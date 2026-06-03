@@ -123,8 +123,9 @@ class AICQuailVADAnalyzer(VADAnalyzer):
             minimum_speech_duration: Optional override for the SDK's
                 ``VadParameter.MinimumSpeechDuration``.
             sensitivity: Optional override for the SDK's
-                ``VadParameter.Sensitivity``. On dedicated Quail VAD models this
-                is a probability in ``[0.0, 1.0]``.
+                ``VadParameter.Sensitivity``. This is a probability threshold
+                in ``[0.0, 1.0]``. Values above this threshold are considered
+                speech.
             sample_rate: Initial sample rate; the pipeline will set this via
                 :meth:`set_sample_rate` once the transport rate is known.
             params: Optional :class:`VADParams` for the base state machine.
@@ -182,10 +183,6 @@ class AICQuailVADAnalyzer(VADAnalyzer):
             raise
 
     def _ensure_model_loaded(self) -> None:
-        # We bypass ``AICModelManager`` (used by ``AICFilter``) because each
-        # analyzer instance owns a dedicated single-purpose Processor; the
-        # ref-counted Model sharing the manager provides is not needed here and
-        # would add a sync/async impedance mismatch (`acquire` is async).
         if self._model is not None:
             return
         if self._model_path is not None:

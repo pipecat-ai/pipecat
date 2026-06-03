@@ -3,8 +3,8 @@
 This module provides VAD analyzer implementations that query the AIC SDK's
 ``is_speech_detected()`` and map it to a float confidence (1.0/0.0).
 
-.. deprecated:: <NEXT_RELEASE>
-    AICVADAnalyzer is deprecated and will be removed in Pipecat 2.0.
+.. deprecated:: 1.4.0
+    AICVADAnalyzer is deprecated and will be removed in Pipecat 1.6.0.
     Use AICQuailVADAnalyzer instead.
 
 Classes:
@@ -24,8 +24,8 @@ from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 class AICVADAnalyzer(VADAnalyzer):
     """VAD analyzer that lazily binds to the AIC VadContext via a factory.
 
-    .. deprecated:: <NEXT_RELEASE>
-        AICVADAnalyzer is deprecated and will be removed in Pipecat 2.0.
+    .. deprecated:: 1.4.0
+        AICVADAnalyzer is deprecated and will be removed in Pipecat 1.6.0.
         Use AICQuailVADAnalyzer instead.
 
     The analyzer can be constructed before the AIC Processor exists. Once the filter has
@@ -63,8 +63,8 @@ class AICVADAnalyzer(VADAnalyzer):
     ):
         """Create an AIC VAD analyzer.
 
-        .. deprecated:: <NEXT_RELEASE>
-            AICVADAnalyzer is deprecated and will be removed in Pipecat 2.0.
+        .. deprecated:: 1.4.0
+            AICVADAnalyzer is deprecated and will be removed in Pipecat 1.6.0.
             Use AICQuailVADAnalyzer instead.
 
         Args:
@@ -91,7 +91,7 @@ class AICVADAnalyzer(VADAnalyzer):
         # can suppress this warning while emitting its own — avoids two DeprecationWarnings
         # firing for one factory call.
         warnings.warn(
-            "AICVADAnalyzer is deprecated and will be removed in Pipecat 2.0. "
+            "AICVADAnalyzer is deprecated and will be removed in Pipecat 1.6.0. "
             "Use AICQuailVADAnalyzer instead.",
             DeprecationWarning,
             stacklevel=2,

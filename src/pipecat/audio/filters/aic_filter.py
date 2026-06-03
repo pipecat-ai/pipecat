@@ -309,8 +309,8 @@ class AICFilter(BaseAudioFilter):
     ):
         """Return an analyzer that will lazily instantiate the AIC VAD when ready.
 
-        .. deprecated:: <NEXT_RELEASE>
-            AICFilter.create_vad_analyzer is deprecated and will be removed in Pipecat 2.0.
+        .. deprecated:: 1.4.0
+            AICFilter.create_vad_analyzer is deprecated and will be removed in Pipecat 1.6.0.
             Construct AICQuailVADAnalyzer directly instead.
 
         AIC VAD parameters:
@@ -338,7 +338,7 @@ class AICFilter(BaseAudioFilter):
         """
         warnings.warn(
             "AICFilter.create_vad_analyzer is deprecated and will be removed "
-            "in Pipecat 2.0. Construct AICQuailVADAnalyzer directly instead.",
+            "in Pipecat 1.6.0. Construct AICQuailVADAnalyzer directly instead.",
             DeprecationWarning,
             stacklevel=2,
         )
