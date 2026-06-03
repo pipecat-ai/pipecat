@@ -223,19 +223,19 @@ class ProjectGenerator:
             template = self.env.get_template("server/bot_realtime.py.jinja2")
 
         # Prepare context for template
-        services = {
+        services: dict[str, str | list[str]] = {
             "transports": self.config.transports,
         }
 
         if self.config.mode == "cascade":
-            services.update(
-                {
-                    "stt": self.config.stt_service,
-                    "llm": self.config.llm_service,
-                    "tts": self.config.tts_service,
-                }
-            )
-        else:
+            for key, value in (
+                ("stt", self.config.stt_service),
+                ("llm", self.config.llm_service),
+                ("tts", self.config.tts_service),
+            ):
+                if value:
+                    services[key] = value
+        elif self.config.realtime_service:
             services["realtime"] = self.config.realtime_service
 
         # Add video service if present
@@ -292,17 +292,17 @@ class ProjectGenerator:
         template = self.env.get_template("server/pyproject.toml.jinja2")
 
         # Build pipecat-ai extras list using ServiceLoader
-        services = {"transports": self.config.transports}
+        services: dict[str, str | list[str]] = {"transports": self.config.transports}
 
         if self.config.mode == "cascade":
-            services.update(
-                {
-                    "stt": self.config.stt_service,
-                    "llm": self.config.llm_service,
-                    "tts": self.config.tts_service,
-                }
-            )
-        else:
+            for key, value in (
+                ("stt", self.config.stt_service),
+                ("llm", self.config.llm_service),
+                ("tts", self.config.tts_service),
+            ):
+                if value:
+                    services[key] = value
+        elif self.config.realtime_service:
             services["realtime"] = self.config.realtime_service
 
         # Extract all required extras
