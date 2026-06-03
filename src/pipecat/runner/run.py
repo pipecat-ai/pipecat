@@ -391,7 +391,11 @@ def _print_startup_message(args: argparse.Namespace):
             print(f"   → MoQ disabled ({TRANSPORT_INSTALL_HINTS['moq']})")
         else:
             print(f"   → Open: {_runner_url(args)}")
-            print(f"   → Relay: {args.moq_host}:{args.moq_port}")
+            if args.moq_serve:
+                bind = args.moq_serve_bind or f"[::]:{args.moq_port}"
+                print(f"   → MoQ server: bot serving on {bind} (no separate relay needed)")
+            else:
+                print(f"   → Relay: {args.moq_host}:{args.moq_port}")
             print(f"   → Namespace: {args.moq_namespace}")
     print()
 
@@ -739,9 +743,9 @@ def _setup_unified_start_route(
             )
 
         elif transport == "moq":
-            # MoQ: spawn the bot and wait for it to finish the MoQ handshake
-            # before returning, so the browser's WebTransport SUBSCRIBE arrives
-            # at a publisher the relay already knows about.
+            # MoQ: spawn the bot and wait for it to finish MoQ bring-up
+            # before returning, so the browser's connection arrives at a
+            # server that is ready to accept it.
             namespace = request_data.get("namespace", args.moq_namespace)
             body = request_data.get("body", {})
             session_id = str(uuid.uuid4())
@@ -756,6 +760,11 @@ def _setup_unified_start_route(
                 participant_id=args.moq_bot_id,
                 peer_id=args.moq_client_id,
                 verify_ssl=not args.moq_insecure,
+                serve=args.moq_serve,
+                serve_bind=args.moq_serve_bind,
+                serve_tls_host=args.moq_host,
+                serve_tls_cert=args.moq_cert,
+                serve_tls_key=getattr(args, "moq_key", None),
                 body=body,
                 session_id=session_id,
                 ready_event=ready_event,
@@ -768,14 +777,14 @@ def _setup_unified_start_route(
             except asyncio.TimeoutError:
                 raise HTTPException(
                     status_code=504,
-                    detail="Bot did not connect to MOQ relay within 15s",
+                    detail="Bot did not become ready within 15s",
                 )
 
             return StartBotResult(
                 sessionId=session_id,
                 namespace=namespace,
                 relay=f"{args.moq_host}:{args.moq_port}",
-                moq=_build_moq_client_config(args, namespace),
+                moq=_build_moq_client_config(args, namespace, runner_args.cert_fingerprints),
             )
 
         else:
@@ -1254,16 +1263,12 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
             }
 
 
-def _compute_moq_cert_hash(args: argparse.Namespace) -> str | None:
-    """Compute the base64 SHA-256 of the relay's TLS cert, if configured.
+def _cert_hash_from_pem(path: str) -> str | None:
+    """Compute the base64 SHA-256 of a PEM-encoded cert on disk.
 
-    The browser uses this for ``WebTransport`` ``serverCertificateHashes``
-    pinning when the relay has a self-signed cert. Returns ``None`` for
-    setups using a CA-signed cert (where pinning isn't needed).
+    Used in client mode when ``--moq-cert`` is set and we need the
+    fingerprint to send to the browser for WebTransport pinning.
     """
-    cert_path = getattr(args, "moq_cert", None)
-    if not cert_path:
-        return None
     try:
         import base64
         import hashlib
@@ -1271,35 +1276,67 @@ def _compute_moq_cert_hash(args: argparse.Namespace) -> str | None:
         from cryptography import x509
         from cryptography.hazmat.primitives import serialization
 
-        with open(cert_path, "rb") as f:
+        with open(path, "rb") as f:
             cert = x509.load_pem_x509_certificate(f.read())
         der_bytes = cert.public_bytes(serialization.Encoding.DER)
         digest = hashlib.sha256(der_bytes).digest()
         return base64.b64encode(digest).decode()
     except Exception as e:
-        logger.warning(f"Could not compute cert fingerprint: {e}")
+        logger.warning(f"Could not compute cert fingerprint from {path}: {e}")
         return None
 
 
-def _build_moq_client_config(args: argparse.Namespace, namespace: str) -> dict[str, Any]:
+def _hex_to_b64(hex_str: str) -> str | None:
+    """Convert a hex-encoded SHA-256 digest to base64.
+
+    The bot exposes its serve-mode cert fingerprints as hex (the moq
+    library's format); the browser's ``serverCertificateHashes`` expects
+    base64 of the raw bytes.
+    """
+    try:
+        import base64
+
+        return base64.b64encode(bytes.fromhex(hex_str)).decode()
+    except Exception as e:
+        logger.warning(f"Could not convert cert hash {hex_str!r}: {e}")
+        return None
+
+
+def _build_moq_client_config(
+    args: argparse.Namespace,
+    namespace: str,
+    cert_fingerprints: list[str] | None = None,
+) -> dict[str, Any]:
     """Build the MoQ relay config the browser needs to construct a transport.
 
     Returned from POST /start (under the ``moq`` key) so the React UI can
     pipe it into ``MoqTransport``'s constructor without a separate fetch.
-    Track names use the JS-side casing conventions.
+
+    In serve mode the bot just minted (or loaded) its own cert; we use
+    the fingerprint it reported (passed via ``cert_fingerprints``).
+    Otherwise we fall back to the PEM file at ``--moq-cert``.
+
+    Track names aren't pinned here — the bot publishes a catalog at
+    runtime and the browser reads whatever it advertises (codec, sample
+    rate, channel count, track name). Lets us add tracks (video,
+    screen-share) without a server-side config update.
     """
+    cert_hash: str | None = None
+    if args.moq_serve and cert_fingerprints:
+        cert_hash = _hex_to_b64(cert_fingerprints[0])
+    elif getattr(args, "moq_cert", None):
+        cert_hash = _cert_hash_from_pem(args.moq_cert)
+
     # WebTransport always uses HTTPS — even for self-signed dev relays,
     # the cert is pinned via `certHash` below.
     return {
         "relayUrl": f"https://{args.moq_host}:{args.moq_port}{args.moq_path}",
-        "certHash": _compute_moq_cert_hash(args),
+        "certHash": cert_hash,
+        "serve": args.moq_serve,
         "namespace": namespace,
         "clientId": args.moq_client_id,
         "botId": args.moq_bot_id,
-        "publishTrack": "user-audio",
-        "subscribeTrack": "bot-audio",
         "transcriptTrack": "transcript",
-        "messageTrack": "user-message",
     }
 
 
@@ -1664,7 +1701,38 @@ def main(parser: argparse.ArgumentParser | None = None):
         "--moq-cert",
         type=str,
         default=None,
-        help="Path to relay TLS certificate (PEM) for WebTransport cert pinning",
+        help=(
+            "Path to a PEM-encoded TLS certificate chain. In client mode, the "
+            "fingerprint is sent to the browser for WebTransport cert pinning. "
+            "In serve mode (--moq-serve), used as the server's TLS cert "
+            "(requires --moq-key)."
+        ),
+    )
+    parser.add_argument(
+        "--moq-key",
+        type=str,
+        default=None,
+        help="Path to the PEM-encoded private key matching --moq-cert (serve mode).",
+    )
+    parser.add_argument(
+        "--moq-serve",
+        action="store_true",
+        default=False,
+        help=(
+            "Run the bot as a MOQ server — the bot binds its own UDP socket "
+            "and accepts the browser's direct connection. Removes the need "
+            "for a separate moq-relay process. If --moq-cert/--moq-key are "
+            "not provided, a self-signed cert is generated on startup."
+        ),
+    )
+    parser.add_argument(
+        "--moq-serve-bind",
+        type=str,
+        default=None,
+        help=(
+            "Address the MOQ server binds to (serve mode). Defaults to "
+            "`[::]:<--moq-port>`."
+        ),
     )
     parser.add_argument(
         "--moq-web-port",
