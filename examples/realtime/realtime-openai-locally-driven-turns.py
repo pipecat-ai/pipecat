@@ -202,9 +202,9 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         # local VAD can drive turn boundaries on the latency critical path.
         realtime_service_mode=True,
         user_params=LLMUserAggregatorParams(
-            # stop_secs is intentionally longer than Pipecat's 0.2s default so
-            # brief mid-utterance pauses don't prematurely commit the user turn
-            # and trigger a response while the user is still speaking.
+            # stop_secs is intentionally longer than Pipecat's 0.2s default:
+            # manual-VAD mode seems to do a bit better when end-of-speech is
+            # padded with a bit more silence.
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
         ),
     )
