@@ -34,7 +34,7 @@ custom_style = Style(
 )
 
 
-def replace_question_with_answer(question: str, answer: str | list[str]):
+def replace_question_with_answer(question: str, answer: str | list[str] | None):
     """
     Replace the questionary output line with a checkmark version.
     Uses ANSI escape codes to move cursor up and overwrite the line.
@@ -42,7 +42,7 @@ def replace_question_with_answer(question: str, answer: str | list[str]):
     if isinstance(answer, list):
         answer_str = ", ".join(answer)
     else:
-        answer_str = str(answer)
+        answer_str = answer or ""
 
     # ANSI escape codes:
     # \033[A = move cursor up one line
