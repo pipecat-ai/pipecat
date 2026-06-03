@@ -4,616 +4,190 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""MOQ (Media over QUIC) transport implementation for Pipecat — moq-lite-02.
+"""MOQ (Media over QUIC) transport implementation for Pipecat.
 
-This module provides MOQ transport functionality for real-time media streaming
-using the QUIC protocol, connecting to MOQ relays for low-latency audio and
-video transmission with pub/sub semantics.
+Uses the upstream ``moq`` Python library
+(`moq-rs <https://pypi.org/project/moq-rs/>`_) for the QUIC connection,
+MOQ session, announcement discovery, subscription routing, group/frame
+framing, codec-specific catalog management, and Opus encode/decode +
+resampling for raw audio tracks. This module just wires it into the
+pipecat Frame pipeline.
 
-moq-lite-02 uses a stream-per-request model: each operation (setup,
-subscribe, announce) opens its own bidirectional QUIC stream, and media
-data flows on unidirectional streams as GROUP + FRAME sequences.
+Each participant publishes under a per-participant broadcast path
+``<namespace>/<participant_id>`` (e.g. ``pipecat/bot0``); the bot
+subscribes to the peer at ``<namespace>/<peer_id>``. Audio rides on a
+single Opus track; transcript (RTVI JSON) rides on a raw byte track in
+the same broadcast.
 
-Based on moq-lite-02 (version code 0xff0dad02).
+Two modes:
+
+- **Client mode** (default): the bot dials a relay at ``relay_url`` (or
+  the constructor's ``host``/``port``/``path``).
+- **Server mode** (``serve=True``): the bot binds its own UDP socket via
+  ``moq.Server`` and accepts the browser's direct connection. Removes
+  the need for a separate ``moq-relay`` process for local dev. The
+  self-signed cert fingerprints are exposed via
+  :attr:`MOQTransport.cert_fingerprints` so a browser can pin them.
 """
 
 import asyncio
 import json
-import ssl
-import struct
-import time
-from typing import Awaitable, Callable, Dict, Optional
+from dataclasses import dataclass
+from enum import IntEnum
+from typing import Optional
 
 from loguru import logger
-from pydantic import BaseModel, ConfigDict
+from pydantic import ConfigDict
 
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
-    Frame,
     InputAudioRawFrame,
-    InputImageRawFrame,
-    InputTransportMessageFrame,
-    InterruptionFrame,
     OutputAudioRawFrame,
-    OutputImageRawFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
     StartFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.moq.protocol import (
-    CLIENT_SETUP_TYPE,
-    MOQL_ALPN,
-    MOQL_VERSION,
-    SERVER_SETUP_TYPE,
-    STREAM_TYPE_ANNOUNCE,
-    STREAM_TYPE_SESSION,
-    STREAM_TYPE_SUBSCRIBE,
-    MOQCodec,
-    MOQRole,
-    MOQSession,
-    MOQTrack,
-    MOQTrackType,
-)
 
 try:
-    from aioquic.asyncio import connect
-    from aioquic.asyncio.protocol import QuicConnectionProtocol
-    from aioquic.quic.configuration import QuicConfiguration
-    from aioquic.quic.events import (
-        ConnectionTerminated,
-        HandshakeCompleted,
-        QuicEvent,
-        StreamDataReceived,
-        StreamReset,
-    )
+    import moq
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use MOQ transport, you need to `pip install pipecat-ai[moq]`.")
     raise Exception(f"Missing module: {e}")
 
 
-# Default track settings
 DEFAULT_NAMESPACE = "pipecat"
 DEFAULT_PARTICIPANT_ID = "bot0"
 DEFAULT_PEER_ID = "client0"
-DEFAULT_AUDIO_TRACK_NAME = "bot-audio"
-DEFAULT_AUDIO_IN_TRACK_NAME = "user-audio"
-DEFAULT_VIDEO_TRACK_NAME = "video"
-DEFAULT_TRANSCRIPT_TRACK_NAME = "transcript"
+DEFAULT_AUDIO_OUT_TRACK = "bot-audio"
+DEFAULT_TRANSCRIPT_TRACK = "transcript"
+
+
+class MOQTrackType(IntEnum):
+    """Types of media tracks the transport surfaces in event callbacks."""
+
+    AUDIO = 0x01
+    VIDEO = 0x02
+    DATA = 0x03
+
+
+@dataclass
+class MOQTrack:
+    """Identifies a MOQ track for event callbacks.
+
+    Parameters:
+        broadcast_path: The full broadcast path (e.g. ``pipecat/bot0``).
+        name: The track name (e.g. ``bot-audio``).
+        track_type: The track media type.
+    """
+
+    broadcast_path: str
+    name: str
+    track_type: MOQTrackType = MOQTrackType.DATA
+
+    @property
+    def full_name(self) -> str:
+        """Get the full track identifier."""
+        return f"{self.broadcast_path}/{self.name}"
 
 
 class MOQParams(TransportParams):
     """Configuration parameters for MOQ transport.
 
-    Each MOQ participant publishes under its own broadcast path:
-    ``<namespace>/<participant_id>``. The bot subscribes to a peer's broadcast
-    at ``<namespace>/<peer_id>``. Tracks live inside a broadcast and are
-    named by their role (e.g. ``bot-audio``, ``user-audio``,
-    ``custom-audio``). Using distinct broadcast paths lets the relay route
-    SUBSCRIBEs to the right participant when multiple bots/clients are on
-    the same namespace.
-
     Parameters:
-        role: The MOQ role (publisher, subscriber, or pubsub).
-        relay_url: URL of the MOQ relay (e.g., "https://localhost:4080/moq").
-        namespace: Top-level namespace (defaults to "pipecat").
-        participant_id: This bot's unique suffix inside ``namespace``.
-            Combined with ``namespace`` gives the broadcast this bot
-            publishes under, e.g. ``pipecat/bot0``.
-        peer_id: The peer participant id to subscribe to, e.g.
-            ``client0`` → bot subscribes to ``pipecat/client0/<track>``.
-        audio_track_name: Name for the output audio track the bot
-            publishes inside its broadcast (bot → client).
-        audio_in_track_name: Name for the input audio track the bot
-            subscribes to inside the peer's broadcast (client → bot).
-        video_track_name: Name for the video track inside the bot's
-            broadcast.
-        priority: Default publisher priority (lower is higher priority).
-        verify_ssl: Whether to verify SSL certificates.
-        connection_timeout: Connection timeout in seconds.
+        relay_url: Full relay URL (e.g. ``https://relay.example.com:4080/moq``).
+            If unset, the transport composes one from the constructor's
+            ``host``/``port``/``path``. Ignored in serve mode.
+        namespace: Top-level namespace shared by all participants.
+        participant_id: This bot's id; the bot publishes under
+            ``<namespace>/<participant_id>``.
+        peer_id: The id of the peer (browser/client) the bot subscribes
+            to: ``<namespace>/<peer_id>``.
+        audio_out_track: Name of the bot's outgoing audio track.
+        transcript_track: Name of the bot's outgoing transcript track.
+        verify_ssl: Verify the relay's TLS certificate. Client mode only.
+        connection_timeout: Seconds to wait for the peer broadcast to be
+            announced before giving up.
+        serve: When ``True``, the bot binds its own UDP socket and accepts
+            incoming MOQ sessions instead of dialing a relay.
+        serve_bind: Address to bind in serve mode (e.g. ``"[::]:4080"``).
+            Defaults to ``"[::]:<port>"`` based on the constructor's port.
+        serve_tls_host: Hostname to use in the generated self-signed
+            certificate when ``serve_tls_cert``/``serve_tls_key`` aren't
+            provided. The browser pins this cert via its SHA-256
+            fingerprint, so the value just needs to match what the
+            browser sees in the URL (typically ``"localhost"``).
+        serve_tls_cert: Path to a PEM-encoded TLS certificate chain.
+            If unset alongside ``serve_tls_key``, a self-signed cert is
+            generated on startup.
+        serve_tls_key: Path to the PEM-encoded private key matching
+            ``serve_tls_cert``.
+        audio_out_sample_rate: Sample rate the bot publishes its audio
+            at (Hz). Pipecat hands us audio at whatever rate the TTS
+            produces; the library resamples to the nearest Opus-supported
+            rate before encoding.
+        audio_in_sample_rate: Sample rate the pipeline expects to receive
+            user audio at (Hz). Decoded Opus is resampled to this rate
+            before being pushed downstream.
+        audio_in_max_latency_ms: How long :func:`subscribe_audio` will
+            wait for a late frame before skipping ahead. Lower = more
+            interactive (fewer fills, more drops on bad networks);
+            higher = smoother audio with more glass-to-glass delay.
+        audio_out_frame_ms: Opus frame duration for the bot's audio
+            output. Must be 2, 5, 10, 20, 40, or 60. 20 ms is the
+            real-time default.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    role: MOQRole = MOQRole.PUBSUB
     relay_url: Optional[str] = None
     namespace: str = DEFAULT_NAMESPACE
     participant_id: str = DEFAULT_PARTICIPANT_ID
     peer_id: str = DEFAULT_PEER_ID
-    audio_track_name: str = DEFAULT_AUDIO_TRACK_NAME
-    audio_in_track_name: str = DEFAULT_AUDIO_IN_TRACK_NAME
-    video_track_name: str = DEFAULT_VIDEO_TRACK_NAME
-    transcript_track_name: str = DEFAULT_TRANSCRIPT_TRACK_NAME
-    priority: int = 128
+    audio_out_track: str = DEFAULT_AUDIO_OUT_TRACK
+    transcript_track: str = DEFAULT_TRANSCRIPT_TRACK
     verify_ssl: bool = True
     connection_timeout: float = 30.0
-
-
-class MOQCallbacks(BaseModel):
-    """Callback functions for MOQ transport events.
-
-    Parameters:
-        on_connected: Called when connection is established.
-        on_disconnected: Called when connection is lost.
-        on_track_published: Called when a track is successfully published.
-        on_track_subscribed: Called when a subscription is confirmed.
-        on_error: Called when an error occurs.
-    """
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    on_connected: Callable[[], Awaitable[None]]
-    on_disconnected: Callable[[], Awaitable[None]]
-    on_track_published: Callable[[MOQTrack], Awaitable[None]]
-    on_track_subscribed: Callable[[MOQTrack], Awaitable[None]]
-    on_error: Callable[[str, Optional[Exception]], Awaitable[None]]
-
-
-class MOQClientProtocol(QuicConnectionProtocol):
-    """QUIC protocol handler for MOQ client connections (moq-lite-02).
-
-    Uses stream-per-request model: each operation opens its own bidi stream.
-    Media data flows on unidirectional streams as GROUP + FRAME sequences.
-    """
-
-    def __init__(self, *args, **kwargs):
-        """Initialize the MOQ protocol handler."""
-        super().__init__(*args, **kwargs)
-        self._session: MOQSession = MOQSession()
-        self._setup_complete = asyncio.Event()
-        self._connected = False
-
-        # Callbacks for received media and events
-        self._on_subscribe_received: Optional[Callable[[str], Awaitable[None]]] = None
-        self._on_audio_frame: Optional[Callable[[bytes, int], Awaitable[None]]] = None
-        self._on_video_frame: Optional[Callable[[bytes, int, int], Awaitable[None]]] = None
-        self._on_message: Optional[Callable[[bytes], Awaitable[None]]] = None
-
-        # Subscribe IDs for our subscriptions (receiving data)
-        self._audio_subscribe_id: Optional[int] = None
-        self._video_subscribe_id: Optional[int] = None
-
-        # Subscribe ID assigned by relay for our published tracks
-        self._publish_subscribe_ids: Dict[str, int] = {}
-
-        # Stream buffers for incoming data
-        self._stream_buffers: Dict[int, bytes] = {}
-        self._stream_types: Dict[int, Optional[int]] = {}
-
-        # Setup stream
-        self._setup_stream_id: Optional[int] = None
-
-        # Track which subscribe IDs map to which track names
-        self._subscribe_id_to_track: Dict[int, str] = {}
-
-        # Track subscribe stream IDs for detecting rejections
-        self._subscribe_streams: Dict[int, int] = {}  # stream_id -> subscribe_id
-        self._rejected_subscribe_ids: set = set()
-
-        # Namespace + per-participant identity. Broadcast path this client
-        # publishes under is "<namespace>/<participant_id>".
-        self._namespace: str = DEFAULT_NAMESPACE
-        self._participant_id: str = DEFAULT_PARTICIPANT_ID
-        self._audio_track_name: str = DEFAULT_AUDIO_TRACK_NAME
-        self._video_track_name: str = DEFAULT_VIDEO_TRACK_NAME
-        self._transcript_track_name: str = DEFAULT_TRANSCRIPT_TRACK_NAME
-
-    def set_audio_callback(self, callback: Callable[[bytes, int], Awaitable[None]]):
-        """Set the callback for received audio frames."""
-        self._on_audio_frame = callback
-
-    def set_video_callback(self, callback: Callable[[bytes, int, int], Awaitable[None]]):
-        """Set the callback for received video frames."""
-        self._on_video_frame = callback
-
-    def set_message_callback(self, callback: Callable[[bytes], Awaitable[None]]):
-        """Set the callback for received messages."""
-        self._on_message = callback
-
-    def quic_event_received(self, event: QuicEvent):
-        """Handle QUIC events."""
-        if isinstance(event, HandshakeCompleted):
-            logger.info(
-                f"🟠 QUIC handshake completed (alpn={event.alpn_protocol}, "
-                f"transport=moq-lite-02, version={MOQL_VERSION:#x})"
-            )
-            if event.alpn_protocol != MOQL_ALPN:
-                logger.error(
-                    f"💔❌💔 UNEXPECTED ALPN! "
-                    f"Expected '{MOQL_ALPN}' but relay negotiated "
-                    f"'{event.alpn_protocol}'. Connection may not work!"
-                )
-            self._connected = True
-
-        elif isinstance(event, StreamDataReceived):
-            self._handle_stream_data(event.stream_id, event.data, event.end_stream)
-
-        elif isinstance(event, StreamReset):
-            logger.warning(f"Stream {event.stream_id} reset (error_code={event.error_code})")
-            # Track which subscribe streams were reset (subscription rejected)
-            if event.stream_id in self._subscribe_streams:
-                sub_id = self._subscribe_streams[event.stream_id]
-                logger.warning(f"Subscribe {sub_id} was rejected (stream reset)")
-                self._rejected_subscribe_ids.add(sub_id)
-                if sub_id == self._audio_subscribe_id:
-                    self._audio_subscribe_id = None
-
-        elif isinstance(event, ConnectionTerminated):
-            logger.info(f"Connection terminated: {event.reason_phrase}")
-            self._connected = False
-
-    def _is_unidirectional(self, stream_id: int) -> bool:
-        """Check if a stream ID is unidirectional."""
-        return (stream_id & 0x02) != 0
-
-    def _is_server_initiated(self, stream_id: int) -> bool:
-        """Check if a stream ID is server-initiated."""
-        return (stream_id & 0x01) != 0
-
-    def _handle_stream_data(self, stream_id: int, data: bytes, end_stream: bool):
-        """Handle data received on a QUIC stream."""
-        if not data and not end_stream:
-            return
-
-        logger.trace(
-            f"Stream {stream_id} data ({len(data)} bytes, end={end_stream}): "
-            f"[{' '.join(f'{b:02x}' for b in data[:40])}]"
-        )
-
-        # Buffer data
-        if stream_id not in self._stream_buffers:
-            self._stream_buffers[stream_id] = b""
-        self._stream_buffers[stream_id] += data
-
-        if self._is_unidirectional(stream_id):
-            # Uni stream: buffer until FIN, then parse GROUP + FRAMEs
-            if end_stream:
-                self._handle_uni_stream_complete(stream_id)
-        elif stream_id == self._setup_stream_id:
-            # Our setup stream — look for SERVER_SETUP response
-            self._try_parse_server_setup(stream_id)
-        elif self._is_server_initiated(stream_id):
-            # Server-initiated bidi stream — could be SUBSCRIBE or ANNOUNCE
-            self._handle_incoming_bidi(stream_id, end_stream)
-
-    def _try_parse_server_setup(self, stream_id: int):
-        """Try to parse SERVER_SETUP from buffered data on setup stream."""
-        buf = self._stream_buffers.get(stream_id, b"")
-        if len(buf) < 2:
-            return
-
-        # Look for 0x21 (SERVER_SETUP type byte)
-        if buf[0] != SERVER_SETUP_TYPE:
-            logger.warning(f"Expected SERVER_SETUP (0x21), got {buf[0]:#x}")
-            return
-
-        try:
-            version, _ = MOQCodec.decode_server_setup(buf, 0)
-            client_name = "moq-lite-02"
-            server_name = "moq-lite-02" if version == MOQL_VERSION else f"unknown"
-            logger.info(
-                f"🟠 MOQ protocol: client={client_name} ({MOQL_VERSION:#x}), "
-                f"relay={server_name} ({version:#x})"
-            )
-            if version != MOQL_VERSION:
-                logger.error(
-                    f"💔❌💔 PROTOCOL MISMATCH! "
-                    f"Bot speaks {client_name} ({MOQL_VERSION:#x}) but "
-                    f"relay responded with {server_name} ({version:#x}). "
-                    f"Connection will likely fail!"
-                )
-            self._session.setup_complete = True
-            self._setup_complete.set()
-        except (IndexError, struct.error):
-            # Incomplete data, wait for more
-            pass
-
-    def _handle_incoming_bidi(self, stream_id: int, end_stream: bool):
-        """Handle data on a server-initiated bidi stream."""
-        buf = self._stream_buffers.get(stream_id, b"")
-        if len(buf) < 1:
-            return
-
-        # Determine stream type from first varint if not yet known
-        if stream_id not in self._stream_types:
-            try:
-                stream_type, _ = MOQCodec.decode_varint(buf, 0)
-                self._stream_types[stream_id] = stream_type
-            except (IndexError, struct.error):
-                return
-
-        stream_type = self._stream_types.get(stream_id)
-
-        if stream_type == STREAM_TYPE_SUBSCRIBE:
-            self._handle_incoming_subscribe(stream_id, buf)
-        elif stream_type == STREAM_TYPE_ANNOUNCE:
-            self._handle_incoming_announce(stream_id, buf)
-        else:
-            logger.debug(f"Unknown incoming bidi stream type: {stream_type}")
-
-    def _handle_incoming_subscribe(self, stream_id: int, buf: bytes):
-        """Handle an incoming SUBSCRIBE from the relay.
-
-        The relay sends SUBSCRIBE when a downstream subscriber wants our track.
-        We respond with SUBSCRIBE_OK for known tracks, or reset the stream
-        for unknown tracks so the relay can try other publishers.
-        """
-        try:
-            # Skip stream type varint
-            _, offset = MOQCodec.decode_varint(buf, 0)
-
-            # Decode subscribe body
-            subscribe_id, broadcast_path, track_name, priority, _ = MOQCodec.decode_subscribe(
-                buf, offset
-            )
-
-            logger.debug(
-                f"Received SUBSCRIBE for {broadcast_path}/{track_name} "
-                f"(subscribe_id={subscribe_id}, priority={priority})"
-            )
-
-            # Only accept subscribes for tracks we actually publish, which
-            # live inside our broadcast: "<namespace>/<participant_id>".
-            our_broadcast = self._namespace + "/" + self._participant_id
-            known_tracks = {
-                our_broadcast + "/" + self._audio_track_name,
-                our_broadcast + "/" + self._video_track_name,
-                our_broadcast + "/" + self._transcript_track_name,
-            }
-            full_track = broadcast_path + "/" + track_name
-            if full_track not in known_tracks:
-                logger.debug(
-                    f"Rejecting SUBSCRIBE for unknown track {full_track} "
-                    f"(we only publish: {known_tracks})"
-                )
-                self._quic.reset_stream(stream_id, error_code=0)
-                self.transmit()
-                return
-
-            # Store the subscribe_id for publishing to this subscriber
-            self._publish_subscribe_ids[track_name] = subscribe_id
-            self._subscribe_id_to_track[subscribe_id] = track_name
-
-            # Send SUBSCRIBE_OK response on the same stream
-            ok_data = MOQCodec.encode_subscribe_ok()
-            self._quic.send_stream_data(stream_id, ok_data, end_stream=False)
-            self.transmit()
-
-            logger.debug(f"Sent SUBSCRIBE_OK for subscribe_id={subscribe_id}")
-
-            # Notify transport that someone subscribed to our track
-            if self._on_subscribe_received:
-                asyncio.create_task(self._on_subscribe_received(track_name))
-
-        except Exception as e:
-            logger.error(f"Error handling incoming SUBSCRIBE: {e}")
-
-    def _handle_incoming_announce(self, stream_id: int, buf: bytes):
-        """Handle an incoming ANNOUNCE stream from the relay.
-
-        The relay sends ANNOUNCE_PLEASE with a path prefix, and we respond
-        with ANNOUNCE_INIT listing our broadcast path suffixes under that prefix.
-        """
-        try:
-            # Skip stream type varint
-            _, offset = MOQCodec.decode_varint(buf, 0)
-
-            # This is ANNOUNCE_PLEASE from the relay
-            path_prefix, _ = MOQCodec.decode_announce_please(buf, offset)
-            logger.debug(f"Received ANNOUNCE_PLEASE for prefix: '{path_prefix}'")
-
-            # Our broadcast path is "<namespace>/<participant_id>". Compute
-            # its suffix relative to the relay-requested prefix.
-            broadcast = self._namespace + "/" + self._participant_id
-            if path_prefix and broadcast.startswith(path_prefix):
-                suffix = broadcast[len(path_prefix) :].lstrip("/")
-            elif not path_prefix:
-                suffix = broadcast
-            else:
-                # Our broadcast doesn't match the prefix — announce nothing
-                suffix = None
-
-            if suffix is not None:
-                logger.debug(f"Announcing broadcast suffix: '{suffix}'")
-                init_data = MOQCodec.encode_announce_init([suffix])
-            else:
-                logger.debug("No matching broadcasts for prefix, announcing empty")
-                init_data = MOQCodec.encode_announce_init([])
-
-            self._quic.send_stream_data(stream_id, init_data)
-            self.transmit()
-
-        except Exception as e:
-            logger.error(f"Error handling incoming ANNOUNCE: {e}")
-
-    def _handle_uni_stream_complete(self, stream_id: int):
-        """Handle a completed unidirectional stream (GROUP + FRAMEs)."""
-        buf = self._stream_buffers.pop(stream_id, b"")
-        if not buf:
-            return
-
-        try:
-            subscribe_id, group_sequence, offset = MOQCodec.decode_group_header(buf, 0)
-            frames = MOQCodec.decode_frames(buf, offset)
-
-            track_name = self._subscribe_id_to_track.get(subscribe_id)
-
-            for frame_data in frames:
-                if not frame_data:
-                    continue
-
-                if subscribe_id == self._audio_subscribe_id and self._on_audio_frame:
-                    asyncio.create_task(self._on_audio_frame(frame_data, 16000))
-                elif subscribe_id == self._video_subscribe_id and self._on_video_frame:
-                    asyncio.create_task(self._on_video_frame(frame_data, 0, 0))
-                elif self._on_message:
-                    asyncio.create_task(self._on_message(frame_data))
-
-        except Exception as e:
-            logger.error(f"Error processing uni stream data: {e}")
-
-        # Clean up
-        self._stream_types.pop(stream_id, None)
-
-    async def send_client_setup(self, role: MOQRole, path: str = "/moq"):
-        """Send CLIENT_SETUP message on a new bidi stream."""
-        self._setup_stream_id = self._quic.get_next_available_stream_id(is_unidirectional=False)
-
-        setup_msg = MOQCodec.encode_client_setup(role, [MOQL_VERSION], path)
-        logger.info(
-            f"CLIENT_SETUP ({len(setup_msg)} bytes) on stream {self._setup_stream_id}: "
-            f"[{' '.join(f'{b:02x}' for b in setup_msg[:40])}]"
-        )
-        self._quic.send_stream_data(self._setup_stream_id, setup_msg)
-        self.transmit()
-
-        logger.debug(f"Sent CLIENT_SETUP on stream {self._setup_stream_id}")
-
-    async def wait_for_setup(self, timeout: float = 10.0):
-        """Wait for setup to complete."""
-        try:
-            await asyncio.wait_for(self._setup_complete.wait(), timeout=timeout)
-            return True
-        except asyncio.TimeoutError:
-            logger.error("Setup timeout")
-            return False
-
-    async def subscribe_track(
-        self, namespace: str, track_name: str, track_type: MOQTrackType
-    ) -> Optional[int]:
-        """Subscribe to a track by opening a new bidi stream.
-
-        moq-lite-02: Each subscription gets its own bidi stream.
-        Stream format: varint(2) + SUBSCRIBE body, then read SUBSCRIBE_OK.
-        """
-        subscribe_id = self._session.next_subscribe_id()
-
-        # Open a new bidi stream
-        stream_id = self._quic.get_next_available_stream_id(is_unidirectional=False)
-
-        # Write stream type + subscribe body
-        msg = MOQCodec.encode_varint(STREAM_TYPE_SUBSCRIBE)
-        msg += MOQCodec.encode_subscribe(subscribe_id, namespace, track_name)
-
-        self._quic.send_stream_data(stream_id, msg, end_stream=False)
-        self.transmit()
-
-        # Track stream for detecting rejections (RESET_STREAM)
-        self._subscribe_streams[stream_id] = subscribe_id
-
-        # Track the subscribe_id for receiving data
-        if track_type == MOQTrackType.AUDIO:
-            self._audio_subscribe_id = subscribe_id
-        elif track_type == MOQTrackType.VIDEO:
-            self._video_subscribe_id = subscribe_id
-
-        self._subscribe_id_to_track[subscribe_id] = track_name
-
-        logger.debug(
-            f"Subscribed to {namespace}/{track_name} "
-            f"(subscribe_id={subscribe_id}, stream={stream_id})"
-        )
-        return subscribe_id
-
-    async def publish_audio(self, audio: bytes, priority: int = 128):
-        """Publish audio data on a new unidirectional stream.
-
-        moq-lite-02: Each group is sent on its own uni stream with
-        GROUP header + FRAME + FIN.
-        """
-        subscribe_id = self._publish_subscribe_ids.get(self._audio_track_name)
-        if subscribe_id is None:
-            return
-
-        group_seq = self._session.get_next_group_sequence(subscribe_id)
-
-        # Open uni stream, write GROUP header + FRAME, FIN
-        stream_id = self._quic.get_next_available_stream_id(is_unidirectional=True)
-
-        data = MOQCodec.encode_group_header(subscribe_id, group_seq)
-        data += MOQCodec.encode_frame(audio)
-
-        self._quic.send_stream_data(stream_id, data, end_stream=True)
-        self.transmit()
-
-    async def publish_video(self, image: bytes, priority: int = 129):
-        """Publish video data on a new unidirectional stream."""
-        subscribe_id = self._publish_subscribe_ids.get(self._video_track_name)
-        if subscribe_id is None:
-            return
-
-        group_seq = self._session.get_next_group_sequence(subscribe_id)
-
-        stream_id = self._quic.get_next_available_stream_id(is_unidirectional=True)
-
-        data = MOQCodec.encode_group_header(subscribe_id, group_seq)
-        data += MOQCodec.encode_frame(image)
-
-        self._quic.send_stream_data(stream_id, data, end_stream=True)
-        self.transmit()
-
-    async def publish_text(self, payload: bytes) -> bool:
-        """Publish a text/control payload on the transcript track.
-
-        Returns False if no subscriber has SUBSCRIBE'd to our transcript
-        track yet — caller can drop or buffer.
-        """
-        subscribe_id = self._publish_subscribe_ids.get(self._transcript_track_name)
-        if subscribe_id is None:
-            return False
-
-        group_seq = self._session.get_next_group_sequence(subscribe_id)
-        stream_id = self._quic.get_next_available_stream_id(is_unidirectional=True)
-
-        data = MOQCodec.encode_group_header(subscribe_id, group_seq)
-        data += MOQCodec.encode_frame(payload)
-
-        self._quic.send_stream_data(stream_id, data, end_stream=True)
-        self.transmit()
-        return True
+    serve: bool = False
+    serve_bind: Optional[str] = None
+    serve_tls_host: str = "localhost"
+    serve_tls_cert: Optional[str] = None
+    serve_tls_key: Optional[str] = None
+    audio_out_sample_rate: int = 24000
+    audio_in_sample_rate: int = 16000
+    audio_in_max_latency_ms: int = 500
+    audio_out_frame_ms: int = 20
 
 
 class MOQInputTransport(BaseInputTransport):
-    """MOQ input transport for receiving media from a relay.
-
-    Handles subscribing to tracks and receiving audio/video streams.
-    """
+    """MOQ input transport: subscribes to the peer's audio track."""
 
     def __init__(
         self,
         transport: "MOQTransport",
         params: MOQParams,
-        callbacks: MOQCallbacks,
         **kwargs,
     ):
         """Initialize the MOQ input transport."""
         super().__init__(params, **kwargs)
-
         self._moq_transport = transport
         self._params = params
-        self._callbacks = callbacks
-        self._protocol: Optional[MOQClientProtocol] = None
         self._initialized = False
 
     async def start(self, frame: StartFrame):
-        """Start the MOQ input transport and connect to relay."""
+        """Auto-connect to the MOQ relay when the pipeline starts."""
         await super().start(frame)
-
         if self._initialized:
             return
-
         self._initialized = True
 
-        # Auto-connect to relay when pipeline starts
         self._moq_transport._connection_task = self.create_task(
-            self._moq_transport.connect(), "moq_connect"
+            self._moq_transport._run(), "moq_run"
         )
-
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
@@ -629,90 +203,15 @@ class MOQInputTransport(BaseInputTransport):
         await super().cleanup()
         await self._moq_transport.cleanup()
 
-    def set_protocol(self, protocol: MOQClientProtocol):
-        """Set the MOQ protocol handler."""
-        self._protocol = protocol
-        protocol.set_audio_callback(self._on_audio_received)
-        protocol.set_video_callback(self._on_video_received)
-        protocol.set_message_callback(self._on_message_received)
-
-    async def _on_audio_received(self, audio: bytes, sample_rate: int):
-        """Handle received audio data."""
-        frame = InputAudioRawFrame(
-            audio=audio,
-            sample_rate=sample_rate,
-            num_channels=1,
+    async def push_received_audio(self, audio: bytes, sample_rate: int):
+        """Push a received audio frame downstream."""
+        await self.push_audio_frame(
+            InputAudioRawFrame(audio=audio, sample_rate=sample_rate, num_channels=1)
         )
-        await self.push_audio_frame(frame)
-
-    async def _on_video_received(self, image: bytes, width: int, height: int):
-        """Handle received video data."""
-        frame = InputImageRawFrame(
-            image=image,
-            size=(width, height),
-            format="RGB",
-        )
-        await self.push_video_frame(frame)
-
-    async def _on_message_received(self, message: bytes):
-        """Handle received transport message."""
-        await self.broadcast_frame(
-            InputTransportMessageFrame,
-            message=message.decode("utf-8"),
-        )
-
-    async def subscribe_audio(self):
-        """Subscribe to the peer's audio track on the relay.
-
-        Target broadcast is ``<namespace>/<peer_id>`` so the relay routes
-        the SUBSCRIBE to the peer (e.g. the browser) and not back to us.
-        Retries because the peer may not yet be announced when we first try.
-        """
-        if not self._protocol:
-            return
-
-        broadcast = self._params.namespace + "/" + self._params.peer_id
-        track = self._params.audio_in_track_name
-        max_retries = 10
-        for attempt in range(max_retries):
-            if attempt > 0:
-                await asyncio.sleep(1)
-            logger.info(
-                f"Subscribing to client audio: {broadcast}/{track}"
-                f" (attempt {attempt + 1}/{max_retries})"
-            )
-            sub_id = await self._protocol.subscribe_track(
-                broadcast,
-                track,
-                MOQTrackType.AUDIO,
-            )
-            # Wait for the relay to respond (accept or reset)
-            await asyncio.sleep(0.5)
-            # Check if this subscribe was rejected
-            if sub_id in self._protocol._rejected_subscribe_ids:
-                logger.warning(f"Subscribe attempt {attempt + 1} rejected, retrying...")
-                continue
-            logger.info(f"Subscribed to client audio: {broadcast}/{track}")
-            return
-        logger.error(f"Failed to subscribe to client audio after {max_retries} attempts")
-
-    async def subscribe_video(self):
-        """Subscribe to the peer's video track on the relay."""
-        if self._protocol:
-            await self._protocol.subscribe_track(
-                self._params.namespace + "/" + self._params.peer_id,
-                self._params.video_track_name,
-                MOQTrackType.VIDEO,
-            )
 
 
 class MOQOutputTransport(BaseOutputTransport):
-    """MOQ output transport for publishing media to a relay.
-
-    In moq-lite-02, the announce flow is reversed: the relay/subscriber sends
-    SUBSCRIBE to us. We register tracks locally and respond to incoming
-    SUBSCRIBE requests with SUBSCRIBE_OK.
-    """
+    """MOQ output transport: writes audio + transcript frames to MOQ tracks."""
 
     def __init__(
         self,
@@ -722,28 +221,24 @@ class MOQOutputTransport(BaseOutputTransport):
     ):
         """Initialize the MOQ output transport."""
         super().__init__(params, **kwargs)
-
         self._moq_transport = transport
         self._params = params
-        self._protocol: Optional[MOQClientProtocol] = None
-
-        # Timing for pacing output
-        self._send_interval = 0
-        self._next_send_time = 0
         self._initialized = False
 
     async def start(self, frame: StartFrame):
         """Start the MOQ output transport."""
         await super().start(frame)
-
         if self._initialized:
             return
-
         self._initialized = True
-        self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
+        # Open the publish_audio track now that we know the pipeline's
+        # output sample rate. The producer side of the broadcast was
+        # created in MOQTransport.__init__, so this call is synchronous
+        # — no race with _run() to lose initial audio frames.
+        self._moq_transport.open_audio_track(self.sample_rate)
         logger.info(
             f"MOQ output: sample_rate={self.sample_rate}, "
-            f"chunk_size={self.audio_chunk_size}, send_interval={self._send_interval:.4f}s"
+            f"chunk_size={self.audio_chunk_size}"
         )
         await self.set_transport_ready(frame)
 
@@ -760,89 +255,30 @@ class MOQOutputTransport(BaseOutputTransport):
         await super().cleanup()
         await self._moq_transport.cleanup()
 
-    def set_protocol(self, protocol: MOQClientProtocol):
-        """Set the MOQ protocol handler."""
-        self._protocol = protocol
-
-    async def announce_tracks(self):
-        """Register tracks for publishing.
-
-        In moq-lite-02, we don't proactively announce. The relay forwards
-        subscriptions to us. We just need to be ready to respond to incoming
-        SUBSCRIBE requests, which the protocol handler does automatically.
-        """
-        pass
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames."""
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, InterruptionFrame):
-            self._next_send_time = 0
-
     async def send_message(
         self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
     ):
-        """Send a transport message to subscribers on the transcript track.
-
-        ``RTVIObserver`` (auto-attached to ``PipelineTask``) converts
-        pipeline frames (transcriptions, bot output, speech events, …) into
-        RTVI message models and pushes them through this method as
-        ``OutputTransportMessage[Urgent]Frame`` instances whose ``message``
-        is the model's JSON-ready dict. We serialize and send as-is — the
-        browser parses RTVI message types client-side.
-        """
-        if not self._protocol:
-            return
+        """Publish a transport message (RTVI JSON) on the transcript track."""
         payload = frame.message
         if not isinstance(payload, (bytes, bytearray)):
             payload = json.dumps(payload).encode("utf-8")
         try:
-            await self._protocol.publish_text(payload)
+            self._moq_transport.publish_transcript(payload)
         except Exception as e:
             logger.warning(f"Failed to publish transport message: {e}")
 
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
-        """Write an audio frame to the relay."""
-        if not self._protocol:
-            return False
-
+        """Write an audio frame to the bot's audio track."""
         try:
-            await self._protocol.publish_audio(frame.audio, self._params.priority)
-            await self._write_audio_sleep()
+            self._moq_transport.publish_audio(frame.audio)
             return True
         except Exception as e:
             logger.error(f"Error writing audio frame: {e}")
             return False
 
-    async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
-        """Write a video frame to the relay."""
-        if not self._protocol:
-            return False
-
-        try:
-            await self._protocol.publish_video(frame.image, self._params.priority + 1)
-            return True
-        except Exception as e:
-            logger.error(f"Error writing video frame: {e}")
-            return False
-
-    async def _write_audio_sleep(self):
-        """Pace audio output."""
-        current_time = time.monotonic()
-        sleep_duration = max(0, self._next_send_time - current_time)
-        await asyncio.sleep(sleep_duration)
-        if sleep_duration == 0:
-            self._next_send_time = time.monotonic() + self._send_interval
-        else:
-            self._next_send_time += self._send_interval
-
 
 class MOQTransport(BaseTransport):
-    """MOQ transport for connecting to a MOQ relay (moq-lite-02).
-
-    Provides a complete MOQ client implementation with separate input and output
-    transports for publishing and subscribing to media streams over QUIC.
+    """MOQ transport that connects to a MOQ relay via the ``moq`` library.
 
     Example::
 
@@ -850,7 +286,6 @@ class MOQTransport(BaseTransport):
             params=MOQParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
-                role=MOQRole.PUBSUB,
                 namespace="my-room",
             ),
             host="localhost",
@@ -858,19 +293,17 @@ class MOQTransport(BaseTransport):
         )
 
         @transport.event_handler("on_connected")
-        async def on_connected():
+        async def on_connected(transport):
             print("Connected to MOQ relay")
-
-        # Connect to relay
-        await transport.connect()
 
     Event handlers available:
 
-    - on_connected: Called when connection to relay is established
-    - on_disconnected: Called when connection is lost
-    - on_track_published: Called when a track is successfully published
-    - on_track_subscribed: Called when a subscription is confirmed
-    - on_error: Called when an error occurs
+    - ``on_connected`` — connection to relay established
+    - ``on_disconnected`` — connection lost / closed
+    - ``on_client_connected`` — peer broadcast announced (client joined)
+    - ``on_client_disconnected`` — peer broadcast went away
+    - ``on_track_subscribed`` — remote track subscription succeeded
+    - ``on_error`` — error in the underlying transport
     """
 
     def __init__(
@@ -884,6 +317,12 @@ class MOQTransport(BaseTransport):
     ):
         """Initialize the MOQ transport.
 
+        The publish broadcast and its transcript track are created here,
+        synchronously, so the output processor can begin writing into
+        them before the async session bring-up in :meth:`_run` finishes
+        — otherwise the bot's first ~hundreds of ms of audio gets
+        silently dropped while we're still dialing the relay.
+
         Args:
             params: MOQ configuration parameters.
             host: Relay host address.
@@ -894,138 +333,339 @@ class MOQTransport(BaseTransport):
         """
         super().__init__(input_name=input_name, output_name=output_name)
 
-        self._host = host
-        self._port = port
-        self._path = path
         self._params = params
-
-        self._callbacks = MOQCallbacks(
-            on_connected=self._on_connected,
-            on_disconnected=self._on_disconnected,
-            on_track_published=self._on_track_published,
-            on_track_subscribed=self._on_track_subscribed,
-            on_error=self._on_error,
-        )
+        self._url = params.relay_url or f"https://{host}:{port}{path}"
+        self._serve_bind = params.serve_bind or f"[::]:{port}"
 
         self._input: Optional[MOQInputTransport] = None
         self._output: Optional[MOQOutputTransport] = None
-        self._protocol: Optional[MOQClientProtocol] = None
         self._connection_task: Optional[asyncio.Task] = None
 
-        self._client_connected = False
+        # Owned for the lifetime of this transport. Created synchronously
+        # so MOQOutputTransport.start() can publish_audio + write
+        # transcript frames without racing with _run()'s async bring-up.
+        self._publish_broadcast: moq.BroadcastProducer = moq.BroadcastProducer()
+        self._transcript_out: moq.TrackProducer = self._publish_broadcast.publish_track(
+            params.transcript_track
+        )
+        # Audio track is opened lazily once the pipeline's output sample
+        # rate is known (in :meth:`open_audio_track`).
+        self._audio_out: Optional[moq.AudioProducer] = None
 
-        # Register event handlers
+        # Track consumers we created so disconnect() can cancel them.
+        # Each entry has a sync .cancel() method that terminates any
+        # pending await on the consumer.
+        self._active_consumers: list = []
+
+        self._cert_fingerprints: list[str] = []
+
+        self._broadcast_path = f"{params.namespace}/{params.participant_id}"
+        self._peer_broadcast_path = f"{params.namespace}/{params.peer_id}"
+        self._cleaned_up = False
+
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
-        self._register_event_handler("on_track_published")
         self._register_event_handler("on_track_subscribed")
         self._register_event_handler("on_error")
 
     def input(self) -> MOQInputTransport:
         """Get the input transport for receiving media."""
         if not self._input:
-            self._input = MOQInputTransport(
-                self,
-                self._params,
-                self._callbacks,
-                name=self._input_name,
-            )
+            self._input = MOQInputTransport(self, self._params, name=self._input_name)
         return self._input
 
     def output(self) -> MOQOutputTransport:
         """Get the output transport for sending media."""
         if not self._output:
-            self._output = MOQOutputTransport(
-                self,
-                self._params,
-                name=self._output_name,
-            )
+            self._output = MOQOutputTransport(self, self._params, name=self._output_name)
         return self._output
 
-    async def connect(self):
-        """Connect to the MOQ relay using moq-lite-02 protocol."""
-        logger.debug("MOQTransport.connect() starting")
+    # ------------------------------------------------------------------
+    # Publishing helpers — called from the output transport.
+    # ------------------------------------------------------------------
+
+    def open_audio_track(self, sample_rate: int):
+        """Open the bot's audio track via ``publish_audio``.
+
+        Called by :class:`MOQOutputTransport.start` once it knows the
+        pipeline's output sample rate. No-op if the track is already
+        open or audio output is disabled.
+        """
+        if self._audio_out is not None or not self._params.audio_out_enabled:
+            return
+
+        self._audio_out = self._publish_broadcast.publish_audio(
+            self._params.audio_out_track,
+            moq.AudioEncoderInput(
+                format=moq.AudioFormat.S16,
+                sample_rate=sample_rate,
+                channels=1,
+            ),
+            moq.AudioEncoderOutput(
+                codec=moq.AudioCodec.OPUS,
+                sample_rate=None,  # let the library pick an Opus-supported rate
+                channels=None,
+                bitrate=None,
+                frame_duration_ms=self._params.audio_out_frame_ms,
+            ),
+        )
+        logger.info(
+            f"MOQ: publishing audio as Opus "
+            f"(pipeline rate={sample_rate}Hz, frame={self._params.audio_out_frame_ms}ms, "
+            f"track={self._params.audio_out_track!r})"
+        )
+
+    def publish_audio(self, audio: bytes):
+        """Push a PCM chunk to the bot's audio track.
+
+        The library does the Opus encode + resample inside the FFI, so
+        we just write S16 PCM bytes. Timestamps are implicit — each
+        successive write becomes the next ``frame_duration_ms`` worth of
+        audio, which is what pipecat actually produces.
+        """
+        if self._audio_out is None:
+            return
+        # Timestamp is informational for downstream A/V sync; the encoder
+        # paces frames itself. Use 0 since we only carry audio and the
+        # browser plays it as soon as it arrives.
+        self._audio_out.write(moq.AudioFrame(timestamp_us=0, data=audio))
+
+    def publish_transcript(self, payload: bytes):
+        """Write a transcript payload (RTVI JSON) to the transcript track."""
+        self._transcript_out.write_frame(payload)
+
+    @property
+    def cert_fingerprints(self) -> list[str]:
+        """SHA-256 fingerprints (hex) of the serving cert (server mode only).
+
+        Populated once the bot has bound; empty in client mode or
+        before :meth:`_run` has reached the listen step. Useful for
+        telling a browser client which self-signed cert to pin.
+        """
+        return list(self._cert_fingerprints)
+
+    # ------------------------------------------------------------------
+    # Connection lifecycle.
+    # ------------------------------------------------------------------
+
+    async def _run(self):
+        """Drive the MOQ session for the bot's lifetime.
+
+        Owns the lifetime of either ``moq.Client`` (client mode) or
+        ``moq.Server`` (serve mode). Returns once the session closes or
+        :meth:`disconnect` is called.
+
+        Both modes share a single :class:`moq.OriginProducer`. The bot
+        publishes its broadcast through the origin and consumes the
+        peer's broadcast through the same origin — only the transport
+        bring-up differs.
+        """
+        origin = moq.OriginProducer()
+
+        if self._params.serve:
+            ctx_label = f"serving {self._serve_bind} as {self._broadcast_path}"
+        else:
+            ctx_label = f"connecting to {self._url} as {self._broadcast_path}"
+        logger.info(f"MOQ: {ctx_label}")
 
         try:
-            configuration = QuicConfiguration(
-                alpn_protocols=[MOQL_ALPN],
-                is_client=True,
+            async with self._make_transport(origin) as transport:
+                if self._params.serve:
+                    self._cert_fingerprints = transport.cert_fingerprints()
+                    logger.info(
+                        f"MOQ: bound on {transport.local_addr} "
+                        f"(cert sha256: {self._cert_fingerprints})"
+                    )
+
+                origin.publish(self._broadcast_path, self._publish_broadcast)
+                logger.info(
+                    f"MOQ: published broadcast {self._broadcast_path!r} "
+                    f"(transcript: {self._params.transcript_track!r}, "
+                    f"audio: {self._params.audio_out_track!r})"
+                )
+                await self._call_event_handler("on_connected")
+
+                # In serve mode, drive the accept loop in the background.
+                # serve() holds each session task until the session closes,
+                # so memory doesn't grow with past connections.
+                serve_task: Optional[asyncio.Task] = None
+                if self._params.serve:
+                    serve_task = asyncio.create_task(transport.serve())
+
+                try:
+                    # Drive the subscribe side. The output side keeps
+                    # writing frames into self._audio_out /
+                    # self._transcript_out from whichever task is running
+                    # the pipeline.
+                    await self._consume_peer(origin)
+                finally:
+                    if serve_task is not None:
+                        serve_task.cancel()
+                        try:
+                            await serve_task
+                        except asyncio.CancelledError:
+                            pass
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"MOQ transport error: {e}", exc_info=True)
+            await self._call_event_handler("on_error", str(e), e)
+        finally:
+            self._audio_out = None
+            self._cert_fingerprints = []
+            await self._call_event_handler("on_disconnected")
+
+    def _make_transport(self, origin: "moq.OriginProducer"):
+        """Return the async-context-manager that owns the MOQ session.
+
+        Client mode dials the relay; serve mode binds a local socket and
+        accepts incoming sessions. Both wire ``origin`` for publish and
+        subscribe so the rest of ``_run`` is shape-identical.
+        """
+        if self._params.serve:
+            tls_kwargs: dict = {}
+            if self._params.serve_tls_cert and self._params.serve_tls_key:
+                tls_kwargs["tls_cert"] = [self._params.serve_tls_cert]
+                tls_kwargs["tls_key"] = [self._params.serve_tls_key]
+            else:
+                tls_kwargs["tls_generate"] = [self._params.serve_tls_host]
+            return moq.Server(
+                self._serve_bind,
+                publish=origin,
+                subscribe=origin,
+                **tls_kwargs,
             )
 
-            # moq-lite-02 opens many streams
-            configuration.max_stream_data = 1048576  # 1MB per stream
+        return moq.Client(
+            self._url,
+            tls_verify=self._params.verify_ssl,
+            publish=origin,
+            subscribe=origin,
+        )
 
-            if not self._params.verify_ssl:
-                configuration.verify_mode = ssl.CERT_NONE
+    async def _consume_peer(self, origin: "moq.OriginProducer"):
+        """Wait for the peer broadcast and forward its audio track.
 
-            # Force IPv4 for localhost — QUIC/UDP doesn't auto-fallback from IPv6
-            connect_host = "127.0.0.1" if self._host == "localhost" else self._host
+        Cancellation flows through the moq consumers themselves: every
+        consumer we open is tracked in ``self._active_consumers`` so
+        ``disconnect()`` can call ``.cancel()`` on it, which makes the
+        relevant ``await`` return ``None`` cleanly. No bespoke race-with-
+        an-event pattern needed.
+        """
+        if not self._params.audio_in_enabled:
+            # Just wait until disconnect() cancels the parent task.
+            await asyncio.Event().wait()
+            return
 
-            # Set SNI explicitly — IP addresses don't carry SNI in TLS,
-            # so the relay needs the original hostname for certificate lookup
-            configuration.server_name = self._host
+        consumer = origin.consume()
 
-            logger.info(f"Connecting to MOQ relay at {connect_host}:{self._port}{self._path}")
+        logger.info(f"MOQ: waiting for peer broadcast {self._peer_broadcast_path!r}")
+        announced = self._track(consumer.announced_broadcast(self._peer_broadcast_path))
+        try:
+            peer_broadcast = await asyncio.wait_for(
+                announced.available(), timeout=self._params.connection_timeout
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"MOQ: peer broadcast {self._peer_broadcast_path!r} did not appear "
+                f"within {self._params.connection_timeout}s"
+            )
+            return
+        except (asyncio.CancelledError, StopAsyncIteration):
+            return
 
-            async with connect(
-                connect_host,
-                self._port,
-                configuration=configuration,
-                create_protocol=MOQClientProtocol,
-            ) as protocol:
-                self._protocol = protocol
+        logger.info(f"MOQ: peer broadcast {self._peer_broadcast_path!r} available")
+        await self._call_event_handler("on_client_connected")
 
-                # Store identity on protocol for ANNOUNCE/SUBSCRIBE handling
-                protocol._namespace = self._params.namespace
-                protocol._participant_id = self._params.participant_id
-                protocol._audio_track_name = self._params.audio_track_name
-                protocol._video_track_name = self._params.video_track_name
-                protocol._transcript_track_name = self._params.transcript_track_name
-                protocol._on_subscribe_received = self._on_subscribe_received
+        try:
+            await self._forward_peer_audio(peer_broadcast)
+        finally:
+            await self._call_event_handler("on_client_disconnected")
 
-                # Set up input/output with protocol
-                if self._input:
-                    self._input.set_protocol(protocol)
-                if self._output:
-                    self._output.set_protocol(protocol)
+    async def _forward_peer_audio(self, peer_broadcast: "moq.BroadcastConsumer"):
+        """Read the catalog, subscribe to the first audio track, pump PCM."""
+        catalog_sub = self._track(peer_broadcast.subscribe_catalog())
+        try:
+            catalog = await catalog_sub.__anext__()
+        except (asyncio.CancelledError, StopAsyncIteration):
+            logger.warning("MOQ: peer closed before publishing a catalog")
+            return
 
-                # Send CLIENT_SETUP
-                await protocol.send_client_setup(self._params.role, self._path)
+        if not catalog.audio:
+            logger.warning(
+                f"MOQ: peer broadcast has no audio in catalog "
+                f"(video={list(catalog.video)})"
+            )
+            return
 
-                # Wait for SERVER_SETUP
-                if not await protocol.wait_for_setup(self._params.connection_timeout):
-                    await self._callbacks.on_error("Setup timeout", None)
-                    return
+        track_name, audio = next(iter(catalog.audio.items()))
+        if audio.codec != "opus":
+            logger.warning(
+                f"MOQ: peer audio codec {audio.codec!r} != opus; "
+                "subscribe may fail. Skipping."
+            )
+            return
 
-                logger.info("MOQ setup complete, connection established")
+        target_rate = self._params.audio_in_sample_rate
+        logger.info(
+            f"MOQ: subscribing to peer audio {track_name!r} "
+            f"(source rate={audio.sample_rate}Hz, channels={audio.channel_count}, "
+            f"output rate={target_rate}Hz, "
+            f"max_latency_ms={self._params.audio_in_max_latency_ms})"
+        )
+        await self._call_event_handler(
+            "on_track_subscribed",
+            MOQTrack(
+                broadcast_path=self._peer_broadcast_path,
+                name=track_name,
+                track_type=MOQTrackType.AUDIO,
+            ),
+        )
 
-                # Don't subscribe yet — wait for a client to connect first.
-                # Subscribing now would fail with "not found" if no client
-                # has announced yet. We subscribe in _on_subscribe_received()
-                # when the relay forwards a SUBSCRIBE for our audio track,
-                # which signals that a client is present.
+        consumer = self._track(
+            peer_broadcast.subscribe_audio(
+                track_name,
+                audio,
+                moq.AudioDecoderOutput(
+                    format=moq.AudioFormat.S16,
+                    sample_rate=target_rate,
+                    channels=1,
+                    latency_max_ms=self._params.audio_in_max_latency_ms,
+                ),
+            )
+        )
+        try:
+            async for frame in consumer:
+                if frame.data and self._input is not None:
+                    await self._input.push_received_audio(frame.data, target_rate)
+        except asyncio.CancelledError:
+            pass
 
-                # In moq-lite-02, publishing is reactive: we wait for the relay
-                # to send us SUBSCRIBE requests for our tracks. The protocol
-                # handler responds automatically with SUBSCRIBE_OK.
+    def _track(self, consumer):
+        """Remember a consumer so ``disconnect()`` can cancel it.
 
-                await self._callbacks.on_connected()
-
-                # Keep connection alive
-                while protocol._connected:
-                    await asyncio.sleep(0.1)
-
-                await self._callbacks.on_disconnected()
-
-        except Exception as e:
-            logger.error(f"MOQ connection error: {e}", exc_info=True)
-            await self._callbacks.on_error(str(e), e)
+        Each moq consumer (announced-broadcast, catalog, track, audio,
+        media) exposes a synchronous ``.cancel()`` that terminates any
+        in-flight ``await``. Tracking them lets us tear down a session
+        without racing on an external cancel event.
+        """
+        self._active_consumers.append(consumer)
+        return consumer
 
     async def disconnect(self):
         """Disconnect from the MOQ relay."""
-        if self._connection_task:
+        # Cancel any open consumers so their async iterations terminate.
+        for c in self._active_consumers:
+            try:
+                c.cancel()
+            except Exception as e:
+                logger.debug(f"MOQ: consumer.cancel() raised: {e}")
+        self._active_consumers.clear()
+
+        if self._connection_task is not None:
             self._connection_task.cancel()
             try:
                 await self._connection_task
@@ -1033,40 +673,13 @@ class MOQTransport(BaseTransport):
                 pass
             self._connection_task = None
 
-        if self._protocol:
-            self._protocol.close()
-            self._protocol = None
+    async def cleanup(self):
+        """Tear down the underlying MOQ connection.
 
-    async def _on_connected(self):
-        """Handle connection established."""
-        await self._call_event_handler("on_connected")
-
-    async def _on_disconnected(self):
-        """Handle connection lost."""
-        await self._call_event_handler("on_disconnected")
-
-    async def _on_track_published(self, track: MOQTrack):
-        """Handle track published."""
-        await self._call_event_handler("on_track_published", track)
-
-    async def _on_track_subscribed(self, track: MOQTrack):
-        """Handle track subscribed."""
-        await self._call_event_handler("on_track_subscribed", track)
-
-    async def _on_subscribe_received(self, track_name: str):
-        """Handle incoming SUBSCRIBE from relay (a client wants our track)."""
-        if track_name == self._params.audio_track_name and not self._client_connected:
-            self._client_connected = True
-            logger.info("Client connected (subscribed to our audio track)")
-
-            # Now that a client is present, subscribe to their audio
-            if self._params.role in (MOQRole.SUBSCRIBER, MOQRole.PUBSUB):
-                if self._input:
-                    if self._params.audio_in_enabled:
-                        await self._input.subscribe_audio()
-
-            await self._call_event_handler("on_client_connected")
-
-    async def _on_error(self, message: str, exception: Optional[Exception]):
-        """Handle error."""
-        await self._call_event_handler("on_error", message, exception)
+        Both the input and output processors call this on shutdown, so
+        we guard against repeating the work.
+        """
+        if self._cleaned_up:
+            return
+        self._cleaned_up = True
+        await self.disconnect()
