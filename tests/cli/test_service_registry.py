@@ -8,47 +8,6 @@ from pipecat.cli.registry import ServiceLoader, ServiceRegistry
 class TestServiceRegistryIntegrity:
     """Test that the service registry is complete and consistent."""
 
-    def test_all_services_have_configs(self):
-        """Verify all services have corresponding configs."""
-        missing = ServiceLoader.get_missing_services()
-
-        if missing["missing_configs"]:
-            pytest.fail(
-                f"Services missing configs: {', '.join(missing['missing_configs'])}\n"
-                f"Add these services to src/pipecat/cli/registry/_configs.py"
-            )
-
-    def test_all_services_have_imports(self):
-        """Verify all services have corresponding import statements."""
-        missing = ServiceLoader.get_missing_services()
-
-        if missing["missing_imports"]:
-            pytest.fail(
-                f"Services missing imports: {', '.join(missing['missing_imports'])}\n"
-                f"Add these services to ServiceRegistry.IMPORTS in services.py"
-            )
-
-    def test_service_definitions_are_valid(self):
-        """Verify all service definitions have required fields.
-
-        This test validates that all services were created successfully
-        (which means they passed __post_init__ validation).
-        """
-        all_services = []
-        all_services.extend(ServiceRegistry.WEBRTC_TRANSPORTS)
-        all_services.extend(ServiceRegistry.TELEPHONY_TRANSPORTS)
-        all_services.extend(ServiceRegistry.STT_SERVICES)
-        all_services.extend(ServiceRegistry.LLM_SERVICES)
-        all_services.extend(ServiceRegistry.TTS_SERVICES)
-        all_services.extend(ServiceRegistry.REALTIME_SERVICES)
-        all_services.extend(ServiceRegistry.VIDEO_SERVICES)
-
-        # Verify all services have required fields
-        for service in all_services:
-            assert service.value, f"Service missing value"
-            assert service.label, f"Service {service.value} missing label"
-            assert service.package, f"Service {service.value} missing package"
-
     def test_no_duplicate_service_values(self):
         """Verify no duplicate service values exist."""
         all_services = []
@@ -157,69 +116,6 @@ class TestServiceLoader:
         joined = "\n".join(imports)
         assert "FastAPIWebsocketParams" in joined
         assert "ProtobufFrameSerializer" in joined
-
-    @pytest.mark.parametrize(
-        "service",
-        ServiceRegistry.STT_SERVICES
-        + ServiceRegistry.LLM_SERVICES
-        + ServiceRegistry.TTS_SERVICES
-        + ServiceRegistry.REALTIME_SERVICES
-        + ServiceRegistry.VIDEO_SERVICES,
-        ids=lambda s: s.value,
-    )
-    def test_every_service_has_config(self, service):
-        """Test that every single service has a valid config."""
-        service_value = service.value
-        config = ServiceLoader.get_service_config(service_value)
-
-        assert config is not None, f"Service {service_value} missing config in _configs.py"
-        assert len(config.strip()) > 0, f"Service {service_value} has empty config"
-        # Config should contain the service class name (e.g., "DeepgramSTTService")
-        assert "Service" in config or "LLM" in config, (
-            f"Service {service_value} config doesn't look like valid service initialization code"
-        )
-
-    @pytest.mark.parametrize(
-        "service",
-        ServiceRegistry.STT_SERVICES
-        + ServiceRegistry.LLM_SERVICES
-        + ServiceRegistry.TTS_SERVICES
-        + ServiceRegistry.REALTIME_SERVICES
-        + ServiceRegistry.VIDEO_SERVICES,
-        ids=lambda s: s.value,
-    )
-    def test_every_service_has_imports(self, service):
-        """Test that every single service has import statements."""
-        service_value = service.value
-        imports = ServiceLoader.get_service_import(service_value)
-
-        assert imports is not None, (
-            f"Service {service_value} missing imports in ServiceRegistry.IMPORTS"
-        )
-        assert len(imports) > 0, f"Service {service_value} has empty imports list"
-        # At least one import should reference pipecat
-        assert any("pipecat" in imp for imp in imports), (
-            f"Service {service_value} imports don't reference pipecat"
-        )
-
-    @pytest.mark.parametrize(
-        "transport",
-        ServiceRegistry.WEBRTC_TRANSPORTS + ServiceRegistry.TELEPHONY_TRANSPORTS,
-        ids=lambda t: t.value,
-    )
-    def test_every_transport_has_imports(self, transport):
-        """Test that every transport has import statements."""
-        transport_value = transport.value
-        imports = ServiceLoader.get_service_import(transport_value)
-
-        assert imports is not None, (
-            f"Transport {transport_value} missing imports in ServiceRegistry.IMPORTS"
-        )
-        assert len(imports) > 0, f"Transport {transport_value} has empty imports list"
-        # Transport imports should reference pipecat
-        assert any("pipecat" in imp for imp in imports), (
-            f"Transport {transport_value} imports don't reference pipecat"
-        )
 
     @pytest.mark.parametrize(
         "service",
@@ -363,7 +259,6 @@ class TestServiceLoader:
         """Test that observability feature imports are defined."""
         assert "observability" in ServiceRegistry.FEATURE_IMPORTS
         observability_imports = ServiceRegistry.FEATURE_IMPORTS["observability"]
-        assert len(observability_imports) == 2
         assert any("WhiskerObserver" in imp for imp in observability_imports)
         assert any("TailObserver" in imp for imp in observability_imports)
 

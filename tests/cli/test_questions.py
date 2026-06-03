@@ -101,76 +101,34 @@ class TestServiceDefinitionChoiceCreation:
     questionary Choice objects. This would have caught the dataclass migration bug.
     """
 
-    def test_stt_service_choices(self):
-        """Test that STT services can be converted to questionary Choices."""
-        choices = [Choice(title=svc.label, value=svc.value) for svc in ServiceRegistry.STT_SERVICES]
-        assert len(choices) > 0
-        assert all(hasattr(choice, "title") for choice in choices)
-        assert all(hasattr(choice, "value") for choice in choices)
-        # Verify actual content
-        assert any("Deepgram" in choice.title for choice in choices)
+    def test_service_definitions_work_as_choices(self):
+        """Every service/transport ServiceDefinition can build a questionary Choice.
 
-    def test_llm_service_choices(self):
-        """Test that LLM services can be converted to questionary Choices."""
-        choices = [Choice(title=svc.label, value=svc.value) for svc in ServiceRegistry.LLM_SERVICES]
-        assert len(choices) > 0
-        assert all(hasattr(choice, "title") for choice in choices)
-        assert all(hasattr(choice, "value") for choice in choices)
-        # Verify actual content
-        assert any("OpenAI" in choice.title for choice in choices)
+        Guards the original dataclass-migration bug across all registry lists at once:
+        ``Choice(title=svc.label, value=svc.value)`` must not raise and must yield a
+        usable Choice for every entry.
+        """
+        all_services = (
+            ServiceRegistry.STT_SERVICES
+            + ServiceRegistry.LLM_SERVICES
+            + ServiceRegistry.TTS_SERVICES
+            + ServiceRegistry.REALTIME_SERVICES
+            + ServiceRegistry.VIDEO_SERVICES
+            + ServiceRegistry.WEBRTC_TRANSPORTS
+            + ServiceRegistry.TELEPHONY_TRANSPORTS
+        )
+        assert len(all_services) > 0
+        for svc in all_services:
+            choice = Choice(title=svc.label, value=svc.value)
+            assert choice.title == svc.label
+            assert choice.value == svc.value
 
-    def test_tts_service_choices(self):
-        """Test that TTS services can be converted to questionary Choices."""
-        choices = [Choice(title=svc.label, value=svc.value) for svc in ServiceRegistry.TTS_SERVICES]
-        assert len(choices) > 0
-        assert all(hasattr(choice, "title") for choice in choices)
-        assert all(hasattr(choice, "value") for choice in choices)
-        # Verify actual content
-        assert any("ElevenLabs" in choice.title for choice in choices)
-
-    def test_realtime_service_choices(self):
-        """Test that realtime services can be converted to questionary Choices."""
-        choices = [
-            Choice(title=svc.label, value=svc.value) for svc in ServiceRegistry.REALTIME_SERVICES
-        ]
-        assert len(choices) > 0
-        assert all(hasattr(choice, "title") for choice in choices)
-        assert all(hasattr(choice, "value") for choice in choices)
-        # Verify actual content
-        assert any("OpenAI" in choice.title for choice in choices)
-
-    def test_video_service_choices(self):
-        """Test that video services can be converted to questionary Choices."""
-        choices = [
-            Choice(title=svc.label, value=svc.value) for svc in ServiceRegistry.VIDEO_SERVICES
-        ]
-        assert len(choices) > 0
-        assert all(hasattr(choice, "title") for choice in choices)
-        assert all(hasattr(choice, "value") for choice in choices)
-        # Verify actual content
-        assert any("HeyGen" in choice.title for choice in choices)
-        assert any("Tavus" in choice.title for choice in choices)
-        assert any("Simli" in choice.title for choice in choices)
-
-    def test_web_transport_choices(self):
-        """Test that web transport options can be converted to questionary Choices."""
-        transport_options = ServiceLoader.get_transport_options("web")
-        choices = [Choice(title=svc.label, value=svc.value) for svc in transport_options]
-        assert len(choices) > 0
-        assert all(hasattr(choice, "title") for choice in choices)
-        assert all(hasattr(choice, "value") for choice in choices)
-        # Verify actual content
-        assert any("Daily" in choice.title for choice in choices)
-
-    def test_telephony_transport_choices(self):
-        """Test that telephony transport options can be converted to questionary Choices."""
-        transport_options = ServiceLoader.get_transport_options("telephony")
-        choices = [Choice(title=svc.label, value=svc.value) for svc in transport_options]
-        assert len(choices) > 0
-        assert all(hasattr(choice, "title") for choice in choices)
-        assert all(hasattr(choice, "value") for choice in choices)
-        # Verify actual content
-        assert any("Twilio" in choice.title for choice in choices)
+    def test_transport_options_query(self):
+        """get_transport_options() returns the right Choices for each bot type."""
+        web = ServiceLoader.get_transport_options("web")
+        assert any("Daily" in svc.label for svc in web)
+        telephony = ServiceLoader.get_transport_options("telephony")
+        assert any("Twilio" in svc.label for svc in telephony)
 
     def test_transport_fallback_access(self):
         """Test that transport options can be accessed by index (for fallback logic)."""

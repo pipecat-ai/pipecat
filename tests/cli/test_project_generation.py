@@ -486,16 +486,34 @@ def test_project_generation(config_data, temp_output_dir):
     assert "async def run_bot" in bot_content, "bot.py should have run_bot function"
     assert "async def bot" in bot_content, "bot.py should have bot function"
 
-    # Verify imports are present
+    # Verify the selected services' actual classes appear in the generated bot,
+    # rather than a weak substring like "stt". The expected class names come from
+    # the registry, so this stays correct as services are added or renamed.
+    from pipecat.cli.registry import ServiceLoader, ServiceRegistry
+
+    def assert_service_class_referenced(value, service_lists):
+        for service_list in service_lists:
+            svc = ServiceLoader.get_service_by_value(service_list, value)
+            if svc:
+                primary_class = svc.class_name[0]
+                assert primary_class in bot_content, (
+                    f"{value} should reference {primary_class} in bot.py"
+                )
+                return
+        pytest.fail(f"Service {value} not found in registry")
+
     if config.mode == "cascade":
         if config.stt_service:
-            assert "STT" in bot_content or "stt" in bot_content, "STT should be referenced"
+            assert_service_class_referenced(config.stt_service, [ServiceRegistry.STT_SERVICES])
         if config.llm_service:
-            assert "LLM" in bot_content or "llm" in bot_content, "LLM should be referenced"
+            assert_service_class_referenced(config.llm_service, [ServiceRegistry.LLM_SERVICES])
         if config.tts_service:
-            assert "TTS" in bot_content or "tts" in bot_content, "TTS should be referenced"
+            assert_service_class_referenced(config.tts_service, [ServiceRegistry.TTS_SERVICES])
     elif config.mode == "realtime":
-        assert "llm" in bot_content, "Realtime LLM should be referenced"
+        if config.realtime_service:
+            assert_service_class_referenced(
+                config.realtime_service, [ServiceRegistry.REALTIME_SERVICES]
+            )
 
     # Verify transport-specific code
     for transport in config.transports:
@@ -697,13 +715,6 @@ def test_format_warns_when_ruff_cannot_run(monkeypatch, temp_output_dir, capsys)
     assert "Could not run Ruff" in captured.out, (
         f"expected a Ruff warning on stdout, got:\n{captured.out}"
     )
-
-
-def test_invalid_service_combination():
-    """Test that invalid service combinations are caught."""
-    # This test would check validation logic if we add it
-    # For now, we rely on the interactive prompts to guide users
-    pass
 
 
 def test_collapsed_transport_construction(temp_output_dir):

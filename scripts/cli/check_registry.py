@@ -31,7 +31,8 @@ def main():
         for service in missing["missing_configs"]:
             print(f"   - {service}")
         print()
-        print("   Add these to src/pipecat/cli/registry/_configs.py")
+        print("   Define them in src/pipecat/cli/registry/service_metadata.py, then run")
+        print("   `uv run scripts/cli/update_registry.py` to regenerate _configs.py")
         print()
 
     if missing["missing_imports"]:
@@ -40,7 +41,8 @@ def main():
         for service in missing["missing_imports"]:
             print(f"   - {service}")
         print()
-        print("   Add these to ServiceRegistry.IMPORTS in services.py")
+        print("   Define them in src/pipecat/cli/registry/service_metadata.py, then run")
+        print("   `uv run scripts/cli/update_registry.py` to regenerate _imports.py")
         print()
 
     # Count services

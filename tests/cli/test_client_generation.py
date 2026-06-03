@@ -219,12 +219,16 @@ class TestStaticTypeScript:
 
         config_content = (project_path / "client" / "src" / "config.ts").read_text()
 
-        # Type definition should include ALL transports
-        assert "type TransportType = 'daily' | 'smallwebrtc'" in config_content
+        # Type definition and TRANSPORT_CONFIG should include ALL web transports the
+        # registry knows about, regardless of which one was selected. Derive the
+        # expected set from the registry so new web transports don't silently drift.
+        from pipecat.cli.registry import ServiceRegistry
 
-        # TRANSPORT_CONFIG should have all transports
-        assert "daily:" in config_content
-        assert "smallwebrtc:" in config_content
+        web_transport_values = [t.value for t in ServiceRegistry.WEBRTC_TRANSPORTS]
+        assert len(web_transport_values) >= 2  # sanity: more than just the selected one
+        for value in web_transport_values:
+            assert f"'{value}'" in config_content, f"{value} missing from TransportType union"
+            assert f"{value}:" in config_content, f"{value} missing from TRANSPORT_CONFIG"
 
         # But AVAILABLE_TRANSPORTS should only have selected ones
         lines = config_content.split("\n")
