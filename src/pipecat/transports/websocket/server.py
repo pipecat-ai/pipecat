@@ -282,8 +282,9 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
             websocket: The WebSocket connection to set as active, or None to clear.
         """
         if self._websocket:
+            if websocket:
+                logger.warning("Only one client allowed, using new connection")
             await self._websocket.close()
-            logger.warning("Only one client allowed, using new connection")
         self._websocket = websocket
 
     async def start(self, frame: StartFrame):
