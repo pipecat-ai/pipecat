@@ -421,6 +421,14 @@ class RTVIProcessor(FrameProcessor):
         opts = data.options if data.options is not None else RTVI.SendTextOptions()
         if opts.run_immediately:
             await self.interrupt_bot()
+            # Drain the pipeline before appending the new message. The
+            # interruption commits the in-progress assistant response into the
+            # context; flushing guarantees that lands *before* we append (and
+            # run) the new user message, so the context stays correctly ordered
+            # (otherwise the append can overtake the commit and the model
+            # continues the interrupted turn). This runs in the message task, so
+            # awaiting here doesn't block the frame loop that forwards the probe.
+            await self.pipeline_worker.flush_pipeline()
         cur_llm_skip_tts = self._llm_skip_tts
         should_skip_tts = not opts.audio_response
         toggle_skip_tts = cur_llm_skip_tts != should_skip_tts
