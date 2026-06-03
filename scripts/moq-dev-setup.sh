@@ -1,86 +1,40 @@
 #!/usr/bin/env bash
 #
-# Generate a self-signed cert for local MOQ dev, symlink it into both the
-# relay repo and this pipecat repo, and print the commands to run everything.
+# Wire the unpublished MoQ-related packages into pipecat-prebuilt/client
+# for local dev, then build them.
+#
+# The pipecat MoQ transport now self-serves via `--moq-serve` (the bot
+# binds its own UDP socket and mints a self-signed cert in-process), so
+# you no longer need a separate moq-relay process or an `openssl` cert
+# dance. This script's only job is the link chain that lets the React
+# prebuilt client pick up the local source of:
+#
+#   * @pipecat-ai/moq-transport (unpublished)
+#   * @pipecat-ai/voice-ui-kit  (local source ahead of the next release)
+#   * @pipecat-ai/client-js     (deduped to a single physical instance)
 #
 # Usage:
-#   ./scripts/moq-dev-setup.sh /path/to/moq-relay
+#   ./scripts/moq-dev-setup.sh
+#
+# TEMPORARY: delete this script once @pipecat-ai/moq-transport ships and
+# voice-ui-kit's next release (with MoQ support) is on npm.
 #
 
 set -euo pipefail
 
-RELAY_DIR="${1:?Usage: $0 /path/to/moq-relay}"
 PIPECAT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Resolve relay dir to absolute path
-RELAY_DIR="$(cd "$RELAY_DIR" && pwd)"
-
-CERT_DIR="$PIPECAT_DIR/.moq-certs"
-CERT_FILE="$CERT_DIR/moq-cert.pem"
-KEY_FILE="$CERT_DIR/moq-key.pem"
-
-echo "==> Relay dir:   $RELAY_DIR"
 echo "==> Pipecat dir: $PIPECAT_DIR"
-echo "==> Cert dir:    $CERT_DIR"
 echo
 
 # ---------------------------------------------------------------------------
-# 1. Generate cert + key
-# ---------------------------------------------------------------------------
-mkdir -p "$CERT_DIR"
-
-echo "==> Generating self-signed cert (valid 14 days — MOQ max)..."
-openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
-  -keyout "$KEY_FILE" \
-  -out "$CERT_FILE" \
-  -days 14 \
-  -nodes \
-  -subj "/CN=localhost" \
-  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
-  2>/dev/null
-
-echo "    $CERT_FILE"
-echo "    $KEY_FILE"
-echo
-
-# ---------------------------------------------------------------------------
-# 2. Compute SHA-256 fingerprint (used by WebTransport cert pinning)
-# ---------------------------------------------------------------------------
-FINGERPRINT=$(openssl x509 -in "$CERT_FILE" -outform der \
-  | openssl dgst -sha256 -binary \
-  | base64)
-
-echo "==> Certificate SHA-256 fingerprint:"
-echo "    $FINGERPRINT"
-echo
-
-# ---------------------------------------------------------------------------
-# 3. Symlink into relay dir and pipecat dir
-# ---------------------------------------------------------------------------
-echo "==> Symlinking certs..."
-
-for DIR in "$RELAY_DIR" "$PIPECAT_DIR"; do
-  for FILE in "$CERT_FILE" "$KEY_FILE"; do
-    BASENAME="$(basename "$FILE")"
-    TARGET="$DIR/$BASENAME"
-    rm -f "$TARGET"
-    ln -s "$FILE" "$TARGET"
-    echo "    $TARGET -> $FILE"
-  done
-done
-echo
-
-# ---------------------------------------------------------------------------
-# 4. Link the unpublished moq-transport + the local voice-ui-kit into the
+# 1. Link the unpublished moq-transport + the local voice-ui-kit into the
 #    prebuilt client, and dedupe @pipecat-ai/client-js across all three.
 #
-# TEMPORARY: remove this block once `@pipecat-ai/moq-transport` is published
-# and voice-ui-kit's next release (with MoQ support) is on npm.
-#
-# This MUST run BEFORE building voice-ui-kit, so its tsc/dts step resolves a
-# single @pipecat-ai/client-js. Otherwise it picks up its own (1.8.x via the
-# pnpm lockfile) AND pipecat-client-web-transports' hoisted copy (currently
-# 1.10.x) and fails with:
+# This MUST run BEFORE building voice-ui-kit, so its tsc/dts step resolves
+# a single @pipecat-ai/client-js. Otherwise it picks up its own (1.8.x via
+# the pnpm lockfile) AND pipecat-client-web-transports' hoisted copy
+# (currently 1.10.x) and fails with:
 #   "Property '_options' is protected but type 'Transport' is not a class
 #    derived from 'Transport'"
 #
@@ -90,8 +44,6 @@ echo
 #   b) @pipecat-ai/voice-ui-kit  (source: voice-ui-kit/package)
 #      -> consumed by pipecat-prebuilt/client (replaces the npm-installed
 #         release with the local build that knows about transportType="moq").
-#         The link itself doesn't require voice-ui-kit's dist/ to exist yet;
-#         dist/ is only needed when the prebuilt client actually runs.
 #   c) @pipecat-ai/client-js     (canonical: pipecat-prebuilt/client's
 #      installed copy at 1.8.x) -> linked into pipecat-client-web-transports
 #      and voice-ui-kit/package so every layer in the build resolves the
@@ -143,6 +95,21 @@ else
   rm -rf "$VUK_CLIENT_JS_LINK"
   ln -s "$PREBUILT_CLIENT_JS_DIR" "$VUK_CLIENT_JS_LINK"
 
+  # `npm install` inside transports/moq-transport (run during the c5
+  # rewrite, and again any time someone refreshes deps there) drops a
+  # non-hoisted client-js into moq-transport/node_modules. When tsc/dts
+  # resolves MoqTransport's `Transport` import while building voice-ui-kit
+  # — which is a *consumer* of moq-transport via pnpm `link:` — it walks
+  # node_modules from moq-transport's REAL location, finds this local
+  # copy FIRST, and ends up resolving to a different physical path than
+  # voice-ui-kit's own client-js. Result: two `Transport` types, the
+  # protected `_options` collision, and the dts build fails. Delete the
+  # local copy so resolution walks up to the deduped root.
+  MOQ_PKG_LOCAL_CLIENT_JS="$MOQ_PKG_DIR/node_modules/@pipecat-ai/client-js"
+  if [[ -d "$MOQ_PKG_LOCAL_CLIENT_JS" ]]; then
+    rm -rf "$MOQ_PKG_LOCAL_CLIENT_JS"
+  fi
+
   echo "    @pipecat-ai/moq-transport -> $MOQ_PKG_DIR"
   echo "    @pipecat-ai/voice-ui-kit  -> $VUK_PKG_DIR"
   echo "    @pipecat-ai/client-js     -> $PREBUILT_CLIENT_JS_DIR (shared into transports + voice-ui-kit)"
@@ -150,11 +117,9 @@ fi
 echo
 
 # ---------------------------------------------------------------------------
-# 5. Build the linked packages so their dist/ reflects local source.
+# 2. Build the linked packages so their dist/ reflects local source.
 #
-# Running the builds inside the script keeps the user-facing flow simple:
-# they install (§2) → run this script (§3) → start the three terminals
-# (§4). The link chain is in place by this point, so tsc resolves a single
+# The link chain is in place by this point, so tsc resolves a single
 # Transport type and the dts build passes.
 # ---------------------------------------------------------------------------
 if [[ -d "$MOQ_PKG_DIR" ]]; then
@@ -172,33 +137,23 @@ if [[ -d "$VUK_PKG_DIR" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 6. Print run commands
+# 3. Print run commands
 # ---------------------------------------------------------------------------
 echo "==========================================="
 echo " Next: run these in separate terminals"
 echo "==========================================="
 echo
-echo "# 1. Start the relay (binds QUIC/WebTransport on UDP [::]:4080)"
-echo "cd $RELAY_DIR"
-echo "cargo run --bin moq-relay -- \\"
-echo "  --server-bind '[::]:4080' \\"
-echo "  --tls-cert moq-cert.pem \\"
-echo "  --tls-key moq-key.pem \\"
-echo "  --auth-public ''"
-echo
-echo "# 2. Start the bot"
+echo "# 1. Start the bot (self-serves as the MOQ server; mints a self-"
+echo "#    signed cert in-process and threads the fingerprint to the"
+echo "#    browser via /start. No separate moq-relay process needed.)"
 echo "cd $PIPECAT_DIR"
-echo "uv run python examples/transports/transports-moq.py \\"
-echo "  -t moq \\"
-echo "  --moq-cert moq-cert.pem \\"
-echo "  --moq-insecure \\"
-echo "  --moq-path /"
+echo "uv run python examples/transports/transports-moq.py -t moq --moq-serve"
 echo
-echo "# 3. Start the prebuilt client dev server (Vite — usually port 5173)"
+echo "# 2. Start the prebuilt client dev server (Vite — usually port 5173)"
 echo "cd $PIPECAT_DIR/../pipecat-prebuilt/client"
 echo "npm run dev"
 echo
-echo "# 4. Open the Vite dev URL printed in terminal 3 (NOT the bot's"
+echo "# 3. Open the Vite dev URL printed in terminal 2 (NOT the bot's"
 echo "#    http://localhost:7860/client/, which serves the published"
 echo "#    pipecat-ai-prebuilt wheel without MoQ)."
 echo "open http://localhost:5173"
