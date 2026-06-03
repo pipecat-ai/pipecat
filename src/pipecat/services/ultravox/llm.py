@@ -612,33 +612,44 @@ class UltravoxRealtimeLLMService(LLMService):
                         await self._handle_audio(message)
                         continue
 
-                data = json.loads(message)
-                match data.get("type"):
-                    case "state":
-                        if self._bot_responding and data.get("state") != "speaking":
-                            await self._handle_response_end()
-                    case "playback_clear_buffer":
-                        # Server signals that the user interrupted the bot
-                        # mid-speech and any buffered output audio should be
-                        # dropped. Broadcast InterruptionFrame so the assistant
-                        # aggregator records the message interrupted=True
-                        # (upstream) and BaseOutputTransport clears its audio
-                        # buffer (downstream). The subsequent "state" message
-                        # transitioning off "speaking" is what closes the
-                        # response via _handle_response_end; firing the
-                        # interruption first ensures the aggregator handles
-                        # InterruptionFrame before LLMFullResponseEndFrame.
-                        await self.broadcast_interruption()
-                    case "client_tool_invocation":
-                        await self._handle_tool_invocation(
-                            data.get("toolName"), data.get("invocationId"), data.get("parameters")
-                        )
-                    case "transcript":
-                        match data.get("role"):
-                            case "user":
-                                if not data.get("final"):
-                                    logger.warning(
-                                        "Unexpected non-final user transcript from Ultravox Realtime; ignoring."
+                    data = json.loads(message)
+                    match data.get("type"):
+                        case "state":
+                            if self._bot_responding and data.get("state") != "speaking":
+                                await self._handle_response_end()
+                        case "playback_clear_buffer":
+                            # Server signals that the user interrupted the bot
+                            # mid-speech and any buffered output audio should be
+                            # dropped. Broadcast InterruptionFrame so the assistant
+                            # aggregator records the message interrupted=True
+                            # (upstream) and BaseOutputTransport clears its audio
+                            # buffer (downstream). The subsequent "state" message
+                            # transitioning off "speaking" is what closes the
+                            # response via _handle_response_end; firing the
+                            # interruption first ensures the aggregator handles
+                            # InterruptionFrame before LLMFullResponseEndFrame.
+                            await self.broadcast_interruption()
+                        case "client_tool_invocation":
+                            await self._handle_tool_invocation(
+                                data.get("toolName"),
+                                data.get("invocationId"),
+                                data.get("parameters"),
+                            )
+                        case "transcript":
+                            match data.get("role"):
+                                case "user":
+                                    if not data.get("final"):
+                                        logger.warning(
+                                            "Unexpected non-final user transcript from Ultravox Realtime; ignoring."
+                                        )
+                                    else:
+                                        await self._handle_user_transcript(data.get("text"))
+                                case "agent":
+                                    await self._handle_agent_transcript(
+                                        data.get("medium"),
+                                        data.get("text"),
+                                        data.get("delta"),
+                                        data.get("final", False),
                                     )
                                 case _:
                                     logger.debug(
