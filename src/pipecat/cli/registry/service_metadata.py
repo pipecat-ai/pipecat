@@ -10,8 +10,7 @@
 
 To add a new service:
   1. Add a ServiceDefinition to the appropriate list below
-  2. Run: uv run scripts/imports/update_imports.py
-  3. Run: uv run scripts/configs/update_configs.py
+  2. Run: uv run scripts/cli/update_registry.py  (regenerates _imports.py and _configs.py)
 
 DO NOT edit _configs.py or _imports.py directly - they are auto-generated from this file.
 
