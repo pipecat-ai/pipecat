@@ -149,7 +149,7 @@ TRANSPORT_ROUTE_DEPENDENCIES = {
     "webrtc": ("aiortc",),
     "telephony": ("fastapi", "websockets"),
     "websocket": ("fastapi", "websockets"),
-    "moq": ("aioquic", "cryptography"),
+    "moq": ("moq", "cryptography"),
 }
 TRANSPORT_INSTALL_HINTS = {
     "daily": "install pipecat-ai[daily]",
