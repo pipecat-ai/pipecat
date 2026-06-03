@@ -13,6 +13,7 @@ and LLM processing.
 
 from __future__ import annotations
 
+import asyncio
 import time
 import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -1635,6 +1636,28 @@ class StopFrame(ControlFrame, UninterruptibleFrame):
     """
 
     pass
+
+
+@dataclass
+class PipelineFlushFrame(ControlFrame, UninterruptibleFrame):
+    """Probe frame used to flush all in-flight frames from the pipeline.
+
+    Pushed downstream; the pipeline worker's sink bounces it back upstream, and
+    when it returns to the source the worker sets ``event``. Once that fires,
+    every frame queued ahead of the probe has completed the round-trip and been
+    processed. Useful to wait for the pipeline to drain (e.g. after an
+    interruption) before injecting a new frame.
+
+    This frame is marked as UninterruptibleFrame so the probe survives an
+    InterruptionFrame and still completes its round-trip.
+
+    Parameters:
+        event: Set by the worker when the probe completes its round-trip. The
+            initiator awaits it to know the pipeline has drained. Carried on the
+            frame so concurrent flushes stay isolated (each awaits its own).
+    """
+
+    event: asyncio.Event | None = field(default=None, compare=False)
 
 
 @dataclass

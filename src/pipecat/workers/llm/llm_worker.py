@@ -10,7 +10,6 @@ Provides the `LLMWorker` class that extends `PipelineWorker` with an LLM
 pipeline and automatic tool registration.
 """
 
-import asyncio
 import functools
 from collections import deque
 from collections.abc import Callable
@@ -19,12 +18,11 @@ from typing import Any
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
-    ControlFrame,
     Frame,
     FunctionCallResultProperties,
     LLMMessagesAppendFrame,
     LLMSetToolsFrame,
-    UninterruptibleFrame,
+    PipelineFlushFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -34,13 +32,6 @@ from pipecat.workers.base_worker import WorkerActivationArgs
 from pipecat.workers.llm.tool_decorator import _collect_tools
 
 FunctionCallResultCallback = Callable[..., Any]
-
-
-@dataclass
-class PipelineFlushFrame(ControlFrame, UninterruptibleFrame):
-    """Probe frame used to flush all in-flight frames from the pipeline."""
-
-    pass
 
 
 @dataclass
@@ -108,7 +99,6 @@ class LLMWorker(PipelineWorker):
         self._tool_call_inflight: int = 0
         self._deferred_frames: deque[tuple[Frame, FrameDirection]] = deque()
         self._closing: bool = False
-        self._flush_done: asyncio.Event = asyncio.Event()
 
         self._llm = llm
         self._register_tools(llm)
@@ -130,22 +120,6 @@ class LLMWorker(PipelineWorker):
         # PipelineWorker's __init__ doesn't accept active; configure after.
         self._active = active
         self._pending_activation = active
-
-        # Pipeline flush wiring: the probe frame travels up to the source
-        # and back down to the sink, signalling that all in-flight frames
-        # have been processed.
-        self.add_reached_upstream_filter((PipelineFlushFrame,))
-        self.add_reached_downstream_filter((PipelineFlushFrame,))
-
-        @self.event_handler("on_frame_reached_upstream")
-        async def _on_flush_upstream(worker, frame):
-            if isinstance(frame, PipelineFlushFrame):
-                await super().queue_frame(PipelineFlushFrame())
-
-        @self.event_handler("on_frame_reached_downstream")
-        async def _on_flush_downstream(worker, frame):
-            if isinstance(frame, PipelineFlushFrame):
-                self._flush_done.set()
 
     @property
     def llm(self) -> LLMService:
@@ -301,19 +275,15 @@ class LLMWorker(PipelineWorker):
         return wrapper
 
     async def _flush_deferred_frames(self) -> None:
-        # Wait until the function result frame is really processed.
-        await self._flush_pipeline()
+        # Wait until the function result frame is really processed. flush_pipeline
+        # injects the probe straight into the pipeline, bypassing our queue_frame
+        # deferral override.
+        await self.flush_pipeline()
 
         frames = list(self._deferred_frames)
         self._deferred_frames.clear()
         for frame, direction in await self.process_deferred_tool_frames(frames):
             await self.queue_frame(frame, direction)
-
-    async def _flush_pipeline(self) -> None:
-        self._flush_done.clear()
-        # Bypass our deferral override by going to PipelineWorker directly.
-        await super().queue_frame(PipelineFlushFrame(), FrameDirection.UPSTREAM)
-        await self._flush_done.wait()
 
     async def _finish_function_call(
         self,
@@ -335,7 +305,7 @@ class LLMWorker(PipelineWorker):
             # self.queue_frame would defer the frame and the flush below would
             # return before the LLM output is delivered.
             await super().queue_frame(LLMMessagesAppendFrame(messages=messages, run_llm=True))
-            await self._flush_pipeline()
+            await self.flush_pipeline()
 
         if not result_callback:
             return
@@ -343,4 +313,4 @@ class LLMWorker(PipelineWorker):
         await result_callback(None, properties=FunctionCallResultProperties(run_llm=False))
 
         # Wait until the function result frame is really processed.
-        await self._flush_pipeline()
+        await self.flush_pipeline()
