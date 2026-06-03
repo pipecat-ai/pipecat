@@ -172,12 +172,14 @@ class ServiceLoader:
         }
 
         for service_type, service_list in service_type_map.items():
-            if service_type in services and services[service_type]:
-                service_def = ServiceLoader.get_service_by_value(
-                    service_list, services[service_type]
-                )
-                if service_def:
-                    extras.update(extract_package_extra(service_def.package))
+            value = services.get(service_type)
+            if not value:
+                continue
+            # These service types hold a single value (only "transports" is a list).
+            service_value = value if isinstance(value, str) else value[0]
+            service_def = ServiceLoader.get_service_by_value(service_list, service_value)
+            if service_def:
+                extras.update(extract_package_extra(service_def.package))
 
         return extras
 
@@ -288,9 +290,9 @@ class ServiceLoader:
         if not (transport_values & _dialout_transports):
             imports.update(ServiceRegistry.FEATURE_IMPORTS["llm_run_frame"])
 
-        # Some STT services perform their own end-of-turn detection
+        # Some STT services perform their own end-of-turn detection ("stt" is a single value)
         stt_value = services.get("stt", "")
-        if ServiceLoader.uses_external_turn_detection(stt_value):
+        if isinstance(stt_value, str) and ServiceLoader.uses_external_turn_detection(stt_value):
             imports.update(ServiceRegistry.FEATURE_IMPORTS["external_turn_strategies"])
 
         return list(imports)
