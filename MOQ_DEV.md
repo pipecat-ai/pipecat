@@ -35,7 +35,7 @@ script assumes this layout:
 <parent>/
 ├── pipecat/                          # github.com/pipecat-ai/pipecat
 ├── pipecat-client-web-transports/    # github.com/pipecat-ai/pipecat-client-web-transports
-├── pipecat-prebuilt/                 # internal
+├── pipecat-prebuilt/                 # github.com/pipecat-ai/pipecat-prebuilt
 └── voice-ui-kit/                     # github.com/pipecat-ai/voice-ui-kit
 ```
 
@@ -67,8 +67,8 @@ Paths assume you start from this `pipecat/` directory and the repos are
 siblings:
 - `/pipecat`
 - `/pipecat-client-web-transports`
-- `/voice-ui-kit`
 - `/pipecat-prebuilt`
+- `/voice-ui-kit`
 
 Order doesn't matter; no builds yet. The link chain that ties them
 together happens after.
