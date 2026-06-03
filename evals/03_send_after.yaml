@@ -14,6 +14,6 @@ turns:
   - user: "second message"
     send_after:
       event: user_stopped_speaking
-      delay_ms: 200
+      delay_ms: 2000
     expect:
       - event: user_stopped_speaking

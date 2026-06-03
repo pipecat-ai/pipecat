@@ -12,7 +12,7 @@ turns:
   - user: "stop, what time is it?"
     send_after:
       event: llm_started
-      delay_ms: 5000
+      delay_ms: 3000
     expect:
       - event: llm_response
         eval: "states a time of day rather than continuing the previous topic"

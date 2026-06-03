@@ -1,5 +1,11 @@
 name: tts_response_transcribes_spoken_audio
 
+user_audio:
+  service: cartesia
+  voice: 71a7ad14-091c-4e8e-a314-022ece01c121     # British Reading Lady
+  model: sonic-2
+  sample_rate: 16000
+
 bot_audio:
   service: whisper
   model: base
