@@ -22,8 +22,10 @@ sets:
   The recorder is an :class:`~pipecat.processors.audio.audio_buffer_processor.AudioBufferProcessor`
   placed *after* the real output transport (so both input and output audio flow
   through it); ``output()`` returns that composite. Recording starts on connect
-  and is flushed synchronously on disconnect (reliable, unlike shutdown).
-  Recording is eval-only — the generic transport is untouched.
+  and is flushed on disconnect (reliable, unlike at shutdown where the process
+  may exit first) — the audio is snapshotted there and written in the background
+  so the disconnect doesn't delay the next connect. Recording is eval-only — the
+  generic transport is untouched.
 
 This transport also keeps one bot alive across a whole eval suite: it overrides
 ``_on_client_disconnected`` to detach the connection (and flush the recording)
@@ -31,10 +33,13 @@ This transport also keeps one bot alive across a whole eval suite: it overrides
 the pipeline.
 """
 
+import asyncio
+import io
 import wave
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+import aiofiles
 from loguru import logger
 
 from pipecat.frames.frames import LLMConfigureOutputFrame
@@ -68,15 +73,23 @@ def _query_value(websocket, name: str) -> str | None:
     return values[0] if values and values[0] else None
 
 
-def _write_wav(path: str, audio: bytes, sample_rate: int, num_channels: int) -> None:
-    """Write PCM ``audio`` to a 16-bit WAV at ``path`` (creating parent dirs)."""
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with wave.open(str(p), "wb") as wf:
+async def _write_wav(path: str, audio: bytes, sample_rate: int, num_channels: int) -> None:
+    """Write PCM ``audio`` to a 16-bit WAV at ``path`` (creating parent dirs).
+
+    Encodes the WAV in memory, then writes it to disk without blocking the event
+    loop.
+    """
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wf:
         wf.setnchannels(num_channels)
         wf.setsampwidth(2)
         wf.setframerate(sample_rate)
         wf.writeframes(audio)
+
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    async with aiofiles.open(p, "wb") as f:
+        await f.write(buffer.getvalue())
     logger.info(f"Eval recording saved: {p} ({len(audio)} bytes)")
 
 
@@ -89,6 +102,8 @@ class EvalWebsocketServerTransport(WebsocketServerTransport):
         self._audio_buffer = None
         self._record_output = None
         self._record_path: str | None = None
+        # In-flight recording writes, tracked so they aren't garbage-collected.
+        self._write_tasks: set = set()
 
     def output(self):
         """Return the output as a recorder composite: ``[real_output, AudioBufferProcessor]``.
@@ -135,12 +150,19 @@ class EvalWebsocketServerTransport(WebsocketServerTransport):
         """
         if self._audio_buffer is not None:
             if self._record_path and self._audio_buffer.has_audio():
-                _write_wav(
-                    self._record_path,
-                    self._audio_buffer.merge_audio_buffers(),
-                    self._audio_buffer.sample_rate,
-                    self._audio_buffer.num_channels,
+                # Snapshot the audio and write it in the background, so this
+                # disconnect returns immediately and the input transport can
+                # release the connection before the next eval connects.
+                task = asyncio.create_task(
+                    _write_wav(
+                        self._record_path,
+                        self._audio_buffer.merge_audio_buffers(),
+                        self._audio_buffer.sample_rate,
+                        self._audio_buffer.num_channels,
+                    )
                 )
+                self._write_tasks.add(task)
+                task.add_done_callback(self._write_tasks.discard)
             await self._audio_buffer.stop_recording()
             self._record_path = None
 
