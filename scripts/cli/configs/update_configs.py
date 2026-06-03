@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-Regenerate service configurations.
+Regenerate service configurations in _configs.py.
 
 This is a convenience script that runs the config generator.
 Similar to update_imports.py but for service configs.
 
 Usage:
-    uv run scripts/configs/update_configs.py           # Update _configs.py
-    uv run scripts/configs/update_configs.py --preview # Preview without updating
+    uv run scripts/cli/configs/update_configs.py           # Update _configs.py
+    uv run scripts/cli/configs/update_configs.py --preview # Preview without updating
+
+Most callers should use the top-level ``scripts/cli/update_registry.py``, which
+regenerates both _imports.py and _configs.py.
 """
 
 import argparse
