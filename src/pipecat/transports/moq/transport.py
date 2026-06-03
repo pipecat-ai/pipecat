@@ -67,6 +67,31 @@ DEFAULT_AUDIO_OUT_TRACK = "bot-audio"
 DEFAULT_TRANSCRIPT_TRACK = "transcript"
 
 
+def _downmix_s16_to_mono(pcm: bytes, channels: int) -> bytes:
+    """Downmix interleaved S16 PCM to mono by averaging channels.
+
+    Used to compensate for the @moq/publish browser encoder publishing
+    stereo even when the source mic is mono (the encoder defaults to
+    the MediaStreamAudioSourceNode's channelCount=2 when the
+    MediaStreamTrack doesn't expose channelCount in its settings).
+    """
+    import array
+
+    samples = array.array("h")
+    samples.frombytes(pcm)
+    if channels <= 1 or len(samples) % channels != 0:
+        return pcm
+    frames = len(samples) // channels
+    out = array.array("h", [0]) * frames
+    for i in range(frames):
+        base = i * channels
+        acc = 0
+        for c in range(channels):
+            acc += samples[base + c]
+        out[i] = max(-32768, min(32767, acc // channels))
+    return out.tobytes()
+
+
 class MOQTrackType(IntEnum):
     """Types of media tracks the transport surfaces in event callbacks."""
 
@@ -588,17 +613,34 @@ class MOQTransport(BaseTransport):
     async def _forward_peer_audio(self, peer_broadcast: "moq.BroadcastConsumer"):
         """Read the catalog, subscribe to the first audio track, pump PCM."""
         catalog_sub = self._track(peer_broadcast.subscribe_catalog())
+
+        # @moq/publish.Broadcast publishes an initial catalog before the
+        # mic permission resolves, so the first frame typically has no
+        # audio. Wait for an update that does — the catalog subscription
+        # is an async iterator that emits each refresh — capped so we
+        # don't hang forever if the peer never adds audio at all.
+        catalog = None
         try:
-            catalog = await catalog_sub.__anext__()
+            async with asyncio.timeout(self._params.connection_timeout):
+                async for next_catalog in catalog_sub:
+                    if next_catalog.audio:
+                        catalog = next_catalog
+                        break
+                    logger.debug(
+                        f"MOQ: peer catalog has no audio yet "
+                        f"(video={list(next_catalog.video)}); waiting for refresh"
+                    )
         except (asyncio.CancelledError, StopAsyncIteration):
-            logger.warning("MOQ: peer closed before publishing a catalog")
+            return
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"MOQ: peer broadcast never advertised audio within "
+                f"{self._params.connection_timeout}s"
+            )
             return
 
-        if not catalog.audio:
-            logger.warning(
-                f"MOQ: peer broadcast has no audio in catalog "
-                f"(video={list(catalog.video)})"
-            )
+        if catalog is None or not catalog.audio:
+            logger.warning("MOQ: peer closed before publishing audio in catalog")
             return
 
         track_name, audio = next(iter(catalog.audio.items()))
@@ -610,9 +652,17 @@ class MOQTransport(BaseTransport):
             return
 
         target_rate = self._params.audio_in_sample_rate
+        # The moq-rs Opus decoder (as of 0.2.17) won't remap channels.
+        # `@moq/publish`'s browser-side encoder tends to publish stereo
+        # even when the source MediaStreamTrack reports mono, because
+        # `MediaStreamAudioSourceNode.channelCount` defaults to 2 and
+        # the encoder falls back to that when `track.getSettings()`
+        # omits `channelCount` (common on macOS). We decode at the
+        # source channel count and downmix in Python below.
+        source_channels = audio.channel_count
         logger.info(
             f"MOQ: subscribing to peer audio {track_name!r} "
-            f"(source rate={audio.sample_rate}Hz, channels={audio.channel_count}, "
+            f"(source rate={audio.sample_rate}Hz, channels={source_channels}, "
             f"output rate={target_rate}Hz, "
             f"max_latency_ms={self._params.audio_in_max_latency_ms})"
         )
@@ -632,7 +682,7 @@ class MOQTransport(BaseTransport):
                 moq.AudioDecoderOutput(
                     format=moq.AudioFormat.S16,
                     sample_rate=target_rate,
-                    channels=1,
+                    channels=source_channels,
                     latency_max_ms=self._params.audio_in_max_latency_ms,
                 ),
             )
@@ -640,7 +690,10 @@ class MOQTransport(BaseTransport):
         try:
             async for frame in consumer:
                 if frame.data and self._input is not None:
-                    await self._input.push_received_audio(frame.data, target_rate)
+                    pcm = frame.data
+                    if source_channels > 1:
+                        pcm = _downmix_s16_to_mono(pcm, source_channels)
+                    await self._input.push_received_audio(pcm, target_rate)
         except asyncio.CancelledError:
             pass
 
