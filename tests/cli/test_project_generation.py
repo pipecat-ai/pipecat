@@ -600,6 +600,48 @@ def test_project_name_conflict(temp_output_dir):
     # that interactively here. This test just verifies the first generation works.
 
 
+def _inplace_config():
+    return ProjectConfig(
+        project_name="my-inplace-bot",
+        bot_type="web",
+        transports=["daily"],
+        mode="cascade",
+        stt_service="deepgram_stt",
+        llm_service="openai_llm",
+        tts_service="cartesia_tts",
+    )
+
+
+def test_generate_in_place_no_subfolder(temp_output_dir):
+    """in_place=True writes contents directly into output_dir (no <name> subfolder)."""
+    generator = ProjectGenerator(_inplace_config())
+    project_path = generator.generate(output_dir=temp_output_dir, in_place=True)
+
+    assert project_path == temp_output_dir
+    assert (temp_output_dir / "server" / "bot.py").exists()
+    assert (temp_output_dir / "README.md").exists()
+    # The contents are NOT nested under the project name.
+    assert not (temp_output_dir / "my-inplace-bot").exists()
+
+
+def test_generate_in_place_preserves_existing_neutral_files(temp_output_dir):
+    """A pre-existing CLAUDE.md (the agent-loop case) is left untouched."""
+    (temp_output_dir / "CLAUDE.md").write_text("# guidance", encoding="utf-8")
+    generator = ProjectGenerator(_inplace_config())
+    generator.generate(output_dir=temp_output_dir, in_place=True)
+
+    assert (temp_output_dir / "CLAUDE.md").read_text(encoding="utf-8") == "# guidance"
+    assert (temp_output_dir / "server" / "bot.py").exists()
+
+
+def test_generate_in_place_aborts_if_project_exists(temp_output_dir):
+    """in_place refuses to clobber an existing project (server/ present)."""
+    (temp_output_dir / "server").mkdir()
+    generator = ProjectGenerator(_inplace_config())
+    with pytest.raises(FileExistsError):
+        generator.generate(output_dir=temp_output_dir, in_place=True, non_interactive=True)
+
+
 def test_generation_uses_utf8_on_windows_locale(monkeypatch, temp_output_dir):
     """Regression test for pipecat-ai/pipecat#4523.
 

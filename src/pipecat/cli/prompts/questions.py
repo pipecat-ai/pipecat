@@ -107,8 +107,12 @@ class ProjectConfig:
     enable_observability: bool = False
 
 
-def ask_project_questions() -> ProjectConfig:
+def ask_project_questions(default_name: str | None = None) -> ProjectConfig:
     """Ask user for project configuration through interactive prompts.
+
+    Args:
+        default_name: Optional default for the project name prompt (e.g. the basename
+            of the target directory when scaffolding in place).
 
     Returns:
         ProjectConfig with user's selections
@@ -118,6 +122,7 @@ def ask_project_questions() -> ProjectConfig:
     # Question 1: Project name
     project_name = questionary.text(
         "Project name:",
+        default=default_name or "",
         style=custom_style,
         validate=lambda text: len(text) > 0 or "Project name cannot be empty",
     ).ask()

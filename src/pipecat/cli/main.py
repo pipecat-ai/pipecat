@@ -36,7 +36,7 @@ def _build_app():
     import typer
     from rich.console import Console
 
-    from pipecat.cli.commands.init import init_app
+    from pipecat.cli.commands.init import init_command
 
     app = typer.Typer(
         name="pipecat",
@@ -45,7 +45,9 @@ def _build_app():
     )
     console = Console()
 
-    app.add_typer(init_app, name="init", help="Initialize a new Pipecat project")
+    # `init` is a plain command (not a sub-Typer group) so it can take an optional
+    # positional target path followed by options (e.g. `pc init . --bot-type web`).
+    app.command("init", help="Initialize a new Pipecat project")(init_command)
 
     # Discover CLI extensions (e.g. `cloud` from pipecatcloud, `tail` from
     # pipecat-ai-tail). The entry-point group is intentionally still named

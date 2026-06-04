@@ -67,22 +67,50 @@ class ProjectGenerator:
 
             # If still exists, loop will continue and prompt again
 
-    def generate(self, output_dir: Path | None = None, non_interactive: bool = False) -> Path:
+    def generate(
+        self,
+        output_dir: Path | None = None,
+        non_interactive: bool = False,
+        in_place: bool = False,
+    ) -> Path:
         """Generate the complete project structure.
 
         Args:
-            output_dir: Optional directory to create project in (defaults to current dir)
+            output_dir: Optional directory to create project in (defaults to current dir).
+                When ``in_place`` is True this is the exact destination; otherwise the
+                project is created in a ``<output_dir>/<project_name>`` subfolder.
             non_interactive: If True, raise FileExistsError instead of prompting
+            in_place: If True, scaffold directly into ``output_dir`` (or the current
+                directory) without nesting under a ``<project_name>`` subfolder.
 
         Returns:
             Path to the created project directory
 
         Raises:
-            FileExistsError: If directory exists and non_interactive is True
+            FileExistsError: If a project already exists at the destination and
+                non_interactive is True
         """
         # Determine output directory
         if output_dir is None:
             output_dir = Path.cwd()
+
+        if in_place:
+            # Scaffold directly into output_dir — no <project_name> subfolder.
+            project_path = output_dir
+            project_path.mkdir(parents=True, exist_ok=True)
+            # Guard against clobbering an existing project. The presence of a server/
+            # directory is our "a project already lives here" signal (cargo-init style).
+            if (project_path / "server").exists():
+                if non_interactive:
+                    raise FileExistsError(
+                        f"A project already exists in {project_path} (found a 'server' directory)"
+                    )
+                console.print(
+                    f"\n[yellow]⚠️  A project already exists in {project_path} "
+                    f"(found a 'server' directory).[/yellow]"
+                )
+                raise KeyboardInterrupt("Project creation cancelled")
+            return self._write_project_files(project_path)
 
         project_path = output_dir / self.config.project_name
 
@@ -96,6 +124,17 @@ class ProjectGenerator:
             self.config.project_name = new_name
             project_path = output_dir / new_name
 
+        return self._write_project_files(project_path)
+
+    def _write_project_files(self, project_path: Path) -> Path:
+        """Create the directory structure and render all project files.
+
+        Args:
+            project_path: The directory the project contents are written into.
+
+        Returns:
+            The same ``project_path``, after all files have been generated.
+        """
         # Create project directory structure
         project_path.mkdir(parents=True, exist_ok=True)
         server_path = project_path / "server"
@@ -438,15 +477,22 @@ class ProjectGenerator:
         content = template.render(**context)
         (project_path / "pcc-deploy.toml").write_text(content, encoding="utf-8")
 
-    def print_next_steps(self, project_path: Path) -> None:
-        """Print next steps for the user."""
+    def print_next_steps(self, project_path: Path, in_place: bool = False) -> None:
+        """Print next steps for the user.
+
+        Args:
+            project_path: The directory the project was created in.
+            in_place: If True, the project was scaffolded into the current directory,
+                so the "cd into your project" step is omitted.
+        """
         console.print("\n[bold green]✨ Project created successfully![/bold green]")
         console.print(f"   [cyan]{project_path}[/cyan]\n")
 
         console.print("[bold]Next steps:[/bold]\n")
-        console.print(
-            f"  • Go to your project: [bold cyan]cd {self.config.project_name}[/bold cyan]"
-        )
+        if not in_place:
+            console.print(
+                f"  • Go to your project: [bold cyan]cd {self.config.project_name}[/bold cyan]"
+            )
 
         # Check if this is Daily PSTN or Twilio + Daily SIP (special handling)
         is_daily_pstn = any(

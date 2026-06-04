@@ -18,8 +18,6 @@ from pipecat.cli.registry.service_metadata import ServiceRegistry
 
 console = Console()
 
-init_app = typer.Typer(invoke_without_command=True)
-
 
 def _list_options_callback(value: bool):
     """Print available options as JSON and exit."""
@@ -45,9 +43,12 @@ def _list_options_callback(value: bool):
     raise typer.Exit(0)
 
 
-@init_app.callback(invoke_without_command=True)
 def init_command(
-    ctx: typer.Context,
+    target: str | None = typer.Argument(
+        None,
+        help="Target directory; use '.' to scaffold into the current directory "
+        "(no <name> subfolder). Omit to create a <name> subfolder.",
+    ),
     output_dir: Path | None = typer.Option(
         None, "--output", "-o", help="Output directory (defaults to current directory)"
     ),
@@ -127,18 +128,46 @@ def init_command(
     Examples::
 
         pc init                                          # Interactive wizard
+        pc init .                                        # Scaffold into the current dir
         pc init --name my-bot --bot-type web \
           --transport daily --mode cascade \
           --stt deepgram_stt --llm openai_llm \
           --tts cartesia_tts                             # Non-interactive
+        pc init . --bot-type web -t daily -m cascade \
+          --stt deepgram_stt --llm openai_llm \
+          --tts cartesia_tts                             # In-place, name from dir
         pc init --config project-config.json             # From config file
         pc init --name my-bot ... --dry-run              # Preview config as JSON
     """
-    if ctx.invoked_subcommand is not None:
-        return
+    # `quickstart` is dispatched here rather than as a subcommand: a positional arg on a
+    # Typer *group* can't be followed by options (Click stops parsing at the first
+    # positional), which would break `pc init . --bot-type ...`. Keeping `init` a plain
+    # command and routing the `quickstart` token preserves `pc init quickstart [-o ...]`.
+    if target == "quickstart":
+        return quickstart_command(output_dir=output_dir)
 
     try:
+        # Resolve the in-place target. A positional path is the exact destination
+        # (vite/django style); -o keeps its legacy "parent dir + name subfolder" meaning,
+        # so passing both is ambiguous.
+        in_place = target is not None
+        dest: Path | None = None
+        derived_name: str | None = None
+        if in_place:
+            if output_dir is not None:
+                console.print(
+                    "\n[red]Error: pass either a target directory or --output, not both.[/red]"
+                )
+                raise typer.Exit(1)
+            dest = Path(target).resolve()
+            derived_name = dest.name or "pipecat-app"
+
+        # In-place runs go non-interactive as soon as any non-interactive intent is
+        # present (the name can be derived from the directory). Scoped to in_place so
+        # no existing (no-positional) invocation changes behavior.
         non_interactive = name is not None or config is not None
+        if in_place and (name is not None or bot_type is not None or config is not None):
+            non_interactive = True
 
         if non_interactive:
             from pipecat.cli.config_validator import (
@@ -182,7 +211,7 @@ def init_command(
 
             try:
                 project_config = validate_and_build_config(
-                    name=name,
+                    name=name or derived_name,
                     bot_type=bot_type,
                     transport=transport,
                     mode=mode,
@@ -213,21 +242,23 @@ def init_command(
 
             # Generate project
             generator = ProjectGenerator(project_config)
-            project_path = generator.generate(output_dir, non_interactive=True)
+            project_path = generator.generate(
+                dest if in_place else output_dir, non_interactive=True, in_place=in_place
+            )
 
             # Show next steps
-            generator.print_next_steps(project_path)
+            generator.print_next_steps(project_path, in_place=in_place)
 
         else:
             # Interactive mode: ask questions
-            config_result = ask_project_questions()
+            config_result = ask_project_questions(default_name=derived_name)
 
             # Generate project
             generator = ProjectGenerator(config_result)
-            project_path = generator.generate(output_dir)
+            project_path = generator.generate(dest if in_place else output_dir, in_place=in_place)
 
             # Show next steps
-            generator.print_next_steps(project_path)
+            generator.print_next_steps(project_path, in_place=in_place)
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Project creation cancelled.[/yellow]")
@@ -242,20 +273,12 @@ def init_command(
         raise typer.Exit(1)
 
 
-@init_app.command("quickstart")
-def quickstart_command(
-    output_dir: Path | None = typer.Option(
-        None, "--output", "-o", help="Output directory (defaults to current directory)"
-    ),
-):
+def quickstart_command(output_dir: Path | None = None):
     """Create a new Pipecat project with quickstart defaults.
 
     Sets up a project with SmallWebRTC, Deepgram STT, OpenAI LLM, and Cartesia TTS
-    — the fastest way to get a voice agent running.
-
-    Examples:
-        pc init quickstart
-        pc init quickstart -o /path/to/output
+    — the fastest way to get a voice agent running. Dispatched from ``init_command``
+    when the target is ``quickstart`` (e.g. ``pc init quickstart [-o DIR]``).
     """
     try:
         project_name = "pipecat-quickstart"
