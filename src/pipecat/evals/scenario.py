@@ -23,58 +23,62 @@ the bot emits, and asserts on them in order.
 
 Event names are the friendly names the harness maps RTVI server messages onto:
 ``user_started_speaking``, ``user_stopped_speaking``, ``user_transcription``,
-``llm_started``, ``llm_response``, ``tts_response``, ``function_call``.
+``llm_started``, ``response``, ``llm_response``, ``tts_response``,
+``function_call``.
 
-``tts_response`` is the transcription of the bot's *actual synthesized audio*
-(a local Whisper model run by the harness), as opposed to ``llm_response`` which
-is the text fed to the TTS. It requires audio mode (see ``bot_audio``); a
-scenario that asserts it without audio mode is skipped with a warning.
+The bot's reply can be asserted three ways:
+    response       the transcription of the bot's *actual synthesized audio* (a
+                   local Whisper model run by the harness) in audio modality, or
+                   the LLM text in text modality. The real end-to-end check —
+                   prefer this.
+    llm_response   the LLM's text output (``bot-llm-text``). Available in both
+                   modalities.
+    tts_response   the text the TTS reports speaking (``bot-tts-text``, with
+                   word timing). Audio modality only.
 
 Supported expectation fields (per event):
     event: <name>              required — event type name
     within_ms: <int>           latency budget from the most recent anchor
                                (optional; defaults to 60s when omitted)
     text_contains: <str>       substring check on the event's text content
-                               (``llm_response.text`` or
-                               ``user_transcription.transcript``)
     name: <str>                function_call.name equality
     args: <object>             function_call.args equality
     eval: <str>                natural-language criterion the event's text content
                                must satisfy, evaluated by a judge LLM (see
-                               :mod:`pipecat.evals.judge`). Only meaningful on
-                               ``llm_response`` (the text the bot produced for
-                               this turn — populated whether or not TTS ran).
+                               :mod:`pipecat.evals.judge`).
 
 A turn may also include ``send_after:`` to schedule its user send relative to a
 prior event (used for interruption / barge-in tests).
 
 Top-level optional fields:
-    reset:    list of LLM messages the harness sends as a reset before driving
-              turns (default empty list, which clears the bot's context).
-    judge:    judge LLM configuration block, e.g.::
+    reset:  list of LLM messages the harness sends as a reset before driving
+            turns (default empty list, which clears the bot's context).
+    user:   how user turns are delivered::
 
-                  judge:
-                    service: ollama
-                    model: qwen2.5:3b
-                    endpoint: http://localhost:11434/v1   # optional
+                user:
+                  modality: audio          # audio | text (default text)
+                  speech:                  # required when modality is audio
+                    service: cartesia      # TTS that synthesizes the user turns
+                    voice: <voice-id>
+                    model: sonic-2         # optional
+                    sample_rate: 16000     # optional
 
-    bot_audio:  whether the bot produces speech (TTS). Default False: the bot
-                skips TTS and ``llm_response`` is read from the LLM text, which is
-                faster and silent (even an on-connect greeting). Set True (or a
-                mapping) for evals that need the bot to actually speak. A mapping
-                form enables ``tts_response`` and configures the STT used to
-                transcribe the bot's audio (like ``judge:``)::
+            ``audio`` streams synthesized user audio to the bot (exercising its
+            STT for real); ``text`` (the default) sends RTVI ``send-text``.
+    judge:  what the judge evaluates, and with which LLM::
 
-                    bot_audio:
-                      service: whisper   # default; the STT for tts_response
-                      model: base        # optional
-    user_audio: when present, the harness generates audio for each user turn
-                via this TTS config and streams it to the bot as RTVI
-                ``raw-audio`` chunks, exercising its STT for real. Omit
-                (default) for text-only evals, where the harness sends RTVI
-                ``send-text``. Mapping with at minimum ``service`` and
-                ``voice``; optional ``model``, ``sample_rate`` (default 16000),
-                and ``api_key`` (defaults to $CARTESIA_API_KEY).
+                judge:
+                  modality: audio          # audio | text (default text)
+                  eval:                    # the judge LLM (default ollama)
+                    service: openai
+                    model: gpt-4o-mini
+                  transcription:           # required when modality is audio
+                    service: whisper       # STT for the bot's audio
+                    model: base            # optional
+
+            ``audio`` makes the bot speak and judges the transcription of its
+            actual audio (``tts_response``); ``text`` (the default) skips TTS and
+            judges the LLM text (``llm_response``), which is faster and silent.
     fixtures: free-form mapping (e.g. ``bot_url:``).
 """
 
@@ -94,7 +98,9 @@ except ModuleNotFoundError as e:
 # evaluate. Asserting ``eval:`` on anything else (user transcripts, tool
 # calls, interruption signals) produces a parser warning — the test controls
 # user input deterministically, so judging it adds cost without signal.
-JUDGEABLE_EVENTS = frozenset({"llm_response", "tts_response"})
+# ``response`` is the modality-agnostic alias, resolved to one of the others
+# after parsing (see _resolve_response_events).
+JUDGEABLE_EVENTS = frozenset({"response", "llm_response", "tts_response"})
 
 
 @dataclass
@@ -249,30 +255,20 @@ def load_scenario(path: str | Path) -> Scenario:
     else:
         raise ValueError(f"{path}: 'reset:' must be a list of message dicts")
 
-    judge = data.get("judge") or {"service": "ollama", "model": "qwen2.5:3b"}
-    if not isinstance(judge, dict):
-        raise ValueError(f"{path}: 'judge:' must be a mapping")
+    # user: { modality: audio|text, speech: {...} }. Audio synthesizes each user
+    # turn via TTS (exercising the bot's STT); text sends it as text. Stored
+    # internally as user_audio (the speech config when audio, else None).
+    user_audio = _parse_user_block(data.get("user"), path)
 
-    # bot_audio is a bool (audio on/off) or a mapping (audio on + transcriber
-    # config for tts_response). Normalize to (bot_audio: bool, transcriber: dict|None).
-    raw_bot_audio = data.get("bot_audio", False)
-    transcriber: dict | None = None
-    if isinstance(raw_bot_audio, bool):
-        bot_audio = raw_bot_audio
-    elif isinstance(raw_bot_audio, dict):
-        bot_audio = True
-        transcriber = raw_bot_audio
-    else:
-        raise ValueError(
-            f"{path}: 'bot_audio:' must be a boolean or a mapping (e.g. {{model: base}})"
-        )
+    # judge: { modality: audio|text, eval: {...}, transcription: {...} }. Audio
+    # means the bot speaks and the judge evaluates the transcription of its
+    # actual audio (tts_response); text means the bot's LLM text directly
+    # (llm_response, bot skips TTS). Stored as bot_audio/transcriber/judge.
+    bot_audio, transcriber, judge = _parse_judge_block(data.get("judge"), path)
 
-    user_audio = data.get("user_audio")
-    if user_audio is not None and not isinstance(user_audio, dict):
-        raise ValueError(
-            f"{path}: 'user_audio:' must be a mapping (service + voice at minimum). "
-            "Omit it entirely for text-only evals."
-        )
+    # Resolve the modality-agnostic `response` event and check event/modality
+    # consistency now that the judge modality is known.
+    _resolve_response_events(turns, bot_audio, path)
 
     return Scenario(
         name=name,
@@ -285,6 +281,88 @@ def load_scenario(path: str | Path) -> Scenario:
         fixtures=data.get("fixtures") or {},
         source_path=path,
     )
+
+
+_DEFAULT_JUDGE = {"service": "ollama", "model": "qwen2.5:3b"}
+
+
+def _parse_user_block(user: Any, path: Path) -> dict | None:
+    """Parse the ``user:`` block into the internal user_audio (speech config or None)."""
+    if user is None:
+        return None  # default: text modality
+    if not isinstance(user, dict):
+        raise ValueError(f"{path}: 'user:' must be a mapping")
+    modality = user.get("modality", "text")
+    if modality not in ("audio", "text"):
+        raise ValueError(f"{path}: 'user.modality:' must be 'audio' or 'text', got {modality!r}")
+    if modality == "text":
+        return None
+    speech = user.get("speech")
+    if not isinstance(speech, dict):
+        raise ValueError(
+            f"{path}: 'user.modality: audio' requires a 'user.speech:' block "
+            "(TTS service + voice to synthesize the user's turns)"
+        )
+    return speech
+
+
+def _parse_judge_block(judge: Any, path: Path) -> tuple[bool, dict | None, dict]:
+    """Parse the ``judge:`` block into (bot_audio, transcriber, eval-config)."""
+    if judge is None:
+        judge = {}
+    if not isinstance(judge, dict):
+        raise ValueError(f"{path}: 'judge:' must be a mapping")
+    modality = judge.get("modality", "text")
+    if modality not in ("audio", "text"):
+        raise ValueError(f"{path}: 'judge.modality:' must be 'audio' or 'text', got {modality!r}")
+    eval_cfg = judge.get("eval") or dict(_DEFAULT_JUDGE)
+    if not isinstance(eval_cfg, dict):
+        raise ValueError(f"{path}: 'judge.eval:' must be a mapping (the judge LLM service)")
+    if modality == "text":
+        return False, None, eval_cfg
+    transcription = judge.get("transcription")
+    if not isinstance(transcription, dict):
+        raise ValueError(
+            f"{path}: 'judge.modality: audio' requires a 'judge.transcription:' block "
+            "(STT service to transcribe the bot's audio)"
+        )
+    return True, transcription, eval_cfg
+
+
+def _resolve_response_events(turns: list[Turn], bot_audio: bool, path: Path) -> None:
+    """Resolve the modality-agnostic ``response`` event and validate consistency.
+
+    In audio modality ``response`` is the transcription of the bot's actual
+    audio, so it stays as ``response``. In text modality there is no audio, so it
+    falls back to ``llm_response``. ``tts_response`` (the TTS's spoken text) needs
+    the bot to speak, so asserting it in text modality is an error.
+    """
+    for ti, turn in enumerate(turns):
+        for exp in turn.expect:
+            if exp.event == "response" and not bot_audio:
+                exp.event = "llm_response"
+            elif exp.event == "tts_response" and not bot_audio:
+                raise ValueError(
+                    f"{path}: turn #{ti} asserts 'tts_response' but 'judge.modality' is text "
+                    "(the bot doesn't speak). Use 'response'/'llm_response', or set "
+                    "'judge.modality: audio'."
+                )
+
+
+def describe_config(scenario: Scenario) -> str:
+    """One-line summary of a scenario's modalities and services, for pre-run logs."""
+    if scenario.user_audio:
+        user = f"audio (speech: {scenario.user_audio.get('service', '?')})"
+    else:
+        user = "text"
+    eval_cfg = scenario.judge or {}
+    eval_svc = f"{eval_cfg.get('service', '?')}/{eval_cfg.get('model', '?')}"
+    if scenario.bot_audio:
+        transcription = (scenario.transcriber or {}).get("service", "whisper")
+        judge = f"audio (eval: {eval_svc}, transcription: {transcription})"
+    else:
+        judge = f"text (eval: {eval_svc})"
+    return f"user: {user}  |  judge: {judge}"
 
 
 def _parse_turn(t: Any, path: Path, idx: int) -> Turn:

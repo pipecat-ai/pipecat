@@ -46,34 +46,82 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertFalse(s.bot_audio)
         self.assertIsNone(s.transcriber)
 
-    def test_bot_audio_bool(self):
-        s = load_scenario(
-            _write(
-                "name: a\nbot_audio: true\nturns: [{user: hi, expect: [{event: llm_started}]}]\n"
-            )
-        )
-        self.assertTrue(s.bot_audio)
-        self.assertIsNone(s.transcriber)
-
-    def test_bot_audio_mapping_enables_transcriber(self):
+    def test_judge_audio_modality_enables_transcriber(self):
         s = load_scenario(
             _write(
                 "name: a\n"
-                "bot_audio:\n"
-                "  model: base\n"
+                "judge:\n"
+                "  modality: audio\n"
+                "  transcription: {service: whisper, model: base}\n"
                 "turns: [{user: hi, expect: [{event: tts_response, eval: ok}]}]\n"
             )
         )
         self.assertTrue(s.bot_audio)
-        self.assertEqual(s.transcriber, {"model": "base"})
+        self.assertEqual(s.transcriber, {"service": "whisper", "model": "base"})
 
-    def test_bot_audio_invalid_type_rejected(self):
+    def test_judge_audio_requires_transcription(self):
+        with self.assertRaises(ValueError) as cm:
+            load_scenario(
+                _write(
+                    "name: a\njudge: {modality: audio}\n"
+                    "turns: [{user: hi, expect: [{event: tts_response, eval: ok}]}]\n"
+                )
+            )
+        self.assertIn("transcription", str(cm.exception))
+
+    def test_judge_invalid_modality_rejected(self):
         with self.assertRaises(ValueError):
             load_scenario(
                 _write(
-                    "name: a\nbot_audio: 3\nturns: [{user: hi, expect: [{event: llm_started}]}]\n"
+                    "name: a\njudge: {modality: bogus}\n"
+                    "turns: [{user: hi, expect: [{event: llm_started}]}]\n"
                 )
             )
+
+    def test_user_audio_modality(self):
+        s = load_scenario(
+            _write(
+                "name: a\n"
+                "user:\n"
+                "  modality: audio\n"
+                "  speech: {service: cartesia, voice: v1}\n"
+                "turns: [{user: hi, expect: [{event: llm_started}]}]\n"
+            )
+        )
+        self.assertEqual(s.user_audio, {"service": "cartesia", "voice": "v1"})
+
+    def test_user_audio_requires_speech(self):
+        with self.assertRaises(ValueError) as cm:
+            load_scenario(
+                _write(
+                    "name: a\nuser: {modality: audio}\n"
+                    "turns: [{user: hi, expect: [{event: llm_started}]}]\n"
+                )
+            )
+        self.assertIn("speech", str(cm.exception))
+
+    def test_response_event_resolves_to_modality(self):
+        # judge.modality audio -> response stays response (the audio transcription)
+        audio = load_scenario(
+            _write(
+                "name: a\n"
+                "judge: {modality: audio, transcription: {service: whisper}}\n"
+                "turns: [{user: hi, expect: [{event: response, eval: ok}]}]\n"
+            )
+        )
+        self.assertEqual(audio.turns[0].expect[0].event, "response")
+        # text (default) -> response falls back to llm_response (no audio)
+        text = load_scenario(
+            _write("name: a\nturns: [{user: hi, expect: [{event: response, eval: ok}]}]\n")
+        )
+        self.assertEqual(text.turns[0].expect[0].event, "llm_response")
+
+    def test_tts_response_in_text_modality_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            load_scenario(
+                _write("name: a\nturns: [{user: hi, expect: [{event: tts_response, eval: ok}]}]\n")
+            )
+        self.assertIn("tts_response", str(cm.exception))
 
     def test_all_expectation_fields(self):
         s = load_scenario(
@@ -134,15 +182,16 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertIsNone(s.turns[0].user)
         self.assertEqual(s.turns[0].expect[0].event, "llm_response")
 
-    def test_judge_block_and_fixtures_preserved(self):
+    def test_judge_eval_and_fixtures_preserved(self):
         s = load_scenario(
             _write(
                 """
                 name: with_judge
                 judge:
-                  service: openai
-                  model: gpt-4o-mini
-                  endpoint: http://custom-endpoint
+                  eval:
+                    service: openai
+                    model: gpt-4o-mini
+                    endpoint: http://custom-endpoint
                 fixtures:
                   bot_url: ws://localhost:9000
                 turns:

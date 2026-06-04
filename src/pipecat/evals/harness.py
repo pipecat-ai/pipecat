@@ -25,10 +25,11 @@ scenario ``event:``         RTVI server message(s)
 ``user_stopped_speaking``   ``user-stopped-speaking``
 ``user_transcription``      ``user-transcription`` (final only)
 ``llm_started``             ``bot-llm-started``
-``llm_response``            text mode: ``bot-llm-text`` joined at ``bot-llm-stopped``;
-                            audio mode: one segment per ``bot-tts-text`` (spoken sentence)
-``tts_response``            local-Whisper transcription of the bot's audio, per
-                            spoken segment (audio mode only)
+``llm_response``            the LLM text: ``bot-llm-text`` joined at ``bot-llm-stopped``
+``tts_response``            the TTS's spoken text: one segment per ``bot-tts-text``
+                            (audio modality only)
+``response``                local-Whisper transcription of the bot's actual audio
+                            (audio modality only); ``llm_response`` in text modality
 ``function_call``           ``llm-function-call-in-progress``
 ==========================  ==============================================
 
@@ -207,11 +208,11 @@ class EvalSession:
         # no text (llm_started, function_call, speaking events).
         self._last_match_text: str = ""
 
-        # tts_response: when a scenario asserts on the bot's actual spoken audio,
-        # the harness captures that audio and transcribes it locally. Lazy — only
-        # set up when needed.
-        self._wants_tts_response: bool = any(
-            exp.event == "tts_response" for turn in scenario.turns for exp in turn.expect
+        # response (audio modality): the harness captures the bot's actual audio
+        # and transcribes it locally for the judge. Lazy — only set up when a
+        # scenario asserts `response`.
+        self._wants_response: bool = any(
+            exp.event == "response" for turn in scenario.turns for exp in turn.expect
         )
         self._transcriber: Any = None
         self._tts_audio: bytearray = bytearray()  # current spoken segment's audio
@@ -223,10 +224,12 @@ class EvalSession:
 
         started = time.monotonic()
 
-        # tts_response needs the bot's actual audio; without audio mode there's
-        # nothing to transcribe, so skip rather than run a guaranteed failure.
-        if self._wants_tts_response and not self._scenario.bot_audio:
-            reason = "asserts tts_response but bot_audio is off (no audio to transcribe)"
+        # The `response` transcription needs the bot's actual audio; without audio
+        # mode there's nothing to transcribe, so skip rather than fail. (Normally
+        # unreachable: load_scenario resolves `response` to llm_response in text
+        # modality; this guards Scenarios built directly.)
+        if self._wants_response and not self._scenario.bot_audio:
+            reason = "asserts 'response' transcription but judge modality is text (no audio)"
             logger.warning(f"Eval '{self._scenario.name}': {reason}; skipping")
             return EvalResult(
                 scenario_name=self._scenario.name,
@@ -275,8 +278,8 @@ class EvalSession:
             )
             await self._voice.start()
 
-        # One STT pipeline to transcribe the bot's audio for tts_response.
-        if self._wants_tts_response:
+        # One STT pipeline to transcribe the bot's audio for `response`.
+        if self._wants_response:
             from pipecat.evals.transcribe import EvalTranscriber, build_stt_service
 
             self._transcriber = EvalTranscriber(build_stt_service(self._scenario.transcriber))
@@ -324,7 +327,7 @@ class EvalSession:
         flags = []
         if not self._scenario.bot_audio:
             flags.append("skip_tts=true")
-        if self._wants_tts_response:
+        if self._wants_response:
             flags.append("capture_audio=true")
         if self._record_path and self._scenario.bot_audio:
             flags.append(f"record={quote(self._record_path, safe='')}")
@@ -411,7 +414,7 @@ class EvalSession:
                     continue
                 if message.get("label") != RTVI.MESSAGE_LABEL:
                     continue
-                if self._wants_tts_response:
+                if self._wants_response:
                     await self._handle_tts_audio(message)
                 for event in self._translate(message):
                     await self._enqueue(event)
@@ -441,7 +444,7 @@ class EvalSession:
                 break
 
     async def _handle_tts_audio(self, message: dict) -> None:
-        """Accumulate the bot's audio and emit a ``tts_response`` per spoken turn.
+        """Accumulate the bot's audio and emit a ``response`` per spoken turn.
 
         We bound on the speaking boundaries (``bot-started-speaking`` /
         ``bot-stopped-speaking``), not the TTS ones: the output transport delays
@@ -465,7 +468,7 @@ class EvalSession:
             started_at = self._response_started_at
             self._tts_audio = bytearray()
             text = await self._transcriber.transcribe(pcm, sample_rate)
-            await self._enqueue({"type": "tts_response", "text": text, "started_at": started_at})
+            await self._enqueue({"type": "response", "text": text, "started_at": started_at})
 
     def _translate(self, message: dict) -> list[dict]:
         """Translate one RTVI server message into zero or more friendly events."""
@@ -494,24 +497,21 @@ class EvalSession:
                 self._response_started_at = time.monotonic()
                 return [{"type": "llm_started"}]
             case "bot-llm-text":
-                # Text mode (skip-TTS): the LLM text is the bot's output. Buffer
+                # The LLM's text output -> llm_response (both modalities). Buffer
                 # it and emit one segment at bot-llm-stopped (a clean boundary —
                 # bot-llm-text reliably precedes bot-llm-stopped).
-                if not self._scenario.bot_audio:
-                    self._text_buffer.append(data.get("text", ""))
+                self._text_buffer.append(data.get("text", ""))
                 return []
             case "bot-llm-stopped":
-                if not self._scenario.bot_audio:
-                    return [self._response_event("".join(self._text_buffer))]
-                return []
+                return [self._segment_event("llm_response", "".join(self._text_buffer))]
             case "bot-tts-text":
-                # Audio mode: each spoken sentence is a response segment, emitted
-                # as it arrives. We can't bound on bot-tts-stopped because some
-                # TTS services emit the text *after* the audio finishes (e.g.
-                # OpenAI), which would yield empty responses. The matcher
-                # aggregates the segments of the turn.
+                # Audio mode: the text the TTS reports speaking -> tts_response,
+                # one segment per spoken sentence, emitted as it arrives. We can't
+                # bound on bot-tts-stopped because some TTS services emit the text
+                # *after* the audio finishes (e.g. OpenAI). The matcher aggregates
+                # the segments of the turn.
                 if self._scenario.bot_audio:
-                    return [self._response_event(data.get("text", ""))]
+                    return [self._segment_event("tts_response", data.get("text", ""))]
                 return []
             case "bot-tts-stopped":
                 return []
@@ -526,17 +526,17 @@ class EvalSession:
             case _:
                 return []
 
-    def _response_event(self, text: str) -> dict:
-        """Build one ``llm_response`` segment, stamped with the response's start.
+    def _segment_event(self, event_type: str, text: str) -> dict:
+        """Build one response segment of ``event_type``, stamped with its start.
 
-        A segment is the full LLM text in text mode, or one spoken sentence in
-        audio mode. The text may be empty (e.g. an interrupted response).
+        Used for ``llm_response`` (the LLM text) and ``tts_response`` (the TTS's
+        spoken text). The text may be empty (e.g. an interrupted response).
         ``started_at`` lets the matcher aggregate the segments of *this* turn and
         skip earlier ones (the greeting, or a prior turn the current one
         interrupted).
         """
         return {
-            "type": "llm_response",
+            "type": event_type,
             "text": text,
             "started_at": self._response_started_at,
         }
@@ -731,7 +731,7 @@ class EvalSession:
         deadline = anchor + (budget_ms / 1000.0)
         self._last_match_text = ""
 
-        aggregates = expectation.event in ("llm_response", "tts_response") and (
+        aggregates = expectation.event in ("response", "llm_response", "tts_response") and (
             expectation.text_contains is not None or expectation.eval is not None
         )
         if not aggregates:
