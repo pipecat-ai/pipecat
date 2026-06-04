@@ -73,7 +73,7 @@ class TestTranslate(unittest.TestCase):
             [{"type": "user_transcription", "transcript": "hello"}],
         )
 
-    def _llm_response(self, result: list[dict]) -> dict:
+    def _one_event(self, result: list[dict]) -> dict:
         # The llm_response event also carries a non-deterministic `started_at`
         # timestamp; assert on type/text only.
         self.assertEqual(len(result), 1)
@@ -88,26 +88,28 @@ class TestTranslate(unittest.TestCase):
         # bot-tts-text is ignored in text mode.
         self.assertEqual(s._translate({"type": "bot-tts-text", "data": {"text": "ignored"}}), [])
         self.assertEqual(
-            self._llm_response(s._translate({"type": "bot-llm-stopped"})),
+            self._one_event(s._translate({"type": "bot-llm-stopped"})),
             {"type": "llm_response", "text": "Hello world"},
         )
 
-    def test_audio_mode_emits_segment_per_bot_tts_text(self):
-        # Audio mode (bot_audio=True): each spoken sentence (bot-tts-text) is its
-        # own llm_response segment, emitted as it arrives (some TTS services emit
-        # the text after bot-tts-stopped, so we don't bound on it). bot-llm-text
-        # and bot-tts-stopped are ignored.
+    def test_audio_mode_llm_text_and_tts_text(self):
+        # Audio mode (bot_audio=True): bot-llm-text -> llm_response (the LLM text),
+        # bot-tts-text -> tts_response (the TTS's spoken text, one per segment).
+        # The Whisper-transcription `response` event is exercised separately.
         s = _session(bot_audio=True)
         self.assertEqual(s._translate({"type": "bot-llm-started"}), [{"type": "llm_started"}])
-        self.assertEqual(s._translate({"type": "bot-llm-text", "data": {"text": "ignored"}}), [])
-        self.assertEqual(s._translate({"type": "bot-llm-stopped"}), [])
+        self.assertEqual(s._translate({"type": "bot-llm-text", "data": {"text": "Hello "}}), [])
         self.assertEqual(
-            self._llm_response(s._translate({"type": "bot-tts-text", "data": {"text": "spoken "}})),
-            {"type": "llm_response", "text": "spoken "},
+            self._one_event(s._translate({"type": "bot-llm-stopped"})),
+            {"type": "llm_response", "text": "Hello "},
         )
         self.assertEqual(
-            self._llm_response(s._translate({"type": "bot-tts-text", "data": {"text": "words"}})),
-            {"type": "llm_response", "text": "words"},
+            self._one_event(s._translate({"type": "bot-tts-text", "data": {"text": "spoken "}})),
+            {"type": "tts_response", "text": "spoken "},
+        )
+        self.assertEqual(
+            self._one_event(s._translate({"type": "bot-tts-text", "data": {"text": "words"}})),
+            {"type": "tts_response", "text": "words"},
         )
         self.assertEqual(s._translate({"type": "bot-tts-stopped"}), [])
 
@@ -117,7 +119,7 @@ class TestTranslate(unittest.TestCase):
         s = _session(bot_audio=False)
         self.assertEqual(s._translate({"type": "bot-llm-started"}), [{"type": "llm_started"}])
         self.assertEqual(
-            self._llm_response(s._translate({"type": "bot-llm-stopped"})),
+            self._one_event(s._translate({"type": "bot-llm-stopped"})),
             {"type": "llm_response", "text": ""},
         )
 
@@ -241,29 +243,30 @@ class TestConnectURL(unittest.TestCase):
             "ws://localhost:7860?x=1&skip_tts=true",
         )
 
-    def test_tts_response_adds_capture_audio(self):
+    def test_response_adds_capture_audio(self):
         scenario = Scenario(
             name="t",
             bot_audio=True,
-            turns=[Turn(user="x", expect=[Expectation(event="tts_response", eval="ok")])],
+            turns=[Turn(user="x", expect=[Expectation(event="response", eval="ok")])],
         )
         url = EvalSession(scenario, "ws://localhost:7860")._connect_url()
         self.assertIn("capture_audio=true", url)
         self.assertNotIn("skip_tts", url)  # audio mode, so no skip
 
 
-class TestTtsResponseSkip(unittest.IsolatedAsyncioTestCase):
+class TestResponseTranscriptionSkip(unittest.IsolatedAsyncioTestCase):
     async def test_skipped_without_audio_mode(self):
-        # tts_response needs the bot's audio; without audio mode, skip (don't run).
+        # The `response` transcription needs the bot's audio; without audio mode,
+        # skip (don't run a guaranteed failure).
         scenario = Scenario(
             name="t",
             bot_audio=False,
-            turns=[Turn(user="x", expect=[Expectation(event="tts_response", eval="ok")])],
+            turns=[Turn(user="x", expect=[Expectation(event="response", eval="ok")])],
         )
         result = await EvalSession(scenario, "ws://localhost:0").run()
         self.assertIsNotNone(result.skipped)
         self.assertFalse(result.passed)
-        self.assertIn("tts_response", result.skipped)
+        self.assertIn("response", result.skipped)
 
 
 class TestTextContainsResolution(unittest.TestCase):
@@ -272,7 +275,7 @@ class TestTextContainsResolution(unittest.TestCase):
     def _check(self, event: dict, exp: Expectation):
         return EvalSession._check_payload(event, exp, 0, 0)
 
-    def test_on_llm_response_text(self):
+    def test_on_one_event_text(self):
         exp = Expectation(event="llm_response", text_contains="Paris")
         self.assertIsNone(self._check({"type": "llm_response", "text": "It's Paris."}, exp))
         self.assertIsNotNone(self._check({"type": "llm_response", "text": "London."}, exp))
@@ -341,7 +344,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.server.stop()
 
-    async def test_llm_response_pass(self):
+    async def test_one_event_pass(self):
         self.server.on_text(
             "what is the capital of France?",
             _rtvi("bot-llm-started"),
@@ -364,7 +367,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         result = await run_scenario(scenario, self.server.url)
         self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
 
-    async def test_llm_response_aggregates_past_filler(self):
+    async def test_one_event_aggregates_past_filler(self):
         # First bot response is filler; the answer arrives in a second segment.
         # text_contains aggregates across both and matches.
         self.server.on_text(
