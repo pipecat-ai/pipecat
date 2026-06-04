@@ -11,25 +11,19 @@ including data frames, system frames, and control frames for audio, video, text,
 and LLM processing.
 """
 
+from __future__ import annotations
+
 import time
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
     Any,
-    Awaitable,
-    Callable,
-    Dict,
-    List,
     Literal,
-    Mapping,
-    Optional,
-    Sequence,
-    Tuple,
 )
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.audio.dtmf.types import KeypadEntry as NewKeypadEntry
-from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.turn.base_turn_analyzer import BaseTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.metrics.metrics import MetricsData
@@ -39,70 +33,14 @@ from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
 
 if TYPE_CHECKING:
-    from pipecat.processors.aggregators.llm_context import LLMContext, NotGiven
+    from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage, NotGiven
     from pipecat.processors.frame_processor import FrameProcessor
     from pipecat.services.settings import ServiceSettings
     from pipecat.utils.context.llm_context_summarization import LLMContextSummaryConfig
     from pipecat.utils.tracing.tracing_context import TracingContext
 
 
-class DeprecatedKeypadEntry:
-    """DTMF keypad entries for phone system integration.
-
-    .. deprecated:: 0.0.82
-        This class is deprecated and will be removed in a future version.
-        Instead, use `audio.dtmf.types.KeypadEntry`.
-
-    Parameters:
-        ONE: Number key 1.
-        TWO: Number key 2.
-        THREE: Number key 3.
-        FOUR: Number key 4.
-        FIVE: Number key 5.
-        SIX: Number key 6.
-        SEVEN: Number key 7.
-        EIGHT: Number key 8.
-        NINE: Number key 9.
-        ZERO: Number key 0.
-        POUND: Pound/hash key (#).
-        STAR: Star/asterisk key (*).
-    """
-
-    _enum = NewKeypadEntry
-
-    @classmethod
-    def _warn(cls):
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "`pipecat.frames.frames.KeypadEntry` is deprecated and will be removed in a future version. "
-                "Use `pipecat.audio.dtmf.types.KeypadEntry` instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        """Allow the instance to be called as a function."""
-        self._warn()
-        return self._enum(*args, **kwargs)
-
-    def __getattr__(self, name):
-        """Retrieve an attribute from the underlying enum."""
-        self._warn()
-        return getattr(self._enum, name)
-
-    def __getitem__(self, name):
-        """Retrieve an item from the underlying enum."""
-        self._warn()
-        return self._enum[name]
-
-
-KeypadEntry = DeprecatedKeypadEntry()
-
-
-def format_pts(pts: Optional[int]):
+def format_pts(pts: int | None):
     """Format presentation timestamp (PTS) in nanoseconds to a human-readable string.
 
     Converts a PTS value in nanoseconds to a string representation.
@@ -134,20 +72,20 @@ class Frame:
 
     id: int = field(init=False)
     name: str = field(init=False)
-    pts: Optional[int] = field(init=False)
-    broadcast_sibling_id: Optional[int] = field(init=False)
-    metadata: Dict[str, Any] = field(init=False)
-    transport_source: Optional[str] = field(init=False)
-    transport_destination: Optional[str] = field(init=False)
+    pts: int | None = field(init=False)
+    broadcast_sibling_id: int | None = field(init=False)
+    metadata: dict[str, Any] = field(init=False)
+    transport_source: str | None = field(init=False)
+    transport_destination: str | None = field(init=False)
 
     def __post_init__(self):
         self.id: int = obj_id()
         self.name: str = f"{self.__class__.__name__}#{obj_count(self)}"
-        self.pts: Optional[int] = None
-        self.broadcast_sibling_id: Optional[int] = None
-        self.metadata: Dict[str, Any] = {}
-        self.transport_source: Optional[str] = None
-        self.transport_destination: Optional[str] = None
+        self.pts: int | None = None
+        self.broadcast_sibling_id: int | None = None
+        self.metadata: dict[str, Any] = {}
+        self.transport_source: str | None = None
+        self.transport_destination: str | None = None
 
     def __str__(self):
         return self.name
@@ -240,8 +178,8 @@ class ImageRawFrame:
     """
 
     image: bytes
-    size: Tuple[int, int]
-    format: Optional[str]
+    size: tuple[int, int]
+    format: str | None
 
 
 #
@@ -274,7 +212,15 @@ class OutputImageRawFrame(DataFrame, ImageRawFrame):
     An image that will be shown by the transport. If the transport supports
     multiple video destinations (e.g. multiple video tracks) the destination
     name can be specified in transport_destination.
+
+    Parameters:
+        sync_with_audio: If True, the image is queued with audio frames so
+            it is only displayed after all preceding audio has been sent.
+            Defaults to False (image is displayed immediately when the output
+            transport receives it).
     """
+
+    sync_with_audio: bool = field(default=False, init=False)
 
     def __str__(self):
         pts = format_pts(self.pts)
@@ -291,7 +237,7 @@ class TTSAudioRawFrame(OutputAudioRawFrame):
         context_id: Unique identifier for the TTS context that generated this audio.
     """
 
-    context_id: Optional[str] = None
+    context_id: str | None = None
 
 
 @dataclass
@@ -317,7 +263,7 @@ class URLImageRawFrame(OutputImageRawFrame):
         url: URL where the image can be downloaded from.
     """
 
-    url: Optional[str] = None
+    url: str | None = None
 
     def __str__(self):
         pts = format_pts(self.pts)
@@ -336,7 +282,7 @@ class SpriteFrame(DataFrame):
         images: List of image frames that make up the sprite animation.
     """
 
-    images: List[OutputImageRawFrame]
+    images: list[OutputImageRawFrame]
 
     def __str__(self):
         pts = format_pts(self.pts)
@@ -361,7 +307,7 @@ class TextFrame(DataFrame):
     """
 
     text: str
-    skip_tts: Optional[bool] = field(init=False)
+    skip_tts: bool | None = field(init=False)
     # Whether any necessary inter-frame (leading/trailing) spaces are already
     # included in the text.
     # NOTE: Ideally this would be available at init time with a default value,
@@ -394,6 +340,40 @@ class LLMTextFrame(TextFrame):
 
 
 @dataclass
+class LLMMarkerFrame(DataFrame):
+    """Sideband marker emitted by an LLM service.
+
+    A marker is short, structured assistant output that should be
+    persisted in the conversation context but should not flow through
+    the standard text path (TTS, transcript). The assistant aggregator
+    writes the marker to the context so the LLM can self-condition on
+    prior markers on subsequent turns.
+
+    The primary use today is the ``filter_incomplete_user_turns``
+    protocol, where ``UserTurnCompletionLLMServiceMixin`` emits the
+    turn-completion markers ✓ / ○ / ◐ on every response. The frame is
+    intentionally generic so other components — STT services with
+    built-in turn signals, end-of-turn classifiers, custom annotations,
+    etc. — can use the same mechanism to inject sideband signals into
+    the assistant context.
+
+    Parameters:
+        marker: The marker payload (typically a short string such as a
+            single character).
+        append_to_context_immediately: If True, the marker is written
+            to the context as its own standalone assistant message as
+            soon as it's received. If False, the marker is appended to
+            the running assistant aggregation and flushed to the
+            context together with the following text as a single
+            message (e.g. for the ✓ case the context message ends up
+            as "✓ <response>").
+    """
+
+    marker: str
+    append_to_context_immediately: bool = True
+
+
+@dataclass
 class AggregatedTextFrame(TextFrame):
     """Text frame representing an aggregation of TextFrames.
 
@@ -403,10 +383,14 @@ class AggregatedTextFrame(TextFrame):
     Parameters:
         aggregated_by: Method used to aggregate the text frames.
         context_id: Unique identifier for the TTS context that generated this text.
+        raw_text: The full matched text including start/end pattern delimiters, set when
+            this frame was produced from a PatternMatch (e.g. a ``<code>...</code>`` block).
+            None for ordinary sentence aggregations.
     """
 
     aggregated_by: AggregationType | str
-    context_id: Optional[str] = None
+    context_id: str | None = None
+    raw_text: str | None = None
 
 
 @dataclass
@@ -424,7 +408,7 @@ class TTSTextFrame(AggregatedTextFrame):
         context_id: Unique identifier for the TTS context that generated this text.
     """
 
-    context_id: Optional[str] = None
+    context_id: str | None = None
 
 
 @dataclass
@@ -445,8 +429,8 @@ class TranscriptionFrame(TextFrame):
 
     user_id: str
     timestamp: str
-    language: Optional[Language] = None
-    result: Optional[Any] = None
+    language: Language | None = None
+    result: Any | None = None
     finalized: bool = False
 
     def __str__(self):
@@ -471,8 +455,8 @@ class InterimTranscriptionFrame(TextFrame):
     text: str
     user_id: str
     timestamp: str
-    language: Optional[Language] = None
-    result: Optional[Any] = None
+    language: Language | None = None
+    result: Any | None = None
 
     def __str__(self):
         return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
@@ -493,40 +477,10 @@ class TranslationFrame(TextFrame):
 
     user_id: str
     timestamp: str
-    language: Optional[Language] = None
+    language: Language | None = None
 
     def __str__(self):
         return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
-
-
-@dataclass
-class OpenAILLMContextAssistantTimestampFrame(DataFrame):
-    """Timestamp information for assistant messages in LLM context.
-
-    .. deprecated:: 0.0.99
-        `OpenAILLMContextAssistantTimestampFrame` is deprecated and will be removed in a future version.
-        Use `LLMContextAssistantTimestampFrame` with the universal `LLMContext` and `LLMContextAggregatorPair` instead.
-        See `OpenAILLMContext` docstring for migration guide.
-
-    Parameters:
-        timestamp: Timestamp when the assistant message was created.
-    """
-
-    timestamp: str
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "OpenAILLMContextAssistantTimestampFrame is deprecated and will be removed in a future version. "
-                "Use LLMContextAssistantTimestampFrame with the universal LLMContext and LLMContextAggregatorPair instead. "
-                "See OpenAILLMContext docstring for migration guide.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
 
 
 @dataclass
@@ -541,137 +495,6 @@ class LLMContextAssistantTimestampFrame(DataFrame):
 
 
 @dataclass
-class TranscriptionMessage:
-    """A message in a conversation transcript.
-
-    A message in a conversation transcript containing the role and content.
-    Messages are in standard format with roles normalized to user/assistant.
-
-    Parameters:
-        role: The role of the message sender (user or assistant).
-        content: The message content/text.
-        user_id: Optional identifier for the user.
-        timestamp: Optional timestamp when the message was created.
-
-    .. deprecated:: 0.0.99
-        `TranscriptionMessage` is deprecated and will be removed in a future version.
-        Use `LLMUserAggregator`'s and `LLMAssistantAggregator`'s new events instead.
-    """
-
-    role: Literal["user", "assistant"]
-    content: str
-    user_id: Optional[str] = None
-    timestamp: Optional[str] = None
-
-    def __post_init__(self):
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "TranscriptionMessage is deprecated and will be removed in a future version. "
-                "Use `LLMUserAggregator`'s and `LLMAssistantAggregator`'s new events instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-
-@dataclass
-class ThoughtTranscriptionMessage:
-    """An LLM thought message in a conversation transcript.
-
-    .. deprecated:: 0.0.99
-        `ThoughtTranscriptionMessage` is deprecated and will be removed in a future version.
-        Use `LLMAssistantAggregator`'s new events instead.
-    """
-
-    role: Literal["assistant"] = field(default="assistant", init=False)
-    content: str
-    timestamp: Optional[str] = None
-
-    def __post_init__(self):
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "ThoughtTranscriptionMessage is deprecated and will be removed in a future version. "
-                "Use `LLMAssistantAggregator`'s new events instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-
-@dataclass
-class TranscriptionUpdateFrame(DataFrame):
-    """Frame containing new messages added to conversation transcript.
-
-    A frame containing new messages added to the conversation transcript.
-    This frame is emitted when new messages are added to the conversation history,
-    containing only the newly added messages rather than the full transcript.
-    Messages have normalized roles (user/assistant) regardless of the LLM service used.
-    Messages are always in the OpenAI standard message format, which supports both:
-
-    Examples:
-        Simple format::
-
-            [
-                {
-                    "role": "user",
-                    "content": "Hi, how are you?"
-                },
-                {
-                    "role": "assistant",
-                    "content": "Great! And you?"
-                }
-            ]
-
-        Content list format::
-
-            [
-                {
-                    "role": "user",
-                    "content": [{"type": "text", "text": "Hi, how are you?"}]
-                },
-                {
-                    "role": "assistant",
-                    "content": [{"type": "text", "text": "Great! And you?"}]
-                }
-            ]
-
-    OpenAI supports both formats. Anthropic and Google messages are converted to the
-    content list format.
-
-    Parameters:
-        messages: List of new transcript messages that were added.
-
-    .. deprecated:: 0.0.99
-        `TranscriptionUpdateFrame` is deprecated and will be removed in a future version.
-        Use `LLMUserAggregator`'s and `LLMAssistantAggregator`'s new events instead.
-    """
-
-    messages: List[TranscriptionMessage | ThoughtTranscriptionMessage]
-
-    def __post_init__(self):
-        super().__post_init__()
-
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "TranscriptionUpdateFrame is deprecated and will be removed in a future version. "
-                "Use `LLMUserAggregator`'s and `LLMAssistantAggregator`'s new events instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-    def __str__(self):
-        pts = format_pts(self.pts)
-        return f"{self.name}(pts: {pts}, messages: {len(self.messages)})"
-
-
-@dataclass
 class LLMContextFrame(Frame):
     """Frame containing a universal LLM context.
 
@@ -682,7 +505,7 @@ class LLMContextFrame(Frame):
         context: The LLM context containing messages, tools, and configuration.
     """
 
-    context: "LLMContext"
+    context: LLMContext
 
 
 @dataclass
@@ -699,7 +522,7 @@ class LLMThoughtStartFrame(ControlFrame):
     """
 
     append_to_context: bool = False
-    llm: Optional[str] = None
+    llm: str | None = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -755,44 +578,6 @@ class LLMThoughtEndFrame(ControlFrame):
 
 
 @dataclass
-class LLMMessagesFrame(DataFrame):
-    """Frame containing LLM messages for chat completion.
-
-    .. deprecated:: 0.0.79
-        This class is deprecated and will be removed in a future version.
-        Instead, use either:
-        - `LLMMessagesUpdateFrame` with `run_llm=True`
-        - `OpenAILLMContextFrame` with desired messages in a new context
-
-    A frame containing a list of LLM messages. Used to signal that an LLM
-    service should run a chat completion and emit an LLMFullResponseStartFrame,
-    TextFrames and an LLMFullResponseEndFrame. Note that the `messages`
-    property in this class is mutable, and will be updated by various
-    aggregators.
-
-    Parameters:
-        messages: List of message dictionaries in LLM format.
-    """
-
-    messages: List[dict]
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "LLMMessagesFrame is deprecated and will be removed in a future version. "
-                "Instead, use either "
-                "`LLMMessagesUpdateFrame` with `run_llm=True`, or "
-                "`OpenAILLMContextFrame` with desired messages in a new context",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-
-@dataclass
 class LLMRunFrame(DataFrame):
     """Frame to trigger LLM processing with current context.
 
@@ -811,12 +596,12 @@ class LLMMessagesAppendFrame(DataFrame):
     current context.
 
     Parameters:
-        messages: List of message dictionaries to append.
+        messages: List of context messages to append.
         run_llm: Whether the context update should be sent to the LLM.
     """
 
-    messages: List[dict]
-    run_llm: Optional[bool] = None
+    messages: list[LLMContextMessage]
+    run_llm: bool | None = None
 
 
 @dataclass
@@ -827,12 +612,29 @@ class LLMMessagesUpdateFrame(DataFrame):
     context LLM messages.
 
     Parameters:
-        messages: List of message dictionaries to replace current context.
+        messages: List of context messages to replace current context.
         run_llm: Whether the context update should be sent to the LLM.
     """
 
-    messages: List[dict]
-    run_llm: Optional[bool] = None
+    messages: list[LLMContextMessage]
+    run_llm: bool | None = None
+
+
+@dataclass
+class LLMMessagesTransformFrame(DataFrame):
+    """Frame containing a transform function to modify the current context's LLM messages.
+
+    A frame containing a transform function that takes the context's current list
+    of LLM messages and returns a modified list.
+
+    Parameters:
+        transform: A function that takes a list of messages and returns a
+            modified list.
+        run_llm: Whether the context update should be sent to the LLM.
+    """
+
+    transform: Callable[[list[LLMContextMessage]], list[LLMContextMessage]]
+    run_llm: bool | None = None
 
 
 @dataclass
@@ -847,7 +649,7 @@ class LLMSetToolsFrame(DataFrame):
         tools: List of tool/function definitions for the LLM.
     """
 
-    tools: List[dict] | ToolsSchema | "NotGiven"
+    tools: list[dict] | ToolsSchema | NotGiven
 
 
 @dataclass
@@ -894,10 +696,19 @@ class FunctionCallResultProperties:
     Parameters:
         run_llm: Whether to run the LLM after receiving this result.
         on_context_updated: Callback to execute when context is updated.
+        is_final: Whether this is the final result for the function call. When
+            ``False`` the result is treated as an intermediate update. Defaults to ``True``.
+            Only meaningful for async function calls (``cancel_on_interruption=False``).
+            Note: realtime LLM services do not support streamed intermediate
+            results; they deliver only the final result to the provider. An
+            intermediate result reported to a realtime service is dropped
+            and an error is raised. Use a non-realtime LLM service if your
+            tool needs to stream intermediate results.
     """
 
-    run_llm: Optional[bool] = None
-    on_context_updated: Optional[Callable[[], Awaitable[None]]] = None
+    run_llm: bool | None = None
+    on_context_updated: Callable[[], Awaitable[None]] | None = None
+    is_final: bool = True
 
 
 @dataclass
@@ -921,8 +732,8 @@ class FunctionCallResultFrame(DataFrame, UninterruptibleFrame):
     tool_call_id: str
     arguments: Any
     result: Any
-    run_llm: Optional[bool] = None
-    properties: Optional[FunctionCallResultProperties] = None
+    run_llm: bool | None = None
+    properties: FunctionCallResultProperties | None = None
 
 
 @dataclass
@@ -938,7 +749,7 @@ class TTSSpeakFrame(DataFrame):
     """
 
     text: str
-    append_to_context: Optional[bool] = None
+    append_to_context: bool | None = None
 
 
 @dataclass
@@ -956,52 +767,67 @@ class OutputTransportMessageFrame(DataFrame):
 
 
 @dataclass
-class TransportMessageFrame(OutputTransportMessageFrame):
-    """Frame containing transport-specific message data.
-
-    .. deprecated:: 0.0.87
-        This frame is deprecated and will be removed in a future version.
-        Instead, use `OutputTransportMessageFrame`.
-
-    Parameters:
-        message: The transport message payload.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "TransportMessageFrame is deprecated and will be removed in a future version. "
-                "Instead, use OutputTransportMessageFrame.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-
-@dataclass
 class DTMFFrame:
-    """Base class for DTMF (Dual-Tone Multi-Frequency) keypad frames.
+    """Marker base class for DTMF (Dual-Tone Multi-Frequency) keypad frames.
 
-    Parameters:
-        button: The DTMF keypad entry that was pressed.
+    Used only as a shared tag so that both input and output DTMF frames can
+    be identified via ``isinstance(frame, DTMFFrame)``. The concrete frames
+    define their own fields.
     """
 
-    button: NewKeypadEntry
+    pass
 
 
 @dataclass
 class OutputDTMFFrame(DTMFFrame, DataFrame):
     """DTMF keypress output frame for transport queuing.
 
-    A DTMF keypress output that will be queued. If your transport supports
-    multiple dial-out destinations, use the `transport_destination` field to
-    specify where the DTMF keypress should be sent.
+    Parameters:
+        button: Convenience shortcut for sending a single DTMF keypad
+            entry. Equivalent to ``buttons=[button]``. If both ``buttons``
+            and ``button`` are provided, ``buttons`` takes precedence.
+        buttons: Sequence of one or more DTMF keypad buttons to send. Use
+            :meth:`from_string` to build this from a string like ``"123#"``.
     """
 
-    pass
+    button: KeypadEntry | None = None
+    buttons: list[KeypadEntry] | None = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.buttons is None and self.button is not None:
+            self.buttons = [self.button]
+        if not self.buttons:
+            raise ValueError(f"{self.__class__.__name__} requires `buttons` or `button` to be set")
+
+    def __str__(self):
+        return f"{self.name}(buttons: {self.to_string()})"
+
+    @classmethod
+    def from_string(cls, buttons: str, **kwargs) -> OutputDTMFFrame:
+        """Build an ``OutputDTMFFrame`` from a string of DTMF characters.
+
+        Args:
+            buttons: A string like ``"123#"``. Each character must be a
+                valid :class:`~pipecat.audio.dtmf.types.KeypadEntry` value.
+            **kwargs: Additional keyword arguments forwarded to the frame
+                constructor.
+
+        Returns:
+            A frame of type ``cls`` with ``buttons`` populated as a list of
+            :class:`~pipecat.audio.dtmf.types.KeypadEntry`.
+        """
+        return cls(buttons=[KeypadEntry(c) for c in buttons], **kwargs)
+
+    def to_string(self) -> str:
+        """Return the frame's ``buttons`` as a dial string.
+
+        Returns:
+            A string such as ``"123#"`` formed by concatenating the values
+            of each :class:`~pipecat.audio.dtmf.types.KeypadEntry` in
+            ``buttons``, or an empty string if ``buttons`` is not set.
+        """
+        return "".join(b.value for b in self.buttons) if self.buttons else ""
 
 
 #
@@ -1019,32 +845,20 @@ class StartFrame(SystemFrame):
     Parameters:
         audio_in_sample_rate: Input audio sample rate in Hz.
         audio_out_sample_rate: Output audio sample rate in Hz.
-        allow_interruptions: Whether to allow user interruptions.
-
-            .. deprecated:: 0.0.99
-                Use  `LLMUserAggregator`'s new `user_mute_strategies` parameter instead.
-
         enable_metrics: Whether to enable performance metrics collection.
         enable_tracing: Whether to enable OpenTelemetry tracing.
         enable_usage_metrics: Whether to enable usage metrics collection.
-        interruption_strategies: List of interruption handling strategies.
-
-            .. deprecated:: 0.0.99
-                Use  `LLMUserAggregator`'s new `user_turn_strategies` parameter instead.
-
         report_only_initial_ttfb: Whether to report only initial time-to-first-byte.
         tracing_context: Pipeline-scoped tracing context for span hierarchy.
     """
 
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
-    allow_interruptions: bool = False
     enable_metrics: bool = False
     enable_tracing: bool = False
     enable_usage_metrics: bool = False
-    interruption_strategies: List[BaseInterruptionStrategy] = field(default_factory=list)
     report_only_initial_ttfb: bool = False
-    tracing_context: Optional["TracingContext"] = None
+    tracing_context: TracingContext | None = None
 
 
 @dataclass
@@ -1058,7 +872,7 @@ class CancelFrame(SystemFrame):
         reason: Optional reason for pushing a cancel frame.
     """
 
-    reason: Optional[Any] = None
+    reason: Any | None = None
 
     def __str__(self):
         return f"{self.name}(reason: {self.reason})"
@@ -1081,8 +895,8 @@ class ErrorFrame(SystemFrame):
 
     error: str
     fatal: bool = False
-    processor: Optional["FrameProcessor"] = None
-    exception: Optional[Exception] = None
+    processor: FrameProcessor | None = None
+    exception: Exception | None = None
 
     def __str__(self):
         return f"{self.name}(error: {self.error}, fatal: {self.fatal})"
@@ -1115,7 +929,7 @@ class FrameProcessorPauseUrgentFrame(SystemFrame):
         processor: The frame processor to pause.
     """
 
-    processor: "FrameProcessor"
+    processor: FrameProcessor
 
 
 @dataclass
@@ -1130,7 +944,7 @@ class FrameProcessorResumeUrgentFrame(SystemFrame):
         processor: The frame processor to resume.
     """
 
-    processor: "FrameProcessor"
+    processor: FrameProcessor
 
 
 @dataclass
@@ -1146,49 +960,14 @@ class InterruptionFrame(SystemFrame):
 
 
 @dataclass
-class StartInterruptionFrame(InterruptionFrame):
-    """Frame indicating user started speaking (interruption detected).
-
-    .. deprecated:: 0.0.85
-        This frame is deprecated and will be removed in a future version.
-        Instead, use `InterruptionFrame`.
-
-    Emitted by the BaseInputTransport to indicate that a user has started
-    speaking (i.e. is interrupting). This is similar to
-    UserStartedSpeakingFrame except that it should be pushed concurrently
-    with other frames (so the order is not guaranteed).
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "StartInterruptionFrame is deprecated and will be removed in a future version. "
-                "Instead, use InterruptionFrame.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-
-@dataclass
 class UserStartedSpeakingFrame(SystemFrame):
     """Frame indicating that the user turn has started.
 
     Emitted when the user turn starts, which usually means that some
     transcriptions are already available.
-
-    Parameters:
-        emulated: Whether this event was emulated rather than detected by VAD.
-
-            .. deprecated:: 0.0.99
-                This field is deprecated and will be removed in a future version.
-
     """
 
-    emulated: bool = False
+    pass
 
 
 @dataclass
@@ -1197,16 +976,9 @@ class UserStoppedSpeakingFrame(SystemFrame):
 
     Emitted when the user turn ends. This usually coincides with the start of
     the bot turn.
-
-    Parameters:
-        emulated: Whether this event was emulated rather than detected by VAD.
-
-            .. deprecated:: 0.0.99
-                This field is deprecated and will be removed in a future version.
-
     """
 
-    emulated: bool = False
+    pass
 
 
 @dataclass
@@ -1242,53 +1014,21 @@ class UserSpeakingFrame(SystemFrame):
 
 
 @dataclass
-class EmulateUserStartedSpeakingFrame(SystemFrame):
-    """Frame to emulate user started speaking behavior.
+class UserTurnInferenceCompletedFrame(SystemFrame):
+    """Frame indicating that the user turn is semantically complete.
 
-    Emitted by internal processors upstream to emulate VAD behavior when a
-    user starts speaking.
-
-    .. deprecated:: 0.0.99
-        This frame is deprecated and will be removed in a future version.
+    Emitted by any component that can judge conversational turn
+    completeness — for example an LLM with turn-completion markers, an
+    STT service with built-in turn detection, or a dedicated
+    end-of-turn classifier. Stop strategies that gate the
+    user-turn-stop event on an external completeness signal (e.g.
+    ``LLMTurnCompletionUserTurnStopStrategy``) consume this frame to
+    finalize the turn. Producers should emit this frame only when they
+    judge the turn complete; an absence of this frame means the turn is
+    not yet considered complete.
     """
 
-    def __post_init__(self):
-        super().__post_init__()
-
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "EmulateUserStartedSpeakingFrame is deprecated and will be removed in a future version.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-
-@dataclass
-class EmulateUserStoppedSpeakingFrame(SystemFrame):
-    """Frame to emulate user stopped speaking behavior.
-
-    Emitted by internal processors upstream to emulate VAD behavior when a
-    user stops speaking.
-
-    .. deprecated:: 0.0.99
-        This frame is deprecated and will be removed in a future version.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "EmulateUserStoppedSpeakingFrame is deprecated and will be removed in a future version.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+    pass
 
 
 @dataclass
@@ -1366,7 +1106,7 @@ class MetricsFrame(SystemFrame):
         data: List of metrics data collected by the processor.
     """
 
-    data: List[MetricsData]
+    data: list[MetricsData]
 
 
 @dataclass
@@ -1441,32 +1181,6 @@ class InputTransportMessageFrame(SystemFrame):
 
 
 @dataclass
-class InputTransportMessageUrgentFrame(InputTransportMessageFrame):
-    """Frame for transport messages received from external sources.
-
-    .. deprecated:: 0.0.87
-        This frame is deprecated and will be removed in a future version.
-        Instead, use `InputTransportMessageFrame`.
-
-    Parameters:
-        message: The urgent transport message payload.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "InputTransportMessageUrgentFrame is deprecated and will be removed in a future version. "
-                "Instead, use InputTransportMessageFrame.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-
-@dataclass
 class OutputTransportMessageUrgentFrame(SystemFrame):
     """Frame for urgent transport messages that need to be sent immediately.
 
@@ -1478,32 +1192,6 @@ class OutputTransportMessageUrgentFrame(SystemFrame):
 
     def __str__(self):
         return f"{self.name}(message: {self.message})"
-
-
-@dataclass
-class TransportMessageUrgentFrame(OutputTransportMessageUrgentFrame):
-    """Frame for urgent transport messages that need to be sent immediately.
-
-    .. deprecated:: 0.0.87
-        This frame is deprecated and will be removed in a future version.
-        Instead, use `OutputTransportMessageUrgentFrame`.
-
-    Parameters:
-        message: The urgent transport message payload.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "TransportMessageUrgentFrame is deprecated and will be removed in a future version. "
-                "Instead, use OutputTransportMessageFrame.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
 
 
 @dataclass
@@ -1521,31 +1209,15 @@ class UserImageRequestFrame(SystemFrame):
         function_name: Name of function that generated this request (if any).
         tool_call_id: Tool call ID if generated by function call (if any).
         result_callback: Optional callback to invoke when the image is retrieved.
-        context: [DEPRECATED] Optional context for the image request.
     """
 
     user_id: str
-    text: Optional[str] = None
-    append_to_context: Optional[bool] = None
-    video_source: Optional[str] = None
-    function_name: Optional[str] = None
-    tool_call_id: Optional[str] = None
-    result_callback: Optional[Any] = None
-    context: Optional[Any] = None
-
-    def __post_init__(self):
-        super().__post_init__()
-
-        if self.context:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "`UserImageRequestFrame` field `context` is deprecated.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+    text: str | None = None
+    append_to_context: bool | None = None
+    video_source: str | None = None
+    function_name: str | None = None
+    tool_call_id: str | None = None
+    result_callback: Any | None = None
 
     def __str__(self):
         return f"{self.name}(user: {self.user_id}, text: {self.text}, append_to_context: {self.append_to_context}, {self.video_source})"
@@ -1628,9 +1300,9 @@ class UserImageRawFrame(InputImageRawFrame):
     """
 
     user_id: str = ""
-    text: Optional[str] = None
-    append_to_context: Optional[bool] = None
-    request: Optional[UserImageRequestFrame] = None
+    text: str | None = None
+    append_to_context: bool | None = None
+    request: UserImageRequestFrame | None = None
 
     def __str__(self):
         pts = format_pts(self.pts)
@@ -1650,27 +1322,74 @@ class AssistantImageRawFrame(OutputImageRawFrame):
         original_mime_type: The MIME type of the original image data.
     """
 
-    original_data: Optional[bytes] = None
-    original_mime_type: Optional[str] = None
+    original_data: bytes | None = None
+    original_mime_type: str | None = None
 
 
 @dataclass
 class InputDTMFFrame(DTMFFrame, SystemFrame):
-    """DTMF keypress input frame from transport."""
+    """DTMF keypress input frame from transport.
 
-    pass
+    Parameters:
+        button: The DTMF keypad entry that was pressed.
+    """
+
+    button: KeypadEntry
+
+    def __str__(self):
+        return f"{self.name}(tone: {self.button.value})"
 
 
 @dataclass
 class OutputDTMFUrgentFrame(DTMFFrame, SystemFrame):
     """DTMF keypress output frame for immediate sending.
 
-    A DTMF keypress output that will be sent right away. If your transport
-    supports multiple dial-out destinations, use the `transport_destination`
-    field to specify where the DTMF keypress should be sent.
+    Parameters:
+        button: Convenience shortcut for sending a single DTMF keypad
+            entry. Equivalent to ``buttons=[button]``. If both ``buttons``
+            and ``button`` are provided, ``buttons`` takes precedence.
+        buttons: Sequence of one or more DTMF keypad buttons to send. Use
+            :meth:`from_string` to build this from a string like ``"123#"``.
     """
 
-    pass
+    button: KeypadEntry | None = None
+    buttons: list[KeypadEntry] | None = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.buttons is None and self.button is not None:
+            self.buttons = [self.button]
+        if not self.buttons:
+            raise ValueError(f"{self.__class__.__name__} requires `buttons` or `button` to be set")
+
+    def __str__(self):
+        return f"{self.name}(buttons: {self.to_string()})"
+
+    @classmethod
+    def from_string(cls, buttons: str, **kwargs) -> OutputDTMFUrgentFrame:
+        """Build an ``OutputDTMFUrgentFrame`` from a string of DTMF characters.
+
+        Args:
+            buttons: A string like ``"123#"``. Each character must be a
+                valid :class:`~pipecat.audio.dtmf.types.KeypadEntry` value.
+            **kwargs: Additional keyword arguments forwarded to the frame
+                constructor.
+
+        Returns:
+            A frame of type ``cls`` with ``buttons`` populated as a list of
+            :class:`~pipecat.audio.dtmf.types.KeypadEntry`.
+        """
+        return cls(buttons=[KeypadEntry(c) for c in buttons], **kwargs)
+
+    def to_string(self) -> str:
+        """Return the frame's ``buttons`` as a dial string.
+
+        Returns:
+            A string such as ``"123#"`` formed by concatenating the values
+            of each :class:`~pipecat.audio.dtmf.types.KeypadEntry` in
+            ``buttons``, or an empty string if ``buttons`` is not set.
+        """
+        return "".join(b.value for b in self.buttons) if self.buttons else ""
 
 
 @dataclass
@@ -1686,8 +1405,8 @@ class SpeechControlParamsFrame(SystemFrame):
         turn_params: Current turn-taking analysis parameters.
     """
 
-    vad_params: Optional[VADParams] = None
-    turn_params: Optional[BaseTurnParams] = None
+    vad_params: VADParams | None = None
+    turn_params: BaseTurnParams | None = None
 
 
 @dataclass
@@ -1733,7 +1452,7 @@ class ServiceSwitcherRequestMetadataFrame(ControlFrame):
         service: The target service that should re-emit its metadata.
     """
 
-    service: "FrameProcessor"
+    service: FrameProcessor
 
 
 #
@@ -1742,7 +1461,7 @@ class ServiceSwitcherRequestMetadataFrame(ControlFrame):
 
 
 @dataclass
-class TaskFrame(SystemFrame):
+class TaskFrame(ControlFrame):
     """Base frame for task frames.
 
     This is a base class for frames that are meant to be sent and handled
@@ -1756,7 +1475,21 @@ class TaskFrame(SystemFrame):
 
 
 @dataclass
-class EndTaskFrame(TaskFrame):
+class TaskSystemFrame(SystemFrame):
+    """Base frame for task system frames.
+
+    This is a base class for frames that are meant to be sent and handled
+    upstream by the pipeline task. This might result in a corresponding frame
+    sent downstream (e.g. `InterruptionTaskFrame` / `InterruptionFrame` or
+    `EndTaskFrame` / `EndFrame`).
+
+    """
+
+    pass
+
+
+@dataclass
+class EndTaskFrame(TaskFrame, UninterruptibleFrame):
     """Frame to request graceful pipeline task closure.
 
     This is used to notify the pipeline task that the pipeline should be
@@ -1767,32 +1500,14 @@ class EndTaskFrame(TaskFrame):
         reason: Optional reason for pushing an end frame.
     """
 
-    reason: Optional[Any] = None
+    reason: Any | None = None
 
     def __str__(self):
         return f"{self.name}(reason: {self.reason})"
 
 
 @dataclass
-class CancelTaskFrame(TaskFrame):
-    """Frame to request immediate pipeline task cancellation.
-
-    This is used to notify the pipeline task that the pipeline should be
-    stopped immediately by pushing a CancelFrame downstream. This frame
-    should be pushed upstream.
-
-    Parameters:
-        reason: Optional reason for pushing a cancel frame.
-    """
-
-    reason: Optional[Any] = None
-
-    def __str__(self):
-        return f"{self.name}(reason: {self.reason})"
-
-
-@dataclass
-class StopTaskFrame(TaskFrame):
+class StopTaskFrame(TaskFrame, UninterruptibleFrame):
     """Frame to request pipeline task stop while keeping processors running.
 
     This is used to notify the pipeline task that it should be stopped as
@@ -1805,7 +1520,25 @@ class StopTaskFrame(TaskFrame):
 
 
 @dataclass
-class InterruptionTaskFrame(TaskFrame):
+class CancelTaskFrame(TaskSystemFrame):
+    """Frame to request immediate pipeline task cancellation.
+
+    This is used to notify the pipeline task that the pipeline should be
+    stopped immediately by pushing a CancelFrame downstream. This frame
+    should be pushed upstream.
+
+    Parameters:
+        reason: Optional reason for pushing a cancel frame.
+    """
+
+    reason: Any | None = None
+
+    def __str__(self):
+        return f"{self.name}(reason: {self.reason})"
+
+
+@dataclass
+class InterruptionTaskFrame(TaskSystemFrame):
     """Frame indicating the pipeline should be interrupted.
 
     This frame should be pushed upstream to indicate the pipeline should be
@@ -1814,34 +1547,6 @@ class InterruptionTaskFrame(TaskFrame):
     """
 
     pass
-
-
-@dataclass
-class BotInterruptionFrame(InterruptionTaskFrame):
-    """Frame indicating the bot should be interrupted.
-
-    .. deprecated:: 0.0.85
-        This frame is deprecated and will be removed in a future version.
-        Instead, use `InterruptionTaskFrame`.
-
-    Emitted when the bot should be interrupted. This will mainly cause the
-    same actions as if the user interrupted except that the
-    UserStartedSpeakingFrame and UserStoppedSpeakingFrame won't be generated.
-    This frame should be pushed upstream.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "BotInterruptionFrame is deprecated and will be removed in a future version. "
-                "Instead, use InterruptionTaskFrame.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
 
 
 #
@@ -1867,7 +1572,7 @@ class EndFrame(ControlFrame, UninterruptibleFrame):
         reason: Optional reason for pushing an end frame.
     """
 
-    reason: Optional[Any] = None
+    reason: Any | None = None
 
     def __str__(self):
         return f"{self.name}(reason: {self.reason})"
@@ -1949,7 +1654,7 @@ class FrameProcessorPauseFrame(ControlFrame):
         processor: The frame processor to pause.
     """
 
-    processor: "FrameProcessor"
+    processor: FrameProcessor
 
 
 @dataclass
@@ -1964,7 +1669,7 @@ class FrameProcessorResumeFrame(ControlFrame):
         processor: The frame processor to resume.
     """
 
-    processor: "FrameProcessor"
+    processor: FrameProcessor
 
 
 @dataclass
@@ -1975,7 +1680,7 @@ class LLMFullResponseStartFrame(ControlFrame):
     more TextFrames and a final LLMFullResponseEndFrame.
     """
 
-    skip_tts: Optional[bool] = field(init=False)
+    skip_tts: bool | None = field(init=False)
 
     def __post_init__(self):
         super().__post_init__()
@@ -1986,7 +1691,7 @@ class LLMFullResponseStartFrame(ControlFrame):
 class LLMFullResponseEndFrame(ControlFrame):
     """Frame indicating the end of an LLM response."""
 
-    skip_tts: Optional[bool] = field(init=False)
+    skip_tts: bool | None = field(init=False)
 
     def __post_init__(self):
         super().__post_init__()
@@ -2016,7 +1721,7 @@ class LLMSummarizeContextFrame(ControlFrame):
             is used.
     """
 
-    config: Optional["LLMContextSummaryConfig"] = None
+    config: LLMContextSummaryConfig | None = None
 
 
 @dataclass
@@ -2043,11 +1748,11 @@ class LLMContextSummaryRequestFrame(ControlFrame):
     """
 
     request_id: str
-    context: "LLMContext"
+    context: LLMContext
     min_messages_to_keep: int
     target_context_tokens: int
     summarization_prompt: str
-    summarization_timeout: Optional[float] = None
+    summarization_timeout: float | None = None
 
 
 @dataclass
@@ -2069,7 +1774,7 @@ class LLMContextSummaryResultFrame(ControlFrame, UninterruptibleFrame):
     request_id: str
     summary: str
     last_summarized_index: int
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -2084,12 +1789,19 @@ class FunctionCallInProgressFrame(ControlFrame, UninterruptibleFrame):
         tool_call_id: Unique identifier for this function call.
         arguments: Arguments passed to the function.
         cancel_on_interruption: Whether to cancel this call if interrupted.
+            When ``False`` the call is treated as asynchronous: the LLM
+            continues the conversation immediately without waiting for the
+            result, and the result is injected later via a developer message.
+        group_id: Identifier shared by all function calls originating from the
+            same LLM response batch. Used to determine when the last call in a
+            group completes so the LLM can be triggered exactly once.
     """
 
     function_name: str
     tool_call_id: str
     arguments: Any
     cancel_on_interruption: bool = False
+    group_id: str | None = None
 
 
 @dataclass
@@ -2125,7 +1837,7 @@ class TTSStartedFrame(ControlFrame):
         context_id: Unique identifier for this TTS context.
     """
 
-    context_id: Optional[str] = None
+    context_id: str | None = None
 
 
 @dataclass
@@ -2136,7 +1848,7 @@ class TTSStoppedFrame(ControlFrame):
         context_id: Unique identifier for this TTS context.
     """
 
-    context_id: Optional[str] = None
+    context_id: str | None = None
 
 
 @dataclass
@@ -2154,10 +1866,15 @@ class ServiceUpdateSettingsFrame(ControlFrame, UninterruptibleFrame):
 
         delta: :class:`~pipecat.services.settings.ServiceSettings` delta-mode
             object describing the fields to change.
+
+        service: Optional target service instance. When provided, only that
+            service will apply the settings; other services will forward the
+            frame unchanged.
     """
 
     settings: Mapping[str, Any] = field(default_factory=dict)
-    delta: Optional["ServiceSettings"] = None
+    delta: ServiceSettings | None = None
+    service: FrameProcessor | None = None
 
 
 @dataclass
@@ -2281,4 +1998,4 @@ class ManuallySwitchServiceFrame(ServiceSwitcherFrame):
     Handled by ServiceSwitcherStrategyManual to switch the active service.
     """
 
-    service: "FrameProcessor"
+    service: FrameProcessor

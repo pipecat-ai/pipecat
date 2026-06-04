@@ -7,12 +7,11 @@
 """Utility functions for extracting probability metrics from STT services."""
 
 import math
-from typing import Optional
 
 from pipecat.frames.frames import TranscriptionFrame
 
 
-def extract_whisper_probability(frame: TranscriptionFrame) -> Optional[float]:
+def extract_whisper_probability(frame: TranscriptionFrame) -> float | None:
     """Extract probability from Whisper-based TranscriptionFrame result.
 
     Works with Groq, OpenAI Whisper, or other Whisper-based services that use
@@ -53,7 +52,7 @@ def extract_whisper_probability(frame: TranscriptionFrame) -> Optional[float]:
     return None
 
 
-def extract_openai_gpt4o_probability(frame: TranscriptionFrame) -> Optional[float]:
+def extract_openai_gpt4o_probability(frame: TranscriptionFrame) -> float | None:
     """Extract probability from OpenAI GPT-4o-transcribe TranscriptionFrame result.
 
     Args:
@@ -90,7 +89,7 @@ def extract_openai_gpt4o_probability(frame: TranscriptionFrame) -> Optional[floa
     return None
 
 
-def extract_deepgram_probability(frame: TranscriptionFrame) -> Optional[float]:
+def extract_deepgram_probability(frame: TranscriptionFrame) -> float | None:
     """Extract probability from Deepgram TranscriptionFrame result.
 
     Args:

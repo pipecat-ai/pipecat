@@ -7,7 +7,6 @@
 """User turn stop strategy triggered by externally emitted frames."""
 
 import asyncio
-from typing import Optional
 
 from pipecat.frames.frames import (
     Frame,
@@ -16,6 +15,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
@@ -43,7 +43,7 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._user_speaking = False
         self._seen_interim_results = False
         self._event = asyncio.Event()
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
 
     async def reset(self):
         """Reset the strategy to its initial state."""
@@ -69,7 +69,7 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self.task_manager.cancel_task(self._task)
             self._task = None
 
-    async def process_frame(self, frame: Frame):
+    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
         """Process an incoming frame to update strategy state.
 
         Updates internal transcription text and VAD state. The user end turn
@@ -78,6 +78,8 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
         Args:
             frame: The frame to be analyzed.
 
+        Returns:
+            Always returns CONTINUE so subsequent stop strategies are evaluated.
         """
         if isinstance(frame, UserStartedSpeakingFrame):
             await self._handle_user_started_speaking(frame)
@@ -87,6 +89,8 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self._handle_interim_transcription(frame)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
+
+        return ProcessFrameResult.CONTINUE
 
     async def _handle_user_started_speaking(self, _: UserStartedSpeakingFrame):
         """Handle when the external service indicates the user is speaking."""
@@ -120,7 +124,7 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
             try:
                 await asyncio.wait_for(self._event.wait(), timeout=self._timeout)
                 self._event.clear()
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 await self._maybe_trigger_user_turn_stopped()
 
     async def _maybe_trigger_user_turn_stopped(self):

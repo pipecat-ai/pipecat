@@ -10,6 +10,8 @@ This module provides an audio resampler that uses the resampy library
 for high-quality audio sample rate conversion.
 """
 
+import warnings
+
 import numpy as np
 import resampy
 
@@ -21,6 +23,11 @@ class ResampyResampler(BaseAudioResampler):
 
     This resampler uses the resampy library's Kaiser windowing filter
     for high-quality audio resampling with good performance characteristics.
+
+    .. deprecated:: 1.2.0
+        ResampyResampler is deprecated and will be removed in Pipecat 2.0.
+        Use SOXRAudioResampler, create_file_resampler(), or create_stream_resampler()
+        instead.
     """
 
     def __init__(self, **kwargs):
@@ -29,7 +36,15 @@ class ResampyResampler(BaseAudioResampler):
         Args:
             **kwargs: Additional keyword arguments (currently unused).
         """
-        pass
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "ResampyResampler is deprecated and will be removed in Pipecat 2.0. "
+                "Use SOXRAudioResampler, create_file_resampler(), or "
+                "create_stream_resampler() instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
     async def resample(self, audio: bytes, in_rate: int, out_rate: int) -> bytes:
         """Resample audio data using resampy library.

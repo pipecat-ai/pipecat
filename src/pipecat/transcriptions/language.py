@@ -11,23 +11,9 @@ and BCP 47 standards, supporting both language-only and language-region
 combinations for various speech and text processing services.
 """
 
-import sys
-from enum import Enum
+from enum import StrEnum
 
 from loguru import logger
-
-if sys.version_info < (3, 11):
-
-    class StrEnum(str, Enum):
-        """String enumeration base class for Python < 3.11 compatibility."""
-
-        def __new__(cls, value):
-            """Create a new instance of the StrEnum."""
-            obj = str.__new__(cls, value)
-            obj._value_ = value
-            return obj
-else:
-    from enum import StrEnum
 
 
 class Language(StrEnum):
@@ -631,13 +617,13 @@ def resolve_language(
         return result
 
     # Not in map - fall back with warning
-    lang_str = str(language.value)
+    lang_str = str(language)
 
     if use_base_code:
         # Extract base code (e.g., "en" from "en-US")
         base_code = lang_str.split("-")[0].lower()
-        logger.warning(f"Language {language.value} not verified. Using base code '{base_code}'.")
+        logger.warning(f"Language {language} not verified. Using base code '{base_code}'.")
         return base_code
     else:
-        logger.warning(f"Language {language.value} not verified. Using '{lang_str}'.")
+        logger.warning(f"Language {language} not verified. Using '{lang_str}'.")
         return lang_str

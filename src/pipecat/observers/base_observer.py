@@ -12,8 +12,7 @@ for logging, debugging, analytics, and monitoring pipeline behavior.
 """
 
 from dataclasses import dataclass
-
-from typing_extensions import TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from pipecat.frames.frames import Frame
 from pipecat.utils.base_object import BaseObject

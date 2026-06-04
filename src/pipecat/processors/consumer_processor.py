@@ -7,7 +7,7 @@
 """Consumer processor for consuming frames from ProducerProcessor queues."""
 
 import asyncio
-from typing import Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
 
 from pipecat.frames.frames import CancelFrame, EndFrame, Frame, StartFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -42,7 +42,7 @@ class ConsumerProcessor(FrameProcessor):
         self._transformer = transformer
         self._direction = direction
         self._producer = producer
-        self._consumer_task: Optional[asyncio.Task] = None
+        self._consumer_task: asyncio.Task | None = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and handle lifecycle events.

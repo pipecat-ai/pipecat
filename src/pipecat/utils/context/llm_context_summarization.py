@@ -10,16 +10,21 @@ This module provides reusable functionality for automatically compressing conver
 context when token limits are reached, enabling efficient long-running conversations.
 """
 
+import json
 import warnings
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from pipecat.services.llm_service import LLMService
 
 from loguru import logger
 
-from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
+from pipecat.processors.aggregators.llm_context import (
+    LLMContext,
+    LLMContextMessage,
+    LLMSpecificMessage,
+)
 
 # Fallback timeout (seconds) used when summarization_timeout is None.
 DEFAULT_SUMMARIZATION_TIMEOUT = 120.0
@@ -89,7 +94,7 @@ class LLMContextSummaryConfig:
 
     target_context_tokens: int = 6000
     min_messages_after_summary: int = 4
-    summarization_prompt: Optional[str] = None
+    summarization_prompt: str | None = None
     summary_message_template: str = "Conversation summary: {summary}"
     llm: Optional["LLMService"] = None
     summarization_timeout: float = DEFAULT_SUMMARIZATION_TIMEOUT
@@ -119,33 +124,45 @@ class LLMAutoContextSummarizationConfig:
     that summary is generated. Summarization is triggered when either the
     token limit or the unsummarized message count threshold is exceeded.
 
+    At least one of ``max_context_tokens`` and ``max_unsummarized_messages``
+    must be set. Set the other to ``None`` to disable that threshold.
+
     Parameters:
         max_context_tokens: Maximum allowed context size in tokens. When this
             limit is reached, summarization is triggered to compress the context.
             The tokens are calculated using the industry-standard approximation
-            of 1 token ≈ 4 characters.
+            of 1 token ≈ 4 characters. Set to ``None`` to disable token-based
+            triggering.
         max_unsummarized_messages: Maximum number of new messages that can
             accumulate since the last summary before triggering a new
             summarization. This ensures regular compression even if token
-            limits are not reached.
+            limits are not reached. Set to ``None`` to disable message-count
+            triggering.
         summary_config: Configuration for summary generation parameters
             (prompt, token budget, messages to keep). If not provided, uses
             default ``LLMContextSummaryConfig`` values.
     """
 
-    max_context_tokens: int = 8000
-    max_unsummarized_messages: int = 20
+    max_context_tokens: int | None = 8000
+    max_unsummarized_messages: int | None = 20
     summary_config: LLMContextSummaryConfig = field(default_factory=LLMContextSummaryConfig)
 
     def __post_init__(self):
         """Validate configuration parameters."""
-        if self.max_context_tokens <= 0:
+        if self.max_context_tokens is None and self.max_unsummarized_messages is None:
+            raise ValueError(
+                "At least one of max_context_tokens and max_unsummarized_messages must be set"
+            )
+        if self.max_context_tokens is not None and self.max_context_tokens <= 0:
             raise ValueError("max_context_tokens must be positive")
-        if self.max_unsummarized_messages < 1:
+        if self.max_unsummarized_messages is not None and self.max_unsummarized_messages < 1:
             raise ValueError("max_unsummarized_messages must be at least 1")
 
         # Auto-adjust target_context_tokens if it exceeds max_context_tokens
-        if self.summary_config.target_context_tokens > self.max_context_tokens:
+        if (
+            self.max_context_tokens is not None
+            and self.summary_config.target_context_tokens > self.max_context_tokens
+        ):
             # Use 80% of max_context_tokens as a reasonable default
             self.summary_config.target_context_tokens = int(self.max_context_tokens * 0.8)
 
@@ -154,9 +171,11 @@ class LLMAutoContextSummarizationConfig:
 class LLMContextSummarizationConfig:
     """Configuration for context summarization behavior.
 
-    .. deprecated::
+    .. deprecated:: 0.0.104
         Use :class:`LLMAutoContextSummarizationConfig` with a nested
-        :class:`LLMContextSummaryConfig` instead::
+        :class:`LLMContextSummaryConfig` instead.
+
+        Example::
 
             LLMAutoContextSummarizationConfig(
                 max_context_tokens=8000,
@@ -169,17 +188,19 @@ class LLMContextSummarizationConfig:
 
     Parameters:
         max_context_tokens: Maximum allowed context size in tokens.
+            Set to ``None`` to disable token-based triggering.
         target_context_tokens: Maximum token size for the generated summary.
         max_unsummarized_messages: Maximum new messages before triggering summarization.
+            Set to ``None`` to disable message-count triggering.
         min_messages_after_summary: Number of recent messages to preserve.
         summarization_prompt: Custom prompt for summary generation.
     """
 
-    max_context_tokens: int = 8000
+    max_context_tokens: int | None = 8000
     target_context_tokens: int = 6000
-    max_unsummarized_messages: int = 20
+    max_unsummarized_messages: int | None = 20
     min_messages_after_summary: int = 4
-    summarization_prompt: Optional[str] = None
+    summarization_prompt: str | None = None
     summary_message_template: str = "Conversation summary: {summary}"
     llm: Optional["LLMService"] = None
     summarization_timeout: float = DEFAULT_SUMMARIZATION_TIMEOUT
@@ -192,17 +213,24 @@ class LLMContextSummarizationConfig:
             DeprecationWarning,
             stacklevel=2,
         )
-        if self.max_context_tokens <= 0:
+        if self.max_context_tokens is None and self.max_unsummarized_messages is None:
+            raise ValueError(
+                "At least one of max_context_tokens and max_unsummarized_messages must be set"
+            )
+        if self.max_context_tokens is not None and self.max_context_tokens <= 0:
             raise ValueError("max_context_tokens must be positive")
         if self.target_context_tokens <= 0:
             raise ValueError("target_context_tokens must be positive")
 
         # Auto-adjust target_context_tokens if it exceeds max_context_tokens
-        if self.target_context_tokens > self.max_context_tokens:
+        if (
+            self.max_context_tokens is not None
+            and self.target_context_tokens > self.max_context_tokens
+        ):
             # Use 80% of max_context_tokens as a reasonable default
             self.target_context_tokens = int(self.max_context_tokens * 0.8)
 
-        if self.max_unsummarized_messages < 1:
+        if self.max_unsummarized_messages is not None and self.max_unsummarized_messages < 1:
             raise ValueError("max_unsummarized_messages must be at least 1")
         if self.min_messages_after_summary < 0:
             raise ValueError("min_messages_after_summary must be positive")
@@ -245,7 +273,7 @@ class LLMMessagesToSummarize:
         last_summarized_index: Index of the last message being summarized
     """
 
-    messages: List[dict]
+    messages: list[LLMContextMessage]
     last_summarized_index: int
 
 
@@ -361,25 +389,66 @@ class LLMContextSummarizationUtil:
         return total
 
     @staticmethod
-    def _get_function_calls_in_progress_index(messages: List[dict], start_idx: int) -> int:
+    def _is_tool_message_pending(content: str) -> bool:
+        """Return True if a tool message content represents an unresolved call.
+
+        A tool message is considered pending (unresolved) when its content is
+        the synchronous ``"IN_PROGRESS"`` sentinel or the async
+        ``{"type": "async_tool", "status": "started"}`` marker — both indicate
+        that the actual result has not yet been written back to the context.
+
+        Args:
+            content: The ``content`` field of a tool-role context message.
+
+        Returns:
+            True if the tool call should be treated as still in progress.
+        """
+        if content == "IN_PROGRESS":
+            return True
+        try:
+            parsed = json.loads(content)
+            if (
+                isinstance(parsed, dict)
+                and parsed.get("type") == "async_tool"
+                and parsed.get("status") == "started"
+            ):
+                return True
+        except (json.JSONDecodeError, ValueError):
+            pass
+        return False
+
+    @staticmethod
+    def _get_earliest_function_call_not_resolved_in_range(
+        messages: list[LLMContextMessage], start_idx: int, summary_end: int
+    ) -> int:
         """Find the earliest message index with incomplete function calls.
 
-        Scans messages to identify function/tool calls that haven't received
-        their results yet. This prevents summarizing incomplete tool interactions
-        which would break the request-response pairing.
+        Scans messages from ``start_idx`` up to (but not including)
+        ``summary_end`` to identify tool calls whose responses either don't
+        exist yet, fall in the kept portion of the context (>= summary_end),
+        or are still marked as ``IN_PROGRESS`` (async calls whose results have
+        not yet arrived).
+
+        This prevents summarizing tool call requests when their responses would
+        remain in the kept context as orphans, which the OpenAI API rejects,
+        and avoids summarizing async function calls before their results arrive.
 
         Args:
             messages: List of messages to check.
             start_idx: Index to start checking from.
+            summary_end: Exclusive upper bound for the scan (the first kept
+                message index). Only tool responses within this range count as
+                completing a call; responses beyond it are treated as absent,
+                leaving the call "in progress".
 
         Returns:
             Index of first message with function call in progress, or -1 if all
-            function calls are complete.
+            function calls are complete within the scanned range.
         """
         # Track tool call IDs mapped to their message index
         pending_tool_calls: dict[str, int] = {}
 
-        for i in range(start_idx, len(messages)):
+        for i in range(start_idx, summary_end):
             msg = messages[i]
             # LLMSpecificMessage instances (e.g. thinking blocks) never carry tool_call or
             # tool_call_id fields, so they cannot affect the pending-call tracking. Skipping
@@ -399,11 +468,37 @@ class LLMContextSummarizationUtil:
                             if tool_call_id:
                                 pending_tool_calls[tool_call_id] = i
 
-            # Check for tool results
+            # Check for tool results — treat IN_PROGRESS and async "started"
+            # messages as still pending so they are not summarized away before
+            # their results arrive.
             if role == "tool":
                 tool_call_id = msg.get("tool_call_id")
                 if tool_call_id and tool_call_id in pending_tool_calls:
-                    pending_tool_calls.pop(tool_call_id)
+                    content = msg.get("content", "")
+                    if not isinstance(content, str):
+                        content = ""
+                    if not LLMContextSummarizationUtil._is_tool_message_pending(content):
+                        pending_tool_calls.pop(tool_call_id)
+
+            # Check for async tool completion — a developer message with
+            # {"type": "async_tool", "status": "finished"} signals that the
+            # async result has arrived and the call is now resolved.
+            if role == "developer":
+                try:
+                    content = msg.get("content", "")
+                    if not isinstance(content, str):
+                        continue
+                    parsed = json.loads(content)
+                    if (
+                        isinstance(parsed, dict)
+                        and parsed.get("type") == "async_tool"
+                        and parsed.get("status") == "finished"
+                    ):
+                        tool_call_id = parsed.get("tool_call_id")
+                        if tool_call_id and tool_call_id in pending_tool_calls:
+                            pending_tool_calls.pop(tool_call_id)
+                except (json.JSONDecodeError, ValueError):
+                    pass
 
         # If we have pending tool calls, return the earliest index
         if pending_tool_calls:
@@ -435,25 +530,19 @@ class LLMContextSummarizationUtil:
         if len(messages) <= min_messages_to_keep:
             return LLMMessagesToSummarize(messages=[], last_summarized_index=-1)
 
-        # Find first system message index. LLMSpecificMessage instances are excluded because
-        # they are not dict-like and never represent a system message; they hold
-        # service-specific metadata (e.g. thinking blocks) that is always paired with a
-        # standard message.
-        first_system_index = next(
-            (
-                i
-                for i, msg in enumerate(messages)
-                if not isinstance(msg, LLMSpecificMessage) and msg.get("role") == "system"
-            ),
-            -1,
+        # Check if the first message is a system message (initial system prompt).
+        # Only messages[0] is treated as the system message to preserve — system
+        # messages at other positions are mid-conversation injections and should be
+        # included in the summarization range.
+        first_msg = messages[0] if messages else None
+        first_is_system = (
+            first_msg is not None
+            and not isinstance(first_msg, LLMSpecificMessage)
+            and first_msg.get("role") == "system"
         )
 
-        # Messages to summarize are between first system and recent messages
-        # We exclude the first system message itself
-        if first_system_index >= 0:
-            summary_start = first_system_index + 1
-        else:
-            summary_start = 0
+        # Start summarization after the initial system message if present
+        summary_start = 1 if first_is_system else 0
 
         # Get messages to keep (last N messages)
         summary_end = len(messages) - min_messages_to_keep
@@ -462,8 +551,10 @@ class LLMContextSummarizationUtil:
             return LLMMessagesToSummarize(messages=[], last_summarized_index=-1)
 
         # Check for function calls in progress in the range we want to summarize
-        function_call_start = LLMContextSummarizationUtil._get_function_calls_in_progress_index(
-            messages, summary_start
+        function_call_start = (
+            LLMContextSummarizationUtil._get_earliest_function_call_not_resolved_in_range(
+                messages, summary_start, summary_end
+            )
         )
         if function_call_start >= 0 and function_call_start < summary_end:
             # Stop summarization before the function call
@@ -491,7 +582,7 @@ class LLMContextSummarizationUtil:
         )
 
     @staticmethod
-    def format_messages_for_summary(messages: List[dict]) -> str:
+    def format_messages_for_summary(messages: list[dict]) -> str:
         """Format messages as a transcript for summarization.
 
         Args:

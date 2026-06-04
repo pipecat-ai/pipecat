@@ -1,3 +1,8 @@
+---
+name: cleanup
+description: Review, refactor, document, and validate code changes in the current branch
+---
+
 # Code Cleanup Skill
 
 The **Code Cleanup Skill** reviews, refactors, and documents code changes in your current branch, ensuring alignment with **Pipecat's architecture, coding standards, and example patterns**.
@@ -144,7 +149,7 @@ class InputParams(BaseModel):
 
 #### Examples
 
-Validated against `examples/foundational/07-interruptible.py`:
+Validated against `examples/07-interruptible.py`:
 
 - Proper `create_transport()` usage
 - Correct pipeline structure

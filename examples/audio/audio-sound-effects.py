@@ -1,0 +1,179 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+import os
+import wave
+
+from dotenv import load_dotenv
+from loguru import logger
+
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import (
+    Frame,
+    LLMContextFrame,
+    LLMFullResponseEndFrame,
+    OutputAudioRawFrame,
+    TTSSpeakFrame,
+)
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineWorker
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.logger import FrameLogger
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.workers.runner import WorkerRunner
+
+load_dotenv(override=True)
+
+
+sounds = {}
+sound_files = ["ding1.wav", "ding2.wav"]
+
+script_dir = os.path.dirname(__file__)
+
+for file in sound_files:
+    # Build the full path to the image file
+    full_path = os.path.join(script_dir, "assets", file)
+    # Get the filename without the extension to use as the dictionary key
+    filename = os.path.splitext(os.path.basename(full_path))[0]
+    # Open the image and convert it to bytes
+    with wave.open(full_path) as audio_file:
+        sounds[file] = OutputAudioRawFrame(
+            audio_file.readframes(-1), audio_file.getframerate(), audio_file.getnchannels()
+        )
+
+
+class OutboundSoundEffectWrapper(FrameProcessor):
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, LLMFullResponseEndFrame):
+            await self.push_frame(sounds["ding1.wav"])
+            # In case anything else downstream needs it
+            await self.push_frame(frame, direction)
+        else:
+            await self.push_frame(frame, direction)
+
+
+class InboundSoundEffectWrapper(FrameProcessor):
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, LLMContextFrame):
+            await self.push_frame(sounds["ding2.wav"])
+            # In case anything else downstream needs it
+            await self.push_frame(frame, direction)
+        else:
+            await self.push_frame(frame, direction)
+
+
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
+transport_params = {
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+}
+
+
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
+    logger.info(f"Starting bot")
+
+    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
+
+    llm = OpenAILLMService(
+        api_key=os.environ["OPENAI_API_KEY"],
+        settings=OpenAILLMService.Settings(
+            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
+        ),
+    )
+
+    tts = CartesiaTTSService(
+        api_key=os.environ["CARTESIA_API_KEY"],
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
+    )
+
+    context = LLMContext()
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
+    out_sound = OutboundSoundEffectWrapper()
+    in_sound = InboundSoundEffectWrapper()
+    fl = FrameLogger("LLM Out")
+    fl2 = FrameLogger("Transcription In")
+
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            stt,
+            user_aggregator,
+            in_sound,
+            fl2,
+            llm,
+            fl,
+            tts,
+            out_sound,
+            transport.output(),
+            assistant_aggregator,
+        ]
+    )
+
+    worker = PipelineWorker(
+        pipeline,
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+    )
+
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected")
+        # Kick off the conversation.
+        await worker.queue_frame(TTSSpeakFrame("Hi, I'm listening!"))
+        await transport.send_audio(sounds["ding1.wav"])
+
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"Client disconnected")
+        await worker.cancel()
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
+    await runner.run()
+
+
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
+
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()

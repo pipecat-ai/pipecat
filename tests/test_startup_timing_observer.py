@@ -181,7 +181,7 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
         report = reports[0]
 
         # No internal processors (PipelineSource, PipelineSink, Pipeline) in the report.
-        internal_names = ("Pipeline#", "PipelineTask#")
+        internal_names = ("Pipeline#", "PipelineWorker#")
         for t in report.processor_timings:
             for prefix in internal_names:
                 self.assertNotIn(

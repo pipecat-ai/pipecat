@@ -14,8 +14,8 @@ comprehensive monitoring and cleanup capabilities.
 import asyncio
 import traceback
 from abc import ABC, abstractmethod
+from collections.abc import Coroutine, Sequence
 from dataclasses import dataclass
-from typing import Coroutine, Dict, Optional, Sequence
 
 from loguru import logger
 
@@ -71,7 +71,7 @@ class BaseTaskManager(ABC):
         pass
 
     @abstractmethod
-    async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = None):
+    async def cancel_task(self, task: asyncio.Task, timeout: float | None = None):
         """Cancels the given asyncio Task and awaits its completion with an optional timeout.
 
         This function removes the task from the set of registered tasks upon
@@ -114,8 +114,8 @@ class TaskManager(BaseTaskManager):
 
     def __init__(self) -> None:
         """Initialize the task manager with empty task registry."""
-        self._tasks: Dict[str, TaskData] = {}
-        self._params: Optional[TaskManagerParams] = None
+        self._tasks: dict[str, TaskData] = {}
+        self._params: TaskManagerParams | None = None
 
     def setup(self, params: TaskManagerParams):
         """Initialize the task manager with configuration parameters.
@@ -177,7 +177,7 @@ class TaskManager(BaseTaskManager):
         logger.trace(f"{name}: task created")
         return task
 
-    async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = None):
+    async def cancel_task(self, task: asyncio.Task, timeout: float | None = None):
         """Cancels the given asyncio Task and awaits its completion with an optional timeout.
 
         This function removes the task from the set of registered tasks upon
@@ -194,7 +194,7 @@ class TaskManager(BaseTaskManager):
                 await asyncio.wait_for(task, timeout=timeout)
             else:
                 await task
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(f"{name}: timed out waiting for task to cancel")
         except asyncio.CancelledError:
             # Here are sure the task is cancelled properly.

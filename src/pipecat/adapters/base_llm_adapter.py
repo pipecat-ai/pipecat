@@ -10,11 +10,14 @@ This module provides the abstract base class for implementing LLM provider-speci
 adapters that handle tool format conversion and standardization.
 """
 
+import warnings
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generic, List, TypeVar
+from collections.abc import Mapping
+from typing import Any, Generic, TypeVar
 
 from loguru import logger
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
@@ -24,7 +27,7 @@ from pipecat.processors.aggregators.llm_context import (
 )
 
 # Should be a TypedDict
-TLLMInvocationParams = TypeVar("TLLMInvocationParams", bound=dict[str, Any])
+TLLMInvocationParams = TypeVar("TLLMInvocationParams", bound=Mapping[str, Any])
 
 
 class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
@@ -39,9 +42,30 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
     - Converting standardized tools schema to provider-specific tool formats.
     - Extracting messages from the LLM context for the purposes of logging
       about the specific provider.
+    - Resolving conflicts between ``system_instruction`` and initial
+      system/developer messages in the conversation context.
 
     Subclasses must implement provider-specific conversion logic.
     """
+
+    def __init__(self):
+        """Initialize the adapter."""
+        self._warned_system_instruction = False
+        self._builtin_tools: dict[str, FunctionSchema] = {}
+
+    @property
+    def builtin_tools(self) -> dict[str, FunctionSchema]:
+        """Built-in tools automatically merged into every inference request.
+
+        Keyed by tool name for O(1) lookup, insertion, and removal.  The
+        service injects tools here so they are sent transparently on every
+        inference request without the user having to add them to their
+        ``ToolsSchema``.
+
+        Returns:
+            Mutable dict mapping tool name to ``FunctionSchema``.
+        """
+        return self._builtin_tools
 
     @property
     @abstractmethod
@@ -67,7 +91,7 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         pass
 
     @abstractmethod
-    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[Any]:
+    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> list[Any]:
         """Convert tools schema to the provider's specific format.
 
         Args:
@@ -79,7 +103,7 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         pass
 
     @abstractmethod
-    def get_messages_for_logging(self, context: LLMContext) -> List[Dict[str, Any]]:
+    def get_messages_for_logging(self, context: LLMContext) -> list[dict[str, Any]]:
         """Get messages from a universal LLM context in a format ready for logging about this provider.
 
         Args:
@@ -102,19 +126,28 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         """
         return LLMSpecificMessage(llm=self.id_for_llm_specific_messages, message=message)
 
-    def get_messages(self, context: LLMContext) -> List[LLMContextMessage]:
+    def get_messages(
+        self, context: LLMContext, *, truncate_large_values: bool = False
+    ) -> list[LLMContextMessage]:
         """Get messages from the LLM context, including standard and LLM-specific messages.
 
         Args:
             context: The LLM context containing messages.
+            truncate_large_values: If True, return deep copies of messages with
+                large values replaced by short placeholders.
 
         Returns:
             List of messages including standard and LLM-specific messages.
         """
-        return context.get_messages(self.id_for_llm_specific_messages)
+        return context.get_messages(
+            self.id_for_llm_specific_messages, truncate_large_values=truncate_large_values
+        )
 
-    def from_standard_tools(self, tools: Any) -> List[Any] | NotGiven:
+    def from_standard_tools(self, tools: Any) -> list[Any] | NotGiven:
         """Convert tools from standard format to provider format.
+
+        Built-in tools are automatically merged into the schema before conversion so that every
+        inference request receives them without the user having to declare them explicitly.
 
         Args:
             tools: Tools in standard format or provider-specific format.
@@ -123,10 +156,143 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
             List of tools converted to provider format, or original tools
             if not in standard format.
         """
+        if self._builtin_tools:
+            if isinstance(tools, ToolsSchema):
+                tools = ToolsSchema(
+                    standard_tools=tools.standard_tools + list(self._builtin_tools.values()),
+                    custom_tools=tools.custom_tools,
+                )
+            else:
+                # User supplied tools in a legacy/provider-specific format.
+                # Built-in tools cannot be safely merged, so they will not be injected.
+                # Migrate to ToolsSchema to enable built-in tool support; use custom_tools
+                # as an escape hatch for any provider-specific tools that don't fit the
+                # standard schema.
+                if tools is not None:
+                    warnings.warn(
+                        "Built-in tools (e.g. async tool cancellation) could not be injected "
+                        "because the supplied tools are not a ToolsSchema instance. "
+                        "Migrate to ToolsSchema to enable built-in tool support. "
+                        "Use ToolsSchema(custom_tools=...) as an escape hatch for any "
+                        "provider-specific tools that don't fit the standard schema.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
+                # Fall through and return the original tools unchanged.
+
         if isinstance(tools, ToolsSchema):
-            logger.debug(f"Retrieving the tools using the adapter: {type(self)}")
             return self.to_provider_tools_format(tools)
         # Fallback to return the same tools in case they are not in a standard format
         return tools
 
-    # TODO: we can move the logic to also handle the Messages here
+    def _extract_initial_system(
+        self,
+        messages: list,
+        *,
+        system_instruction: str | None = None,
+    ) -> str | None:
+        """Extract an initial ``"system"`` message for use as a system instruction.
+
+        Only useful for services that expect the system instruction as a
+        separate parameter, not inline in conversation history (today, all
+        non-OpenAI services). Does not extract ``"developer"`` messages —
+        those are converted to ``"user"`` by the adapter's subsequent message
+        loop, like any other non-system role the provider doesn't support.
+
+        Checks ``messages[0]``. If the role is ``"system"``, pops and returns
+        its content. If extracting would leave the messages list empty
+        (``len(messages) == 1``), the message is converted to ``"user"``
+        role instead of being extracted, to prevent sending an empty
+        conversation history to providers that require at least one
+        non-system message.
+
+        Args:
+            messages: Message list in standard format (mutated in-place).
+            system_instruction: The system instruction from service settings
+                or ``run_inference``. Only used to decide whether to warn
+                about a conflict in the single-message case.
+
+        Returns:
+            The extracted system message content, or ``None`` if nothing
+            was extracted.
+        """
+        if not messages:
+            return None
+
+        if messages[0].get("role") != "system":
+            return None
+
+        # Would extracting empty the list? Convert to "user" instead.
+        if len(messages) == 1:
+            if system_instruction:
+                if not self._warned_system_instruction:
+                    self._warned_system_instruction = True
+                    logger.warning(
+                        "Both system_instruction and an initial system message in"
+                        " context are set. Using system_instruction. The context"
+                        " system message is being converted to a user message to"
+                        " avoid sending an empty conversation history."
+                    )
+            messages[0]["role"] = "user"
+            return None
+
+        # Extract
+        content = messages[0].get("content", "")
+        if isinstance(content, list):
+            # Join text parts for providers that expect a string system instruction
+            content = " ".join(
+                part.get("text", "") for part in content if part.get("type") == "text"
+            )
+        messages.pop(0)
+        return content
+
+    def _resolve_system_instruction(
+        self,
+        system_from_context: str | None,
+        system_instruction: str | None,
+        *,
+        discard_context_system: bool,
+    ) -> str | None:
+        """Resolve conflict between ``system_instruction`` and an extracted context system message.
+
+        Args:
+            system_from_context: Content extracted from an initial ``"system"``
+                message by :meth:`_extract_initial_system`, or detected
+                inline (OpenAI adapters).
+            system_instruction: From service settings or ``run_inference`` param.
+            discard_context_system: If ``True`` (non-OpenAI adapters), the
+                context system message is discarded when ``system_instruction``
+                is also present. If ``False`` (OpenAI adapters), both are kept.
+
+        Returns:
+            The effective system instruction to use, or ``None`` if the system
+            instruction is already represented in the messages (OpenAI path).
+        """
+        if system_from_context and system_instruction:
+            if not self._warned_system_instruction:
+                self._warned_system_instruction = True
+                if discard_context_system:
+                    logger.warning(
+                        "Both system_instruction and an initial system message"
+                        " in context are set. Using system_instruction."
+                    )
+                else:
+                    logger.warning(
+                        "Both system_instruction and an initial system message"
+                        " in context are set, which may be unintended. Keeping"
+                        " both, but consider using system_instruction for"
+                        " system-level instructions and developer messages in"
+                        " context for supplementary guidance."
+                    )
+
+        if system_instruction:
+            return system_instruction
+
+        if system_from_context:
+            if discard_context_system:
+                return system_from_context
+            else:
+                # Content is already in messages; nothing to prepend
+                return None
+
+        return None

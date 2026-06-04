@@ -12,7 +12,7 @@ HTTP endpoints for ML-based end-of-turn detection.
 
 import asyncio
 import io
-from typing import Any, Dict, Optional
+from typing import Any
 
 import aiohttp
 import numpy as np
@@ -33,7 +33,7 @@ class HttpSmartTurnAnalyzer(BaseSmartTurn):
         *,
         url: str,
         aiohttp_session: aiohttp.ClientSession,
-        headers: Optional[Dict[str, str]] = None,
+        headers: dict[str, str] | None = None,
         **kwargs,
     ):
         """Initialize the HTTP smart turn analyzer.
@@ -58,7 +58,7 @@ class HttpSmartTurnAnalyzer(BaseSmartTurn):
         logger.trace(f"Serialized size: {len(serialized_bytes)} bytes")
         return serialized_bytes
 
-    async def _send_raw_request(self, data_bytes: bytes) -> Dict[str, Any]:
+    async def _send_raw_request(self, data_bytes: bytes) -> dict[str, Any]:
         """Send raw audio data to the HTTP endpoint for prediction."""
         headers = {"Content-Type": "application/octet-stream"}
         headers.update(self._headers)
@@ -97,14 +97,14 @@ class HttpSmartTurnAnalyzer(BaseSmartTurn):
                     logger.trace(text)
                     raise Exception(f"Non-JSON response: {text}")
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(f"Request timed out after {self._params.stop_secs} seconds")
             raise SmartTurnTimeoutException(f"Request exceeded {self._params.stop_secs} seconds.")
         except aiohttp.ClientError as e:
             logger.error(f"Failed to send raw request to Daily Smart Turn: {e}")
             raise Exception("Failed to send raw request to Daily Smart Turn.")
 
-    def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
+    def _predict_endpoint(self, audio_array: np.ndarray) -> dict[str, Any]:
         """Predict end-of-turn using remote HTTP ML service."""
         try:
             serialized_array = self._serialize_array(audio_array)

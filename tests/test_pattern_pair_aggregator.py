@@ -21,8 +21,8 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         self.code_handler = AsyncMock()
 
         # Add a test pattern
-        self.aggregator.add_pattern_pair(
-            pattern_id="test_pattern",
+        self.aggregator.add_pattern(
+            type="test_pattern",
             start_pattern="<test>",
             end_pattern="</test>",
         )

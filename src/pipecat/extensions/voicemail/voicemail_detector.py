@@ -16,7 +16,6 @@ Note:
 """
 
 import asyncio
-from typing import List, Optional
 
 from loguru import logger
 
@@ -36,7 +35,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
@@ -60,18 +59,18 @@ class NotifierGate(FrameProcessor):
     decisions or events.
     """
 
-    def __init__(self, notifier: BaseNotifier, task_name: str = "gate"):
+    def __init__(self, notifier: BaseNotifier, worker_name: str = "gate"):
         """Initialize the notifier gate.
 
         Args:
             notifier: Notifier that signals when the gate should close.
-            task_name: Name for the notification waiting task (for debugging).
+            worker_name: Name for the notification waiting task (for debugging).
         """
         super().__init__()
         self._notifier = notifier
-        self._task_name = task_name
+        self._worker_name = worker_name
         self._gate_opened = True
-        self._gate_task: Optional[asyncio.Task] = None
+        self._gate_task: asyncio.Task | None = None
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the processor with required components.
@@ -140,10 +139,10 @@ class ClassifierGate(NotifierGate):
                 been made and the gate should close.
             conversation_notifier: Notifier that signals when conversation is detected.
         """
-        super().__init__(gate_notifier, task_name="classifier_gate")
+        super().__init__(gate_notifier, worker_name="classifier_gate")
         self._conversation_notifier = conversation_notifier
         self._conversation_detected = False
-        self._conversation_task: Optional[asyncio.Task] = None
+        self._conversation_task: asyncio.Task | None = None
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the processor with required components.
@@ -209,7 +208,7 @@ class ConversationGate(NotifierGate):
             voicemail_notifier: Notifier that signals when voicemail has been
                 detected and the conversation should be blocked.
         """
-        super().__init__(voicemail_notifier, task_name="conversation_gate")
+        super().__init__(voicemail_notifier, worker_name="conversation_gate")
 
 
 class ClassificationProcessor(FrameProcessor):
@@ -267,7 +266,7 @@ class ClassificationProcessor(FrameProcessor):
 
         # Voicemail timing state
         self._voicemail_detected = False
-        self._voicemail_task: Optional[asyncio.Task] = None
+        self._voicemail_task: asyncio.Task | None = None
         self._voicemail_event = asyncio.Event()
         self._voicemail_event.set()
 
@@ -390,7 +389,7 @@ class ClassificationProcessor(FrameProcessor):
                     self._voicemail_event.wait(), timeout=self._voicemail_response_delay
                 )
                 await asyncio.sleep(0.1)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 await self._call_event_handler("on_voicemail_detected")
                 break
 
@@ -423,10 +422,10 @@ class TTSGate(FrameProcessor):
         super().__init__()
         self._conversation_notifier = conversation_notifier
         self._voicemail_notifier = voicemail_notifier
-        self._frame_buffer: List[tuple[Frame, FrameDirection]] = []
+        self._frame_buffer: list[tuple[Frame, FrameDirection]] = []
         self._gating_active = True
-        self._conversation_task: Optional[asyncio.Task] = None
-        self._voicemail_task: Optional[asyncio.Task] = None
+        self._conversation_task: asyncio.Task | None = None
+        self._voicemail_task: asyncio.Task | None = None
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the processor with required components.
@@ -591,7 +590,7 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
         *,
         llm: LLMService,
         voicemail_response_delay: float = 2.0,
-        custom_system_prompt: Optional[str] = None,
+        custom_system_prompt: str | None = None,
     ):
         """Initialize the voicemail detector with classification and buffering components.
 
@@ -618,9 +617,9 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
             self._validate_prompt(custom_system_prompt)
 
         # Set up the LLM context with the classification prompt
-        self._messages = [
+        self._messages: list[LLMContextMessage] = [
             {
-                "role": "system",
+                "role": "developer",
                 "content": self._prompt,
             },
         ]

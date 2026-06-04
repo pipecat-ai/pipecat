@@ -14,6 +14,7 @@ import numpy as np
 from loguru import logger
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
+from pipecat.audio.resamplers.base_audio_resampler import SoxrQuality
 from pipecat.frames.frames import FilterControlFrame, FilterEnableFrame
 
 try:
@@ -35,7 +36,7 @@ class RNNoiseFilter(BaseAudioFilter):
     processes it in chunks.
     """
 
-    def __init__(self, resampler_quality: str = "QQ") -> None:
+    def __init__(self, resampler_quality: SoxrQuality = "QQ") -> None:
         """Initialize the RNNoise noise suppression filter.
 
         Args:
@@ -49,7 +50,7 @@ class RNNoiseFilter(BaseAudioFilter):
         self._rnnoise_ready = False
         self._resampler_in = None
         self._resampler_out = None
-        self._resampler_quality = resampler_quality
+        self._resampler_quality: SoxrQuality = resampler_quality
 
     async def start(self, sample_rate: int):
         """Initialize the filter with the transport's sample rate.
@@ -60,7 +61,12 @@ class RNNoiseFilter(BaseAudioFilter):
         self._sample_rate = sample_rate
 
         try:
-            # RNNoise always requires 48kHz
+            # The module-level import sets `RNNoise` to `None` if pyrnnoise
+            # isn't installed; raise instead of calling `None(...)` so the
+            # except clause handles it cleanly.
+            if RNNoise is None:
+                raise ImportError("pyrnnoise is not installed")
+            # RNNoise always requires 48kHz.
             self._rnnoise = RNNoise(sample_rate=48000)
             self._rnnoise_ready = True
         except Exception as e:
@@ -107,7 +113,7 @@ class RNNoiseFilter(BaseAudioFilter):
         Returns:
             Noise-suppressed audio data as bytes.
         """
-        if not self._rnnoise_ready or not self._filtering:
+        if not self._rnnoise_ready or not self._filtering or self._rnnoise is None:
             return audio
 
         # Resample input if needed

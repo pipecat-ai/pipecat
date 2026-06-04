@@ -6,18 +6,17 @@
 
 """Frame serialization interfaces for Pipecat."""
 
-from abc import ABC, abstractmethod
-from typing import Optional
+from abc import abstractmethod
 
 from pydantic import BaseModel
 
+import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
     Frame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
     StartFrame,
 )
-from pipecat.processors.frameworks.rtvi import RTVI_MESSAGE_LABEL
 from pipecat.utils.base_object import BaseObject
 
 
@@ -39,7 +38,7 @@ class FrameSerializer(BaseObject):
 
         ignore_rtvi_messages: bool = True
 
-    def __init__(self, params: Optional[InputParams] = None, **kwargs):
+    def __init__(self, params: InputParams | None = None, **kwargs):
         """Initialize the FrameSerializer.
 
         Args:
@@ -64,7 +63,7 @@ class FrameSerializer(BaseObject):
         if (
             self._params.ignore_rtvi_messages
             and isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame))
-            and frame.message.get("label") == RTVI_MESSAGE_LABEL
+            and frame.message.get("label") == RTVI.MESSAGE_LABEL
         ):
             return True
         return False

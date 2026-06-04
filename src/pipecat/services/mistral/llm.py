@@ -6,14 +6,23 @@
 
 """Mistral LLM service implementation using OpenAI-compatible interface."""
 
-from typing import List, Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 from loguru import logger
-from openai.types.chat import ChatCompletionMessageParam
 
+from pipecat.adapters.services.mistral_adapter import MistralLLMAdapter
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.frames.frames import FunctionCallFromLLM
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
+
+
+@dataclass
+class MistralLLMSettings(BaseOpenAILLMService.Settings):
+    """Settings for MistralLLMService."""
+
+    pass
 
 
 class MistralLLMService(OpenAILLMService):
@@ -23,12 +32,22 @@ class MistralLLMService(OpenAILLMService):
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
+    # Mistral doesn't support the "developer" message role.
+    # This value is used by BaseOpenAILLMService when calling the adapter.
+    supports_developer_role = False
+
+    adapter_class = MistralLLMAdapter
+
+    Settings = MistralLLMSettings
+    _settings: Settings
+
     def __init__(
         self,
         *,
         api_key: str,
         base_url: str = "https://api.mistral.ai/v1",
-        model: str = "mistral-small-latest",
+        model: str | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Mistral LLM service.
@@ -37,9 +56,29 @@ class MistralLLMService(OpenAILLMService):
             api_key: The API key for accessing Mistral's API.
             base_url: The base URL for Mistral API. Defaults to "https://api.mistral.ai/v1".
             model: The model identifier to use. Defaults to "mistral-small-latest".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=MistralLLMService.Settings(model=...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
-        super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(model="mistral-small-latest")
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+
+        # 3. (No step 3, as there's no params object to apply)
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(api_key=api_key, base_url=base_url, settings=default_settings, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         """Create OpenAI-compatible client for Mistral API endpoint.
@@ -54,60 +93,6 @@ class MistralLLMService(OpenAILLMService):
         """
         logger.debug(f"Creating Mistral client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
-
-    def _apply_mistral_fixups(
-        self, messages: List[ChatCompletionMessageParam]
-    ) -> List[ChatCompletionMessageParam]:
-        """Apply fixups to messages to meet Mistral-specific requirements.
-
-        1. A "tool"-role message must be followed by an assistant message.
-
-        2. "system"-role messages must only appear at the start of a
-           conversation.
-
-        3. Assistant messages must have prefix=True when they are the final
-           message in a conversation (but at no other point).
-
-        Args:
-            messages: The original list of messages.
-
-        Returns:
-            Messages with Mistral prefix requirement applied to final assistant message.
-        """
-        if not messages:
-            return messages
-
-        # Create a copy to avoid modifying the original
-        fixed_messages = [dict(msg) for msg in messages]
-
-        # Ensure all tool responses are followed by an assistant message
-        assistant_insert_indices = []
-        for i, msg in enumerate(fixed_messages):
-            if msg.get("role") == "tool":
-                # If this is the last message or the next message is not assistant
-                if i == len(fixed_messages) - 1 or fixed_messages[i + 1].get("role") != "assistant":
-                    assistant_insert_indices.append(i + 1)
-        for idx in reversed(assistant_insert_indices):
-            fixed_messages.insert(idx, {"role": "assistant", "content": " "})
-
-        # Convert any "system" messages that aren't at the start (i.e., after the initial contiguous block) to "user"
-        first_non_system_idx = next(
-            (i for i, msg in enumerate(fixed_messages) if msg.get("role") != "system"),
-            len(fixed_messages),
-        )
-        for i, msg in enumerate(fixed_messages):
-            if msg.get("role") == "system" and i >= first_non_system_idx:
-                msg["role"] = "user"
-
-        # Get the last message
-        last_message = fixed_messages[-1]
-
-        # Only add prefix=True to the last message if it's an assistant message
-        # and Mistral would otherwise reject it
-        if last_message.get("role") == "assistant" and "prefix" not in last_message:
-            last_message["prefix"] = True
-
-        return fixed_messages
 
     async def run_function_calls(self, function_calls: Sequence[FunctionCallFromLLM]):
         """Execute function calls, filtering out already-completed ones.
@@ -171,18 +156,14 @@ class MistralLLMService(OpenAILLMService):
     def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
         """Build parameters for Mistral chat completion request.
 
-        Handles Mistral-specific requirements including:
-        - Assistant message prefix requirement for API compatibility
-        - Parameter mapping (random_seed instead of seed)
-        - Core completion settings
+        Handles Mistral-specific parameter mapping (``random_seed`` in place
+        of ``seed``). Message-shape fixups required by Mistral are applied
+        by :class:`MistralLLMAdapter` upstream.
         """
-        # Apply Mistral's assistant prefix requirement for API compatibility
-        fixed_messages = self._apply_mistral_fixups(params_from_context["messages"])
-
         params = {
             "model": self._settings.model,
             "stream": True,
-            "messages": fixed_messages,
+            "messages": params_from_context["messages"],
             "tools": params_from_context["tools"],
             "tool_choice": params_from_context["tool_choice"],
             "frequency_penalty": self._settings.frequency_penalty,

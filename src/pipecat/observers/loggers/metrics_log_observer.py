@@ -11,8 +11,6 @@ allowing developers to monitor performance metrics, token usage, and other
 statistics in real-time.
 """
 
-from typing import Optional, Set, Type
-
 from loguru import logger
 
 from pipecat.frames.frames import MetricsFrame
@@ -60,7 +58,7 @@ class MetricsLogObserver(BaseObserver):
 
     def __init__(
         self,
-        include_metrics: Optional[Set[Type[MetricsData]]] = None,
+        include_metrics: set[type[MetricsData]] | None = None,
         **kwargs,
     ):
         """Initialize the metrics log observer.

@@ -7,9 +7,10 @@
 """Piper TTS service implementation."""
 
 import asyncio
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, AsyncGenerator, AsyncIterator, Optional
+from typing import Any
 
 import aiohttp
 from loguru import logger
@@ -17,10 +18,9 @@ from loguru import logger
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import TTSSettings
+from pipecat.services.settings import TTSSettings, assert_given
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -30,12 +30,12 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Piper, you need to `pip install pipecat-ai[piper]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 @dataclass
 class PiperTTSSettings(TTSSettings):
-    """Settings for Piper TTS service."""
+    """Settings for PiperTTSService."""
 
     pass
 
@@ -48,46 +48,73 @@ class PiperTTSService(TTSService):
     match the configured sample rate.
     """
 
-    _settings: PiperTTSSettings
+    Settings = PiperTTSSettings
+    _settings: Settings
 
     def __init__(
         self,
         *,
-        voice_id: str,
-        download_dir: Optional[Path] = None,
+        voice_id: str | None = None,
+        download_dir: Path | None = None,
         force_redownload: bool = False,
         use_cuda: bool = False,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Piper TTS service.
 
         Args:
             voice_id: Piper voice model identifier (e.g. `en_US-ryan-high`).
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=PiperTTSService.Settings(voice=...)`` instead.
+
             download_dir: Directory for storing voice model files. Defaults to
                 the current working directory.
             force_redownload: Re-download the voice model even if it already exists.
             use_cuda: Use CUDA for GPU-accelerated inference.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent `TTSService`.
         """
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(model=None, voice=None, language=None)
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
+            default_settings.voice = voice_id
+
+        # 3. (No step 3, as there's no params object to apply)
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
-            settings=PiperTTSSettings(model=None, voice=voice_id, language=None),
+            push_start_frame=True,
+            push_stop_frames=True,
+            settings=default_settings,
             **kwargs,
         )
 
         download_dir = download_dir or Path.cwd()
 
-        model_file = f"{voice_id}.onnx"
-        model_path = Path(download_dir) / model_file
+        _voice = assert_given(self._settings.voice)
+        if _voice is None:
+            raise ValueError("Piper TTS voice must be specified")
+        model_file = f"{_voice}.onnx"
+        model_path_resolved = Path(download_dir) / model_file
 
-        if not model_path.exists():
-            logger.debug(f"Downloading Piper '{voice_id}' model")
-            download_voice(voice_id, download_dir, force_redownload=force_redownload)
+        if not model_path_resolved.exists():
+            logger.debug(f"Downloading Piper '{_voice}' model")
+            download_voice(_voice, download_dir, force_redownload=force_redownload)
 
-        logger.debug(f"Loading Piper '{voice_id}' model from {model_path}")
+        logger.debug(f"Loading Piper '{_voice}' model from {model_path_resolved}")
 
-        self._voice = PiperVoice.load(model_path, use_cuda=use_cuda)
+        self._voice = PiperVoice.load(model_path_resolved, use_cuda=use_cuda)
 
-        logger.debug(f"Loaded Piper '{voice_id}' model")
+        logger.debug(f"Loaded Piper '{_voice}' model")
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -97,7 +124,7 @@ class PiperTTSService(TTSService):
         """
         return True
 
-    async def _update_settings(self, delta: PiperTTSSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply a settings delta.
 
         Settings are stored but not applied to the active connection.
@@ -137,11 +164,7 @@ class PiperTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            await self.start_ttfb_metrics()
-
             await self.start_tts_usage_metrics(text)
-
-            yield TTSStartedFrame(context_id=context_id)
 
             async for frame in self._stream_audio_frames_from_iterator(
                 async_iterator(self._voice.synthesize(text)),
@@ -156,7 +179,6 @@ class PiperTTSService(TTSService):
         finally:
             logger.debug(f"{self}: Finished TTS [{text}]")
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame(context_id=context_id)
 
 
 # This assumes a running TTS service running:
@@ -169,7 +191,7 @@ class PiperTTSService(TTSService):
 #
 @dataclass
 class PiperHttpTTSSettings(TTSSettings):
-    """Settings for Piper HTTP TTS service."""
+    """Settings for PiperHttpTTSService."""
 
     pass
 
@@ -182,14 +204,16 @@ class PiperHttpTTSService(TTSService):
     rates and automatic WAV header removal.
     """
 
-    _settings: PiperHttpTTSSettings
+    Settings = PiperHttpTTSSettings
+    _settings: Settings
 
     def __init__(
         self,
         *,
         base_url: str,
         aiohttp_session: aiohttp.ClientSession,
-        voice_id: Optional[str] = None,
+        voice_id: str | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Piper TTS service.
@@ -198,10 +222,32 @@ class PiperHttpTTSService(TTSService):
             base_url: Base URL for the Piper TTS HTTP server.
             aiohttp_session: aiohttp ClientSession for making HTTP requests.
             voice_id: Piper voice model identifier (e.g. `en_US-ryan-high`).
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=PiperHttpTTSService.Settings(voice=...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent TTSService.
         """
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(model=None, voice=None, language=None)
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
+            default_settings.voice = voice_id
+
+        # 3. (No step 3, as there's no params object to apply)
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
-            settings=PiperHttpTTSSettings(model=None, voice=voice_id, language=None),
+            push_start_frame=True,
+            push_stop_frames=True,
+            settings=default_settings,
             **kwargs,
         )
 
@@ -236,8 +282,6 @@ class PiperHttpTTSService(TTSService):
             "Content-Type": "application/json",
         }
         try:
-            await self.start_ttfb_metrics()
-
             data = {
                 "text": text,
                 "voice": self._settings.voice,
@@ -249,11 +293,10 @@ class PiperHttpTTSService(TTSService):
                     yield ErrorFrame(
                         error=f"Error getting audio (status: {response.status}, error: {error})"
                     )
+                    yield TTSStoppedFrame(context_id=context_id)
                     return
 
                 await self.start_tts_usage_metrics(text)
-
-                yield TTSStartedFrame(context_id=context_id)
 
                 CHUNK_SIZE = self.chunk_size
 
@@ -268,4 +311,3 @@ class PiperHttpTTSService(TTSService):
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame(context_id=context_id)

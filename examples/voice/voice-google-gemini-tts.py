@@ -1,0 +1,157 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+
+import os
+
+from dotenv import load_dotenv
+from loguru import logger
+
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import LLMRunFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
+from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.google.stt import GoogleSTTService
+from pipecat.services.google.tts import GeminiTTSService
+from pipecat.transcriptions.language import Language
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.workers.runner import WorkerRunner
+
+load_dotenv(override=True)
+
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
+transport_params = {
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+}
+
+
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
+    logger.info(f"Starting bot with Gemini TTS")
+
+    stt = GoogleSTTService(
+        settings=GoogleSTTService.Settings(
+            languages=[Language.EN_US],
+        ),
+        credentials=os.environ["GOOGLE_TEST_CREDENTIALS"],
+    )
+
+    tts = GeminiTTSService(
+        credentials=os.environ["GOOGLE_TEST_CREDENTIALS"],
+        settings=GeminiTTSService.Settings(
+            model="gemini-2.5-flash-tts",
+            voice="Charon",
+            language=Language.EN_US,
+            prompt="You are a helpful AI assistant. Speak in a natural, conversational tone.",
+        ),
+    )
+
+    llm = GoogleLLMService(
+        api_key=os.environ["GOOGLE_API_KEY"],
+        model="gemini-2.5-flash",
+        settings=GoogleLLMService.Settings(
+            system_instruction="""You are a helpful assistant in a voice conversation.
+
+            IMPORTANT: You're using Gemini TTS which supports expressive markup tags. You can use these tags in your responses:
+            - [sigh] - Insert a sigh sound
+            - [laughing] - Insert a laugh
+            - [uhm] - Insert a hesitation sound
+            - [whispering] - Speak the next part in a whisper
+            - [shouting] - Speak the next part louder
+            - [extremely fast] - Speak the next part very quickly
+            - [short pause], [medium pause], [long pause] - Add pauses for dramatic effect
+
+            Examples:
+            - "Well [sigh] that's a tricky question."
+            - "[laughing] That's a great joke!"
+            - "[whispering] Let me tell you a secret."
+            - "The answer is... [long pause] ...42!"
+
+            Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Keep responses concise. Respond to what the user said in a creative and helpful way.""",
+        ),
+    )
+
+    context = LLMContext()
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
+
+    pipeline = Pipeline(
+        [
+            transport.input(),  # Transport user input
+            stt,  # STT
+            user_aggregator,  # User responses
+            llm,  # LLM
+            tts,  # Gemini TTS
+            transport.output(),  # Transport bot output
+            assistant_aggregator,  # Assistant spoken responses
+        ]
+    )
+
+    worker = PipelineWorker(
+        pipeline,
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+    )
+
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected")
+        # Kick off the conversation
+        context.add_message(
+            {
+                "role": "developer",
+                "content": "You are an AI assistant. You can help with a variety of tasks. Introduce yourself and ask the user what they would like to know.",
+            }
+        )
+        await worker.queue_frames([LLMRunFrame()])
+
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"Client disconnected")
+        await worker.cancel()
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
+    await runner.run()
+
+
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
+
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()

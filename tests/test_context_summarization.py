@@ -10,7 +10,7 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock
 
-from pipecat.frames.frames import LLMContextSummaryRequestFrame, LLMContextSummaryResultFrame
+from pipecat.frames.frames import LLMContextSummaryRequestFrame
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.context.llm_context_summarization import (
@@ -136,6 +136,58 @@ class TestContextSummarizationMixin(unittest.TestCase):
         self.assertEqual(len(result.messages), 0)
         self.assertEqual(result.last_summarized_index, -1)
 
+    def test_get_messages_to_summarize_mid_conversation_system_message(self):
+        """Test that a system message mid-conversation is included in summarization.
+
+        Regression test for #4286: when the only system message is a mid-conversation
+        injection (not at index 0), get_messages_to_summarize should start from index 0,
+        not after the mid-conversation system message.
+        """
+        context = LLMContext()
+
+        # No system message at index 0 (using system_instruction instead)
+        context.add_message({"role": "user", "content": "Hello"})
+        context.add_message({"role": "assistant", "content": "Hi there"})
+        context.add_message({"role": "user", "content": "Tell me a joke"})
+        context.add_message({"role": "assistant", "content": "Why did the chicken..."})
+        # Mid-conversation system injection (e.g. "The user has been quiet")
+        context.add_message({"role": "system", "content": "The user has been quiet for a while"})
+        context.add_message({"role": "user", "content": "Latest message"})
+        context.add_message({"role": "assistant", "content": "Latest response"})
+
+        # Keep last 2 messages
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 2)
+
+        # Should summarize from index 0 (no system preamble to skip)
+        # through index 4, keeping last 2 messages
+        self.assertEqual(len(result.messages), 5)
+        self.assertEqual(result.messages[0]["content"], "Hello")
+        # The mid-conversation system message should be included in summarization
+        self.assertEqual(result.messages[4]["content"], "The user has been quiet for a while")
+        self.assertEqual(result.last_summarized_index, 4)
+
+    def test_get_messages_to_summarize_system_at_index_0_with_mid_system(self):
+        """Test that only messages[0] system message is preserved, not later ones."""
+        context = LLMContext()
+
+        context.add_message({"role": "system", "content": "You are helpful"})
+        context.add_message({"role": "user", "content": "Hello"})
+        context.add_message({"role": "assistant", "content": "Hi"})
+        # Mid-conversation system injection
+        context.add_message({"role": "system", "content": "The user seems frustrated"})
+        context.add_message({"role": "user", "content": "Help me"})
+        context.add_message({"role": "assistant", "content": "Sure"})
+
+        # Keep last 2 messages
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 2)
+
+        # Should skip index 0 (system preamble), summarize indices 1-3
+        self.assertEqual(len(result.messages), 3)
+        self.assertEqual(result.messages[0]["content"], "Hello")
+        # Mid-conversation system message is summarized, not treated as preamble
+        self.assertEqual(result.messages[2]["content"], "The user seems frustrated")
+        self.assertEqual(result.last_summarized_index, 3)
+
     def test_format_messages_for_summary(self):
         """Test message formatting for summary."""
 
@@ -238,6 +290,43 @@ class TestLLMAutoContextSummarizationConfig(unittest.TestCase):
             summary_config=LLMContextSummaryConfig(target_context_tokens=9000),
         )
         self.assertLessEqual(config.summary_config.target_context_tokens, config.max_context_tokens)
+
+    def test_max_context_tokens_none(self):
+        """Test that max_context_tokens can be None when max_unsummarized_messages is set."""
+        config = LLMAutoContextSummarizationConfig(
+            max_context_tokens=None,
+            max_unsummarized_messages=20,
+        )
+        self.assertIsNone(config.max_context_tokens)
+        self.assertEqual(config.max_unsummarized_messages, 20)
+
+    def test_max_unsummarized_messages_none(self):
+        """Test that max_unsummarized_messages can be None when max_context_tokens is set."""
+        config = LLMAutoContextSummarizationConfig(
+            max_context_tokens=8000,
+            max_unsummarized_messages=None,
+        )
+        self.assertEqual(config.max_context_tokens, 8000)
+        self.assertIsNone(config.max_unsummarized_messages)
+
+    def test_both_none_raises(self):
+        """Test that setting both thresholds to None raises ValueError."""
+        with self.assertRaises(ValueError) as cm:
+            LLMAutoContextSummarizationConfig(
+                max_context_tokens=None,
+                max_unsummarized_messages=None,
+            )
+        self.assertIn("at least one", str(cm.exception).lower())
+
+    def test_target_tokens_not_auto_adjusted_when_max_none(self):
+        """Test that target_context_tokens is not auto-adjusted when max_context_tokens is None."""
+        config = LLMAutoContextSummarizationConfig(
+            max_context_tokens=None,
+            max_unsummarized_messages=10,
+            summary_config=LLMContextSummaryConfig(target_context_tokens=9000),
+        )
+        # target_context_tokens should remain unchanged since there's no max to compare against
+        self.assertEqual(config.summary_config.target_context_tokens, 9000)
 
 
 class TestLLMContextSummarizationConfigDeprecated(unittest.TestCase):
@@ -917,6 +1006,152 @@ class TestDedicatedLLMSummarization(unittest.IsolatedAsyncioTestCase):
         await summarizer.cleanup()
 
 
+class TestOrphanedToolResponseDetection(unittest.TestCase):
+    """Tests that tool responses in the kept range are treated as orphans.
+
+    The scan in _get_function_calls_in_progress_index is bounded by summary_end,
+    so a tool response that falls in the kept portion (>= summary_end) never
+    resolves its matching tool call.  This ensures the assistant+tool_calls
+    message and all its responses stay together in the kept range.
+    """
+
+    def test_tool_response_in_kept_range_is_treated_as_orphan(self):
+        """Tool response in the kept range causes the tool call to be kept too."""
+        context = LLMContext()
+        context.add_message({"role": "system", "content": "System prompt"})  # idx 0
+        context.add_message({"role": "user", "content": "Hello"})  # idx 1
+        context.add_message(  # idx 2: assistant with tool_call
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "fn", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        context.add_message(
+            {"role": "tool", "tool_call_id": "call_1", "content": "result"}
+        )  # idx 3 (kept)
+        context.add_message({"role": "user", "content": "Thanks"})  # idx 4 (kept)
+
+        # Keep 2: summary_end=3. The tool response at idx 3 is outside the scan
+        # range → call_1 stays pending → boundary moves back to idx 2.
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 2)
+        self.assertEqual(result.last_summarized_index, 1)
+        self.assertEqual(result.messages[-1]["content"], "Hello")
+
+    def test_tool_response_in_summarized_range_is_not_orphan(self):
+        """Tool response within the summarized range correctly resolves its call."""
+        context = LLMContext()
+        context.add_message({"role": "system", "content": "System prompt"})  # idx 0
+        context.add_message({"role": "user", "content": "Hello"})  # idx 1
+        context.add_message(  # idx 2: assistant with tool_call
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "fn", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        context.add_message(
+            {"role": "tool", "tool_call_id": "call_1", "content": "result"}
+        )  # idx 3
+        context.add_message({"role": "assistant", "content": "Done"})  # idx 4
+        context.add_message({"role": "user", "content": "Thanks"})  # idx 5 (kept)
+
+        # Keep 1: summary_end=5. Both the tool call (idx 2) and its response
+        # (idx 3) are within the scan range → resolved → no adjustment.
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 1)
+        self.assertEqual(result.last_summarized_index, 4)
+        self.assertEqual(len(result.messages), 4)
+
+    def test_partial_responses_in_kept_range_moves_back(self):
+        """When only some tool responses are in the kept range the whole group is kept."""
+        context = LLMContext()
+        context.add_message({"role": "system", "content": "System prompt"})  # idx 0
+        context.add_message({"role": "user", "content": "Hello"})  # idx 1
+        context.add_message(  # idx 2: assistant with two tool_calls
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_a",
+                        "type": "function",
+                        "function": {"name": "fn_a", "arguments": "{}"},
+                    },
+                    {
+                        "id": "call_b",
+                        "type": "function",
+                        "function": {"name": "fn_b", "arguments": "{}"},
+                    },
+                ],
+            }
+        )
+        context.add_message(
+            {"role": "tool", "tool_call_id": "call_a", "content": "result_a"}
+        )  # idx 3
+        context.add_message(
+            {"role": "tool", "tool_call_id": "call_b", "content": "result_b"}
+        )  # idx 4 (kept)
+        context.add_message({"role": "user", "content": "Thanks"})  # idx 5 (kept)
+
+        # Keep 2: summary_end=4. call_a is resolved (idx 3 is in scan range) but
+        # call_b's response (idx 4) is outside → call_b stays pending →
+        # function_call_start=2 → boundary moves back to idx 2.
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 2)
+        self.assertEqual(result.last_summarized_index, 1)
+        self.assertEqual(result.messages[-1]["content"], "Hello")
+
+    def test_non_adjacent_orphan_in_kept_range_moves_back(self):
+        """Orphaned tool response deeper in the kept range (not at the boundary) is detected."""
+        context = LLMContext()
+        context.add_message({"role": "system", "content": "System prompt"})  # idx 0
+        context.add_message({"role": "user", "content": "Hello"})  # idx 1
+        context.add_message(  # idx 2: assistant with two tool_calls
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_a",
+                        "type": "function",
+                        "function": {"name": "fn_a", "arguments": "{}"},
+                    },
+                    {
+                        "id": "call_b",
+                        "type": "function",
+                        "function": {"name": "fn_b", "arguments": "{}"},
+                    },
+                ],
+            }
+        )
+        context.add_message(
+            {"role": "tool", "tool_call_id": "call_a", "content": "result_a"}
+        )  # idx 3
+        context.add_message({"role": "user", "content": "Intermediate"})  # idx 4 (kept)
+        context.add_message(
+            {"role": "tool", "tool_call_id": "call_b", "content": "result_b"}
+        )  # idx 5 (kept) — NOT adjacent to the boundary
+        context.add_message({"role": "user", "content": "Latest"})  # idx 6 (kept)
+
+        # Keep 3: summary_end=4. call_b's response is at idx 5, two hops into
+        # the kept range. The scan stops at idx 4, so call_b is never resolved →
+        # function_call_start=2 → boundary moves back to idx 2.
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 3)
+        self.assertEqual(result.last_summarized_index, 1)
+        self.assertEqual(result.messages[-1]["content"], "Hello")
+
+
 class TestLLMSpecificMessageHandling(unittest.TestCase):
     """Tests that LLMSpecificMessage objects are correctly skipped in summarization."""
 
@@ -985,7 +1220,9 @@ class TestLLMSpecificMessageHandling(unittest.TestCase):
             {"role": "tool", "tool_call_id": "call_123", "content": '{"time": "10:30 AM"}'},
         ]
 
-        result = LLMContextSummarizationUtil._get_function_calls_in_progress_index(messages, 0)
+        result = LLMContextSummarizationUtil._get_earliest_function_call_not_resolved_in_range(
+            messages, 0, len(messages)
+        )
         self.assertEqual(result, -1)
 
 

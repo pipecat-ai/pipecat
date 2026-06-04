@@ -16,11 +16,12 @@ The module consists of three main components:
 - HeyGenTransport: Main transport implementation that coordinates input/output transports
 """
 
-from typing import Any, Optional, Union
+from typing import Any
 
 import aiohttp
 from loguru import logger
 
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AudioRawFrame,
     BotConnectedFrame,
@@ -40,7 +41,12 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.heygen.api_interactive_avatar import NewSessionRequest
 from pipecat.services.heygen.api_liveavatar import LiveAvatarNewSessionRequest
-from pipecat.services.heygen.client import HeyGenCallbacks, HeyGenClient, ServiceType
+from pipecat.services.heygen.client import (
+    HEY_GEN_SAMPLE_RATE,
+    HeyGenCallbacks,
+    HeyGenClient,
+    ServiceType,
+)
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -164,6 +170,7 @@ class HeyGenOutputTransport(BaseOutputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
+        self._resampler = create_stream_resampler()
 
         # Whether we have seen a StartFrame already.
         self._initialized = False
@@ -195,7 +202,7 @@ class HeyGenOutputTransport(BaseOutputTransport):
             return
 
         self._initialized = True
-        await self._client.start(frame, self.audio_chunk_size)
+        await self._client.start(frame)
         await self.set_transport_ready(frame)
         self._client.transport_ready()
 
@@ -232,8 +239,9 @@ class HeyGenOutputTransport(BaseOutputTransport):
                     logger.warning("self._event_id is already defined!")
                 self._event_id = str(frame.id)
             elif isinstance(frame, BotStoppedSpeakingFrame):
-                await self._client.agent_speak_end(self._event_id)
-                self._event_id = None
+                if self._event_id is not None:
+                    await self._client.agent_speak_end(self._event_id)
+                    self._event_id = None
         await super().push_frame(frame, direction)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -254,7 +262,8 @@ class HeyGenOutputTransport(BaseOutputTransport):
         """
         await super().process_frame(frame, direction)
         if isinstance(frame, InterruptionFrame):
-            await self._client.interrupt(self._event_id)
+            if self._event_id is not None:
+                await self._client.interrupt(self._event_id)
             await self.push_frame(frame, direction)
         if isinstance(frame, UserStartedSpeakingFrame):
             await self._client.start_agent_listening()
@@ -266,10 +275,20 @@ class HeyGenOutputTransport(BaseOutputTransport):
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the HeyGen transport.
 
+        Resamples audio to 24kHz if needed before sending.
+
         Args:
             frame: The audio frame to write.
         """
-        await self._client.agent_speak(bytes(frame.audio), self._event_id)
+        audio = frame.audio
+        if frame.sample_rate != HEY_GEN_SAMPLE_RATE:
+            audio = await self._resampler.resample(audio, frame.sample_rate, HEY_GEN_SAMPLE_RATE)
+        if self._event_id is None:
+            # No active bot-speech event — drop the chunk rather than send a
+            # message the HeyGen API will reject.
+            logger.warning(f"{self}: dropping audio frame because no event_id is set")
+            return False
+        await self._client.agent_speak(bytes(audio), self._event_id)
         return True
 
 
@@ -309,10 +328,10 @@ class HeyGenTransport(BaseTransport):
         session: aiohttp.ClientSession,
         api_key: str,
         params: HeyGenParams = HeyGenParams(),
-        input_name: Optional[str] = None,
-        output_name: Optional[str] = None,
-        session_request: Optional[Union[LiveAvatarNewSessionRequest, NewSessionRequest]] = None,
-        service_type: Optional[ServiceType] = None,
+        input_name: str | None = None,
+        output_name: str | None = None,
+        session_request: LiveAvatarNewSessionRequest | NewSessionRequest | None = None,
+        service_type: ServiceType | None = None,
     ):
         """Initialize the HeyGen transport.
 
@@ -346,8 +365,8 @@ class HeyGenTransport(BaseTransport):
                 on_participant_disconnected=self._on_participant_disconnected,
             ),
         )
-        self._input: Optional[HeyGenInputTransport] = None
-        self._output: Optional[HeyGenOutputTransport] = None
+        self._input: HeyGenInputTransport | None = None
+        self._output: HeyGenOutputTransport | None = None
         self._HeyGen_participant_id = None
 
         # Register supported handlers. The user will only be able to register

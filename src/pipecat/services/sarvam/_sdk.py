@@ -5,12 +5,11 @@
 #
 
 import platform
-from typing import Dict
 
 from pipecat import version as pipecat_version
 
 
-def sdk_headers() -> Dict[str, str]:
+def sdk_headers() -> dict[str, str]:
     """SDK identification headers for upstream providers."""
     return {
         "User-Agent": f"Pipecat/{pipecat_version()} Python/{platform.python_version()}",

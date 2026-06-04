@@ -12,7 +12,8 @@ import time
 import warnings
 import wave
 from abc import abstractmethod
-from typing import Any, AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from loguru import logger
 from websockets.protocol import State
@@ -28,6 +29,7 @@ from pipecat.frames.frames import (
     STTMuteFrame,
     STTUpdateSettingsFrame,
     TranscriptionFrame,
+    UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -81,12 +83,12 @@ class STTService(AIService):
         self,
         *,
         audio_passthrough=True,
-        sample_rate: Optional[int] = None,
+        sample_rate: int | None = None,
         stt_ttfb_timeout: float = 2.0,
-        ttfs_p99_latency: Optional[float] = None,
-        keepalive_timeout: Optional[float] = None,
+        ttfs_p99_latency: float | None = None,
+        keepalive_timeout: float | None = None,
         keepalive_interval: float = 5.0,
-        settings: Optional[STTSettings] = None,
+        settings: STTSettings | None = None,
         **kwargs,
     ):
         """Initialize the STT service.
@@ -106,6 +108,8 @@ class STTService(AIService):
                 This is broadcast via STTMetadataFrame at pipeline start for downstream
                 processors (e.g., turn strategies) to optimize timing. Subclasses provide
                 measured defaults; pass a value here to override for your deployment.
+                Turn-based services where the server defines turn boundaries should
+                override :attr:`supports_ttfs` to return False instead of supplying a value.
             keepalive_timeout: Seconds of no audio before sending silence to keep the
                 connection alive. None disables keepalive. Useful for services that
                 close idle connections (e.g. behind a ServiceSwitcher).
@@ -120,6 +124,27 @@ class STTService(AIService):
             or STTSettings(),
             **kwargs,
         )
+
+        # Convert Language enum to service-specific format at init time.
+        # Runtime updates are handled by _update_settings(), but init-time
+        # settings bypass that path and need explicit conversion.
+        # Raw strings (e.g. "de-DE") are first converted to Language enums
+        # so they go through the same resolution logic.
+        if isinstance(self._settings.language, str) and not isinstance(
+            self._settings.language, Language
+        ):
+            try:
+                self._settings.language = Language(self._settings.language)
+            except ValueError:
+                logger.debug(
+                    f"Language string '{self._settings.language}' is not a recognized "
+                    f"Language code. It will be passed to the service as-is."
+                )
+        if isinstance(self._settings.language, Language):
+            converted = self.language_to_service_language(self._settings.language)
+            if converted is not None:
+                self._settings.language = converted
+
         self._audio_passthrough = audio_passthrough
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
@@ -130,7 +155,7 @@ class STTService(AIService):
 
         # STT TTFB tracking state
         self._stt_ttfb_timeout = stt_ttfb_timeout
-        self._ttfb_timeout_task: Optional[asyncio.Task] = None
+        self._ttfb_timeout_task: asyncio.Task | None = None
         self._user_speaking: bool = False
         self._finalize_pending: bool = False
         self._finalize_requested: bool = False
@@ -139,8 +164,18 @@ class STTService(AIService):
         # Keepalive state
         self._keepalive_timeout = keepalive_timeout
         self._keepalive_interval = keepalive_interval
-        self._keepalive_task: Optional[asyncio.Task] = None
+        self._keepalive_task: asyncio.Task | None = None
         self._last_audio_time: float = 0
+
+        # VAD-aware reconnect state
+        # Whether it is safe to reconnect right now (False while the user is speaking).
+        self._can_reconnect: bool = True
+        # Whether a reconnect has been requested but deferred until speaking ends.
+        self._need_reconnect: bool = False
+        # Whether a reconnect cycle is currently in progress.
+        self._reconnecting: bool = False
+        # Audio frames received while _reconnecting is True, replayed after reconnect.
+        self._reconnect_audio_buffer: list[tuple[AudioRawFrame, FrameDirection]] = []
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
@@ -229,19 +264,22 @@ class STTService(AIService):
         settings_cls = type(self._settings)
         await self._update_settings(settings_cls(language=language))
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a language to the service-specific language format.
 
         Args:
             language: The language to convert.
 
         Returns:
-            The service-specific language identifier, or None if not supported.
+            The service-specific language identifier. Return ``None`` to
+            indicate an unsupported language. This optional return is an
+            extension hook for future or third-party subclasses; as of
+            2026-04-28, first-party services return a string.
         """
         return Language(language)
 
     @abstractmethod
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Run speech-to-text on the provided audio data.
 
         This method must be implemented by subclasses to provide actual speech
@@ -269,6 +307,7 @@ class STTService(AIService):
         await super().cleanup()
         await self._cancel_ttfb_timeout()
         await self._cancel_keepalive_task()
+        self._reconnect_audio_buffer.clear()
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply an STT settings delta.
@@ -285,7 +324,20 @@ class STTService(AIService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
-        # Translate language *before* applying so the stored value is canonical
+        # Translate language *before* applying so the stored value is canonical.
+        # Raw strings are first converted to Language enums for proper resolution.
+        if (
+            is_given(delta.language)
+            and isinstance(delta.language, str)
+            and not isinstance(delta.language, Language)
+        ):
+            try:
+                delta.language = Language(delta.language)
+            except ValueError:
+                logger.debug(
+                    f"Language string '{delta.language}' is not a recognized "
+                    f"Language code. It will be passed to the service as-is."
+                )
         if is_given(delta.language) and isinstance(delta.language, Language):
             converted = self.language_to_service_language(delta.language)
             if converted is not None:
@@ -297,15 +349,19 @@ class STTService(AIService):
     async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
         """Process an audio frame for speech recognition.
 
-        If the service is muted, this method does nothing. Otherwise, it
-        processes the audio frame and runs speech-to-text on it, yielding
-        transcription results. If the frame has a user_id, it is stored
-        for later use in transcription.
+        If a reconnect is in progress, the frame is buffered and replayed
+        once the connection is restored. If the service is muted, the frame
+        is dropped. Otherwise the frame is sent to the STT service and, if
+        a user_id is present, it is stored for use in transcription results.
 
         Args:
             frame: The audio frame to process.
             direction: The direction of frame processing.
         """
+        if self._reconnecting:
+            self._reconnect_audio_buffer.append((frame, direction))
+            return
+
         if self._muted:
             return
 
@@ -356,8 +412,13 @@ class STTService(AIService):
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             await self._handle_vad_user_stopped_speaking(frame)
             await self.push_frame(frame, direction)
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            await self._maybe_reconnect_on_user_stopped_speaking()
+            await self.push_frame(frame, direction)
         elif isinstance(frame, STTUpdateSettingsFrame):
-            if frame.delta is not None:
+            if frame.service is not None and frame.service is not self:
+                await self.push_frame(frame, direction)
+            elif frame.delta is not None:
                 await self._update_settings(frame.delta)
             elif frame.settings:
                 # Backward-compatible path: convert legacy dict to settings object.
@@ -409,8 +470,24 @@ class STTService(AIService):
 
         await super().push_frame(frame, direction)
 
+    @property
+    def supports_ttfs(self) -> bool:
+        """Whether this STT service has a meaningful TTFS-to-final-transcript metric.
+
+        Returns False for turn-based STTs where the server defines the turn
+        boundary, so there is no separate "speech end → final transcript"
+        interval to measure. Downstream turn-stop strategies that consume
+        :class:`STTMetadataFrame` treat a 0 latency as "no extra wait."
+        """
+        return True
+
     async def _push_stt_metadata(self):
         """Push STT metadata frame for downstream processors (e.g., turn strategies)."""
+        if not self.supports_ttfs:
+            await self.broadcast_frame(
+                STTMetadataFrame, service_name=self.name, ttfs_p99_latency=0.0
+            )
+            return
         ttfs = self._ttfs_p99_latency
         if ttfs is None:
             ttfs = DEFAULT_TTFS_P99
@@ -447,9 +524,24 @@ class STTService(AIService):
         """
         await self._reset_stt_ttfb_state()
         self._user_speaking = True
+        self._can_reconnect = False
         self._finalize_requested = False
         self._finalize_pending = False
         self._last_transcript_time = 0
+
+    async def _maybe_reconnect_on_user_stopped_speaking(self):
+        """Check if reconnection is needed after the user stops speaking.
+
+        Called when the user's full turn has ended and the transcription has been
+        received. Re-enables reconnection and triggers any deferred reconnect that
+        was requested while the user was speaking.
+
+        Args:
+            frame: The user stopped speaking frame.
+        """
+        self._can_reconnect = True
+        if self._need_reconnect:
+            await self._reconnect()
 
     async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         """Handle VAD user stopped speaking frame.
@@ -510,6 +602,58 @@ class STTService(AIService):
             await self.cancel_task(self._keepalive_task)
             self._keepalive_task = None
 
+    async def _reconnect(self):
+        """Perform a full reconnect cycle with audio buffering.
+
+        Sets ``_reconnecting`` so incoming audio frames are buffered rather than
+        sent to a dead connection. Delegates the actual connection reset to
+        ``_do_reconnect()``. After the new connection is established all buffered
+        frames are replayed. On failure the error is reported via ``push_error``
+        and the ``on_connection_error`` event handler.
+        """
+        logger.info(f"{self} reconnecting...")
+        self._reconnect_audio_buffer.clear()
+        self._reconnecting = True
+        self._need_reconnect = False
+        try:
+            await self._do_reconnect()
+        except Exception as e:
+            logger.error(f"{self} reconnect failed: {e}")
+            await self._call_event_handler("on_connection_error", str(e))
+            await self.push_error(f"{self} reconnect failed: {e}", exception=e)
+            return
+        finally:
+            self._reconnecting = False
+
+        # Replay audio frames that arrived while the connection was down.
+        for buffered_frame, buffered_direction in self._reconnect_audio_buffer:
+            await self.process_audio_frame(buffered_frame, buffered_direction)
+        self._reconnect_audio_buffer.clear()
+
+    async def _do_reconnect(self):
+        """Perform the service-specific connection reset.
+
+        Called by ``_reconnect()`` inside the reconnecting guard. The default
+        implementation is a no-op. Subclasses that support explicit reconnection
+        (e.g. ``WebsocketSTTService``) should override this to tear down and
+        re-establish their connection.
+        """
+        pass
+
+    async def _request_reconnect(self):
+        """Reconnect immediately if safe, or defer until after the current user turn.
+
+        Reconnection is unsafe while the user is speaking because the service is
+        actively receiving audio. Calling this method while the user is speaking
+        schedules a reconnect that fires as soon as ``UserStoppedSpeakingFrame``
+        is received.
+        """
+        logger.debug(f"{self} requesting to reconnect!")
+        if self._can_reconnect:
+            await self._reconnect()
+        else:
+            self._need_reconnect = True
+
     async def _keepalive_task_handler(self):
         """Send periodic silent audio to prevent the server from closing the connection.
 
@@ -568,7 +712,7 @@ class SegmentedSTTService(STTService):
     VAD detection.
     """
 
-    def __init__(self, *, sample_rate: Optional[int] = None, **kwargs):
+    def __init__(self, *, sample_rate: int | None = None, **kwargs):
         """Initialize the segmented STT service.
 
         Args:
@@ -701,6 +845,16 @@ class WebsocketSTTService(STTService, WebsocketService):
         await super()._disconnect()
         await self._cancel_keepalive_task()
 
+    async def _do_reconnect(self):
+        """Disconnect and reconnect the websocket.
+
+        Called by ``STTService._reconnect()`` inside the reconnecting guard.
+        Tears down the current websocket connection and re-establishes it.
+        Keepalive management is handled by ``_connect`` / ``_disconnect``.
+        """
+        await self._disconnect()
+        await self._connect()
+
     async def _reconnect_websocket(self, attempt_number: int) -> bool:
         """Reconnect and restart keepalive task.
 
@@ -726,6 +880,10 @@ class WebsocketSTTService(STTService, WebsocketService):
         Args:
             silence: Silent 16-bit mono PCM audio bytes.
         """
+        if (
+            self._websocket is None
+        ):  # should never happen — caller should gate on _is_keepalive_ready()
+            return
         await self._websocket.send(silence)
 
     async def _report_error(self, error: ErrorFrame):

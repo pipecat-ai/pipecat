@@ -1,0 +1,139 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+import asyncio
+import json
+import os
+import sys
+
+from dotenv import load_dotenv
+from loguru import logger
+
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import (
+    InterruptionFrame,
+    TranscriptionFrame,
+    TTSSpeakFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+)
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.runner.livekit import configure
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
+from pipecat.workers.runner import WorkerRunner
+
+load_dotenv(override=True)
+
+logger.remove(0)
+logger.add(sys.stderr, level="DEBUG")
+
+
+async def main():
+    (url, token, room_name) = await configure()
+
+    transport = LiveKitTransport(
+        url=url,
+        token=token,
+        room_name=room_name,
+        params=LiveKitParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+        ),
+    )
+
+    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
+
+    llm = OpenAILLMService(
+        api_key=os.environ["OPENAI_API_KEY"],
+        settings=OpenAILLMService.Settings(
+            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
+        ),
+    )
+
+    tts = CartesiaTTSService(
+        api_key=os.environ["CARTESIA_API_KEY"],
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
+    )
+
+    context = LLMContext()
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
+
+    pipeline = Pipeline(
+        [
+            transport.input(),  # Transport user input
+            stt,
+            user_aggregator,  # User responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            assistant_aggregator,  # Assistant spoken responses
+        ]
+    )
+
+    worker = PipelineWorker(
+        pipeline,
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+    )
+
+    # Register an event handler so we can play the audio when the
+    # participant joins.
+    @transport.event_handler("on_first_participant_joined")
+    async def on_first_participant_joined(transport, participant_id):
+        await asyncio.sleep(1)
+        await worker.queue_frame(
+            TTSSpeakFrame(
+                "Hello there! How are you doing today? Would you like to talk about the weather?"
+            )
+        )
+
+    # Register an event handler to receive data from the participant via text chat
+    # in the LiveKit room. This will be used to as transcription frames and
+    # interrupt the bot and pass it to llm for processing and
+    # then pass back to the participant as audio output.
+    @transport.event_handler("on_data_received")
+    async def on_data_received(transport, data, participant_id):
+        logger.info(f"Received data from participant {participant_id}: {data}")
+        # convert data from bytes to string
+        json_data = json.loads(data)
+
+        await worker.queue_frames(
+            [
+                InterruptionFrame(),
+                UserStartedSpeakingFrame(),
+                TranscriptionFrame(
+                    user_id=participant_id,
+                    timestamp=json_data["timestamp"],
+                    text=json_data["message"],
+                ),
+                UserStoppedSpeakingFrame(),
+            ],
+        )
+
+    runner = WorkerRunner()
+
+    await runner.add_workers(worker)
+    await runner.run()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

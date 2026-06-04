@@ -1,0 +1,112 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+import os
+
+from dotenv import load_dotenv
+from loguru import logger
+
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import Frame, TranscriptionFrame, TranslationFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineWorker
+from pipecat.processors.audio.vad_processor import VADProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
+from pipecat.services.gladia.config import (
+    LanguageConfig,
+    RealtimeProcessingConfig,
+    TranslationConfig,
+)
+from pipecat.services.gladia.stt import GladiaSTTService
+from pipecat.transcriptions.language import Language
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.workers.runner import WorkerRunner
+
+load_dotenv(override=True)
+
+
+class TranscriptionLogger(FrameProcessor):
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, TranscriptionFrame):
+            print(f"Transcription ({frame.language}): {frame.text}")
+        elif isinstance(frame, TranslationFrame):
+            print(f"Translation ({frame.language}): {frame.text}")
+
+        # Push all frames through
+        await self.push_frame(frame, direction)
+
+
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
+transport_params = {
+    "daily": lambda: DailyParams(audio_in_enabled=True),
+    "twilio": lambda: FastAPIWebsocketParams(audio_in_enabled=True),
+    "webrtc": lambda: TransportParams(audio_in_enabled=True),
+}
+
+
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
+    logger.info(f"Starting bot")
+
+    region = os.getenv("GLADIA_REGION", "us-west")
+    assert region in ("us-west", "eu-west"), f"Invalid GLADIA_REGION: {region}"
+
+    stt = GladiaSTTService(
+        api_key=os.environ["GLADIA_API_KEY"],
+        region=region,
+        settings=GladiaSTTService.Settings(
+            language_config=LanguageConfig(
+                languages=[Language.EN],
+                code_switching=False,
+            ),
+            realtime_processing=RealtimeProcessingConfig(
+                translation=True,
+                translation_config=TranslationConfig(
+                    target_languages=[Language.ES],
+                    model="enhanced",
+                ),
+            ),
+        ),
+    )
+
+    tl = TranscriptionLogger()
+
+    vad_processor = VADProcessor(vad_analyzer=SileroVADAnalyzer())
+
+    pipeline = Pipeline([transport.input(), vad_processor, stt, tl, transport.output()])
+
+    worker = PipelineWorker(
+        pipeline,
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+    )
+
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"Client disconnected")
+        await worker.cancel()
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
+    await runner.run()
+
+
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
+
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()

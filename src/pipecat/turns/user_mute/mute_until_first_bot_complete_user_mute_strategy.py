@@ -30,10 +30,6 @@ class MuteUntilFirstBotCompleteUserMuteStrategy(BaseUserMuteStrategy):
         super().__init__()
         self._first_speech_handled = False
 
-    async def reset(self):
-        """Reset the strategy to its initial state."""
-        self._first_speech_handled = False
-
     async def process_frame(self, frame: Frame) -> bool:
         """Process an incoming frame.
 
