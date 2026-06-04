@@ -71,7 +71,7 @@ transport_params = {
 }
 
 
-async def get_weather(params: FunctionCallParams, location: str):
+async def get_current_weather(params: FunctionCallParams, location: str):
     """Return the current weather for a location.
 
     A stub that always reports the same conditions — replace with a real
@@ -102,12 +102,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 "responses will be spoken aloud, so avoid emojis, bullet "
                 "points, or other formatting that can't be spoken. Respond to "
                 "what the user said in a creative, helpful, and brief way. "
-                "If the user asks about the weather, call the get_weather "
+                "If the user asks about the weather, call the get_current_weather "
                 "tool and speak the result back naturally."
             ),
         ),
     )
-    llm.register_direct_function(get_weather)
+    llm.register_direct_function(get_current_weather)
 
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
@@ -116,7 +116,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    context = LLMContext(tools=ToolsSchema(standard_tools=[get_weather]))
+    context = LLMContext(tools=ToolsSchema(standard_tools=[get_current_weather]))
     # `FilterIncompleteUserTurnStrategies` pairs the default detector
     # chain with `LLMTurnCompletionUserTurnStopStrategy`: detectors
     # trigger LLM inference but the public `on_user_turn_stopped` event

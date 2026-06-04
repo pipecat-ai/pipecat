@@ -85,7 +85,7 @@ You have one functions available:
 
 Infer whether to use Fahrenheit or Celsius automatically based on the location, unless the user specifies a preference.
 
-Start by asking me for my location. Then, use 'get_weather_current' to give me a forecast.
+Start by asking me for my location. Then, use 'get_current_weather' to give me a forecast.
 
     Respond to what the user said in a creative and helpful way.""",
         ),
