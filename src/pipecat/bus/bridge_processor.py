@@ -16,6 +16,7 @@ Provides:
   to the bus).
 """
 
+from collections import deque
 from typing import TYPE_CHECKING
 
 from pipecat.bus.bus import WorkerBus
@@ -75,6 +76,16 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
         self._target_task = target_task
         self._bridge = bridge
         self._exclude_frames = exclude_frames or ()
+        # Bounded LRU dedup against sibling worker re-broadcast.
+        # In a multi-worker setup, sibling workers briefly co-existing as
+        # ``active=True`` during a handoff transient re-broadcast frames
+        # originally emitted by another worker back onto the bus. The host
+        # bridge then receives the same ``frame.id`` from multiple sources
+        # (the original and N siblings). Dropping the duplicate delivery
+        # here keeps the assistant aggregator from recording duplicate
+        # tool round-trips in the LLM context.
+        self._seen_bus_ids: set[int] = set()
+        self._seen_bus_history: deque[int] = deque(maxlen=512)
 
     async def setup(self, setup: FrameProcessorSetup):
         """Subscribe to the bus during processor setup."""
@@ -144,6 +155,20 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
         # If message targeted at someone else, skip
         if message.target and message.target != self._worker_name:
             return
+
+        # Skip duplicate delivery when a sibling worker, briefly active
+        # during a handoff transient, re-broadcasts a frame originally
+        # emitted by another worker. The bus loop is by-design (it
+        # propagates upstream frames to processors upstream of the
+        # BusBridge in the host pipeline, e.g. LLMUserAggregator), so
+        # we dedup at the receiver instead of skipping at the sender.
+        fid = message.frame.id
+        if fid in self._seen_bus_ids:
+            return
+        self._seen_bus_ids.add(fid)
+        self._seen_bus_history.append(fid)
+        if len(self._seen_bus_ids) > len(self._seen_bus_history):
+            self._seen_bus_ids = set(self._seen_bus_history)
 
         await self.push_frame(message.frame, message.direction)
 

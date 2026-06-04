@@ -263,6 +263,157 @@ class TestBusBridgeProcessor(unittest.IsolatedAsyncioTestCase):
         await processor.on_bus_message(msg)
         self.assertEqual(len(injected), 0)
 
+    async def test_duplicate_frame_id_from_sibling_dropped(self):
+        """Sibling re-broadcast of the same frame.id is dropped at the receiver.
+
+        In a multi-worker setup, sibling workers briefly co-existing as
+        ``active=True`` during a handoff transient re-broadcast frames
+        originally emitted by another worker. Without dedup the host
+        bridge delivers the same ``frame.id`` once per re-broadcasting
+        sibling, which pollutes the assistant aggregator's LLM context.
+
+        Regression: same ``frame.id`` received twice (once from the
+        original emitter, once from a sibling) is pushed only once.
+        """
+        bus = AsyncQueueBus()
+        processor = BusBridgeProcessor(
+            bus=bus,
+            worker_name="main_task",
+        )
+
+        injected = []
+        original_push = processor.push_frame
+
+        async def capture_push(frame, direction=FrameDirection.DOWNSTREAM):
+            injected.append(frame)
+            await original_push(frame, direction)
+
+        processor.push_frame = capture_push
+
+        # Same TextFrame instance (same ``frame.id``) re-broadcast by a
+        # sibling worker during the handoff transient.
+        original_frame = TextFrame(text="result")
+
+        first_delivery = BusFrameMessage(
+            source="child_a",
+            frame=original_frame,
+            direction=FrameDirection.DOWNSTREAM,
+        )
+        sibling_rebroadcast = BusFrameMessage(
+            source="child_b",
+            frame=original_frame,
+            direction=FrameDirection.DOWNSTREAM,
+        )
+
+        await processor.on_bus_message(first_delivery)
+        await processor.on_bus_message(sibling_rebroadcast)
+
+        # Only the first delivery reaches the pipeline.
+        self.assertEqual(len(injected), 1)
+        self.assertEqual(injected[0].text, "result")
+
+    async def test_dedup_distinct_frame_ids_all_delivered(self):
+        """Distinct ``frame.id``s are always delivered (dedup is by id).
+
+        Sanity check: the dedup key is the frame id, not the frame type
+        or content. Two frames with different ids must both pass through.
+        """
+        bus = AsyncQueueBus()
+        processor = BusBridgeProcessor(
+            bus=bus,
+            worker_name="main_task",
+        )
+
+        injected = []
+        original_push = processor.push_frame
+
+        async def capture_push(frame, direction=FrameDirection.DOWNSTREAM):
+            injected.append(frame)
+            await original_push(frame, direction)
+
+        processor.push_frame = capture_push
+
+        # Two distinct frames (different ``frame.id``) with identical text.
+        first = TextFrame(text="same_text")
+        second = TextFrame(text="same_text")
+        self.assertNotEqual(first.id, second.id)
+
+        await processor.on_bus_message(
+            BusFrameMessage(
+                source="child",
+                frame=first,
+                direction=FrameDirection.DOWNSTREAM,
+            )
+        )
+        await processor.on_bus_message(
+            BusFrameMessage(
+                source="child",
+                frame=second,
+                direction=FrameDirection.DOWNSTREAM,
+            )
+        )
+
+        self.assertEqual(len(injected), 2)
+
+    async def test_dedup_lru_eviction_rebuilds_set_from_history(self):
+        """LRU eviction path: bounded deque + set stay consistent.
+
+        The dedup state is a ``set[int]`` (O(1) membership) backed by a
+        ``deque(maxlen=512)`` history. When the 513th distinct id is
+        appended, the deque silently evicts its oldest entry. The set
+        does not get the eviction signal, so it must be rebuilt from the
+        history to keep memory bounded and to allow very old ids to be
+        delivered again if they ever recur.
+
+        Regression: after pushing more than 512 distinct frames, the
+        oldest evicted id is no longer in the dedup set (so a hypothetical
+        re-delivery would pass through), and the most recent 512 ids
+        remain deduplicated.
+        """
+        bus = AsyncQueueBus()
+        processor = BusBridgeProcessor(
+            bus=bus,
+            worker_name="main_task",
+        )
+
+        injected = []
+        original_push = processor.push_frame
+
+        async def capture_push(frame, direction=FrameDirection.DOWNSTREAM):
+            injected.append(frame)
+            await original_push(frame, direction)
+
+        processor.push_frame = capture_push
+
+        # Push 513 distinct frames → deque is full (maxlen=512) and the
+        # first frame's id has been evicted from the history. The set
+        # rebuild branch must fire on the 513th delivery.
+        frames = [TextFrame(text=f"f{i}") for i in range(513)]
+        for f in frames:
+            await processor.on_bus_message(
+                BusFrameMessage(
+                    source="child",
+                    frame=f,
+                    direction=FrameDirection.DOWNSTREAM,
+                )
+            )
+
+        # All 513 distinct ids were delivered exactly once.
+        self.assertEqual(len(injected), 513)
+
+        # Dedup state is now bounded to the deque length (set was
+        # rebuilt from history when it overgrew the deque).
+        self.assertEqual(len(processor._seen_bus_history), 512)
+        self.assertEqual(len(processor._seen_bus_ids), 512)
+        self.assertEqual(processor._seen_bus_ids, set(processor._seen_bus_history))
+
+        # The oldest frame's id has been evicted from both structures —
+        # if the same id ever recurred, it would no longer be dropped.
+        self.assertNotIn(frames[0].id, processor._seen_bus_ids)
+        # The most recent 512 ids are still tracked.
+        self.assertIn(frames[-1].id, processor._seen_bus_ids)
+        self.assertIn(frames[1].id, processor._seen_bus_ids)
+
 
 if __name__ == "__main__":
     unittest.main()
