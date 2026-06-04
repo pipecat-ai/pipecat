@@ -112,6 +112,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client disconnected")
         await worker.cancel()
 
+    @tts.event_handler("on_tts_request")
+    async def on_tts_request(tts, context_id, text):
+        """Surface the context_id for debugging and tracing TTS requests.
+
+        Pipecat auto-generates a context_id (UUID) per LLM turn and passes it
+        directly as Cartesia's `context_id` in the WebSocket request. Logging
+        it here lets you correlate your application logs with Cartesia's
+        context-level audio output for end-to-end tracing.
+
+        Docs:
+          - Pipecat event: https://docs.pipecat.ai/api-reference/server/events/service-events#on_tts_request
+          - Cartesia contexts: https://docs.cartesia.ai/use-the-api/tts-websocket/contexts
+        """
+        logger.info(f"TTS request: {context_id} - {text}")
+
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.add_workers(worker)
