@@ -94,7 +94,7 @@ class Judge:
             for a JSON verdict + short reason.
     """
 
-    def __init__(self, service, max_tokens: int = 200):
+    def __init__(self, service, *, max_tokens: int = 200):
         """Initialize the judge with a configured pipecat LLM service.
 
         Args:
