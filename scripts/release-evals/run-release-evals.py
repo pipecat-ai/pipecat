@@ -257,6 +257,7 @@ async def run_one(
     port: int,
     logs_dir: Path,
     record_dir: Path | None,
+    cache_dir: str | None,
     sem: asyncio.Semaphore,
 ) -> None:
     """Launch one example bot, run its scenario, and record the outcome on ``state``."""
@@ -299,7 +300,7 @@ async def run_one(
             scenario = load_scenario(scenario_path)
             record_path = str(record_dir / f"{safe}.wav") if record_dir else None
             state.result = await run_scenario(
-                scenario, f"ws://localhost:{port}", record_path=record_path
+                scenario, f"ws://localhost:{port}", record_path=record_path, cache_dir=cache_dir
             )
         except Exception as e:
             state.error = f"error: {e}"
@@ -445,7 +446,8 @@ async def main(args: argparse.Namespace) -> int:
     states = [TestState(example=e, scenario=s) for (e, s) in pairs]
     sem = asyncio.Semaphore(args.concurrency)
     tasks = [
-        run_one(states[i], BASE_PORT + i, logs_dir, record_dir, sem) for i in range(len(states))
+        run_one(states[i], BASE_PORT + i, logs_dir, record_dir, args.cache_dir, sem)
+        for i in range(len(states))
     ]
 
     if _console.is_terminal:
@@ -467,6 +469,7 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--concurrency", type=int, default=4, help="How many to run at once")
     parser.add_argument("-a", "--audio", action="store_true", help="Record conversation audio")
     parser.add_argument("-n", "--name", help="Run name (defaults to a timestamp)")
+    parser.add_argument("--cache-dir", help="Directory for cached synthesized user audio")
     args = parser.parse_args()
 
     sys.exit(asyncio.run(main(args)))

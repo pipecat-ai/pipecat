@@ -160,7 +160,7 @@ def _rich_failure(f: AssertionFailure) -> Text:
 
 
 async def _run_one_live(
-    scenario, url: str, label: str, verbose: bool, record_path: str | None
+    scenario, url: str, label: str, verbose: bool, record_path: str | None, cache_dir: str | None
 ) -> EvalResult:
     """Run one eval with a spinning header that updates to ✓/✗, turns streaming below."""
     lines: list[Text] = []
@@ -172,7 +172,11 @@ async def _run_one_live(
             live.update(Group(spinner, *lines))
 
         result = await run_scenario(
-            scenario, url, on_progress=on_progress if verbose else None, record_path=record_path
+            scenario,
+            url,
+            on_progress=on_progress if verbose else None,
+            record_path=record_path,
+            cache_dir=cache_dir,
         )
         # Connect-level failures aren't turn lines; surface them under the header.
         extra = [_rich_failure(f) for f in result.failures if f.turn_index < 0]
@@ -191,8 +195,9 @@ async def _run_all(
     paths: list[Path],
     bot_url: str,
     verbose: bool,
-    record_dir: str | None,
-    record_file: str | None,
+    audio: bool,
+    record_dir: str,
+    cache_dir: str | None,
 ) -> int:
     passed = 0
     failed = 0
@@ -207,14 +212,14 @@ async def _run_all(
 
         label = f"{path.name}::{scenario.name}"
         url = scenario.fixtures.get("bot_url") or bot_url
-        record_path = record_file or _record_path(record_dir, scenario.name)
+        record_path = _record_path(record_dir, scenario.name) if audio else None
         print(f"  {_dim(describe_config(scenario))}")
         if _console.is_terminal:
-            result = await _run_one_live(scenario, url, label, verbose, record_path)
+            result = await _run_one_live(scenario, url, label, verbose, record_path, cache_dir)
         else:
             on_progress = _print_progress if verbose else None
             result = await run_scenario(
-                scenario, url, on_progress=on_progress, record_path=record_path
+                scenario, url, on_progress=on_progress, record_path=record_path, cache_dir=cache_dir
             )
             _print_result(result, label)
         if result.skipped:
@@ -251,17 +256,21 @@ def run(
         "-v",
         help="Print a line for each turn and expectation as it resolves.",
     ),
-    record_dir: str = typer.Option(
-        None,
-        "--record-dir",
-        help="Record each audio-mode scenario's conversation to "
-        "<record-dir>/<scenario>.wav (bot-side path).",
+    audio: bool = typer.Option(
+        False,
+        "-a",
+        "--audio",
+        help="Record each scenario's conversation audio (audio-mode scenarios).",
     ),
-    record: str = typer.Option(
+    record_dir: str = typer.Option(
+        "recordings",
+        "--record-dir",
+        help="Directory for --audio recordings: <record-dir>/<scenario>.wav.",
+    ),
+    cache_dir: str = typer.Option(
         None,
-        "--record",
-        help="Record the conversation audio to this WAV file. Intended for a "
-        "single scenario; for multiple use --record-dir.",
+        "--cache-dir",
+        help="Directory for cached synthesized user audio (default <user-cache-dir>/pipecat/tts).",
     ),
 ) -> None:
     """Run one or more evals against a bot."""
@@ -273,5 +282,5 @@ def run(
         logger.remove()
         logger.add(sys.stderr, level="WARNING")
 
-    exit_code = asyncio.run(_run_all(scenarios, bot_url, verbose, record_dir, record))
+    exit_code = asyncio.run(_run_all(scenarios, bot_url, verbose, audio, record_dir, cache_dir))
     raise typer.Exit(code=exit_code)
