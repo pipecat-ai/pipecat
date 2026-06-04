@@ -23,7 +23,7 @@ from rich.spinner import Spinner
 from rich.text import Text
 
 from pipecat.evals.harness import AssertionFailure, EvalResult, TurnProgress, run_scenario
-from pipecat.evals.scenario import load_scenario
+from pipecat.evals.scenario import describe_config, load_scenario
 
 _console = Console()
 
@@ -187,7 +187,13 @@ def _record_path(record_dir: str | None, scenario_name: str) -> str | None:
     return str(Path(record_dir) / f"{scenario_name}.wav")
 
 
-async def _run_all(paths: list[Path], bot_url: str, verbose: bool, record_dir: str | None) -> int:
+async def _run_all(
+    paths: list[Path],
+    bot_url: str,
+    verbose: bool,
+    record_dir: str | None,
+    record_file: str | None,
+) -> int:
     passed = 0
     failed = 0
     skipped = 0
@@ -201,7 +207,8 @@ async def _run_all(paths: list[Path], bot_url: str, verbose: bool, record_dir: s
 
         label = f"{path.name}::{scenario.name}"
         url = scenario.fixtures.get("bot_url") or bot_url
-        record_path = _record_path(record_dir, scenario.name)
+        record_path = record_file or _record_path(record_dir, scenario.name)
+        print(f"  {_dim(describe_config(scenario))}")
         if _console.is_terminal:
             result = await _run_one_live(scenario, url, label, verbose, record_path)
         else:
@@ -250,6 +257,12 @@ def run(
         help="Record each audio-mode scenario's conversation to "
         "<record-dir>/<scenario>.wav (bot-side path).",
     ),
+    record: str = typer.Option(
+        None,
+        "--record",
+        help="Record the conversation audio to this WAV file. Intended for a "
+        "single scenario; for multiple use --record-dir.",
+    ),
 ) -> None:
     """Run one or more evals against a bot."""
     # In an interactive terminal, quiet pipecat's INFO/DEBUG logs (e.g. from the
@@ -260,5 +273,5 @@ def run(
         logger.remove()
         logger.add(sys.stderr, level="WARNING")
 
-    exit_code = asyncio.run(_run_all(scenarios, bot_url, verbose, record_dir))
+    exit_code = asyncio.run(_run_all(scenarios, bot_url, verbose, record_dir, record))
     raise typer.Exit(code=exit_code)
