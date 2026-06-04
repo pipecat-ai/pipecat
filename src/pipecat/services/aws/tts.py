@@ -29,7 +29,7 @@ from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
-    import aioboto3
+    import aiobotocore.session
     from botocore.exceptions import BotoCoreError, ClientError
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -192,7 +192,7 @@ class AWSPollyTTSService(TTSService):
 
         Args:
             api_key: AWS secret access key. If None, falls back to environment
-                variables and the default boto3 credential chain (instance
+                variables and the default botocore credential chain (instance
                 profiles, IRSA, ECS task roles, SSO, etc.).
             aws_access_key_id: AWS access key ID. Same fallback behaviour as
                 ``api_key``.
@@ -253,7 +253,7 @@ class AWSPollyTTSService(TTSService):
             **kwargs,
         )
 
-        # Resolve credentials using the shared chain (explicit → env → boto3).
+        # Resolve credentials using the shared chain (explicit → env → botocore).
         self._aws_params = resolve_credentials(
             aws_access_key_id=aws_access_key_id,
             aws_secret_access_key=api_key,
@@ -261,7 +261,7 @@ class AWSPollyTTSService(TTSService):
             region=region,
         ).to_boto_kwargs()
 
-        self._aws_session = aioboto3.Session()
+        self._aws_session = aiobotocore.session.get_session()
 
         self._resampler = create_stream_resampler()
 
@@ -348,13 +348,11 @@ class AWSPollyTTSService(TTSService):
             # Filter out None values
             filtered_params = {k: v for k, v in params.items() if v is not None}
 
-            # aioboto3's `client()` is an async context manager but its stubs
-            # don't advertise `__aenter__` / `__aexit__` to pyright.
-            async with self._aws_session.client(  # pyright: ignore[reportGeneralTypeIssues]
+            async with self._aws_session.create_client(  # pyright: ignore[reportGeneralTypeIssues]
                 "polly",
                 **self._aws_params,  # pyright: ignore[reportArgumentType]
             ) as polly:
-                response = await polly.synthesize_speech(**filtered_params)
+                response = await polly.synthesize_speech(**filtered_params)  # pyright: ignore[reportGeneralTypeIssues]
                 if "AudioStream" in response:
                     # Get the streaming body and read it
                     stream = response["AudioStream"]
