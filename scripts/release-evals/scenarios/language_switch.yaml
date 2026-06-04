@@ -1,0 +1,20 @@
+name: language_switch
+
+# Text modality: switch languages mid-conversation. Tests that the bot follows a
+# language instruction and responds in the requested language.
+
+judge:
+  eval:
+    service: ollama
+    model: llama3:latest
+
+turns:
+  - user: "Where is La Sagrada Familia?"
+    expect:
+      - event: response
+        eval: "answers that La Sagrada Familia is in Barcelona, Spain"
+
+  - user: "From now on, reply only in Spanish. What's a good dish to try there?"
+    expect:
+      - event: response
+        eval: "the response is written in Spanish"
