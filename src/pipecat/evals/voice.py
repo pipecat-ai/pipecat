@@ -15,7 +15,7 @@ full input audio path.
 ``TTSService`` and reuses it across the scenario's audio turns, so any TTS
 service works (HTTP or streaming/WebSocket) — the audio comes back as
 ``TTSAudioRawFrame``s flowing through the pipeline. Generated audio is cached at
-``.cache/evals/tts/<sha256>.wav`` (keyed by ``cache_key`` + text); the cache
+``<cache-dir>/<sha256>.wav`` (keyed by ``cache_key`` + lower-cased text); the cache
 file's actual sample rate is checked on load and regenerated on mismatch, so you
 can experiment with sample rates without bloating the cache.
 
@@ -37,8 +37,16 @@ from loguru import logger
 from pipecat.frames.frames import Frame
 from pipecat.serializers.base_serializer import FrameSerializer
 
-# Where cached audio lives. Override via the PIPECAT_EVALS_CACHE_DIR env var.
-DEFAULT_CACHE_DIR = Path(".cache/evals/tts")
+
+# Where cached audio lives. Defaults to <user-cache-dir>/pipecat/tts; override
+# with an explicit cache_dir or the PIPECAT_EVALS_CACHE_DIR env var.
+def _default_cache_dir() -> Path:
+    root = os.environ.get("XDG_CACHE_HOME")
+    base = Path(root) if root else Path.home() / ".cache"
+    return base / "pipecat" / "tts"
+
+
+DEFAULT_CACHE_DIR = _default_cache_dir()
 
 # Default sample rate for generated audio (matches pipecat input default).
 DEFAULT_SAMPLE_RATE = 16000
@@ -79,7 +87,7 @@ def tts_cache_key(voice_cfg: dict) -> str:
     return "\x00".join((service, voice, model))
 
 
-def build_tts_service(voice_cfg: dict, sample_rate: int):
+def build_tts_service(voice_cfg: dict, *, sample_rate: int):
     """Build a ``TTSService`` from a scenario's ``user_audio`` mapping.
 
     Honors a custom ``factory`` (dotted path to a callable taking
@@ -152,7 +160,14 @@ class EvalVoice:
             pcm, sample_rate = await voice.generate("hello world")
     """
 
-    def __init__(self, service, sample_rate: int, cache_key: str):
+    def __init__(
+        self,
+        service,
+        *,
+        sample_rate: int,
+        cache_key: str,
+        cache_dir: str | Path | None = None,
+    ):
         """Initialize the generator.
 
         Args:
@@ -161,10 +176,13 @@ class EvalVoice:
             sample_rate: Output sample rate the service produces.
             cache_key: Stable identity for the service config (see
                 :func:`tts_cache_key`); combined with the text to key the cache.
+            cache_dir: Where to store cached audio. Defaults to
+                ``<user-cache-dir>/pipecat/tts`` (or ``$PIPECAT_EVALS_CACHE_DIR``).
         """
         self._service = service
         self._sample_rate = sample_rate
         self._cache_key = cache_key
+        self._cache_dir_override = Path(cache_dir) if cache_dir else None
 
         self._worker = None
         self._runner_task = None
@@ -280,15 +298,20 @@ class EvalVoice:
         """
         h = hashlib.sha256()
         for part in (self._cache_key, text):
-            h.update(part.encode("utf-8"))
+            # Lower-case so trivial casing differences ("Hello" vs "hello") hit
+            # the same cache slot.
+            h.update(part.lower().encode("utf-8"))
             h.update(b"\x00")
         return self._cache_dir() / f"{h.hexdigest()}.wav"
 
-    @staticmethod
-    def _cache_dir() -> Path:
-        """Resolve the cache directory, honoring the env var override."""
-        override = os.environ.get("PIPECAT_EVALS_CACHE_DIR")
-        base = Path(override) if override else DEFAULT_CACHE_DIR
+    def _cache_dir(self) -> Path:
+        """Resolve the cache directory: explicit cache_dir > env var > default."""
+        if self._cache_dir_override is not None:
+            base = self._cache_dir_override
+        elif os.environ.get("PIPECAT_EVALS_CACHE_DIR"):
+            base = Path(os.environ["PIPECAT_EVALS_CACHE_DIR"])
+        else:
+            base = DEFAULT_CACHE_DIR
         base.mkdir(parents=True, exist_ok=True)
         return base
 

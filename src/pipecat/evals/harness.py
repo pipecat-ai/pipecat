@@ -159,9 +159,11 @@ class EvalSession:
         self,
         scenario: Scenario,
         bot_url: str,
+        *,
         connect_timeout_s: float = 5.0,
         on_progress: Callable[[TurnProgress], None] | None = None,
         record_path: str | None = None,
+        cache_dir: str | None = None,
     ):
         """Initialize the eval session.
 
@@ -174,12 +176,15 @@ class EvalSession:
                 as each turn and expectation resolves (used for verbose output).
             record_path: When set (and the scenario is audio mode), asks the eval
                 transport to record the conversation audio to this path (bot-side).
+            cache_dir: Where to cache synthesized user audio. Defaults to
+                ``<user-cache-dir>/pipecat/tts``.
         """
         self._scenario = scenario
         self._bot_url = bot_url
         self._connect_timeout_s = connect_timeout_s
         self._on_progress = on_progress
         self._record_path = record_path
+        self._cache_dir = cache_dir
 
         self._ws: Any = None
         self._queue: asyncio.Queue = asyncio.Queue()
@@ -272,9 +277,10 @@ class EvalSession:
             cfg = self._scenario.user_audio
             sample_rate = tts_sample_rate(cfg)
             self._voice = EvalVoice(
-                build_tts_service(cfg, sample_rate),
+                build_tts_service(cfg, sample_rate=sample_rate),
                 sample_rate=sample_rate,
                 cache_key=tts_cache_key(cfg),
+                cache_dir=self._cache_dir,
             )
             await self._voice.start()
 
@@ -919,9 +925,11 @@ def _audio_chunks(pcm: bytes, sample_rate: int):
 async def run_scenario(
     scenario: Scenario,
     bot_url: str,
+    *,
     connect_timeout_s: float = 5.0,
     on_progress: Callable[[TurnProgress], None] | None = None,
     record_path: str | None = None,
+    cache_dir: str | None = None,
 ) -> EvalResult:
     """Run a scenario against a bot at the given WebSocket URL.
 
@@ -934,8 +942,17 @@ async def run_scenario(
             connection before giving up.
         on_progress: Optional per-turn/expectation progress callback (verbose).
         record_path: Optional path to record the conversation audio (audio mode).
+        cache_dir: Optional directory for cached synthesized user audio
+            (default ``<user-cache-dir>/pipecat/tts``).
 
     Returns:
         The structured outcome.
     """
-    return await EvalSession(scenario, bot_url, connect_timeout_s, on_progress, record_path).run()
+    return await EvalSession(
+        scenario,
+        bot_url,
+        connect_timeout_s=connect_timeout_s,
+        on_progress=on_progress,
+        record_path=record_path,
+        cache_dir=cache_dir,
+    ).run()
