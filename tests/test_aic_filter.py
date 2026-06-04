@@ -7,11 +7,21 @@
 import asyncio
 import time
 import unittest
+import warnings
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
+
+# The create_vad_analyzer factory and AICVADAnalyzer constructor now emit
+# DeprecationWarnings of their own (covered by their dedicated test files).
+# Suppress here so this file's primary coverage stays quiet.
+warnings.filterwarnings(
+    "ignore",
+    category=DeprecationWarning,
+    message=".*(AICVADAnalyzer|create_vad_analyzer) is deprecated.*",
+)
 
 # Check if aic_sdk is available
 aic_sdk: Any
@@ -34,40 +44,14 @@ def _model_manager_ref_count(manager, key: str) -> int:
         return entry[1] if entry else 0
 
 
-class MockProcessor:
-    """A lightweight mock for AIC ProcessorAsync that mimics real behavior."""
-
-    def __init__(self):
-        self.processor_ctx = MockProcessorContext()
-        self.vad_ctx = MockVadContext()
-
-    def get_processor_context(self):
-        return self.processor_ctx
-
-    def get_vad_context(self):
-        return self.vad_ctx
-
-    async def process_async(self, audio_array):
-        # Return a copy of the input (simulating passthrough)
-        return audio_array.copy()
-
-
-class MockProcessorContext:
-    """A lightweight mock for AIC ProcessorContext."""
-
-    def __init__(self):
-        self.parameters_set: list[tuple] = []
-        self.reset_called = False
-        self._output_delay = 0
-
-    def get_output_delay(self):
-        return self._output_delay
-
-    def set_parameter(self, param, value):
-        self.parameters_set.append((param, value))
-
-    def reset(self):
-        self.reset_called = True
+from tests.aic_mocks import (  # noqa: E402
+    MockModel,
+    MockProcessorContext,
+    MockVadContext,
+)
+from tests.aic_mocks import (
+    MockProcessorAsync as MockProcessor,
+)
 
 
 class UnsupportedEnhancementProcessorContext(MockProcessorContext):
@@ -84,39 +68,6 @@ class UnsupportedEnhancementProcessorContext(MockProcessorContext):
             self.enhancement_attempts += 1
             raise self._error_type("EnhancementLevel out of range")
         super().set_parameter(param, value)
-
-
-class MockVadContext:
-    """A lightweight mock for AIC VadContext."""
-
-    def __init__(self, speech_detected: bool = False):
-        self.speech_detected = speech_detected
-        self.parameters_set: list[tuple] = []
-
-    def is_speech_detected(self) -> bool:
-        return self.speech_detected
-
-    def set_parameter(self, param, value):
-        self.parameters_set.append((param, value))
-
-
-class MockModel:
-    """A lightweight mock for AIC Model."""
-
-    def __init__(self, model_id: str = "test-model"):
-        self._model_id = model_id
-        self._optimal_num_frames = 160
-        self._optimal_sample_rate = 16000
-
-    def get_optimal_num_frames(self, sample_rate: int):
-        """Return optimal number of frames for the given sample rate."""
-        return self._optimal_num_frames
-
-    def get_id(self):
-        return self._model_id
-
-    def get_optimal_sample_rate(self):
-        return self._optimal_sample_rate
 
 
 @unittest.skipUnless(HAS_AIC_SDK, "aic-sdk not installed")
@@ -825,6 +776,23 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
             self.AICFilter(license_key="test-key", model_id="test-model")
 
             mock_set_sdk_id.assert_called_once_with(6)
+
+    async def test_apply_bypass_noop_without_processor_ctx(self):
+        """_apply_bypass returns early when the processor context isn't initialized."""
+        filter_instance = self._create_filter_with_mocks()
+        self.assertIsNone(filter_instance._processor_ctx)
+        # Must not raise.
+        filter_instance._apply_bypass()
+
+    async def test_filter_enable_frame_swallows_set_parameter_exception(self):
+        """process_frame logs and continues if _apply_bypass / _apply_enhancement_level raises."""
+        filter_instance = self._create_filter_with_mocks(enhancement_level=0.5)
+        await self._start_filter_with_mocks(filter_instance)
+        # Force the bypass path to raise; process_frame must swallow it.
+        with patch.object(filter_instance, "_apply_bypass", side_effect=RuntimeError("boom")):
+            await filter_instance.process_frame(self.FilterEnableFrame(enable=True))
+        # Filter state still updated to reflect the requested enable.
+        self.assertFalse(filter_instance._bypass)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,17 @@
 #
 
 import unittest
+import unittest.mock
+import warnings
+
+# The whole module construct AICVADAnalyzer many times; the class now emits a
+# DeprecationWarning of its own (covered by test_aic_vad_deprecation.py).
+# Suppress here so the existing suite stays quiet.
+warnings.filterwarnings(
+    "ignore",
+    category=DeprecationWarning,
+    message=".*AICVADAnalyzer is deprecated.*",
+)
 
 # Check if aic_sdk is available
 try:
@@ -13,6 +24,9 @@ try:
     HAS_AIC_SDK = True
 except ImportError:
     HAS_AIC_SDK = False
+
+# Shared AIC SDK mock surface (consolidated in tests/aic_mocks.py).
+from tests.aic_mocks import MockVadContext  # noqa: E402
 
 
 @unittest.skipUnless(HAS_AIC_SDK, "aic-sdk not installed")
@@ -292,30 +306,27 @@ class TestAICVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(analyzer._params.stop_secs, 0.0)
         self.assertEqual(analyzer._params.min_volume, 0.0)
 
+    def test_apply_vad_params_noop_without_context(self):
+        """_apply_vad_params returns early when no VadContext is bound yet."""
+        analyzer = self.AICVADAnalyzer(sensitivity=8.0)
+        self.assertIsNone(analyzer._vad_ctx)
+        # Should not raise; pending params stay pending.
+        analyzer._apply_vad_params()
+        self.assertEqual(analyzer._pending_sensitivity, 8.0)
 
-class MockVadContext:
-    """A lightweight mock for AIC VadContext that mimics real behavior."""
+    def test_set_sample_rate_swallows_set_params_exception(self):
+        """set_sample_rate logs and continues if super().set_params raises."""
+        from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 
-    def __init__(
-        self,
-        speech_detected: bool = False,
-        raise_on_detect: bool = False,
-        raise_on_set_param: bool = False,
-    ):
-        self.speech_detected = speech_detected
-        self.raise_on_detect = raise_on_detect
-        self.raise_on_set_param = raise_on_set_param
-        self.parameters_set: list[tuple] = []
-
-    def is_speech_detected(self) -> bool:
-        if self.raise_on_detect:
-            raise RuntimeError("VAD error")
-        return self.speech_detected
-
-    def set_parameter(self, param, value):
-        if self.raise_on_set_param:
-            raise RuntimeError("Param error")
-        self.parameters_set.append((param, value))
+        analyzer = self.AICVADAnalyzer()
+        with unittest.mock.patch.object(
+            VADAnalyzer,
+            "set_params",
+            side_effect=RuntimeError("boom"),
+        ):
+            # Must not propagate.
+            analyzer.set_sample_rate(16000)
+        self.assertEqual(analyzer.sample_rate, 16000)
 
 
 if __name__ == "__main__":
