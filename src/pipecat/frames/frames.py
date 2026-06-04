@@ -14,6 +14,7 @@ and LLM processing.
 from __future__ import annotations
 
 import time
+import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import (
@@ -745,11 +746,36 @@ class TTSSpeakFrame(DataFrame):
 
     Parameters:
         text: The text to be spoken.
-        append_to_context: Whether to append the text to the context.
+        append_to_context: Whether the spoken text should be appended to the LLM
+            context. Defaults to True.
+
+            .. deprecated:: 1.4.0
+                The default changed from ``None`` to ``True``, and ``None`` is
+                no longer a supported value (it is coerced to ``True`` with a
+                warning). The previous ``None`` behavior was situation-dependent
+                which made it hard to reason about. ``True`` records spoken text
+                in the context by default; pass ``False`` to keep it out.
+                ``None`` support will be removed in a future release.
     """
 
     text: str
-    append_to_context: bool | None = None
+    append_to_context: bool = True
+
+    def __post_init__(self):
+        super().__post_init__()
+        # Backward compatibility: callers used to be able to pass None.
+        # Coerce it to the new default of True and warn, so existing code keeps
+        # working while surfacing the change.
+        if self.append_to_context is None:
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "TTSSpeakFrame.append_to_context=None is deprecated and has been "
+                    "converted to True, the new default.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+            self.append_to_context = True
 
 
 @dataclass
