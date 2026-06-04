@@ -1,0 +1,30 @@
+name: weather_function_call
+
+# Audio modality, end to end: ask for the weather (which requires a tool
+# call). Tests that the bot invokes a function and speaks a correct,
+# grounded answer.
+
+user:
+  modality: audio
+  speech:
+    service: cartesia
+    voice: 71a7ad14-091c-4e8e-a314-022ece01c121 # British Reading Lady
+    model: sonic-2
+    sample_rate: 16000
+
+judge:
+  modality: audio
+  eval:
+    service: ollama
+    model: llama3:latest
+  transcription:
+    service: whisper
+    model: base
+
+turns:
+  - user: "What's the weather in San Francisco? Use Fahrenheit."
+    expect:
+      - event: function_call
+        name: get_current_weather
+      - event: response
+        eval: "the response describes the weather in San Francisco, including a temperature in degrees"

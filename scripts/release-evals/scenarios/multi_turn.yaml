@@ -1,0 +1,20 @@
+name: multi_turn
+
+# Text modality: a two-turn conversation where the second turn depends on the
+# first. Tests context retention across turns.
+
+judge:
+  eval:
+    service: ollama
+    model: llama3:latest
+
+turns:
+  - user: "My name is Mark, and I'm planning a trip to Italy."
+    expect:
+      - event: response
+        eval: "acknowledges the user's message (the name Mark and/or the trip to Italy)"
+
+  - user: "Remind me — what's my name and where am I going?"
+    expect:
+      - event: response
+        eval: "recalls that the user's name is Mark and the destination is Italy"

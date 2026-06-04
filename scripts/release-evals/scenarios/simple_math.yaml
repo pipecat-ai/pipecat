@@ -1,0 +1,28 @@
+name: simple_math
+
+# Audio modality, end to end: ask a simple question and judge the bot's
+# actual spoken answer (transcribed locally). Tests that the full
+# STT -> LLM -> TTS pipeline works for a given service stack.
+
+user:
+  modality: audio
+  speech:
+    service: cartesia
+    voice: 71a7ad14-091c-4e8e-a314-022ece01c121 # British Reading Lady
+    model: sonic-2
+    sample_rate: 16000
+
+judge:
+  modality: audio
+  eval:
+    service: ollama
+    model: llama3:latest
+  transcription:
+    service: whisper
+    model: base
+
+turns:
+  - user: "What is two plus two?"
+    expect:
+      - event: response
+        eval: "the response correctly answers that two plus two is four (stated as '4' or 'four')"
