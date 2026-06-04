@@ -130,7 +130,7 @@ and helpful way.
 
 You have several tools you can use to help you.
 
-You can respond to questions about the weather using the get_weather tool.
+You can respond to questions about the weather using the get_current_weather tool.
 
 You can save the current conversation using the save_conversation tool. This tool allows you to save
 the current conversation to external storage. If the user asks you to save the conversation, use this
