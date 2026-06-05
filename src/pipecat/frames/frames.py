@@ -747,15 +747,8 @@ class TTSSpeakFrame(DataFrame):
     Parameters:
         text: The text to be spoken.
         append_to_context: Whether the spoken text should be appended to the LLM
-            context. Defaults to True.
-
-            .. deprecated:: 1.4.0
-                The default changed from ``None`` to ``True``, and ``None`` is
-                no longer a supported value (it is coerced to ``True`` with a
-                warning). The previous ``None`` behavior was situation-dependent
-                which made it hard to reason about. ``True`` records spoken text
-                in the context by default; pass ``False`` to keep it out.
-                ``None`` support will be removed in a future release.
+            context. Defaults to True. (Note that, as of version 1.4.0, ``None`` —
+            the previous default — is no longer a supported value.)
     """
 
     text: str
