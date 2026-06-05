@@ -26,6 +26,28 @@ _INSTALL_HINT = (
     '    uv tool install "pipecat-ai[cli]"\n'
 )
 
+# Official optional sub-CLIs. Each ships as a separate plugin package that registers
+# a Typer app under the ``pipecat_cli.extensions`` group. We list them in ``--help``
+# even when they're not installed (as stubs) so they're discoverable, and the stub
+# prints how to enable the plugin. Only first-party plugins belong here.
+_KNOWN_EXTENSIONS: dict[str, tuple[str, str]] = {
+    "cloud": ("pipecatcloud", "Deploy and manage bots on Pipecat Cloud"),
+    "tail": ("pipecat-ai-tail", "Monitor live Pipecat sessions in a terminal dashboard"),
+}
+
+
+def _enable_hint(name: str, package: str) -> str:
+    """Message shown when an official-but-uninstalled sub-CLI is invoked."""
+    return (
+        f"The `pipecat {name}` command requires the optional `{package}` plugin, "
+        "which isn't installed.\n\n"
+        "Enable it by reinstalling the CLI with the plugin:\n\n"
+        f'    uv tool install "pipecat-ai[cli]" --with {package}\n\n'
+        "or, if you installed the CLI into a virtual environment:\n\n"
+        f"    pip install {package}\n"
+    )
+
+
 _app = None
 
 
@@ -61,6 +83,26 @@ def _build_app():
     extensions.sort(key=lambda item: item[0].lower())
     for name, extension in extensions:
         app.add_typer(extension, name=name)
+
+    # For official plugins that aren't installed, register a discoverable stub so the
+    # command still shows up in `pipecat --help` and, when invoked, prints how to enable
+    # it instead of a bare "No such command". Installed plugins (above) take precedence.
+    def _make_extension_stub(cmd_name: str, package: str):
+        def _stub(ctx: typer.Context):
+            print(_enable_hint(cmd_name, package), file=sys.stderr)
+            raise typer.Exit(1)
+
+        return _stub
+
+    installed = {name for name, _ in extensions}
+    for cmd_name, (package, help_text) in sorted(_KNOWN_EXTENSIONS.items()):
+        if cmd_name in installed:
+            continue
+        app.command(
+            cmd_name,
+            help=f"{help_text} (requires {package})",
+            context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+        )(_make_extension_stub(cmd_name, package))
 
     def version_callback(value: bool):
         if value:
