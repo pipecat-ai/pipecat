@@ -74,6 +74,7 @@ from pipecat.evals.judge import Judge, build_default_judge
 from pipecat.evals.scenario import Expectation, Scenario, SendAfter, Turn
 from pipecat.evals.serializer import (
     EVAL_BOT_AUDIO_TYPE,
+    EVAL_CANCEL_MESSAGE_TYPE,
     EVAL_CONFIGURE_MESSAGE_TYPE,
     EVAL_RESET_MESSAGE_TYPE,
 )
@@ -91,9 +92,15 @@ SEND_AFTER_MAX_WAIT_S = 30.0
 SEND_AFTER_POLL_S = 0.01
 BOT_READY_TIMEOUT_S = 10.0
 
-# Audio injection: chunk PCM into ~20ms slices (typical mic cadence) and append
-# trailing silence so the bot's VAD detects end-of-speech.
+# Audio injection: stream the user's audio as ~20ms PCM slices at real-time mic
+# cadence (one frame every ~20ms), padded with ~500ms of leading/trailing silence.
+# The bot's VAD/STT endpoint on wall-clock timing, so bursting the whole utterance
+# compresses the speech/silence boundary and mis-segments it — _send_user_audio
+# paces the sends, which is what makes a short trailing pad enough for the VAD to
+# detect end-of-turn. Padding is added at send time (not baked into the cached
+# audio), so it can change without invalidating the cache.
 AUDIO_CHUNK_MS = 20
+AUDIO_LEADING_SILENCE_MS = 500
 AUDIO_TRAILING_SILENCE_MS = 500
 
 
@@ -122,6 +129,10 @@ class EvalResult:
     failures: list[AssertionFailure] = field(default_factory=list)
     duration_ms: int = 0
     events_seen: list[dict] = field(default_factory=list)
+    # Timestamped trace of the harness's own decisions (events received, audio
+    # transcribed, matcher progress), for diagnosing flaky runs. Saved per-scenario
+    # by the orchestrator alongside the bot log.
+    debug_log: list[str] = field(default_factory=list)
     # When set, the scenario was not run (e.g. tts_response without audio mode);
     # the string is the reason. Neither passed nor failed.
     skipped: str | None = None
@@ -190,6 +201,9 @@ class EvalSession:
         self._queue: asyncio.Queue = asyncio.Queue()
         self._latest_event_times: dict[str, float] = {}
         self._events_seen: list[dict] = []
+        # Timestamped trace of the harness's own decisions, for diagnosing flakes.
+        self._debug_log: list[str] = []
+        self._debug_t0: float = 0.0
         self._next_id = 0
         self._judge: Judge | None = None
 
@@ -201,12 +215,6 @@ class EvalSession:
         # synthesize llm_response. Source depends on the mode: bot-llm-text in
         # text mode (skip-TTS), bot-tts-text in audio mode (what was spoken).
         self._text_buffer: list[str] = []
-
-        # When the current response began (bot-llm-started). Stamped onto each
-        # llm_response so the matcher can ignore responses that started before a
-        # turn's input (the on-connect greeting, or a turn the current one
-        # interrupted). See _match_and_verify.
-        self._response_started_at: float = 0.0
 
         # Text content of the most recently matched event (the bot's response, or
         # a user transcript), surfaced to verbose progress. Empty for events with
@@ -228,6 +236,8 @@ class EvalSession:
         import websockets  # lazy: see note at the top of the module
 
         started = time.monotonic()
+        self._debug_t0 = started
+        self._debug(f"run scenario {self._scenario.name!r} -> {self._bot_url}")
 
         # The `response` transcription needs the bot's actual audio; without audio
         # mode there's nothing to transcribe, so skip rather than fail. (Normally
@@ -243,10 +253,21 @@ class EvalSession:
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
 
-        try:
-            async with asyncio.timeout(self._connect_timeout_s):
+        # Retry the connect until the bot accepts it or we time out. Attempts
+        # before the bot is listening fail with ConnectionRefused (no WebSocket
+        # handshake, so no server-side error) — this doubles as readiness waiting,
+        # which is why callers (e.g. the release orchestrator) can launch the bot
+        # and connect straight away without a separate, handshake-noisy port probe.
+        deadline = time.monotonic() + self._connect_timeout_s
+        connect_error: Exception | None = None
+        while self._ws is None and time.monotonic() < deadline:
+            try:
                 self._ws = await websockets.connect(self._connect_url())
-        except (TimeoutError, OSError) as e:
+            except OSError as e:  # not accepting connections yet
+                connect_error = e
+                await asyncio.sleep(0.25)
+        if self._ws is None:
+            e = connect_error or TimeoutError("timed out")
             return EvalResult(
                 scenario_name=self._scenario.name,
                 passed=False,
@@ -289,15 +310,31 @@ class EvalSession:
             from pipecat.evals.transcribe import EvalTranscriber, build_stt_service
 
             self._transcriber = EvalTranscriber(build_stt_service(self._scenario.transcriber))
+            self._transcriber.debug = self._debug
             await self._transcriber.start()
 
         failures: list[AssertionFailure] = []
         reader_task = asyncio.create_task(self._reader_loop())
 
+        self._debug("connected")
         try:
-            await self._handshake()
-            for turn_idx, turn in enumerate(self._scenario.turns):
-                failures.extend(await self._run_turn(turn, turn_idx))
+            try:
+                await self._handshake()
+                self._debug("handshake ok (bot-ready)")
+            except TimeoutError:
+                self._debug("handshake FAILED: bot-ready not received")
+                failures.append(
+                    AssertionFailure(
+                        turn_index=-1,
+                        expectation_index=-1,
+                        event_name="<bot-ready>",
+                        reason=f"bot-ready not received within {int(BOT_READY_TIMEOUT_S * 1000)}ms",
+                    )
+                )
+            else:
+                for turn_idx, turn in enumerate(self._scenario.turns):
+                    self._debug(f"--- turn {turn_idx}: {turn.user!r}")
+                    failures.extend(await self._run_turn(turn, turn_idx))
         finally:
             reader_task.cancel()
             try:
@@ -308,14 +345,20 @@ class EvalSession:
                 await self._voice.aclose()
             if self._transcriber is not None:
                 await self._transcriber.aclose()
+            # Ask the bot to tear its pipeline down gracefully (closing its STT/TTS/
+            # LLM connections) so the process exits on its own — best-effort; the
+            # orchestrator still has a kill fallback.
+            await self._send_cancel()
             await self._ws.close()
 
+        self._debug(f"done: {'PASS' if not failures else 'FAIL'} ({len(failures)} failure(s))")
         return EvalResult(
             scenario_name=self._scenario.name,
             passed=not failures,
             failures=failures,
             duration_ms=int((time.monotonic() - started) * 1000),
             events_seen=self._events_seen,
+            debug_log=self._debug_log,
         )
 
     def _connect_url(self) -> str:
@@ -365,7 +408,15 @@ class EvalSession:
         return "name" if needs_name else None
 
     async def _handshake(self) -> None:
-        """Send client-ready, wait for bot-ready, then optionally seed context."""
+        """Send client-ready, wait for bot-ready, then optionally seed context.
+
+        ``bot-ready`` is a hard gate: the eval framework requires an RTVI bot, so a
+        bot that never announces readiness either isn't a valid eval target or
+        hasn't finished starting (services still connecting). Rather than fire
+        turns at a half-started bot — which produces flaky, hard-to-read failures —
+        we raise :class:`TimeoutError` so the caller reports a clean connect-level
+        failure.
+        """
         ready = RTVI.Message(
             type="client-ready",
             id=self._message_id(),
@@ -376,10 +427,8 @@ class EvalSession:
         )
         await self._ws.send(ready.model_dump_json())
 
-        try:
-            await self._wait_for_event("bot_ready", BOT_READY_TIMEOUT_S)
-        except TimeoutError:
-            logger.warning("Eval session: bot-ready not received; proceeding anyway")
+        # Hard gate — raises TimeoutError if the bot never announces readiness.
+        await self._wait_for_event("bot_ready", BOT_READY_TIMEOUT_S)
 
         # If the scenario asserts on function-call name/args, ask the bot's
         # RTVIObserver to report them for the duration of this eval. Agents keep
@@ -407,6 +456,22 @@ class EvalSession:
             )
             await self._ws.send(reset.model_dump_json())
 
+    async def _send_cancel(self) -> None:
+        """Ask the bot to cancel its pipeline so it shuts down gracefully.
+
+        Best-effort: the connection may already be gone, in which case the
+        orchestrator's kill fallback handles teardown.
+        """
+        try:
+            message = RTVI.Message(
+                type="client-message",
+                id=self._message_id(),
+                data={"t": EVAL_CANCEL_MESSAGE_TYPE, "d": {}},
+            )
+            await self._ws.send(message.model_dump_json())
+        except Exception:
+            pass
+
     async def _reader_loop(self) -> None:
         """Drain the WS, translate RTVI messages to friendly events, enqueue them."""
         import websockets  # lazy: see note at the top of the module
@@ -427,10 +492,17 @@ class EvalSession:
         except (websockets.ConnectionClosed, asyncio.CancelledError):
             pass
 
+    def _debug(self, msg: str) -> None:
+        """Append a timestamped line to the per-scenario debug trace."""
+        t = time.monotonic() - self._debug_t0 if self._debug_t0 else 0.0
+        self._debug_log.append(f"{t:8.3f}  {msg}")
+
     async def _enqueue(self, event: dict) -> None:
         """Record and queue a friendly event for the matcher."""
         self._events_seen.append(event)
         self._latest_event_times[event["type"]] = time.monotonic()
+        preview = event.get("text") or event.get("transcript") or event.get("name") or ""
+        self._debug(f"event  {event['type']}" + (f"  {str(preview)[:60]!r}" if preview else ""))
         await self._queue.put(event)
 
     def _discard_interrupted_output(self) -> None:
@@ -456,9 +528,8 @@ class EvalSession:
         ``bot-stopped-speaking``), not the TTS ones: the output transport delays
         audio by PTS to play it out, so ``bot-tts-stopped`` fires while the tail
         is still streaming. ``bot-stopped-speaking`` fires once the audio has
-        actually finished — only then is the buffer complete. The transcription
-        is stamped with the response's start so the matcher anchors/aggregates it
-        like ``llm_response``.
+        actually finished — only then is the buffer complete. The transcription is
+        enqueued as a ``response`` event, aggregated like ``llm_response``.
         """
         msg_type = message.get("type")
         if msg_type == EVAL_BOT_AUDIO_TYPE:
@@ -466,15 +537,20 @@ class EvalSession:
             self._tts_audio.extend(base64.b64decode(data.get("audio", "")))
             self._tts_sample_rate = int(data.get("sampleRate", 0)) or self._tts_sample_rate
         elif msg_type == "bot-started-speaking":
+            self._debug(f"bot-started-speaking (discarding {len(self._tts_audio)}B buffered)")
             self._tts_audio = bytearray()
         elif msg_type == "bot-stopped-speaking":
+            self._debug(
+                f"bot-stopped-speaking: {len(self._tts_audio)}B @ {self._tts_sample_rate}Hz, "
+                f"transcriber={self._transcriber is not None}"
+            )
             if not self._tts_audio or self._transcriber is None:
                 return
             pcm, sample_rate = bytes(self._tts_audio), self._tts_sample_rate
-            started_at = self._response_started_at
             self._tts_audio = bytearray()
             text = await self._transcriber.transcribe(pcm, sample_rate)
-            await self._enqueue({"type": "response", "text": text, "started_at": started_at})
+            self._debug(f"  transcribed {len(pcm)}B -> {text!r}")
+            await self._enqueue({"type": "response", "text": text})
 
     def _translate(self, message: dict) -> list[dict]:
         """Translate one RTVI server message into zero or more friendly events."""
@@ -485,13 +561,17 @@ class EvalSession:
             case "bot-ready":
                 return [{"type": "bot_ready"}]
             case "user-started-speaking":
-                # The user (re)started speaking — an interruption. Discard
-                # everything the bot was mid-saying so only what it says *after*
-                # the interruption is matched. This keeps audio-mode scenarios
-                # deterministic regardless of greeting / prior-response timing
-                # (a stronger guarantee than the started_at anchor alone).
+                # A new user turn in audio mode. Drop any leftover bot output from
+                # a prior turn so it isn't aggregated into this one.
                 self._discard_interrupted_output()
                 return [{"type": "user_started_speaking"}]
+            case "bot-interrupted":
+                # The bot's in-flight output was cut off — a VAD barge-in or a
+                # run_immediately text interrupt. Drop it so only what the bot says
+                # *after* the interruption is matched. Service-independent, the same
+                # path for both modalities, and no timestamps.
+                self._discard_interrupted_output()
+                return [{"type": "bot_interrupted"}]
             case "user-stopped-speaking":
                 return [{"type": "user_stopped_speaking"}]
             case "user-transcription":
@@ -500,7 +580,6 @@ class EvalSession:
                 return []
             case "bot-llm-started":
                 self._text_buffer = []
-                self._response_started_at = time.monotonic()
                 return [{"type": "llm_started"}]
             case "bot-llm-text":
                 # The LLM's text output -> llm_response (both modalities). Buffer
@@ -533,19 +612,13 @@ class EvalSession:
                 return []
 
     def _segment_event(self, event_type: str, text: str) -> dict:
-        """Build one response segment of ``event_type``, stamped with its start.
+        """Build one response segment of ``event_type``.
 
         Used for ``llm_response`` (the LLM text) and ``tts_response`` (the TTS's
-        spoken text). The text may be empty (e.g. an interrupted response).
-        ``started_at`` lets the matcher aggregate the segments of *this* turn and
-        skip earlier ones (the greeting, or a prior turn the current one
-        interrupted).
+        spoken text). The text may be empty (e.g. an interrupted response); the
+        matcher aggregates successive segments until the content check passes.
         """
-        return {
-            "type": event_type,
-            "text": text,
-            "started_at": self._response_started_at,
-        }
+        return {"type": event_type, "text": text}
 
     @staticmethod
     def _match_summary(event: dict) -> str:
@@ -593,19 +666,11 @@ class EvalSession:
                 )
                 return failures
 
-        anchor = time.monotonic()
         if turn.user is not None:
             if self._voice is not None:
                 await self._send_user_audio(turn.user)
             else:
                 await self._send_user_text(turn.user, self._scenario.bot_audio)
-            anchor = time.monotonic()
-
-        # A turn that sends input only accepts a response that began after the
-        # send (skipping the greeting / an interrupted prior turn). An
-        # observe-only turn has no input to anchor on — it observes whatever the
-        # bot produced autonomously (e.g. the on-connect greeting), so don't skip.
-        match_floor = anchor if turn.user is not None else 0.0
 
         self._progress(TurnProgress(turn_idx, -1, turn.user or "", "turn"))
 
@@ -613,9 +678,7 @@ class EvalSession:
             budget_ms = expectation.within_ms or DEFAULT_EVENT_TIMEOUT_MS
 
             try:
-                failure = await self._match_and_verify(
-                    expectation, anchor, budget_ms, turn_idx, exp_idx, match_floor
-                )
+                failure = await self._match_and_verify(expectation, budget_ms, turn_idx, exp_idx)
             except TimeoutError:
                 reason = f"no matching {expectation.event!r} event arrived within {budget_ms}ms"
                 failures.append(
@@ -662,8 +725,16 @@ class EvalSession:
         await self._ws.send(message.model_dump_json())
 
     async def _send_user_audio(self, text: str) -> None:
-        """Render ``text`` to audio (cached) and stream it as ``raw-audio`` chunks."""
+        """Render ``text`` to audio (cached) and stream it as ``raw-audio`` chunks.
+
+        The chunks are sent at real-time mic cadence (one ~20ms frame every ~20ms)
+        rather than in a burst: the bot's VAD/STT endpoint on wall-clock timing, so
+        a bursted utterance compresses the speech/silence boundary and gets
+        mis-segmented. Pacing is monotonic-clock based so it doesn't drift.
+        """
         pcm, sample_rate = await self._voice.generate(text)
+        loop = asyncio.get_running_loop()
+        next_send = loop.time()
         for chunk in _audio_chunks(pcm, sample_rate):
             message = RTVI.Message(
                 type="raw-audio",
@@ -675,6 +746,8 @@ class EvalSession:
                 },
             )
             await self._ws.send(message.model_dump_json())
+            next_send += AUDIO_CHUNK_MS / 1000
+            await asyncio.sleep(max(0, next_send - loop.time()))
 
     async def _wait_for_event(self, event_name: str, timeout_s: float) -> None:
         """Block until ``event_name`` has been seen, or raise TimeoutError."""
@@ -712,29 +785,30 @@ class EvalSession:
     async def _match_and_verify(
         self,
         expectation: Expectation,
-        anchor: float,
         budget_ms: int,
         turn_idx: int,
         exp_idx: int,
-        match_floor: float,
     ) -> AssertionFailure | None:
         """Wait for the expected event and verify it. Returns a failure or None.
 
         Most events match a single event and are checked once. An ``llm_response``
         carrying a content check (``text_contains`` / ``eval:``) instead
-        *aggregates*: it accumulates the text of successive response segments
-        within the turn and re-checks on each new segment until the check passes,
-        the judge affirmatively rejects, or the ``within_ms`` budget expires.
-        Segments whose response began before ``match_floor`` (the greeting, or a
-        turn the current one interrupted) are skipped; observe-only turns pass a
-        floor of 0 so they can match the autonomous greeting.
+        *aggregates*: it accumulates the text of successive response segments and
+        re-checks on each new segment until the check passes, the judge
+        affirmatively rejects, or the ``within_ms`` budget expires.
+
+        Output that predates this turn (the greeting, or a turn that was
+        interrupted) isn't specially filtered: in audio mode the reader already
+        drops it from the queue when ``user-started-speaking`` fires, and anything
+        that slips through (e.g. a text-mode greeting) is harmless — the judge
+        returns "continue" until the turn's real answer is aggregated in.
 
         Raises:
             TimeoutError: when no matching event arrives at all (so the caller can
                 report "no matching event arrived"). A response that arrives but
                 never satisfies the content check returns a failure instead.
         """
-        deadline = anchor + (budget_ms / 1000.0)
+        deadline = time.monotonic() + (budget_ms / 1000.0)
         self._last_match_text = ""
 
         aggregates = expectation.event in ("response", "llm_response", "tts_response") and (
@@ -756,6 +830,7 @@ class EvalSession:
         if expectation.eval is not None and self._judge is None:
             return fail("scenario uses 'eval:' but no judge could be built")
 
+        self._debug(f"match: aggregating {expectation.event!r} for eval/text_contains")
         aggregate = ""
         last_reason = ""
         seen_any = False
@@ -764,17 +839,15 @@ class EvalSession:
                 event = await self._next_matching_event(expectation.event, deadline)
             except TimeoutError:
                 if not seen_any:
+                    self._debug(f"match: TIMEOUT — no {expectation.event!r} event arrived")
                     raise  # no response at all → "no matching event arrived"
+                self._debug(f"match: TIMEOUT — not satisfied: {last_reason}")
                 return fail(f"not satisfied within {budget_ms}ms: {last_reason}")
-
-            # Ignore responses that began before this turn's input (greeting /
-            # interrupted prior turn). Observe-only turns use a floor of 0.
-            if event.get("started_at", 0.0) < match_floor:
-                continue
 
             seen_any = True
             aggregate += event.get("text", "")
             status, reason = await self._evaluate_aggregate(aggregate, expectation)
+            self._debug(f"match: {status} (aggregate={aggregate.strip()[:60]!r}) {reason}")
             if status == "pass":
                 self._last_match_text = aggregate
                 return None
@@ -913,11 +986,19 @@ class EvalSession:
 
 
 def _audio_chunks(pcm: bytes, sample_rate: int):
-    """Yield ~20ms PCM slices followed by trailing silence."""
-    bytes_per_chunk = (sample_rate * AUDIO_CHUNK_MS // 1000) * 2  # 16-bit mono
+    """Yield ~20ms PCM slices, padded with leading and trailing silence.
+
+    The padding is generated here, at send time, rather than stored in the cached
+    audio, so it can change without invalidating the TTS cache.
+    """
+    samples_per_chunk = sample_rate * AUDIO_CHUNK_MS // 1000
+    silence = b"\x00\x00" * samples_per_chunk
+    bytes_per_chunk = samples_per_chunk * 2  # 16-bit mono
+
+    for _ in range(AUDIO_LEADING_SILENCE_MS // AUDIO_CHUNK_MS):
+        yield silence
     for offset in range(0, len(pcm), bytes_per_chunk):
         yield pcm[offset : offset + bytes_per_chunk]
-    silence = b"\x00\x00" * (sample_rate * AUDIO_CHUNK_MS // 1000)
     for _ in range(AUDIO_TRAILING_SILENCE_MS // AUDIO_CHUNK_MS):
         yield silence
 

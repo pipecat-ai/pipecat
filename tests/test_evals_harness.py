@@ -54,7 +54,7 @@ class TestTranslate(unittest.TestCase):
         s = _session(bot_audio=True)
         s._text_buffer = ["greeting"]
         s._tts_audio = bytearray(b"\x01\x02\x03\x04")
-        s._queue.put_nowait({"type": "llm_response", "text": "greeting", "started_at": 1.0})
+        s._queue.put_nowait({"type": "llm_response", "text": "greeting"})
         self.assertEqual(
             s._translate({"type": "user-started-speaking"}),
             [{"type": "user_started_speaking"}],
@@ -74,10 +74,8 @@ class TestTranslate(unittest.TestCase):
         )
 
     def _one_event(self, result: list[dict]) -> dict:
-        # The llm_response event also carries a non-deterministic `started_at`
-        # timestamp; assert on type/text only.
         self.assertEqual(len(result), 1)
-        return {"type": result[0]["type"], "text": result[0]["text"]}
+        return result[0]
 
     def test_text_mode_accumulates_bot_llm_text(self):
         # Text mode (bot_audio=False): llm_response comes from bot-llm-text.
@@ -541,7 +539,11 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
             turns=[Turn(user="hi", expect=[Expectation(event="llm_started", within_ms=2000)])],
         )
         await run_scenario(scenario, self.server.url)
-        resets = [m for m in self.server.received if m.get("type") == "client-message"]
+        resets = [
+            m
+            for m in self.server.received
+            if m.get("type") == "client-message" and m["data"].get("t") == "eval-reset"
+        ]
         self.assertEqual(resets, [])
 
 
