@@ -302,6 +302,13 @@ async def run_one(
         except Exception as e:
             state.error = f"error: {e}"
         finally:
+            # Stamp the wall-clock and flip to "done" BEFORE tearing the bot down,
+            # measured the same way as the live counter (now - started_at). That way
+            # the displayed time matches what was ticking and neither includes the
+            # bot's shutdown wait (which is teardown, not the eval).
+            if state.started_at is not None:
+                state.duration_ms = int((time.monotonic() - state.started_at) * 1000)
+            state.status = "done"
             if proc is not None:
                 await _stop_bot(proc)
             if logf is not None:
@@ -310,11 +317,6 @@ async def run_one(
             # diagnosing flaky runs (empty transcriptions, missed events, etc.).
             if state.result is not None and state.result.debug_log:
                 (logs_dir / f"{safe}.eval.log").write_text("\n".join(state.result.debug_log) + "\n")
-            state.status = "done"
-            if state.result is not None:
-                state.duration_ms = state.result.duration_ms
-            elif state.started_at is not None:
-                state.duration_ms = int((time.monotonic() - state.started_at) * 1000)
             if not _console.is_terminal:
                 _print_line(state)
 
@@ -384,14 +386,23 @@ def _print_line(s: TestState) -> None:
     print(f"  {_c(glyph, code)} {s.example} {_c(s.scenario, '36')} {_c(extra, '2')}", flush=True)
 
 
-def _finalize(states: list[TestState], runs_dir: Path) -> int:
-    """Print failure detail and the final tally; return the process exit code."""
+def _fmt_duration(seconds: float) -> str:
+    """Human-friendly elapsed time, e.g. ``12.3s`` or ``2m 04s``."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    m, s = divmod(int(round(seconds)), 60)
+    return f"{m}m {s:02d}s"
+
+
+def _finalize(states: list[TestState], runs_dir: Path, elapsed_s: float) -> int:
+    """Print the failed set + final tally; return the process exit code."""
     failed = [s for s in states if _verdict(s) in ("failed", "error")]
     passed = sum(1 for s in states if _verdict(s) == "passed")
     skipped = sum(1 for s in states if _verdict(s) == "skipped")
 
     if failed:
         print()
+        print(f"  {_c(f'Failed ({len(failed)}):', '1;31')}")
         for s in failed:
             if s.error:
                 print(
@@ -403,7 +414,13 @@ def _finalize(states: list[TestState], runs_dir: Path) -> int:
                     print(f"      {_c('•', '31')} {f}")
 
     print()
-    print(f"  {passed}/{len(states)} passed" + (f", {skipped} skipped" if skipped else ""))
+    summary = f"{passed}/{len(states)} passed"
+    if failed:
+        summary += f", {len(failed)} failed"
+    if skipped:
+        summary += f", {skipped} skipped"
+    summary += f"  ·  {_fmt_duration(elapsed_s)}"
+    print(f"  {_c(summary, '31' if failed else '32')}")
     print(f"  logs: {runs_dir}")
     print()
     return 0 if not failed else 1
@@ -454,6 +471,7 @@ async def main(args: argparse.Namespace) -> int:
         for i in range(len(states))
     ]
 
+    started = time.monotonic()
     if _console.is_terminal:
         # Live dashboard: each task mutates its state; the table re-renders every
         # frame, so rows flip pending -> running -> result as they finish.
@@ -464,7 +482,7 @@ async def main(args: argparse.Namespace) -> int:
         print(f"Running {len(states)} eval(s), {args.concurrency} at a time...")
         await asyncio.gather(*tasks)
 
-    return _finalize(states, runs_dir)
+    return _finalize(states, runs_dir, time.monotonic() - started)
 
 
 if __name__ == "__main__":
