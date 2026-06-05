@@ -1,55 +1,54 @@
-# Pipecat Evals
+# Release Evals
 
-This directory contains a set of utilities to help test Pipecat, specifically
-its examples.
+Before a Pipecat release we make sure all (or most) of the 100+ examples still
+work. Doing that by hand is slow and painful, so these "release evals" drive each
+example automatically.
 
-## Release Evals
+## How it works
 
-Before any Pipecat release, we make sure that all (or most) of the examples work
-flawlessly.  We have 100+ examples, and checking each one manually was very
-time-consuming (and painful!), especially because we aim to release often.
+Each example is a Pipecat **agent**. We run it with its eval transport
+(`-t eval`), and the **eval harness** (`pipecat.evals`) connects to it as an RTVI
+client, plays the user's turns (synthesizing audio when a scenario is in audio
+mode), transcribes the agent's speech, and judges the response with an LLM. No
+Daily room and no second "eval bot" — the harness is both.
 
-To make this process easier, we designed these "release evals," which do the
-following:
+A scenario (`scenarios/<name>.yaml`) is a scripted conversation plus the expected
+results. For example the `simple_math` scenario asks "What is two plus two?" and
+judges that the reply says four. Scenarios are reusable, so one shared scenario
+covers many agents.
 
-- Start one of the foundational examples (the user bot)
-- Start an eval bot
+[`manifest.yaml`](manifest.yaml) maps each agent to the scenarios it runs.
 
-The user bot (i.e. the example) introduces itself, and the eval bot then asks a
-question. The user bot replies, and the eval bot verifies the response.
-
-For example, the eval bot might ask:
-
-"What's 2 plus 2?"
-
-The user bot replies:
-
-"2 plus 2 is 4."
-
-The eval bot (powered by an LLM) evaluates the response and emits a result.  It
-also explains why it thinks the answer is valid or invalid.
-
-To run the release evals:
+## Running
 
 ```sh
-uv run run-release-evals.py -a -v
+./run.sh                  # everything in the manifest
+./run.sh -p voice-openai  # only agents whose path contains "voice-openai"
+./run.sh -s simple_math   # only the simple_math scenario
+./run.sh -c 8 -a          # 8 at a time, record audio
 ```
 
-This runs all the evals and stores logs and audio (`-a`) for each test.
-
-You can also specify which tests to run. For example, to run all `07` series
-tests:
+`run.sh` is a thin wrapper over the `pipecat eval suite` command:
 
 ```sh
-uv run run-release-evals.py -p 07 -a -v
+uv run python -m pipecat.evals suite manifest.yaml [-p PATTERN] [-s SCENARIO] [-c N] [-a]
 ```
 
-## Script Evals
+Per-agent logs and the harness's own decision trace (`<agent>__<scenario>.eval.log`,
+invaluable for diagnosing a flake) land under `test-runs/<timestamp>/logs/`.
 
-You can also run evals for a single example (not part of the release set):
+## Running one scenario against an already-running agent
+
+If you already have an agent running with `-t eval`, run a scenario directly:
 
 ```sh
-uv run run-eval.py -p "A simple math addition" -a -v YOUR_EXAMPLE_SCRIPT
+pipecat eval run scenarios/simple_math.yaml --agent-url ws://localhost:7860
 ```
 
-Your script needs to follow any of the foundation examples pattern.
+## Adding coverage
+
+- New agent: add an entry to `manifest.yaml` (`agent:` + the `scenarios:` it should run).
+- New behavior to test: add a `scenarios/<name>.yaml` and reference it from the manifest.
+
+> Note: `eval.py`, `run-eval.py`, and `utils.py` are the older Daily-room eval
+> framework, kept for now but superseded by the harness above.
