@@ -204,6 +204,7 @@ class EvalSession:
         # Timestamped trace of the harness's own decisions, for diagnosing flakes.
         self._debug_log: list[str] = []
         self._debug_t0: float = 0.0
+        self._current_turn: int = -1
         self._next_id = 0
         self._judge: Judge | None = None
 
@@ -237,7 +238,7 @@ class EvalSession:
 
         started = time.monotonic()
         self._debug_t0 = started
-        self._debug(f"run scenario {self._scenario.name!r} -> {self._bot_url}")
+        self._debug(f"run: scenario {self._scenario.name!r} -> {self._bot_url}")
 
         # The `response` transcription needs the bot's actual audio; without audio
         # mode there's nothing to transcribe, so skip rather than fail. (Normally
@@ -320,9 +321,9 @@ class EvalSession:
         try:
             try:
                 await self._handshake()
-                self._debug("handshake ok (bot-ready)")
+                self._debug("handshake: ok (bot-ready)")
             except TimeoutError:
-                self._debug("handshake FAILED: bot-ready not received")
+                self._debug("handshake: failed (bot-ready not received)")
                 failures.append(
                     AssertionFailure(
                         turn_index=-1,
@@ -333,6 +334,7 @@ class EvalSession:
                 )
             else:
                 for turn_idx, turn in enumerate(self._scenario.turns):
+                    self._current_turn = turn_idx
                     self._debug(f"--- turn {turn_idx}: {turn.user!r}")
                     failures.extend(await self._run_turn(turn, turn_idx))
         finally:
@@ -493,16 +495,24 @@ class EvalSession:
             pass
 
     def _debug(self, msg: str) -> None:
-        """Append a timestamped line to the per-scenario debug trace."""
+        """Append a timestamped, turn-tagged line to the per-scenario debug trace.
+
+        The tag is the turn the harness is currently *processing* (``[--]`` before
+        the first turn). Because events are logged the moment they arrive, an event
+        that lands while a turn is still waiting on ``send_after`` is tagged with
+        that waiting turn even though it's the previous turn's output — the
+        ``send_after: waiting`` / ``send:`` lines make that boundary visible.
+        """
         t = time.monotonic() - self._debug_t0 if self._debug_t0 else 0.0
-        self._debug_log.append(f"{t:8.3f}  {msg}")
+        tag = f"t{self._current_turn}" if self._current_turn >= 0 else "--"
+        self._debug_log.append(f"{t:8.3f}  [{tag:>3}]  {msg}")
 
     async def _enqueue(self, event: dict) -> None:
         """Record and queue a friendly event for the matcher."""
         self._events_seen.append(event)
         self._latest_event_times[event["type"]] = time.monotonic()
         preview = event.get("text") or event.get("transcript") or event.get("name") or ""
-        self._debug(f"event  {event['type']}" + (f"  {str(preview)[:60]!r}" if preview else ""))
+        self._debug(f"event: {event['type']}" + (f"  {str(preview)!r}" if preview else ""))
         await self._queue.put(event)
 
     def _discard_interrupted_output(self) -> None:
@@ -515,11 +525,15 @@ class EvalSession:
         """
         self._text_buffer = []
         self._tts_audio = bytearray()
+        dropped = 0
         while not self._queue.empty():
             try:
                 self._queue.get_nowait()
+                dropped += 1
             except asyncio.QueueEmpty:
                 break
+        if dropped:
+            self._debug(f"discard: dropped {dropped} queued event(s) on interruption")
 
     async def _handle_tts_audio(self, message: dict) -> None:
         """Accumulate the bot's audio and emit a ``response`` per spoken turn.
@@ -537,7 +551,7 @@ class EvalSession:
             self._tts_audio.extend(base64.b64decode(data.get("audio", "")))
             self._tts_sample_rate = int(data.get("sampleRate", 0)) or self._tts_sample_rate
         elif msg_type == "bot-started-speaking":
-            self._debug(f"bot-started-speaking (discarding {len(self._tts_audio)}B buffered)")
+            self._debug(f"bot-started-speaking: discarding {len(self._tts_audio)}B buffered")
             self._tts_audio = bytearray()
         elif msg_type == "bot-stopped-speaking":
             self._debug(
@@ -549,7 +563,7 @@ class EvalSession:
             pcm, sample_rate = bytes(self._tts_audio), self._tts_sample_rate
             self._tts_audio = bytearray()
             text = await self._transcriber.transcribe(pcm, sample_rate)
-            self._debug(f"  transcribed {len(pcm)}B -> {text!r}")
+            self._debug(f"  transcribed: {len(pcm)}B -> {text!r}")
             await self._enqueue({"type": "response", "text": text})
 
     def _translate(self, message: dict) -> list[dict]:
@@ -667,6 +681,7 @@ class EvalSession:
                 return failures
 
         if turn.user is not None:
+            self._debug(f"send: {turn.user!r} ({'audio' if self._voice is not None else 'text'})")
             if self._voice is not None:
                 await self._send_user_audio(turn.user)
             else:
@@ -766,6 +781,7 @@ class EvalSession:
         """
         target_delay_s = send_after.delay_ms / 1000.0
         deadline = time.monotonic() + SEND_AFTER_MAX_WAIT_S
+        self._debug(f"send_after: waiting for {send_after.event!r} + {send_after.delay_ms}ms")
 
         while True:
             seen_at = self._latest_event_times.get(send_after.event)
@@ -830,7 +846,15 @@ class EvalSession:
         if expectation.eval is not None and self._judge is None:
             return fail("scenario uses 'eval:' but no judge could be built")
 
-        self._debug(f"match: aggregating {expectation.event!r} for eval/text_contains")
+        check = "+".join(
+            name
+            for name, val in (
+                ("text_contains", expectation.text_contains),
+                ("eval", expectation.eval),
+            )
+            if val is not None
+        )
+        self._debug(f"match: aggregating {expectation.event!r} ({check})")
         aggregate = ""
         last_reason = ""
         seen_any = False
@@ -839,15 +863,15 @@ class EvalSession:
                 event = await self._next_matching_event(expectation.event, deadline)
             except TimeoutError:
                 if not seen_any:
-                    self._debug(f"match: TIMEOUT — no {expectation.event!r} event arrived")
+                    self._debug(f"match: timeout, no {expectation.event!r} event arrived")
                     raise  # no response at all → "no matching event arrived"
-                self._debug(f"match: TIMEOUT — not satisfied: {last_reason}")
+                self._debug(f"eval: timeout, not satisfied: {last_reason}")
                 return fail(f"not satisfied within {budget_ms}ms: {last_reason}")
 
             seen_any = True
             aggregate += event.get("text", "")
             status, reason = await self._evaluate_aggregate(aggregate, expectation)
-            self._debug(f"match: {status} (aggregate={aggregate.strip()[:60]!r}) {reason}")
+            self._debug(f"eval: {status} (aggregate={aggregate.strip()!r}) {reason}")
             if status == "pass":
                 self._last_match_text = aggregate
                 return None
@@ -887,10 +911,7 @@ class EvalSession:
         arrive); only the judge can affirmatively ``"fail"``.
         """
         if expectation.text_contains is not None and expectation.text_contains not in aggregate:
-            return (
-                "continue",
-                f"text {aggregate!r} does not contain {expectation.text_contains!r}",
-            )
+            return ("continue", f"does not contain {expectation.text_contains!r}")
 
         if expectation.eval is not None:
             if not aggregate.strip():
@@ -899,9 +920,10 @@ class EvalSession:
             assert self._judge is not None
             verdict = await self._judge.evaluate(expectation.eval, aggregate)
             if verdict.verdict == "no":
-                return ("fail", f"eval {expectation.eval!r}: judge said no — {verdict.reason}")
+                return ("fail", f"judge said no: {verdict.reason}")
             if verdict.verdict == "continue":
-                return ("continue", f"eval {expectation.eval!r}: incomplete — {verdict.reason}")
+                return ("continue", f"judge said continue: {verdict.reason}")
+            return ("pass", f"judge said yes: {verdict.reason}")
 
         return ("pass", "")
 

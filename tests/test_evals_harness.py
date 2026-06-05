@@ -169,7 +169,9 @@ class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
         s = _session()
         s._judge = _FakeJudge(["yes"])
         exp = Expectation(event="llm_response", eval="describes the weather")
-        self.assertEqual(await s._evaluate_aggregate("It's 75 and sunny.", exp), ("pass", ""))
+        status, reason = await s._evaluate_aggregate("It's 75 and sunny.", exp)
+        self.assertEqual(status, "pass")
+        self.assertIn("judge said yes", reason)
 
     async def test_eval_no_fails(self):
         s = _session()
