@@ -7,6 +7,8 @@
 agents_dir: ../../examples       # agent paths below are relative to this
 scenarios_dir: scenarios         # scenario names resolve to <dir>/<name>.yaml
 concurrency: 4
+runs_dir: test-runs              # logs + recordings -> test-runs/<timestamp>/
+record: true                     # set true (or pass -a) to record conversation audio
 spawn: "{python} {agent} -t eval --port {port}"
 
 suite:
