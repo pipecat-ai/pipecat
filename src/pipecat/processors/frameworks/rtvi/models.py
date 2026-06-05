@@ -499,6 +499,18 @@ class BotStoppedSpeakingMessage(BaseModel):
     type: Literal["bot-stopped-speaking"] = "bot-stopped-speaking"
 
 
+class BotInterruptedMessage(BaseModel):
+    """Message indicating the bot was interrupted and its in-flight output cut off.
+
+    Fires for any pipeline interruption — a VAD-detected user barge-in or a
+    programmatic interrupt (e.g. ``send-text`` with ``run_immediately``) — so a
+    client can drop whatever the bot was mid-saying.
+    """
+
+    label: MessageLiteral = MESSAGE_LABEL
+    type: Literal["bot-interrupted"] = "bot-interrupted"
+
+
 class MetricsMessage(BaseModel):
     """Message containing performance metrics.
 
