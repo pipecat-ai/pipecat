@@ -336,8 +336,9 @@ def _suite_status_cell(r: SuiteRun):
 class _SuiteDashboard:
     """Live table rendered every frame from the shared list of runs."""
 
-    def __init__(self, runs: list[SuiteRun]):
+    def __init__(self, runs: list[SuiteRun], started_at: float):
         self.runs = runs
+        self.started_at = started_at
 
     def __rich__(self) -> Group:
         table = Table.grid(padding=(0, 2))
@@ -358,9 +359,23 @@ class _SuiteDashboard:
                 Text(r.scenario, style="cyan"),
                 Text(detail, style="dim"),
             )
+        total = len(self.runs)
         done = sum(1 for r in self.runs if r.status == "done")
         passed = sum(1 for r in self.runs if _suite_verdict(r) == "passed")
-        summary = Text(f"{passed}/{len(self.runs)} passed  ·  {done}/{len(self.runs)} done", "bold")
+        # The total time ticks live next to the tally, so it doubles as the
+        # "still working" signal (no spinner needed); it keeps advancing through
+        # the agent-teardown tail (see _stop_agent) until Live exits, leaving the
+        # final time on screen. The first column is kept blank so the tally stays
+        # aligned with the rows above. _finalize_suite intentionally does not
+        # reprint this line (it would duplicate the last frame).
+        elapsed = _fmt_duration(time.monotonic() - self.started_at)
+        summary = Table.grid(padding=(0, 1))
+        summary.add_column()  # blank, for alignment with the status column
+        summary.add_column()  # tally
+        summary.add_row(
+            Text(" "),
+            Text(f"{passed}/{total} passed  ·  {done}/{total} done  ·  {elapsed}", "bold"),
+        )
         return Group(table, Text(""), summary)
 
 
@@ -391,24 +406,28 @@ def _finalize_suite(runs: list[SuiteRun], runs_dir: Path, elapsed_s: float) -> i
                     print(f"      {_red('•')} {f}")
 
     print()
-    summary = f"{passed}/{len(runs)} passed"
-    if failed:
-        summary += f", {len(failed)} failed"
-    if skipped:
-        summary += f", {skipped} skipped"
-    summary += f"  ·  {_fmt_duration(elapsed_s)}"
-    print(f"  {_color(summary, '31' if failed else '32')}")
+    # In a terminal the live dashboard's last frame already shows the tally and
+    # the (now final) elapsed time, so reprinting it here would just duplicate
+    # that line. Piped output has no dashboard, so print the tally there.
+    if not _console.is_terminal:
+        summary = f"{passed}/{len(runs)} passed"
+        if failed:
+            summary += f", {len(failed)} failed"
+        if skipped:
+            summary += f", {skipped} skipped"
+        summary += f"  ·  {_fmt_duration(elapsed_s)}"
+        print(f"  {_color(summary, '31' if failed else '32')}")
     print(f"  logs: {runs_dir}")
     print()
     return 0 if not failed else 1
 
 
 async def _run_suite_all(
-    runs: list[SuiteRun], manifest, logs_dir: Path, record_dir: Path | None
+    runs: list[SuiteRun], manifest, logs_dir: Path, record_dir: Path | None, started: float
 ) -> None:
     """Run the suite with a live dashboard (TTY) or streamed lines (piped)."""
     if _console.is_terminal:
-        with Live(_SuiteDashboard(runs), console=_console, refresh_per_second=12.5):
+        with Live(_SuiteDashboard(runs, started), console=_console, refresh_per_second=12.5):
             await run_suite(runs, manifest, logs_dir, record_dir=record_dir)
     else:
         print(f"Running {len(runs)} eval(s), {manifest.concurrency} at a time...")
@@ -493,6 +512,6 @@ def suite(
     print()
 
     started = time.monotonic()
-    asyncio.run(_run_suite_all(runs, manifest, logs_dir, record_dir))
+    asyncio.run(_run_suite_all(runs, manifest, logs_dir, record_dir, started))
     exit_code = _finalize_suite(runs, run_dir, time.monotonic() - started)
     raise typer.Exit(code=exit_code)
