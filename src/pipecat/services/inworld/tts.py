@@ -1219,6 +1219,11 @@ class InworldTTSService(WebsocketTTSService):
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
+            if self._websocket is None:
+                logger.warning(f"{self}: websocket unavailable after connect attempt, skipping TTS")
+                yield ErrorFrame(error="websocket unavailable")
+                return
+
             try:
                 if not self.audio_context_available(context_id):
                     self._reset_generation_timing()
