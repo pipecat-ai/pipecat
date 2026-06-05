@@ -9,8 +9,7 @@ example automatically.
 Each example is a Pipecat **agent**. We run it with its eval transport
 (`-t eval`), and the **eval harness** (`pipecat.evals`) connects to it as an RTVI
 client, plays the user's turns (synthesizing audio when a scenario is in audio
-mode), transcribes the agent's speech, and judges the response with an LLM. No
-Daily room and no second "eval bot" — the harness is both.
+mode), transcribes the agent's speech, and judges the response with an LLM.
 
 A scenario (`scenarios/<name>.yaml`) is a scripted conversation plus the expected
 results. For example the `simple_math` scenario asks "What is two plus two?" and
@@ -51,6 +50,25 @@ If you already have an agent running with `-t eval`, run a scenario directly:
 ```sh
 pipecat eval run scenarios/simple_math.yaml --agent-url ws://localhost:7860
 ```
+
+## Vision (image input)
+
+Some agents need session data they'd normally get from a `/start` request body,
+such as a vision bot's image. The eval transport has no such endpoint, so an
+agent entry can point to a JSON `runner_body:` file (resolved relative to the
+manifest) that is passed to the agent as `--runner-body`:
+
+```yaml
+- agent: vision/vision-openai.py
+  runner_body: scenarios/vision-cat.json   # {"image_path": "../assets/cat.jpg", "question": "..."}
+  scenarios: [vision_describe]
+```
+
+The agent is spawned with the body file's directory as its working directory, so
+a relative `image_path` in the body resolves next to the file and the two travel
+together. The `vision_describe` scenario is a bot-first turn (no user input): the
+bot describes the image (a cat) on connect and the judge checks that it described
+a cat.
 
 ## Adding coverage
 

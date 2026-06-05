@@ -188,3 +188,28 @@ suite:
     scenarios: [weather_function_call]
   - agent: function-calling/function-calling-sarvam.py
     scenarios: [weather_function_call]
+
+  # Vision: the bot is handed an image (a cat) on connect via --runner-body and
+  # describes it. `runner_body:` is resolved relative to this manifest; relative
+  # paths inside it (the image) resolve next to the body file.
+  - agent: vision/vision-openai.py
+    runner_body: scenarios/vision-cat.json
+    scenarios: [vision_describe]
+  - agent: vision/vision-openai-responses.py
+    runner_body: scenarios/vision-cat.json
+    scenarios: [vision_describe]
+  - agent: vision/vision-openai-responses-http.py
+    runner_body: scenarios/vision-cat.json
+    scenarios: [vision_describe]
+  - agent: vision/vision-anthropic.py
+    runner_body: scenarios/vision-cat.json
+    scenarios: [vision_describe]
+  - agent: vision/vision-aws.py
+    runner_body: scenarios/vision-cat.json
+    scenarios: [vision_describe]
+  - agent: vision/vision-gemini-flash.py
+    runner_body: scenarios/vision-cat.json
+    scenarios: [vision_describe]
+  - agent: vision/vision-moondream.py
+    runner_body: scenarios/vision-cat.json
+    scenarios: [vision_describe]

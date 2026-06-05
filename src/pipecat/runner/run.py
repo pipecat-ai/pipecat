@@ -91,6 +91,7 @@ To run locally:
 import argparse
 import asyncio
 import importlib.util
+import json
 import mimetypes
 import os
 import sys
@@ -1174,6 +1175,12 @@ async def _run_eval(args: argparse.Namespace):
     runner_args.handle_sigint = True
     runner_args.cli_args = args
 
+    # A bot may need session data it would normally receive in the /start request
+    # body (e.g. a vision bot's image path). The eval transport has no such
+    # endpoint, so the body is read from a JSON file passed with --runner-body.
+    if args.runner_body:
+        runner_args.body = json.loads(Path(args.runner_body).read_text())
+
     bot_module = _get_bot_module()
     await bot_module.bot(runner_args)
 
@@ -1294,6 +1301,12 @@ def main(parser: argparse.ArgumentParser | None = None):
         help="Connect directly to Daily room (automatically sets transport to daily)",
     )
     parser.add_argument("-f", "--folder", type=str, help="Path to downloads folder")
+    parser.add_argument(
+        "--runner-body",
+        type=str,
+        default=None,
+        help="Path to a JSON file with the runner args body (e.g. a vision bot's image path under -t eval)",
+    )
     parser.add_argument(
         "-v", "--verbose", action="count", default=0, help="Increase logging verbosity"
     )
