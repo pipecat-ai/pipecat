@@ -46,8 +46,6 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import (
     FunctionCallFromLLM,
     LLMService,
-    WebsocketLLMService,
-    WebsocketReconnectedError,
 )
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
 from pipecat.services.settings import LLMSettings, _NotGiven, assert_given
@@ -56,6 +54,11 @@ from pipecat.utils.tracing.service_decorators import traced_llm
 try:
     from websockets.asyncio.client import connect as websocket_connect
     from websockets.exceptions import ConnectionClosed
+
+    from pipecat.services.websocket_llm_service import (
+        WebsocketLLMService,
+        WebsocketReconnectedError,
+    )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use OpenAI, you need to `pip install pipecat-ai[openai]`.")
