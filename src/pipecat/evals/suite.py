@@ -15,7 +15,8 @@ are just a manifest plus that command.
 Manifest format (YAML)::
 
     concurrency: 4
-    record_dir: recordings        # optional; enables audio recording
+    runs_dir: test-runs           # logs + recordings go to <runs_dir>/<timestamp>/
+    record: false                 # record conversation audio
     cache_dir: null               # optional
     scenarios_dir: scenarios      # resolved relative to this manifest file
     # {python}=interpreter (default sys.executable), {agent}=agent path,
@@ -79,7 +80,8 @@ class Manifest:
     python: str
     concurrency: int
     base_port: int
-    record_dir: Path | None
+    runs_dir: Path | None  # base for run output (a <timestamp>/ subdir is added)
+    record: bool  # record conversation audio
     cache_dir: str | None
     base_dir: Path
 
@@ -99,7 +101,8 @@ def load_manifest(path: str | Path) -> Manifest:
     python = str(data.get("python") or sys.executable)
     concurrency = int(data.get("concurrency", DEFAULT_CONCURRENCY))
     base_port = int(data.get("base_port", DEFAULT_BASE_PORT))
-    record_dir = data.get("record_dir")
+    runs_dir = data.get("runs_dir")
+    record = bool(data.get("record", False))
     cache_dir = data.get("cache_dir")
     scenarios_dir = base / str(data.get("scenarios_dir", "scenarios"))
     agents_dir = base / str(data.get("agents_dir", "."))
@@ -133,7 +136,8 @@ def load_manifest(path: str | Path) -> Manifest:
         python=python,
         concurrency=concurrency,
         base_port=base_port,
-        record_dir=(base / str(record_dir)).resolve() if record_dir else None,
+        runs_dir=(base / str(runs_dir)).resolve() if runs_dir else None,
+        record=record,
         cache_dir=cache_dir,
         base_dir=base,
     )
@@ -186,6 +190,7 @@ async def _run_one(
     port: int,
     manifest: Manifest,
     logs_dir: Path,
+    record_dir: Path | None,
     sem: asyncio.Semaphore,
     on_update: Callable[[SuiteRun], None] | None,
 ) -> None:
@@ -221,7 +226,7 @@ async def _run_one(
             )
 
             scenario = load_scenario(run.scenario_path)
-            record_path = str(manifest.record_dir / f"{safe}.wav") if manifest.record_dir else None
+            record_path = str(record_dir / f"{safe}.wav") if record_dir else None
             run.result = await run_scenario(
                 scenario,
                 f"ws://localhost:{port}",
@@ -254,21 +259,23 @@ async def run_suite(
     manifest: Manifest,
     logs_dir: Path,
     *,
+    record_dir: Path | None = None,
     on_update: Callable[[SuiteRun], None] | None = None,
 ) -> None:
     """Run all ``runs`` with the manifest's concurrency, mutating each in place.
 
-    Each run is spawned on its own port (``base_port + index``). ``on_update`` is
-    called whenever a run changes status, for live display.
+    Each run is spawned on its own port (``base_port + index``). ``logs_dir`` and
+    (optional) ``record_dir`` are where per-run logs and recordings go.
+    ``on_update`` is called whenever a run changes status, for live display.
     """
     logger.remove()  # keep stdout clean for the caller's display
     logs_dir.mkdir(parents=True, exist_ok=True)
-    if manifest.record_dir:
-        manifest.record_dir.mkdir(parents=True, exist_ok=True)
+    if record_dir:
+        record_dir.mkdir(parents=True, exist_ok=True)
     sem = asyncio.Semaphore(manifest.concurrency)
     await asyncio.gather(
         *(
-            _run_one(run, manifest.base_port + i, manifest, logs_dir, sem, on_update)
+            _run_one(run, manifest.base_port + i, manifest, logs_dir, record_dir, sem, on_update)
             for i, run in enumerate(runs)
         )
     )

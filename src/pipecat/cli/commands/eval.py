@@ -403,14 +403,18 @@ def _finalize_suite(runs: list[SuiteRun], runs_dir: Path, elapsed_s: float) -> i
     return 0 if not failed else 1
 
 
-async def _run_suite_all(runs: list[SuiteRun], manifest, logs_dir: Path) -> None:
+async def _run_suite_all(
+    runs: list[SuiteRun], manifest, logs_dir: Path, record_dir: Path | None
+) -> None:
     """Run the suite with a live dashboard (TTY) or streamed lines (piped)."""
     if _console.is_terminal:
         with Live(_SuiteDashboard(runs), console=_console, refresh_per_second=12.5):
-            await run_suite(runs, manifest, logs_dir)
+            await run_suite(runs, manifest, logs_dir, record_dir=record_dir)
     else:
         print(f"Running {len(runs)} eval(s), {manifest.concurrency} at a time...")
-        await run_suite(runs, manifest, logs_dir, on_update=_print_suite_line)
+        await run_suite(
+            runs, manifest, logs_dir, record_dir=record_dir, on_update=_print_suite_line
+        )
 
 
 @eval_app.command("suite")
@@ -421,7 +425,10 @@ def suite(
     ),
     scenario: str = typer.Option(None, "-s", "--scenario", help="Only this scenario name."),
     runs_dir: Path = typer.Option(
-        None, "--runs-dir", help="Where logs/recordings go (default eval-runs/<timestamp>)."
+        None,
+        "--runs-dir",
+        help="Output base, overriding the manifest's runs_dir (a <timestamp>/ subdir "
+        "with logs/ and recordings/ is created under it; default eval-runs).",
     ),
     concurrency: int = typer.Option(
         None, "-c", "--concurrency", help="Override manifest concurrency."
@@ -438,10 +445,12 @@ def suite(
         print("No runs match.")
         raise typer.Exit(code=1)
 
-    out = runs_dir or Path("eval-runs") / datetime.now().strftime("%Y%m%d_%H%M%S")
-    logs_dir = out / "logs"
-    if audio and manifest.record_dir is None:
-        manifest.record_dir = out / "recordings"
+    # Base for output (CLI overrides the manifest's runs_dir); a per-run timestamp
+    # subdir holds this run's logs and recordings.
+    base = runs_dir or manifest.runs_dir or Path("eval-runs")
+    run_dir = base / datetime.now().strftime("%Y%m%d_%H%M%S")
+    logs_dir = run_dir / "logs"
+    record_dir = (run_dir / "recordings") if (audio or manifest.record) else None
 
     # Print each distinct scenario's config up front (per-run would interleave).
     print("Scenarios:")
@@ -460,6 +469,6 @@ def suite(
     print()
 
     started = time.monotonic()
-    asyncio.run(_run_suite_all(runs, manifest, logs_dir))
-    exit_code = _finalize_suite(runs, out, time.monotonic() - started)
+    asyncio.run(_run_suite_all(runs, manifest, logs_dir, record_dir))
+    exit_code = _finalize_suite(runs, run_dir, time.monotonic() - started)
     raise typer.Exit(code=exit_code)
