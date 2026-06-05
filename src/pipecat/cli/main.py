@@ -65,7 +65,7 @@ def _build_app():
 
     app = typer.Typer(
         name="pipecat",
-        help="CLI tool for scaffolding Pipecat AI voice agent projects",
+        help="Command-line tools for building Pipecat AI applications.",
         add_completion=False,
     )
     console = Console()
