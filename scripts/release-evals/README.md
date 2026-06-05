@@ -56,6 +56,3 @@ pipecat eval run scenarios/simple_math.yaml --agent-url ws://localhost:7860
 
 - New agent: add an entry to `manifest.yaml` (`agent:` + the `scenarios:` it should run).
 - New behavior to test: add a `scenarios/<name>.yaml` and reference it from the manifest.
-
-> Note: `eval.py`, `run-eval.py`, and `utils.py` are the older Daily-room eval
-> framework, kept for now but superseded by the harness above.
