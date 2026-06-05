@@ -25,7 +25,7 @@ _INSTALL_HINT = (
     "  • As a global tool (on your PATH):\n"
     '        uv tool install "pipecat-ai[cli]"     # or: pipx install "pipecat-ai[cli]"\n\n'
     "  • In your current project or virtualenv:\n"
-    '        pip install "pipecat-ai[cli]"         # or: uv pip install "pipecat-ai[cli]"\n'
+    '        uv pip install "pipecat-ai[cli]"      # or: pip install "pipecat-ai[cli]"\n'
 )
 
 # Official optional sub-CLIs. Each ships as a separate plugin package that registers
@@ -47,7 +47,7 @@ def _enable_hint(name: str, package: str) -> str:
         "  • As a global tool (on your PATH), reinstall with the plugin:\n"
         f'        uv tool install "pipecat-ai[cli]" --with {package}\n\n'
         "  • In your current project or virtualenv:\n"
-        f"        pip install {package}     # or: uv pip install {package}\n"
+        f"        uv pip install {package}     # or: pip install {package}\n"
     )
 
 
