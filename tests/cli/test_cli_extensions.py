@@ -6,6 +6,7 @@ enable it when invoked — rather than hiding it or erroring with "No such comma
 """
 
 import importlib.metadata as importlib_metadata
+import re
 
 import pytest
 from typer.testing import CliRunner
@@ -13,6 +14,9 @@ from typer.testing import CliRunner
 from pipecat.cli.main import _enable_hint, app
 
 runner = CliRunner()
+
+# rich emits ANSI color codes when it thinks the output is a terminal (e.g. in CI).
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 # These assert the *stub* path, which only exists when the official plugins are NOT
 # installed. If one is installed its real Typer app is mounted instead, so skip.
@@ -24,7 +28,8 @@ pytestmark = pytest.mark.skipif(
 
 
 def _norm(text: str) -> str:
-    """Normalize help output so assertions survive rich's wrapping + box borders."""
+    """Normalize help output so assertions survive rich's ANSI colors, wrapping, and borders."""
+    text = _ANSI_RE.sub("", text)
     for ch in "│╭╮╰╯─":
         text = text.replace(ch, " ")
     return " ".join(text.split())
