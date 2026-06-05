@@ -1,0 +1,188 @@
+# Release evals manifest: which scenarios each agent runs.
+# Run with: pipecat eval suite scripts/release-evals/manifest.yaml
+#
+# Scenarios live in scenarios/<name>.yaml and are reusable, so one shared
+# scenario covers many agents.
+
+agents_dir: ../../examples       # agent paths below are relative to this
+scenarios_dir: scenarios         # scenario names resolve to <dir>/<name>.yaml
+concurrency: 4
+spawn: "{python} {agent} -t eval --port {port}"
+
+suite:
+  - agent: voice/voice-aicoustics.py
+    scenarios: [simple_math]
+  - agent: voice/voice-assemblyai.py
+    scenarios: [simple_math]
+  - agent: voice/voice-assemblyai-turn-detection.py
+    scenarios: [simple_math]
+  - agent: voice/voice-asyncai.py
+    scenarios: [simple_math]
+  - agent: voice/voice-asyncai-http.py
+    scenarios: [simple_math]
+  - agent: voice/voice-aws.py
+    scenarios: [simple_math]
+  - agent: voice/voice-aws-strands.py
+    scenarios: [weather_function_call]
+  - agent: voice/voice-azure.py
+    scenarios: [simple_math]
+  - agent: voice/voice-azure-http.py
+    scenarios: [simple_math]
+  - agent: voice/voice-camb.py
+    scenarios: [simple_math]
+  - agent: voice/voice-cartesia.py
+    scenarios: [simple_math, greeting, multi_turn, interruption, language_switch]
+  - agent: voice/voice-cartesia-http.py
+    scenarios: [simple_math]
+  - agent: voice/voice-cartesia-turns.py
+    scenarios: [simple_math]
+  - agent: voice/voice-deepgram.py
+    scenarios: [simple_math]
+  - agent: voice/voice-deepgram-flux.py
+    scenarios: [simple_math]
+  - agent: voice/voice-deepgram-http.py
+    scenarios: [simple_math]
+  - agent: voice/voice-elevenlabs.py
+    scenarios: [simple_math]
+  - agent: voice/voice-elevenlabs-http.py
+    scenarios: [simple_math]
+  - agent: voice/voice-fal.py
+    scenarios: [simple_math]
+  - agent: voice/voice-fish.py
+    scenarios: [simple_math]
+  - agent: voice/voice-gladia.py
+    scenarios: [simple_math]
+  - agent: voice/voice-gladia-vad.py
+    scenarios: [simple_math]
+  - agent: voice/voice-google.py
+    scenarios: [simple_math]
+  - agent: voice/voice-google-audio-in.py
+    scenarios: [simple_math]
+  - agent: voice/voice-google-gemini-tts.py
+    scenarios: [simple_math]
+  - agent: voice/voice-google-http.py
+    scenarios: [simple_math]
+  - agent: voice/voice-gradium.py
+    scenarios: [simple_math]
+  - agent: voice/voice-groq.py
+    scenarios: [simple_math]
+  - agent: voice/voice-hume.py
+    scenarios: [simple_math]
+  - agent: voice/voice-inworld.py
+    scenarios: [simple_math]
+  - agent: voice/voice-inworld-http.py
+    scenarios: [simple_math]
+  - agent: voice/voice-kokoro.py
+    scenarios: [simple_math]
+  - agent: voice/voice-krisp-viva.py
+    scenarios: [simple_math]
+  - agent: voice/voice-langchain.py
+    scenarios: [simple_math]
+  - agent: voice/voice-lmnt.py
+    scenarios: [simple_math]
+  - agent: voice/voice-minimax.py
+    scenarios: [simple_math]
+  - agent: voice/voice-mistral.py
+    scenarios: [simple_math]
+  - agent: voice/voice-neuphonic.py
+    scenarios: [simple_math]
+  - agent: voice/voice-neuphonic-http.py
+    scenarios: [simple_math]
+  - agent: voice/voice-nvidia.py
+    scenarios: [simple_math]
+  - agent: voice/voice-openai.py
+    scenarios: [simple_math, interruption]
+  - agent: voice/voice-openai-http.py
+    scenarios: [simple_math]
+  - agent: voice/voice-openai-responses.py
+    scenarios: [simple_math]
+  - agent: voice/voice-openai-responses-http.py
+    scenarios: [simple_math]
+  - agent: voice/voice-piper.py
+    scenarios: [simple_math]
+  - agent: voice/voice-resemble.py
+    scenarios: [simple_math]
+  - agent: voice/voice-rime.py
+    scenarios: [simple_math]
+  - agent: voice/voice-rime-http.py
+    scenarios: [simple_math]
+  - agent: voice/voice-sarvam.py
+    scenarios: [simple_math]
+  - agent: voice/voice-sarvam-http.py
+    scenarios: [simple_math]
+  - agent: voice/voice-smallest.py
+    scenarios: [simple_math]
+  - agent: voice/voice-soniox.py
+    scenarios: [simple_math]
+  - agent: voice/voice-speechmatics.py
+    scenarios: [simple_math]
+  - agent: voice/voice-speechmatics-vad.py
+    scenarios: [simple_math]
+  - agent: voice/voice-xai.py
+    scenarios: [simple_math]
+  - agent: voice/voice-xai-http.py
+    scenarios: [simple_math]
+  - agent: getting-started/07-function-calling.py
+    scenarios: [weather_function_call, weather_and_restaurant]
+  - agent: function-calling/function-calling-anthropic.py
+    scenarios: [weather_function_call, weather_and_restaurant]
+  - agent: function-calling/function-calling-anthropic-async.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-anthropic-async-stream.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-aws.py
+    scenarios: [weather_function_call, weather_and_restaurant]
+  - agent: function-calling/function-calling-azure.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-cerebras.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-deepseek.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-fireworks.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-google.py
+    scenarios: [weather_function_call, weather_and_restaurant]
+  - agent: function-calling/function-calling-google-async.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-google-async-stream.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-google-vertex.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-grok.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-groq.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-inception.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-mistral.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-nebius.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-novita.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-nvidia.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-openai.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-openai-async.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-openai-async-stream.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-openai-responses.py
+    scenarios: [weather_function_call, weather_and_restaurant]
+  - agent: function-calling/function-calling-openai-responses-async.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-openai-responses-async-stream.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-openai-responses-http.py
+    scenarios: [weather_function_call, weather_and_restaurant]
+  - agent: function-calling/function-calling-openrouter.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-perplexity.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-qwen.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-sambanova.py
+    scenarios: [weather_function_call]
+  - agent: function-calling/function-calling-sarvam.py
+    scenarios: [weather_function_call]
