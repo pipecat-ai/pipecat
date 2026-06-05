@@ -433,6 +433,10 @@ def suite(
         help="Output base, overriding the manifest's runs_dir (a <name>/ subdir with "
         "logs/ and recordings/ is created under it; default eval-runs).",
     ),
+    agents_dir: Path = typer.Option(None, "--agents-dir", help="Override manifest agents_dir."),
+    scenarios_dir: Path = typer.Option(
+        None, "--scenarios-dir", help="Override manifest scenarios_dir."
+    ),
     concurrency: int = typer.Option(
         None, "-c", "--concurrency", help="Override manifest concurrency."
     ),
@@ -444,32 +448,33 @@ def suite(
 ) -> None:
     """Spawn the agents in a manifest and run their scenarios concurrently.
 
-    Any option also settable in the manifest takes precedence when passed here.
+    Everything except the ``suite:`` list can be set in the manifest or overridden
+    here (the command line wins), so a manifest can be just a ``suite:`` list.
     """
-    manifest = load_manifest(manifest_path)
-    # CLI overrides win over the manifest.
-    if concurrency is not None:
-        manifest.concurrency = concurrency
-    if base_port is not None:
-        manifest.base_port = base_port
-    if cache_dir is not None:
-        manifest.cache_dir = cache_dir
-    if spawn is not None:
-        manifest.spawn = spawn
-    if python is not None:
-        manifest.python = python
+    manifest = load_manifest(
+        manifest_path,
+        agents_dir=agents_dir,
+        scenarios_dir=scenarios_dir,
+        runs_dir=runs_dir,
+        spawn=spawn,
+        python=python,
+        concurrency=concurrency,
+        base_port=base_port,
+        record=True if audio else None,
+        cache_dir=cache_dir,
+    )
 
     runs = filter_runs(manifest.runs, pattern=pattern, scenario=scenario)
     if not runs:
         print("No runs match.")
         raise typer.Exit(code=1)
 
-    # Output base (CLI overrides the manifest's runs_dir); a per-run subdir named by
-    # --name (default a timestamp) holds this run's logs and recordings.
-    base = runs_dir or manifest.runs_dir or Path("eval-runs")
+    # A per-run subdir named by --name (default a timestamp) holds this run's logs
+    # and recordings, under the (resolved) runs_dir.
+    base = manifest.runs_dir or Path("eval-runs")
     run_dir = base / (name or datetime.now().strftime("%Y%m%d_%H%M%S"))
     logs_dir = run_dir / "logs"
-    record_dir = (run_dir / "recordings") if (audio or manifest.record) else None
+    record_dir = (run_dir / "recordings") if manifest.record else None
 
     # Print each distinct scenario's config up front (per-run would interleave).
     print("Scenarios:")
