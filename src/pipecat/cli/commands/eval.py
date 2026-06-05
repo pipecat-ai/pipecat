@@ -424,31 +424,50 @@ def suite(
         None, "-p", "--pattern", help="Only agents whose path contains this."
     ),
     scenario: str = typer.Option(None, "-s", "--scenario", help="Only this scenario name."),
+    name: str = typer.Option(
+        None, "-n", "--name", help="Run subdir name under runs_dir (default a timestamp)."
+    ),
     runs_dir: Path = typer.Option(
         None,
         "--runs-dir",
-        help="Output base, overriding the manifest's runs_dir (a <timestamp>/ subdir "
-        "with logs/ and recordings/ is created under it; default eval-runs).",
+        help="Output base, overriding the manifest's runs_dir (a <name>/ subdir with "
+        "logs/ and recordings/ is created under it; default eval-runs).",
     ),
     concurrency: int = typer.Option(
         None, "-c", "--concurrency", help="Override manifest concurrency."
     ),
+    base_port: int = typer.Option(None, "--base-port", help="Override manifest base_port."),
+    cache_dir: str = typer.Option(None, "--cache-dir", help="Override manifest cache_dir."),
+    spawn: str = typer.Option(None, "--spawn", help="Override manifest spawn template."),
+    python: str = typer.Option(None, "--python", help="Override manifest python interpreter."),
     audio: bool = typer.Option(False, "-a", "--audio", help="Record conversation audio."),
 ) -> None:
-    """Spawn the agents in a manifest and run their scenarios concurrently."""
+    """Spawn the agents in a manifest and run their scenarios concurrently.
+
+    Any option also settable in the manifest takes precedence when passed here.
+    """
     manifest = load_manifest(manifest_path)
+    # CLI overrides win over the manifest.
     if concurrency is not None:
         manifest.concurrency = concurrency
+    if base_port is not None:
+        manifest.base_port = base_port
+    if cache_dir is not None:
+        manifest.cache_dir = cache_dir
+    if spawn is not None:
+        manifest.spawn = spawn
+    if python is not None:
+        manifest.python = python
 
     runs = filter_runs(manifest.runs, pattern=pattern, scenario=scenario)
     if not runs:
         print("No runs match.")
         raise typer.Exit(code=1)
 
-    # Base for output (CLI overrides the manifest's runs_dir); a per-run timestamp
-    # subdir holds this run's logs and recordings.
+    # Output base (CLI overrides the manifest's runs_dir); a per-run subdir named by
+    # --name (default a timestamp) holds this run's logs and recordings.
     base = runs_dir or manifest.runs_dir or Path("eval-runs")
-    run_dir = base / datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = base / (name or datetime.now().strftime("%Y%m%d_%H%M%S"))
     logs_dir = run_dir / "logs"
     record_dir = (run_dir / "recordings") if (audio or manifest.record) else None
 

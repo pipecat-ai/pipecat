@@ -26,7 +26,12 @@ covers many agents.
 ./run.sh -p voice-openai  # only agents whose path contains "voice-openai"
 ./run.sh -s simple_math   # only the simple_math scenario
 ./run.sh -c 8 -a          # 8 at a time, record audio
+./run.sh -n nightly       # output to test-runs/nightly/ instead of a timestamp
 ```
+
+Any value also set in the manifest can be overridden on the command line (it
+wins): `-c/--concurrency`, `--base-port`, `--cache-dir`, `--spawn`, `--python`,
+`--runs-dir`, and `-a`.
 
 `run.sh` is a thin wrapper over the `pipecat eval suite` command:
 
