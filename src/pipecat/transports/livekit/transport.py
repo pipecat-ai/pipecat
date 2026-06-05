@@ -169,8 +169,14 @@ class LiveKitTransportClient:
         self._audio_track: rtc.LocalAudioTrack | None = None
         self._audio_tracks = {}
         self._audio_queue = asyncio.Queue()
+        # Per-participant ``(AudioStream, Task)`` so unsubscribe can close
+        # the owned native stream and cancel its producer task instead of
+        # leaking both on every track republish.
+        self._audio_streams: dict[str, tuple[rtc.AudioStream, asyncio.Task]] = {}
         self._video_tracks = {}
         self._video_queue = asyncio.Queue()
+        # Symmetric registry for video streams.
+        self._video_streams: dict[str, tuple[rtc.VideoStream, asyncio.Task]] = {}
         self._other_participant_has_joined = False
         self._task_manager: BaseTaskManager | None = None
         self._async_lock = asyncio.Lock()
@@ -498,24 +504,34 @@ class LiveKitTransportClient:
         """Handle track subscribed events."""
         if track.kind == rtc.TrackKind.KIND_AUDIO:
             logger.info(f"Audio track subscribed: {track.sid} from participant {participant.sid}")
+            # If the participant is re-publishing (e.g. mute/unmute cycle),
+            # close + cancel the previous stream/task before replacing the
+            # registry entry, so two producers never feed ``_audio_queue``
+            # for the same participant.
+            await self._close_audio_stream(participant.sid)
             self._audio_tracks[participant.sid] = track
             audio_stream = rtc.AudioStream(track)
-            self._task_manager.create_task(
+            task = self._task_manager.create_task(
                 self._process_audio_stream(audio_stream, participant.sid),
                 f"{self}::_process_audio_stream",
             )
+            self._audio_streams[participant.sid] = (audio_stream, task)
             await self._callbacks.on_audio_track_subscribed(participant.sid)
         elif track.kind == rtc.TrackKind.KIND_VIDEO:
             logger.info(f"Video track subscribed: {track.sid} from participant {participant.sid}")
+            # Symmetric: clean up any prior video stream/task for the same
+            # participant before replacing.
+            await self._close_video_stream(participant.sid)
             self._video_tracks[participant.sid] = track
             # Only process video stream if video input is enabled to prevent
             # unbounded queue growth when there is no consumer for video frames.
             if self._params.video_in_enabled:
                 video_stream = rtc.VideoStream(track)
-                self._task_manager.create_task(
+                task = self._task_manager.create_task(
                     self._process_video_stream(video_stream, participant.sid),
                     f"{self}::_process_video_stream",
                 )
+                self._video_streams[participant.sid] = (video_stream, task)
             await self._callbacks.on_video_track_subscribed(participant.sid)
 
     async def _async_on_track_unsubscribed(
@@ -527,9 +543,45 @@ class LiveKitTransportClient:
         """Handle track unsubscribed events."""
         logger.info(f"Track unsubscribed: {publication.sid} from {participant.identity}")
         if track.kind == rtc.TrackKind.KIND_AUDIO:
+            await self._close_audio_stream(participant.sid)
             await self._callbacks.on_audio_track_unsubscribed(participant.sid)
         elif track.kind == rtc.TrackKind.KIND_VIDEO:
+            await self._close_video_stream(participant.sid)
             await self._callbacks.on_video_track_unsubscribed(participant.sid)
+
+    async def _close_audio_stream(self, participant_id: str) -> None:
+        """Close a participant's owned audio stream and cancel its producer task.
+
+        Idempotent: no-op when there is no registered stream for the
+        participant.
+        """
+        entry = self._audio_streams.pop(participant_id, None)
+        if entry is None:
+            return
+        stream, task = entry
+        try:
+            await asyncio.wait_for(stream.aclose(), timeout=2.0)
+        except Exception as e:
+            logger.warning(f"AudioStream.aclose failed for {participant_id}: {e}")
+        if task is not None and not task.done():
+            task.cancel()
+
+    async def _close_video_stream(self, participant_id: str) -> None:
+        """Close a participant's owned video stream and cancel its producer task.
+
+        Idempotent: no-op when there is no registered stream for the
+        participant.
+        """
+        entry = self._video_streams.pop(participant_id, None)
+        if entry is None:
+            return
+        stream, task = entry
+        try:
+            await asyncio.wait_for(stream.aclose(), timeout=2.0)
+        except Exception as e:
+            logger.warning(f"VideoStream.aclose failed for {participant_id}: {e}")
+        if task is not None and not task.done():
+            task.cancel()
 
     async def _async_on_data_received(self, data: rtc.DataPacket):
         """Handle data received events."""
