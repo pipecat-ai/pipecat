@@ -17,4 +17,4 @@ turns:
   - user: "From now on, reply only in Spanish. What's a good dish to try there?"
     expect:
       - event: response
-        eval: "the response is written in Spanish"
+        eval: "the response is written in Spanish (Catalan place or dish names such as 'pa amb tomàquet' are acceptable)"
