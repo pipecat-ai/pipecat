@@ -533,12 +533,24 @@ class RTVIObserver(BaseObserver):
 
         if self._params.bot_output_enabled:
             message = RTVI.BotOutputMessage(
-                data=RTVI.BotOutputMessageData(text=text, spoken=isTTS, aggregated_by=agg_type)
+                data=RTVI.BotOutputMessageData(
+                    text=text,
+                    spoken=isTTS,
+                    aggregated_by=agg_type,
+                    includes_inter_frame_spaces=(
+                        frame.includes_inter_frame_spaces if isTTS else None
+                    ),
+                )
             )
             await self.send_rtvi_message(message)
 
         if isTTS and self._params.bot_tts_enabled:
-            tts_message = RTVI.BotTTSTextMessage(data=RTVI.TextMessageData(text=text))
+            tts_message = RTVI.BotTTSTextMessage(
+                data=RTVI.TextMessageData(
+                    text=text,
+                    includes_inter_frame_spaces=frame.includes_inter_frame_spaces,
+                )
+            )
             await self.send_rtvi_message(tts_message)
 
     async def _handle_llm_text_frame(self, frame: LLMTextFrame):

@@ -343,6 +343,7 @@ class TextMessageData(BaseModel):
     """
 
     text: str
+    includes_inter_frame_spaces: bool | None = None
 
 
 class BotOutputMessageData(TextMessageData):
