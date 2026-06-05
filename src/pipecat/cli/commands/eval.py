@@ -14,16 +14,20 @@ point and also reachable as ``python -m pipecat.evals``.
 import asyncio
 import shutil
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
 
 import typer
 from rich.console import Console, Group
 from rich.live import Live
 from rich.spinner import Spinner
+from rich.table import Table
 from rich.text import Text
 
 from pipecat.evals.harness import AssertionFailure, EvalResult, TurnProgress, run_scenario
 from pipecat.evals.scenario import describe_config, load_scenario
+from pipecat.evals.suite import SuiteRun, filter_runs, load_manifest, run_suite
 
 _console = Console()
 
@@ -193,7 +197,7 @@ def _record_path(record_dir: str | None, scenario_name: str) -> str | None:
 
 async def _run_all(
     paths: list[Path],
-    bot_url: str,
+    agent_url: str,
     verbose: bool,
     audio: bool,
     record_dir: str,
@@ -211,7 +215,7 @@ async def _run_all(
             continue
 
         label = f"{path.name}::{scenario.name}"
-        url = scenario.fixtures.get("bot_url") or bot_url
+        url = scenario.fixtures.get("agent_url") or scenario.fixtures.get("bot_url") or agent_url
         record_path = _record_path(record_dir, scenario.name) if audio else None
         print(f"  {_color(scenario.name + ':', '1;36')}")
         for line in describe_config(scenario, color=_supports_color()).splitlines():
@@ -246,11 +250,11 @@ async def _run_all(
 @eval_app.command("run")
 def run(
     scenarios: list[Path] = typer.Argument(..., help="One or more scenario YAML files."),
-    bot_url: str = typer.Option(
+    agent_url: str = typer.Option(
         "ws://localhost:7860",
-        "--bot-url",
-        help="WebSocket URL of the bot's eval transport. "
-        "Overridden per-scenario by fixtures.bot_url.",
+        "--agent-url",
+        help="WebSocket URL of the agent's eval transport. "
+        "Overridden per-scenario by fixtures.agent_url.",
     ),
     verbose: bool = typer.Option(
         False,
@@ -284,5 +288,178 @@ def run(
         logger.remove()
         logger.add(sys.stderr, level="WARNING")
 
-    exit_code = asyncio.run(_run_all(scenarios, bot_url, verbose, audio, record_dir, cache_dir))
+    exit_code = asyncio.run(_run_all(scenarios, agent_url, verbose, audio, record_dir, cache_dir))
+    raise typer.Exit(code=exit_code)
+
+
+#
+# `pipecat eval suite` — spawn the agents in a manifest and run their scenarios.
+#
+
+_SUITE_GLYPH = {
+    "passed": ("✓", "green", "32"),
+    "failed": ("✗", "red", "31"),
+    "skipped": ("⊘", "yellow", "33"),
+    "error": ("✗", "red", "31"),
+}
+
+
+def _suite_verdict(r: SuiteRun) -> str:
+    """Collapse a run into a display verdict."""
+    if r.status != "done":
+        return r.status  # pending | running
+    if r.error or r.result is None:
+        return "error"
+    if r.result.skipped:
+        return "skipped"
+    return "passed" if r.result.passed else "failed"
+
+
+def _fmt_duration(seconds: float) -> str:
+    """Human-friendly elapsed time, e.g. ``12.3s`` or ``2m 04s``."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    m, s = divmod(int(round(seconds)), 60)
+    return f"{m}m {s:02d}s"
+
+
+def _suite_status_cell(r: SuiteRun):
+    """A rich renderable for the status column (spinner while running)."""
+    if r.status == "pending":
+        return Text("·", style="dim")
+    if r.status == "running":
+        return Spinner("dots", style="cyan")
+    glyph, style, _ = _SUITE_GLYPH[_suite_verdict(r)]
+    return Text(glyph, style=style)
+
+
+class _SuiteDashboard:
+    """Live table rendered every frame from the shared list of runs."""
+
+    def __init__(self, runs: list[SuiteRun]):
+        self.runs = runs
+
+    def __rich__(self) -> Group:
+        table = Table.grid(padding=(0, 2))
+        table.add_column()  # status
+        table.add_column()  # agent
+        table.add_column()  # scenario
+        table.add_column(justify="right")  # timing
+        for r in self.runs:
+            if r.status == "running" and r.started_at is not None:
+                detail = f"{int(time.monotonic() - r.started_at)}s"
+            elif r.status == "done" and r.duration_ms is not None:
+                detail = f"{r.duration_ms}ms"
+            else:
+                detail = ""
+            table.add_row(
+                _suite_status_cell(r),
+                Text(r.agent),
+                Text(r.scenario, style="cyan"),
+                Text(detail, style="dim"),
+            )
+        done = sum(1 for r in self.runs if r.status == "done")
+        passed = sum(1 for r in self.runs if _suite_verdict(r) == "passed")
+        summary = Text(f"{passed}/{len(self.runs)} passed  ·  {done}/{len(self.runs)} done", "bold")
+        return Group(table, Text(""), summary)
+
+
+def _print_suite_line(r: SuiteRun) -> None:
+    """Print a single result line (non-TTY fallback, streamed as each finishes)."""
+    if r.status != "done":
+        return
+    glyph, _, code = _SUITE_GLYPH[_suite_verdict(r)]
+    extra = f"({r.duration_ms}ms)" if r.duration_ms is not None and not r.error else (r.error or "")
+    print(f"  {_color(glyph, code)} {r.agent} {_color(r.scenario, '36')} {_dim(extra)}", flush=True)
+
+
+def _finalize_suite(runs: list[SuiteRun], runs_dir: Path, elapsed_s: float) -> int:
+    """Print the failed set + final tally; return the process exit code."""
+    failed = [r for r in runs if _suite_verdict(r) in ("failed", "error")]
+    passed = sum(1 for r in runs if _suite_verdict(r) == "passed")
+    skipped = sum(1 for r in runs if _suite_verdict(r) == "skipped")
+
+    if failed:
+        print()
+        print(f"  {_color(f'Failed ({len(failed)}):', '1;31')}")
+        for r in failed:
+            if r.error:
+                print(f"  {_red('✗')} {r.agent} {_color(r.scenario, '36')} {_dim('— ' + r.error)}")
+            elif r.result is not None:
+                print(f"  {_red('✗')} {r.agent} {_color(r.scenario, '36')}")
+                for f in r.result.failures:
+                    print(f"      {_red('•')} {f}")
+
+    print()
+    summary = f"{passed}/{len(runs)} passed"
+    if failed:
+        summary += f", {len(failed)} failed"
+    if skipped:
+        summary += f", {skipped} skipped"
+    summary += f"  ·  {_fmt_duration(elapsed_s)}"
+    print(f"  {_color(summary, '31' if failed else '32')}")
+    print(f"  logs: {runs_dir}")
+    print()
+    return 0 if not failed else 1
+
+
+async def _run_suite_all(runs: list[SuiteRun], manifest, logs_dir: Path) -> None:
+    """Run the suite with a live dashboard (TTY) or streamed lines (piped)."""
+    if _console.is_terminal:
+        with Live(_SuiteDashboard(runs), console=_console, refresh_per_second=12.5):
+            await run_suite(runs, manifest, logs_dir)
+    else:
+        print(f"Running {len(runs)} eval(s), {manifest.concurrency} at a time...")
+        await run_suite(runs, manifest, logs_dir, on_update=_print_suite_line)
+
+
+@eval_app.command("suite")
+def suite(
+    manifest_path: Path = typer.Argument(..., help="Manifest YAML listing agents + scenarios."),
+    pattern: str = typer.Option(
+        None, "-p", "--pattern", help="Only agents whose path contains this."
+    ),
+    scenario: str = typer.Option(None, "-s", "--scenario", help="Only this scenario name."),
+    runs_dir: Path = typer.Option(
+        None, "--runs-dir", help="Where logs/recordings go (default eval-runs/<timestamp>)."
+    ),
+    concurrency: int = typer.Option(
+        None, "-c", "--concurrency", help="Override manifest concurrency."
+    ),
+    audio: bool = typer.Option(False, "-a", "--audio", help="Record conversation audio."),
+) -> None:
+    """Spawn the agents in a manifest and run their scenarios concurrently."""
+    manifest = load_manifest(manifest_path)
+    if concurrency is not None:
+        manifest.concurrency = concurrency
+
+    runs = filter_runs(manifest.runs, pattern=pattern, scenario=scenario)
+    if not runs:
+        print("No runs match.")
+        raise typer.Exit(code=1)
+
+    out = runs_dir or Path("eval-runs") / datetime.now().strftime("%Y%m%d_%H%M%S")
+    logs_dir = out / "logs"
+    if audio and manifest.record_dir is None:
+        manifest.record_dir = out / "recordings"
+
+    # Print each distinct scenario's config up front (per-run would interleave).
+    print("Scenarios:")
+    seen: set[str] = set()
+    for r in runs:
+        if r.scenario in seen:
+            continue
+        seen.add(r.scenario)
+        try:
+            cfg = describe_config(load_scenario(r.scenario_path), color=sys.stdout.isatty())
+        except Exception as e:  # noqa: BLE001
+            cfg = f"(failed to load: {e})"
+        print(f"  {_color(r.scenario + ':', '1;36')}")
+        for line in cfg.splitlines():
+            print(f"    {line}")
+    print()
+
+    started = time.monotonic()
+    asyncio.run(_run_suite_all(runs, manifest, logs_dir))
+    exit_code = _finalize_suite(runs, out, time.monotonic() - started)
     raise typer.Exit(code=exit_code)
