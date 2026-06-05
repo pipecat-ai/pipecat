@@ -32,6 +32,7 @@ from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -359,6 +360,10 @@ class RTVIObserver(BaseObserver):
             and self._params.bot_speaking_enabled
         ):
             await self._handle_bot_speaking(frame)
+        elif isinstance(frame, InterruptionFrame) and self._params.bot_speaking_enabled:
+            # The bot's in-flight output was cut off (VAD barge-in or a programmatic
+            # run_immediately interrupt). Let clients drop what it was mid-saying.
+            await self.send_rtvi_message(RTVI.BotInterruptedMessage())
         elif (
             isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame))
             and self._params.user_transcription_enabled
