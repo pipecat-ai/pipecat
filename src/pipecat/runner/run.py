@@ -279,6 +279,14 @@ def _print_startup_message(args: argparse.Namespace):
             if args.proxy:
                 print(f"   → XML webhook: http://{args.host}:{args.port}/")
             print(f"   → WebSocket:   ws://{args.host}:{args.port}/ws")
+    elif args.transport == "websocket":
+        print("🚀 Bot ready! (WebSocket)")
+        if not _transport_routes_enabled("websocket"):
+            print(f"   → WebSocket disabled ({TRANSPORT_INSTALL_HINTS['websocket']})")
+        else:
+            print(f"   → Open: {_runner_url(args)}")
+            scheme = "wss" if args.host != "localhost" else "ws"
+            print(f"   → WebSocket:   {scheme}://{args.host}:{args.port}/ws-client")
     elif args.transport == "vonage":
         print()
         print("🚀 Bot ready!")
@@ -1223,7 +1231,8 @@ def main(parser: argparse.ArgumentParser | None = None):
        - --host: Server host address (default: localhost)
        - --port: Server port (default: 7860)
        - -t/--transport: Restrict to a single transport and set as default for /start
-         (daily, webrtc, twilio, telnyx, plivo, exotel). Omit to support all transports.
+         (daily, webrtc, websocket, twilio, telnyx, plivo, exotel). Omit to support
+         all transports.
        - -x/--proxy: Public proxy hostname for telephony webhooks
        - -d/--direct: Connect directly to Daily room (automatically sets transport to daily)
        - -f/--folder: Path to downloads folder
@@ -1250,7 +1259,7 @@ def main(parser: argparse.ArgumentParser | None = None):
         "-t",
         "--transport",
         type=str,
-        choices=["daily", "vonage", "webrtc", *TELEPHONY_TRANSPORTS],
+        choices=["daily", "vonage", "webrtc", "websocket", *TELEPHONY_TRANSPORTS],
         default=None,
         help=(
             "Restrict the server to a single transport and set it as the default for /start. "
