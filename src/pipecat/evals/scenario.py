@@ -349,20 +349,60 @@ def _resolve_response_events(turns: list[Turn], bot_audio: bool, path: Path) -> 
                 )
 
 
-def describe_config(scenario: Scenario) -> str:
-    """One-line summary of a scenario's modalities and services, for pre-run logs."""
+# ANSI codes for the colored config summary (applied only when color=True). The
+# section labels are bold, the separators dim, and each segment's keyword gets one
+# hue per category so modality / service / judge LLM are easy to tell apart; the
+# values are left uncolored.
+_CFG_LABEL = "1"  # bold — the "user" / "judge" section labels
+_CFG_SEP = "2"  # dim — the "->" arrow and "|" separators
+_CFG_MODALITY = "33"  # yellow — modality keyword
+_CFG_SERVICE = "32"  # green — speech (TTS) / transcription (STT) keywords
+_CFG_EVAL = "35"  # magenta — eval keyword (judge LLM)
+
+
+def describe_config(scenario: Scenario, *, color: bool = False) -> str:
+    """Two-line summary of a scenario's user + judge config, for pre-run logs.
+
+    Returns a ``user`` line and a ``judge`` line, each a set of ``key: value``
+    segments separated by ``|``, e.g.::
+
+        user  -> modality: audio | speech: cartesia
+        judge -> modality: audio | eval: ollama/llama3:latest | transcription: whisper
+
+    With ``color=True``, each segment's keyword is ANSI-colored by category
+    (modality, service, judge LLM) so they're easy to tell apart.
+    """
+
+    def paint(text: str, code: str) -> str:
+        return f"\033[{code}m{text}\033[0m" if color else text
+
+    def seg(key: str, value: str, code: str) -> str:
+        return f"{paint(key + ':', code)} {value}"
+
+    arrow = paint(" -> ", _CFG_SEP)
+    sep = paint(" | ", _CFG_SEP)
+
+    user_segs = [seg("modality", "audio" if scenario.user_audio else "text", _CFG_MODALITY)]
     if scenario.user_audio:
-        user = f"audio (speech: {scenario.user_audio.get('service', '?')})"
-    else:
-        user = "text"
+        user_segs.append(seg("speech", scenario.user_audio.get("service", "?"), _CFG_SERVICE))
+
     eval_cfg = scenario.judge or {}
     eval_svc = f"{eval_cfg.get('service', '?')}/{eval_cfg.get('model', '?')}"
+    judge_segs = [seg("modality", "audio" if scenario.bot_audio else "text", _CFG_MODALITY)]
     if scenario.bot_audio:
-        transcription = (scenario.transcriber or {}).get("service", "whisper")
-        judge = f"audio (eval: {eval_svc}, transcription: {transcription})"
-    else:
-        judge = f"text (eval: {eval_svc})"
-    return f"user: {user}  |  judge: {judge}"
+        judge_segs.append(
+            seg(
+                "transcription",
+                (scenario.transcriber or {}).get("service", "whisper"),
+                _CFG_SERVICE,
+            )
+        )
+    judge_segs.append(seg("eval", eval_svc, _CFG_EVAL))
+
+    return (
+        f"{paint('user'.ljust(5), _CFG_LABEL)}{arrow}{sep.join(user_segs)}\n"
+        f"{paint('judge'.ljust(5), _CFG_LABEL)}{arrow}{sep.join(judge_segs)}"
+    )
 
 
 def _parse_turn(t: Any, path: Path, idx: int) -> Turn:

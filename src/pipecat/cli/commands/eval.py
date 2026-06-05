@@ -213,7 +213,9 @@ async def _run_all(
         label = f"{path.name}::{scenario.name}"
         url = scenario.fixtures.get("bot_url") or bot_url
         record_path = _record_path(record_dir, scenario.name) if audio else None
-        print(f"  {_dim(describe_config(scenario))}")
+        print(f"  {_color(scenario.name + ':', '1;36')}")
+        for line in describe_config(scenario, color=_supports_color()).splitlines():
+            print(f"    {line}")
         if _console.is_terminal:
             result = await _run_one_live(scenario, url, label, verbose, record_path, cache_dir)
         else:
