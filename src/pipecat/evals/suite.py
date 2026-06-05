@@ -27,6 +27,15 @@ Manifest format (YAML)::
         scenarios: [simple_math, greeting]
       - agent: examples/voice/voice-openai.py
         scenarios: [simple_math, interruption]
+      - agent: examples/vision/vision-openai.py
+        runner_body: scenarios/vision-cat.json   # passed to the agent as --runner-body
+        scenarios: [vision_describe]
+
+An optional ``runner_body:`` (a JSON file, resolved relative to the manifest) is
+passed to the agent as ``--runner-body``, supplying runner-args data it would
+normally receive in a ``/start`` request body (e.g. a vision bot's image path).
+The agent is spawned with the body file's directory as its working directory, so
+relative paths inside the body (like an image) resolve next to the file.
 
 Manifest-relative paths (``agent``/``agents_dir``, ``scenarios_dir``,
 ``runs_dir``) resolve relative to the manifest file, so a manifest is portable;
@@ -65,6 +74,7 @@ class SuiteRun:
     scenario: str  # display name (the scenario, without .yaml)
     agent_path: Path
     scenario_path: Path
+    runner_body_path: Path | None = None  # optional --runner-body JSON for the agent's runner args
     status: str = "pending"  # pending | running | done
     result: EvalResult | None = None
     error: str | None = None
@@ -151,6 +161,11 @@ def load_manifest(
     for item in data.get("suite", []):
         agent = str(item["agent"])
         agent_path = (agents_dir_p / agent).resolve()
+        # A body file (resolved relative to the manifest) is passed to the agent
+        # as --runner-body, supplying runner-args data the agent would normally
+        # get from a /start request (e.g. a vision bot's image path).
+        runner_body = item.get("runner_body")
+        runner_body_path = (base / str(runner_body)).resolve() if runner_body else None
         for scenario in item.get("scenarios", []):
             scenario = str(scenario)
             # A scenario may be a bare name (resolved under scenarios_dir) or a
@@ -167,6 +182,7 @@ def load_manifest(
                     scenario=name,
                     agent_path=agent_path,
                     scenario_path=scenario_path,
+                    runner_body_path=runner_body_path,
                 )
             )
 
@@ -195,14 +211,20 @@ def filter_runs(
     return out
 
 
-def _spawn_argv(manifest: Manifest, agent_path: Path, port: int) -> list[str]:
+def _spawn_argv(
+    manifest: Manifest, agent_path: Path, port: int, runner_body_path: Path | None = None
+) -> list[str]:
     """Build the spawn argv, substituting {python}/{agent}/{port} per token.
 
     Substituting per token (rather than into the whole string) keeps a path with
-    spaces in one argv entry.
+    spaces in one argv entry. If the run has a body file, ``--runner-body <path>``
+    is appended so the agent's runner picks it up.
     """
     subs = {"python": manifest.python, "agent": str(agent_path), "port": str(port)}
-    return [tok.format(**subs) for tok in shlex.split(manifest.spawn)]
+    argv = [tok.format(**subs) for tok in shlex.split(manifest.spawn)]
+    if runner_body_path is not None:
+        argv += ["--runner-body", str(runner_body_path)]
+    return argv
 
 
 async def _stop_agent(proc: asyncio.subprocess.Process) -> None:
@@ -255,14 +277,22 @@ async def _run_one(
             if not run.scenario_path.exists():
                 run.error = f"scenario not found: {run.scenario_path}"
                 return
+            if run.runner_body_path is not None and not run.runner_body_path.exists():
+                run.error = f"body not found: {run.runner_body_path}"
+                return
 
             from pipecat.evals.scenario import load_scenario
 
+            # Spawn the agent with the body file's directory as cwd, so relative
+            # paths inside the body (e.g. an image) resolve next to the file.
+            cwd = str(run.runner_body_path.parent) if run.runner_body_path else None
+
             logf = log_path.open("wb")
             proc = await asyncio.create_subprocess_exec(
-                *_spawn_argv(manifest, run.agent_path, port),
+                *_spawn_argv(manifest, run.agent_path, port, run.runner_body_path),
                 stdout=logf,
                 stderr=asyncio.subprocess.STDOUT,
+                cwd=cwd,
             )
 
             scenario = load_scenario(run.scenario_path)
