@@ -56,6 +56,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     pipeline = Pipeline(
         [
+            transport.input(),  # Transport user input
             vision,  # Vision
             tts,  # TTS
             transport.output(),  # Transport bot output
