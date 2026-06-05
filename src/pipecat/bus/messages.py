@@ -113,10 +113,11 @@ class BusTTSSpeakMessage(BusDataMessage):
         text: The text to be spoken.
         append_to_context: Whether the spoken text should also be appended
             to the conversation context (forwarded to `TTSSpeakFrame`).
+            Defaults to True, matching `TTSSpeakFrame.append_to_context`.
     """
 
     text: str
-    append_to_context: bool | None = None
+    append_to_context: bool = True
 
 
 # ---------------------------------------------------------------------------
