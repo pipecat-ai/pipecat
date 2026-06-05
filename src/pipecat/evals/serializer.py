@@ -40,6 +40,7 @@ from loguru import logger
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
+    CancelTaskFrame,
     Frame,
     InputTransportMessageFrame,
     LLMMessagesUpdateFrame,
@@ -61,6 +62,12 @@ EVAL_RESET_MESSAGE_TYPE = "eval-reset"
 # function-call report level: only the eval transport understands it, so a
 # production RTVI serializer can't be elevated by a remote client.
 EVAL_CONFIGURE_MESSAGE_TYPE = "eval-configure"
+
+# A ``client-message`` with this ``t`` is intercepted and turned into a
+# ``CancelFrame``, so the harness can end a scenario by gracefully tearing down the
+# bot's pipeline (closing its service connections) instead of the orchestrator
+# having to kill the process.
+EVAL_CANCEL_MESSAGE_TYPE = "eval-cancel"
 
 # Outbound message carrying a chunk of the bot's synthesized audio (base64), used
 # only when a scenario asserts on ``tts_response``. Emitted under the RTVI label
@@ -152,6 +159,10 @@ class RTVIEvalSerializer(FrameSerializer):
         if configure is not None:
             return configure
 
+        cancel = self._maybe_cancel_frame(message)
+        if cancel is not None:
+            return cancel
+
         return InputTransportMessageFrame(message=message)
 
     def _maybe_reset_frame(self, message: dict) -> Frame | None:
@@ -165,6 +176,22 @@ class RTVIEvalSerializer(FrameSerializer):
         messages = payload.get("messages", []) if isinstance(payload, dict) else []
         # run_llm=False: seed the context, don't trigger a response.
         return LLMMessagesUpdateFrame(messages=list(messages), run_llm=False)
+
+    def _maybe_cancel_frame(self, message: dict) -> Frame | None:
+        """Return a ``CancelTaskFrame`` for the eval-cancel message, else None.
+
+        The harness sends this when a scenario finishes. The input transport routes
+        it upstream to the pipeline task, which cancels the whole pipeline (source
+        included, so the WebSocket server stops too) and tears down service
+        connections gracefully — the bot process then exits on its own instead of
+        being killed mid-flight.
+        """
+        if message.get("type") != "client-message":
+            return None
+        data: Any = message.get("data") or {}
+        if not isinstance(data, dict) or data.get("t") != EVAL_CANCEL_MESSAGE_TYPE:
+            return None
+        return CancelTaskFrame()
 
     def _maybe_configure_frame(self, message: dict) -> Frame | None:
         """Return an ``RTVIConfigureObserverFrame`` for the eval-configure message, else None."""
