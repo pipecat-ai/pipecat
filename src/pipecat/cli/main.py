@@ -19,11 +19,13 @@ and the console script) is resolved on first access via ``__getattr__``.
 import sys
 
 _INSTALL_HINT = (
-    "The Pipecat CLI requires additional dependencies that are not installed.\n\n"
-    "Install them with:\n\n"
-    '    pip install "pipecat-ai[cli]"\n\n'
-    "or install the CLI as an isolated tool:\n\n"
-    '    uv tool install "pipecat-ai[cli]"\n'
+    "The Pipecat CLI needs its optional dependencies (the `cli` extra), which aren't "
+    "installed.\n\n"
+    "Install the extra wherever you want the `pipecat` command:\n\n"
+    "  • As a global tool (on your PATH):\n"
+    '        uv tool install "pipecat-ai[cli]"     # or: pipx install "pipecat-ai[cli]"\n\n'
+    "  • In your current project or virtualenv:\n"
+    '        pip install "pipecat-ai[cli]"         # or: uv pip install "pipecat-ai[cli]"\n'
 )
 
 # Official optional sub-CLIs. Each ships as a separate plugin package that registers
@@ -41,10 +43,11 @@ def _enable_hint(name: str, package: str) -> str:
     return (
         f"The `pipecat {name}` command requires the optional `{package}` plugin, "
         "which isn't installed.\n\n"
-        "Enable it by reinstalling the CLI with the plugin:\n\n"
-        f'    uv tool install "pipecat-ai[cli]" --with {package}\n\n'
-        "or, if you installed the CLI into a virtual environment:\n\n"
-        f"    pip install {package}\n"
+        "Enable it where the `pipecat` command lives:\n\n"
+        "  • As a global tool (on your PATH), reinstall with the plugin:\n"
+        f'        uv tool install "pipecat-ai[cli]" --with {package}\n\n'
+        "  • In your current project or virtualenv:\n"
+        f"        pip install {package}     # or: uv pip install {package}\n"
     )
 
 
