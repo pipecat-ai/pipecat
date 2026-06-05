@@ -34,7 +34,6 @@ _INSTALL_HINT = (
 # prints how to enable the plugin. Only first-party plugins belong here.
 _KNOWN_EXTENSIONS: dict[str, tuple[str, str]] = {
     "cloud": ("pipecatcloud", "Deploy and manage bots on Pipecat Cloud"),
-    "tail": ("pipecat-ai-tail", "Monitor live Pipecat sessions in a terminal dashboard"),
 }
 
 
@@ -74,8 +73,8 @@ def _build_app():
     # positional target path followed by options (e.g. `pc init . --bot-type web`).
     app.command("init", help="Initialize a new Pipecat project")(init_command)
 
-    # Discover CLI extensions (e.g. `cloud` from pipecatcloud, `tail` from
-    # pipecat-ai-tail). The entry-point group is intentionally still named
+    # Discover CLI extensions (e.g. `cloud` from pipecatcloud). The entry-point
+    # group is intentionally still named
     # "pipecat_cli.extensions" for backward compatibility — renaming it would force
     # every plugin to re-release. (A future rename to "pipecat.cli.extensions" is a
     # separate, coordinated change.)

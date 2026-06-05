@@ -1,8 +1,8 @@
 """Tests for optional sub-CLI (plugin) discovery and graceful enable hints.
 
-When an official plugin (``cloud`` → pipecatcloud, ``tail`` → pipecat-ai-tail) is
-not installed, the CLI still lists it in ``--help`` as a stub and prints how to
-enable it when invoked — rather than hiding it or erroring with "No such command".
+When an official plugin (e.g. ``cloud`` → pipecatcloud) is not installed, the CLI
+still lists it in ``--help`` as a stub and prints how to enable it when invoked —
+rather than hiding it or erroring with "No such command".
 """
 
 import importlib.metadata as importlib_metadata
@@ -22,7 +22,7 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 # installed. If one is installed its real Typer app is mounted instead, so skip.
 _installed = {ep.name for ep in importlib_metadata.entry_points(group="pipecat_cli.extensions")}
 pytestmark = pytest.mark.skipif(
-    "cloud" in _installed or "tail" in _installed,
+    "cloud" in _installed,
     reason="official CLI plugins are installed; stub path not exercised",
 )
 
@@ -42,12 +42,10 @@ class TestExtensionDiscovery:
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
         out = _norm(result.output)
-        # Both official sub-CLIs are listed though neither is installed...
+        # The official sub-CLI is listed though it isn't installed...
         assert "cloud" in out
-        assert "tail" in out
-        # ...each annotated with the package that provides it.
+        # ...annotated with the package that provides it.
         assert "requires pipecatcloud" in out
-        assert "requires pipecat-ai-tail" in out
 
 
 class TestEnableHint:
