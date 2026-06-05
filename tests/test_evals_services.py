@@ -55,14 +55,16 @@ class TestTTSBuilder(unittest.TestCase):
 
     def test_unknown_service_rejected(self):
         with self.assertRaises(ValueError):
-            build_tts_service({"service": "nope", "voice": "v"}, 16000)
+            build_tts_service({"service": "nope", "voice": "v"}, sample_rate=16000)
 
     def test_missing_service_or_voice_rejected(self):
         with self.assertRaises(ValueError):
-            build_tts_service({}, 16000)
+            build_tts_service({}, sample_rate=16000)
 
     def test_factory_escape_hatch(self):
-        result = build_tts_service({"factory": "tests.test_evals_services._fake_tts"}, 24000)
+        result = build_tts_service(
+            {"factory": "tests.test_evals_services._fake_tts"}, sample_rate=24000
+        )
         self.assertEqual(result[0], "FAKE_TTS")
         self.assertEqual(result[2], 24000)
 

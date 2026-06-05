@@ -24,6 +24,7 @@ constructs one from a scenario's ``bot_audio`` mapping — ``service`` (default
 
 import asyncio
 import importlib
+from collections.abc import Callable
 
 from loguru import logger
 
@@ -73,13 +74,23 @@ def build_stt_service(config: dict | None):
 
 
 def _whisper_service(config: dict):
-    """Build a local Whisper STT service from the ``bot_audio`` config."""
+    """Build a local Whisper STT service from the ``bot_audio`` config.
+
+    The eval transcribes audio it already knows is the bot speaking (the harness
+    captures it between ``bot-started-speaking`` and ``bot-stopped-speaking``), so
+    Whisper's non-speech filter is counterproductive here: the default
+    ``no_speech_prob=0.4`` drops correct transcriptions of synthetic/TTS speech,
+    whose ``no_speech_prob`` jitters across ~0.4-0.6 run to run (a dropped segment
+    yields no ``TranscriptionFrame``, so the harness then waits out the whole
+    transcription timeout). Disable the filter with a permissive threshold.
+    """
     from pipecat.services.whisper.stt import WhisperSTTService
 
+    kwargs: dict = {"no_speech_prob": 1.0}
     model = config.get("model")
     if model:
-        return WhisperSTTService(settings=WhisperSTTService.Settings(model=str(model)))
-    return WhisperSTTService()
+        kwargs["model"] = str(model)
+    return WhisperSTTService(settings=WhisperSTTService.Settings(**kwargs))
 
 
 class EvalTranscriber:
@@ -104,6 +115,9 @@ class EvalTranscriber:
         self._runner_task = None
         self._output_generator = None
         self._resampler = None
+        # Optional sink for timing diagnostics; the harness points this at its
+        # per-scenario debug trace so a hung transcription is visible.
+        self.debug: Callable[[str], None] = lambda _msg: None
 
     async def start(self) -> None:
         """Build and start the persistent transcription pipeline."""
@@ -156,6 +170,7 @@ class EvalTranscriber:
 
         if sample_rate != STT_SAMPLE_RATE:
             pcm = await self._resampler.resample(pcm, sample_rate, STT_SAMPLE_RATE)
+        self.debug(f"transcribe: resampled {sample_rate}->{STT_SAMPLE_RATE}Hz, {len(pcm)}B")
 
         # VAD start/stop bracket the audio so the SegmentedSTTService buffers it
         # and transcribes the whole segment on stop.
@@ -166,6 +181,7 @@ class EvalTranscriber:
                 VADUserStoppedSpeakingFrame(),
             ]
         )
+        self.debug("transcribe: frames queued, awaiting transcription")
 
         try:
             async with asyncio.timeout(TRANSCRIBE_TIMEOUT_S):
@@ -173,11 +189,41 @@ class EvalTranscriber:
                     if isinstance(frame, TranscriptionFrame):
                         return frame.text.strip()
                     if isinstance(frame, ErrorFrame):
+                        self.debug(f"transcribe: ErrorFrame {frame.error}")
                         logger.warning(f"EvalTranscriber: transcription error: {frame.error}")
                         return ""
         except TimeoutError:
+            self.debug(f"transcribe: TIMEOUT after {TRANSCRIBE_TIMEOUT_S}s — no TranscriptionFrame")
+            self._dump_threads()
             return ""  # no speech detected in the segment
         return ""
+
+    def _dump_threads(self) -> None:
+        """Dump thread stacks AND asyncio task stacks to the debug trace.
+
+        Used on a transcription timeout to find where the STT inference is parked.
+        Threads catch a hang in C (e.g. ``ctranslate2``); asyncio tasks catch a
+        suspended coroutine (e.g. the STT pipeline worker awaiting something that
+        never arrives), which a thread dump cannot show.
+        """
+        import io
+        import sys
+        import threading
+        import traceback
+
+        names = {t.ident: t.name for t in threading.enumerate()}
+        for tid, frame in sys._current_frames().items():
+            stack = "".join(traceback.format_stack(frame)).rstrip()
+            self.debug(f"--- thread {names.get(tid, '?')} ({tid}) ---\n{stack}")
+
+        try:
+            tasks = asyncio.all_tasks()
+        except RuntimeError:
+            tasks = set()
+        for task in tasks:
+            buf = io.StringIO()
+            task.print_stack(file=buf)
+            self.debug(f"--- task {task.get_name()} ---\n{buf.getvalue().rstrip()}")
 
     async def aclose(self) -> None:
         """Stop the pipeline and release the model."""
