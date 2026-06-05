@@ -154,8 +154,11 @@ class TaskManager(BaseTaskManager):
         Raises:
             Exception: If the task manager is not properly set up.
         """
+        coroutine_started = False
 
         async def run_coroutine():
+            nonlocal coroutine_started
+            coroutine_started = True
             try:
                 return await coroutine
             except asyncio.CancelledError:
@@ -167,11 +170,16 @@ class TaskManager(BaseTaskManager):
                 last = tb[-1]
                 logger.error(f"{name} unexpected exception ({last.filename}:{last.lineno}): {e}")
 
+        def close_unstarted_coroutine(task: asyncio.Task):
+            if task.cancelled() and not coroutine_started:
+                coroutine.close()
+
         if not self._params:
             raise Exception("TaskManager is not setup: unable to get event loop")
 
         task = self._params.loop.create_task(run_coroutine())
         task.set_name(name)
+        task.add_done_callback(close_unstarted_coroutine)
         task.add_done_callback(self._task_done_handler)
         self._add_task(TaskData(task=task))
         logger.trace(f"{name}: task created")
