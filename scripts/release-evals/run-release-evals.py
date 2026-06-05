@@ -226,25 +226,20 @@ def _verdict(s: TestState) -> str:
     return "passed" if s.result.passed else "failed"
 
 
-async def _wait_for_port(host: str, port: int, timeout: float) -> bool:
-    """Return True once a TCP connection to host:port succeeds (server is up)."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            _, writer = await asyncio.open_connection(host, port)
-            writer.close()
-            await writer.wait_closed()
-            return True
-        except OSError:
-            await asyncio.sleep(0.25)
-    return False
-
-
 async def _stop_bot(proc: asyncio.subprocess.Process) -> None:
-    """Ask the bot subprocess to stop, escalating to kill if it lingers."""
+    """Wait for the bot to exit, escalating to terminate/kill if it lingers.
+
+    The harness sends an ``eval-cancel`` message on teardown, so the bot should be
+    cancelling its pipeline and exiting on its own — we wait for that graceful exit
+    first, and only signal the process if it doesn't.
+    """
     if proc.returncode is not None:
         return
-    proc.terminate()
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=BOT_STOP_TIMEOUT_SECS)
+        return
+    except TimeoutError:
+        proc.terminate()
     try:
         await asyncio.wait_for(proc.wait(), timeout=BOT_STOP_TIMEOUT_SECS)
     except TimeoutError:
@@ -293,14 +288,16 @@ async def run_one(
                 stderr=asyncio.subprocess.STDOUT,
             )
 
-            if not await _wait_for_port("localhost", port, BOT_READY_TIMEOUT_SECS):
-                state.error = f"bot did not start (see {log_path})"
-                return
-
             scenario = load_scenario(scenario_path)
             record_path = str(record_dir / f"{safe}.wav") if record_dir else None
+            # No port probe (which logs a handshake error on the bot's WS server):
+            # run_scenario retries the connect, which doubles as readiness waiting.
             state.result = await run_scenario(
-                scenario, f"ws://localhost:{port}", record_path=record_path, cache_dir=cache_dir
+                scenario,
+                f"ws://localhost:{port}",
+                connect_timeout_s=BOT_READY_TIMEOUT_SECS,
+                record_path=record_path,
+                cache_dir=cache_dir,
             )
         except Exception as e:
             state.error = f"error: {e}"
@@ -309,6 +306,10 @@ async def run_one(
                 await _stop_bot(proc)
             if logf is not None:
                 logf.close()
+            # Save the harness's own decision trace next to the bot log, for
+            # diagnosing flaky runs (empty transcriptions, missed events, etc.).
+            if state.result is not None and state.result.debug_log:
+                (logs_dir / f"{safe}.eval.log").write_text("\n".join(state.result.debug_log) + "\n")
             state.status = "done"
             if state.result is not None:
                 state.duration_ms = state.result.duration_ms
@@ -435,12 +436,15 @@ async def main(args: argparse.Namespace) -> int:
         if scenario_name not in seen:
             try:
                 seen[scenario_name] = describe_config(
-                    load_scenario(SCENARIOS_DIR / f"{scenario_name}.yaml")
+                    load_scenario(SCENARIOS_DIR / f"{scenario_name}.yaml"),
+                    color=sys.stdout.isatty(),
                 )
             except Exception as e:
                 seen[scenario_name] = f"(failed to load: {e})"
     for scenario_name, cfg in seen.items():
-        print(f"  {scenario_name}: {cfg}")
+        print(f"  {_c(scenario_name + ':', '1;36')}")
+        for line in cfg.splitlines():
+            print(f"    {line}")
     print()
 
     states = [TestState(example=e, scenario=s) for (e, s) in pairs]
