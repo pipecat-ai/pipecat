@@ -548,12 +548,9 @@ def test_project_generation(config_data, temp_output_dir):
     # Verify observability dependencies
     if config.enable_observability:
         assert "pipecat-ai-whisker" in pyproject_content
-        assert "pipecat-ai-tail" in pyproject_content
         # Verify observability imports in bot.py
         assert "WhiskerObserver" in bot_content
-        assert "TailObserver" in bot_content
         assert "from pipecat_whisker import WhiskerObserver" in bot_content
-        assert "from pipecat_tail.observer import TailObserver" in bot_content
 
     # Verify video service dependencies and imports
     if config.video_service:

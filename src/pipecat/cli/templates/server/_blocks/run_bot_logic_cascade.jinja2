@@ -49,7 +49,6 @@
 {{ "observers=[" | indent(indent_level + 4, first=True) }}
 {% if enable_observability %}
 {{ "WhiskerObserver(pipeline)," | indent(indent_level + 8, first=True) }}
-{{ "TailObserver()," | indent(indent_level + 8, first=True) }}
 {% endif %}
 {{ "]," | indent(indent_level + 4, first=True) }}
 {% endif %}

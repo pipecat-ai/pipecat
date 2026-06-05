@@ -207,10 +207,7 @@ FEATURE_IMPORTS = {
         "from pipecat.transports.base_transport import BaseTransport",
     ],
     "llm_run_frame": ["from pipecat.frames.frames import LLMRunFrame"],
-    "observability": [
-        "from pipecat_tail.observer import TailObserver",
-        "from pipecat_whisker import WhiskerObserver",
-    ],
+    "observability": ["from pipecat_whisker import WhiskerObserver"],
     "external_turn_strategies": [
         "from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies"
     ],

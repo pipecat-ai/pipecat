@@ -260,7 +260,6 @@ class TestServiceLoader:
         assert "observability" in ServiceRegistry.FEATURE_IMPORTS
         observability_imports = ServiceRegistry.FEATURE_IMPORTS["observability"]
         assert any("WhiskerObserver" in imp for imp in observability_imports)
-        assert any("TailObserver" in imp for imp in observability_imports)
 
     def test_get_imports_with_observability(self):
         """Test that observability imports are included when enabled."""
@@ -279,9 +278,7 @@ class TestServiceLoader:
         # Check that observability imports are included
         import_str = "\n".join(imports)
         assert "WhiskerObserver" in import_str
-        assert "TailObserver" in import_str
         assert "pipecat_whisker" in import_str
-        assert "pipecat_tail" in import_str
 
     def test_get_imports_with_video_service(self):
         """Test that video service imports are included when a video service is selected."""

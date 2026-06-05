@@ -106,7 +106,7 @@ FEATURE_DEFINITIONS: dict[str, list[str]] = {
     # Queued on connect to kick off the conversation. Dial-out bots wait for the
     # callee to answer/speak first, so they don't import or use it.
     "llm_run_frame": ["LLMRunFrame"],
-    "observability": ["WhiskerObserver", "TailObserver"],
+    "observability": ["WhiskerObserver"],
     "external_turn_strategies": ["ExternalUserTurnStrategies"],
     # Imported on the standard (non-PSTN/SIP) transport path: the collapsed bot()
     # calls create_transport. Dial-out and SIP construct their transports by hand.

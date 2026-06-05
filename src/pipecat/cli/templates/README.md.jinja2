@@ -38,7 +38,7 @@ A Pipecat AI voice agent built with {% if mode == 'cascade' %}a cascade pipeline
   - Krisp Noise Cancellation
 {% endif %}
 {%- if enable_observability %}
-  - Observability (Whisker + Tail)
+  - Observability (Whisker)
 {% endif %}
 {% endif %}
 
@@ -213,26 +213,6 @@ With Whisker you can:
 2. Navigate to [https://whisker.pipecat.ai/](https://whisker.pipecat.ai/) and enter your ngrok URL (e.g., `your-subdomain.ngrok.io`)
 
 3. Once your bot is running, press connect
-
-### Tail - Terminal Dashboard
-
-**Tail** is a terminal dashboard that lets you monitor your Pipecat sessions in real time.
-
-With Tail you can:
-
-- 📜 Follow system logs in real time
-- 💬 Track conversations as they happen
-- 🔊 Monitor user and agent audio levels
-- 📈 Keep an eye on service metrics and usage
-
-**To use Tail:**
-
-1. Run your bot (in one terminal)
-
-2. Launch Tail in another terminal:
-   ```bash
-   pipecat tail
-   ```
 {% endif %}
 ## Learn More
 

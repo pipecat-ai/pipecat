@@ -358,7 +358,6 @@ def _get_external_module_path(class_name: str) -> str | None:
     external_mappings = {
         "load_dotenv": "dotenv",
         "WhiskerObserver": "pipecat_whisker",
-        "TailObserver": "pipecat_tail.observer",
         # Standard library imports (these will be import statements, not from...import)
         "datetime": "datetime",
         "io": "io",
