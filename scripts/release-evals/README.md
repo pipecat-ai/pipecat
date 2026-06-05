@@ -29,9 +29,11 @@ covers many agents.
 ./run.sh -n nightly       # output to test-runs/nightly/ instead of a timestamp
 ```
 
-Any value also set in the manifest can be overridden on the command line (it
-wins): `-c/--concurrency`, `--base-port`, `--cache-dir`, `--spawn`, `--python`,
-`--runs-dir`, and `-a`.
+Everything except the `suite:` list can be set in the manifest *or* on the
+command line (the command line wins): `--agents-dir`, `--scenarios-dir`,
+`--runs-dir`, `-c/--concurrency`, `--base-port`, `--cache-dir`, `--spawn`,
+`--python`, and `-a`. So a manifest can be just a `suite:` list with the rest
+supplied as flags.
 
 `run.sh` is a thin wrapper over the `pipecat eval suite` command:
 

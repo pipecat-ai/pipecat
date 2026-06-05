@@ -28,8 +28,9 @@ Manifest format (YAML)::
       - agent: examples/voice/voice-openai.py
         scenarios: [simple_math, interruption]
 
-Paths (``agent``, ``scenarios_dir``, ``record_dir``, scenario files) resolve
-relative to the manifest file, so a manifest is portable.
+Manifest-relative paths (``agent``/``agents_dir``, ``scenarios_dir``,
+``runs_dir``) resolve relative to the manifest file, so a manifest is portable;
+the same values passed as CLI overrides resolve against the working directory.
 """
 
 import asyncio
@@ -86,8 +87,27 @@ class Manifest:
     base_dir: Path
 
 
-def load_manifest(path: str | Path) -> Manifest:
-    """Parse a manifest YAML file into a :class:`Manifest` (paths resolved)."""
+def load_manifest(
+    path: str | Path,
+    *,
+    agents_dir: str | Path | None = None,
+    scenarios_dir: str | Path | None = None,
+    runs_dir: str | Path | None = None,
+    spawn: str | None = None,
+    python: str | None = None,
+    concurrency: int | None = None,
+    base_port: int | None = None,
+    record: bool | None = None,
+    cache_dir: str | None = None,
+) -> Manifest:
+    """Parse a manifest YAML into a :class:`Manifest`, with optional overrides.
+
+    Any keyword that is not ``None`` overrides the corresponding manifest value
+    (so the CLI wins), which means a manifest can be just a ``suite:`` list with
+    everything else supplied on the command line. Manifest-relative paths resolve
+    against the manifest's directory; path overrides resolve against the current
+    working directory.
+    """
     try:
         import yaml
     except ModuleNotFoundError as e:  # pragma: no cover
@@ -97,20 +117,40 @@ def load_manifest(path: str | Path) -> Manifest:
     base = path.parent
     data = yaml.safe_load(path.read_text()) or {}
 
-    spawn = str(data.get("spawn", DEFAULT_SPAWN))
-    python = str(data.get("python") or sys.executable)
-    concurrency = int(data.get("concurrency", DEFAULT_CONCURRENCY))
-    base_port = int(data.get("base_port", DEFAULT_BASE_PORT))
-    runs_dir = data.get("runs_dir")
-    record = bool(data.get("record", False))
-    cache_dir = data.get("cache_dir")
-    scenarios_dir = base / str(data.get("scenarios_dir", "scenarios"))
-    agents_dir = base / str(data.get("agents_dir", "."))
+    def dir_value(override, key: str, default: str) -> Path:
+        # Override (from the CLI) resolves against cwd; the manifest value resolves
+        # against the manifest file's directory.
+        if override is not None:
+            return Path(override).resolve()
+        return (base / str(data.get(key, default))).resolve()
+
+    agents_dir_p = dir_value(agents_dir, "agents_dir", ".")
+    scenarios_dir_p = dir_value(scenarios_dir, "scenarios_dir", "scenarios")
+
+    if runs_dir is not None:
+        runs_dir_p: Path | None = Path(runs_dir).resolve()
+    elif data.get("runs_dir"):
+        runs_dir_p = (base / str(data["runs_dir"])).resolve()
+    else:
+        runs_dir_p = None
+
+    spawn = spawn or str(data.get("spawn", DEFAULT_SPAWN))
+    python = python or str(data.get("python") or sys.executable)
+    concurrency = (
+        concurrency
+        if concurrency is not None
+        else int(data.get("concurrency", DEFAULT_CONCURRENCY))
+    )
+    base_port = (
+        base_port if base_port is not None else int(data.get("base_port", DEFAULT_BASE_PORT))
+    )
+    record = record if record is not None else bool(data.get("record", False))
+    cache_dir = cache_dir if cache_dir is not None else data.get("cache_dir")
 
     runs: list[SuiteRun] = []
     for item in data.get("suite", []):
         agent = str(item["agent"])
-        agent_path = (agents_dir / agent).resolve()
+        agent_path = (agents_dir_p / agent).resolve()
         for scenario in item.get("scenarios", []):
             scenario = str(scenario)
             # A scenario may be a bare name (resolved under scenarios_dir) or a
@@ -119,7 +159,7 @@ def load_manifest(path: str | Path) -> Manifest:
                 scenario_path = (base / scenario).resolve()
                 name = Path(scenario).stem
             else:
-                scenario_path = (scenarios_dir / f"{scenario}.yaml").resolve()
+                scenario_path = (scenarios_dir_p / f"{scenario}.yaml").resolve()
                 name = scenario
             runs.append(
                 SuiteRun(
@@ -136,7 +176,7 @@ def load_manifest(path: str | Path) -> Manifest:
         python=python,
         concurrency=concurrency,
         base_port=base_port,
-        runs_dir=(base / str(runs_dir)).resolve() if runs_dir else None,
+        runs_dir=runs_dir_p,
         record=record,
         cache_dir=cache_dir,
         base_dir=base,
