@@ -50,6 +50,13 @@ Source = "https://github.com/pipecat-ai/pipecat"
 Issues = "https://github.com/pipecat-ai/pipecat/issues"
 Changelog = "https://github.com/pipecat-ai/pipecat/blob/main/CHANGELOG.md"
 
+[project.scripts]
+# The Pipecat CLI ships with pipecat-ai, but its dependencies are optional (the `cli`
+# extra). These console scripts target a graceful-degradation shim that prints an
+# install hint when the `cli` extra isn't installed (rather than an ImportError).
+pipecat = "pipecat.cli.main:run"
+pc = "pipecat.cli.main:run"
+
 [project.optional-dependencies]
 aic = [ "aic-sdk~=2.3.0" ]
 anthropic = [ "anthropic>=0.49.0,<1" ]
@@ -128,6 +135,16 @@ websockets-base = [ "websockets>=13.1" ]
 whisper = [ "faster-whisper~=1.2.1" ]
 xai = [ "pipecat-ai[websockets-base]" ]
 
+# CLI tooling for `pipecat init` (not a service). Optional so the runtime/base-image
+# install stays lean; install with `pip install "pipecat-ai[cli]"`.
+cli = [
+    "typer>=0.20.0,<1",
+    "rich>=13.0.0,<14",
+    "jinja2>=3.1.0,<4",
+    "questionary>=2.0.0,<3",
+    "ruff>=0.12.1,<1",
+]
+
 [dependency-groups]
 dev = [
     "build~=1.4.0",
@@ -175,6 +192,12 @@ where = ["src"]
 ]
 "pipecat.services.aws_nova_sonic" = ["src/pipecat/services/aws_nova_sonic/ready.wav"]
 "pipecat.audio.turn.smart_turn.data" = ["src/pipecat/audio/turn/smart_turn/data/smart-turn-v3.2-cpu.onnx"]
+# CLI project-scaffolding templates (jinja + client TS/JS/JSON/CSS trees). The
+# `.gitignore` patterns are listed explicitly because glob `*` does not match dotfiles.
+"pipecat.cli" = [
+    "templates/**/*",
+    "templates/**/.gitignore",
+]
 
 [tool.pytest.ini_options]
 addopts = "--verbose"

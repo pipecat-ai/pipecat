@@ -1,0 +1,52 @@
+## Project Structure
+
+{{project_name}}/
+├── server/              # Python bot server
+│   ├── bot.py           # Main bot implementation
+{% if twilio_daily_sip_mode == 'dial-in' %}
+│   ├── server.py        # FastAPI webhook server for Twilio + Daily SIP dial-in
+{% elif twilio_daily_sip_mode == 'dial-out' %}
+│   ├── server.py        # FastAPI server for Twilio + Daily SIP dial-out
+{% endif %}
+│   ├── server_utils.py  # Utility functions for Twilio and Daily API interactions
+│   ├── pyproject.toml   # Python dependencies
+│   ├── env.example      # Environment variables template
+│   ├── .env             # Your API keys (git-ignored)
+│   ├── Dockerfile       # Container image for Pipecat Cloud
+│   └── pcc-deploy.toml  # Pipecat Cloud deployment config
+├── .gitignore           # Git ignore patterns
+└── README.md            # This file
+
+This example is organized to be production-ready and easy to customize:
+
+- **`server.py`** - FastAPI {% if twilio_daily_sip_mode == 'dial-in' %}webhook server that handles incoming calls{% else %}server that handles dial-out requests{% endif %}
+
+{% if twilio_daily_sip_mode == 'dial-in' %}
+  - Receives Twilio call webhooks
+  - Creates Daily rooms with SIP capabilities
+  - Routes to local or production bot deployment
+  - Uses shared HTTP session for optimal performance
+{% else %}
+  - Receives dial-out requests via `/dialout` endpoint
+  - Creates Daily rooms with SIP capabilities
+  - Routes to local or production bot deployment
+  - Uses shared HTTP session for optimal performance
+{% endif %}
+
+- **`server_utils.py`** - Utility functions for Twilio and Daily API interactions
+
+  - Data models for {% if twilio_daily_sip_mode == 'dial-in' %}call data and agent requests{% else %}dial-out requests and agent configuration{% endif %}
+  - Room creation logic
+  - Bot starting logic (production and local modes)
+  - Easy to extend with custom business logic
+
+- **`bot.py`** - The voice bot implementation
+{% if twilio_daily_sip_mode == 'dial-in' %}
+  - Handles the conversation with the caller
+  - Deployed to Pipecat Cloud in production or run locally for development
+{% else %}
+  - `DialoutManager` class for retry logic
+  - Handles the conversation with the person being called
+  - Deployed to Pipecat Cloud in production or run locally for development
+{% endif %}
+

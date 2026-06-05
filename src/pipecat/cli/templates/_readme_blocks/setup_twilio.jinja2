@@ -1,0 +1,53 @@
+### Setting Up Twilio
+
+#### 1. Create a TwiML Bin
+
+A TwiML Bin tells Twilio how to handle incoming calls. You'll create one that establishes a WebSocket connection to your bot.
+
+1. Go to the [Twilio Console](https://console.twilio.com)
+2. Navigate to **TwiML Bins** → **My TwiML Bins**
+3. Click the **+** to create a new TwiML Bin
+4. Name your bin and add the TwiML:
+
+    **For Local Development:**
+
+    ```xml
+    <?xml version="1.0" encoding="UTF-8"?>
+    <Response>
+      <Connect>
+        <Stream url="wss://your-url.ngrok.io/ws" />
+      </Connect>
+    </Response>
+    ```
+
+    Replace `your-url.ngrok.io` with your ngrok URL.
+
+    **For Pipecat Cloud:**
+
+    ```xml
+    <?xml version="1.0" encoding="UTF-8"?>
+    <Response>
+      <Connect>
+        <Stream url="wss://api.pipecat.daily.co/ws/twilio">
+          <Parameter name="_pipecatCloudServiceHost"
+            value="AGENT_NAME.ORGANIZATION_NAME"/>
+        </Stream>
+      </Connect>
+    </Response>
+    ```
+
+    Replace:
+    - `AGENT_NAME` with the name of the agent you deployed to Pipecat Cloud
+    - `ORGANIZATION_NAME` with the name of your Pipecat Cloud organization
+
+5. Click **Save**
+
+#### 2. Assign TwiML Bin to Your Phone Number
+
+1. Navigate to **Phone Numbers** → **Manage** → **Active Numbers**
+2. Click on your Twilio phone number
+3. In the "Voice Configuration" section:
+   - Set "A call comes in" to **TwiML Bin**
+   - Select the TwiML Bin you created
+4. Click **Save configuration**
+
