@@ -26,9 +26,15 @@ from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
-from pipecat.evals.harness import AssertionFailure, EvalResult, TurnProgress, run_scenario
+from pipecat.evals.harness import TurnProgress, run_scenario
 from pipecat.evals.scenario import describe_config, load_scenario
-from pipecat.evals.suite import SuiteRun, filter_runs, load_manifest, run_suite
+from pipecat.evals.suite import (
+    EvalRun,
+    add_pipeline_log_sinks,
+    filter_runs,
+    load_manifest,
+    run_suite,
+)
 
 _console = Console()
 
@@ -107,10 +113,6 @@ def _dim(s: str) -> str:
     return _color(s, "2")
 
 
-def _yellow(s: str) -> str:
-    return _color(s, "33")
-
-
 def _print_progress(p: TurnProgress) -> None:
     """Print a per-turn / per-expectation line (verbose mode)."""
     if p.status == "turn":
@@ -126,69 +128,6 @@ def _print_progress(p: TurnProgress) -> None:
         print(line)
 
 
-def _print_result(result: EvalResult, label: str) -> None:
-    if result.skipped:
-        print(f"  {_yellow('⊘')} {label} {_dim(f'— skipped: {result.skipped}')}")
-        return
-    badge = _green("✓") if result.passed else _red("✗")
-    print(f"  {badge} {label} {_dim(f'({result.duration_ms}ms)')}")
-    if not result.passed:
-        for f in result.failures:
-            print(f"      {_red('•')} {f}")
-
-
-def _rich_turn(p: TurnProgress) -> Text:
-    """Render a turn/expectation line for the live display."""
-    if p.status == "turn":
-        label = f'"{p.event_name}"' if p.event_name else "(observe)"
-        return Text.assemble("    ", (f"turn {p.turn_index}", "dim"), f" → {label}")
-    ok = p.status == "matched"
-    line = Text("      ", no_wrap=True, overflow="ellipsis")
-    line.append("✓ " if ok else "✗ ", style="green" if ok else "red")
-    line.append(p.event_name)
-    if p.detail:
-        used = 6 + 2 + len(p.event_name) + 4  # indent + badge + name + "  — "
-        line.append(f"  — {_fit_detail(_format_detail(p), used)}", style="dim")
-    return line
-
-
-def _rich_header(label: str, result: EvalResult) -> Text:
-    """Render the final (✓/✗/⊘) header that replaces the spinner."""
-    if result.skipped:
-        return Text.assemble(("⊘ ", "yellow"), label, (f" — skipped: {result.skipped}", "dim"))
-    badge, style = ("✓", "green") if result.passed else ("✗", "red")
-    return Text.assemble((f"{badge} ", style), label, (f" ({result.duration_ms}ms)", "dim"))
-
-
-def _rich_failure(f: AssertionFailure) -> Text:
-    return Text.assemble(("      • ", "red"), str(f))
-
-
-async def _run_one_live(
-    scenario, url: str, label: str, verbose: bool, record_path: str | None, cache_dir: str | None
-) -> EvalResult:
-    """Run one eval with a spinning header that updates to ✓/✗, turns streaming below."""
-    lines: list[Text] = []
-    spinner = Spinner("dots", text=Text(f" {label}"))
-    with Live(spinner, console=_console, refresh_per_second=12.5) as live:
-
-        def on_progress(p: TurnProgress) -> None:
-            lines.append(_rich_turn(p))
-            live.update(Group(spinner, *lines))
-
-        result = await run_scenario(
-            scenario,
-            url,
-            on_progress=on_progress if verbose else None,
-            record_path=record_path,
-            cache_dir=cache_dir,
-        )
-        # Connect-level failures aren't turn lines; surface them under the header.
-        extra = [_rich_failure(f) for f in result.failures if f.turn_index < 0]
-        live.update(Group(_rich_header(label, result), *lines, *extra))
-    return result
-
-
 def _record_path(record_dir: str | None, scenario_name: str) -> str | None:
     """Per-scenario recording path under ``record_dir``, or None when recording is off."""
     if not record_dir:
@@ -196,99 +135,111 @@ def _record_path(record_dir: str | None, scenario_name: str) -> str | None:
     return str(Path(record_dir) / f"{scenario_name}.wav")
 
 
-# The harness runs three sub-pipelines in-process (voice / transcription /
-# judge) and tags each one's logs with an ``eval_pipeline`` context value via
-# ``logger.contextualize`` (see harness.py), independent of which TTS/STT/LLM
-# service is plugged in. Routing on that label keeps each pipeline's logs in its
-# own file instead of one interleaved, confusing stream; everything untagged
-# (harness, pipeline framework, RTVI, connection) goes to "harness".
-_LOG_CATEGORIES = ("voice", "transcription", "judge", "harness")
+def _build_scenario_runs(paths: list[Path], agent_url: str) -> list[EvalRun]:
+    """Build an EvalRun per scenario YAML, each run against ``agent_url`` (no spawn).
 
-
-async def _run_all(
-    paths: list[Path],
-    agent_url: str,
-    verbose: bool,
-    audio: bool,
-    record_dir: str,
-    cache_dir: str | None,
-    logs_dir: str,
-) -> int:
-    passed = 0
-    failed = 0
-    skipped = 0
-    logged = False
+    ``fixtures.agent_url`` (or ``bot_url``) in a scenario overrides the URL. A
+    scenario that fails to load becomes an EvalRun already marked done with an
+    error, so it shows in the dashboard and the final tally like any other failure.
+    """
+    runs: list[EvalRun] = []
     for path in paths:
         try:
             scenario = load_scenario(path)
         except (ValueError, FileNotFoundError) as e:
-            print(f"  {_red('✗')} {path.name}: {e}")
-            failed += 1
-            continue
-
-        label = f"{path.name}::{scenario.name}"
-        url = scenario.fixtures.get("agent_url") or scenario.fixtures.get("bot_url") or agent_url
-        record_path = _record_path(record_dir, scenario.name) if audio else None
-        print(f"  {_color(scenario.name + ':', '1;36')}")
-        for line in describe_config(scenario, color=_supports_color()).splitlines():
-            print(f"    {line}")
-        out = Path(logs_dir)
-        out.mkdir(parents=True, exist_ok=True)
-        # Route pipecat's own logs for this scenario into one file per sub-pipeline
-        # (<scenario>.voice/.transcription/.judge/.harness.log) instead of the
-        # console or one confusing interleaved file. delay=True so a category with
-        # no logs (e.g. no audio in a text scenario) doesn't create an empty file.
-        # Sequential runs make this clean (the suite can't, running concurrently).
-        sinks = [
-            logger.add(
-                out / f"{scenario.name}.{cat}.log",
-                level="DEBUG",
-                delay=True,
-                filter=lambda r, c=cat: r["extra"].get("eval_pipeline", "harness") == c,
+            run = EvalRun(
+                agent=agent_url, scenario=path.stem, scenario_path=path, agent_url=agent_url
             )
-            for cat in _LOG_CATEGORIES
-        ]
-        try:
-            if _console.is_terminal:
-                result = await _run_one_live(scenario, url, label, verbose, record_path, cache_dir)
-            else:
-                on_progress = _print_progress if verbose else None
-                result = await run_scenario(
-                    scenario,
-                    url,
-                    on_progress=on_progress,
-                    record_path=record_path,
-                    cache_dir=cache_dir,
-                )
-                _print_result(result, label)
-        finally:
-            for sink in sinks:
-                logger.remove(sink)
-        logged = True
+            run.status = "done"
+            run.error = f"failed to load: {e}"
+            runs.append(run)
+            continue
+        url = scenario.fixtures.get("agent_url") or scenario.fixtures.get("bot_url") or agent_url
+        runs.append(EvalRun(agent=url, scenario=scenario.name, scenario_path=path, agent_url=url))
+    return runs
 
-        # Save the harness's decision trace, like the suite does, so a single run
-        # is just as diagnosable. Written per-scenario so a later failure can't
-        # lose an earlier trace.
-        if result.debug_log:
-            (out / f"{scenario.name}.eval.log").write_text("\n".join(result.debug_log) + "\n")
 
-        if result.skipped:
-            skipped += 1
-        elif result.passed:
-            passed += 1
-        else:
-            failed += 1
+async def _execute_scenario(
+    run: EvalRun,
+    *,
+    audio: bool,
+    record_dir: str,
+    cache_dir: str | None,
+    logs_dir: str,
+    on_progress,
+) -> None:
+    """Run one scenario against its ``agent_url``, updating ``run`` in place.
 
-    print()
-    ran = passed + failed
-    summary = f"{passed}/{ran} scenarios passed"
-    if skipped:
-        summary += f", {skipped} skipped"
-    ok = failed == 0
-    print(_green(f"PASS — {summary}") if ok else _red(f"FAIL — {summary}"))
-    if logged:
-        print(f"  logs: {Path(logs_dir).resolve()}")
-    return 0 if ok else 1
+    The ``eval run`` counterpart to the suite's _run_one: it connects to a fixed
+    URL instead of spawning, and (like the suite) splits the harness's own logs
+    into per-pipeline files plus the decision trace under ``logs_dir``.
+    """
+    run.status = "running"
+    run.started_at = time.monotonic()
+    url = run.agent_url
+    assert url is not None  # always set by _build_scenario_runs
+    sinks = add_pipeline_log_sinks(Path(logs_dir), run.scenario, run.scenario)
+    try:
+        scenario = load_scenario(run.scenario_path)
+        record_path = _record_path(record_dir, run.scenario) if audio else None
+        with logger.contextualize(eval_run=run.scenario):
+            run.result = await run_scenario(
+                scenario,
+                url,
+                on_progress=on_progress,
+                record_path=record_path,
+                cache_dir=cache_dir,
+            )
+        if run.result.debug_log:
+            (Path(logs_dir) / f"{run.scenario}.eval.log").write_text(
+                "\n".join(run.result.debug_log) + "\n"
+            )
+    except Exception as e:  # noqa: BLE001
+        run.error = f"error: {e}"
+    finally:
+        for sink in sinks:
+            logger.remove(sink)
+        if run.started_at is not None:
+            run.duration_ms = int((time.monotonic() - run.started_at) * 1000)
+        run.status = "done"
+
+
+async def _run_scenarios_all(
+    runs: list[EvalRun],
+    *,
+    audio: bool,
+    record_dir: str,
+    cache_dir: str | None,
+    logs_dir: str,
+    verbose: bool,
+    started: float,
+) -> None:
+    """Run scenarios sequentially against a fixed agent, with the suite's display.
+
+    A live dashboard in an interactive terminal; ``--verbose`` (per-turn lines) or
+    a piped stdout fall back to streamed result lines instead.
+    """
+
+    async def go(run: EvalRun, on_progress) -> None:
+        await _execute_scenario(
+            run,
+            audio=audio,
+            record_dir=record_dir,
+            cache_dir=cache_dir,
+            logs_dir=logs_dir,
+            on_progress=on_progress,
+        )
+
+    if _console.is_terminal and not verbose:
+        with Live(_EvalDashboard(runs, started), console=_console, refresh_per_second=12.5):
+            for run in runs:
+                if run.status != "done":  # skip a build-time load error
+                    await go(run, None)
+    else:
+        for run in runs:
+            if run.status != "done":
+                await go(run, _print_progress if verbose else None)
+            _print_eval_line(run)
 
 
 @eval_app.command("run")
@@ -328,14 +279,36 @@ def run(
         help="Directory for each scenario's eval log: <logs-dir>/<scenario>.eval.log.",
     ),
 ) -> None:
-    """Run one or more evals against a bot."""
-    # pipecat's own logs (e.g. from the user-audio synthesis pipeline) are routed
-    # to a per-scenario file in _run_all, so silence the console sink here: it
-    # would otherwise corrupt the live display, and the logs are saved anyway.
+    """Run one or more evals against an already-running agent.
+
+    A list of scenarios is treated as a one-agent suite: configs are printed up
+    front, then a live dashboard (or streamed lines when piped / ``--verbose``)
+    shows each scenario's status and timing, the running tally, and the total
+    time, sharing the display with ``pipecat eval suite``.
+    """
+    # pipecat's own logs are routed to per-pipeline files in _execute_scenario, so
+    # silence the console sink here: it would otherwise corrupt the live display,
+    # and the logs are saved anyway.
     logger.remove()
 
-    exit_code = asyncio.run(
-        _run_all(scenarios, agent_url, verbose, audio, record_dir, cache_dir, logs_dir)
+    runs = _build_scenario_runs(scenarios, agent_url)
+    _print_scenario_configs(runs)
+
+    started = time.monotonic()
+    asyncio.run(
+        _run_scenarios_all(
+            runs,
+            audio=audio,
+            record_dir=record_dir,
+            cache_dir=cache_dir,
+            logs_dir=logs_dir,
+            verbose=verbose,
+            started=started,
+        )
+    )
+    dashboard_shown = _console.is_terminal and not verbose
+    exit_code = _finalize_evals(
+        runs, Path(logs_dir).resolve(), time.monotonic() - started, dashboard_shown
     )
     raise typer.Exit(code=exit_code)
 
@@ -344,7 +317,7 @@ def run(
 # `pipecat eval suite` — spawn the agents in a manifest and run their scenarios.
 #
 
-_SUITE_GLYPH = {
+_EVAL_GLYPH = {
     "passed": ("✓", "green", "32"),
     "failed": ("✗", "red", "31"),
     "skipped": ("⊘", "yellow", "33"),
@@ -352,7 +325,7 @@ _SUITE_GLYPH = {
 }
 
 
-def _suite_verdict(r: SuiteRun) -> str:
+def _eval_verdict(r: EvalRun) -> str:
     """Collapse a run into a display verdict."""
     if r.status != "done":
         return r.status  # pending | running
@@ -371,20 +344,20 @@ def _fmt_duration(seconds: float) -> str:
     return f"{m}m {s:02d}s"
 
 
-def _suite_status_cell(r: SuiteRun):
+def _eval_status_cell(r: EvalRun):
     """A rich renderable for the status column (spinner while running)."""
     if r.status == "pending":
         return Text("·", style="dim")
     if r.status == "running":
         return Spinner("dots", style="cyan")
-    glyph, style, _ = _SUITE_GLYPH[_suite_verdict(r)]
+    glyph, style, _ = _EVAL_GLYPH[_eval_verdict(r)]
     return Text(glyph, style=style)
 
 
-class _SuiteDashboard:
+class _EvalDashboard:
     """Live table rendered every frame from the shared list of runs."""
 
-    def __init__(self, runs: list[SuiteRun], started_at: float):
+    def __init__(self, runs: list[EvalRun], started_at: float):
         self.runs = runs
         self.started_at = started_at
 
@@ -402,19 +375,19 @@ class _SuiteDashboard:
             else:
                 detail = ""
             table.add_row(
-                _suite_status_cell(r),
+                _eval_status_cell(r),
                 Text(r.agent),
                 Text(r.scenario, style="cyan"),
                 Text(detail, style="dim"),
             )
         total = len(self.runs)
         done = sum(1 for r in self.runs if r.status == "done")
-        passed = sum(1 for r in self.runs if _suite_verdict(r) == "passed")
+        passed = sum(1 for r in self.runs if _eval_verdict(r) == "passed")
         # The total time ticks live next to the tally, so it doubles as the
         # "still working" signal (no spinner needed); it keeps advancing through
         # the agent-teardown tail (see _stop_agent) until Live exits, leaving the
         # final time on screen. The first column is kept blank so the tally stays
-        # aligned with the rows above. _finalize_suite intentionally does not
+        # aligned with the rows above. _finalize_evals intentionally does not
         # reprint this line (it would duplicate the last frame).
         elapsed = _fmt_duration(time.monotonic() - self.started_at)
         summary = Table.grid(padding=(0, 1))
@@ -427,20 +400,44 @@ class _SuiteDashboard:
         return Group(table, Text(""), summary)
 
 
-def _print_suite_line(r: SuiteRun) -> None:
+def _print_eval_line(r: EvalRun) -> None:
     """Print a single result line (non-TTY fallback, streamed as each finishes)."""
     if r.status != "done":
         return
-    glyph, _, code = _SUITE_GLYPH[_suite_verdict(r)]
+    glyph, _, code = _EVAL_GLYPH[_eval_verdict(r)]
     extra = f"({r.duration_ms}ms)" if r.duration_ms is not None and not r.error else (r.error or "")
     print(f"  {_color(glyph, code)} {r.agent} {_color(r.scenario, '36')} {_dim(extra)}", flush=True)
 
 
-def _finalize_suite(runs: list[SuiteRun], runs_dir: Path, elapsed_s: float) -> int:
+def _print_scenario_configs(runs: list[EvalRun]) -> None:
+    """Print each distinct scenario's config once, up front (shared by run + suite).
+
+    Done before the runs (not per-run) so it doesn't interleave with the live
+    display, with a trailing blank line separating it from the runs.
+    """
+    print("Scenarios:")
+    seen: set[str] = set()
+    for r in runs:
+        if r.scenario in seen:
+            continue
+        seen.add(r.scenario)
+        try:
+            cfg = describe_config(load_scenario(r.scenario_path), color=sys.stdout.isatty())
+        except Exception as e:  # noqa: BLE001
+            cfg = f"(failed to load: {e})"
+        print(f"  {_color(r.scenario + ':', '1;36')}")
+        for line in cfg.splitlines():
+            print(f"    {line}")
+    print()
+
+
+def _finalize_evals(
+    runs: list[EvalRun], runs_dir: Path, elapsed_s: float, dashboard_shown: bool
+) -> int:
     """Print the failed set + final tally; return the process exit code."""
-    failed = [r for r in runs if _suite_verdict(r) in ("failed", "error")]
-    passed = sum(1 for r in runs if _suite_verdict(r) == "passed")
-    skipped = sum(1 for r in runs if _suite_verdict(r) == "skipped")
+    failed = [r for r in runs if _eval_verdict(r) in ("failed", "error")]
+    passed = sum(1 for r in runs if _eval_verdict(r) == "passed")
+    skipped = sum(1 for r in runs if _eval_verdict(r) == "skipped")
 
     if failed:
         print()
@@ -454,10 +451,10 @@ def _finalize_suite(runs: list[SuiteRun], runs_dir: Path, elapsed_s: float) -> i
                     print(f"      {_red('•')} {f}")
 
     print()
-    # In a terminal the live dashboard's last frame already shows the tally and
-    # the (now final) elapsed time, so reprinting it here would just duplicate
-    # that line. Piped output has no dashboard, so print the tally there.
-    if not _console.is_terminal:
+    # When the live dashboard ran, its last frame already shows the tally and the
+    # (now final) elapsed time, so reprinting it here would just duplicate that
+    # line. Without a dashboard (piped, or run --verbose) print the tally here.
+    if not dashboard_shown:
         summary = f"{passed}/{len(runs)} passed"
         if failed:
             summary += f", {len(failed)} failed"
@@ -471,17 +468,15 @@ def _finalize_suite(runs: list[SuiteRun], runs_dir: Path, elapsed_s: float) -> i
 
 
 async def _run_suite_all(
-    runs: list[SuiteRun], manifest, logs_dir: Path, record_dir: Path | None, started: float
+    runs: list[EvalRun], manifest, logs_dir: Path, record_dir: Path | None, started: float
 ) -> None:
     """Run the suite with a live dashboard (TTY) or streamed lines (piped)."""
     if _console.is_terminal:
-        with Live(_SuiteDashboard(runs, started), console=_console, refresh_per_second=12.5):
+        with Live(_EvalDashboard(runs, started), console=_console, refresh_per_second=12.5):
             await run_suite(runs, manifest, logs_dir, record_dir=record_dir)
     else:
         print(f"Running {len(runs)} eval(s), {manifest.concurrency} at a time...")
-        await run_suite(
-            runs, manifest, logs_dir, record_dir=record_dir, on_update=_print_suite_line
-        )
+        await run_suite(runs, manifest, logs_dir, record_dir=record_dir, on_update=_print_eval_line)
 
 
 @eval_app.command("suite")
@@ -543,23 +538,11 @@ def suite(
     logs_dir = run_dir / "logs"
     record_dir = (run_dir / "recordings") if manifest.record else None
 
-    # Print each distinct scenario's config up front (per-run would interleave).
-    print("Scenarios:")
-    seen: set[str] = set()
-    for r in runs:
-        if r.scenario in seen:
-            continue
-        seen.add(r.scenario)
-        try:
-            cfg = describe_config(load_scenario(r.scenario_path), color=sys.stdout.isatty())
-        except Exception as e:  # noqa: BLE001
-            cfg = f"(failed to load: {e})"
-        print(f"  {_color(r.scenario + ':', '1;36')}")
-        for line in cfg.splitlines():
-            print(f"    {line}")
-    print()
+    _print_scenario_configs(runs)
 
     started = time.monotonic()
     asyncio.run(_run_suite_all(runs, manifest, logs_dir, record_dir, started))
-    exit_code = _finalize_suite(runs, run_dir, time.monotonic() - started)
+    exit_code = _finalize_evals(
+        runs, run_dir, time.monotonic() - started, dashboard_shown=_console.is_terminal
+    )
     raise typer.Exit(code=exit_code)
