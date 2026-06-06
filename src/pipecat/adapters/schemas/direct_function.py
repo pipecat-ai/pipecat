@@ -289,3 +289,44 @@ class DirectFunctionWrapper(BaseDirectFunctionWrapper):
             The result of the function call.
         """
         return await self.function(params=params, **args)
+
+
+def direct_function(fn=None, *, cancel_on_interruption: bool = True, timeout: float | None = None):
+    """Configure a direct function's call options.
+
+    This decorator is optional. A direct function listed in an ``LLMContext``'s
+    tools is registered automatically with default call options, so the
+    decorator is only needed when you want to override those defaults. It
+    attaches the options to the function and returns it unchanged — it does not
+    register anything, so decorated functions can stay at module level.
+
+    Can be used with or without arguments::
+
+        @direct_function
+        async def get_weather(params, location: str):
+            ...
+
+        @direct_function(cancel_on_interruption=False, timeout=60)
+        async def end_call(params, reason: str):
+            ...
+
+    Args:
+        fn: The function to decorate (when used without arguments).
+        cancel_on_interruption: Whether to cancel this function call when an
+            interruption occurs. Defaults to True.
+        timeout: Optional per-tool timeout in seconds. Defaults to None (uses
+            the LLM service default).
+
+    Returns:
+        The decorated function, with ``cancel_on_interruption`` and ``timeout``
+        attributes attached.
+    """
+
+    def decorator(fn):
+        fn.cancel_on_interruption = cancel_on_interruption
+        fn.timeout = timeout
+        return fn
+
+    if fn is not None:
+        return decorator(fn)
+    return decorator

@@ -32,6 +32,8 @@ from openai.types.chat import (
 )
 from PIL import Image
 
+from pipecat.adapters.schemas.direct_function import DirectFunction
+from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import AudioRawFrame
 
@@ -101,14 +103,19 @@ class LLMContext:
     def __init__(
         self,
         messages: list[LLMContextMessage] | None = None,
-        tools: ToolsSchema | NotGiven = NOT_GIVEN,
+        tools: ToolsSchema | list[FunctionSchema | DirectFunction] | NotGiven = NOT_GIVEN,
         tool_choice: LLMContextToolChoice | NotGiven = NOT_GIVEN,
     ):
         """Initialize the LLM context.
 
         Args:
             messages: Initial list of conversation messages.
-            tools: Available tools for the LLM to use.
+            tools: Available tools for the LLM to use. May be a ``ToolsSchema``
+                or a plain list of direct functions and/or ``FunctionSchema``
+                objects (normalized to a ``ToolsSchema`` internally). Direct
+                functions in the list are registered with the LLM service
+                automatically — no separate ``register_direct_function`` call is
+                needed.
             tool_choice: Tool selection strategy for the LLM.
         """
         self._messages: list[LLMContextMessage] = messages if messages else []
@@ -404,11 +411,15 @@ class LLMContext:
         """
         self.set_messages(transform(self._messages))
 
-    def set_tools(self, tools: ToolsSchema | NotGiven = NOT_GIVEN):
+    def set_tools(
+        self,
+        tools: ToolsSchema | list[FunctionSchema | DirectFunction] | NotGiven = NOT_GIVEN,
+    ):
         """Set the available tools for the LLM.
 
         Args:
-            tools: A ToolsSchema or NOT_GIVEN to disable tools.
+            tools: A ToolsSchema, a plain list of direct functions and/or
+                ``FunctionSchema`` objects, or NOT_GIVEN to disable tools.
         """
         self._tools = LLMContext._normalize_and_validate_tools(tools)
 
@@ -457,12 +468,19 @@ class LLMContext:
         self.add_message(message)
 
     @staticmethod
-    def _normalize_and_validate_tools(tools: ToolsSchema | NotGiven) -> ToolsSchema | NotGiven:
+    def _normalize_and_validate_tools(
+        tools: ToolsSchema | list[FunctionSchema | DirectFunction] | NotGiven,
+    ) -> ToolsSchema | NotGiven:
         """Normalize and validate the given tools.
 
+        A plain list of direct functions and/or ``FunctionSchema`` objects is
+        wrapped in a ``ToolsSchema``.
+
         Raises:
-            TypeError: If tools are not a ToolsSchema or NotGiven.
+            TypeError: If tools are not a ToolsSchema, list, or NotGiven.
         """
+        if isinstance(tools, list):
+            tools = ToolsSchema(standard_tools=tools)
         if isinstance(tools, ToolsSchema):
             if not tools.standard_tools and not tools.custom_tools:
                 return NOT_GIVEN
@@ -471,5 +489,6 @@ class LLMContext:
             return NOT_GIVEN
         else:
             raise TypeError(
-                f"In LLMContext, tools must be a ToolsSchema object or NOT_GIVEN. Got type: {type(tools)}",
+                "In LLMContext, tools must be a ToolsSchema, a list of direct functions / "
+                f"FunctionSchema objects, or NOT_GIVEN. Got type: {type(tools)}",
             )
