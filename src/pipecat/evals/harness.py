@@ -70,7 +70,7 @@ from typing import Any
 from loguru import logger
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
-from pipecat.evals.judge import Judge, build_default_judge
+from pipecat.evals.judge import EvalJudge, build_default_judge
 from pipecat.evals.scenario import Expectation, Scenario, SendAfter, Turn
 from pipecat.evals.serializer import (
     EVAL_BOT_AUDIO_TYPE,
@@ -206,7 +206,7 @@ class EvalSession:
         self._debug_t0: float = 0.0
         self._current_turn: int = -1
         self._next_id = 0
-        self._judge: Judge | None = None
+        self._judge: EvalJudge | None = None
 
         # One persistent TTS pipeline reused across the scenario's audio turns
         # (created in run() only when the scenario uses user_audio).
@@ -352,10 +352,15 @@ class EvalSession:
                 await reader_task
             except (asyncio.CancelledError, Exception):
                 pass
+            # Tear each sub-pipeline down under the same eval_pipeline label as its
+            # setup, so its shutdown logs (e.g. "Cancelling pipeline worker") are
+            # attributed to it rather than leaking into the harness catch-all.
             if self._voice is not None:
-                await self._voice.aclose()
+                with logger.contextualize(eval_pipeline="voice"):
+                    await self._voice.aclose()
             if self._transcriber is not None:
-                await self._transcriber.aclose()
+                with logger.contextualize(eval_pipeline="transcription"):
+                    await self._transcriber.aclose()
             # Ask the bot to tear its pipeline down gracefully (closing its STT/TTS/
             # LLM connections) so the process exits on its own — best-effort; the
             # orchestrator still has a kill fallback.
@@ -442,7 +447,7 @@ class EvalSession:
         await self._wait_for_event("bot_ready", BOT_READY_TIMEOUT_S)
 
         # If the scenario asserts on function-call name/args, ask the bot's
-        # RTVIObserver to report them for the duration of this eval. Agents keep
+        # RTVIObserver to report them for the duration of this eval. Bots keep
         # the secure NONE default; only the eval transport understands this.
         level = self._required_report_level()
         if level is not None:

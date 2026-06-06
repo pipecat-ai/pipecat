@@ -1,4 +1,4 @@
-"""Behavioral harness for Pipecat agents.
+"""Behavioral harness for Pipecat bots.
 
 This package provides a scenario-based test runner that drives a bot via the
 eval transport and asserts on the semantic event stream it emits. See
