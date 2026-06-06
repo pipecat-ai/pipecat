@@ -283,3 +283,26 @@ def is_silence(pcm_bytes: bytes) -> bool:
 
     # If max value is lower than SPEAKING_THRESHOLD, consider it as silence
     return max_value <= SPEAKING_THRESHOLD
+
+
+def apply_fade_out_to_pcm16(
+    pcm: bytes, *, sample_rate: int, num_channels: int, fade_out_ms: int
+) -> bytes:
+    """Linear fade on the last ``fade_out_ms`` of interleaved 16-bit PCM (in place on a copy)."""
+    if not pcm or fade_out_ms <= 0 or sample_rate <= 0 or num_channels <= 0:
+        return pcm
+    frame_b = 2 * num_channels
+    if len(pcm) < frame_b or len(pcm) % frame_b:
+        return pcm
+    nframes = len(pcm) // frame_b
+    fade_nframes = int(sample_rate * fade_out_ms / 1000.0)
+    fade_nframes = min(fade_nframes, nframes)
+    if fade_nframes <= 0:
+        return pcm
+    out = np.frombuffer(pcm, dtype=np.int16).copy()
+    start = nframes - fade_nframes
+    for j in range(fade_nframes):
+        g = (fade_nframes - j) / fade_nframes
+        sl = slice((start + j) * num_channels, (start + j + 1) * num_channels)
+        out[sl] = (out[sl].astype(np.float32) * g).astype(np.int16)
+    return out.tobytes()
