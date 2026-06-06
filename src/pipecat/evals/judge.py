@@ -4,10 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Judge LLM for content assertions in behavioral evaluations.
+"""EvalJudge LLM for content assertions in behavioral evaluations.
 
 Uses an LLM to decide whether a bot's response satisfies a natural-language
-criterion (``judge: "describes the agent's capabilities"``). The judge runs as
+criterion (``judge: "describes the bot's capabilities"``). The judge runs as
 a one-shot, out-of-pipeline inference via
 :meth:`pipecat.services.openai.base_llm.BaseOpenAILLMService.run_inference`,
 so it works with any pipecat LLM service backed by an OpenAI-compatible API
@@ -22,9 +22,9 @@ Example::
     from pipecat.services.ollama.llm import OLLamaLLMService
 
     service = OLLamaLLMService(settings=OLLamaLLMService.Settings(model="qwen2.5:3b"))
-    judge = Judge(service)
+    judge = EvalJudge(service)
     verdict = await judge.evaluate(
-        criterion="describes the agent's capabilities",
+        criterion="describes the bot's capabilities",
         text="I can help with questions, set reminders, and look things up.",
     )
     if not verdict.passed:
@@ -84,7 +84,7 @@ class JudgeVerdict:
         return self.verdict == "yes"
 
 
-class Judge:
+class EvalJudge:
     """Wraps a pipecat LLM service and runs single-shot evaluations.
 
     Args:
@@ -137,7 +137,7 @@ class Judge:
                 system_instruction=JUDGE_SYSTEM_INSTRUCTION,
             )
         except Exception as e:
-            logger.error(f"Judge call failed: {e.__class__.__name__} ({e})")
+            logger.error(f"EvalJudge call failed: {e.__class__.__name__} ({e})")
             return JudgeVerdict(
                 verdict="no",
                 reason=f"judge call failed: {e.__class__.__name__}",
@@ -197,8 +197,8 @@ def _parse_verdict(response: str) -> JudgeVerdict:
         )
 
 
-def build_default_judge(judge_config: dict | None) -> Judge | None:
-    """Build a :class:`Judge` from a scenario's ``judge:`` config block.
+def build_default_judge(judge_config: dict | None) -> EvalJudge | None:
+    """Build a :class:`EvalJudge` from a scenario's ``judge:`` config block.
 
     Args:
         judge_config: Mapping with keys ``service`` (default ``"ollama"``),
@@ -206,7 +206,7 @@ def build_default_judge(judge_config: dict | None) -> Judge | None:
             (service-specific default if omitted). ``None`` uses all defaults.
 
     Returns:
-        A configured Judge, or ``None`` if construction fails (caller decides
+        A configured EvalJudge, or ``None`` if construction fails (caller decides
         whether to skip ``eval:`` assertions or fail the scenario).
     """
     config = judge_config or {}
@@ -224,7 +224,7 @@ def build_default_judge(judge_config: dict | None) -> Judge | None:
         logger.error(f"Failed to construct judge service {service_name!r}: {e}")
         return None
 
-    return Judge(llm_service)
+    return EvalJudge(llm_service)
 
 
 def _ollama_service(config: dict):

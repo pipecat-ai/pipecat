@@ -30,7 +30,7 @@ from pipecat.evals.harness import TurnProgress, run_scenario
 from pipecat.evals.scenario import describe_config, load_scenario
 from pipecat.evals.suite import (
     EvalRun,
-    add_pipeline_log_sinks,
+    capture_pipeline_logs,
     filter_runs,
     load_manifest,
     run_suite,
@@ -135,27 +135,25 @@ def _record_path(record_dir: str | None, scenario_name: str) -> str | None:
     return str(Path(record_dir) / f"{scenario_name}.wav")
 
 
-def _build_scenario_runs(paths: list[Path], agent_url: str) -> list[EvalRun]:
-    """Build an EvalRun per scenario YAML, each run against ``agent_url`` (no spawn).
+def _build_scenario_runs(paths: list[Path], bot_url: str) -> list[EvalRun]:
+    """Build an EvalRun per scenario YAML, each run against ``bot_url`` (no spawn).
 
-    ``fixtures.agent_url`` (or ``bot_url``) in a scenario overrides the URL. A
-    scenario that fails to load becomes an EvalRun already marked done with an
-    error, so it shows in the dashboard and the final tally like any other failure.
+    A scenario's ``fixtures.bot_url`` overrides the URL. A scenario that fails to
+    load becomes an EvalRun already marked done with an error, so it shows in the
+    dashboard and the final tally like any other failure.
     """
     runs: list[EvalRun] = []
     for path in paths:
         try:
             scenario = load_scenario(path)
         except (ValueError, FileNotFoundError) as e:
-            run = EvalRun(
-                agent=agent_url, scenario=path.stem, scenario_path=path, agent_url=agent_url
-            )
+            run = EvalRun(bot=bot_url, scenario=path.stem, scenario_path=path, bot_url=bot_url)
             run.status = "done"
             run.error = f"failed to load: {e}"
             runs.append(run)
             continue
-        url = scenario.fixtures.get("agent_url") or scenario.fixtures.get("bot_url") or agent_url
-        runs.append(EvalRun(agent=url, scenario=scenario.name, scenario_path=path, agent_url=url))
+        url = scenario.fixtures.get("bot_url") or bot_url
+        runs.append(EvalRun(bot=url, scenario=scenario.name, scenario_path=path, bot_url=url))
     return runs
 
 
@@ -166,23 +164,23 @@ async def _execute_scenario(
     record_dir: str,
     cache_dir: str | None,
     logs_dir: str,
+    debug: bool,
     on_progress,
 ) -> None:
-    """Run one scenario against its ``agent_url``, updating ``run`` in place.
+    """Run one scenario against its ``bot_url``, updating ``run`` in place.
 
     The ``eval run`` counterpart to the suite's _run_one: it connects to a fixed
-    URL instead of spawning, and (like the suite) splits the harness's own logs
-    into per-pipeline files plus the decision trace under ``logs_dir``.
+    URL instead of spawning, always writes the decision trace (``<scenario>.eval.log``)
+    and, under ``--debug``, the combined ``<scenario>.debug.log``.
     """
     run.status = "running"
     run.started_at = time.monotonic()
-    url = run.agent_url
+    url = run.bot_url
     assert url is not None  # always set by _build_scenario_runs
-    sinks = add_pipeline_log_sinks(Path(logs_dir), run.scenario, run.scenario)
     try:
         scenario = load_scenario(run.scenario_path)
         record_path = _record_path(record_dir, run.scenario) if audio else None
-        with logger.contextualize(eval_run=run.scenario):
+        with capture_pipeline_logs(Path(logs_dir), run.scenario, name=run.scenario, enabled=debug):
             run.result = await run_scenario(
                 scenario,
                 url,
@@ -191,14 +189,13 @@ async def _execute_scenario(
                 cache_dir=cache_dir,
             )
         if run.result.debug_log:
+            Path(logs_dir).mkdir(parents=True, exist_ok=True)
             (Path(logs_dir) / f"{run.scenario}.eval.log").write_text(
                 "\n".join(run.result.debug_log) + "\n"
             )
     except Exception as e:  # noqa: BLE001
         run.error = f"error: {e}"
     finally:
-        for sink in sinks:
-            logger.remove(sink)
         if run.started_at is not None:
             run.duration_ms = int((time.monotonic() - run.started_at) * 1000)
         run.status = "done"
@@ -212,9 +209,10 @@ async def _run_scenarios_all(
     cache_dir: str | None,
     logs_dir: str,
     verbose: bool,
+    debug: bool,
     started: float,
 ) -> None:
-    """Run scenarios sequentially against a fixed agent, with the suite's display.
+    """Run scenarios sequentially against a fixed bot, with the suite's display.
 
     A live dashboard in an interactive terminal; ``--verbose`` (per-turn lines) or
     a piped stdout fall back to streamed result lines instead.
@@ -227,6 +225,7 @@ async def _run_scenarios_all(
             record_dir=record_dir,
             cache_dir=cache_dir,
             logs_dir=logs_dir,
+            debug=debug,
             on_progress=on_progress,
         )
 
@@ -245,11 +244,11 @@ async def _run_scenarios_all(
 @eval_app.command("run")
 def run(
     scenarios: list[Path] = typer.Argument(..., help="One or more scenario YAML files."),
-    agent_url: str = typer.Option(
+    bot_url: str = typer.Option(
         "ws://localhost:7860",
-        "--agent-url",
-        help="WebSocket URL of the agent's eval transport. "
-        "Overridden per-scenario by fixtures.agent_url.",
+        "--bot-url",
+        help="WebSocket URL of the bot's eval transport. "
+        "Overridden per-scenario by fixtures.bot_url.",
     ),
     verbose: bool = typer.Option(
         False,
@@ -276,22 +275,27 @@ def run(
     logs_dir: str = typer.Option(
         ".",
         "--logs-dir",
-        help="Directory for each scenario's eval log: <logs-dir>/<scenario>.eval.log.",
+        help="Directory for each scenario's logs: <logs-dir>/<scenario>.eval.log (+ .debug.log).",
+    ),
+    debug: bool = typer.Option(
+        False,
+        "-d",
+        "--debug",
+        help="Also save <scenario>.debug.log with the harness's full per-pipeline logs.",
     ),
 ) -> None:
-    """Run one or more evals against an already-running agent.
+    """Run one or more evals against an already-running bot.
 
-    A list of scenarios is treated as a one-agent suite: configs are printed up
+    A list of scenarios is treated as a one-bot suite: configs are printed up
     front, then a live dashboard (or streamed lines when piped / ``--verbose``)
     shows each scenario's status and timing, the running tally, and the total
     time, sharing the display with ``pipecat eval suite``.
     """
-    # pipecat's own logs are routed to per-pipeline files in _execute_scenario, so
-    # silence the console sink here: it would otherwise corrupt the live display,
-    # and the logs are saved anyway.
+    # pipecat's own logs are captured to <scenario>.debug.log under --debug; either
+    # way, silence the console sink so it can't corrupt the live display.
     logger.remove()
 
-    runs = _build_scenario_runs(scenarios, agent_url)
+    runs = _build_scenario_runs(scenarios, bot_url)
     _print_scenario_configs(runs)
 
     started = time.monotonic()
@@ -303,6 +307,7 @@ def run(
             cache_dir=cache_dir,
             logs_dir=logs_dir,
             verbose=verbose,
+            debug=debug,
             started=started,
         )
     )
@@ -314,7 +319,7 @@ def run(
 
 
 #
-# `pipecat eval suite` — spawn the agents in a manifest and run their scenarios.
+# `pipecat eval suite` — spawn the bots in a manifest and run their scenarios.
 #
 
 _EVAL_GLYPH = {
@@ -364,7 +369,7 @@ class _EvalDashboard:
     def __rich__(self) -> Group:
         table = Table.grid(padding=(0, 2))
         table.add_column()  # status
-        table.add_column()  # agent
+        table.add_column()  # bot
         table.add_column()  # scenario
         table.add_column(justify="right")  # timing
         for r in self.runs:
@@ -376,7 +381,7 @@ class _EvalDashboard:
                 detail = ""
             table.add_row(
                 _eval_status_cell(r),
-                Text(r.agent),
+                Text(r.bot),
                 Text(r.scenario, style="cyan"),
                 Text(detail, style="dim"),
             )
@@ -385,7 +390,7 @@ class _EvalDashboard:
         passed = sum(1 for r in self.runs if _eval_verdict(r) == "passed")
         # The total time ticks live next to the tally, so it doubles as the
         # "still working" signal (no spinner needed); it keeps advancing through
-        # the agent-teardown tail (see _stop_agent) until Live exits, leaving the
+        # the bot-teardown tail (see _stop_bot) until Live exits, leaving the
         # final time on screen. The first column is kept blank so the tally stays
         # aligned with the rows above. _finalize_evals intentionally does not
         # reprint this line (it would duplicate the last frame).
@@ -406,7 +411,7 @@ def _print_eval_line(r: EvalRun) -> None:
         return
     glyph, _, code = _EVAL_GLYPH[_eval_verdict(r)]
     extra = f"({r.duration_ms}ms)" if r.duration_ms is not None and not r.error else (r.error or "")
-    print(f"  {_color(glyph, code)} {r.agent} {_color(r.scenario, '36')} {_dim(extra)}", flush=True)
+    print(f"  {_color(glyph, code)} {r.bot} {_color(r.scenario, '36')} {_dim(extra)}", flush=True)
 
 
 def _print_scenario_configs(runs: list[EvalRun]) -> None:
@@ -444,9 +449,9 @@ def _finalize_evals(
         print(f"  {_color(f'Failed ({len(failed)}):', '1;31')}")
         for r in failed:
             if r.error:
-                print(f"  {_red('✗')} {r.agent} {_color(r.scenario, '36')} {_dim('— ' + r.error)}")
+                print(f"  {_red('✗')} {r.bot} {_color(r.scenario, '36')} {_dim('— ' + r.error)}")
             elif r.result is not None:
-                print(f"  {_red('✗')} {r.agent} {_color(r.scenario, '36')}")
+                print(f"  {_red('✗')} {r.bot} {_color(r.scenario, '36')}")
                 for f in r.result.failures:
                     print(f"      {_red('•')} {f}")
 
@@ -468,22 +473,29 @@ def _finalize_evals(
 
 
 async def _run_suite_all(
-    runs: list[EvalRun], manifest, logs_dir: Path, record_dir: Path | None, started: float
+    runs: list[EvalRun],
+    manifest,
+    logs_dir: Path,
+    record_dir: Path | None,
+    started: float,
+    debug: bool,
 ) -> None:
     """Run the suite with a live dashboard (TTY) or streamed lines (piped)."""
     if _console.is_terminal:
         with Live(_EvalDashboard(runs, started), console=_console, refresh_per_second=12.5):
-            await run_suite(runs, manifest, logs_dir, record_dir=record_dir)
+            await run_suite(runs, manifest, logs_dir, record_dir=record_dir, debug=debug)
     else:
         print(f"Running {len(runs)} eval(s), {manifest.concurrency} at a time...")
-        await run_suite(runs, manifest, logs_dir, record_dir=record_dir, on_update=_print_eval_line)
+        await run_suite(
+            runs, manifest, logs_dir, record_dir=record_dir, on_update=_print_eval_line, debug=debug
+        )
 
 
 @eval_app.command("suite")
 def suite(
-    manifest_path: Path = typer.Argument(..., help="Manifest YAML listing agents + scenarios."),
+    manifest_path: Path = typer.Argument(..., help="Manifest YAML listing bots + scenarios."),
     pattern: str = typer.Option(
-        None, "-p", "--pattern", help="Only agents whose path contains this."
+        None, "-p", "--pattern", help="Only bots whose path contains this."
     ),
     scenario: str = typer.Option(None, "-s", "--scenario", help="Only this scenario name."),
     name: str = typer.Option(
@@ -495,7 +507,7 @@ def suite(
         help="Output base, overriding the manifest's runs_dir (a <name>/ subdir with "
         "logs/ and recordings/ is created under it; default eval-runs).",
     ),
-    agents_dir: Path = typer.Option(None, "--agents-dir", help="Override manifest agents_dir."),
+    bots_dir: Path = typer.Option(None, "--bots-dir", help="Override manifest bots_dir."),
     scenarios_dir: Path = typer.Option(
         None, "--scenarios-dir", help="Override manifest scenarios_dir."
     ),
@@ -507,15 +519,21 @@ def suite(
     spawn: str = typer.Option(None, "--spawn", help="Override manifest spawn template."),
     python: str = typer.Option(None, "--python", help="Override manifest python interpreter."),
     audio: bool = typer.Option(False, "-a", "--audio", help="Record conversation audio."),
+    debug: bool = typer.Option(
+        False,
+        "-d",
+        "--debug",
+        help="Also save <run>.debug.log with the harness's full per-pipeline logs.",
+    ),
 ) -> None:
-    """Spawn the agents in a manifest and run their scenarios concurrently.
+    """Spawn the bots in a manifest and run their scenarios concurrently.
 
     Everything except the ``suite:`` list can be set in the manifest or overridden
     here (the command line wins), so a manifest can be just a ``suite:`` list.
     """
     manifest = load_manifest(
         manifest_path,
-        agents_dir=agents_dir,
+        bots_dir=bots_dir,
         scenarios_dir=scenarios_dir,
         runs_dir=runs_dir,
         spawn=spawn,
@@ -541,7 +559,7 @@ def suite(
     _print_scenario_configs(runs)
 
     started = time.monotonic()
-    asyncio.run(_run_suite_all(runs, manifest, logs_dir, record_dir, started))
+    asyncio.run(_run_suite_all(runs, manifest, logs_dir, record_dir, started, debug))
     exit_code = _finalize_evals(
         runs, run_dir, time.monotonic() - started, dashboard_shown=_console.is_terminal
     )

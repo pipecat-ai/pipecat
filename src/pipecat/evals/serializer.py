@@ -19,7 +19,7 @@ is the only glue needed:
   ``t = "eval-configure"`` into an
   :class:`~pipecat.processors.frameworks.rtvi.frames.RTVIConfigureObserverFrame`
   (raising the function-call report level for the eval). Both keep eval-specific
-  behavior out of the bot, and the latter is the trust boundary that lets agents
+  behavior out of the bot, and the latter is the trust boundary that lets bots
   keep the secure default report level in production.
 
 - **Outbound** (bot → harness): RTVI server messages (carried as
