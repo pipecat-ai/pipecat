@@ -165,6 +165,7 @@ async def _execute_scenario(
     cache_dir: str | None,
     logs_dir: str,
     debug: bool,
+    stop_bot: bool,
     on_progress,
 ) -> None:
     """Run one scenario against its ``bot_url``, updating ``run`` in place.
@@ -187,6 +188,7 @@ async def _execute_scenario(
                 on_progress=on_progress,
                 record_path=record_path,
                 cache_dir=cache_dir,
+                stop_bot=stop_bot,
             )
         if run.result.debug_log:
             Path(logs_dir).mkdir(parents=True, exist_ok=True)
@@ -210,6 +212,7 @@ async def _run_scenarios_all(
     logs_dir: str,
     verbose: bool,
     debug: bool,
+    stop_bot: bool,
     started: float,
 ) -> None:
     """Run scenarios sequentially against a fixed bot, with the suite's display.
@@ -226,6 +229,7 @@ async def _run_scenarios_all(
             cache_dir=cache_dir,
             logs_dir=logs_dir,
             debug=debug,
+            stop_bot=stop_bot,
             on_progress=on_progress,
         )
 
@@ -283,6 +287,12 @@ def run(
         "--debug",
         help="Also save <scenario>.debug.log with the harness's full per-pipeline logs.",
     ),
+    stop_bot: bool = typer.Option(
+        False,
+        "--stop-bot",
+        help="Cancel the bot's pipeline (exit it) after the run. By default the "
+        "bot is left running so it can serve more scenarios.",
+    ),
 ) -> None:
     """Run one or more evals against an already-running bot.
 
@@ -308,6 +318,7 @@ def run(
             logs_dir=logs_dir,
             verbose=verbose,
             debug=debug,
+            stop_bot=stop_bot,
             started=started,
         )
     )
