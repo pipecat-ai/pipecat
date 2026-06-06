@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 import typer
+from loguru import logger
 from rich.console import Console, Group
 from rich.live import Live
 from rich.spinner import Spinner
@@ -195,6 +196,15 @@ def _record_path(record_dir: str | None, scenario_name: str) -> str | None:
     return str(Path(record_dir) / f"{scenario_name}.wav")
 
 
+# The harness runs three sub-pipelines in-process (voice / transcription /
+# judge) and tags each one's logs with an ``eval_pipeline`` context value via
+# ``logger.contextualize`` (see harness.py), independent of which TTS/STT/LLM
+# service is plugged in. Routing on that label keeps each pipeline's logs in its
+# own file instead of one interleaved, confusing stream; everything untagged
+# (harness, pipeline framework, RTVI, connection) goes to "harness".
+_LOG_CATEGORIES = ("voice", "transcription", "judge", "harness")
+
+
 async def _run_all(
     paths: list[Path],
     agent_url: str,
@@ -202,10 +212,12 @@ async def _run_all(
     audio: bool,
     record_dir: str,
     cache_dir: str | None,
+    logs_dir: str,
 ) -> int:
     passed = 0
     failed = 0
     skipped = 0
+    logged = False
     for path in paths:
         try:
             scenario = load_scenario(path)
@@ -220,14 +232,46 @@ async def _run_all(
         print(f"  {_color(scenario.name + ':', '1;36')}")
         for line in describe_config(scenario, color=_supports_color()).splitlines():
             print(f"    {line}")
-        if _console.is_terminal:
-            result = await _run_one_live(scenario, url, label, verbose, record_path, cache_dir)
-        else:
-            on_progress = _print_progress if verbose else None
-            result = await run_scenario(
-                scenario, url, on_progress=on_progress, record_path=record_path, cache_dir=cache_dir
+        out = Path(logs_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        # Route pipecat's own logs for this scenario into one file per sub-pipeline
+        # (<scenario>.voice/.transcription/.judge/.harness.log) instead of the
+        # console or one confusing interleaved file. delay=True so a category with
+        # no logs (e.g. no audio in a text scenario) doesn't create an empty file.
+        # Sequential runs make this clean (the suite can't, running concurrently).
+        sinks = [
+            logger.add(
+                out / f"{scenario.name}.{cat}.log",
+                level="DEBUG",
+                delay=True,
+                filter=lambda r, c=cat: r["extra"].get("eval_pipeline", "harness") == c,
             )
-            _print_result(result, label)
+            for cat in _LOG_CATEGORIES
+        ]
+        try:
+            if _console.is_terminal:
+                result = await _run_one_live(scenario, url, label, verbose, record_path, cache_dir)
+            else:
+                on_progress = _print_progress if verbose else None
+                result = await run_scenario(
+                    scenario,
+                    url,
+                    on_progress=on_progress,
+                    record_path=record_path,
+                    cache_dir=cache_dir,
+                )
+                _print_result(result, label)
+        finally:
+            for sink in sinks:
+                logger.remove(sink)
+        logged = True
+
+        # Save the harness's decision trace, like the suite does, so a single run
+        # is just as diagnosable. Written per-scenario so a later failure can't
+        # lose an earlier trace.
+        if result.debug_log:
+            (out / f"{scenario.name}.eval.log").write_text("\n".join(result.debug_log) + "\n")
+
         if result.skipped:
             skipped += 1
         elif result.passed:
@@ -240,11 +284,11 @@ async def _run_all(
     summary = f"{passed}/{ran} scenarios passed"
     if skipped:
         summary += f", {skipped} skipped"
-    if failed == 0:
-        print(_green(f"PASS — {summary}"))
-        return 0
-    print(_red(f"FAIL — {summary}"))
-    return 1
+    ok = failed == 0
+    print(_green(f"PASS — {summary}") if ok else _red(f"FAIL — {summary}"))
+    if logged:
+        print(f"  logs: {Path(logs_dir).resolve()}")
+    return 0 if ok else 1
 
 
 @eval_app.command("run")
@@ -278,17 +322,21 @@ def run(
         "--cache-dir",
         help="Directory for cached synthesized user audio (default <user-cache-dir>/pipecat/tts).",
     ),
+    logs_dir: str = typer.Option(
+        ".",
+        "--logs-dir",
+        help="Directory for each scenario's eval log: <logs-dir>/<scenario>.eval.log.",
+    ),
 ) -> None:
     """Run one or more evals against a bot."""
-    # In an interactive terminal, quiet pipecat's INFO/DEBUG logs (e.g. from the
-    # user-audio synthesis pipeline) so they don't corrupt the live display.
-    if _console.is_terminal:
-        from loguru import logger
+    # pipecat's own logs (e.g. from the user-audio synthesis pipeline) are routed
+    # to a per-scenario file in _run_all, so silence the console sink here: it
+    # would otherwise corrupt the live display, and the logs are saved anyway.
+    logger.remove()
 
-        logger.remove()
-        logger.add(sys.stderr, level="WARNING")
-
-    exit_code = asyncio.run(_run_all(scenarios, agent_url, verbose, audio, record_dir, cache_dir))
+    exit_code = asyncio.run(
+        _run_all(scenarios, agent_url, verbose, audio, record_dir, cache_dir, logs_dir)
+    )
     raise typer.Exit(code=exit_code)
 
 
