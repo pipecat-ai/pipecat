@@ -26,7 +26,7 @@ from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
-from pipecat.evals.harness import TurnProgress, run_scenario
+from pipecat.evals.harness import EvalTurnProgress, run_scenario
 from pipecat.evals.scenario import describe_config, load_scenario
 from pipecat.evals.suite import (
     EvalRun,
@@ -62,7 +62,7 @@ def _fit_detail(detail: str, used_cols: int) -> str:
     return one_line
 
 
-def _format_detail(p: TurnProgress) -> str:
+def _format_detail(p: EvalTurnProgress) -> str:
     """Detail text for a resolved expectation.
 
     Matched prose (the bot's output) is quoted to set it apart from failure
@@ -113,7 +113,7 @@ def _dim(s: str) -> str:
     return _color(s, "2")
 
 
-def _print_progress(p: TurnProgress) -> None:
+def _print_progress(p: EvalTurnProgress) -> None:
     """Print a per-turn / per-expectation line (verbose mode)."""
     if p.status == "turn":
         label = f'"{p.event_name}"' if p.event_name else "(observe)"
