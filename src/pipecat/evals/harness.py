@@ -175,6 +175,7 @@ class EvalSession:
         on_progress: Callable[[TurnProgress], None] | None = None,
         record_path: str | None = None,
         cache_dir: str | None = None,
+        stop_bot: bool = False,
     ):
         """Initialize the eval session.
 
@@ -189,6 +190,11 @@ class EvalSession:
                 transport to record the conversation audio to this path (bot-side).
             cache_dir: Where to cache synthesized user audio. Defaults to
                 ``<user-cache-dir>/pipecat/tts``.
+            stop_bot: When True, ask the bot to cancel its pipeline (and exit) on
+                teardown via ``eval-cancel``. Leave False to keep the bot running
+                so it can serve more scenarios (the eval transport already
+                survives the WebSocket disconnect). The suite enables it to clean
+                up each spawned bot.
         """
         self._scenario = scenario
         self._bot_url = bot_url
@@ -196,6 +202,7 @@ class EvalSession:
         self._on_progress = on_progress
         self._record_path = record_path
         self._cache_dir = cache_dir
+        self._stop_bot = stop_bot
 
         self._ws: Any = None
         self._queue: asyncio.Queue = asyncio.Queue()
@@ -361,10 +368,13 @@ class EvalSession:
             if self._transcriber is not None:
                 with logger.contextualize(eval_pipeline="transcription"):
                     await self._transcriber.aclose()
-            # Ask the bot to tear its pipeline down gracefully (closing its STT/TTS/
-            # LLM connections) so the process exits on its own — best-effort; the
-            # orchestrator still has a kill fallback.
-            await self._send_cancel()
+            # Optionally ask the bot to tear its pipeline down gracefully (closing
+            # its STT/TTS/LLM connections) so the process exits on its own. Skipped
+            # by default so the bot stays up for more scenarios; the eval transport
+            # survives the disconnect either way (best-effort; the suite still has a
+            # kill fallback).
+            if self._stop_bot:
+                await self._send_cancel()
             await self._ws.close()
 
         self._debug(f"done: {'PASS' if not failures else 'FAIL'} ({len(failures)} failure(s))")
@@ -1048,6 +1058,7 @@ async def run_scenario(
     on_progress: Callable[[TurnProgress], None] | None = None,
     record_path: str | None = None,
     cache_dir: str | None = None,
+    stop_bot: bool = False,
 ) -> EvalResult:
     """Run a scenario against a bot at the given WebSocket URL.
 
@@ -1062,6 +1073,8 @@ async def run_scenario(
         record_path: Optional path to record the conversation audio (audio mode).
         cache_dir: Optional directory for cached synthesized user audio
             (default ``<user-cache-dir>/pipecat/tts``).
+        stop_bot: When True, ask the bot to cancel its pipeline (and exit) on
+            teardown. Leave False to keep it running for more scenarios.
 
     Returns:
         The structured outcome.
@@ -1073,4 +1086,5 @@ async def run_scenario(
         on_progress=on_progress,
         record_path=record_path,
         cache_dir=cache_dir,
+        stop_bot=stop_bot,
     ).run()

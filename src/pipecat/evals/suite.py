@@ -369,6 +369,9 @@ async def _run_one(
                     connect_timeout_s=BOT_READY_TIMEOUT_S,
                     record_path=record_path,
                     cache_dir=manifest.cache_dir,
+                    # The suite spawns a bot per run, so cancel it on teardown to
+                    # shut it down gracefully (faster than the kill fallback).
+                    stop_bot=True,
                 )
         except Exception as e:
             run.error = f"error: {e}"
