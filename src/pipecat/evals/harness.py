@@ -283,9 +283,16 @@ class EvalSession:
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
 
+        # Each sub-pipeline tags its logs with an ``eval_pipeline`` label via
+        # logger.contextualize: the tasks created here inherit it (contextvars
+        # copy into asyncio tasks), so the underlying service's logs carry the
+        # label too, regardless of which TTS/STT/LLM service is used. The CLI
+        # routes each label to its own log file (see _LOG_CATEGORIES).
+
         # Lazily construct the judge — only if the scenario uses eval: assertions.
         if any(exp.eval is not None for turn in self._scenario.turns for exp in turn.expect):
-            self._judge = build_default_judge(self._scenario.judge)
+            with logger.contextualize(eval_pipeline="judge"):
+                self._judge = build_default_judge(self._scenario.judge)
 
         # One TTS pipeline for the whole scenario's audio turns.
         if self._scenario.user_audio is not None:
@@ -298,21 +305,23 @@ class EvalSession:
 
             cfg = self._scenario.user_audio
             sample_rate = tts_sample_rate(cfg)
-            self._voice = EvalVoice(
-                build_tts_service(cfg, sample_rate=sample_rate),
-                sample_rate=sample_rate,
-                cache_key=tts_cache_key(cfg),
-                cache_dir=self._cache_dir,
-            )
-            await self._voice.start()
+            with logger.contextualize(eval_pipeline="voice"):
+                self._voice = EvalVoice(
+                    build_tts_service(cfg, sample_rate=sample_rate),
+                    sample_rate=sample_rate,
+                    cache_key=tts_cache_key(cfg),
+                    cache_dir=self._cache_dir,
+                )
+                await self._voice.start()
 
         # One STT pipeline to transcribe the bot's audio for `response`.
         if self._wants_response:
             from pipecat.evals.transcribe import EvalTranscriber, build_stt_service
 
-            self._transcriber = EvalTranscriber(build_stt_service(self._scenario.transcriber))
-            self._transcriber.debug = self._debug
-            await self._transcriber.start()
+            with logger.contextualize(eval_pipeline="transcription"):
+                self._transcriber = EvalTranscriber(build_stt_service(self._scenario.transcriber))
+                self._transcriber.debug = self._debug
+                await self._transcriber.start()
 
         failures: list[AssertionFailure] = []
         reader_task = asyncio.create_task(self._reader_loop())
@@ -918,7 +927,8 @@ class EvalSession:
                 return ("continue", "no response text yet")
             # _match_and_verify guarantees a judge exists before aggregating eval:.
             assert self._judge is not None
-            verdict = await self._judge.evaluate(expectation.eval, aggregate)
+            with logger.contextualize(eval_pipeline="judge"):
+                verdict = await self._judge.evaluate(expectation.eval, aggregate)
             if verdict.verdict == "no":
                 return ("fail", f"judge said no: {verdict.reason}")
             if verdict.verdict == "continue":
