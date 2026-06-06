@@ -9,7 +9,7 @@
 An :class:`EvalSession` connects to a running bot's eval transport (a
 ``WebsocketServerTransport`` speaking RTVI via
 :class:`~pipecat.evals.serializer.RTVIEvalSerializer`), walks through a parsed
-:class:`~pipecat.evals.scenario.Scenario`, and verifies that the expected
+:class:`~pipecat.evals.scenario.EvalScenario`, and verifies that the expected
 semantic events arrive in order, with the right payloads, within their latency
 budgets. It returns an :class:`EvalResult`.
 
@@ -71,7 +71,7 @@ from loguru import logger
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.judge import EvalJudge, build_default_judge
-from pipecat.evals.scenario import Expectation, Scenario, SendAfter, Turn
+from pipecat.evals.scenario import EvalExpectation, EvalScenario, EvalSendAfter, EvalTurn
 from pipecat.evals.serializer import (
     EVAL_BOT_AUDIO_TYPE,
     EVAL_CANCEL_MESSAGE_TYPE,
@@ -105,7 +105,7 @@ AUDIO_TRAILING_SILENCE_MS = 500
 
 
 @dataclass
-class AssertionFailure:
+class EvalAssertionFailure:
     """A single failed assertion within an eval."""
 
     turn_index: int
@@ -126,7 +126,7 @@ class EvalResult:
 
     scenario_name: str
     passed: bool
-    failures: list[AssertionFailure] = field(default_factory=list)
+    failures: list[EvalAssertionFailure] = field(default_factory=list)
     duration_ms: int = 0
     events_seen: list[dict] = field(default_factory=list)
     # Timestamped trace of the harness's own decisions (events received, audio
@@ -139,7 +139,7 @@ class EvalResult:
 
 
 @dataclass
-class TurnProgress:
+class EvalTurnProgress:
     """A real-time progress record emitted while a turn runs (for verbose output).
 
     Parameters:
@@ -159,7 +159,7 @@ class TurnProgress:
 
 
 class EvalSession:
-    """Runs one :class:`Scenario` against a bot over a single WebSocket session.
+    """Runs one :class:`EvalScenario` against a bot over a single WebSocket session.
 
     Connects as an RTVI client, drives each turn (sending ``send-text`` or
     ``raw-audio``), collects the RTVI events the bot emits, and asserts on them.
@@ -168,11 +168,11 @@ class EvalSession:
 
     def __init__(
         self,
-        scenario: Scenario,
+        scenario: EvalScenario,
         bot_url: str,
         *,
         connect_timeout_s: float = 5.0,
-        on_progress: Callable[[TurnProgress], None] | None = None,
+        on_progress: Callable[[EvalTurnProgress], None] | None = None,
         record_path: str | None = None,
         cache_dir: str | None = None,
         stop_bot: bool = False,
@@ -184,7 +184,7 @@ class EvalSession:
             bot_url: WebSocket URL of the bot's eval transport.
             connect_timeout_s: How long to wait for the bot to accept the WS
                 connection before giving up.
-            on_progress: Optional callback invoked with a :class:`TurnProgress`
+            on_progress: Optional callback invoked with a :class:`EvalTurnProgress`
                 as each turn and expectation resolves (used for verbose output).
             record_path: When set (and the scenario is audio mode), asks the eval
                 transport to record the conversation audio to this path (bot-side).
@@ -280,7 +280,7 @@ class EvalSession:
                 scenario_name=self._scenario.name,
                 passed=False,
                 failures=[
-                    AssertionFailure(
+                    EvalAssertionFailure(
                         turn_index=-1,
                         expectation_index=-1,
                         event_name="<connect>",
@@ -330,7 +330,7 @@ class EvalSession:
                 self._transcriber.debug = self._debug
                 await self._transcriber.start()
 
-        failures: list[AssertionFailure] = []
+        failures: list[EvalAssertionFailure] = []
         reader_task = asyncio.create_task(self._reader_loop())
 
         self._debug("connected")
@@ -341,7 +341,7 @@ class EvalSession:
             except TimeoutError:
                 self._debug("handshake: failed (bot-ready not received)")
                 failures.append(
-                    AssertionFailure(
+                    EvalAssertionFailure(
                         turn_index=-1,
                         expectation_index=-1,
                         event_name="<bot-ready>",
@@ -671,26 +671,26 @@ class EvalSession:
             return f"{event.get('name') or '?'}({sig})"
         return event.get("text") or event.get("transcript") or ""
 
-    def _progress(self, record: TurnProgress) -> None:
+    def _progress(self, record: EvalTurnProgress) -> None:
         """Emit a progress record to the on_progress callback, if one was given."""
         if self._on_progress is not None:
             self._on_progress(record)
 
-    async def _run_turn(self, turn: Turn, turn_idx: int) -> list[AssertionFailure]:
+    async def _run_turn(self, turn: EvalTurn, turn_idx: int) -> list[EvalAssertionFailure]:
         """Drive one turn: optionally honor send_after, send user input, match expectations.
 
         The user turn is sent as ``send-text`` (text mode) or, when the scenario
         provides a ``user_audio`` block, as chunked ``raw-audio`` messages that
         the bot's STT transcribes for real.
         """
-        failures: list[AssertionFailure] = []
+        failures: list[EvalAssertionFailure] = []
 
         if turn.send_after is not None:
             try:
                 await self._wait_send_after(turn.send_after)
             except TimeoutError as e:
                 failures.append(
-                    AssertionFailure(
+                    EvalAssertionFailure(
                         turn_index=turn_idx,
                         expectation_index=-1,
                         event_name=turn.send_after.event,
@@ -698,7 +698,7 @@ class EvalSession:
                     )
                 )
                 self._progress(
-                    TurnProgress(
+                    EvalTurnProgress(
                         turn_idx, -1, turn.send_after.event, "timeout", failures[-1].reason
                     )
                 )
@@ -711,7 +711,7 @@ class EvalSession:
             else:
                 await self._send_user_text(turn.user, self._scenario.bot_audio)
 
-        self._progress(TurnProgress(turn_idx, -1, turn.user or "", "turn"))
+        self._progress(EvalTurnProgress(turn_idx, -1, turn.user or "", "turn"))
 
         for exp_idx, expectation in enumerate(turn.expect):
             budget_ms = expectation.within_ms or DEFAULT_EVENT_TIMEOUT_MS
@@ -721,7 +721,7 @@ class EvalSession:
             except TimeoutError:
                 reason = f"no matching {expectation.event!r} event arrived within {budget_ms}ms"
                 failures.append(
-                    AssertionFailure(
+                    EvalAssertionFailure(
                         turn_index=turn_idx,
                         expectation_index=exp_idx,
                         event_name=expectation.event,
@@ -729,18 +729,18 @@ class EvalSession:
                     )
                 )
                 self._progress(
-                    TurnProgress(turn_idx, exp_idx, expectation.event, "timeout", reason)
+                    EvalTurnProgress(turn_idx, exp_idx, expectation.event, "timeout", reason)
                 )
                 break
 
             if failure:
                 failures.append(failure)
                 self._progress(
-                    TurnProgress(turn_idx, exp_idx, expectation.event, "failed", failure.reason)
+                    EvalTurnProgress(turn_idx, exp_idx, expectation.event, "failed", failure.reason)
                 )
             else:
                 self._progress(
-                    TurnProgress(
+                    EvalTurnProgress(
                         turn_idx, exp_idx, expectation.event, "matched", self._last_match_text
                     )
                 )
@@ -796,7 +796,7 @@ class EvalSession:
                 raise TimeoutError(event_name)
             await asyncio.sleep(SEND_AFTER_POLL_S)
 
-    async def _wait_send_after(self, send_after: SendAfter) -> None:
+    async def _wait_send_after(self, send_after: EvalSendAfter) -> None:
         """Block until ``send_after.event`` has been seen + ``delay_ms`` has elapsed.
 
         If the event was seen earlier in the run, anchor on that time (potentially
@@ -824,11 +824,11 @@ class EvalSession:
 
     async def _match_and_verify(
         self,
-        expectation: Expectation,
+        expectation: EvalExpectation,
         budget_ms: int,
         turn_idx: int,
         exp_idx: int,
-    ) -> AssertionFailure | None:
+    ) -> EvalAssertionFailure | None:
         """Wait for the expected event and verify it. Returns a failure or None.
 
         Most events match a single event and are checked once. An ``llm_response``
@@ -864,8 +864,8 @@ class EvalSession:
                 self._last_match_text = self._match_summary(event)
             return judge_failure
 
-        def fail(reason: str) -> AssertionFailure:
-            return AssertionFailure(turn_idx, exp_idx, expectation.event, reason)
+        def fail(reason: str) -> EvalAssertionFailure:
+            return EvalAssertionFailure(turn_idx, exp_idx, expectation.event, reason)
 
         if expectation.eval is not None and self._judge is None:
             return fail("scenario uses 'eval:' but no judge could be built")
@@ -926,7 +926,7 @@ class EvalSession:
                 return event
 
     async def _evaluate_aggregate(
-        self, aggregate: str, expectation: Expectation
+        self, aggregate: str, expectation: EvalExpectation
     ) -> tuple[str, str]:
         """Evaluate the accumulated response text. Returns ``(status, reason)``.
 
@@ -955,14 +955,14 @@ class EvalSession:
     @staticmethod
     def _check_payload(
         event: dict,
-        expectation: Expectation,
+        expectation: EvalExpectation,
         turn_idx: int,
         exp_idx: int,
-    ) -> AssertionFailure | None:
+    ) -> EvalAssertionFailure | None:
         """Apply payload-level checks to a matched event. Returns the first failure or None."""
 
-        def fail(reason: str) -> AssertionFailure:
-            return AssertionFailure(
+        def fail(reason: str) -> EvalAssertionFailure:
+            return EvalAssertionFailure(
                 turn_index=turn_idx,
                 expectation_index=exp_idx,
                 event_name=expectation.event,
@@ -995,16 +995,16 @@ class EvalSession:
     async def _check_judge(
         self,
         event: dict,
-        expectation: Expectation,
+        expectation: EvalExpectation,
         turn_idx: int,
         exp_idx: int,
-    ) -> AssertionFailure | None:
+    ) -> EvalAssertionFailure | None:
         """Run the judge assertion if ``eval:`` was set on this expectation."""
         if expectation.eval is None:
             return None
 
         if self._judge is None:
-            return AssertionFailure(
+            return EvalAssertionFailure(
                 turn_index=turn_idx,
                 expectation_index=exp_idx,
                 event_name=expectation.event,
@@ -1013,7 +1013,7 @@ class EvalSession:
 
         content = event.get("text") or event.get("transcript")
         if not content:
-            return AssertionFailure(
+            return EvalAssertionFailure(
                 turn_index=turn_idx,
                 expectation_index=exp_idx,
                 event_name=expectation.event,
@@ -1022,7 +1022,7 @@ class EvalSession:
 
         verdict = await self._judge.evaluate(expectation.eval, content)
         if not verdict.passed:
-            return AssertionFailure(
+            return EvalAssertionFailure(
                 turn_index=turn_idx,
                 expectation_index=exp_idx,
                 event_name=expectation.event,
@@ -1051,11 +1051,11 @@ def _audio_chunks(pcm: bytes, sample_rate: int):
 
 
 async def run_scenario(
-    scenario: Scenario,
+    scenario: EvalScenario,
     bot_url: str,
     *,
     connect_timeout_s: float = 5.0,
-    on_progress: Callable[[TurnProgress], None] | None = None,
+    on_progress: Callable[[EvalTurnProgress], None] | None = None,
     record_path: str | None = None,
     cache_dir: str | None = None,
     stop_bot: bool = False,

@@ -7,33 +7,33 @@ eval transport and asserts on the semantic event stream it emits. See
 """
 
 from pipecat.evals.harness import (
-    AssertionFailure,
+    EvalAssertionFailure,
     EvalResult,
     EvalSession,
-    TurnProgress,
+    EvalTurnProgress,
     run_scenario,
 )
 from pipecat.evals.scenario import (
-    Expectation,
-    Scenario,
-    SendAfter,
-    Turn,
+    EvalExpectation,
+    EvalScenario,
+    EvalSendAfter,
+    EvalTurn,
     load_scenario,
 )
 from pipecat.evals.transcribe import EvalTranscriber
 from pipecat.evals.voice import EvalVoice
 
 __all__ = [
-    "AssertionFailure",
+    "EvalAssertionFailure",
     "EvalResult",
     "EvalSession",
     "EvalTranscriber",
     "EvalVoice",
-    "TurnProgress",
-    "Expectation",
-    "Scenario",
-    "SendAfter",
-    "Turn",
+    "EvalTurnProgress",
+    "EvalExpectation",
+    "EvalScenario",
+    "EvalSendAfter",
+    "EvalTurn",
     "load_scenario",
     "run_scenario",
 ]

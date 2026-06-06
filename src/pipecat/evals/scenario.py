@@ -104,7 +104,7 @@ JUDGEABLE_EVENTS = frozenset({"response", "llm_response", "tts_response"})
 
 
 @dataclass
-class Expectation:
+class EvalExpectation:
     """A single expected event in a scenario turn.
 
     Parameters:
@@ -133,10 +133,10 @@ class Expectation:
 
 
 @dataclass
-class SendAfter:
+class EvalSendAfter:
     """Event-driven scheduling for a turn's ``user_input`` send.
 
-    When set on a :class:`Turn`, the harness waits for ``event`` to have been
+    When set on a :class:`EvalTurn`, the harness waits for ``event`` to have been
     seen (either earlier in the run or arriving now), then waits an additional
     ``delay_ms`` before sending the turn's ``user`` text. Used for barge-in
     tests: ``send_after: {event: llm_started, delay_ms: 500}`` means
@@ -152,7 +152,7 @@ class SendAfter:
 
 
 @dataclass
-class Turn:
+class EvalTurn:
     """One turn in a scenario.
 
     A turn is either driven by the harness sending a ``user`` utterance, or it
@@ -168,12 +168,12 @@ class Turn:
     """
 
     user: str | None
-    expect: list[Expectation]
-    send_after: SendAfter | None = None
+    expect: list[EvalExpectation]
+    send_after: EvalSendAfter | None = None
 
 
 @dataclass
-class Scenario:
+class EvalScenario:
     """A parsed scenario file.
 
     Parameters:
@@ -207,7 +207,7 @@ class Scenario:
     """
 
     name: str
-    turns: list[Turn]
+    turns: list[EvalTurn]
     reset: list[dict] = field(default_factory=list)
     judge: dict = field(default_factory=lambda: {"service": "ollama", "model": "qwen2.5:3b"})
     bot_audio: bool = False
@@ -217,8 +217,8 @@ class Scenario:
     source_path: Path | None = None
 
 
-def load_scenario(path: str | Path) -> Scenario:
-    """Parse a scenario YAML file into a :class:`Scenario`.
+def load_scenario(path: str | Path) -> EvalScenario:
+    """Parse a scenario YAML file into a :class:`EvalScenario`.
 
     Args:
         path: Path to a YAML file with the scenario schema.
@@ -270,7 +270,7 @@ def load_scenario(path: str | Path) -> Scenario:
     # consistency now that the judge modality is known.
     _resolve_response_events(turns, bot_audio, path)
 
-    return Scenario(
+    return EvalScenario(
         name=name,
         turns=turns,
         reset=reset,
@@ -329,7 +329,7 @@ def _parse_judge_block(judge: Any, path: Path) -> tuple[bool, dict | None, dict]
     return True, transcription, eval_cfg
 
 
-def _resolve_response_events(turns: list[Turn], bot_audio: bool, path: Path) -> None:
+def _resolve_response_events(turns: list[EvalTurn], bot_audio: bool, path: Path) -> None:
     """Resolve the modality-agnostic ``response`` event and validate consistency.
 
     In audio modality ``response`` is the transcription of the bot's actual
@@ -360,7 +360,7 @@ _CFG_SERVICE = "32"  # green — speech (TTS) / transcription (STT) keywords
 _CFG_EVAL = "35"  # magenta — eval keyword (judge LLM)
 
 
-def describe_config(scenario: Scenario, *, color: bool = False) -> str:
+def describe_config(scenario: EvalScenario, *, color: bool = False) -> str:
     """Two-line summary of a scenario's user + judge config, for pre-run logs.
 
     Returns a ``user`` line and a ``judge`` line, each a set of ``key: value``
@@ -405,7 +405,7 @@ def describe_config(scenario: Scenario, *, color: bool = False) -> str:
     )
 
 
-def _parse_turn(t: Any, path: Path, idx: int) -> Turn:
+def _parse_turn(t: Any, path: Path, idx: int) -> EvalTurn:
     """Parse one entry from the ``turns:`` list."""
     if not isinstance(t, dict):
         raise ValueError(f"{path}: turn #{idx} must be a mapping")
@@ -427,10 +427,10 @@ def _parse_turn(t: Any, path: Path, idx: int) -> Turn:
             "send_after only schedules when the user message gets sent"
         )
 
-    return Turn(user=user, expect=expect, send_after=send_after)
+    return EvalTurn(user=user, expect=expect, send_after=send_after)
 
 
-def _parse_send_after(s: Any, path: Path, turn_idx: int) -> SendAfter:
+def _parse_send_after(s: Any, path: Path, turn_idx: int) -> EvalSendAfter:
     """Parse a ``send_after:`` block."""
     if not isinstance(s, dict):
         raise ValueError(f"{path}: turn #{turn_idx} 'send_after:' must be a mapping")
@@ -445,10 +445,10 @@ def _parse_send_after(s: Any, path: Path, turn_idx: int) -> SendAfter:
             f"{path}: turn #{turn_idx} 'send_after.delay_ms' must be a non-negative int"
         )
 
-    return SendAfter(event=event, delay_ms=delay_ms)
+    return EvalSendAfter(event=event, delay_ms=delay_ms)
 
 
-def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> Expectation:
+def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalExpectation:
     """Parse one entry from a turn's ``expect:`` list."""
     if not isinstance(e, dict):
         raise ValueError(f"{path}: turn #{turn_idx} expectation #{exp_idx} must be a mapping")
@@ -468,7 +468,7 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> Expec
             "unlikely to be meaningful."
         )
 
-    return Expectation(
+    return EvalExpectation(
         event=event,
         within_ms=e.get("within_ms"),
         text_contains=e.get("text_contains"),
