@@ -65,15 +65,49 @@ AGENT_STOP_TIMEOUT_S = 10.0
 # Default spawn template; {python}/{agent}/{port} are substituted per run.
 DEFAULT_SPAWN = "{python} {agent} -t eval --port {port}"
 
+# The harness runs three sub-pipelines in-process and tags each one's logs with an
+# ``eval_pipeline`` context value via logger.contextualize (see harness.py),
+# independent of which TTS/STT/LLM service is used. Anything untagged (harness,
+# pipeline framework, RTVI, connection) falls through to "harness".
+PIPELINE_LOG_CATEGORIES = ("voice", "transcription", "judge", "harness")
+
+
+def add_pipeline_log_sinks(logs_dir: Path, prefix: str, run_id: str) -> list[int]:
+    """Add one loguru file sink per sub-pipeline for a single run.
+
+    Splits the harness's own logs into ``<prefix>.<pipeline>.log`` so they aren't
+    one confusing interleaved stream. Each sink filters on the ``eval_run`` id as
+    well as the pipeline, so concurrent runs (the suite) don't write into each
+    other's files; the caller must wrap the run in ``logger.contextualize(
+    eval_run=run_id)`` so the harness's tasks carry that id. ``delay=True`` keeps
+    an empty category (e.g. no audio in a text scenario) from creating a file.
+
+    Returns the sink ids; remove them with ``logger.remove(id)`` when the run ends.
+    """
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    return [
+        logger.add(
+            logs_dir / f"{prefix}.{cat}.log",
+            level="DEBUG",
+            delay=True,
+            filter=lambda r, c=cat, rid=run_id: (
+                r["extra"].get("eval_run") == rid
+                and r["extra"].get("eval_pipeline", "harness") == c
+            ),
+        )
+        for cat in PIPELINE_LOG_CATEGORIES
+    ]
+
 
 @dataclass
-class SuiteRun:
+class EvalRun:
     """Mutable per-(agent, scenario) state, updated in place so a live display can read it."""
 
-    agent: str  # display name (the manifest's ``agent:`` value)
+    agent: str  # display name (suite: the manifest's ``agent:``; run: the agent URL)
     scenario: str  # display name (the scenario, without .yaml)
-    agent_path: Path
     scenario_path: Path
+    agent_path: Path | None = None  # the agent to spawn (suite); None when connecting to agent_url
+    agent_url: str | None = None  # connect here instead of spawning (``pipecat eval run``)
     runner_body_path: Path | None = None  # optional --runner-body JSON for the agent's runner args
     status: str = "pending"  # pending | running | done
     result: EvalResult | None = None
@@ -86,7 +120,7 @@ class SuiteRun:
 class Manifest:
     """A parsed eval-suite manifest."""
 
-    runs: list[SuiteRun]
+    runs: list[EvalRun]
     spawn: str
     python: str
     concurrency: int
@@ -157,7 +191,7 @@ def load_manifest(
     record = record if record is not None else bool(data.get("record", False))
     cache_dir = cache_dir if cache_dir is not None else data.get("cache_dir")
 
-    runs: list[SuiteRun] = []
+    runs: list[EvalRun] = []
     for item in data.get("suite", []):
         agent = str(item["agent"])
         agent_path = (agents_dir_p / agent).resolve()
@@ -177,7 +211,7 @@ def load_manifest(
                 scenario_path = (scenarios_dir_p / f"{scenario}.yaml").resolve()
                 name = scenario
             runs.append(
-                SuiteRun(
+                EvalRun(
                     agent=agent,
                     scenario=name,
                     agent_path=agent_path,
@@ -200,8 +234,8 @@ def load_manifest(
 
 
 def filter_runs(
-    runs: list[SuiteRun], *, pattern: str | None = None, scenario: str | None = None
-) -> list[SuiteRun]:
+    runs: list[EvalRun], *, pattern: str | None = None, scenario: str | None = None
+) -> list[EvalRun]:
     """Subset the runs by agent-name substring (``pattern``) and/or scenario name."""
     out = runs
     if pattern:
@@ -248,13 +282,13 @@ async def _stop_agent(proc: asyncio.subprocess.Process) -> None:
 
 
 async def _run_one(
-    run: SuiteRun,
+    run: EvalRun,
     port: int,
     manifest: Manifest,
     logs_dir: Path,
     record_dir: Path | None,
     sem: asyncio.Semaphore,
-    on_update: Callable[[SuiteRun], None] | None,
+    on_update: Callable[[EvalRun], None] | None,
 ) -> None:
     """Spawn one agent, run its scenario against it, and record the outcome on ``run``."""
     async with sem:
@@ -270,8 +304,10 @@ async def _run_one(
 
         proc: asyncio.subprocess.Process | None = None
         logf = None
+        log_sinks: list[int] = []
         try:
-            if not run.agent_path.exists():
+            agent_path = run.agent_path
+            if agent_path is None or not agent_path.exists():
                 run.error = f"agent not found: {run.agent_path}"
                 return
             if not run.scenario_path.exists():
@@ -289,7 +325,7 @@ async def _run_one(
 
             logf = log_path.open("wb")
             proc = await asyncio.create_subprocess_exec(
-                *_spawn_argv(manifest, run.agent_path, port, run.runner_body_path),
+                *_spawn_argv(manifest, agent_path, port, run.runner_body_path),
                 stdout=logf,
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=cwd,
@@ -297,16 +333,23 @@ async def _run_one(
 
             scenario = load_scenario(run.scenario_path)
             record_path = str(record_dir / f"{safe}.wav") if record_dir else None
-            run.result = await run_scenario(
-                scenario,
-                f"ws://localhost:{port}",
-                connect_timeout_s=AGENT_READY_TIMEOUT_S,
-                record_path=record_path,
-                cache_dir=manifest.cache_dir,
-            )
+            # Split the harness's own logs (transcription / voice / judge) into
+            # per-pipeline files, scoped by this run's id so concurrent runs don't
+            # mix. The agent's own logs are captured separately in <safe>.log above.
+            log_sinks = add_pipeline_log_sinks(logs_dir, safe, safe)
+            with logger.contextualize(eval_run=safe):
+                run.result = await run_scenario(
+                    scenario,
+                    f"ws://localhost:{port}",
+                    connect_timeout_s=AGENT_READY_TIMEOUT_S,
+                    record_path=record_path,
+                    cache_dir=manifest.cache_dir,
+                )
         except Exception as e:
             run.error = f"error: {e}"
         finally:
+            for sink in log_sinks:
+                logger.remove(sink)
             # Stamp the wall-clock and flip to "done" BEFORE tearing the agent
             # down, measured the same way as a live counter (now - started_at), so
             # the displayed time matches what was ticking and excludes shutdown.
@@ -325,12 +368,12 @@ async def _run_one(
 
 
 async def run_suite(
-    runs: list[SuiteRun],
+    runs: list[EvalRun],
     manifest: Manifest,
     logs_dir: Path,
     *,
     record_dir: Path | None = None,
-    on_update: Callable[[SuiteRun], None] | None = None,
+    on_update: Callable[[EvalRun], None] | None = None,
 ) -> None:
     """Run all ``runs`` with the manifest's concurrency, mutating each in place.
 
