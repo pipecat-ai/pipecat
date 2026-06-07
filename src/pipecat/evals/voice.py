@@ -19,10 +19,10 @@ service works (HTTP or streaming/WebSocket) — the audio comes back as
 file's actual sample rate is checked on load and regenerated on mismatch, so you
 can experiment with sample rates without bloating the cache.
 
-:func:`build_tts_service` constructs the service from a ``user_audio`` mapping
-(dispatch + a ``user_audio.factory`` escape hatch); :func:`tts_cache_key` and
-:func:`tts_sample_rate` derive the cache identity and rate. The harness wires
-builder → runner.
+:meth:`EvalVoice.from_config` constructs the service from a ``user_audio``
+mapping (dispatch + a ``user_audio.factory`` escape hatch) and wraps it;
+:func:`tts_cache_key` and :func:`tts_sample_rate` derive the cache identity and
+rate.
 """
 
 import asyncio
@@ -36,6 +36,7 @@ from loguru import logger
 
 from pipecat.frames.frames import Frame
 from pipecat.serializers.base_serializer import FrameSerializer
+from pipecat.services.tts_service import TTSService
 
 
 # Default location for cached audio: <user-cache-dir>/pipecat/tts. Callers can
@@ -88,49 +89,6 @@ def tts_cache_key(voice_cfg: dict) -> str:
     return "\x00".join((service, voice, model))
 
 
-def build_tts_service(voice_cfg: dict, *, sample_rate: int):
-    """Build a ``TTSService`` from a scenario's ``user_audio`` mapping.
-
-    Honors a custom ``factory`` (dotted path to a callable taking
-    ``(voice_cfg, sample_rate)`` and returning a ``TTSService``); otherwise
-    dispatches on the ``service`` name. Add providers by extending this.
-
-    Example::
-
-        # In the scenario: user_audio.factory: "my_pkg.make_tts"
-        def make_tts(voice_cfg, sample_rate):
-            return RimeTTSService(...)
-
-    Args:
-        voice_cfg: ``user_audio`` mapping — ``service`` and ``voice`` at minimum;
-            optional ``model``, ``api_key`` (defaults to $CARTESIA_API_KEY).
-        sample_rate: Output sample rate for the service.
-
-    Returns:
-        A constructed ``TTSService``.
-    """
-    custom = voice_cfg.get("factory")
-    if custom:
-        module_name, _, attr = custom.rpartition(".")
-        if not module_name:
-            raise ValueError(f"user_audio.factory must be a dotted path: {custom!r}")
-        factory = getattr(importlib.import_module(module_name), attr)
-        return factory(voice_cfg, sample_rate)
-
-    service = str(voice_cfg.get("service", "")).lower()
-    voice = str(voice_cfg.get("voice", ""))
-    if not service or not voice:
-        raise ValueError("user_audio config requires at least 'service' and 'voice'")
-
-    if service == "cartesia":
-        return _cartesia_service(voice_cfg, sample_rate)
-
-    raise ValueError(
-        f"Unknown TTS service: {service!r}. Known: cartesia. "
-        "Or set user_audio.factory to a 'module.func' returning a TTSService."
-    )
-
-
 def _cartesia_service(voice_cfg: dict, sample_rate: int):
     """Build a Cartesia TTS service from the ``user_audio`` config."""
     from pipecat.services.cartesia.tts import CartesiaHttpTTSService
@@ -156,10 +114,11 @@ def _cartesia_service(voice_cfg: dict, sample_rate: int):
 class EvalVoice:
     """Generates user audio for a scenario from one persistent TTS pipeline.
 
-    Takes an already-built ``TTSService`` (see :func:`build_tts_service`), runs
-    one pipeline around it, and reuses it across all the scenario's audio turns —
-    connecting the service once instead of per turn. Synthesized audio is cached
-    on disk (keyed by ``cache_key`` + text), so re-runs skip synthesis entirely.
+    Takes an already-built ``TTSService``; :meth:`from_config` builds one from a
+    scenario's ``user_audio`` mapping. Runs one pipeline around the service and
+    reuses it across all the scenario's audio turns — connecting it once instead
+    of per turn. Synthesized audio is cached on disk (keyed by ``cache_key`` +
+    text), so re-runs skip synthesis entirely.
 
     Use as an async context manager::
 
@@ -169,7 +128,7 @@ class EvalVoice:
 
     def __init__(
         self,
-        service,
+        service: TTSService,
         *,
         sample_rate: int,
         cache_key: str,
@@ -178,8 +137,7 @@ class EvalVoice:
         """Initialize the generator.
 
         Args:
-            service: A constructed ``TTSService`` (e.g. from
-                :func:`build_tts_service`).
+            service: A constructed ``TTSService`` (e.g. from :meth:`from_config`).
             sample_rate: Output sample rate the service produces.
             cache_key: Stable identity for the service config (see
                 :func:`tts_cache_key`); combined with the text to key the cache.
@@ -194,6 +152,60 @@ class EvalVoice:
         self._worker = None
         self._runner_task = None
         self._output_generator = None
+
+    @classmethod
+    def from_config(cls, voice_cfg: dict, *, cache_dir: str | Path | None = None) -> "EvalVoice":
+        """Build an :class:`EvalVoice` from a scenario's ``user_audio`` mapping.
+
+        Honors a custom ``factory`` (dotted path to a callable taking
+        ``(voice_cfg, sample_rate)`` and returning a ``TTSService``); otherwise
+        dispatches on the ``service`` name. Add providers by extending this. To
+        use a fully custom setup, construct ``EvalVoice`` directly with your own
+        ``TTSService`` and pass it to :func:`pipecat.evals.harness.run_scenario`.
+
+        Args:
+            voice_cfg: ``user_audio`` mapping — ``service`` and ``voice`` at
+                minimum; optional ``model``, ``api_key`` (defaults to
+                $CARTESIA_API_KEY), and ``sample_rate``.
+            cache_dir: Where to store cached audio (see :meth:`__init__`).
+
+        Returns:
+            A configured EvalVoice (not yet started).
+
+        Example::
+
+            # In the scenario: user_audio.factory: "my_pkg.make_tts"
+            def make_tts(voice_cfg, sample_rate):
+                return RimeTTSService(...)
+        """
+        sample_rate = tts_sample_rate(voice_cfg)
+
+        custom = voice_cfg.get("factory")
+        if custom:
+            module_name, _, attr = custom.rpartition(".")
+            if not module_name:
+                raise ValueError(f"user_audio.factory must be a dotted path: {custom!r}")
+            factory = getattr(importlib.import_module(module_name), attr)
+            service = factory(voice_cfg, sample_rate)
+        else:
+            name = str(voice_cfg.get("service", "")).lower()
+            voice = str(voice_cfg.get("voice", ""))
+            if not name or not voice:
+                raise ValueError("user_audio config requires at least 'service' and 'voice'")
+            if name == "cartesia":
+                service = _cartesia_service(voice_cfg, sample_rate)
+            else:
+                raise ValueError(
+                    f"Unknown TTS service: {name!r}. Known: cartesia. "
+                    "Or set user_audio.factory to a 'module.func' returning a TTSService."
+                )
+
+        return cls(
+            service,
+            sample_rate=sample_rate,
+            cache_key=tts_cache_key(voice_cfg),
+            cache_dir=cache_dir,
+        )
 
     async def start(self) -> None:
         """Build and start the persistent TTS pipeline."""
