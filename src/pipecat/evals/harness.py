@@ -1136,6 +1136,7 @@ async def run_scenario(
     on_progress: Callable[[EvalTurnProgress], None] | None = None,
     record_path: str | None = None,
     cache_dir: str | None = None,
+    use_cache: bool = True,
     stop_bot: bool = False,
     judge: EvalJudge | None = None,
     voice: EvalVoice | None = None,
@@ -1157,6 +1158,8 @@ async def run_scenario(
         record_path: Optional path to record the conversation audio (audio mode).
         cache_dir: Optional directory for cached synthesized user audio
             (default ``<user-cache-dir>/pipecat/tts``).
+        use_cache: When False, ignore cached user audio and force fresh synthesis
+            (no cache reads or writes). Defaults to True.
         stop_bot: When True, ask the bot to cancel its pipeline (and exit) on
             teardown. Leave False to keep it running for more scenarios.
         judge: Override the judge (default: built from ``scenario.judge`` when the
@@ -1176,7 +1179,9 @@ async def run_scenario(
 
     if voice is None and scenario.user_audio is not None:
         with logger.contextualize(eval_pipeline="voice"):
-            voice = EvalVoice.from_config(scenario.user_audio, cache_dir=cache_dir)
+            voice = EvalVoice.from_config(
+                scenario.user_audio, cache_dir=cache_dir, use_cache=use_cache
+            )
 
     wants_response = any(exp.event == "response" for turn in turns for exp in turn.expect)
     if transcriber is None and wants_response and scenario.bot_audio:

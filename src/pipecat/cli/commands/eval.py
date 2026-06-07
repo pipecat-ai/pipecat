@@ -163,6 +163,7 @@ async def _execute_scenario(
     audio: bool,
     record_dir: str,
     cache_dir: str | None,
+    use_cache: bool,
     logs_dir: str,
     debug: bool,
     stop_bot: bool,
@@ -188,6 +189,7 @@ async def _execute_scenario(
                 on_progress=on_progress,
                 record_path=record_path,
                 cache_dir=cache_dir,
+                use_cache=use_cache,
                 stop_bot=stop_bot,
             )
         if run.result.debug_log:
@@ -209,6 +211,7 @@ async def _run_scenarios_all(
     audio: bool,
     record_dir: str,
     cache_dir: str | None,
+    use_cache: bool,
     logs_dir: str,
     verbose: bool,
     debug: bool,
@@ -227,6 +230,7 @@ async def _run_scenarios_all(
             audio=audio,
             record_dir=record_dir,
             cache_dir=cache_dir,
+            use_cache=use_cache,
             logs_dir=logs_dir,
             debug=debug,
             stop_bot=stop_bot,
@@ -276,6 +280,11 @@ def run(
         "--cache-dir",
         help="Directory for cached synthesized user audio (default <user-cache-dir>/pipecat/tts).",
     ),
+    no_cache: bool = typer.Option(
+        False,
+        "--no-cache",
+        help="Disable the user-audio cache: re-synthesize every turn (no reads or writes).",
+    ),
     logs_dir: str = typer.Option(
         ".",
         "--logs-dir",
@@ -315,6 +324,7 @@ def run(
             audio=audio,
             record_dir=record_dir,
             cache_dir=cache_dir,
+            use_cache=not no_cache,
             logs_dir=logs_dir,
             verbose=verbose,
             debug=debug,
@@ -490,15 +500,24 @@ async def _run_suite_all(
     record_dir: Path | None,
     started: float,
     debug: bool,
+    use_cache: bool,
 ) -> None:
     """Run the suite with a live dashboard (TTY) or streamed lines (piped)."""
     if _console.is_terminal:
         with Live(_EvalDashboard(runs, started), console=_console, refresh_per_second=12.5):
-            await run_suite(runs, manifest, logs_dir, record_dir=record_dir, debug=debug)
+            await run_suite(
+                runs, manifest, logs_dir, record_dir=record_dir, debug=debug, use_cache=use_cache
+            )
     else:
         print(f"Running {len(runs)} eval(s), {manifest.concurrency} at a time...")
         await run_suite(
-            runs, manifest, logs_dir, record_dir=record_dir, on_update=_print_eval_line, debug=debug
+            runs,
+            manifest,
+            logs_dir,
+            record_dir=record_dir,
+            on_update=_print_eval_line,
+            debug=debug,
+            use_cache=use_cache,
         )
 
 
@@ -527,6 +546,11 @@ def suite(
     ),
     base_port: int = typer.Option(None, "--base-port", help="Override manifest base_port."),
     cache_dir: str = typer.Option(None, "--cache-dir", help="Override manifest cache_dir."),
+    no_cache: bool = typer.Option(
+        False,
+        "--no-cache",
+        help="Disable the user-audio cache: re-synthesize every turn (no reads or writes).",
+    ),
     spawn: str = typer.Option(None, "--spawn", help="Override manifest spawn template."),
     python: str = typer.Option(None, "--python", help="Override manifest python interpreter."),
     audio: bool = typer.Option(False, "-a", "--audio", help="Record conversation audio."),
@@ -570,7 +594,7 @@ def suite(
     _print_scenario_configs(runs)
 
     started = time.monotonic()
-    asyncio.run(_run_suite_all(runs, manifest, logs_dir, record_dir, started, debug))
+    asyncio.run(_run_suite_all(runs, manifest, logs_dir, record_dir, started, debug, not no_cache))
     exit_code = _finalize_evals(
         runs, run_dir, time.monotonic() - started, dashboard_shown=_console.is_terminal
     )

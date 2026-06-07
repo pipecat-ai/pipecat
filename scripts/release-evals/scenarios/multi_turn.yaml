@@ -9,12 +9,12 @@ judge:
     model: llama3:latest
 
 turns:
-  - user: "My name is Mark, and I'm planning a trip to Italy."
+  - user: "My name is Alex, and I'm planning a trip to Italy."
     expect:
       - event: response
-        eval: "acknowledges the user's message (the name Mark and/or the trip to Italy)"
+        eval: "acknowledges the user's message (the name Alex and/or the trip to Italy)"
 
   - user: "Remind me — what's my name and where am I going?"
     expect:
       - event: response
-        eval: "recalls that the user's name is Mark and the destination is Italy"
+        eval: "recalls that the user's name is Alex and the destination is Italy"

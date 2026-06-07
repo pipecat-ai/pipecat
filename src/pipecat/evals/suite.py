@@ -365,6 +365,7 @@ async def _run_one(
     sem: asyncio.Semaphore,
     on_update: Callable[[EvalRun], None] | None,
     debug: bool,
+    use_cache: bool,
 ) -> None:
     """Spawn one bot, run its scenario against it, and record the outcome on ``run``."""
     async with sem:
@@ -419,6 +420,7 @@ async def _run_one(
                     connect_timeout_s=BOT_READY_TIMEOUT_S,
                     record_path=record_path,
                     cache_dir=manifest.cache_dir,
+                    use_cache=use_cache,
                     # The suite spawns a bot per run, so cancel it on teardown to
                     # shut it down gracefully (faster than the kill fallback).
                     stop_bot=True,
@@ -451,6 +453,7 @@ async def run_suite(
     record_dir: Path | None = None,
     on_update: Callable[[EvalRun], None] | None = None,
     debug: bool = False,
+    use_cache: bool = True,
 ) -> None:
     """Run all ``runs`` with the manifest's concurrency, mutating each in place.
 
@@ -463,6 +466,7 @@ async def run_suite(
         record_dir: Directory for per-run conversation recordings, or ``None``.
         on_update: Called whenever a run changes status, for live display.
         debug: When True, save each run's combined ``<run>.debug.log``.
+        use_cache: When False, ignore cached user audio and force fresh synthesis.
     """
     logger.remove()  # keep stdout clean for the caller's display
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -472,7 +476,15 @@ async def run_suite(
     await asyncio.gather(
         *(
             _run_one(
-                run, manifest.base_port + i, manifest, logs_dir, record_dir, sem, on_update, debug
+                run,
+                manifest.base_port + i,
+                manifest,
+                logs_dir,
+                record_dir,
+                sem,
+                on_update,
+                debug,
+                use_cache,
             )
             for i, run in enumerate(runs)
         )
