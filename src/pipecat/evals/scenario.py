@@ -41,8 +41,16 @@ Supported expectation fields (per event):
     within_ms: <int>           latency budget from the most recent anchor
                                (optional; defaults to 60s when omitted)
     text_contains: <str>       substring check on the event's text content
-    name: <str>                function_call.name equality
-    args: <object>             function_call.args equality
+    calls:                     for ``function_call`` — the set of calls the turn
+                               should make, matched by name in any order; the
+                               expectation passes only when all are found::
+
+                                   - event: function_call
+                                     calls:
+                                       - name: get_current_weather
+                                         args: { location: San Francisco }
+                                       - name: get_restaurant_recommendation
+
     eval: <str>                natural-language criterion the event's text content
                                must satisfy, evaluated by a judge LLM (see
                                :mod:`pipecat.evals.judge`).
@@ -104,6 +112,21 @@ JUDGEABLE_EVENTS = frozenset({"response", "llm_response", "tts_response"})
 
 
 @dataclass
+class EvalFunctionCall:
+    """One expected function call within a ``function_call`` expectation.
+
+    Parameters:
+        name: The function name to match. ``None`` matches any call (used by a
+            bare ``function_call`` expectation that just asserts a call happened).
+        args: Optional subset check on the call's arguments (every listed
+            key/value must be present; extra arguments are ignored).
+    """
+
+    name: str | None = None
+    args: dict | None = None
+
+
+@dataclass
 class EvalExpectation:
     """A single expected event in a scenario turn.
 
@@ -115,8 +138,14 @@ class EvalExpectation:
             when omitted, so timing isn't asserted unless set explicitly.
         text_contains: Optional substring check on the event's text content
             (``llm_response.text`` or ``user_transcription.transcript``).
-        name: Optional equality check for ``function_call.name``.
-        args: Optional equality check for ``function_call.args``.
+        name: Optional equality check for ``function_call.name`` (single-call
+            shorthand; normalized into ``calls``).
+        args: Optional subset check for ``function_call.args`` (single-call
+            shorthand; normalized into ``calls``).
+        calls: For a ``function_call`` event, the set of calls expected in the
+            turn. They are matched by name in any order and the expectation passes
+            only when all of them are found. Built from ``calls:`` in the YAML, or
+            from the single ``name:``/``args:`` shorthand.
         eval: Optional natural-language criterion the event's text content
             must satisfy. Evaluated by a judge LLM. Only meaningful on
             ``llm_response`` (the text the bot produced for this turn).
@@ -128,6 +157,7 @@ class EvalExpectation:
     text_contains: str | None = None
     name: str | None = None
     args: dict | None = None
+    calls: list[EvalFunctionCall] | None = None
     eval: str | None = None
     raw: dict = field(default_factory=dict)
 
@@ -468,12 +498,46 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
             "unlikely to be meaningful."
         )
 
+    calls = _parse_function_calls(e, event, path, turn_idx, exp_idx)
+
     return EvalExpectation(
         event=event,
         within_ms=e.get("within_ms"),
         text_contains=e.get("text_contains"),
         name=e.get("name"),
         args=e.get("args"),
+        calls=calls,
         eval=criterion,
         raw=e,
     )
+
+
+def _parse_function_calls(
+    e: dict, event: str, path: Path, turn_idx: int, exp_idx: int
+) -> list[EvalFunctionCall] | None:
+    """Normalize a ``function_call`` expectation's expected calls into a list.
+
+    Accepts a ``calls:`` list (each entry a bare name string or a ``{name, args}``
+    mapping) for the multi-call case, or the single ``name:``/``args:`` shorthand.
+    A bare ``function_call`` (neither) becomes one ``EvalFunctionCall(name=None)``
+    that matches any single call. Returns None for non-function_call events.
+    """
+    if event != "function_call":
+        return None
+
+    where = f"{path}: turn #{turn_idx} expectation #{exp_idx}"
+    raw_calls = e.get("calls")
+    if raw_calls is None:
+        return [EvalFunctionCall(name=e.get("name"), args=e.get("args"))]
+
+    if not isinstance(raw_calls, list) or not raw_calls:
+        raise ValueError(f"{where}: 'calls:' must be a non-empty list")
+    out: list[EvalFunctionCall] = []
+    for c in raw_calls:
+        if isinstance(c, str):
+            out.append(EvalFunctionCall(name=c))
+        elif isinstance(c, dict):
+            out.append(EvalFunctionCall(name=c.get("name"), args=c.get("args")))
+        else:
+            raise ValueError(f"{where}: each 'calls:' entry must be a name or a mapping")
+    return out

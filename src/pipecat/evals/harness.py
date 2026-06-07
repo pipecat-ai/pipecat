@@ -206,6 +206,9 @@ class EvalSession:
 
         self._ws: Any = None
         self._queue: asyncio.Queue = asyncio.Queue()
+        # function_call events popped while matching another expectation, held so
+        # the turn's calls can be matched by name in any order (reset per turn).
+        self._pending_function_calls: list[dict] = []
         self._latest_event_times: dict[str, float] = {}
         self._events_seen: list[dict] = []
         # Timestamped trace of the harness's own decisions, for diagnosing flakes.
@@ -427,10 +430,13 @@ class EvalSession:
             for exp in turn.expect:
                 if exp.event != "function_call":
                     continue
-                if exp.args is not None:
-                    return "full"
-                if exp.name is not None:
-                    needs_name = True
+                # name/args live in exp.calls (the parser normalizes the single
+                # name:/args: shorthand into it too).
+                for call in exp.calls or []:
+                    if call.args is not None:
+                        return "full"
+                    if call.name is not None:
+                        needs_name = True
         return "name" if needs_name else None
 
     async def _handshake(self) -> None:
@@ -684,6 +690,9 @@ class EvalSession:
         the bot's STT transcribes for real.
         """
         failures: list[EvalAssertionFailure] = []
+        # The turn's function calls match by name in any order; start each turn
+        # with an empty buffer so a prior turn's calls can't carry over.
+        self._pending_function_calls = []
 
         if turn.send_after is not None:
             try:
@@ -855,6 +864,11 @@ class EvalSession:
             expectation.text_contains is not None or expectation.eval is not None
         )
         if not aggregates:
+            if expectation.event == "function_call":
+                # A function_call expectation holds the set of calls the turn should
+                # make; it completes only when all are found, in any order (a
+                # response arriving doesn't short-circuit it).
+                return await self._match_function_calls(expectation, deadline, turn_idx, exp_idx)
             event = await self._next_matching_event(expectation.event, deadline)
             payload_failure = self._check_payload(event, expectation, turn_idx, exp_idx)
             if payload_failure:
@@ -924,6 +938,76 @@ class EvalSession:
 
             if event.get("type") == event_type:
                 return event
+
+    async def _match_function_calls(
+        self,
+        expectation: EvalExpectation,
+        deadline: float,
+        turn_idx: int,
+        exp_idx: int,
+    ) -> EvalAssertionFailure | None:
+        """Match every call in a ``function_call`` expectation, in any order.
+
+        Iterates the expectation's ``calls`` (each a name + optional args), claiming
+        a matching call for each from the turn's calls (buffered + still arriving).
+        Passes only when all are claimed within the budget; otherwise returns a
+        failure naming the call that was missing or whose args didn't match.
+        """
+
+        def fail(reason: str) -> EvalAssertionFailure:
+            return EvalAssertionFailure(turn_idx, exp_idx, expectation.event, reason)
+
+        matched: list[str] = []
+        for spec in expectation.calls or []:
+            try:
+                event = await self._next_function_call(spec.name, deadline)
+            except TimeoutError:
+                want = spec.name or "any function"
+                seen = ", ".join(matched) if matched else "none"
+                return fail(f"function call {want!r} not seen (matched: {seen})")
+            if spec.args:
+                actual = event.get("args") or {}
+                missing = {k: v for k, v in spec.args.items() if actual.get(k) != v}
+                if missing:
+                    return fail(
+                        f"call {event.get('name')!r} args {actual!r} missing expected {missing!r}"
+                    )
+            matched.append(str(event.get("name")))
+
+        self._last_match_text = ", ".join(matched) or "function call"
+        return None
+
+    async def _next_function_call(self, name: str | None, deadline: float) -> dict:
+        """Return a ``function_call`` event with the given ``name`` (``None`` = any).
+
+        A turn's function calls can arrive in any order, so match against the
+        per-turn buffer of calls seen but not yet claimed, plus newly arriving
+        ones; a call with a different name is buffered so another expected call can
+        claim it. Other event types are dropped, as in :meth:`_next_matching_event`.
+        Raises TimeoutError once ``deadline`` passes.
+        """
+
+        def matches(ev: dict) -> bool:
+            return name is None or ev.get("name") == name
+
+        for i, ev in enumerate(self._pending_function_calls):
+            if matches(ev):
+                return self._pending_function_calls.pop(i)
+
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError()
+
+            async with asyncio.timeout(remaining):
+                event = await self._queue.get()
+
+            if event.get("type") != "function_call":
+                continue
+            if matches(event):
+                return event
+            self._pending_function_calls.append(event)
+            self._pending_function_calls.append(event)
 
     async def _evaluate_aggregate(
         self, aggregate: str, expectation: EvalExpectation

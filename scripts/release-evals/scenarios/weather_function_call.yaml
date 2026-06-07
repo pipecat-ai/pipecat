@@ -25,6 +25,7 @@ turns:
   - user: "What's the weather in San Francisco? Use Fahrenheit."
     expect:
       - event: function_call
-        name: get_current_weather
+        calls:
+          - name: get_current_weather
       - event: response
         eval: "the response describes the weather in San Francisco, including a temperature in degrees"
