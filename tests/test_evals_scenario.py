@@ -9,9 +9,10 @@ import unittest
 from pathlib import Path
 
 from pipecat.evals.scenario import (
-    Expectation,
-    SendAfter,
-    Turn,
+    EvalExpectation,
+    EvalFunctionCall,
+    EvalSendAfter,
+    EvalTurn,
     load_scenario,
 )
 
@@ -134,8 +135,6 @@ class TestEvalsScenarioParser(unittest.TestCase):
                       - event: llm_response
                         within_ms: 500
                         text_contains: "bar"
-                        name: my_tool
-                        args: {a: 1}
                         eval: "is friendly"
                 """
             )
@@ -143,9 +142,59 @@ class TestEvalsScenarioParser(unittest.TestCase):
         exp = s.turns[0].expect[0]
         self.assertEqual(exp.within_ms, 500)
         self.assertEqual(exp.text_contains, "bar")
-        self.assertEqual(exp.name, "my_tool")
-        self.assertEqual(exp.args, {"a": 1})
         self.assertEqual(exp.eval, "is friendly")
+        self.assertIsNone(exp.calls)
+
+    def test_function_call_name_args_shorthand(self):
+        """A single function_call uses the ``name:``/``args:`` shorthand."""
+        s = load_scenario(
+            _write(
+                """
+                name: one_call
+                turns:
+                  - user: "weather?"
+                    expect:
+                      - event: function_call
+                        name: get_weather
+                        args: {city: Paris}
+                """
+            )
+        )
+        self.assertEqual(
+            s.turns[0].expect[0].calls,
+            [EvalFunctionCall(name="get_weather", args={"city": "Paris"})],
+        )
+
+    def test_function_call_calls_list_any_order(self):
+        """Multiple calls in a turn go under ``calls:`` (matched in any order)."""
+        s = load_scenario(
+            _write(
+                """
+                name: two_calls
+                turns:
+                  - user: "weather and food?"
+                    expect:
+                      - event: function_call
+                        calls:
+                          - get_weather
+                          - {name: get_restaurants, args: {city: Paris}}
+                """
+            )
+        )
+        self.assertEqual(
+            s.turns[0].expect[0].calls,
+            [
+                EvalFunctionCall(name="get_weather"),
+                EvalFunctionCall(name="get_restaurants", args={"city": "Paris"}),
+            ],
+        )
+
+    def test_bare_function_call_matches_any(self):
+        """A bare function_call (no name/calls) matches any single call."""
+        s = load_scenario(
+            _write("name: bare\nturns: [{user: hi, expect: [{event: function_call}]}]\n")
+        )
+        self.assertEqual(s.turns[0].expect[0].calls, [EvalFunctionCall(name=None)])
 
     def test_send_after_parsed(self):
         s = load_scenario(
@@ -162,7 +211,7 @@ class TestEvalsScenarioParser(unittest.TestCase):
             )
         )
         self.assertIsNone(s.turns[0].send_after)
-        self.assertIsInstance(s.turns[1].send_after, SendAfter)
+        self.assertIsInstance(s.turns[1].send_after, EvalSendAfter)
         assert s.turns[1].send_after is not None  # for the type checker
         self.assertEqual(s.turns[1].send_after.event, "user_stopped_speaking")
         self.assertEqual(s.turns[1].send_after.delay_ms, 200)
@@ -267,8 +316,8 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertIn("event", str(cm.exception))
 
     def test_expectation_dataclass_defaults(self):
-        """Construct Expectation directly to lock its defaults."""
-        e = Expectation(event="foo")
+        """Construct EvalExpectation directly to lock its defaults."""
+        e = EvalExpectation(event="foo")
         self.assertIsNone(e.within_ms)
         self.assertIsNone(e.text_contains)
         self.assertIsNone(e.eval)
@@ -294,7 +343,7 @@ class TestEvalsScenarioParser(unittest.TestCase):
 
     def test_turn_dataclass_construction(self):
         """Direct construction (used by tests / programmatic eval generation)."""
-        t = Turn(user="hi", expect=[Expectation(event="x")])
+        t = EvalTurn(user="hi", expect=[EvalExpectation(event="x")])
         self.assertEqual(t.user, "hi")
         self.assertIsNone(t.send_after)
 
