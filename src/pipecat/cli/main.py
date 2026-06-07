@@ -60,6 +60,7 @@ def _build_app():
     import typer
     from rich.console import Console
 
+    from pipecat.cli.commands.eval import eval_app
     from pipecat.cli.commands.init import init_command
 
     app = typer.Typer(
@@ -72,6 +73,9 @@ def _build_app():
     # `init` is a plain command (not a sub-Typer group) so it can take an optional
     # positional target path followed by options (e.g. `pc init . --bot-type web`).
     app.command("init", help="Initialize a new Pipecat project")(init_command)
+
+    # `eval` is a first-party sub-Typer group, built in (not a plugin extension).
+    app.add_typer(eval_app, name="eval")
 
     # Discover CLI extensions (e.g. `cloud` from pipecatcloud). The entry-point
     # group is intentionally still named
