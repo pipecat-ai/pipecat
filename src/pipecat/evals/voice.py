@@ -34,6 +34,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from pipecat.evals.services import cartesia_service, kokoro_service
 from pipecat.frames.frames import Frame
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.services.tts_service import TTSService
@@ -89,28 +90,6 @@ def tts_cache_key(voice_cfg: dict) -> str:
     return "\x00".join((service, voice, model))
 
 
-def _cartesia_service(voice_cfg: dict, sample_rate: int):
-    """Build a Cartesia TTS service from the ``user_audio`` config."""
-    from pipecat.services.cartesia.tts import CartesiaHttpTTSService
-
-    # Prefer an explicit api_key in the config; fall back to the env var so
-    # committed scenarios don't carry secrets.
-    api_key = voice_cfg.get("api_key") or os.environ.get("CARTESIA_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "Cartesia API key not found — set $CARTESIA_API_KEY or user_audio.api_key"
-        )
-
-    return CartesiaHttpTTSService(
-        api_key=api_key,
-        settings=CartesiaHttpTTSService.Settings(
-            voice=str(voice_cfg.get("voice", "")),
-            model=voice_cfg.get("model") or "sonic-2",
-        ),
-        sample_rate=sample_rate,
-    )
-
-
 class EvalVoice:
     """Generates user audio for a scenario from one persistent TTS pipeline.
 
@@ -164,9 +143,10 @@ class EvalVoice:
         ``TTSService`` and pass it to :func:`pipecat.evals.harness.run_scenario`.
 
         Args:
-            voice_cfg: ``user_audio`` mapping — ``service`` and ``voice`` at
-                minimum; optional ``model``, ``api_key`` (defaults to
-                $CARTESIA_API_KEY), and ``sample_rate``.
+            voice_cfg: ``user_audio`` mapping — ``service`` (``kokoro`` or
+                ``cartesia``) and ``voice`` at minimum; optional ``sample_rate``
+                (default 16 kHz), plus ``model`` / ``api_key`` (defaults to
+                $CARTESIA_API_KEY) for Cartesia.
             cache_dir: Where to store cached audio (see :meth:`__init__`).
 
         Returns:
@@ -192,11 +172,13 @@ class EvalVoice:
             voice = str(voice_cfg.get("voice", ""))
             if not name or not voice:
                 raise ValueError("user_audio config requires at least 'service' and 'voice'")
-            if name == "cartesia":
-                service = _cartesia_service(voice_cfg, sample_rate)
+            if name == "kokoro":
+                service = kokoro_service(voice_cfg, sample_rate)
+            elif name == "cartesia":
+                service = cartesia_service(voice_cfg, sample_rate)
             else:
                 raise ValueError(
-                    f"Unknown TTS service: {name!r}. Known: cartesia. "
+                    f"Unknown TTS service: {name!r}. Known: kokoro, cartesia. "
                     "Or set user_audio.factory to a 'module.func' returning a TTSService."
                 )
 

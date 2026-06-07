@@ -28,6 +28,7 @@ from collections.abc import Callable
 
 from loguru import logger
 
+from pipecat.evals.services import whisper_service
 from pipecat.evals.voice import _IdentitySerializer
 from pipecat.services.stt_service import STTService
 
@@ -37,26 +38,6 @@ STT_SAMPLE_RATE = 16000
 # Upper bound on a single transcription; also the silence fallback (no
 # TranscriptionFrame is emitted for non-speech, so we time out and return "").
 TRANSCRIBE_TIMEOUT_S = 30.0
-
-
-def _whisper_service(config: dict):
-    """Build a local Whisper STT service from the ``bot_audio`` config.
-
-    The eval transcribes audio it already knows is the bot speaking (the harness
-    captures it between ``bot-started-speaking`` and ``bot-stopped-speaking``), so
-    Whisper's non-speech filter is counterproductive here: the default
-    ``no_speech_prob=0.4`` drops correct transcriptions of synthetic/TTS speech,
-    whose ``no_speech_prob`` jitters across ~0.4-0.6 run to run (a dropped segment
-    yields no ``TranscriptionFrame``, so the harness then waits out the whole
-    transcription timeout). Disable the filter with a permissive threshold.
-    """
-    from pipecat.services.whisper.stt import WhisperSTTService
-
-    kwargs: dict = {"no_speech_prob": 1.0}
-    model = config.get("model")
-    if model:
-        kwargs["model"] = str(model)
-    return WhisperSTTService(settings=WhisperSTTService.Settings(**kwargs))
 
 
 class EvalTranscriber:
@@ -119,7 +100,7 @@ class EvalTranscriber:
 
         name = str(config.get("service", "whisper")).lower()
         if name == "whisper":
-            return cls(_whisper_service(config))
+            return cls(whisper_service(config))
 
         raise ValueError(
             f"Unknown STT service: {name!r}. Known: whisper. "

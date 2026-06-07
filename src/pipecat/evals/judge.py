@@ -39,6 +39,7 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+from pipecat.evals.services import ollama_service, openai_service
 from pipecat.processors.aggregators.llm_context import LLMContext
 
 JUDGE_SYSTEM_INSTRUCTION = (
@@ -145,9 +146,9 @@ class EvalJudge:
 
         try:
             if service_name == "ollama":
-                llm_service = _ollama_service(config)
+                llm_service = ollama_service(config)
             elif service_name == "openai":
-                llm_service = _openai_service(config)
+                llm_service = openai_service(config)
             else:
                 logger.error(f"Unknown judge service: {service_name!r}")
                 return None
@@ -247,21 +248,3 @@ def _parse_verdict(response: str) -> JudgeVerdict:
             reason=f"could not parse judge response: {response!r}",
             raw_response=response,
         )
-
-
-def _ollama_service(config: dict):
-    """Build a local Ollama LLM service from the ``judge:`` config."""
-    from pipecat.services.ollama.llm import OLLamaLLMService
-
-    base_url = config.get("endpoint") or "http://localhost:11434/v1"
-    return OLLamaLLMService(
-        base_url=base_url,
-        settings=OLLamaLLMService.Settings(model=config.get("model", "qwen2.5:3b")),
-    )
-
-
-def _openai_service(config: dict):
-    """Build an OpenAI LLM service from the ``judge:`` config."""
-    from pipecat.services.openai.llm import OpenAILLMService
-
-    return OpenAILLMService(settings=OpenAILLMService.Settings(model=config.get("model", "gpt-4o")))
