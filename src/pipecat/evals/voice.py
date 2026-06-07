@@ -95,6 +95,12 @@ def build_tts_service(voice_cfg: dict, *, sample_rate: int):
     ``(voice_cfg, sample_rate)`` and returning a ``TTSService``); otherwise
     dispatches on the ``service`` name. Add providers by extending this.
 
+    Example::
+
+        # In the scenario: user_audio.factory: "my_pkg.make_tts"
+        def make_tts(voice_cfg, sample_rate):
+            return RimeTTSService(...)
+
     Args:
         voice_cfg: ``user_audio`` mapping — ``service`` and ``voice`` at minimum;
             optional ``model``, ``api_key`` (defaults to $CARTESIA_API_KEY).

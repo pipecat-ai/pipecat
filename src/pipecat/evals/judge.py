@@ -32,6 +32,7 @@ Example::
 """
 
 import hashlib
+import importlib
 import json
 import re
 from dataclasses import dataclass
@@ -200,6 +201,17 @@ def _parse_verdict(response: str) -> JudgeVerdict:
 def build_default_judge(judge_config: dict | None) -> EvalJudge | None:
     """Build a :class:`EvalJudge` from a scenario's ``judge:`` config block.
 
+    Honors a custom ``factory`` (dotted path to a callable taking ``(config)``
+    and returning a pipecat LLM service with ``run_inference()``); otherwise
+    dispatches on the ``service`` name (default ``"ollama"``). Add providers by
+    extending this.
+
+    Example::
+
+        # In the scenario: judge.eval.factory: "my_pkg.make_judge_llm"
+        def make_judge_llm(config):
+            return TogetherLLMService(...)  # any service exposing run_inference()
+
     Args:
         judge_config: Mapping with keys ``service`` (default ``"ollama"``),
             ``model`` (default ``"qwen2.5:3b"``), and optional ``endpoint``
@@ -210,6 +222,15 @@ def build_default_judge(judge_config: dict | None) -> EvalJudge | None:
         whether to skip ``eval:`` assertions or fail the scenario).
     """
     config = judge_config or {}
+
+    custom = config.get("factory")
+    if custom:
+        module_name, _, attr = custom.rpartition(".")
+        if not module_name:
+            raise ValueError(f"judge.eval.factory must be a dotted path: {custom!r}")
+        factory = getattr(importlib.import_module(module_name), attr)
+        return EvalJudge(factory(config))
+
     service_name = str(config.get("service", "ollama")).lower()
 
     try:
