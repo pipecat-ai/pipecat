@@ -15,6 +15,7 @@ from pipecat.evals.harness import (
 )
 from pipecat.evals.scenario import (
     EvalExpectation,
+    EvalFunctionCall,
     EvalScenario,
     EvalSendAfter,
     EvalTurn,
@@ -31,6 +32,7 @@ __all__ = [
     "EvalVoice",
     "EvalTurnProgress",
     "EvalExpectation",
+    "EvalFunctionCall",
     "EvalScenario",
     "EvalSendAfter",
     "EvalTurn",
