@@ -4334,6 +4334,7 @@ dependencies = [
     { name = "resampy" },
     { name = "soxr" },
     { name = "wait-for2", marker = "python_full_version < '3.12'" },
+    { name = "websockets" },
 ]
 
 [package.optional-dependencies]
@@ -4343,15 +4344,8 @@ aic = [
 anthropic = [
     { name = "anthropic" },
 ]
-assemblyai = [
-    { name = "websockets" },
-]
-asyncai = [
-    { name = "websockets" },
-]
 aws = [
     { name = "aiobotocore" },
-    { name = "websockets" },
 ]
 aws-nova-sonic = [
     { name = "aws-sdk-bedrock-runtime", marker = "python_full_version >= '3.12'" },
@@ -4361,9 +4355,6 @@ azure = [
 ]
 camb = [
     { name = "camb-sdk" },
-]
-cartesia = [
-    { name = "websockets" },
 ]
 cli = [
     { name = "jinja2" },
@@ -4377,26 +4368,14 @@ daily = [
 ]
 deepgram = [
     { name = "deepgram-sdk" },
-    { name = "websockets" },
-]
-elevenlabs = [
-    { name = "websockets" },
 ]
 fish = [
     { name = "ormsgpack" },
-    { name = "websockets" },
-]
-gladia = [
-    { name = "websockets" },
 ]
 google = [
     { name = "google-cloud-speech" },
     { name = "google-cloud-texttospeech" },
     { name = "google-genai" },
-    { name = "websockets" },
-]
-gradium = [
-    { name = "websockets" },
 ]
 groq = [
     { name = "groq" },
@@ -4406,13 +4385,9 @@ gstreamer = [
 ]
 heygen = [
     { name = "livekit" },
-    { name = "websockets" },
 ]
 hume = [
     { name = "hume" },
-]
-inworld = [
-    { name = "websockets" },
 ]
 koala = [
     { name = "pvkoala" },
@@ -4434,9 +4409,6 @@ livekit = [
     { name = "livekit-api" },
     { name = "pyjwt" },
     { name = "tenacity" },
-]
-lmnt = [
-    { name = "websockets" },
 ]
 local = [
     { name = "pyaudio" },
@@ -4466,15 +4438,9 @@ moondream = [
     { name = "timm" },
     { name = "transformers" },
 ]
-neuphonic = [
-    { name = "websockets" },
-]
 nvidia = [
     { name = "nvidia-riva-client" },
     { name = "protobuf" },
-]
-openai = [
-    { name = "websockets" },
 ]
 pgmq = [
     { name = "asyncpg" },
@@ -4486,12 +4452,6 @@ piper = [
 ]
 redis = [
     { name = "redis", extra = ["hiredis"] },
-]
-resembleai = [
-    { name = "websockets" },
-]
-rime = [
-    { name = "websockets" },
 ]
 rnnoise = [
     { name = "pyrnnoise" },
@@ -4507,19 +4467,12 @@ sagemaker = [
 ]
 sarvam = [
     { name = "sarvamai" },
-    { name = "websockets" },
 ]
 sentry = [
     { name = "sentry-sdk" },
 ]
 simli = [
     { name = "simli-ai" },
-]
-smallest = [
-    { name = "websockets" },
-]
-soniox = [
-    { name = "websockets" },
 ]
 soundfile = [
     { name = "soundfile" },
@@ -4538,9 +4491,6 @@ tracing = [
     { name = "opentelemetry-instrumentation" },
     { name = "opentelemetry-sdk" },
 ]
-ultravox = [
-    { name = "websockets" },
-]
 vonage-video-connector = [
     { name = "vonage-video-connector", marker = "python_full_version == '3.13.*' and sys_platform == 'linux'" },
 ]
@@ -4550,16 +4500,9 @@ webrtc = [
 ]
 websocket = [
     { name = "fastapi" },
-    { name = "websockets" },
-]
-websockets-base = [
-    { name = "websockets" },
 ]
 whisper = [
     { name = "faster-whisper" },
-]
-xai = [
-    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -4646,29 +4589,6 @@ requires-dist = [
     { name = "pillow", specifier = ">=11.1.0,<13" },
     { name = "pipecat-ai", extras = ["daily"], marker = "extra == 'lemonslice'" },
     { name = "pipecat-ai", extras = ["daily"], marker = "extra == 'tavus'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'assemblyai'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'asyncai'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'aws'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'cartesia'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'deepgram'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'elevenlabs'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'fish'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'gladia'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'google'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'gradium'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'heygen'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'inworld'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'lmnt'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'neuphonic'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'openai'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'resembleai'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'rime'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'sarvam'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'smallest'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'soniox'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'ultravox'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'websocket'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'xai'" },
     { name = "pipecat-ai-prebuilt", marker = "extra == 'runner'", specifier = ">=1.0.2" },
     { name = "piper-tts", marker = "extra == 'piper'", specifier = ">=1.3.0,<2" },
     { name = "protobuf", specifier = ">=5.29.6,<7" },
@@ -4706,9 +4626,9 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'runner'", specifier = ">=0.32.0,<1.0.0" },
     { name = "vonage-video-connector", marker = "python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'vonage-video-connector'", specifier = "~=0.2.3b0" },
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1,<1" },
-    { name = "websockets", marker = "extra == 'websockets-base'", specifier = ">=13.1" },
+    { name = "websockets", specifier = ">=13.1" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "camb", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "koala", "kokoro", "langchain", "lemonslice", "livekit", "lmnt", "local", "local-smart-turn", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "nebius", "neuphonic", "novita", "nvidia", "openai", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "qwen", "redis", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "vonage-video-connector", "webrtc", "websocket", "websockets-base", "whisper", "xai", "cli"]
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "camb", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "koala", "kokoro", "langchain", "lemonslice", "livekit", "lmnt", "local", "local-smart-turn", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "nebius", "neuphonic", "novita", "nvidia", "openai", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "qwen", "redis", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "vonage-video-connector", "webrtc", "websocket", "whisper", "xai", "cli"]
 
 [package.metadata.requires-dev]
 dev = [

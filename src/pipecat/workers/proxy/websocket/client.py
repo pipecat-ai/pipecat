@@ -8,23 +8,15 @@
 
 import asyncio
 
+import websockets
 from loguru import logger
+from websockets.asyncio.client import connect
 
 from pipecat.bus import BusMessage, BusWorkerRegistryMessage
 from pipecat.bus.messages import BusLocalMessage
 from pipecat.bus.serializers import JSONMessageSerializer
 from pipecat.bus.serializers.base import MessageSerializer
 from pipecat.workers.base_worker import BaseWorker
-
-try:
-    import websockets
-    from websockets.asyncio.client import connect
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use WebSocketProxyClient, you need to `pip install pipecat-ai[websockets-base]`."
-    )
-    raise ImportError(f"Missing module: {e}") from e
 
 
 class WebSocketProxyClient(BaseWorker):
