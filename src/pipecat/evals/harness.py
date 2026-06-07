@@ -67,6 +67,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+import websockets
 from loguru import logger
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
@@ -78,13 +79,6 @@ from pipecat.evals.serializer import (
     EVAL_CONFIGURE_MESSAGE_TYPE,
     EVAL_RESET_MESSAGE_TYPE,
 )
-
-# ``websockets`` is imported lazily inside the methods that use it. The
-# ``pipecat eval`` command imports this module while building the CLI, so it
-# gets pulled in on every ``pipecat`` invocation (even ``pipecat init``), not
-# only when an eval runs. Keeping the import lazy means the module stays
-# importable when the optional ``websockets-base`` extra isn't installed; users
-# who actually run an eval get a clear ImportError at that point.
 
 # Generous default so an expectation without an explicit ``within_ms`` waits
 # long enough for slow LLM/TTS responses (and function-call round-trips) rather
@@ -263,8 +257,6 @@ class EvalSession:
 
     async def run(self) -> EvalResult:
         """Connect, drive the scenario, and return the result."""
-        import websockets  # lazy: see note at the top of the module
-
         started = time.monotonic()
         self._debug_t0 = started
         self._debug(f"run: scenario {self._scenario.name!r} -> {self._bot_url}")
@@ -525,8 +517,6 @@ class EvalSession:
 
     async def _reader_loop(self) -> None:
         """Drain the WS, translate RTVI messages to friendly events, enqueue them."""
-        import websockets  # lazy: see note at the top of the module
-
         try:
             async for raw in self._ws:
                 try:
