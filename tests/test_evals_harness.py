@@ -25,7 +25,13 @@ import websockets
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.harness import EvalSession, run_scenario
-from pipecat.evals.scenario import Expectation, Scenario, SendAfter, Turn
+from pipecat.evals.scenario import (
+    EvalExpectation,
+    EvalFunctionCall,
+    EvalScenario,
+    EvalSendAfter,
+    EvalTurn,
+)
 
 
 def _rtvi(msg_type: str, data: dict | None = None) -> str:
@@ -33,7 +39,7 @@ def _rtvi(msg_type: str, data: dict | None = None) -> str:
 
 
 def _session(bot_audio: bool = False) -> EvalSession:
-    return EvalSession(Scenario(name="t", turns=[], bot_audio=bot_audio), "ws://localhost:0")
+    return EvalSession(EvalScenario(name="t", turns=[], bot_audio=bot_audio), "ws://localhost:0")
 
 
 class TestTranslate(unittest.TestCase):
@@ -156,19 +162,19 @@ class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
 
     async def test_text_contains_present_passes(self):
         s = _session(bot_audio=False)
-        exp = Expectation(event="llm_response", text_contains="Paris")
+        exp = EvalExpectation(event="llm_response", text_contains="Paris")
         self.assertEqual(await s._evaluate_aggregate("The capital is Paris.", exp), ("pass", ""))
 
     async def test_text_contains_absent_continues(self):
         s = _session()
-        exp = Expectation(event="llm_response", text_contains="Paris")
+        exp = EvalExpectation(event="llm_response", text_contains="Paris")
         status, _ = await s._evaluate_aggregate("Let me check on that.", exp)
         self.assertEqual(status, "continue")
 
     async def test_eval_yes_passes(self):
         s = _session()
         s._judge = _FakeJudge(["yes"])
-        exp = Expectation(event="llm_response", eval="describes the weather")
+        exp = EvalExpectation(event="llm_response", eval="describes the weather")
         status, reason = await s._evaluate_aggregate("It's 75 and sunny.", exp)
         self.assertEqual(status, "pass")
         self.assertIn("judge said yes", reason)
@@ -176,7 +182,7 @@ class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
     async def test_eval_no_fails(self):
         s = _session()
         s._judge = _FakeJudge(["no"])
-        exp = Expectation(event="llm_response", eval="describes the weather")
+        exp = EvalExpectation(event="llm_response", eval="describes the weather")
         status, reason = await s._evaluate_aggregate("I like turtles.", exp)
         self.assertEqual(status, "fail")
         self.assertIn("judge said no", reason)
@@ -184,7 +190,7 @@ class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
     async def test_eval_continue_waits_for_more(self):
         s = _session()
         s._judge = _FakeJudge(["continue"])
-        exp = Expectation(event="llm_response", eval="describes the weather")
+        exp = EvalExpectation(event="llm_response", eval="describes the weather")
         status, _ = await s._evaluate_aggregate("Let me check on that.", exp)
         self.assertEqual(status, "continue")
 
@@ -192,7 +198,7 @@ class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
         s = _session()
         judge = _FakeJudge([])  # would IndexError if the judge were called
         s._judge = judge
-        exp = Expectation(event="llm_response", eval="describes the weather")
+        exp = EvalExpectation(event="llm_response", eval="describes the weather")
         status, _ = await s._evaluate_aggregate("   ", exp)
         self.assertEqual(status, "continue")
         self.assertEqual(judge.calls, [])
@@ -202,24 +208,34 @@ class TestRequiredReportLevel(unittest.TestCase):
     """The minimal function-call report level the harness asks the bot for."""
 
     def _level(self, *expects) -> str | None:
-        scenario = Scenario(name="t", bot_audio=False, turns=[Turn(user="x", expect=list(expects))])
+        scenario = EvalScenario(
+            name="t", bot_audio=False, turns=[EvalTurn(user="x", expect=list(expects))]
+        )
         return EvalSession(scenario, "ws://localhost:0")._required_report_level()
 
     def test_none_without_function_call(self):
-        self.assertIsNone(self._level(Expectation(event="llm_response")))
+        self.assertIsNone(self._level(EvalExpectation(event="llm_response")))
 
     def test_none_for_bare_function_call(self):
         # Just asserting the call happened needs no name/args, so no elevation.
-        self.assertIsNone(self._level(Expectation(event="function_call")))
+        self.assertIsNone(self._level(EvalExpectation(event="function_call")))
 
     def test_name_when_only_name_asserted(self):
         self.assertEqual(
-            self._level(Expectation(event="function_call", name="get_weather")), "name"
+            self._level(
+                EvalExpectation(event="function_call", calls=[EvalFunctionCall(name="get_weather")])
+            ),
+            "name",
         )
 
     def test_full_when_args_asserted(self):
         self.assertEqual(
-            self._level(Expectation(event="function_call", name="get_weather", args={"city": "P"})),
+            self._level(
+                EvalExpectation(
+                    event="function_call",
+                    calls=[EvalFunctionCall(name="get_weather", args={"city": "P"})],
+                )
+            ),
             "full",
         )
 
@@ -228,7 +244,7 @@ class TestConnectURL(unittest.TestCase):
     """The harness signals skip-TTS via the connect URL in text mode."""
 
     def _url(self, bot_audio: bool, base: str = "ws://localhost:7860") -> str:
-        scenario = Scenario(name="t", turns=[], bot_audio=bot_audio)
+        scenario = EvalScenario(name="t", turns=[], bot_audio=bot_audio)
         return EvalSession(scenario, base)._connect_url()
 
     def test_text_mode_adds_skip_tts(self):
@@ -244,10 +260,10 @@ class TestConnectURL(unittest.TestCase):
         )
 
     def test_response_adds_capture_audio(self):
-        scenario = Scenario(
+        scenario = EvalScenario(
             name="t",
             bot_audio=True,
-            turns=[Turn(user="x", expect=[Expectation(event="response", eval="ok")])],
+            turns=[EvalTurn(user="x", expect=[EvalExpectation(event="response", eval="ok")])],
         )
         url = EvalSession(scenario, "ws://localhost:7860")._connect_url()
         self.assertIn("capture_audio=true", url)
@@ -258,10 +274,10 @@ class TestResponseTranscriptionSkip(unittest.IsolatedAsyncioTestCase):
     async def test_skipped_without_audio_mode(self):
         # The `response` transcription needs the bot's audio; without audio mode,
         # skip (don't run a guaranteed failure).
-        scenario = Scenario(
+        scenario = EvalScenario(
             name="t",
             bot_audio=False,
-            turns=[Turn(user="x", expect=[Expectation(event="response", eval="ok")])],
+            turns=[EvalTurn(user="x", expect=[EvalExpectation(event="response", eval="ok")])],
         )
         result = await EvalSession(scenario, "ws://localhost:0").run()
         self.assertIsNotNone(result.skipped)
@@ -272,16 +288,16 @@ class TestResponseTranscriptionSkip(unittest.IsolatedAsyncioTestCase):
 class TestTextContainsResolution(unittest.TestCase):
     """text_contains resolves against whichever event carries the text."""
 
-    def _check(self, event: dict, exp: Expectation):
+    def _check(self, event: dict, exp: EvalExpectation):
         return EvalSession._check_payload(event, exp, 0, 0)
 
     def test_on_one_event_text(self):
-        exp = Expectation(event="llm_response", text_contains="Paris")
+        exp = EvalExpectation(event="llm_response", text_contains="Paris")
         self.assertIsNone(self._check({"type": "llm_response", "text": "It's Paris."}, exp))
         self.assertIsNotNone(self._check({"type": "llm_response", "text": "London."}, exp))
 
     def test_on_user_transcription_transcript(self):
-        exp = Expectation(event="user_transcription", text_contains="hello")
+        exp = EvalExpectation(event="user_transcription", text_contains="hello")
         ok = {"type": "user_transcription", "transcript": "hello world"}
         self.assertIsNone(self._check(ok, exp))
         failure = self._check({"type": "user_transcription", "transcript": "bye"}, exp)
@@ -351,15 +367,17 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
             _rtvi("bot-llm-text", {"text": "Paris"}),
             _rtvi("bot-llm-stopped"),
         )
-        scenario = Scenario(
+        scenario = EvalScenario(
             name="capital",
             bot_audio=False,
             turns=[
-                Turn(
+                EvalTurn(
                     user="what is the capital of France?",
                     expect=[
-                        Expectation(event="llm_started", within_ms=2000),
-                        Expectation(event="llm_response", within_ms=2000, text_contains="Paris"),
+                        EvalExpectation(event="llm_started", within_ms=2000),
+                        EvalExpectation(
+                            event="llm_response", within_ms=2000, text_contains="Paris"
+                        ),
                     ],
                 )
             ],
@@ -379,14 +397,14 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
             _rtvi("bot-llm-text", {"text": "It is sunny in Paris."}),
             _rtvi("bot-llm-stopped"),
         )
-        scenario = Scenario(
+        scenario = EvalScenario(
             name="filler",
             bot_audio=False,
             turns=[
-                Turn(
+                EvalTurn(
                     user="weather?",
                     expect=[
-                        Expectation(event="llm_response", within_ms=2000, text_contains="Paris")
+                        EvalExpectation(event="llm_response", within_ms=2000, text_contains="Paris")
                     ],
                 )
             ],
@@ -406,17 +424,16 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
                 },
             ),
         )
-        scenario = Scenario(
+        scenario = EvalScenario(
             name="tool",
             turns=[
-                Turn(
+                EvalTurn(
                     user="weather in Paris?",
                     expect=[
-                        Expectation(
+                        EvalExpectation(
                             event="function_call",
                             within_ms=2000,
-                            name="get_weather",
-                            args={"city": "Paris"},
+                            calls=[EvalFunctionCall(name="get_weather", args={"city": "Paris"})],
                         ),
                     ],
                 )
@@ -432,14 +449,16 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
             _rtvi("bot-llm-text", {"text": "Paris"}),
             _rtvi("bot-llm-stopped"),
         )
-        scenario = Scenario(
+        scenario = EvalScenario(
             name="mismatch",
             bot_audio=False,
             turns=[
-                Turn(
+                EvalTurn(
                     user="hi",
                     expect=[
-                        Expectation(event="llm_response", within_ms=2000, text_contains="London")
+                        EvalExpectation(
+                            event="llm_response", within_ms=2000, text_contains="London"
+                        )
                     ],
                 )
             ],
@@ -450,9 +469,11 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertIn("does not contain", result.failures[0].reason)
 
     async def test_missing_event_times_out(self):
-        scenario = Scenario(
+        scenario = EvalScenario(
             name="never",
-            turns=[Turn(user="hi", expect=[Expectation(event="llm_response", within_ms=200)])],
+            turns=[
+                EvalTurn(user="hi", expect=[EvalExpectation(event="llm_response", within_ms=200)])
+            ],
         )
         result = await run_scenario(scenario, self.server.url)
         self.assertFalse(result.passed)
@@ -461,15 +482,15 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertIn("200ms", result.failures[0].reason)
 
     async def test_subsequent_assertions_skipped_after_timeout(self):
-        scenario = Scenario(
+        scenario = EvalScenario(
             name="cascading",
             turns=[
-                Turn(
+                EvalTurn(
                     user="hi",
                     expect=[
-                        Expectation(event="llm_started", within_ms=100),
-                        Expectation(event="llm_response", within_ms=100),
-                        Expectation(event="function_call", within_ms=100),
+                        EvalExpectation(event="llm_started", within_ms=100),
+                        EvalExpectation(event="llm_response", within_ms=100),
+                        EvalExpectation(event="function_call", within_ms=100),
                     ],
                 )
             ],
@@ -486,15 +507,17 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
             _rtvi("bot-llm-text", {"text": "ok"}),
             _rtvi("bot-llm-stopped"),
         )
-        scenario = Scenario(
+        scenario = EvalScenario(
             name="send_after",
             bot_audio=False,
             turns=[
-                Turn(user="first", expect=[Expectation(event="llm_started", within_ms=2000)]),
-                Turn(
+                EvalTurn(
+                    user="first", expect=[EvalExpectation(event="llm_started", within_ms=2000)]
+                ),
+                EvalTurn(
                     user="second",
-                    expect=[Expectation(event="llm_response", within_ms=2000)],
-                    send_after=SendAfter(event="llm_started", delay_ms=200),
+                    expect=[EvalExpectation(event="llm_response", within_ms=2000)],
+                    send_after=EvalSendAfter(event="llm_started", delay_ms=200),
                 ),
             ],
         )
@@ -503,9 +526,9 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(result.duration_ms, 200)
 
     async def test_connect_failure_reported_cleanly(self):
-        scenario = Scenario(
+        scenario = EvalScenario(
             name="no_bot",
-            turns=[Turn(user="x", expect=[Expectation(event="llm_started")])],
+            turns=[EvalTurn(user="x", expect=[EvalExpectation(event="llm_started")])],
         )
         result = await run_scenario(
             scenario, f"ws://localhost:{_free_port()}", connect_timeout_s=0.5
@@ -517,9 +540,11 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
 
     async def test_reset_sends_eval_reset_message(self):
         self.server.on_text("hi", _rtvi("bot-llm-started"), _rtvi("bot-llm-stopped"))
-        scenario = Scenario(
+        scenario = EvalScenario(
             name="reset",
-            turns=[Turn(user="hi", expect=[Expectation(event="llm_started", within_ms=2000)])],
+            turns=[
+                EvalTurn(user="hi", expect=[EvalExpectation(event="llm_started", within_ms=2000)])
+            ],
             reset=[{"role": "system", "content": "be terse"}],
         )
         result = await run_scenario(scenario, self.server.url)
@@ -536,9 +561,11 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_reset_when_not_requested(self):
         self.server.on_text("hi", _rtvi("bot-llm-started"), _rtvi("bot-llm-stopped"))
-        scenario = Scenario(
+        scenario = EvalScenario(
             name="noreset",
-            turns=[Turn(user="hi", expect=[Expectation(event="llm_started", within_ms=2000)])],
+            turns=[
+                EvalTurn(user="hi", expect=[EvalExpectation(event="llm_started", within_ms=2000)])
+            ],
         )
         await run_scenario(scenario, self.server.url)
         resets = [

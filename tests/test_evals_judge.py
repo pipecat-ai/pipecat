@@ -6,7 +6,7 @@
 
 import unittest
 
-from pipecat.evals.judge import Judge, JudgeVerdict, _parse_verdict
+from pipecat.evals.judge import EvalJudge, JudgeVerdict, _parse_verdict
 
 
 class TestParseVerdict(unittest.TestCase):
@@ -102,21 +102,21 @@ class _FakeLLMService:
 class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
     async def test_evaluate_pass(self):
         svc = _FakeLLMService(['{"verdict": "yes", "reason": "yes it does"}'])
-        judge = Judge(svc)
+        judge = EvalJudge(svc)
         v = await judge.evaluate("mentions weather", "It's raining in Paris.")
         self.assertTrue(v.passed)
         self.assertEqual(len(svc.calls), 1)
 
     async def test_evaluate_fail(self):
         svc = _FakeLLMService(['{"verdict": "no", "reason": "no it does not"}'])
-        judge = Judge(svc)
+        judge = EvalJudge(svc)
         v = await judge.evaluate("mentions weather", "Hello there.")
         self.assertFalse(v.passed)
 
     async def test_caching_avoids_second_call(self):
-        """Same (criterion, text) within one Judge hits the cache."""
+        """Same (criterion, text) within one EvalJudge hits the cache."""
         svc = _FakeLLMService(['{"verdict": "yes", "reason": "ok"}'])
-        judge = Judge(svc)
+        judge = EvalJudge(svc)
         v1 = await judge.evaluate("mentions weather", "It rains.")
         v2 = await judge.evaluate("mentions weather", "It rains.")
         self.assertTrue(v1.passed)
@@ -130,14 +130,14 @@ class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
             async def run_inference(self, **kwargs):
                 raise RuntimeError("network down")
 
-        judge = Judge(_BoomService())
+        judge = EvalJudge(_BoomService())
         v = await judge.evaluate("anything", "anything")
         self.assertFalse(v.passed)
         self.assertIn("RuntimeError", v.reason)
 
     async def test_empty_response_fails(self):
         svc = _FakeLLMService([""])
-        judge = Judge(svc)
+        judge = EvalJudge(svc)
         v = await judge.evaluate("anything", "anything")
         self.assertFalse(v.passed)
 
