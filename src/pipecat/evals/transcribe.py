@@ -13,13 +13,13 @@ service in one persistent pipeline (mirroring
 :class:`~pipecat.evals.voice.EvalVoice`) and transcribes buffered audio segments
 on demand.
 
-The transcriber takes an already-built ``STTService``; :func:`build_stt_service`
-constructs one from a scenario's ``bot_audio`` mapping — ``service`` (default
-``"whisper"``, a local model) and ``model`` — much like
-:func:`~pipecat.evals.judge.build_default_judge`. The escape hatch is
-``bot_audio.factory: "my_pkg.my_func"`` — an importable callable taking
-``(config, sample_rate)`` and returning an ``STTService``. Audio is resampled to
-16 kHz before transcription, a rate STT services expect.
+The transcriber takes an already-built ``STTService``;
+:meth:`EvalTranscriber.from_config` constructs one from a scenario's
+``bot_audio`` mapping — ``service`` (default ``"whisper"``, a local model) and
+``model`` — much like :meth:`pipecat.evals.judge.EvalJudge.from_config`. The
+escape hatch is ``bot_audio.factory: "my_pkg.my_func"`` — an importable callable
+taking ``(config, sample_rate)`` and returning an ``STTService``. Audio is
+resampled to 16 kHz before transcription, a rate STT services expect.
 """
 
 import asyncio
@@ -37,46 +37,6 @@ STT_SAMPLE_RATE = 16000
 # Upper bound on a single transcription; also the silence fallback (no
 # TranscriptionFrame is emitted for non-speech, so we time out and return "").
 TRANSCRIBE_TIMEOUT_S = 30.0
-
-
-def build_stt_service(config: dict | None):
-    """Build an ``STTService`` from a scenario's ``bot_audio`` mapping.
-
-    Honors a custom ``factory`` (dotted path to a callable taking
-    ``(config, sample_rate)`` and returning an ``STTService``); otherwise
-    dispatches on the ``service`` name (default ``"whisper"``). Add providers by
-    extending this.
-
-    Example::
-
-        # In the scenario: bot_audio.factory: "my_pkg.make_stt"
-        def make_stt(config, sample_rate):
-            return DeepgramSTTService(...)
-
-    Args:
-        config: ``bot_audio`` mapping, or ``None`` for the Whisper default.
-
-    Returns:
-        A constructed ``STTService``.
-    """
-    config = config or {}
-
-    custom = config.get("factory")
-    if custom:
-        module_name, _, attr = custom.rpartition(".")
-        if not module_name:
-            raise ValueError(f"bot_audio.factory must be a dotted path: {custom!r}")
-        factory = getattr(importlib.import_module(module_name), attr)
-        return factory(config, STT_SAMPLE_RATE)
-
-    service = str(config.get("service", "whisper")).lower()
-    if service == "whisper":
-        return _whisper_service(config)
-
-    raise ValueError(
-        f"Unknown STT service: {service!r}. Known: whisper. "
-        "Or set bot_audio.factory to a 'module.func' returning an STTService."
-    )
 
 
 def _whisper_service(config: dict):
@@ -102,10 +62,10 @@ def _whisper_service(config: dict):
 class EvalTranscriber:
     """Transcribes bot audio with an STT service from one persistent pipeline.
 
-    Takes an already-built ``STTService`` (see :func:`build_stt_service`). Use as
-    an async context manager::
+    Takes an already-built ``STTService``; :meth:`from_config` builds one from a
+    scenario's ``bot_audio`` mapping. Use as an async context manager::
 
-        async with EvalTranscriber(build_stt_service({"model": "base"})) as t:
+        async with EvalTranscriber.from_config({"model": "base"}) as t:
             text = await t.transcribe(pcm, sample_rate=24000)
     """
 
@@ -113,8 +73,7 @@ class EvalTranscriber:
         """Initialize the transcriber.
 
         Args:
-            service: A constructed ``STTService`` (e.g. from
-                :func:`build_stt_service`).
+            service: A constructed ``STTService`` (e.g. from :meth:`from_config`).
         """
         self._service = service
         self._worker = None
@@ -124,6 +83,48 @@ class EvalTranscriber:
         # Optional sink for timing diagnostics; the harness points this at its
         # per-scenario debug trace so a hung transcription is visible.
         self.debug: Callable[[str], None] = lambda _msg: None
+
+    @classmethod
+    def from_config(cls, config: dict | None) -> "EvalTranscriber":
+        """Build an :class:`EvalTranscriber` from a scenario's ``bot_audio`` mapping.
+
+        Honors a custom ``factory`` (dotted path to a callable taking
+        ``(config, sample_rate)`` and returning an ``STTService``); otherwise
+        dispatches on the ``service`` name (default ``"whisper"``). Add providers
+        by extending this. To use a fully custom setup, construct
+        ``EvalTranscriber`` directly with your own ``STTService`` and pass it to
+        :func:`pipecat.evals.harness.run_scenario`.
+
+        Args:
+            config: ``bot_audio`` mapping, or ``None`` for the Whisper default.
+
+        Returns:
+            A configured EvalTranscriber (not yet started).
+
+        Example::
+
+            # In the scenario: bot_audio.factory: "my_pkg.make_stt"
+            def make_stt(config, sample_rate):
+                return DeepgramSTTService(...)
+        """
+        config = config or {}
+
+        custom = config.get("factory")
+        if custom:
+            module_name, _, attr = custom.rpartition(".")
+            if not module_name:
+                raise ValueError(f"bot_audio.factory must be a dotted path: {custom!r}")
+            factory = getattr(importlib.import_module(module_name), attr)
+            return cls(factory(config, STT_SAMPLE_RATE))
+
+        name = str(config.get("service", "whisper")).lower()
+        if name == "whisper":
+            return cls(_whisper_service(config))
+
+        raise ValueError(
+            f"Unknown STT service: {name!r}. Known: whisper. "
+            "Or set bot_audio.factory to a 'module.func' returning an STTService."
+        )
 
     async def start(self) -> None:
         """Build and start the persistent transcription pipeline."""

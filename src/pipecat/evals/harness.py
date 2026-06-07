@@ -65,13 +65,13 @@ import json
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
 
 import websockets
 from loguru import logger
+from websockets.asyncio.client import ClientConnection
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
-from pipecat.evals.judge import EvalJudge, build_default_judge
+from pipecat.evals.judge import EvalJudge
 from pipecat.evals.scenario import EvalExpectation, EvalScenario, EvalSendAfter, EvalTurn
 from pipecat.evals.serializer import (
     EVAL_BOT_AUDIO_TYPE,
@@ -79,6 +79,8 @@ from pipecat.evals.serializer import (
     EVAL_CONFIGURE_MESSAGE_TYPE,
     EVAL_RESET_MESSAGE_TYPE,
 )
+from pipecat.evals.transcribe import EvalTranscriber
+from pipecat.evals.voice import EvalVoice
 
 # Generous default so an expectation without an explicit ``within_ms`` waits
 # long enough for slow LLM/TTS responses (and function-call round-trips) rather
@@ -189,8 +191,16 @@ class EvalSession:
         record_path: str | None = None,
         cache_dir: str | None = None,
         stop_bot: bool = False,
+        judge: EvalJudge | None = None,
+        voice: EvalVoice | None = None,
+        transcriber: EvalTranscriber | None = None,
     ):
         """Initialize the eval session.
+
+        The ``judge``, ``voice``, and ``transcriber`` are injected pre-built:
+        :func:`run_scenario` constructs the defaults from the scenario's config
+        (via the respective ``from_config``) and passes them in. Construct and
+        pass your own to override them (e.g. a custom judge LLM or TTS service).
 
         Args:
             scenario: The parsed scenario to run.
@@ -208,6 +218,14 @@ class EvalSession:
                 so it can serve more scenarios (the eval transport already
                 survives the WebSocket disconnect). The suite enables it to clean
                 up each spawned bot.
+            judge: The :class:`~pipecat.evals.judge.EvalJudge` for ``eval:``
+                assertions, or ``None`` if the scenario has none.
+            voice: The :class:`~pipecat.evals.voice.EvalVoice` for synthesizing
+                user audio, or ``None`` for text-mode scenarios. Started and
+                stopped by the session.
+            transcriber: The :class:`~pipecat.evals.transcribe.EvalTranscriber`
+                for the ``response`` event, or ``None`` when unused. Started and
+                stopped by the session.
         """
         self._scenario = scenario
         self._bot_url = bot_url
@@ -217,7 +235,7 @@ class EvalSession:
         self._cache_dir = cache_dir
         self._stop_bot = stop_bot
 
-        self._ws: Any = None
+        self._ws: ClientConnection | None = None
         self._queue: asyncio.Queue = asyncio.Queue()
         # function_call events popped while matching another expectation, held so
         # the turn's calls can be matched by name in any order (reset per turn).
@@ -229,11 +247,11 @@ class EvalSession:
         self._debug_t0: float = 0.0
         self._current_turn: int = -1
         self._next_id = 0
-        self._judge: EvalJudge | None = None
+        self._judge: EvalJudge | None = judge
 
-        # One persistent TTS pipeline reused across the scenario's audio turns
-        # (created in run() only when the scenario uses user_audio).
-        self._voice: Any = None
+        # One persistent TTS pipeline reused across the scenario's audio turns,
+        # started in run(); None for text-mode scenarios.
+        self._voice: EvalVoice | None = voice
 
         # Accumulates the bot's output text for the current response, to
         # synthesize llm_response. Source depends on the mode: bot-llm-text in
@@ -251,7 +269,7 @@ class EvalSession:
         self._wants_response: bool = any(
             exp.event == "response" for turn in scenario.turns for exp in turn.expect
         )
-        self._transcriber: Any = None
+        self._transcriber: EvalTranscriber | None = transcriber
         self._tts_audio: bytearray = bytearray()  # current spoken segment's audio
         self._tts_sample_rate: int = 0
 
@@ -304,43 +322,18 @@ class EvalSession:
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
 
-        # Each sub-pipeline tags its logs with an ``eval_pipeline`` label via
+        # Start the injected sub-pipelines (built by run_scenario from the
+        # scenario config). Each tags its logs with an ``eval_pipeline`` label via
         # logger.contextualize: the tasks created here inherit it (contextvars
         # copy into asyncio tasks), so the underlying service's logs carry the
         # label too, regardless of which TTS/STT/LLM service is used. The CLI
         # routes each label to its own log file (see _LOG_CATEGORIES).
-
-        # Lazily construct the judge — only if the scenario uses eval: assertions.
-        if any(exp.eval is not None for turn in self._scenario.turns for exp in turn.expect):
-            with logger.contextualize(eval_pipeline="judge"):
-                self._judge = build_default_judge(self._scenario.judge)
-
-        # One TTS pipeline for the whole scenario's audio turns.
-        if self._scenario.user_audio is not None:
-            from pipecat.evals.voice import (
-                EvalVoice,
-                build_tts_service,
-                tts_cache_key,
-                tts_sample_rate,
-            )
-
-            cfg = self._scenario.user_audio
-            sample_rate = tts_sample_rate(cfg)
+        if self._voice is not None:
             with logger.contextualize(eval_pipeline="voice"):
-                self._voice = EvalVoice(
-                    build_tts_service(cfg, sample_rate=sample_rate),
-                    sample_rate=sample_rate,
-                    cache_key=tts_cache_key(cfg),
-                    cache_dir=self._cache_dir,
-                )
                 await self._voice.start()
 
-        # One STT pipeline to transcribe the bot's audio for `response`.
-        if self._wants_response:
-            from pipecat.evals.transcribe import EvalTranscriber, build_stt_service
-
+        if self._transcriber is not None:
             with logger.contextualize(eval_pipeline="transcription"):
-                self._transcriber = EvalTranscriber(build_stt_service(self._scenario.transcriber))
                 self._transcriber.debug = self._debug
                 await self._transcriber.start()
 
@@ -468,7 +461,7 @@ class EvalSession:
                 about=RTVI.AboutClientData(library="pipecat-evals"),
             ).model_dump(),
         )
-        await self._ws.send(ready.model_dump_json())
+        await self._send(ready)
 
         # Hard gate — raises TimeoutError if the bot never announces readiness.
         await self._wait_for_event("bot_ready", BOT_READY_TIMEOUT_S)
@@ -486,7 +479,7 @@ class EvalSession:
                     "d": {"function_call_report_level": {"*": level}},
                 },
             )
-            await self._ws.send(configure.model_dump_json())
+            await self._send(configure)
 
         # Only send a reset when the scenario actually asked for one. An implicit
         # empty reset would race with bot startup flows (e.g. a greeting added in
@@ -497,7 +490,12 @@ class EvalSession:
                 id=self._message_id(),
                 data={"t": EVAL_RESET_MESSAGE_TYPE, "d": {"messages": self._scenario.reset}},
             )
-            await self._ws.send(reset.model_dump_json())
+            await self._send(reset)
+
+    async def _send(self, message: RTVI.Message) -> None:
+        """Serialize and send an RTVI message over the WebSocket."""
+        assert self._ws is not None  # connected before any send
+        await self._ws.send(message.model_dump_json())
 
     async def _send_cancel(self) -> None:
         """Ask the bot to cancel its pipeline so it shuts down gracefully.
@@ -511,12 +509,13 @@ class EvalSession:
                 id=self._message_id(),
                 data={"t": EVAL_CANCEL_MESSAGE_TYPE, "d": {}},
             )
-            await self._ws.send(message.model_dump_json())
+            await self._send(message)
         except Exception:
             pass
 
     async def _reader_loop(self) -> None:
         """Drain the WS, translate RTVI messages to friendly events, enqueue them."""
+        assert self._ws is not None  # started only after a successful connect
         try:
             async for raw in self._ws:
                 try:
@@ -779,7 +778,7 @@ class EvalSession:
                 options=RTVI.SendTextOptions(run_immediately=True, audio_response=bot_audio),
             ).model_dump(),
         )
-        await self._ws.send(message.model_dump_json())
+        await self._send(message)
 
     async def _send_user_audio(self, text: str) -> None:
         """Render ``text`` to audio (cached) and stream it as ``raw-audio`` chunks.
@@ -789,6 +788,7 @@ class EvalSession:
         a bursted utterance compresses the speech/silence boundary and gets
         mis-segmented. Pacing is monotonic-clock based so it doesn't drift.
         """
+        assert self._voice is not None  # only called for audio-mode turns
         pcm, sample_rate = await self._voice.generate(text)
         loop = asyncio.get_running_loop()
         next_send = loop.time()
@@ -802,7 +802,7 @@ class EvalSession:
                     "numChannels": 1,
                 },
             )
-            await self._ws.send(message.model_dump_json())
+            await self._send(message)
             next_send += AUDIO_CHUNK_MS / 1000
             await asyncio.sleep(max(0, next_send - loop.time()))
 
@@ -1137,10 +1137,16 @@ async def run_scenario(
     record_path: str | None = None,
     cache_dir: str | None = None,
     stop_bot: bool = False,
+    judge: EvalJudge | None = None,
+    voice: EvalVoice | None = None,
+    transcriber: EvalTranscriber | None = None,
 ) -> EvalResult:
     """Run a scenario against a bot at the given WebSocket URL.
 
-    Convenience wrapper around :class:`EvalSession`.
+    Convenience wrapper around :class:`EvalSession`. Builds the judge, voice, and
+    transcriber the scenario calls for — each via its ``from_config`` — and hands
+    them to the session. Pass ``judge`` / ``voice`` / ``transcriber`` to override
+    any of them with your own pre-built instance.
 
     Args:
         scenario: The parsed scenario to run.
@@ -1153,10 +1159,30 @@ async def run_scenario(
             (default ``<user-cache-dir>/pipecat/tts``).
         stop_bot: When True, ask the bot to cancel its pipeline (and exit) on
             teardown. Leave False to keep it running for more scenarios.
+        judge: Override the judge (default: built from ``scenario.judge`` when the
+            scenario has ``eval:`` assertions).
+        voice: Override the user-audio generator (default: built from
+            ``scenario.user_audio`` in audio mode).
+        transcriber: Override the bot-audio transcriber (default: built from
+            ``scenario.transcriber`` when the scenario asserts ``response``).
 
     Returns:
         The structured outcome.
     """
+    turns = scenario.turns
+    if judge is None and any(exp.eval is not None for turn in turns for exp in turn.expect):
+        with logger.contextualize(eval_pipeline="judge"):
+            judge = EvalJudge.from_config(scenario.judge)
+
+    if voice is None and scenario.user_audio is not None:
+        with logger.contextualize(eval_pipeline="voice"):
+            voice = EvalVoice.from_config(scenario.user_audio, cache_dir=cache_dir)
+
+    wants_response = any(exp.event == "response" for turn in turns for exp in turn.expect)
+    if transcriber is None and wants_response and scenario.bot_audio:
+        with logger.contextualize(eval_pipeline="transcription"):
+            transcriber = EvalTranscriber.from_config(scenario.transcriber)
+
     return await EvalSession(
         scenario,
         bot_url,
@@ -1165,4 +1191,7 @@ async def run_scenario(
         record_path=record_path,
         cache_dir=cache_dir,
         stop_bot=stop_bot,
+        judge=judge,
+        voice=voice,
+        transcriber=transcriber,
     ).run()
