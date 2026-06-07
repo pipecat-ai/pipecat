@@ -551,7 +551,7 @@ def suite(
         python=python,
         concurrency=concurrency,
         base_port=base_port,
-        record=True if audio else None,
+        record=audio or None,
         cache_dir=cache_dir,
     )
 
