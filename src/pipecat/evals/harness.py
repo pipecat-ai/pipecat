@@ -1007,7 +1007,6 @@ class EvalSession:
             if matches(event):
                 return event
             self._pending_function_calls.append(event)
-            self._pending_function_calls.append(event)
 
     async def _evaluate_aggregate(
         self, aggregate: str, expectation: EvalExpectation
