@@ -51,6 +51,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+import yaml
 from loguru import logger
 
 from pipecat.evals.harness import EvalResult, run_scenario
@@ -221,15 +222,7 @@ def load_manifest(
 
     Returns:
         The parsed :class:`Manifest`.
-
-    Raises:
-        ImportError: If PyYAML is not installed.
     """
-    try:
-        import yaml
-    except ModuleNotFoundError as e:  # pragma: no cover
-        raise ImportError("PyYAML is required for eval suites: pip install pyyaml") from e
-
     path = Path(path).resolve()
     base = path.parent
     data = yaml.safe_load(path.read_text()) or {}

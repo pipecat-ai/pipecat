@@ -94,13 +94,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import yaml
 from loguru import logger
-
-try:
-    import yaml
-except ModuleNotFoundError as e:
-    logger.error("PyYAML is required for the scenario runner. Install with: pip install pyyaml")
-    raise ImportError(f"Missing module: {e}") from e
 
 # Events whose payloads carry bot-generated text the judge can sensibly
 # evaluate. Asserting ``eval:`` on anything else (user transcripts, tool
