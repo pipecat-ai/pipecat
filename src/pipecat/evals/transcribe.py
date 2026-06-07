@@ -47,6 +47,12 @@ def build_stt_service(config: dict | None):
     dispatches on the ``service`` name (default ``"whisper"``). Add providers by
     extending this.
 
+    Example::
+
+        # In the scenario: bot_audio.factory: "my_pkg.make_stt"
+        def make_stt(config, sample_rate):
+            return DeepgramSTTService(...)
+
     Args:
         config: ``bot_audio`` mapping, or ``None`` for the Whisper default.
 
