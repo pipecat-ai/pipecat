@@ -10,7 +10,7 @@ Two layers:
 
 - :class:`TestTranslate` unit-tests the RTVI-server-message → friendly-event
   translation in isolation (pure, fast).
-- :class:`TestEvalsHarnessIntegration` runs :func:`run_scenario` against a fake
+- :class:`TestEvalsHarnessIntegration` runs scenarios via :meth:`EvalSession.from_scenario` against a fake
   RTVI WebSocket server that replies to ``client-ready``/``send-text`` with
   scripted RTVI server messages — exercising the handshake, send/receive, event
   matching, and reset paths without a real bot pipeline.
@@ -24,7 +24,7 @@ import unittest
 import websockets
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
-from pipecat.evals.harness import EvalSession, run_scenario
+from pipecat.evals.harness import EvalSession
 from pipecat.evals.scenario import (
     EvalExpectation,
     EvalFunctionCall,
@@ -382,7 +382,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
                 )
             ],
         )
-        result = await run_scenario(scenario, self.server.url)
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
         self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
 
     async def test_one_event_aggregates_past_filler(self):
@@ -409,7 +409,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
                 )
             ],
         )
-        result = await run_scenario(scenario, self.server.url)
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
         self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
 
     async def test_function_call_pass(self):
@@ -439,7 +439,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
                 )
             ],
         )
-        result = await run_scenario(scenario, self.server.url)
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
         self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
 
     async def test_text_mismatch_fails_clearly(self):
@@ -463,7 +463,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
                 )
             ],
         )
-        result = await run_scenario(scenario, self.server.url)
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
         self.assertFalse(result.passed)
         self.assertEqual(len(result.failures), 1)
         self.assertIn("does not contain", result.failures[0].reason)
@@ -475,7 +475,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
                 EvalTurn(user="hi", expect=[EvalExpectation(event="llm_response", within_ms=200)])
             ],
         )
-        result = await run_scenario(scenario, self.server.url)
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
         self.assertFalse(result.passed)
         self.assertEqual(len(result.failures), 1)
         self.assertIn("arrived within", result.failures[0].reason)
@@ -495,7 +495,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
                 )
             ],
         )
-        result = await run_scenario(scenario, self.server.url)
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
         self.assertFalse(result.passed)
         self.assertEqual(len(result.failures), 1, "only the first failed expectation should report")
 
@@ -521,7 +521,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
                 ),
             ],
         )
-        result = await run_scenario(scenario, self.server.url)
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
         self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
         self.assertGreaterEqual(result.duration_ms, 200)
 
@@ -530,9 +530,9 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
             name="no_bot",
             turns=[EvalTurn(user="x", expect=[EvalExpectation(event="llm_started")])],
         )
-        result = await run_scenario(
+        result = await EvalSession.from_scenario(
             scenario, f"ws://localhost:{_free_port()}", connect_timeout_s=0.5
-        )
+        ).run()
         self.assertFalse(result.passed)
         self.assertEqual(len(result.failures), 1)
         self.assertEqual(result.failures[0].event_name, "<connect>")
@@ -547,7 +547,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
             ],
             reset=[{"role": "system", "content": "be terse"}],
         )
-        result = await run_scenario(scenario, self.server.url)
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
         self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
         resets = [
             m
@@ -567,7 +567,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
                 EvalTurn(user="hi", expect=[EvalExpectation(event="llm_started", within_ms=2000)])
             ],
         )
-        await run_scenario(scenario, self.server.url)
+        await EvalSession.from_scenario(scenario, self.server.url).run()
         resets = [
             m
             for m in self.server.received

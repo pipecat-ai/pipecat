@@ -74,7 +74,7 @@ class EvalTranscriber:
         dispatches on the ``service`` name (default ``"whisper"``). Add providers
         by extending this. To use a fully custom setup, construct
         ``EvalTranscriber`` directly with your own ``STTService`` and pass it to
-        :func:`pipecat.evals.harness.run_scenario`.
+        :meth:`pipecat.evals.harness.EvalSession.from_scenario`.
 
         Args:
             config: ``bot_audio`` mapping, or ``None`` for the Whisper default.

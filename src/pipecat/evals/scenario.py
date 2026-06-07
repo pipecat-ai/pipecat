@@ -232,71 +232,71 @@ class EvalScenario:
     fixtures: dict = field(default_factory=dict)
     source_path: Path | None = None
 
+    @classmethod
+    def load(cls, path: str | Path) -> "EvalScenario":
+        """Parse a scenario YAML file into an :class:`EvalScenario`.
 
-def load_scenario(path: str | Path) -> EvalScenario:
-    """Parse a scenario YAML file into a :class:`EvalScenario`.
+        Args:
+            path: Path to a YAML file with the scenario schema.
 
-    Args:
-        path: Path to a YAML file with the scenario schema.
+        Returns:
+            The parsed scenario.
 
-    Returns:
-        The parsed scenario.
+        Raises:
+            ValueError: If the file structure is invalid.
+            FileNotFoundError: If the path doesn't exist.
+        """
+        path = Path(path)
+        with path.open() as f:
+            data = yaml.safe_load(f)
 
-    Raises:
-        ValueError: If the file structure is invalid.
-        FileNotFoundError: If the path doesn't exist.
-    """
-    path = Path(path)
-    with path.open() as f:
-        data = yaml.safe_load(f)
+        if not isinstance(data, dict):
+            raise ValueError(f"{path}: top level must be a mapping")
 
-    if not isinstance(data, dict):
-        raise ValueError(f"{path}: top level must be a mapping")
+        name = data.get("name")
+        if not name or not isinstance(name, str):
+            raise ValueError(f"{path}: missing or invalid 'name:' field")
 
-    name = data.get("name")
-    if not name or not isinstance(name, str):
-        raise ValueError(f"{path}: missing or invalid 'name:' field")
+        raw_turns = data.get("turns")
+        if not isinstance(raw_turns, list):
+            raise ValueError(f"{path}: 'turns:' must be a list")
 
-    raw_turns = data.get("turns")
-    if not isinstance(raw_turns, list):
-        raise ValueError(f"{path}: 'turns:' must be a list")
+        turns = [_parse_turn(t, path, idx) for idx, t in enumerate(raw_turns)]
 
-    turns = [_parse_turn(t, path, idx) for idx, t in enumerate(raw_turns)]
+        raw_reset = data.get("reset")
+        if raw_reset is None:
+            reset: list[dict] = []
+        elif isinstance(raw_reset, list):
+            reset = raw_reset
+        else:
+            raise ValueError(f"{path}: 'reset:' must be a list of message dicts")
 
-    raw_reset = data.get("reset")
-    if raw_reset is None:
-        reset: list[dict] = []
-    elif isinstance(raw_reset, list):
-        reset = raw_reset
-    else:
-        raise ValueError(f"{path}: 'reset:' must be a list of message dicts")
+        # user: { modality: audio|text, speech: {...} }. Audio synthesizes each user
+        # turn via TTS (exercising the bot's STT); text sends it as text. Stored
+        # internally as user_audio (the speech config when audio, else None).
+        user_audio = _parse_user_block(data.get("user"), path)
 
-    # user: { modality: audio|text, speech: {...} }. Audio synthesizes each user
-    # turn via TTS (exercising the bot's STT); text sends it as text. Stored
-    # internally as user_audio (the speech config when audio, else None).
-    user_audio = _parse_user_block(data.get("user"), path)
+        # judge: { modality: audio|text, eval: {...}, transcription: {...} }. Audio
+        # means the bot speaks and the judge evaluates the transcription of its
+        # actual audio (tts_response); text means the bot's LLM text directly
+        # (llm_response, bot skips TTS). Stored as bot_audio/transcriber/judge.
+        bot_audio, transcriber, judge = _parse_judge_block(data.get("judge"), path)
 
-    # judge: { modality: audio|text, eval: {...}, transcription: {...} }. Audio
-    # means the bot speaks and the judge evaluates the transcription of its
-    # actual audio (tts_response); text means the bot's LLM text directly
-    # (llm_response, bot skips TTS). Stored as bot_audio/transcriber/judge.
-    bot_audio, transcriber, judge = _parse_judge_block(data.get("judge"), path)
+        # Resolve the modality-agnostic `response` event and check event/modality
+        # consistency now that the judge modality is known.
+        _resolve_response_events(turns, bot_audio, path)
 
-    # Resolve the modality-agnostic `response` event and check event/modality
-    # consistency now that the judge modality is known.
-    _resolve_response_events(turns, bot_audio, path)
-
-    return EvalScenario(
-        name=name,
-        turns=turns,
-        reset=reset,
-        judge=judge,
-        bot_audio=bot_audio,
-        transcriber=transcriber,
-        user_audio=user_audio,
-        fixtures=data.get("fixtures") or {},
-        source_path=path,
-    )
+        return cls(
+            name=name,
+            turns=turns,
+            reset=reset,
+            judge=judge,
+            bot_audio=bot_audio,
+            transcriber=transcriber,
+            user_audio=user_audio,
+            fixtures=data.get("fixtures") or {},
+            source_path=path,
+        )
 
 
 _DEFAULT_JUDGE = {"service": "ollama", "model": "qwen2.5:3b"}

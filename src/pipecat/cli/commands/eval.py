@@ -26,14 +26,13 @@ from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
-from pipecat.evals.harness import EvalTurnProgress, run_scenario
-from pipecat.evals.scenario import describe_config, load_scenario
+from pipecat.evals.harness import EvalSession, EvalTurnProgress
+from pipecat.evals.scenario import EvalScenario, describe_config
 from pipecat.evals.suite import (
+    EvalManifest,
     EvalRun,
+    EvalSuite,
     capture_pipeline_logs,
-    filter_runs,
-    load_manifest,
-    run_suite,
 )
 
 _console = Console()
@@ -145,7 +144,7 @@ def _build_scenario_runs(paths: list[Path], bot_url: str) -> list[EvalRun]:
     runs: list[EvalRun] = []
     for path in paths:
         try:
-            scenario = load_scenario(path)
+            scenario = EvalScenario.load(path)
         except (ValueError, FileNotFoundError) as e:
             run = EvalRun(bot=bot_url, scenario=path.stem, scenario_path=path, bot_url=bot_url)
             run.status = "done"
@@ -180,10 +179,10 @@ async def _execute_scenario(
     url = run.bot_url
     assert url is not None  # always set by _build_scenario_runs
     try:
-        scenario = load_scenario(run.scenario_path)
+        scenario = EvalScenario.load(run.scenario_path)
         record_path = _record_path(record_dir, run.scenario) if audio else None
         with capture_pipeline_logs(Path(logs_dir), run.scenario, name=run.scenario, enabled=debug):
-            run.result = await run_scenario(
+            run.result = await EvalSession.from_scenario(
                 scenario,
                 url,
                 on_progress=on_progress,
@@ -191,7 +190,7 @@ async def _execute_scenario(
                 cache_dir=cache_dir,
                 use_cache=use_cache,
                 stop_bot=stop_bot,
-            )
+            ).run()
         if run.result.debug_log:
             Path(logs_dir).mkdir(parents=True, exist_ok=True)
             (Path(logs_dir) / f"{run.scenario}.eval.log").write_text(
@@ -448,7 +447,7 @@ def _print_scenario_configs(runs: list[EvalRun]) -> None:
             continue
         seen.add(r.scenario)
         try:
-            cfg = describe_config(load_scenario(r.scenario_path), color=sys.stdout.isatty())
+            cfg = describe_config(EvalScenario.load(r.scenario_path), color=sys.stdout.isatty())
         except Exception as e:  # noqa: BLE001
             cfg = f"(failed to load: {e})"
         print(f"  {_color(r.scenario + ':', '1;36')}")
@@ -494,8 +493,7 @@ def _finalize_evals(
 
 
 async def _run_suite_all(
-    runs: list[EvalRun],
-    manifest,
+    suite: EvalSuite,
     logs_dir: Path,
     record_dir: Path | None,
     started: float,
@@ -504,15 +502,11 @@ async def _run_suite_all(
 ) -> None:
     """Run the suite with a live dashboard (TTY) or streamed lines (piped)."""
     if _console.is_terminal:
-        with Live(_EvalDashboard(runs, started), console=_console, refresh_per_second=12.5):
-            await run_suite(
-                runs, manifest, logs_dir, record_dir=record_dir, debug=debug, use_cache=use_cache
-            )
+        with Live(_EvalDashboard(suite.runs, started), console=_console, refresh_per_second=12.5):
+            await suite.run(logs_dir, record_dir=record_dir, debug=debug, use_cache=use_cache)
     else:
-        print(f"Running {len(runs)} eval(s), {manifest.concurrency} at a time...")
-        await run_suite(
-            runs,
-            manifest,
+        print(f"Running {len(suite.runs)} eval(s), {suite.manifest.concurrency} at a time...")
+        await suite.run(
             logs_dir,
             record_dir=record_dir,
             on_update=_print_eval_line,
@@ -566,7 +560,7 @@ def suite(
     Everything except the ``suite:`` list can be set in the manifest or overridden
     here (the command line wins), so a manifest can be just a ``suite:`` list.
     """
-    manifest = load_manifest(
+    manifest = EvalManifest.load(
         manifest_path,
         bots_dir=bots_dir,
         scenarios_dir=scenarios_dir,
@@ -579,7 +573,8 @@ def suite(
         cache_dir=cache_dir,
     )
 
-    runs = filter_runs(manifest.runs, pattern=pattern, scenario=scenario)
+    suite = EvalSuite(manifest)
+    runs = suite.filter(pattern=pattern, scenario=scenario)
     if not runs:
         print("No runs match.")
         raise typer.Exit(code=1)
@@ -594,7 +589,7 @@ def suite(
     _print_scenario_configs(runs)
 
     started = time.monotonic()
-    asyncio.run(_run_suite_all(runs, manifest, logs_dir, record_dir, started, debug, not no_cache))
+    asyncio.run(_run_suite_all(suite, logs_dir, record_dir, started, debug, not no_cache))
     exit_code = _finalize_evals(
         runs, run_dir, time.monotonic() - started, dashboard_shown=_console.is_terminal
     )

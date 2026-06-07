@@ -50,8 +50,8 @@ continue; ``text_contains`` treats a missing substring as continue. The
 
 Example::
 
-    scenario = load_scenario("scenarios/greeting.yaml")
-    result = await run_scenario(scenario, "ws://localhost:7860")
+    scenario = EvalScenario.load("scenarios/greeting.yaml")
+    result = await EvalSession.from_scenario(scenario, "ws://localhost:7860").run()
     if result.passed:
         print("PASS")
     else:
@@ -178,7 +178,8 @@ class EvalSession:
 
     Connects as an RTVI client, drives each turn (sending ``send-text`` or
     ``raw-audio``), collects the RTVI events the bot emits, and asserts on them.
-    Use :meth:`run`, or the :func:`run_scenario` convenience wrapper.
+    Build one with :meth:`from_scenario` (which constructs the judge, voice, and
+    transcriber the scenario needs), then await :meth:`run`.
     """
 
     def __init__(
@@ -189,7 +190,6 @@ class EvalSession:
         connect_timeout_s: float = 5.0,
         on_progress: Callable[[EvalTurnProgress], None] | None = None,
         record_path: str | None = None,
-        cache_dir: str | None = None,
         stop_bot: bool = False,
         judge: EvalJudge | None = None,
         voice: EvalVoice | None = None,
@@ -198,7 +198,7 @@ class EvalSession:
         """Initialize the eval session.
 
         The ``judge``, ``voice``, and ``transcriber`` are injected pre-built:
-        :func:`run_scenario` constructs the defaults from the scenario's config
+        :meth:`from_scenario` constructs the defaults from the scenario's config
         (via the respective ``from_config``) and passes them in. Construct and
         pass your own to override them (e.g. a custom judge LLM or TTS service).
 
@@ -211,8 +211,6 @@ class EvalSession:
                 as each turn and expectation resolves (used for verbose output).
             record_path: When set (and the scenario is audio mode), asks the eval
                 transport to record the conversation audio to this path (bot-side).
-            cache_dir: Where to cache synthesized user audio. Defaults to
-                ``<user-cache-dir>/pipecat/tts``.
             stop_bot: When True, ask the bot to cancel its pipeline (and exit) on
                 teardown via ``eval-cancel``. Leave False to keep the bot running
                 so it can serve more scenarios (the eval transport already
@@ -232,7 +230,6 @@ class EvalSession:
         self._connect_timeout_s = connect_timeout_s
         self._on_progress = on_progress
         self._record_path = record_path
-        self._cache_dir = cache_dir
         self._stop_bot = stop_bot
 
         self._ws: ClientConnection | None = None
@@ -273,6 +270,83 @@ class EvalSession:
         self._tts_audio: bytearray = bytearray()  # current spoken segment's audio
         self._tts_sample_rate: int = 0
 
+    @classmethod
+    def from_scenario(
+        cls,
+        scenario: EvalScenario,
+        bot_url: str,
+        *,
+        connect_timeout_s: float = 5.0,
+        on_progress: Callable[[EvalTurnProgress], None] | None = None,
+        record_path: str | None = None,
+        cache_dir: str | None = None,
+        use_cache: bool = True,
+        stop_bot: bool = False,
+        judge: EvalJudge | None = None,
+        voice: EvalVoice | None = None,
+        transcriber: EvalTranscriber | None = None,
+    ) -> "EvalSession":
+        """Build a ready-to-run session from a scenario, constructing what it needs.
+
+        Builds the judge, voice, and transcriber the scenario calls for — each via
+        its ``from_config`` — and injects them into a new session. Pass ``judge`` /
+        ``voice`` / ``transcriber`` to override any of them with your own pre-built
+        instance. Then await :meth:`run`::
+
+            session = EvalSession.from_scenario(scenario, "ws://localhost:7860")
+            result = await session.run()
+
+        Args:
+            scenario: The parsed scenario to run.
+            bot_url: WebSocket URL of the bot's eval transport.
+            connect_timeout_s: How long to wait for the bot to accept the WS
+                connection before giving up.
+            on_progress: Optional per-turn/expectation progress callback (verbose).
+            record_path: Optional path to record the conversation audio (audio mode).
+            cache_dir: Optional directory for cached synthesized user audio
+                (default ``<user-cache-dir>/pipecat/tts``).
+            use_cache: When False, ignore cached user audio and force fresh synthesis
+                (no cache reads or writes). Defaults to True.
+            stop_bot: When True, ask the bot to cancel its pipeline (and exit) on
+                teardown. Leave False to keep it running for more scenarios.
+            judge: Override the judge (default: built from ``scenario.judge`` when the
+                scenario has ``eval:`` assertions).
+            voice: Override the user-audio generator (default: built from
+                ``scenario.user_audio`` in audio mode).
+            transcriber: Override the bot-audio transcriber (default: built from
+                ``scenario.transcriber`` when the scenario asserts ``response``).
+
+        Returns:
+            A configured session, ready for :meth:`run`.
+        """
+        turns = scenario.turns
+        if judge is None and any(exp.eval is not None for turn in turns for exp in turn.expect):
+            with logger.contextualize(eval_pipeline="judge"):
+                judge = EvalJudge.from_config(scenario.judge)
+
+        if voice is None and scenario.user_audio is not None:
+            with logger.contextualize(eval_pipeline="voice"):
+                voice = EvalVoice.from_config(
+                    scenario.user_audio, cache_dir=cache_dir, use_cache=use_cache
+                )
+
+        wants_response = any(exp.event == "response" for turn in turns for exp in turn.expect)
+        if transcriber is None and wants_response and scenario.bot_audio:
+            with logger.contextualize(eval_pipeline="transcription"):
+                transcriber = EvalTranscriber.from_config(scenario.transcriber)
+
+        return cls(
+            scenario,
+            bot_url,
+            connect_timeout_s=connect_timeout_s,
+            on_progress=on_progress,
+            record_path=record_path,
+            stop_bot=stop_bot,
+            judge=judge,
+            voice=voice,
+            transcriber=transcriber,
+        )
+
     async def run(self) -> EvalResult:
         """Connect, drive the scenario, and return the result."""
         started = time.monotonic()
@@ -281,7 +355,7 @@ class EvalSession:
 
         # The `response` transcription needs the bot's actual audio; without audio
         # mode there's nothing to transcribe, so skip rather than fail. (Normally
-        # unreachable: load_scenario resolves `response` to llm_response in text
+        # unreachable: EvalScenario.load resolves `response` to llm_response in text
         # modality; this guards Scenarios built directly.)
         if self._wants_response and not self._scenario.bot_audio:
             reason = "asserts 'response' transcription but judge modality is text (no audio)"
@@ -322,7 +396,7 @@ class EvalSession:
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
 
-        # Start the injected sub-pipelines (built by run_scenario from the
+        # Start the injected sub-pipelines (built by from_scenario from the
         # scenario config). Each tags its logs with an ``eval_pipeline`` label via
         # logger.contextualize: the tasks created here inherit it (contextvars
         # copy into asyncio tasks), so the underlying service's logs carry the
@@ -1126,77 +1200,3 @@ def _audio_chunks(pcm: bytes, sample_rate: int):
         yield pcm[offset : offset + bytes_per_chunk]
     for _ in range(AUDIO_TRAILING_SILENCE_MS // AUDIO_CHUNK_MS):
         yield silence
-
-
-async def run_scenario(
-    scenario: EvalScenario,
-    bot_url: str,
-    *,
-    connect_timeout_s: float = 5.0,
-    on_progress: Callable[[EvalTurnProgress], None] | None = None,
-    record_path: str | None = None,
-    cache_dir: str | None = None,
-    use_cache: bool = True,
-    stop_bot: bool = False,
-    judge: EvalJudge | None = None,
-    voice: EvalVoice | None = None,
-    transcriber: EvalTranscriber | None = None,
-) -> EvalResult:
-    """Run a scenario against a bot at the given WebSocket URL.
-
-    Convenience wrapper around :class:`EvalSession`. Builds the judge, voice, and
-    transcriber the scenario calls for — each via its ``from_config`` — and hands
-    them to the session. Pass ``judge`` / ``voice`` / ``transcriber`` to override
-    any of them with your own pre-built instance.
-
-    Args:
-        scenario: The parsed scenario to run.
-        bot_url: WebSocket URL of the bot's eval transport.
-        connect_timeout_s: How long to wait for the bot to accept the WS
-            connection before giving up.
-        on_progress: Optional per-turn/expectation progress callback (verbose).
-        record_path: Optional path to record the conversation audio (audio mode).
-        cache_dir: Optional directory for cached synthesized user audio
-            (default ``<user-cache-dir>/pipecat/tts``).
-        use_cache: When False, ignore cached user audio and force fresh synthesis
-            (no cache reads or writes). Defaults to True.
-        stop_bot: When True, ask the bot to cancel its pipeline (and exit) on
-            teardown. Leave False to keep it running for more scenarios.
-        judge: Override the judge (default: built from ``scenario.judge`` when the
-            scenario has ``eval:`` assertions).
-        voice: Override the user-audio generator (default: built from
-            ``scenario.user_audio`` in audio mode).
-        transcriber: Override the bot-audio transcriber (default: built from
-            ``scenario.transcriber`` when the scenario asserts ``response``).
-
-    Returns:
-        The structured outcome.
-    """
-    turns = scenario.turns
-    if judge is None and any(exp.eval is not None for turn in turns for exp in turn.expect):
-        with logger.contextualize(eval_pipeline="judge"):
-            judge = EvalJudge.from_config(scenario.judge)
-
-    if voice is None and scenario.user_audio is not None:
-        with logger.contextualize(eval_pipeline="voice"):
-            voice = EvalVoice.from_config(
-                scenario.user_audio, cache_dir=cache_dir, use_cache=use_cache
-            )
-
-    wants_response = any(exp.event == "response" for turn in turns for exp in turn.expect)
-    if transcriber is None and wants_response and scenario.bot_audio:
-        with logger.contextualize(eval_pipeline="transcription"):
-            transcriber = EvalTranscriber.from_config(scenario.transcriber)
-
-    return await EvalSession(
-        scenario,
-        bot_url,
-        connect_timeout_s=connect_timeout_s,
-        on_progress=on_progress,
-        record_path=record_path,
-        cache_dir=cache_dir,
-        stop_bot=stop_bot,
-        judge=judge,
-        voice=voice,
-        transcriber=transcriber,
-    ).run()
