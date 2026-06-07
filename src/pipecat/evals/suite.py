@@ -6,11 +6,11 @@
 
 """Multi-bot eval suite runner.
 
-A *manifest* lists bots to spawn and the scenarios to run against each. This
-module spawns each bot with its eval transport on its own port, drives it with
-the harness (:func:`pipecat.evals.harness.run_scenario`), and runs several
-concurrently. ``pipecat eval suite`` is the CLI in front of it; the release evals
-are just a manifest plus that command.
+An :class:`EvalManifest` lists bots to spawn and the scenarios to run against
+each; an :class:`EvalSuite` spawns each bot with its eval transport on its own
+port, drives it with the harness (:meth:`pipecat.evals.harness.EvalSession.from_scenario`),
+and runs several concurrently. ``pipecat eval suite`` is the CLI in front of it;
+the release evals are just a manifest plus that command.
 
 Manifest format (YAML)::
 
@@ -54,7 +54,7 @@ from pathlib import Path
 import yaml
 from loguru import logger
 
-from pipecat.evals.harness import EvalResult, run_scenario
+from pipecat.evals.harness import EvalResult, EvalSession
 
 DEFAULT_BASE_PORT = 7900
 DEFAULT_CONCURRENCY = 4
@@ -161,7 +161,7 @@ class EvalRun:
 
 
 @dataclass
-class Manifest:
+class EvalManifest:
     """A parsed eval-suite manifest.
 
     Parameters:
@@ -173,7 +173,6 @@ class Manifest:
         runs_dir: Base for run output (a ``<name>/`` subdir is added), or ``None``.
         record: Whether to record conversation audio.
         cache_dir: Directory for cached synthesized user audio, or ``None``.
-        base_dir: The manifest file's directory, for resolving relative paths.
     """
 
     runs: list[EvalRun]
@@ -184,308 +183,329 @@ class Manifest:
     runs_dir: Path | None
     record: bool
     cache_dir: str | None
-    base_dir: Path
 
+    @classmethod
+    def load(
+        cls,
+        path: str | Path,
+        *,
+        bots_dir: str | Path | None = None,
+        scenarios_dir: str | Path | None = None,
+        runs_dir: str | Path | None = None,
+        spawn: str | None = None,
+        python: str | None = None,
+        concurrency: int | None = None,
+        base_port: int | None = None,
+        record: bool | None = None,
+        cache_dir: str | None = None,
+    ) -> "EvalManifest":
+        """Parse a manifest YAML into an :class:`EvalManifest`, with optional overrides.
 
-def load_manifest(
-    path: str | Path,
-    *,
-    bots_dir: str | Path | None = None,
-    scenarios_dir: str | Path | None = None,
-    runs_dir: str | Path | None = None,
-    spawn: str | None = None,
-    python: str | None = None,
-    concurrency: int | None = None,
-    base_port: int | None = None,
-    record: bool | None = None,
-    cache_dir: str | None = None,
-) -> Manifest:
-    """Parse a manifest YAML into a :class:`Manifest`, with optional overrides.
+        Any keyword that is not ``None`` overrides the corresponding manifest value
+        (so the CLI wins), which means a manifest can be just a ``suite:`` list with
+        everything else supplied on the command line. Manifest-relative paths resolve
+        against the manifest's directory; path overrides resolve against the current
+        working directory.
 
-    Any keyword that is not ``None`` overrides the corresponding manifest value
-    (so the CLI wins), which means a manifest can be just a ``suite:`` list with
-    everything else supplied on the command line. Manifest-relative paths resolve
-    against the manifest's directory; path overrides resolve against the current
-    working directory.
+        Args:
+            path: Path to the manifest YAML.
+            bots_dir: Override for the manifest's ``bots_dir`` (bot paths are relative to it).
+            scenarios_dir: Override for the manifest's ``scenarios_dir``.
+            runs_dir: Override for the manifest's ``runs_dir`` (base for run output).
+            spawn: Override for the spawn command template.
+            python: Override for the interpreter used to spawn bots.
+            concurrency: Override for how many runs execute at once.
+            base_port: Override for the first port assigned.
+            record: Override for whether to record conversation audio.
+            cache_dir: Override for the synthesized-audio cache directory.
 
-    Args:
-        path: Path to the manifest YAML.
-        bots_dir: Override for the manifest's ``bots_dir`` (bot paths are relative to it).
-        scenarios_dir: Override for the manifest's ``scenarios_dir``.
-        runs_dir: Override for the manifest's ``runs_dir`` (base for run output).
-        spawn: Override for the spawn command template.
-        python: Override for the interpreter used to spawn bots.
-        concurrency: Override for how many runs execute at once.
-        base_port: Override for the first port assigned.
-        record: Override for whether to record conversation audio.
-        cache_dir: Override for the synthesized-audio cache directory.
+        Returns:
+            The parsed :class:`EvalManifest`.
+        """
+        path = Path(path).resolve()
+        base = path.parent
+        data = yaml.safe_load(path.read_text()) or {}
 
-    Returns:
-        The parsed :class:`Manifest`.
-    """
-    path = Path(path).resolve()
-    base = path.parent
-    data = yaml.safe_load(path.read_text()) or {}
+        def dir_value(override, key: str, default: str) -> Path:
+            # Override (from the CLI) resolves against cwd; the manifest value resolves
+            # against the manifest file's directory.
+            if override is not None:
+                return Path(override).resolve()
+            return (base / str(data.get(key, default))).resolve()
 
-    def dir_value(override, key: str, default: str) -> Path:
-        # Override (from the CLI) resolves against cwd; the manifest value resolves
-        # against the manifest file's directory.
-        if override is not None:
-            return Path(override).resolve()
-        return (base / str(data.get(key, default))).resolve()
+        bots_dir_p = dir_value(bots_dir, "bots_dir", ".")
+        scenarios_dir_p = dir_value(scenarios_dir, "scenarios_dir", "scenarios")
 
-    bots_dir_p = dir_value(bots_dir, "bots_dir", ".")
-    scenarios_dir_p = dir_value(scenarios_dir, "scenarios_dir", "scenarios")
+        if runs_dir is not None:
+            runs_dir_p: Path | None = Path(runs_dir).resolve()
+        elif data.get("runs_dir"):
+            runs_dir_p = (base / str(data["runs_dir"])).resolve()
+        else:
+            runs_dir_p = None
 
-    if runs_dir is not None:
-        runs_dir_p: Path | None = Path(runs_dir).resolve()
-    elif data.get("runs_dir"):
-        runs_dir_p = (base / str(data["runs_dir"])).resolve()
-    else:
-        runs_dir_p = None
+        spawn = spawn or str(data.get("spawn", DEFAULT_SPAWN))
+        python = python or str(data.get("python") or sys.executable)
+        concurrency = (
+            concurrency
+            if concurrency is not None
+            else int(data.get("concurrency", DEFAULT_CONCURRENCY))
+        )
+        base_port = (
+            base_port if base_port is not None else int(data.get("base_port", DEFAULT_BASE_PORT))
+        )
+        record = record if record is not None else bool(data.get("record", False))
+        cache_dir = cache_dir if cache_dir is not None else data.get("cache_dir")
 
-    spawn = spawn or str(data.get("spawn", DEFAULT_SPAWN))
-    python = python or str(data.get("python") or sys.executable)
-    concurrency = (
-        concurrency
-        if concurrency is not None
-        else int(data.get("concurrency", DEFAULT_CONCURRENCY))
-    )
-    base_port = (
-        base_port if base_port is not None else int(data.get("base_port", DEFAULT_BASE_PORT))
-    )
-    record = record if record is not None else bool(data.get("record", False))
-    cache_dir = cache_dir if cache_dir is not None else data.get("cache_dir")
-
-    runs: list[EvalRun] = []
-    for item in data.get("suite", []):
-        bot = str(item["bot"])
-        bot_path = (bots_dir_p / bot).resolve()
-        # A body file (resolved relative to the manifest) is passed to the bot
-        # as --runner-body, supplying runner-args data the bot would normally
-        # get from a /start request (e.g. a vision bot's image path).
-        runner_body = item.get("runner_body")
-        runner_body_path = (base / str(runner_body)).resolve() if runner_body else None
-        for scenario in item.get("scenarios", []):
-            scenario = str(scenario)
-            # A scenario may be a bare name (resolved under scenarios_dir) or a
-            # path/.yaml relative to the manifest.
-            if scenario.endswith((".yaml", ".yml")) or "/" in scenario:
-                scenario_path = (base / scenario).resolve()
-                name = Path(scenario).stem
-            else:
-                scenario_path = (scenarios_dir_p / f"{scenario}.yaml").resolve()
-                name = scenario
-            runs.append(
-                EvalRun(
-                    bot=bot,
-                    scenario=name,
-                    bot_path=bot_path,
-                    scenario_path=scenario_path,
-                    runner_body_path=runner_body_path,
+        runs: list[EvalRun] = []
+        for item in data.get("suite", []):
+            bot = str(item["bot"])
+            bot_path = (bots_dir_p / bot).resolve()
+            # A body file (resolved relative to the manifest) is passed to the bot
+            # as --runner-body, supplying runner-args data the bot would normally
+            # get from a /start request (e.g. a vision bot's image path).
+            runner_body = item.get("runner_body")
+            runner_body_path = (base / str(runner_body)).resolve() if runner_body else None
+            for scenario in item.get("scenarios", []):
+                scenario = str(scenario)
+                # A scenario may be a bare name (resolved under scenarios_dir) or a
+                # path/.yaml relative to the manifest.
+                if scenario.endswith((".yaml", ".yml")) or "/" in scenario:
+                    scenario_path = (base / scenario).resolve()
+                    name = Path(scenario).stem
+                else:
+                    scenario_path = (scenarios_dir_p / f"{scenario}.yaml").resolve()
+                    name = scenario
+                runs.append(
+                    EvalRun(
+                        bot=bot,
+                        scenario=name,
+                        bot_path=bot_path,
+                        scenario_path=scenario_path,
+                        runner_body_path=runner_body_path,
+                    )
                 )
-            )
 
-    return Manifest(
-        runs=runs,
-        spawn=spawn,
-        python=python,
-        concurrency=concurrency,
-        base_port=base_port,
-        runs_dir=runs_dir_p,
-        record=record,
-        cache_dir=cache_dir,
-        base_dir=base,
-    )
+        return cls(
+            runs=runs,
+            spawn=spawn,
+            python=python,
+            concurrency=concurrency,
+            base_port=base_port,
+            runs_dir=runs_dir_p,
+            record=record,
+            cache_dir=cache_dir,
+        )
 
 
-def filter_runs(
-    runs: list[EvalRun], *, pattern: str | None = None, scenario: str | None = None
-) -> list[EvalRun]:
-    """Subset the runs by bot-name substring and/or scenario name.
+class EvalSuite:
+    """Runs the (bot, scenario) runs of an :class:`EvalManifest`, spawning each bot.
 
-    Args:
-        runs: The runs to filter.
-        pattern: Keep only runs whose bot name contains this substring.
-        scenario: Keep only runs for this exact scenario name.
+    Spawns each bot with its eval transport on its own port, drives it with the
+    harness (:meth:`pipecat.evals.harness.EvalSession.from_scenario`), and runs several
+    concurrently (up to the manifest's ``concurrency``). The runs are mutated in
+    place as they execute so a live display can read their progress.
 
-    Returns:
-        The matching runs, in their original order.
+    Example::
+
+        manifest = EvalManifest.load("manifest.yaml")
+        suite = EvalSuite(manifest)
+        suite.filter(pattern="voice")
+        await suite.run(Path("logs"))
     """
-    out = runs
-    if pattern:
-        out = [r for r in out if pattern in r.bot]
-    if scenario:
-        out = [r for r in out if r.scenario == scenario]
-    return out
 
+    def __init__(self, manifest: EvalManifest):
+        """Initialize the suite from a parsed manifest.
 
-def _spawn_argv(
-    manifest: Manifest, bot_path: Path, port: int, runner_body_path: Path | None = None
-) -> list[str]:
-    """Build the spawn argv, substituting {python}/{bot}/{port} per token.
+        Args:
+            manifest: The parsed :class:`EvalManifest`; its runs become the suite's
+                working set (narrowed by :meth:`filter`, executed by :meth:`run`).
+        """
+        self.manifest = manifest
+        self.runs = list(manifest.runs)
 
-    Substituting per token (rather than into the whole string) keeps a path with
-    spaces in one argv entry. If the run has a body file, ``--runner-body <path>``
-    is appended so the bot's runner picks it up.
-    """
-    subs = {"python": manifest.python, "bot": str(bot_path), "port": str(port)}
-    argv = [tok.format(**subs) for tok in shlex.split(manifest.spawn)]
-    if runner_body_path is not None:
-        argv += ["--runner-body", str(runner_body_path)]
-    return argv
+    def filter(self, *, pattern: str | None = None, scenario: str | None = None) -> list[EvalRun]:
+        """Subset the suite's runs by bot-name substring and/or scenario name.
 
+        Narrows :attr:`runs` in place (and returns it) so only matching runs are
+        executed and displayed.
 
-async def _stop_bot(proc: asyncio.subprocess.Process) -> None:
-    """Wait for the bot to exit, escalating to terminate/kill if it lingers.
+        Args:
+            pattern: Keep only runs whose bot name contains this substring.
+            scenario: Keep only runs for this exact scenario name.
 
-    The harness sends ``eval-cancel`` on teardown, so the bot should already be
-    cancelling its pipeline and exiting; wait for that graceful exit first.
-    """
-    if proc.returncode is not None:
-        return
-    try:
-        await asyncio.wait_for(proc.wait(), timeout=BOT_STOP_TIMEOUT_S)
-        return
-    except TimeoutError:
-        proc.terminate()
-    try:
-        await asyncio.wait_for(proc.wait(), timeout=BOT_STOP_TIMEOUT_S)
-    except TimeoutError:
-        proc.kill()
-        await proc.wait()
+        Returns:
+            The matching runs, in their original order.
+        """
+        runs = self.runs
+        if pattern:
+            runs = [r for r in runs if pattern in r.bot]
+        if scenario:
+            runs = [r for r in runs if r.scenario == scenario]
+        self.runs = runs
+        return runs
 
+    async def run(
+        self,
+        logs_dir: Path,
+        *,
+        record_dir: Path | None = None,
+        on_update: Callable[[EvalRun], None] | None = None,
+        debug: bool = False,
+        use_cache: bool = True,
+    ) -> None:
+        """Run all of the suite's runs with the manifest's concurrency, in place.
 
-async def _run_one(
-    run: EvalRun,
-    port: int,
-    manifest: Manifest,
-    logs_dir: Path,
-    record_dir: Path | None,
-    sem: asyncio.Semaphore,
-    on_update: Callable[[EvalRun], None] | None,
-    debug: bool,
-    use_cache: bool,
-) -> None:
-    """Spawn one bot, run its scenario against it, and record the outcome on ``run``."""
-    async with sem:
-        # Include the bot in the filename: one bot can run several scenarios
-        # concurrently, and they must not share a log/recording file.
-        safe = f"{run.bot.replace('/', '_')}__{run.scenario}"
-        log_path = logs_dir / f"{safe}.log"
+        Each run is spawned on its own port (``base_port + index``).
 
-        run.status = "running"
-        run.started_at = time.monotonic()
-        if on_update:
-            on_update(run)
-
-        proc: asyncio.subprocess.Process | None = None
-        logf = None
-        try:
-            bot_path = run.bot_path
-            if bot_path is None or not bot_path.exists():
-                run.error = f"bot not found: {run.bot_path}"
-                return
-            if not run.scenario_path.exists():
-                run.error = f"scenario not found: {run.scenario_path}"
-                return
-            if run.runner_body_path is not None and not run.runner_body_path.exists():
-                run.error = f"body not found: {run.runner_body_path}"
-                return
-
-            from pipecat.evals.scenario import load_scenario
-
-            # Spawn the bot with the body file's directory as cwd, so relative
-            # paths inside the body (e.g. an image) resolve next to the file.
-            cwd = str(run.runner_body_path.parent) if run.runner_body_path else None
-
-            logf = log_path.open("wb")
-            proc = await asyncio.create_subprocess_exec(
-                *_spawn_argv(manifest, bot_path, port, run.runner_body_path),
-                stdout=logf,
-                stderr=asyncio.subprocess.STDOUT,
-                cwd=cwd,
-            )
-
-            scenario = load_scenario(run.scenario_path)
-            record_path = str(record_dir / f"{safe}.wav") if record_dir else None
-            # Under --debug, capture the harness's own logs (transcription / voice
-            # / judge) into a single <safe>.debug.log, scoped by this run's id so
-            # concurrent runs don't mix. The bot's own logs are captured
-            # separately in <safe>.log above.
-            with capture_pipeline_logs(logs_dir, safe, name=run.scenario, enabled=debug):
-                run.result = await run_scenario(
-                    scenario,
-                    f"ws://localhost:{port}",
-                    connect_timeout_s=BOT_READY_TIMEOUT_S,
-                    record_path=record_path,
-                    cache_dir=manifest.cache_dir,
-                    use_cache=use_cache,
-                    # The suite spawns a bot per run, so cancel it on teardown to
-                    # shut it down gracefully (faster than the kill fallback).
-                    stop_bot=True,
+        Args:
+            logs_dir: Directory for per-run logs.
+            record_dir: Directory for per-run conversation recordings, or ``None``.
+            on_update: Called whenever a run changes status, for live display.
+            debug: When True, save each run's combined ``<run>.debug.log``.
+            use_cache: When False, ignore cached user audio and force fresh synthesis.
+        """
+        logger.remove()  # keep stdout clean for the caller's display
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        if record_dir:
+            record_dir.mkdir(parents=True, exist_ok=True)
+        sem = asyncio.Semaphore(self.manifest.concurrency)
+        await asyncio.gather(
+            *(
+                self._run_one(
+                    run,
+                    self.manifest.base_port + i,
+                    logs_dir,
+                    record_dir,
+                    sem,
+                    on_update,
+                    debug,
+                    use_cache,
                 )
-        except Exception as e:
-            run.error = f"error: {e}"
-        finally:
-            # Stamp the wall-clock and flip to "done" BEFORE tearing the bot
-            # down, measured the same way as a live counter (now - started_at), so
-            # the displayed time matches what was ticking and excludes shutdown.
-            if run.started_at is not None:
-                run.duration_ms = int((time.monotonic() - run.started_at) * 1000)
-            run.status = "done"
+                for i, run in enumerate(self.runs)
+            )
+        )
+
+    async def _run_one(
+        self,
+        run: EvalRun,
+        port: int,
+        logs_dir: Path,
+        record_dir: Path | None,
+        sem: asyncio.Semaphore,
+        on_update: Callable[[EvalRun], None] | None,
+        debug: bool,
+        use_cache: bool,
+    ) -> None:
+        """Spawn one bot, run its scenario against it, and record the outcome on ``run``."""
+        async with sem:
+            # Include the bot in the filename: one bot can run several scenarios
+            # concurrently, and they must not share a log/recording file.
+            safe = f"{run.bot.replace('/', '_')}__{run.scenario}"
+            log_path = logs_dir / f"{safe}.log"
+
+            run.status = "running"
+            run.started_at = time.monotonic()
             if on_update:
                 on_update(run)
-            if proc is not None:
-                await _stop_bot(proc)
-            if logf is not None:
-                logf.close()
-            # Save the harness's own decision trace next to the bot log.
-            if run.result is not None and run.result.debug_log:
-                (logs_dir / f"{safe}.eval.log").write_text("\n".join(run.result.debug_log) + "\n")
 
+            proc: asyncio.subprocess.Process | None = None
+            logf = None
+            try:
+                bot_path = run.bot_path
+                if bot_path is None or not bot_path.exists():
+                    run.error = f"bot not found: {run.bot_path}"
+                    return
+                if not run.scenario_path.exists():
+                    run.error = f"scenario not found: {run.scenario_path}"
+                    return
+                if run.runner_body_path is not None and not run.runner_body_path.exists():
+                    run.error = f"body not found: {run.runner_body_path}"
+                    return
 
-async def run_suite(
-    runs: list[EvalRun],
-    manifest: Manifest,
-    logs_dir: Path,
-    *,
-    record_dir: Path | None = None,
-    on_update: Callable[[EvalRun], None] | None = None,
-    debug: bool = False,
-    use_cache: bool = True,
-) -> None:
-    """Run all ``runs`` with the manifest's concurrency, mutating each in place.
+                from pipecat.evals.scenario import EvalScenario
 
-    Each run is spawned on its own port (``base_port + index``).
+                # Spawn the bot with the body file's directory as cwd, so relative
+                # paths inside the body (e.g. an image) resolve next to the file.
+                cwd = str(run.runner_body_path.parent) if run.runner_body_path else None
 
-    Args:
-        runs: The runs to execute (mutated in place with status/result).
-        manifest: The parsed manifest (concurrency, spawn template, ports, cache).
-        logs_dir: Directory for per-run logs.
-        record_dir: Directory for per-run conversation recordings, or ``None``.
-        on_update: Called whenever a run changes status, for live display.
-        debug: When True, save each run's combined ``<run>.debug.log``.
-        use_cache: When False, ignore cached user audio and force fresh synthesis.
-    """
-    logger.remove()  # keep stdout clean for the caller's display
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    if record_dir:
-        record_dir.mkdir(parents=True, exist_ok=True)
-    sem = asyncio.Semaphore(manifest.concurrency)
-    await asyncio.gather(
-        *(
-            _run_one(
-                run,
-                manifest.base_port + i,
-                manifest,
-                logs_dir,
-                record_dir,
-                sem,
-                on_update,
-                debug,
-                use_cache,
-            )
-            for i, run in enumerate(runs)
-        )
-    )
+                logf = log_path.open("wb")
+                proc = await asyncio.create_subprocess_exec(
+                    *self._spawn_argv(bot_path, port, run.runner_body_path),
+                    stdout=logf,
+                    stderr=asyncio.subprocess.STDOUT,
+                    cwd=cwd,
+                )
+
+                scenario = EvalScenario.load(run.scenario_path)
+                record_path = str(record_dir / f"{safe}.wav") if record_dir else None
+                # Under --debug, capture the harness's own logs (transcription / voice
+                # / judge) into a single <safe>.debug.log, scoped by this run's id so
+                # concurrent runs don't mix. The bot's own logs are captured
+                # separately in <safe>.log above.
+                with capture_pipeline_logs(logs_dir, safe, name=run.scenario, enabled=debug):
+                    run.result = await EvalSession.from_scenario(
+                        scenario,
+                        f"ws://localhost:{port}",
+                        connect_timeout_s=BOT_READY_TIMEOUT_S,
+                        record_path=record_path,
+                        cache_dir=self.manifest.cache_dir,
+                        use_cache=use_cache,
+                        # The suite spawns a bot per run, so cancel it on teardown to
+                        # shut it down gracefully (faster than the kill fallback).
+                        stop_bot=True,
+                    ).run()
+            except Exception as e:
+                run.error = f"error: {e}"
+            finally:
+                # Stamp the wall-clock and flip to "done" BEFORE tearing the bot
+                # down, measured the same way as a live counter (now - started_at), so
+                # the displayed time matches what was ticking and excludes shutdown.
+                if run.started_at is not None:
+                    run.duration_ms = int((time.monotonic() - run.started_at) * 1000)
+                run.status = "done"
+                if on_update:
+                    on_update(run)
+                if proc is not None:
+                    await self._stop_bot(proc)
+                if logf is not None:
+                    logf.close()
+                # Save the harness's own decision trace next to the bot log.
+                if run.result is not None and run.result.debug_log:
+                    (logs_dir / f"{safe}.eval.log").write_text(
+                        "\n".join(run.result.debug_log) + "\n"
+                    )
+
+    def _spawn_argv(
+        self, bot_path: Path, port: int, runner_body_path: Path | None = None
+    ) -> list[str]:
+        """Build the spawn argv, substituting {python}/{bot}/{port} per token.
+
+        Substituting per token (rather than into the whole string) keeps a path with
+        spaces in one argv entry. If the run has a body file, ``--runner-body <path>``
+        is appended so the bot's runner picks it up.
+        """
+        subs = {"python": self.manifest.python, "bot": str(bot_path), "port": str(port)}
+        argv = [tok.format(**subs) for tok in shlex.split(self.manifest.spawn)]
+        if runner_body_path is not None:
+            argv += ["--runner-body", str(runner_body_path)]
+        return argv
+
+    @staticmethod
+    async def _stop_bot(proc: asyncio.subprocess.Process) -> None:
+        """Wait for the bot to exit, escalating to terminate/kill if it lingers.
+
+        The harness sends ``eval-cancel`` on teardown, so the bot should already be
+        cancelling its pipeline and exiting; wait for that graceful exit first.
+        """
+        if proc.returncode is not None:
+            return
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=BOT_STOP_TIMEOUT_S)
+            return
+        except TimeoutError:
+            proc.terminate()
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=BOT_STOP_TIMEOUT_S)
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()

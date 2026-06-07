@@ -150,7 +150,7 @@ class EvalVoice:
         ``(voice_cfg, sample_rate)`` and returning a ``TTSService``); otherwise
         dispatches on the ``service`` name. Add providers by extending this. To
         use a fully custom setup, construct ``EvalVoice`` directly with your own
-        ``TTSService`` and pass it to :func:`pipecat.evals.harness.run_scenario`.
+        ``TTSService`` and pass it to :meth:`pipecat.evals.harness.EvalSession.from_scenario`.
 
         Args:
             voice_cfg: ``user_audio`` mapping — ``service`` (``kokoro`` or
