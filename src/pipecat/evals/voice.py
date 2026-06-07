@@ -112,6 +112,7 @@ class EvalVoice:
         sample_rate: int,
         cache_key: str,
         cache_dir: str | Path | None = None,
+        use_cache: bool = True,
     ):
         """Initialize the generator.
 
@@ -122,18 +123,27 @@ class EvalVoice:
                 :func:`tts_cache_key`); combined with the text to key the cache.
             cache_dir: Where to store cached audio. Defaults to
                 ``<user-cache-dir>/pipecat/tts`` (or ``$PIPECAT_EVALS_CACHE_DIR``).
+            use_cache: When False, ignore any cached audio and don't write new
+                cache files — every utterance is freshly synthesized.
         """
         self._service = service
         self._sample_rate = sample_rate
         self._cache_key = cache_key
         self._cache_dir_override = Path(cache_dir) if cache_dir else None
+        self._use_cache = use_cache
 
         self._worker = None
         self._runner_task = None
         self._output_generator = None
 
     @classmethod
-    def from_config(cls, voice_cfg: dict, *, cache_dir: str | Path | None = None) -> "EvalVoice":
+    def from_config(
+        cls,
+        voice_cfg: dict,
+        *,
+        cache_dir: str | Path | None = None,
+        use_cache: bool = True,
+    ) -> "EvalVoice":
         """Build an :class:`EvalVoice` from a scenario's ``user_audio`` mapping.
 
         Honors a custom ``factory`` (dotted path to a callable taking
@@ -148,6 +158,7 @@ class EvalVoice:
                 (default 16 kHz), plus ``model`` / ``api_key`` (defaults to
                 $CARTESIA_API_KEY) for Cartesia.
             cache_dir: Where to store cached audio (see :meth:`__init__`).
+            use_cache: When False, force fresh synthesis (see :meth:`__init__`).
 
         Returns:
             A configured EvalVoice (not yet started).
@@ -187,6 +198,7 @@ class EvalVoice:
             sample_rate=sample_rate,
             cache_key=tts_cache_key(voice_cfg),
             cache_dir=cache_dir,
+            use_cache=use_cache,
         )
 
     async def start(self) -> None:
@@ -222,9 +234,9 @@ class EvalVoice:
         Returns:
             Tuple of ``(pcm_bytes, sample_rate)`` — raw 16-bit little-endian mono PCM.
         """
-        cache_file = self._cache_file(text)
+        cache_file = self._cache_file(text) if self._use_cache else None
 
-        if cache_file.exists():
+        if cache_file is not None and cache_file.exists():
             try:
                 pcm, cached_sr = self._read_wav(cache_file)
                 if cached_sr == self._sample_rate:
@@ -237,7 +249,8 @@ class EvalVoice:
                 logger.warning(f"Cache read failed for {cache_file}: {e} — regenerating")
 
         pcm = await self._synthesize(text)
-        self._write_wav(cache_file, pcm, self._sample_rate)
+        if cache_file is not None:
+            self._write_wav(cache_file, pcm, self._sample_rate)
         return pcm, self._sample_rate
 
     async def _synthesize(self, text: str) -> bytes:
