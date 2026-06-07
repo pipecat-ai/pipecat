@@ -7,8 +7,8 @@
 """``pipecat eval`` typer commands.
 
 Thin CLI wrappers over :mod:`pipecat.evals` — all the load/run logic lives in
-that module. Loaded by pipecat-cli via the ``pipecat_cli.extensions`` entry
-point and also reachable as ``python -m pipecat.evals``.
+that module. Mounted as the ``eval`` subcommand of the ``pipecat`` CLI (see
+:mod:`pipecat.cli.main`) and also reachable as ``python -m pipecat.evals``.
 """
 
 import asyncio

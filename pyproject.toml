@@ -45,9 +45,6 @@ dependencies = [
     "onnxruntime~=1.24.3",
 ]
 
-[project.entry-points."pipecat_cli.extensions"]
-eval = "pipecat.cli.entry_point:entrypoint_cli_typer"
-
 [project.urls]
 Homepage = "https://pipecat.ai"
 Documentation = "https://docs.pipecat.ai/"
