@@ -106,7 +106,15 @@ AUDIO_TRAILING_SILENCE_MS = 500
 
 @dataclass
 class EvalAssertionFailure:
-    """A single failed assertion within an eval."""
+    """A single failed assertion within an eval.
+
+    Parameters:
+        turn_index: Index of the turn that failed.
+        expectation_index: Index of the expectation within the turn, or -1 for a
+            turn-level failure (e.g. a ``send_after`` that never fired).
+        event_name: The expectation's event name.
+        reason: Human-readable explanation of the failure.
+    """
 
     turn_index: int
     expectation_index: int
@@ -122,19 +130,28 @@ class EvalAssertionFailure:
 
 @dataclass
 class EvalResult:
-    """Outcome of running a scenario in an :class:`EvalSession`."""
+    """Outcome of running a scenario in an :class:`EvalSession`.
+
+    Parameters:
+        scenario_name: Name of the scenario that was run.
+        passed: Whether every assertion passed.
+        failures: The assertions that failed, in order.
+        duration_ms: Wall-clock time the run took, in milliseconds.
+        events_seen: Every friendly event observed, for diagnostics.
+        debug_log: Timestamped trace of the harness's own decisions (events
+            received, audio transcribed, matcher progress), for diagnosing flaky
+            runs. Saved per-scenario by the orchestrator alongside the bot log.
+        skipped: When set, the scenario was not run (e.g. a ``tts_response``
+            assertion without audio mode); the string is the reason. Such a result
+            is neither passed nor failed.
+    """
 
     scenario_name: str
     passed: bool
     failures: list[EvalAssertionFailure] = field(default_factory=list)
     duration_ms: int = 0
     events_seen: list[dict] = field(default_factory=list)
-    # Timestamped trace of the harness's own decisions (events received, audio
-    # transcribed, matcher progress), for diagnosing flaky runs. Saved per-scenario
-    # by the orchestrator alongside the bot log.
     debug_log: list[str] = field(default_factory=list)
-    # When set, the scenario was not run (e.g. tts_response without audio mode);
-    # the string is the reason. Neither passed nor failed.
     skipped: str | None = None
 
 
@@ -1058,20 +1075,6 @@ class EvalSession:
             content = event.get("text") or event.get("transcript") or ""
             if expectation.text_contains not in content:
                 return fail(f"text {content!r} does not contain {expectation.text_contains!r}")
-
-        if expectation.name is not None:
-            actual_name = event.get("name")
-            if actual_name != expectation.name:
-                return fail(f"name {actual_name!r} != expected {expectation.name!r}")
-
-        if expectation.args is not None:
-            # Subset match: every expected key/value must be present in the call,
-            # so extra arguments the model includes (e.g. a `format`/unit field)
-            # don't fail the assertion.
-            actual_args = event.get("args") or {}
-            missing = {k: v for k, v in expectation.args.items() if actual_args.get(k) != v}
-            if missing:
-                return fail(f"args {actual_args!r} missing expected {missing!r}")
 
         return None
 

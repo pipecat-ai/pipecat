@@ -88,13 +88,17 @@ def capture_pipeline_logs(
 
     Rather than one file per sub-pipeline, the harness's logs are buffered in
     memory (bounded: one scenario's worth) and written on exit as one file with a
-    ``===== <label>: <name> =====`` section per pipeline (see PIPELINE_LOG_LABELS).
+    ``===== <label>: <name> =====`` section per pipeline (see ``PIPELINE_LOG_LABELS``).
     The run is tagged with ``prefix`` as its ``eval_run`` id and the sink filters on
-    it, so the suite's concurrent runs never mix into each other's file. ``name`` is
-    the human test name shown in each section heading.
+    it, so the suite's concurrent runs never mix into each other's file. A no-op
+    (and writes nothing) when ``enabled`` is False, so the debug log only appears
+    under ``--debug``.
 
-    A no-op (and writes nothing) when ``enabled`` is False, so the debug log only
-    appears under ``--debug``.
+    Args:
+        logs_dir: Directory the ``<prefix>.debug.log`` is written to.
+        prefix: Filename stem; also the ``eval_run`` id the sink filters on.
+        name: Human test name shown in each section heading.
+        enabled: When False, do nothing and write no file.
     """
     if not enabled:
         yield
@@ -126,15 +130,29 @@ def capture_pipeline_logs(
 
 @dataclass
 class EvalRun:
-    """Mutable per-(bot, scenario) state, updated in place so a live display can read it."""
+    """Mutable per-(bot, scenario) state, updated in place so a live display can read it.
 
-    bot: str  # display name (suite: the manifest's ``bot:``; run: the bot URL)
-    scenario: str  # display name (the scenario, without .yaml)
+    Parameters:
+        bot: Display name — the manifest's ``bot:`` (suite) or the bot URL (run).
+        scenario: Display name (the scenario, without ``.yaml``).
+        scenario_path: Path to the scenario file.
+        bot_path: The bot to spawn (suite); ``None`` when connecting to ``bot_url``.
+        bot_url: Connect here instead of spawning (used by ``pipecat eval run``).
+        runner_body_path: Optional ``--runner-body`` JSON for the bot's runner args.
+        status: ``pending``, ``running``, or ``done``.
+        result: The outcome, once the run is done.
+        error: Spawn/connection error message, if the run failed before producing a result.
+        started_at: Monotonic start time, for the live elapsed counter.
+        duration_ms: Wall-clock time the run took, in milliseconds.
+    """
+
+    bot: str
+    scenario: str
     scenario_path: Path
-    bot_path: Path | None = None  # the bot to spawn (suite); None when connecting to bot_url
-    bot_url: str | None = None  # connect here instead of spawning (``pipecat eval run``)
-    runner_body_path: Path | None = None  # optional --runner-body JSON for the bot's runner args
-    status: str = "pending"  # pending | running | done
+    bot_path: Path | None = None
+    bot_url: str | None = None
+    runner_body_path: Path | None = None
+    status: str = "pending"
     result: EvalResult | None = None
     error: str | None = None
     started_at: float | None = None
@@ -143,15 +161,27 @@ class EvalRun:
 
 @dataclass
 class Manifest:
-    """A parsed eval-suite manifest."""
+    """A parsed eval-suite manifest.
+
+    Parameters:
+        runs: The (bot, scenario) runs to execute.
+        spawn: Spawn command template (``{python}``/``{bot}``/``{port}`` substituted).
+        python: Interpreter used to spawn each bot.
+        concurrency: How many runs to execute at once.
+        base_port: First port to assign; each run gets ``base_port + index``.
+        runs_dir: Base for run output (a ``<name>/`` subdir is added), or ``None``.
+        record: Whether to record conversation audio.
+        cache_dir: Directory for cached synthesized user audio, or ``None``.
+        base_dir: The manifest file's directory, for resolving relative paths.
+    """
 
     runs: list[EvalRun]
     spawn: str
     python: str
     concurrency: int
     base_port: int
-    runs_dir: Path | None  # base for run output (a <timestamp>/ subdir is added)
-    record: bool  # record conversation audio
+    runs_dir: Path | None
+    record: bool
     cache_dir: str | None
     base_dir: Path
 
@@ -176,6 +206,24 @@ def load_manifest(
     everything else supplied on the command line. Manifest-relative paths resolve
     against the manifest's directory; path overrides resolve against the current
     working directory.
+
+    Args:
+        path: Path to the manifest YAML.
+        bots_dir: Override for the manifest's ``bots_dir`` (bot paths are relative to it).
+        scenarios_dir: Override for the manifest's ``scenarios_dir``.
+        runs_dir: Override for the manifest's ``runs_dir`` (base for run output).
+        spawn: Override for the spawn command template.
+        python: Override for the interpreter used to spawn bots.
+        concurrency: Override for how many runs execute at once.
+        base_port: Override for the first port assigned.
+        record: Override for whether to record conversation audio.
+        cache_dir: Override for the synthesized-audio cache directory.
+
+    Returns:
+        The parsed :class:`Manifest`.
+
+    Raises:
+        ImportError: If PyYAML is not installed.
     """
     try:
         import yaml
@@ -261,7 +309,16 @@ def load_manifest(
 def filter_runs(
     runs: list[EvalRun], *, pattern: str | None = None, scenario: str | None = None
 ) -> list[EvalRun]:
-    """Subset the runs by bot-name substring (``pattern``) and/or scenario name."""
+    """Subset the runs by bot-name substring and/or scenario name.
+
+    Args:
+        runs: The runs to filter.
+        pattern: Keep only runs whose bot name contains this substring.
+        scenario: Keep only runs for this exact scenario name.
+
+    Returns:
+        The matching runs, in their original order.
+    """
     out = runs
     if pattern:
         out = [r for r in out if pattern in r.bot]
@@ -404,10 +461,15 @@ async def run_suite(
 ) -> None:
     """Run all ``runs`` with the manifest's concurrency, mutating each in place.
 
-    Each run is spawned on its own port (``base_port + index``). ``logs_dir`` and
-    (optional) ``record_dir`` are where per-run logs and recordings go.
-    ``on_update`` is called whenever a run changes status, for live display.
-    ``debug`` saves each run's combined ``<run>.debug.log``.
+    Each run is spawned on its own port (``base_port + index``).
+
+    Args:
+        runs: The runs to execute (mutated in place with status/result).
+        manifest: The parsed manifest (concurrency, spawn template, ports, cache).
+        logs_dir: Directory for per-run logs.
+        record_dir: Directory for per-run conversation recordings, or ``None``.
+        on_update: Called whenever a run changes status, for live display.
+        debug: When True, save each run's combined ``<run>.debug.log``.
     """
     logger.remove()  # keep stdout clean for the caller's display
     logs_dir.mkdir(parents=True, exist_ok=True)

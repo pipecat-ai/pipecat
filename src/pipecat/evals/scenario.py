@@ -138,10 +138,6 @@ class EvalExpectation:
             when omitted, so timing isn't asserted unless set explicitly.
         text_contains: Optional substring check on the event's text content
             (``llm_response.text`` or ``user_transcription.transcript``).
-        name: Optional equality check for ``function_call.name`` (single-call
-            shorthand; normalized into ``calls``).
-        args: Optional subset check for ``function_call.args`` (single-call
-            shorthand; normalized into ``calls``).
         calls: For a ``function_call`` event, the set of calls expected in the
             turn. They are matched by name in any order and the expectation passes
             only when all of them are found. Built from ``calls:`` in the YAML, or
@@ -149,17 +145,13 @@ class EvalExpectation:
         eval: Optional natural-language criterion the event's text content
             must satisfy. Evaluated by a judge LLM. Only meaningful on
             ``llm_response`` (the text the bot produced for this turn).
-        raw: The original parsed dict, for forward compatibility.
     """
 
     event: str
     within_ms: int | None = None
     text_contains: str | None = None
-    name: str | None = None
-    args: dict | None = None
     calls: list[EvalFunctionCall] | None = None
     eval: str | None = None
-    raw: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -393,14 +385,17 @@ _CFG_EVAL = "35"  # magenta — eval keyword (judge LLM)
 def describe_config(scenario: EvalScenario, *, color: bool = False) -> str:
     """Two-line summary of a scenario's user + judge config, for pre-run logs.
 
-    Returns a ``user`` line and a ``judge`` line, each a set of ``key: value``
-    segments separated by ``|``, e.g.::
+    Args:
+        scenario: The parsed scenario to summarize.
+        color: When True, ANSI-color each segment's keyword by category (modality,
+            service, judge LLM) so they're easy to tell apart.
 
-        user  -> modality: audio | speech: cartesia
-        judge -> modality: audio | eval: ollama/llama3:latest | transcription: whisper
+    Returns:
+        A ``user`` line and a ``judge`` line, each a set of ``key: value`` segments
+        separated by ``|``, e.g.::
 
-    With ``color=True``, each segment's keyword is ANSI-colored by category
-    (modality, service, judge LLM) so they're easy to tell apart.
+            user  -> modality: audio | speech: cartesia
+            judge -> modality: audio | eval: ollama/llama3:latest | transcription: whisper
     """
 
     def paint(text: str, code: str) -> str:
@@ -416,8 +411,7 @@ def describe_config(scenario: EvalScenario, *, color: bool = False) -> str:
     if scenario.user_audio:
         user_segs.append(seg("speech", scenario.user_audio.get("service", "?"), _CFG_SERVICE))
 
-    eval_cfg = scenario.judge or {}
-    eval_svc = f"{eval_cfg.get('service', '?')}/{eval_cfg.get('model', '?')}"
+    eval_svc = f"{scenario.judge.get('service', '?')}/{scenario.judge.get('model', '?')}"
     judge_segs = [seg("modality", "audio" if scenario.bot_audio else "text", _CFG_MODALITY)]
     if scenario.bot_audio:
         judge_segs.append(
@@ -504,11 +498,8 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         event=event,
         within_ms=e.get("within_ms"),
         text_contains=e.get("text_contains"),
-        name=e.get("name"),
-        args=e.get("args"),
         calls=calls,
         eval=criterion,
-        raw=e,
     )
 
 

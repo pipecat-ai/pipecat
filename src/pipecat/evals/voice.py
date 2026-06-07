@@ -38,8 +38,9 @@ from pipecat.frames.frames import Frame
 from pipecat.serializers.base_serializer import FrameSerializer
 
 
-# Where cached audio lives. Defaults to <user-cache-dir>/pipecat/tts; override
-# with an explicit cache_dir or the PIPECAT_EVALS_CACHE_DIR env var.
+# Default location for cached audio: <user-cache-dir>/pipecat/tts. Callers can
+# override per-run with an explicit cache_dir or the PIPECAT_EVALS_CACHE_DIR env
+# var (resolved in _cache_dir).
 def _default_cache_dir() -> Path:
     root = os.environ.get("XDG_CACHE_HOME")
     base = Path(root) if root else Path.home() / ".cache"
