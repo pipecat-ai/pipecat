@@ -66,9 +66,8 @@ Top-level optional fields:
                 user:
                   modality: audio          # audio | text (default text)
                   speech:                  # required when modality is audio
-                    service: cartesia      # TTS that synthesizes the user turns
-                    voice: <voice-id>
-                    model: sonic-2         # optional
+                    service: kokoro        # local TTS that synthesizes the user turns
+                    voice: af_heart
                     sample_rate: 16000     # optional
 
             ``audio`` streams synthesized user audio to the bot (exercising its
@@ -389,7 +388,7 @@ def describe_config(scenario: EvalScenario, *, color: bool = False) -> str:
         A ``user`` line and a ``judge`` line, each a set of ``key: value`` segments
         separated by ``|``, e.g.::
 
-            user  -> modality: audio | speech: cartesia
+            user  -> modality: audio | speech: kokoro
             judge -> modality: audio | eval: ollama/llama3:latest | transcription: whisper
     """
 

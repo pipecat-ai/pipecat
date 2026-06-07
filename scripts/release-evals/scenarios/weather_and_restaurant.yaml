@@ -6,9 +6,8 @@ name: weather_and_restaurant
 user:
   modality: audio
   speech:
-    service: cartesia
-    voice: 71a7ad14-091c-4e8e-a314-022ece01c121 # British Reading Lady
-    model: sonic-2
+    service: kokoro
+    voice: af_heart
     sample_rate: 16000
 
 judge:

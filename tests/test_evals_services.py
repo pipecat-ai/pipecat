@@ -46,14 +46,14 @@ class TestTranscriberFromConfig(unittest.TestCase):
 
 class TestVoiceFromConfig(unittest.TestCase):
     def test_cache_key_excludes_sample_rate(self):
-        a = tts_cache_key({"service": "cartesia", "voice": "v", "model": "m", "sample_rate": 16000})
-        b = tts_cache_key({"service": "cartesia", "voice": "v", "model": "m", "sample_rate": 24000})
+        a = tts_cache_key({"service": "kokoro", "voice": "v", "model": "m", "sample_rate": 16000})
+        b = tts_cache_key({"service": "kokoro", "voice": "v", "model": "m", "sample_rate": 24000})
         self.assertEqual(a, b)
 
     def test_cache_key_distinguishes_voice(self):
         self.assertNotEqual(
-            tts_cache_key({"service": "cartesia", "voice": "a"}),
-            tts_cache_key({"service": "cartesia", "voice": "b"}),
+            tts_cache_key({"service": "kokoro", "voice": "a"}),
+            tts_cache_key({"service": "kokoro", "voice": "b"}),
         )
 
     def test_sample_rate_default(self):
