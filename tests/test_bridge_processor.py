@@ -264,5 +264,91 @@ class TestBusBridgeProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(injected), 0)
 
 
+class TestBusEdgeProcessorOrdering(unittest.IsolatedAsyncioTestCase):
+    """Frames received from the bus by ``_BusEdgeProcessor.on_bus_message``
+    are serialised with frames the owning worker queues via
+    ``queue_frame``/``queue_frames``, so a bus inbound frame cannot
+    interleave between a multi-frame sequence the worker enqueues itself
+    (regression test for the multi-worker ``set_node`` apply race where
+    an ``LLMContextFrame`` from a user input would reach the LLM before
+    the new node's ``LLMSetToolsFrame`` had landed)."""
+
+    async def test_bus_inbound_drains_after_worker_queued_frames(self):
+        """A frame received from the bus is observed downstream **after**
+        any frames queued via ``worker.queue_frame`` before it, because
+        both paths share the worker's single ``_push_queue`` (FIFO)."""
+        from pipecat.frames.frames import EndFrame
+        from pipecat.pipeline.worker import PipelineWorker
+        from pipecat.processors.frame_processor import FrameProcessor
+        from pipecat.workers.runner import WorkerRunner
+
+        class RecordingProcessor(FrameProcessor):
+            """Appends every ``TextFrame`` it sees to a shared list."""
+
+            def __init__(self, observed: list, **kwargs):
+                super().__init__(**kwargs)
+                self._observed = observed
+
+            async def process_frame(self, frame, direction):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, TextFrame):
+                    self._observed.append(frame.text)
+                await self.push_frame(frame, direction)
+
+        observed: list[str] = []
+        bus = AsyncQueueBus()
+        recorder = RecordingProcessor(observed)
+        # ``bridged=()`` wraps the pipeline with _BusEdgeProcessor at both
+        # ends so frames received from the bus are injected here.
+        worker = PipelineWorker(
+            Pipeline([recorder]),
+            cancel_on_idle_timeout=False,
+            bridged=(),
+        )
+
+        ready = asyncio.Event()
+
+        @worker.event_handler("on_pipeline_started")
+        async def _on_started(_w, _f):
+            ready.set()
+
+        async def drive():
+            await asyncio.wait_for(ready.wait(), timeout=5)
+            # Queue an APPLY-like frame on the worker FIRST, then push a
+            # bus message. If the bus path bypassed the queue (the old
+            # behaviour), the bus frame could race ahead and be observed
+            # before "apply". With this fix it is queued and drains after.
+            await worker.queue_frame(TextFrame(text="apply"))
+            await bus.send(
+                BusFrameMessage(
+                    source="other_task",
+                    frame=TextFrame(text="from_bus"),
+                    direction=FrameDirection.DOWNSTREAM,
+                )
+            )
+            await asyncio.sleep(0.2)
+            await worker.queue_frame(EndFrame())
+
+        runner = WorkerRunner(bus=bus, handle_sigint=False)
+        await runner.add_workers(worker)
+        await asyncio.gather(runner.run(), drive())
+
+        # The bus inbound frame must NEVER precede the previously queued
+        # apply frame. ``"apply"`` is queued first; ``"from_bus"`` arrives
+        # via on_bus_message after that put. With the fix both frames
+        # land in the same ``_push_queue`` and drain FIFO, so the order
+        # observed downstream is deterministic.
+        apply_idx = observed.index("apply") if "apply" in observed else -1
+        bus_idx = observed.index("from_bus") if "from_bus" in observed else -1
+        self.assertGreaterEqual(apply_idx, 0, f"apply missing from {observed}")
+        self.assertGreaterEqual(bus_idx, 0, f"from_bus missing from {observed}")
+        self.assertLess(
+            apply_idx,
+            bus_idx,
+            f"bus inbound 'from_bus' raced ahead of locally queued 'apply' "
+            f"(observed order: {observed})",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
