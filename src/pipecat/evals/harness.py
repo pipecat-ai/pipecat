@@ -79,10 +79,12 @@ from pipecat.evals.serializer import (
     EVAL_RESET_MESSAGE_TYPE,
 )
 
-# ``websockets`` is imported lazily inside the methods that use it. That keeps
-# this module importable (and the CLI plugin loadable via pipecat-cli) even
-# when the optional ``websockets-base`` extra isn't installed — users who
-# actually run an eval get a clear ImportError at that point.
+# ``websockets`` is imported lazily inside the methods that use it. The
+# ``pipecat eval`` command imports this module while building the CLI, so it
+# gets pulled in on every ``pipecat`` invocation (even ``pipecat init``), not
+# only when an eval runs. Keeping the import lazy means the module stays
+# importable when the optional ``websockets-base`` extra isn't installed; users
+# who actually run an eval get a clear ImportError at that point.
 
 # Generous default so an expectation without an explicit ``within_ms`` waits
 # long enough for slow LLM/TTS responses (and function-call round-trips) rather
