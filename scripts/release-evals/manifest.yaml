@@ -25,7 +25,7 @@ suite:
   - bot: voice/voice-aws.py
     scenarios: [simple_math]
   - bot: voice/voice-aws-strands.py
-    scenarios: [weather_function_call]
+    scenarios: [weather]
   - bot: voice/voice-azure.py
     scenarios: [simple_math]
   - bot: voice/voice-azure-http.py
@@ -139,10 +139,6 @@ suite:
     scenarios:
       - weather_function_call
       - weather_and_restaurant
-  - bot: function-calling/function-calling-anthropic-async.py
-    scenarios: [weather_function_call]
-  - bot: function-calling/function-calling-anthropic-async-stream.py
-    scenarios: [weather_function_call]
   - bot: function-calling/function-calling-aws.py
     scenarios:
       - weather_function_call
@@ -159,10 +155,6 @@ suite:
     scenarios:
       - weather_function_call
       - weather_and_restaurant
-  - bot: function-calling/function-calling-google-async.py
-    scenarios: [weather_function_call]
-  - bot: function-calling/function-calling-google-async-stream.py
-    scenarios: [weather_function_call]
   - bot: function-calling/function-calling-google-vertex.py
     scenarios: [weather_function_call]
   - bot: function-calling/function-calling-grok.py
@@ -181,18 +173,10 @@ suite:
     scenarios: [weather_function_call]
   - bot: function-calling/function-calling-openai.py
     scenarios: [weather_function_call]
-  - bot: function-calling/function-calling-openai-async.py
-    scenarios: [weather_function_call]
-  - bot: function-calling/function-calling-openai-async-stream.py
-    scenarios: [weather_function_call]
   - bot: function-calling/function-calling-openai-responses.py
     scenarios:
       - weather_function_call
       - weather_and_restaurant
-  - bot: function-calling/function-calling-openai-responses-async.py
-    scenarios: [weather_function_call]
-  - bot: function-calling/function-calling-openai-responses-async-stream.py
-    scenarios: [weather_function_call]
   - bot: function-calling/function-calling-openai-responses-http.py
     scenarios:
       - weather_function_call
