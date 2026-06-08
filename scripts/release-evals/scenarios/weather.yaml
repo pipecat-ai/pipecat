@@ -1,8 +1,8 @@
-name: weather_function_call
+name: weather
 
-# Audio modality, end to end: ask for the weather (which requires a tool
-# call). Tests that the bot invokes a function and speaks a correct,
-# grounded answer.
+# Audio modality, end to end: ask for the weather (no tool call required since
+# it's using another framework). Tests that the bot response correctly, grounded
+# answer.
 
 user:
   modality: audio
@@ -23,8 +23,5 @@ judge:
 turns:
   - user: "What's the weather in San Francisco, California? Use Fahrenheit."
     expect:
-      - event: function_call
-        calls:
-          - name: get_current_weather
       - event: response
         eval: "the response describes the weather in San Francisco, including a temperature in degrees"
