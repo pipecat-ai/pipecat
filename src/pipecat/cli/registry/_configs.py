@@ -78,6 +78,7 @@ SERVICE_CONFIGS = {
     ),
     "openai_stt": 'OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"))',
     "openai_realtime_stt": 'OpenAIRealtimeSTTService(api_key=os.getenv("OPENAI_API_KEY"))',
+    "sarvam_realtime_stt": 'SarvamRealtimeSTTService(api_key=os.getenv("SARVAM_API_KEY"))',
     "sarvam_stt": (
         "SarvamSTTService(\n"
         '        api_key=os.getenv("SARVAM_API_KEY"),\n'

@@ -78,6 +78,9 @@ IMPORTS = {
     ],
     "openai_stt": ["from pipecat.services.openai.stt import OpenAISTTService"],
     "openai_realtime_stt": ["from pipecat.services.openai.stt import OpenAIRealtimeSTTService"],
+    "sarvam_realtime_stt": [
+        "from pipecat.services.sarvam.stt_realtime import SarvamRealtimeSTTService"
+    ],
     "sarvam_stt": ["from pipecat.services.sarvam.stt import SarvamSTTService"],
     "soniox_stt": ["from pipecat.services.soniox.stt import SonioxSTTService"],
     "speechmatics_stt": ["from pipecat.services.speechmatics.stt import SpeechmaticsSTTService"],

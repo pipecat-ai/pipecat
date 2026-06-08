@@ -407,6 +407,15 @@ class ServiceRegistry:
             include_params=["api_key"],
         ),
         ServiceDefinition(
+            value="sarvam_realtime_stt",
+            label="Sarvam Realtime",
+            package="pipecat-ai[sarvam]",
+            class_name=["SarvamRealtimeSTTService"],
+            env_prefix="SARVAM",
+            include_params=["api_key"],
+            external_turn_detection=True,  # server-side VAD drives turns
+        ),
+        ServiceDefinition(
             value="sarvam_stt",
             label="Sarvam",
             package="pipecat-ai[sarvam]",
