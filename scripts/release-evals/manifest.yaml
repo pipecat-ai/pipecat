@@ -202,6 +202,25 @@ suite:
     scenarios: [weather_function_call]
 
   #
+  # Function calling with video: the bot calls a vision function that requests a
+  # user image; the eval transport serves the scenario's `image:` for that turn.
+  #
+  - bot: function-calling/function-calling-openai-video.py
+    scenarios: [describe_image]
+  - bot: function-calling/function-calling-openai-responses-video.py
+    scenarios: [describe_image]
+  - bot: function-calling/function-calling-openai-responses-video-http.py
+    scenarios: [describe_image]
+  - bot: function-calling/function-calling-anthropic-video.py
+    scenarios: [describe_image]
+  - bot: function-calling/function-calling-aws-video.py
+    scenarios: [describe_image]
+  - bot: function-calling/function-calling-google-video.py
+    scenarios: [describe_image]
+  - bot: function-calling/function-calling-moondream-video.py
+    scenarios: [describe_image]
+
+  #
   # Vision: the bot is handed an image (a cat) on connect via --runner-body and
   # describes it. `runner_body:` is resolved relative to this manifest; relative
   # paths inside it (the image) resolve next to the body file.

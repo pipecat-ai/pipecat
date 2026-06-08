@@ -69,6 +69,14 @@ EVAL_CONFIGURE_MESSAGE_TYPE = "eval-configure"
 # having to kill the process.
 EVAL_CANCEL_MESSAGE_TYPE = "eval-cancel"
 
+# A ``client-message`` with this ``t`` registers an image (base64-encoded
+# PNG/JPEG/... bytes plus its MIME ``format``) on the serializer. The eval input
+# transport hands it back as a ``UserImageRawFrame`` when the bot asks for a user
+# image (``UserImageRequestFrame``), so a function-calling-video bot can be driven
+# without a real camera. The image is already encoded, so it flows straight into
+# the LLM context with no decode/re-encode.
+EVAL_IMAGE_MESSAGE_TYPE = "eval-image"
+
 # Outbound message carrying a chunk of the bot's synthesized audio (base64), used
 # only when a scenario asserts on ``tts_response``. Emitted under the RTVI label
 # so the harness reader sees it; the harness transcribes the audio locally.
@@ -96,10 +104,17 @@ class RTVIEvalSerializer(FrameSerializer):
         # the ?capture_audio query param) only for tts_response scenarios, so we
         # don't ship the bot's audio over the wire unless something asserts on it.
         self._capture_audio = False
+        # The most recent image the harness registered (decoded bytes, MIME type),
+        # served back on a UserImageRequestFrame. See EVAL_IMAGE_MESSAGE_TYPE.
+        self._user_image: tuple[bytes, str] | None = None
 
     def set_capture_audio(self, capture: bool) -> None:
         """Enable/disable forwarding the bot's synthesized audio to the harness."""
         self._capture_audio = capture
+
+    def get_user_image(self) -> tuple[bytes, str] | None:
+        """The image registered for the current turn as ``(bytes, mime)``, or None."""
+        return self._user_image
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serialize an outbound frame to JSON for the harness.
@@ -163,6 +178,9 @@ class RTVIEvalSerializer(FrameSerializer):
         if cancel is not None:
             return cancel
 
+        if self._maybe_store_image(message):
+            return None
+
         return InputTransportMessageFrame(message=message)
 
     def _maybe_reset_frame(self, message: dict) -> Frame | None:
@@ -192,6 +210,25 @@ class RTVIEvalSerializer(FrameSerializer):
         if not isinstance(data, dict) or data.get("t") != EVAL_CANCEL_MESSAGE_TYPE:
             return None
         return CancelTaskFrame()
+
+    def _maybe_store_image(self, message: dict) -> bool:
+        """Store the image from an eval-image message; return True if consumed.
+
+        The image (base64-encoded bytes + MIME ``format``) is kept until the next
+        eval-image replaces it, and served back on a ``UserImageRequestFrame`` by
+        the eval input transport.
+        """
+        if message.get("type") != "client-message":
+            return False
+        data: Any = message.get("data") or {}
+        if not isinstance(data, dict) or data.get("t") != EVAL_IMAGE_MESSAGE_TYPE:
+            return False
+        payload = data.get("d") or {}
+        encoded = payload.get("image") if isinstance(payload, dict) else None
+        if encoded:
+            fmt = str(payload.get("format") or "image/jpeg")
+            self._user_image = (base64.b64decode(encoded), fmt)
+        return True
 
     def _maybe_configure_frame(self, message: dict) -> Frame | None:
         """Return an ``RTVIConfigureObserverFrame`` for the eval-configure message, else None."""

@@ -62,9 +62,11 @@ Example::
 import asyncio
 import base64
 import json
+import mimetypes
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import websockets
 from loguru import logger
@@ -77,6 +79,7 @@ from pipecat.evals.serializer import (
     EVAL_BOT_AUDIO_TYPE,
     EVAL_CANCEL_MESSAGE_TYPE,
     EVAL_CONFIGURE_MESSAGE_TYPE,
+    EVAL_IMAGE_MESSAGE_TYPE,
     EVAL_RESET_MESSAGE_TYPE,
 )
 from pipecat.evals.transcribe import EvalTranscriber
@@ -804,6 +807,11 @@ class EvalSession:
                 )
                 return failures
 
+        # Register the turn's image (if any) before the user input, so the bot can
+        # serve it when it requests a user image during the turn.
+        if turn.image is not None:
+            await self._send_image(turn.image)
+
         if turn.user is not None:
             self._debug(f"send: {turn.user!r} ({'audio' if self._voice is not None else 'text'})")
             if self._voice is not None:
@@ -867,6 +875,24 @@ class EvalSession:
                 content=text,
                 options=RTVI.SendTextOptions(run_immediately=True, audio_response=bot_audio),
             ).model_dump(),
+        )
+        await self._send(message)
+
+    async def _send_image(self, image_path: str) -> None:
+        """Register an image (base64, with its MIME type) for the current turn.
+
+        The eval transport serves it back as a ``UserImageRawFrame`` when the bot
+        requests a user image. The file is sent as-is (already PNG/JPEG/...), so
+        nothing is decoded or re-encoded.
+        """
+        path = Path(image_path)
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
+        self._debug(f"send: image {path.name} ({mime})")
+        message = RTVI.Message(
+            type="client-message",
+            id=self._message_id(),
+            data={"t": EVAL_IMAGE_MESSAGE_TYPE, "d": {"image": encoded, "format": mime}},
         )
         await self._send(message)
 
