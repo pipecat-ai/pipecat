@@ -90,9 +90,14 @@ To run locally:
 
 import argparse
 import asyncio
+import base64
+import hashlib
+import hmac
 import importlib.util
+import json
 import mimetypes
 import os
+import secrets
 import sys
 import time
 import uuid
@@ -153,6 +158,10 @@ PIPECAT_ROOM_EXP_HOURS = 4.0
 RUNNER_DOWNLOADS_FOLDER: str | None = None
 RUNNER_HOST: str = "localhost"
 RUNNER_PORT: int = 7860
+
+# Per-process HMAC secret for WebSocket token authentication. Auto-generated so
+# tokens from one runner instance cannot be replayed against another.
+_WS_AUTH_SECRET: bytes = secrets.token_bytes(32)
 
 app: FastAPI = FastAPI()
 """The FastAPI application instance.
@@ -237,6 +246,69 @@ def _format_transport_status(labels: list[str]) -> str:
     return ", ".join(labels) if labels else "none"
 
 
+def _generate_ws_token(ttl: int = 300) -> str:
+    """Return a signed, self-expiring WebSocket session token.
+
+    The token is ``<base64url-payload>.<hmac-sha256-hex>`` where the payload
+    encodes ``{"exp": unix_timestamp}``. Valid for ``ttl`` seconds (default 5 min).
+    """
+    payload = (
+        base64.urlsafe_b64encode(json.dumps({"exp": int(time.time()) + ttl}).encode())
+        .decode()
+        .rstrip("=")
+    )
+    sig = hmac.new(_WS_AUTH_SECRET, payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{sig}"
+
+
+def _validate_ws_token(used: set[str], token: str) -> bool:
+    """Validate a WebSocket session token and mark it as used (one-time use).
+
+    Args:
+        used: Set of already-consumed tokens (mutated on success).
+        token: Token string obtained from :func:`_generate_ws_token`.
+
+    Returns:
+        ``True`` if the token has a valid signature, has not expired, and has
+        not been used before. Adds the token to ``used`` on success so replay
+        attempts are rejected.
+    """
+    try:
+        payload, sig = token.rsplit(".", 1)
+    except ValueError:
+        return False
+    expected = hmac.new(_WS_AUTH_SECRET, payload.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, sig):
+        return False
+    padded = payload + "=" * (-len(payload) % 4)
+    try:
+        data = json.loads(base64.urlsafe_b64decode(padded))
+    except Exception:
+        return False
+    if time.time() > data.get("exp", 0):
+        return False
+    if token in used:
+        return False
+    used.add(token)
+    return True
+
+
+def _extract_ws_token(websocket) -> str | None:
+    """Extract a WebSocket session token from the connection handshake.
+
+    Checks, in order:
+
+    1. ``Authorization: Bearer <token>`` request header.
+    2. ``?token=<token>`` query parameter.
+
+    Returns the token string, or ``None`` if not present.
+    """
+    auth = websocket.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return websocket.query_params.get("token")
+
+
 def _print_startup_message(args: argparse.Namespace):
     """Print connection information for the development runner."""
     print()
@@ -279,6 +351,8 @@ def _print_startup_message(args: argparse.Namespace):
             if args.proxy:
                 print(f"   → XML webhook: http://{args.host}:{args.port}/")
             print(f"   → WebSocket:   ws://{args.host}:{args.port}/ws")
+            if args.ws_auth == "token":
+                print("   → WebSocket auth: token (HMAC, call /start to obtain a token)")
     elif args.transport == "websocket":
         print("🚀 Bot ready! (WebSocket)")
         if not _transport_routes_enabled("websocket"):
@@ -287,6 +361,8 @@ def _print_startup_message(args: argparse.Namespace):
             print(f"   → Open: {_runner_url(args)}")
             scheme = "wss" if args.host != "localhost" else "ws"
             print(f"   → WebSocket:   {scheme}://{args.host}:{args.port}/ws-client")
+            if args.ws_auth == "token":
+                print("   → WebSocket auth: token (HMAC, call /start to obtain a token)")
     elif args.transport == "vonage":
         print()
         print("🚀 Bot ready!")
@@ -362,17 +438,41 @@ async def _run_websocket_bot(websocket: WebSocket, args: argparse.Namespace):
     await bot_module.bot(runner_args)
 
 
-def _setup_websocket_routes(app: FastAPI, args: argparse.Namespace):
-    """Set up the plain WebSocket route at ``/ws-client``."""
+def _setup_websocket_routes(app: FastAPI, args: argparse.Namespace, ws_used_tokens: set[str]):
+    """Set up the plain WebSocket route at ``/ws-client``.
+
+    When ``args.ws_auth == "token"``, connections must present a valid HMAC
+    session token obtained via ``POST /start``. The token may be supplied as:
+
+    - ``Authorization: Bearer <token>`` header
+    - ``?token=<token>`` query parameter
+    - URL path segment: ``/ws-client/<token>``
+
+    Invalid or missing tokens are rejected with WebSocket close code 4003.
+    """
     if not _transport_routes_enabled("websocket"):
         return
+
+    async def _handle_plain_ws(websocket: WebSocket, path_token: str | None = None):
+        if args.ws_auth == "token":
+            token = path_token or _extract_ws_token(websocket)
+            if not token or not _validate_ws_token(ws_used_tokens, token):
+                logger.warning("WebSocket connection rejected: invalid or missing token")
+                await websocket.close(code=4003)
+                return
+        await websocket.accept()
+        logger.debug("Plain WebSocket connection accepted")
+        await _run_websocket_bot(websocket, args)
 
     @app.websocket("/ws-client")
     async def websocket_client_endpoint(websocket: WebSocket):
         """Handle plain WebSocket connections (non-telephony)."""
-        await websocket.accept()
-        logger.debug("Plain WebSocket connection accepted")
-        await _run_websocket_bot(websocket, args)
+        await _handle_plain_ws(websocket)
+
+    @app.websocket("/ws-client/{token}")
+    async def websocket_client_endpoint_with_token(websocket: WebSocket, token: str):
+        """Handle plain WebSocket connections with token in the URL path."""
+        await _handle_plain_ws(websocket, path_token=token)
 
 
 def _configure_server_app(args: argparse.Namespace):
@@ -403,11 +503,15 @@ def _configure_server_app(args: argparse.Namespace):
     # flow and the /sessions/{session_id}/... proxy routes.
     active_sessions: dict[str, dict[str, Any]] = {}
 
+    # Consumed WebSocket tokens (one-time use). Shared across both WebSocket
+    # endpoint families (/ws and /ws-client).
+    ws_used_tokens: set[str] = set()
+
     _setup_frontend_routes(app)
     _setup_webrtc_routes(app, args, active_sessions)
     _setup_daily_routes(app, args)
-    _setup_telephony_routes(app, args)
-    _setup_websocket_routes(app, args)
+    _setup_telephony_routes(app, args, ws_used_tokens)
+    _setup_websocket_routes(app, args, ws_used_tokens)
     _setup_unified_start_route(app, args, active_sessions)
 
     if args.whatsapp:
@@ -581,18 +685,20 @@ def _setup_unified_start_route(
             # Telephony: the bot starts when the provider connects to /ws.
             # Return the WebSocket URL so the caller knows where to point their provider.
             scheme = "wss" if args.host != "localhost" else "ws"
-            return StartBotResult(
-                wsUrl=f"{scheme}://{args.host}:{args.port}/ws",
-            )
+            result = StartBotResult(wsUrl=f"{scheme}://{args.host}:{args.port}/ws")
+            if args.ws_auth == "token":
+                result["token"] = _generate_ws_token()
+            return result
 
         elif transport == "websocket":
             # Plain WebSocket: the bot starts when the client connects to /ws-client.
             scheme = "wss" if args.host != "localhost" else "ws"
             session_id = str(uuid.uuid4())
+            token = _generate_ws_token() if args.ws_auth == "token" else None
             return StartBotResult(
                 wsUrl=f"{scheme}://{args.host}:{args.port}/ws-client",
                 sessionId=session_id,
-                token="mock_token",
+                token=token,
             )
 
         else:
@@ -1071,13 +1177,22 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
             }
 
 
-def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace):
+def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace, ws_used_tokens: set[str]):
     """Set up telephony-specific routes.
 
     The WebSocket endpoint (``/ws``) is always registered so providers can
     connect directly. The XML webhook (``POST /``) is only registered when a
     specific telephony transport is chosen via ``-t`` because the XML template
     is provider-specific and requires a proxy hostname (``--proxy``).
+
+    When ``args.ws_auth == "token"``, connections must present a valid HMAC
+    session token obtained via ``POST /start``. The token may be supplied as:
+
+    - ``Authorization: Bearer <token>`` header
+    - ``?token=<token>`` query parameter
+    - URL path segment: ``/ws/<token>`` (recommended for telephony providers)
+
+    Invalid or missing tokens are rejected with WebSocket close code 4003.
     """
     if not _transport_routes_enabled("telephony"):
         return
@@ -1121,12 +1236,26 @@ def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace):
                 xml_content = XML_TEMPLATES.get(args.transport, "<Response></Response>")
                 return HTMLResponse(content=xml_content, media_type="application/xml")
 
-    @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
-        """Handle WebSocket connections for telephony."""
+    async def _handle_telephony_ws(websocket: WebSocket, path_token: str | None = None):
+        if args.ws_auth == "token":
+            token = path_token or _extract_ws_token(websocket)
+            if not token or not _validate_ws_token(ws_used_tokens, token):
+                logger.warning("WebSocket connection rejected: invalid or missing token")
+                await websocket.close(code=4003)
+                return
         await websocket.accept()
         logger.debug("WebSocket connection accepted")
         await _run_telephony_bot(websocket, args)
+
+    @app.websocket("/ws")
+    async def websocket_endpoint(websocket: WebSocket):
+        """Handle WebSocket connections for telephony."""
+        await _handle_telephony_ws(websocket)
+
+    @app.websocket("/ws/{token}")
+    async def websocket_endpoint_with_token(websocket: WebSocket, token: str):
+        """Handle WebSocket connections for telephony with token in the URL path."""
+        await _handle_telephony_ws(websocket, path_token=token)
 
 
 async def _run_daily_direct(args: argparse.Namespace):
@@ -1298,6 +1427,18 @@ def main(parser: argparse.ArgumentParser | None = None):
         action="store_true",
         default=False,
         help="Ensure required WhatsApp environment variables are present",
+    )
+    parser.add_argument(
+        "--ws-auth",
+        dest="ws_auth",
+        choices=["none", "token"],
+        default=os.getenv("PIPECAT_WEBSOCKET_AUTH", "none"),
+        help=(
+            "WebSocket authentication mode. 'token' requires clients to call /start "
+            "and obtain a signed HMAC session token before connecting to /ws or "
+            "/ws-client. Defaults to the PIPECAT_WEBSOCKET_AUTH environment variable "
+            "or 'none'."
+        ),
     )
 
     args = parser.parse_args()
