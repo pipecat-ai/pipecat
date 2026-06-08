@@ -1,4 +1,4 @@
-name: interruption
+name: interruption_text
 
 # Text modality: the user barges in mid-response. The bot must drop the
 # in-progress answer and respond to the new question (exercises interruption

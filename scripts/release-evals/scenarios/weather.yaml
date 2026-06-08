@@ -1,24 +1,12 @@
 name: weather
 
-# Audio modality, end to end: ask for the weather (no tool call required since
-# it's using another framework). Tests that the bot response correctly, grounded
-# answer.
-
-user:
-  modality: audio
-  speech:
-    service: kokoro
-    voice: af_heart
-    sample_rate: 16000
+# Text, end to end: ask for the weather (no tool call required since it's using
+# another framework). Tests that the bot response correctly, grounded answer.
 
 judge:
-  modality: audio
   eval:
     service: ollama
     model: llama3:latest
-  transcription:
-    service: whisper
-    model: base
 
 turns:
   - user: "What's the weather in San Francisco, California? Use Fahrenheit."

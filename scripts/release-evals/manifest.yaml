@@ -12,6 +12,10 @@ record: true                     # set true (or pass -a) to record conversation 
 spawn: "{python} {bot} -t eval --port {port}"
 
 suite:
+  #
+  # Voice: exercise voice for all out services. Some examples use a combination
+  # of audio and text modalities.
+  #
   - bot: voice/voice-aicoustics.py
     scenarios: [simple_math]
   - bot: voice/voice-assemblyai.py
@@ -37,7 +41,8 @@ suite:
       - simple_math
       - greeting
       - multi_turn
-      - interruption
+      - interruption_audio
+      - interruption_text
       - language_switch
   - bot: voice/voice-cartesia-http.py
     scenarios: [simple_math]
@@ -131,6 +136,10 @@ suite:
     scenarios: [simple_math]
   - bot: voice/voice-xai-http.py
     scenarios: [simple_math]
+
+  #
+  # Function calling: exercise one or more function calls.
+  #
   - bot: getting-started/07-function-calling.py
     scenarios:
       - weather_function_call
@@ -192,9 +201,11 @@ suite:
   - bot: function-calling/function-calling-sarvam.py
     scenarios: [weather_function_call]
 
+  #
   # Vision: the bot is handed an image (a cat) on connect via --runner-body and
   # describes it. `runner_body:` is resolved relative to this manifest; relative
   # paths inside it (the image) resolve next to the body file.
+  #
   - bot: vision/vision-openai.py
     runner_body: scenarios/vision-cat.json
     scenarios: [vision_describe]
