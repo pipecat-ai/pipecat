@@ -1093,7 +1093,13 @@ class TTSService(AIService):
         if self._push_start_frame and not self.audio_context_available(context_id):
             await self.create_audio_context(context_id)
             await self.start_ttfb_metrics()
-            await self.append_to_audio_context(context_id, TTSStartedFrame(context_id=context_id))
+            started_frame = TTSStartedFrame(context_id=context_id)
+            # Carry append_to_context so the assistant aggregator can open a turn
+            # for TTSSpeakFrame utterances (which have no LLMFullResponseStartFrame).
+            # Only override append_to_context if explicitly set.
+            if append_tts_text_to_context is not None:
+                started_frame.append_to_context = append_tts_text_to_context
+            await self.append_to_audio_context(context_id, started_frame)
 
         # Register this spoken frame so the sequencer can track its completion
         # and unblock any skipped frames queued behind it. Word-timestamp services

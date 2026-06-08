@@ -555,7 +555,15 @@ class NvidiaTTSService(TTSService):
             if not self.audio_context_available(context_id):
                 await self.create_audio_context(context_id)
                 await self.start_ttfb_metrics()
-                yield TTSStartedFrame(context_id=context_id)
+                started_frame = TTSStartedFrame(context_id=context_id)
+                # Mirror append_to_context from the context (set by the base class)
+                # so the assistant aggregator opens a turn only when the spoken
+                # text will be written to context — matching the base-class
+                # TTSStartedFrame path used by push_start_frame=True services.
+                tts_context = self._tts_contexts.get(context_id)
+                if tts_context is not None:
+                    started_frame.append_to_context = tts_context.append_to_context
+                yield started_frame
                 self._start_synthesis_stream(context_id)
                 logger.trace(f"{self}: Started synthesis stream for context {context_id}")
 
