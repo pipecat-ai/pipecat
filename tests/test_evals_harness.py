@@ -499,6 +499,32 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.passed)
         self.assertEqual(len(result.failures), 1, "only the first failed expectation should report")
 
+    async def test_turn_shares_one_deadline_across_expectations(self):
+        # A turn that expects a function call AND a response but gets neither must
+        # fail within a single within_ms budget. The function_call timeout returns a
+        # failure (not a raise) so the loop continues to the response; both share the
+        # anchor, so the run takes ~one budget, not budget-per-expectation.
+        scenario = EvalScenario(
+            name="shared_deadline",
+            turns=[
+                EvalTurn(
+                    user="weather?",  # no scripted reply -> nothing arrives
+                    expect=[
+                        EvalExpectation(
+                            event="function_call",
+                            within_ms=400,
+                            calls=[EvalFunctionCall(name="get_weather")],
+                        ),
+                        EvalExpectation(event="llm_response", within_ms=400),
+                    ],
+                )
+            ],
+        )
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
+        self.assertFalse(result.passed)
+        # One shared 400ms budget, not 400ms + 400ms.
+        self.assertLess(result.duration_ms, 700)
+
     async def test_send_after_delays_run(self):
         self.server.on_text("first", _rtvi("bot-llm-started"), _rtvi("bot-llm-stopped"))
         self.server.on_text(

@@ -126,10 +126,11 @@ class EvalExpectation:
 
     Parameters:
         event: Required — the semantic event name (e.g. ``user_stopped_speaking``).
-        within_ms: Optional latency budget, measured from the most recent anchor
-            (typically the preceding ``user_input`` send for the first event of
-            a turn, or the previous matched event otherwise). Defaults to 60s
-            when omitted, so timing isn't asserted unless set explicitly.
+        within_ms: Optional latency budget, measured from the turn's ``user_input``
+            send — all of a turn's expectations share that one anchor, so a stalled
+            turn fails within a single budget rather than one per expectation.
+            Defaults to 60s when omitted, so timing isn't asserted unless set
+            explicitly.
         text_contains: Optional substring check on the event's text content
             (``llm_response.text`` or ``user_transcription.transcript``).
         calls: For a ``function_call`` event, the set of calls expected in the
