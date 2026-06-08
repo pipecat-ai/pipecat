@@ -318,6 +318,12 @@ class TTSService(AIService):
         # correct PTS to TTSStoppedFrame and LLMFullResponseEndFrame.
         self._word_last_pts: int = 0
         self._llm_response_started: bool = False
+        # LLMFullResponseEndFrames received in process_frame, keyed by the turn's
+        # context_id, held so each can be re-pushed (with corrected PTS) at end of
+        # its context instead of creating a new one. Reusing the original frame
+        # keeps its id, so observers that dedup by frame.id (e.g. RTVIObserver)
+        # don't emit a second bot-llm-stopped.
+        self._pending_llm_response_end_frames: dict[str, LLMFullResponseEndFrame] = {}
         self._reuse_context_id_within_turn: bool = reuse_context_id_within_turn
 
         # _turn_context_id:
@@ -735,6 +741,12 @@ class TTSService(AIService):
                     # drained (including the final TTSTextFrame).  Pushing
                     # directly would let it race ahead of queued text frames.
                     await self._serialization_queue.put(frame)
+                elif self._turn_context_id is not None:
+                    # Hold the original frame, keyed by this turn's context_id, so
+                    # _maybe_reset_word_timestamps can re-push it (with the PTS of
+                    # the last word frame) at end of that context, rather than
+                    # emitting a fresh frame with a new id.
+                    self._pending_llm_response_end_frames[self._turn_context_id] = frame
             else:
                 await self.push_frame(frame, direction)
 
@@ -910,6 +922,7 @@ class TTSService(AIService):
         self._streamed_text = ""
         self._text_aggregation_metrics_started = False
         self._aggregated_frame_sequencer.clear()  # discard all pending slots on interruption
+        self._pending_llm_response_end_frames.clear()
         await self.reset_word_timestamps()
 
         await self._stop_audio_context_task()
@@ -1430,20 +1443,29 @@ class TTSService(AIService):
 
             self._serialization_queue.task_done()
 
-    async def _maybe_reset_word_timestamps(self):
+    async def _maybe_reset_word_timestamps(self, context_id: str | None = None):
         """Reset word-timestamp state and emit LLMFullResponseEndFrame if needed.
 
         Called at the end of an audio context (either on clean completion timeout or
         when the context queue is drained). Resets the PTS baseline so the next turn
         starts fresh. If an LLM response is still marked as in-progress and text frames
-        are not being pushed (which would have already emitted the frame), an
-        LLMFullResponseEndFrame is pushed with the PTS of the last word frame.
+        are not being pushed (which would have already emitted the frame), the end
+        frame held for ``context_id`` is re-pushed with the PTS of the last word frame.
+
+        Args:
+            context_id: The audio context that just ended, used to look up the held
+                LLMFullResponseEndFrame.
         """
         await self.reset_word_timestamps()
         # If self._push_text_frames is True, we have already pushed the original LLMFullResponseEndFrame
         if self._llm_response_started and not self._push_text_frames:
             self._llm_response_started = False
-            frame = LLMFullResponseEndFrame()
+            # Re-push the original end frame held in process_frame (preserving its
+            # id) rather than a new one, so observers that dedup by frame.id don't
+            # see a second LLM-response end. Fall back to a fresh frame if absent.
+            frame = self._pending_llm_response_end_frames.pop(context_id, None) or (
+                LLMFullResponseEndFrame()
+            )
             frame.pts = self._word_last_pts
             await self.push_frame(frame)
 
@@ -1518,7 +1540,7 @@ class TTSService(AIService):
         if should_push_stop_frame and self._push_stop_frames:
             await self.push_frame(TTSStoppedFrame(context_id=context_id))
 
-        await self._maybe_reset_word_timestamps()
+        await self._maybe_reset_word_timestamps(context_id)
 
     async def on_audio_context_interrupted(self, context_id: str):
         """Called when an audio context is cancelled due to an interruption.
