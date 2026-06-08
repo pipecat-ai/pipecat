@@ -12,4 +12,4 @@
 #
 set -e
 here="$(cd "$(dirname "$0")" && pwd)"
-exec uv run python -m pipecat.evals suite "$here/manifest.yaml" "$@"
+exec uv run python -m pipecat.evals suite -d "$here/manifest.yaml" "$@"
