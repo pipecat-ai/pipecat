@@ -55,7 +55,7 @@ try:
     from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use ElevenLabs, you need to `pip install pipecat-ai[elevenlabs]`.")
+    logger.error('In order to use ElevenLabs, you need to `uv add "pipecat-ai[elevenlabs]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 # Models that support language codes

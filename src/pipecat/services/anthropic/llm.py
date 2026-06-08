@@ -47,7 +47,7 @@ try:
     from anthropic import NotGiven as AnthropicNotGiven
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Anthropic, you need to `pip install pipecat-ai[anthropic]`.")
+    logger.error('In order to use Anthropic, you need to `uv add "pipecat-ai[anthropic]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 

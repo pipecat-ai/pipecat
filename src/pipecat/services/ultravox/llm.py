@@ -57,7 +57,7 @@ try:
     from websockets.exceptions import ConnectionClosed
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Ultravox, you need to `pip install pipecat-ai[ultravox]`.")
+    logger.error('In order to use Ultravox, you need to `uv add "pipecat-ai[ultravox]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 

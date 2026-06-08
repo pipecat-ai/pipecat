@@ -72,9 +72,7 @@ try:
     from daily import LogLevel as DailyLogLevel
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use the Daily transport, you need to `pip install pipecat-ai[daily]`."
-    )
+    logger.error('In order to use the Daily transport, you need to `uv add "pipecat-ai[daily]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 VAD_RESET_PERIOD_MS = 2000

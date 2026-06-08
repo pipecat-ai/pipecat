@@ -29,7 +29,7 @@ try:
     from piper.download_voices import download_voice
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Piper, you need to `pip install pipecat-ai[piper]`.")
+    logger.error('In order to use Piper, you need to `uv add "pipecat-ai[piper]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 

@@ -32,7 +32,7 @@ try:
     from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Resemble AI, you need to `pip install pipecat-ai[resembleai]`.")
+    logger.error('In order to use Resemble AI, you need to `uv add "pipecat-ai[resembleai]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 

@@ -33,7 +33,7 @@ try:
     from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use LMNT, you need to `pip install pipecat-ai[lmnt]`.")
+    logger.error('In order to use LMNT, you need to `uv add "pipecat-ai[lmnt]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 

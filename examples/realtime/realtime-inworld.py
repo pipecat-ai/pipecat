@@ -20,7 +20,7 @@ Features:
 
 Requirements:
     - INWORLD_API_KEY environment variable set
-    - pip install pipecat-ai[inworld]
+    - uv add "pipecat-ai[inworld]"
 
 Usage:
     python realtime-inworld.py --transport webrtc

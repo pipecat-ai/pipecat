@@ -29,7 +29,7 @@ try:
     from groq import AsyncGroq
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Groq, you need to `pip install pipecat-ai[groq]`.")
+    logger.error('In order to use Groq, you need to `uv add "pipecat-ai[groq]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 # Hint set for `output_format`. The values mirror the Literal that

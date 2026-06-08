@@ -38,7 +38,7 @@ try:
     from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Async, you need to `pip install pipecat-ai[asyncai]`.")
+    logger.error('In order to use Async, you need to `uv add "pipecat-ai[asyncai]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 

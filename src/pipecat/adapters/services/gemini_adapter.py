@@ -27,7 +27,7 @@ try:
     from google.genai.types import Blob, Content, FileData, FunctionCall, FunctionResponse, Part
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Google AI, you need to `pip install pipecat-ai[google]`.")
+    logger.error('In order to use Google AI, you need to `uv add "pipecat-ai[google]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 

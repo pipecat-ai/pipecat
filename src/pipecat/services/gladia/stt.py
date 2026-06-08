@@ -52,7 +52,7 @@ try:
     from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Gladia, you need to `pip install pipecat-ai[gladia]`.")
+    logger.error('In order to use Gladia, you need to `uv add "pipecat-ai[gladia]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 

@@ -54,7 +54,7 @@ try:
     from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error('In order to use AssemblyAI, you need to `pip install "pipecat-ai[assemblyai]"`.')
+    logger.error('In order to use AssemblyAI, you need to `uv add "pipecat-ai[assemblyai]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 

@@ -179,7 +179,7 @@ description: "Brief description"
 ## Installation
 
 ```bash
-pip install "pipecat-ai[package-name]"
+uv add "pipecat-ai[package-name]"
 ```
 
 ## Prerequisites
@@ -248,7 +248,7 @@ Add a new row to the correct category table in `DOCS_PATH/server/services/suppor
 
 Use this format:
 ```
-| [DisplayName](/server/services/{category}/{provider}) | `pip install "pipecat-ai[package]"` |
+| [DisplayName](/server/services/{category}/{provider}) | `uv add "pipecat-ai[package]"` |
 ```
 
 To determine the correct values:

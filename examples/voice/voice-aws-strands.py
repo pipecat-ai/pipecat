@@ -32,7 +32,7 @@ try:
     from strands import Agent, tool
     from strands.models import BedrockModel
 except ImportError:
-    logger.warning("Strands not installed. Please install with: pip install strands-agents")
+    logger.warning("Strands not installed. Please install with: uv add strands-agents")
     Agent = None
     BedrockModel = None
 

@@ -38,7 +38,7 @@ try:
     from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Cartesia, you need to `pip install pipecat-ai[cartesia]`.")
+    logger.error('In order to use Cartesia, you need to `uv add "pipecat-ai[cartesia]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 

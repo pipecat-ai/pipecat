@@ -52,7 +52,7 @@ try:
     from sarvamai.core.events import EventType
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Sarvam, you need to `pip install pipecat-ai[sarvam]`.")
+    logger.error('In order to use Sarvam, you need to `uv add "pipecat-ai[sarvam]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 

@@ -58,7 +58,7 @@ try:
     from websockets.exceptions import ConnectionClosed
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use OpenAI, you need to `pip install pipecat-ai[openai]`.")
+    logger.error('In order to use OpenAI, you need to `uv add "pipecat-ai[openai]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 

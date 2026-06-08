@@ -34,7 +34,7 @@ try:
     from simli import SimliClient, SimliConfig
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Simli, you need to `pip install pipecat-ai[simli]`.")
+    logger.error('In order to use Simli, you need to `uv add "pipecat-ai[simli]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 

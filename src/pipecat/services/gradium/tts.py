@@ -32,7 +32,7 @@ try:
     from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Gradium, you need to `pip install pipecat-ai[gradium]`.")
+    logger.error('In order to use Gradium, you need to `uv add "pipecat-ai[gradium]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 SAMPLE_RATE = 48000

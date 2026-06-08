@@ -46,7 +46,7 @@ try:
     from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Rime, you need to `pip install pipecat-ai[rime]`.")
+    logger.error('In order to use Rime, you need to `uv add "pipecat-ai[rime]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 

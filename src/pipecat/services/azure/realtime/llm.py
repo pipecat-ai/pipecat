@@ -16,7 +16,7 @@ try:
     from websockets.asyncio.client import connect as websocket_connect
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Azure Realtime, you need to `pip install pipecat-ai[openai]`.")
+    logger.error('In order to use Azure Realtime, you need to `uv add "pipecat-ai[openai]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 

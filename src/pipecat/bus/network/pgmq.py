@@ -24,7 +24,7 @@ try:
     from pgmq.async_queue import PGMQueue
 except ModuleNotFoundError as e:  # pragma: no cover - exercised only when extra is missing
     logger.error(f"Exception: {e}")
-    logger.error("In order to use PgmqBus, you need to `pip install pipecat-ai[pgmq]`.")
+    logger.error('In order to use PgmqBus, you need to `uv add "pipecat-ai[pgmq]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 
@@ -51,7 +51,7 @@ class PgmqBus(WorkerBus):
     or ``backend=PgmqBackend`` (any backend). The two are mutually exclusive.
 
     Requires the ``pgmq`` extra. Install with
-    ``pip install pipecat-ai[pgmq]``.
+    ``uv add "pipecat-ai[pgmq]"``.
 
     Example::
 

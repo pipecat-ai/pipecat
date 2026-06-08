@@ -300,7 +300,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         if websocket_connect is None:
             raise ImportError(
                 "websockets is required for OpenAIRealtimeSTTService. "
-                "Install it with: pip install pipecat-ai[openai]"
+                'Install it with: uv add "pipecat-ai[openai]"'
             )
 
         # --- 1. Hardcoded defaults ---
