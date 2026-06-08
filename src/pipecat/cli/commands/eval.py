@@ -387,12 +387,35 @@ class _EvalDashboard:
         self.started_at = started_at
 
     def __rich__(self) -> Group:
+        rows = self.runs
+        n = len(rows)
+
+        # Show only as many scenario rows as fit above the pinned tally, and slide
+        # the window to follow the active runs. Otherwise, once the first screenful
+        # finishes, Rich crops the bottom — hiding the still running/pending rows and
+        # the tally itself — and there's no way to see the rest make progress.
+        term_h = _console.size.height if _console.is_terminal else 24
+        avail = max(3, term_h - 3)  # leave room for a blank line + the tally (+1 slack)
+        if n <= avail:
+            start, end = 0, n
+        else:
+            # Anchor on the active frontier (the last running run, or the first
+            # pending one) and keep a couple of upcoming rows in view below it, so
+            # completed runs scroll off the top as new ones start.
+            running = [i for i, r in enumerate(rows) if r.status == "running"]
+            done_n = sum(1 for r in rows if r.status == "done")
+            anchor = max(running) if running else min(done_n, n - 1)
+            body = max(1, avail - 2)  # 2 lines reserved for the ↑/↓ "more" markers
+            end = min(n, anchor + 1 + min(2, body - 1))
+            start = max(0, end - body)
+            end = min(n, start + body)
+
         table = Table.grid(padding=(0, 2))
         table.add_column()  # status
         table.add_column()  # bot
         table.add_column()  # scenario
         table.add_column(justify="right")  # timing
-        for r in self.runs:
+        for r in rows[start:end]:
             if r.status == "running" and r.started_at is not None:
                 detail = f"{int(time.monotonic() - r.started_at)}s"
             elif r.status == "done" and r.duration_ms is not None:
@@ -405,9 +428,10 @@ class _EvalDashboard:
                 Text(r.scenario, style="cyan"),
                 Text(detail, style="dim"),
             )
-        total = len(self.runs)
-        done = sum(1 for r in self.runs if r.status == "done")
-        passed = sum(1 for r in self.runs if _eval_verdict(r) == "passed")
+
+        total = n
+        done = sum(1 for r in rows if r.status == "done")
+        passed = sum(1 for r in rows if _eval_verdict(r) == "passed")
         # The total time ticks live next to the tally, so it doubles as the
         # "still working" signal (no spinner needed); it keeps advancing through
         # the bot-teardown tail (see _stop_bot) until Live exits, leaving the
@@ -422,7 +446,16 @@ class _EvalDashboard:
             Text(" "),
             Text(f"{passed}/{total} passed  ·  {done}/{total} done  ·  {elapsed}", "bold"),
         )
-        return Group(table, Text(""), summary)
+
+        # Replace Rich's bottom-crop "…" with scroll markers that count what's
+        # hidden above/below the window, so the tally below always stays on screen.
+        parts: list = []
+        if start > 0:
+            parts.append(Text(f"   ↑ {start} more", style="dim"))
+        parts.append(table)
+        if end < n:
+            parts.append(Text(f"   ↓ {n - end} more", style="dim"))
+        return Group(*parts, Text(""), summary)
 
 
 def _print_eval_line(r: EvalRun) -> None:
