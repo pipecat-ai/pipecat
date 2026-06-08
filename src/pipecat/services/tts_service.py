@@ -988,7 +988,7 @@ class TTSService(AIService):
         self,
         src_frame: AggregatedTextFrame,
         includes_inter_frame_spaces: bool | None = False,
-        append_tts_text_to_context: bool | None = True,
+        append_tts_text_to_context: bool = True,
         push_assistant_aggregation: bool | None = False,
     ):
         type = src_frame.aggregated_by
@@ -1078,9 +1078,7 @@ class TTSService(AIService):
                 transformed_text = await transform(transformed_text, type)
 
         self._tts_contexts[context_id] = TTSContext(
-            append_to_context=append_tts_text_to_context
-            if append_tts_text_to_context is not None
-            else True,
+            append_to_context=append_tts_text_to_context,
             push_assistant_aggregation=push_assistant_aggregation,
         )
 
@@ -1096,9 +1094,7 @@ class TTSService(AIService):
             started_frame = TTSStartedFrame(context_id=context_id)
             # Carry append_to_context so the assistant aggregator can open a turn
             # for TTSSpeakFrame utterances (which have no LLMFullResponseStartFrame).
-            # Only override append_to_context if explicitly set.
-            if append_tts_text_to_context is not None:
-                started_frame.append_to_context = append_tts_text_to_context
+            started_frame.append_to_context = append_tts_text_to_context
             await self.append_to_audio_context(context_id, started_frame)
 
         # Register this spoken frame so the sequencer can track its completion
@@ -1132,9 +1128,7 @@ class TTSService(AIService):
             frame = TTSTextFrame(text, aggregated_by=type)
             frame.includes_inter_frame_spaces = includes_inter_frame_spaces
             frame.context_id = context_id
-            # Only override append_to_context if explicitly set
-            if append_tts_text_to_context is not None:
-                frame.append_to_context = append_tts_text_to_context
+            frame.append_to_context = append_tts_text_to_context
             # Appending to the context, so it preserves the ordering.
             await self.append_to_audio_context(context_id, frame)
             # TTSTextFrame is queued; mark the spoken slot complete so any skipped
