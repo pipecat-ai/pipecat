@@ -250,10 +250,13 @@ def _generate_ws_token(ttl: int = 300) -> str:
     """Return a signed, self-expiring WebSocket session token.
 
     The token is ``<base64url-payload>.<hmac-sha256-hex>`` where the payload
-    encodes ``{"exp": unix_timestamp}``. Valid for ``ttl`` seconds (default 5 min).
+    encodes ``{"exp": unix_timestamp, "jti": random_nonce}``. Valid for ``ttl``
+    seconds (default 5 min). The nonce ensures uniqueness within the same second.
     """
     payload = (
-        base64.urlsafe_b64encode(json.dumps({"exp": int(time.time()) + ttl}).encode())
+        base64.urlsafe_b64encode(
+            json.dumps({"exp": int(time.time()) + ttl, "jti": secrets.token_hex(8)}).encode()
+        )
         .decode()
         .rstrip("=")
     )
@@ -261,7 +264,7 @@ def _generate_ws_token(ttl: int = 300) -> str:
     return f"{payload}.{sig}"
 
 
-def _validate_ws_token(used: set[str], token: str) -> bool:
+def _verify_and_consume_ws_token(used: set[str], token: str) -> bool:
     """Validate a WebSocket session token and mark it as used (one-time use).
 
     Args:
@@ -456,7 +459,7 @@ def _setup_websocket_routes(app: FastAPI, args: argparse.Namespace, ws_used_toke
     async def _handle_plain_ws(websocket: WebSocket, path_token: str | None = None):
         if args.ws_auth == "token":
             token = path_token or _extract_ws_token(websocket)
-            if not token or not _validate_ws_token(ws_used_tokens, token):
+            if not token or not _verify_and_consume_ws_token(ws_used_tokens, token):
                 logger.warning("WebSocket connection rejected: invalid or missing token")
                 await websocket.close(code=4003)
                 return
@@ -1239,7 +1242,7 @@ def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace, ws_used_toke
     async def _handle_telephony_ws(websocket: WebSocket, path_token: str | None = None):
         if args.ws_auth == "token":
             token = path_token or _extract_ws_token(websocket)
-            if not token or not _validate_ws_token(ws_used_tokens, token):
+            if not token or not _verify_and_consume_ws_token(ws_used_tokens, token):
                 logger.warning("WebSocket connection rejected: invalid or missing token")
                 await websocket.close(code=4003)
                 return
