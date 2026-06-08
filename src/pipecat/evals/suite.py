@@ -54,7 +54,7 @@ from pathlib import Path
 import yaml
 from loguru import logger
 
-from pipecat.evals.harness import EvalResult, EvalSession
+from pipecat.evals.harness import DEFAULT_EVENT_TIMEOUT_MS, EvalResult, EvalSession
 
 DEFAULT_BASE_PORT = 7900
 DEFAULT_CONCURRENCY = 4
@@ -352,6 +352,7 @@ class EvalSuite:
         on_update: Callable[[EvalRun], None] | None = None,
         debug: bool = False,
         use_cache: bool = True,
+        default_timeout_ms: int = DEFAULT_EVENT_TIMEOUT_MS,
     ) -> None:
         """Run all of the suite's runs with the manifest's concurrency, in place.
 
@@ -363,6 +364,8 @@ class EvalSuite:
             on_update: Called whenever a run changes status, for live display.
             debug: When True, save each run's combined ``<run>.debug.log``.
             use_cache: When False, ignore cached user audio and force fresh synthesis.
+            default_timeout_ms: Per-expectation budget for expectations without
+                their own ``within_ms``. Defaults to 60s.
         """
         logger.remove()  # keep stdout clean for the caller's display
         logs_dir.mkdir(parents=True, exist_ok=True)
@@ -380,6 +383,7 @@ class EvalSuite:
                     on_update,
                     debug,
                     use_cache,
+                    default_timeout_ms,
                 )
                 for i, run in enumerate(self.runs)
             )
@@ -395,6 +399,7 @@ class EvalSuite:
         on_update: Callable[[EvalRun], None] | None,
         debug: bool,
         use_cache: bool,
+        default_timeout_ms: int,
     ) -> None:
         """Spawn one bot, run its scenario against it, and record the outcome on ``run``."""
         async with sem:
@@ -447,6 +452,7 @@ class EvalSuite:
                         scenario,
                         f"ws://localhost:{port}",
                         connect_timeout_s=BOT_READY_TIMEOUT_S,
+                        default_timeout_ms=default_timeout_ms,
                         record_path=record_path,
                         cache_dir=self.manifest.cache_dir,
                         use_cache=use_cache,

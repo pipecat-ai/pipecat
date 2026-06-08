@@ -188,6 +188,7 @@ class EvalSession:
         bot_url: str,
         *,
         connect_timeout_s: float = 5.0,
+        default_timeout_ms: int = DEFAULT_EVENT_TIMEOUT_MS,
         on_progress: Callable[[EvalTurnProgress], None] | None = None,
         record_path: str | None = None,
         stop_bot: bool = False,
@@ -207,6 +208,9 @@ class EvalSession:
             bot_url: WebSocket URL of the bot's eval transport.
             connect_timeout_s: How long to wait for the bot to accept the WS
                 connection before giving up.
+            default_timeout_ms: Per-expectation latency budget for expectations
+                without their own ``within_ms`` (the turn's expectations share one
+                deadline anchored at the send). Defaults to 60s.
             on_progress: Optional callback invoked with a :class:`EvalTurnProgress`
                 as each turn and expectation resolves (used for verbose output).
             record_path: When set (and the scenario is audio mode), asks the eval
@@ -228,6 +232,7 @@ class EvalSession:
         self._scenario = scenario
         self._bot_url = bot_url
         self._connect_timeout_s = connect_timeout_s
+        self._default_timeout_ms = default_timeout_ms
         self._on_progress = on_progress
         self._record_path = record_path
         self._stop_bot = stop_bot
@@ -277,6 +282,7 @@ class EvalSession:
         bot_url: str,
         *,
         connect_timeout_s: float = 5.0,
+        default_timeout_ms: int = DEFAULT_EVENT_TIMEOUT_MS,
         on_progress: Callable[[EvalTurnProgress], None] | None = None,
         record_path: str | None = None,
         cache_dir: str | None = None,
@@ -301,6 +307,8 @@ class EvalSession:
             bot_url: WebSocket URL of the bot's eval transport.
             connect_timeout_s: How long to wait for the bot to accept the WS
                 connection before giving up.
+            default_timeout_ms: Per-expectation latency budget for expectations
+                without their own ``within_ms``. Defaults to 60s.
             on_progress: Optional per-turn/expectation progress callback (verbose).
             record_path: Optional path to record the conversation audio (audio mode).
             cache_dir: Optional directory for cached synthesized user audio
@@ -339,6 +347,7 @@ class EvalSession:
             scenario,
             bot_url,
             connect_timeout_s=connect_timeout_s,
+            default_timeout_ms=default_timeout_ms,
             on_progress=on_progress,
             record_path=record_path,
             stop_bot=stop_bot,
@@ -810,7 +819,7 @@ class EvalSession:
         # missing response fails in 60s total, not 120s.
         anchor = time.monotonic()
         for exp_idx, expectation in enumerate(turn.expect):
-            budget_ms = expectation.within_ms or DEFAULT_EVENT_TIMEOUT_MS
+            budget_ms = expectation.within_ms or self._default_timeout_ms
 
             try:
                 failure = await self._match_and_verify(

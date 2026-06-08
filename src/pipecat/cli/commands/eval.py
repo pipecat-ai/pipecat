@@ -163,6 +163,7 @@ async def _execute_scenario(
     record_dir: str,
     cache_dir: str | None,
     use_cache: bool,
+    default_timeout_ms: int,
     logs_dir: str,
     debug: bool,
     stop_bot: bool,
@@ -185,6 +186,7 @@ async def _execute_scenario(
             run.result = await EvalSession.from_scenario(
                 scenario,
                 url,
+                default_timeout_ms=default_timeout_ms,
                 on_progress=on_progress,
                 record_path=record_path,
                 cache_dir=cache_dir,
@@ -211,6 +213,7 @@ async def _run_scenarios_all(
     record_dir: str,
     cache_dir: str | None,
     use_cache: bool,
+    default_timeout_ms: int,
     logs_dir: str,
     verbose: bool,
     debug: bool,
@@ -230,6 +233,7 @@ async def _run_scenarios_all(
             record_dir=record_dir,
             cache_dir=cache_dir,
             use_cache=use_cache,
+            default_timeout_ms=default_timeout_ms,
             logs_dir=logs_dir,
             debug=debug,
             stop_bot=stop_bot,
@@ -284,6 +288,13 @@ def run(
         "--no-cache",
         help="Disable the user-audio cache: re-synthesize every turn (no reads or writes).",
     ),
+    timeout: int = typer.Option(
+        60,
+        "-t",
+        "--timeout",
+        help="Default per-expectation timeout in seconds (for expectations without their own "
+        "within_ms).",
+    ),
     logs_dir: str = typer.Option(
         ".",
         "--logs-dir",
@@ -324,6 +335,7 @@ def run(
             record_dir=record_dir,
             cache_dir=cache_dir,
             use_cache=not no_cache,
+            default_timeout_ms=timeout * 1000,
             logs_dir=logs_dir,
             verbose=verbose,
             debug=debug,
@@ -532,11 +544,18 @@ async def _run_suite_all(
     started: float,
     debug: bool,
     use_cache: bool,
+    default_timeout_ms: int,
 ) -> None:
     """Run the suite with a live dashboard (TTY) or streamed lines (piped)."""
     if _console.is_terminal:
         with Live(_EvalDashboard(suite.runs, started), console=_console, refresh_per_second=12.5):
-            await suite.run(logs_dir, record_dir=record_dir, debug=debug, use_cache=use_cache)
+            await suite.run(
+                logs_dir,
+                record_dir=record_dir,
+                debug=debug,
+                use_cache=use_cache,
+                default_timeout_ms=default_timeout_ms,
+            )
     else:
         print(f"Running {len(suite.runs)} eval(s), {suite.manifest.concurrency} at a time...")
         await suite.run(
@@ -545,6 +564,7 @@ async def _run_suite_all(
             on_update=_print_eval_line,
             debug=debug,
             use_cache=use_cache,
+            default_timeout_ms=default_timeout_ms,
         )
 
 
@@ -577,6 +597,13 @@ def suite(
         False,
         "--no-cache",
         help="Disable the user-audio cache: re-synthesize every turn (no reads or writes).",
+    ),
+    timeout: int = typer.Option(
+        60,
+        "-t",
+        "--timeout",
+        help="Default per-expectation timeout in seconds (for expectations without their own "
+        "within_ms).",
     ),
     spawn: str = typer.Option(None, "--spawn", help="Override manifest spawn template."),
     python: str = typer.Option(None, "--python", help="Override manifest python interpreter."),
@@ -622,7 +649,9 @@ def suite(
     _print_scenario_configs(runs)
 
     started = time.monotonic()
-    asyncio.run(_run_suite_all(suite, logs_dir, record_dir, started, debug, not no_cache))
+    asyncio.run(
+        _run_suite_all(suite, logs_dir, record_dir, started, debug, not no_cache, timeout * 1000)
+    )
     exit_code = _finalize_evals(
         runs, run_dir, time.monotonic() - started, dashboard_shown=_console.is_terminal
     )
