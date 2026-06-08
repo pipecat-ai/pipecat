@@ -1,23 +1,12 @@
 name: weather_and_restaurant
 
-# Audio modality, end to end: ask for two things at once (weather and a
+# Text modality, end to end: ask for two things at once (weather and a
 # restaurant). Tests that the bot handles multiple tool calls in one turn.
 
-user:
-  modality: audio
-  speech:
-    service: kokoro
-    voice: af_heart
-    sample_rate: 16000
-
 judge:
-  modality: audio
   eval:
     service: ollama
     model: llama3:latest
-  transcription:
-    service: whisper
-    model: base
 
 turns:
   - user: "What's the weather in San Francisco, and what's a good restaurant there? Use Fahrenheit."
