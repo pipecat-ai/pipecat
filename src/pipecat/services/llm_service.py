@@ -44,6 +44,7 @@ from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
     InterruptionFrame,
     LLMConfigureOutputFrame,
+    LLMContextFrame,
     LLMContextSummaryRequestFrame,
     LLMContextSummaryResultFrame,
     LLMFullResponseEndFrame,
@@ -586,6 +587,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         elif isinstance(frame, LLMContextSummaryRequestFrame):
             await self._handle_summary_request(frame)
 
+        if isinstance(frame, LLMContextFrame):
+            # Auto-register handlers for any direct functions advertised in the
+            # context. Runs before the subclass processes the context (subclasses
+            # call super().process_frame() first), so handlers are in place by the
+            # time the LLM can call them.
+            self._auto_register_direct_functions(frame.context)
+
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Pushes a frame.
 
@@ -835,6 +843,35 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             cancel_on_interruption=cancel_on_interruption,
             timeout_secs=timeout_secs,
         )
+
+    def _auto_register_direct_functions(self, context: LLMContext) -> None:
+        """Register handlers for direct functions advertised in the context.
+
+        A direct function bundles its handler with its schema, so advertising one
+        in the context's tools is enough to make it callable — no explicit
+        ``register_direct_function`` call is needed. Per-function options are read
+        from the attributes set by the ``@direct_function`` / ``@tool`` decorator,
+        falling back to defaults when undecorated.
+
+        Any direct function whose name is already registered (explicitly, or from
+        a previous context) is left untouched, so explicit registration always
+        wins and repeated context frames don't re-register.
+
+        Args:
+            context: The LLM context whose advertised tools should be scanned.
+        """
+        tools = context.tools if context is not None else None
+        if tools is None or not is_given(tools):
+            return
+        for wrapper in tools.direct_functions:
+            if wrapper.name in self._functions:
+                continue
+            handler = wrapper.function
+            self.register_direct_function(
+                handler,
+                cancel_on_interruption=getattr(handler, "cancel_on_interruption", True),
+                timeout_secs=getattr(handler, "timeout", None),
+            )
 
     def unregister_function(self, function_name: str | None):
         """Remove a registered function handler.

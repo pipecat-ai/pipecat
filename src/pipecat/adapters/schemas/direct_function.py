@@ -15,11 +15,11 @@ formats).
 
 import inspect
 import types
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import (
     TYPE_CHECKING,
     Any,
-    Protocol,
+    TypeAlias,
     Union,
     get_args,
     get_origin,
@@ -34,22 +34,20 @@ if TYPE_CHECKING:
     from pipecat.services.llm_service import FunctionCallParams
 
 
-class DirectFunction(Protocol):
-    """Protocol for a "direct" function that handles LLM function calls.
+DirectFunction: TypeAlias = Callable[..., Awaitable[Any]]
+"""A "direct" function that handles LLM function calls.
 
-    "Direct" functions' metadata is automatically extracted from their function signature and
-    docstrings, allowing them to be used without accompanying function configurations (as
-    FunctionSchemas or in provider-specific formats).
-    """
+A direct function is an async function whose first parameter is ``params`` (a
+``FunctionCallParams``), followed by the tool's arguments. Its metadata (name,
+description, and parameter schemas) is extracted automatically from its
+signature and docstring, so it can be used without an accompanying
+``FunctionSchema`` or provider-specific configuration.
 
-    async def __call__(self, params: "FunctionCallParams", **kwargs: Any) -> None:
-        """Execute the direct function.
-
-        Args:
-            params: Function call parameters from the LLM service.
-            **kwargs: Additional keyword arguments passed to the function.
-        """
-        ...
+Typed as a permissive ``Callable`` so that concrete function signatures (which a
+stricter ``Protocol`` form would reject) type-check when passed to public APIs.
+The precise contract — async, with a first parameter named ``params`` — is
+validated at runtime by ``DirectFunctionWrapper.validate_function``.
+"""
 
 
 class BaseDirectFunctionWrapper:
@@ -289,3 +287,44 @@ class DirectFunctionWrapper(BaseDirectFunctionWrapper):
             The result of the function call.
         """
         return await self.function(params=params, **args)
+
+
+def direct_function(fn=None, *, cancel_on_interruption: bool = True, timeout: float | None = None):
+    """Configure a direct function's call options.
+
+    This decorator is optional. A direct function listed in an ``LLMContext``'s
+    tools is registered automatically with default call options, so the
+    decorator is only needed when you want to override those defaults. It
+    attaches the options to the function and returns it unchanged — it does not
+    register anything, so decorated functions can stay at module level.
+
+    Can be used with or without arguments::
+
+        @direct_function
+        async def get_weather(params, location: str):
+            ...
+
+        @direct_function(cancel_on_interruption=False, timeout=60)
+        async def end_call(params, reason: str):
+            ...
+
+    Args:
+        fn: The function to decorate (when used without arguments).
+        cancel_on_interruption: Whether to cancel this function call when an
+            interruption occurs. Defaults to True.
+        timeout: Optional per-tool timeout in seconds. Defaults to None (uses
+            the LLM service default).
+
+    Returns:
+        The decorated function, with ``cancel_on_interruption`` and ``timeout``
+        attributes attached.
+    """
+
+    def decorator(fn):
+        fn.cancel_on_interruption = cancel_on_interruption
+        fn.timeout = timeout
+        return fn
+
+    if fn is not None:
+        return decorator(fn)
+    return decorator
