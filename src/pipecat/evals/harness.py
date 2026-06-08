@@ -804,11 +804,18 @@ class EvalSession:
 
         self._progress(EvalTurnProgress(turn_idx, -1, turn.user or "", "turn"))
 
+        # All of a turn's expectations share one deadline anchored at the send, so a
+        # stalled turn fails within a single ``within_ms`` budget instead of spending
+        # a fresh budget per expectation — e.g. a missing function call followed by a
+        # missing response fails in 60s total, not 120s.
+        anchor = time.monotonic()
         for exp_idx, expectation in enumerate(turn.expect):
             budget_ms = expectation.within_ms or DEFAULT_EVENT_TIMEOUT_MS
 
             try:
-                failure = await self._match_and_verify(expectation, budget_ms, turn_idx, exp_idx)
+                failure = await self._match_and_verify(
+                    expectation, anchor, budget_ms, turn_idx, exp_idx
+                )
             except TimeoutError:
                 reason = f"no matching {expectation.event!r} event arrived within {budget_ms}ms"
                 failures.append(
@@ -917,6 +924,7 @@ class EvalSession:
     async def _match_and_verify(
         self,
         expectation: EvalExpectation,
+        anchor: float,
         budget_ms: int,
         turn_idx: int,
         exp_idx: int,
@@ -940,7 +948,7 @@ class EvalSession:
                 report "no matching event arrived"). A response that arrives but
                 never satisfies the content check returns a failure instead.
         """
-        deadline = time.monotonic() + (budget_ms / 1000.0)
+        deadline = anchor + (budget_ms / 1000.0)
         self._last_match_text = ""
 
         aggregates = expectation.event in ("response", "llm_response", "tts_response") and (
