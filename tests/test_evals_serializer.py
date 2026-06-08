@@ -6,12 +6,14 @@
 
 """Tests for :class:`pipecat.evals.serializer.RTVIEvalSerializer`."""
 
+import base64
 import json
 import unittest
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.serializer import (
     EVAL_CONFIGURE_MESSAGE_TYPE,
+    EVAL_IMAGE_MESSAGE_TYPE,
     EVAL_RESET_MESSAGE_TYPE,
     RTVIEvalSerializer,
 )
@@ -86,6 +88,21 @@ class TestRTVIEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
         frame = await self.serializer.deserialize(json.dumps(msg))
         self.assertIsInstance(frame, RTVIConfigureObserverFrame)
         self.assertEqual(frame.function_call_report_level, {"*": RTVIFunctionCallReportLevel.FULL})
+
+    async def test_eval_image_stored_and_not_forwarded(self):
+        img = b"\x89PNG-fake-bytes"
+        msg = {
+            "label": RTVI.MESSAGE_LABEL,
+            "type": "client-message",
+            "id": "7",
+            "data": {
+                "t": EVAL_IMAGE_MESSAGE_TYPE,
+                "d": {"image": base64.b64encode(img).decode("ascii"), "format": "image/png"},
+            },
+        }
+        # eval-image is consumed (not forwarded) and kept for a later image request.
+        self.assertIsNone(await self.serializer.deserialize(json.dumps(msg)))
+        self.assertEqual(self.serializer.get_user_image(), (img, "image/png"))
 
     async def test_non_reset_client_message_is_forwarded(self):
         msg = {

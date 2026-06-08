@@ -56,7 +56,9 @@ Supported expectation fields (per event):
                                :mod:`pipecat.evals.judge`).
 
 A turn may also include ``send_after:`` to schedule its user send relative to a
-prior event (used for interruption / barge-in tests).
+prior event (used for interruption / barge-in tests), or ``image:`` (a path,
+relative to the scenario file) to register an image for the turn — when a
+function-calling-video bot requests a user image, the eval transport serves it.
 
 Top-level optional fields:
     reset:  list of LLM messages the harness sends as a reset before driving
@@ -182,11 +184,16 @@ class EvalTurn:
         expect: Expected events, in the order they should arrive.
         send_after: Optional event-driven schedule for when the ``user`` send
             should fire. Only meaningful when ``user`` is set.
+        image: Optional path to an image to register for this turn (resolved
+            relative to the scenario file). When a function-calling-video bot
+            requests a user image during the turn, the eval transport serves this
+            one. Stays registered until a later turn provides a different image.
     """
 
     user: str | None
     expect: list[EvalExpectation]
     send_after: EvalSendAfter | None = None
+    image: str | None = None
 
 
 @dataclass
@@ -446,7 +453,14 @@ def _parse_turn(t: Any, path: Path, idx: int) -> EvalTurn:
             "send_after only schedules when the user message gets sent"
         )
 
-    return EvalTurn(user=user, expect=expect, send_after=send_after)
+    # Image paths resolve relative to the scenario file, so a scenario is portable.
+    image = t.get("image")
+    if image is not None:
+        if not isinstance(image, str):
+            raise ValueError(f"{path}: turn #{idx} 'image:' must be a path string")
+        image = str((path.parent / image).resolve())
+
+    return EvalTurn(user=user, expect=expect, send_after=send_after, image=image)
 
 
 def _parse_send_after(s: Any, path: Path, turn_idx: int) -> EvalSendAfter:

@@ -348,6 +348,21 @@ class TestEvalsScenarioParser(unittest.TestCase):
         t = EvalTurn(user="hi", expect=[EvalExpectation(event="x")])
         self.assertEqual(t.user, "hi")
         self.assertIsNone(t.send_after)
+        self.assertIsNone(t.image)
+
+    def test_turn_image_resolved_relative_to_scenario(self):
+        p = _write(
+            "name: t\nturns: [{user: hi, image: pics/cat.jpg, expect: [{event: llm_response}]}]\n"
+        )
+        s = EvalScenario.load(p)
+        self.assertEqual(s.turns[0].image, str((p.parent / "pics/cat.jpg").resolve()))
+
+    def test_turn_image_non_string_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load(
+                _write("name: t\nturns: [{user: hi, image: 5, expect: [{event: x}]}]\n")
+            )
+        self.assertIn("image", str(cm.exception))
 
     def test_reset_defaults_to_empty(self):
         s = EvalScenario.load(

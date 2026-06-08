@@ -42,8 +42,17 @@ from urllib.parse import parse_qs, urlsplit
 import aiofiles
 from loguru import logger
 
-from pipecat.frames.frames import LLMConfigureOutputFrame
-from pipecat.transports.websocket.server import WebsocketServerTransport
+from pipecat.frames.frames import (
+    Frame,
+    LLMConfigureOutputFrame,
+    UserImageRawFrame,
+    UserImageRequestFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.transports.websocket.server import (
+    WebsocketServerInputTransport,
+    WebsocketServerTransport,
+)
 
 SKIP_TTS_QUERY_PARAM = "skip_tts"
 CAPTURE_AUDIO_QUERY_PARAM = "capture_audio"
@@ -93,6 +102,47 @@ async def _write_wav(path: str, audio: bytes, sample_rate: int, num_channels: in
     logger.info(f"Eval recording saved: {p} ({len(audio)} bytes)")
 
 
+class EvalWebsocketServerInputTransport(WebsocketServerInputTransport):
+    """Input transport that answers image requests with the harness's image.
+
+    A function-calling-video bot pushes a ``UserImageRequestFrame`` upstream when
+    it needs the user's camera image. There is no camera under eval, so we serve
+    the image the harness registered for the turn (an ``eval-image`` message,
+    stored on the serializer) as a ``UserImageRawFrame`` — mirroring
+    ``daily/transport.py`` but sourcing the image from the serializer instead of a
+    live video frame.
+    """
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Serve the registered image in response to a ``UserImageRequestFrame``."""
+        await super().process_frame(frame, direction)
+        if isinstance(frame, UserImageRequestFrame):
+            await self._serve_user_image(frame)
+
+    async def _serve_user_image(self, request: UserImageRequestFrame) -> None:
+        serializer = getattr(self._params, "serializer", None)
+        image = None
+        if serializer is not None and hasattr(serializer, "get_user_image"):
+            image = serializer.get_user_image()
+        if image is None:
+            logger.warning(f"{self}: UserImageRequestFrame but no eval image registered")
+            return
+        data, fmt = image
+        # The image is already encoded, so ``format`` is its MIME type and ``size``
+        # is unused (the LLM context uses the encoded bytes as-is).
+        await self.push_frame(
+            UserImageRawFrame(
+                image=data,
+                size=(0, 0),
+                format=fmt,
+                user_id=request.user_id,
+                text=request.text,
+                append_to_context=request.append_to_context,
+                request=request,
+            )
+        )
+
+
 class EvalWebsocketServerTransport(WebsocketServerTransport):
     """WebSocket server transport used by the eval harness (see the module docstring)."""
 
@@ -104,6 +154,14 @@ class EvalWebsocketServerTransport(WebsocketServerTransport):
         self._record_path: str | None = None
         # In-flight recording writes, tracked so they aren't garbage-collected.
         self._write_tasks: set = set()
+
+    def input(self) -> WebsocketServerInputTransport:
+        """Return an input transport that can serve harness-provided images."""
+        if not self._input:
+            self._input = EvalWebsocketServerInputTransport(
+                self, self._host, self._port, self._params, self._callbacks, name=self._input_name
+            )
+        return self._input
 
     def output(self):
         """Return the output as a recorder composite: ``[real_output, AudioBufferProcessor]``.

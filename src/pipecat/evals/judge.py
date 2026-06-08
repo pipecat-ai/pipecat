@@ -36,11 +36,13 @@ import importlib
 import json
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from loguru import logger
 
 from pipecat.evals.services import ollama_service, openai_service
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.services.llm_service import LLMService
 
 JUDGE_SYSTEM_INSTRUCTION = (
     "You are a strict but fair judge deciding whether a bot's response satisfies a "
@@ -96,7 +98,7 @@ class EvalJudge:
             for a JSON verdict + short reason.
     """
 
-    def __init__(self, service, *, max_tokens: int = 200):
+    def __init__(self, service: LLMService[Any], *, max_tokens: int = 200):
         """Initialize the judge with a configured pipecat LLM service.
 
         Args:

@@ -1,0 +1,24 @@
+name: describe_image
+
+# Text modality: the user asks the bot to look at what they're showing. The bot
+# calls its vision function (which pushes a UserImageRequestFrame); the eval
+# transport serves the image registered for this turn as a UserImageRawFrame.
+# Exercises the function-call -> user-image -> describe flow of the *-video bots.
+
+judge:
+  eval:
+    service: ollama
+    model: llama3:latest
+
+turns:
+  - user: "What do you see in my camera?"
+    image: ../assets/cat.jpg
+    send_after:
+      event: llm_started
+      delay_ms: 2000
+    expect:
+      - event: function_call
+        calls:
+          - name: fetch_user_image
+      - event: response
+        eval: "the response says the image shows a cat"
