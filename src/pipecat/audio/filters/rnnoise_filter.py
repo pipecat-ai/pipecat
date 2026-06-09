@@ -22,9 +22,7 @@ try:
 except ModuleNotFoundError as e:
     RNNoise = None
     logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use the RNNoise filter, you need to `pip install pipecat-ai[rnnoise]`."
-    )
+    logger.error('In order to use the RNNoise filter, you need to `uv add "pipecat-ai[rnnoise]"`.')
 
 
 class RNNoiseFilter(BaseAudioFilter):

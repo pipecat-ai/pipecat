@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
 from loguru import logger
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
@@ -47,13 +49,6 @@ from pipecat.services.whisper.base_stt import (
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError:
-    websocket_connect = None
-    State = None
 
 
 @dataclass
@@ -300,7 +295,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         if websocket_connect is None:
             raise ImportError(
                 "websockets is required for OpenAIRealtimeSTTService. "
-                "Install it with: pip install pipecat-ai[openai]"
+                'Install it with: uv add "pipecat-ai[openai]"'
             )
 
         # --- 1. Hardcoded defaults ---

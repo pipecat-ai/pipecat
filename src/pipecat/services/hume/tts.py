@@ -37,7 +37,7 @@ try:
     from hume.tts.types import TimestampMessage
 except ModuleNotFoundError as e:  # pragma: no cover - import-time guidance
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Hume, you need to `pip install pipecat-ai[hume]`.")
+    logger.error('In order to use Hume, you need to `uv add "pipecat-ai[hume]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 

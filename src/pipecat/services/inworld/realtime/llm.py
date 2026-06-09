@@ -20,6 +20,7 @@ from dataclasses import fields as dataclass_fields
 from typing import Any, Literal
 
 from loguru import logger
+from websockets.asyncio.client import connect as websocket_connect
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.inworld_realtime_adapter import InworldRealtimeLLMAdapter
@@ -62,13 +63,6 @@ from pipecat.services.settings import (
 from pipecat.utils.time import time_now_iso8601
 
 from . import events
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Inworld Realtime, you need to `pip install pipecat-ai[inworld]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 
 @dataclass

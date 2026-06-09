@@ -51,7 +51,7 @@ try:
     from tenacity import retry, stop_after_attempt, wait_exponential
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use LiveKit, you need to `pip install pipecat-ai[livekit]`.")
+    logger.error('In order to use LiveKit, you need to `uv add "pipecat-ai[livekit]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 # DTMF mapping according to RFC 4733

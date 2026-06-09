@@ -18,7 +18,7 @@ voice conversations. The Grok Voice Agent provides:
 
 Requirements:
     - XAI_API_KEY environment variable set
-    - pip install pipecat-ai[grok]
+    - uv add "pipecat-ai[grok]"
 
 Usage:
     python 50-grok-realtime.py --transport webrtc

@@ -20,6 +20,7 @@ from typing import Any
 from urllib.parse import quote
 
 from loguru import logger
+from websockets.asyncio.client import connect as websocket_connect
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
@@ -61,13 +62,6 @@ from pipecat.services.settings import (
 from pipecat.utils.time import time_now_iso8601
 
 from . import events
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Grok Realtime, you need to `pip install pipecat-ai[grok]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 
 @dataclass

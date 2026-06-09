@@ -18,6 +18,9 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from loguru import logger
+from websockets import Subprotocol
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -40,15 +43,6 @@ from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-
-try:
-    from websockets import Subprotocol
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use AWS services, you need to `pip install pipecat-ai[aws]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 
 @dataclass

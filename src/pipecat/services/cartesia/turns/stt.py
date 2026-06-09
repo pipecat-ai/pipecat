@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -32,14 +34,6 @@ from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Cartesia, you need to `pip install pipecat-ai[cartesia]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 
 @dataclass

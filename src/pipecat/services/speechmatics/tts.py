@@ -29,9 +29,7 @@ try:
     from speechmatics.rt import __version__
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use Speechmatics, you need to `pip install pipecat-ai[speechmatics]`."
-    )
+    logger.error('In order to use Speechmatics, you need to `uv add "pipecat-ai[speechmatics]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 

@@ -17,6 +17,8 @@ from typing import Any
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -32,15 +34,6 @@ from pipecat.services.tts_service import TextAggregationMode, TTSService, Websoc
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
-
-# See .env.example for Cartesia configuration needed
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Cartesia, you need to `pip install pipecat-ai[cartesia]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 
 class GenerationConfig(BaseModel):

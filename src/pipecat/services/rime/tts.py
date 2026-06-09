@@ -19,6 +19,8 @@ from typing import Any, ClassVar
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -40,14 +42,6 @@ from pipecat.services.tts_service import (
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Rime, you need to `pip install pipecat-ai[rime]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 
 def language_to_rime_language(language: Language) -> str:

@@ -14,8 +14,11 @@ from dataclasses import dataclass
 from typing import Any
 
 import aiohttp
+import websockets
 from loguru import logger
 from pydantic import BaseModel
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -31,15 +34,6 @@ from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
-
-try:
-    import websockets
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Async, you need to `pip install pipecat-ai[asyncai]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 
 def language_to_async_language(language: Language) -> str:

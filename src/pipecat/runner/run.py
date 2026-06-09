@@ -13,7 +13,7 @@ supports multiple transport types with a unified interface.
 
 Install with::
 
-    pip install pipecat-ai[runner]
+    uv add "pipecat-ai[runner]"
 
 All bots must implement a `bot(runner_args)` async function as the entry point.
 The server automatically discovers and executes this function when connections
@@ -129,9 +129,9 @@ try:
     from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 except ImportError as e:
     logger.error(f"Runner dependencies not available: {e}")
-    logger.error("To use Pipecat runners, install with: pip install pipecat-ai[runner]")
+    logger.error('To use Pipecat runners, install with: uv add "pipecat-ai[runner]"')
     raise ImportError(
-        "Runner dependencies required. Install with: pip install pipecat-ai[runner]"
+        'Runner dependencies required. Install with: uv add "pipecat-ai[runner]"'
     ) from e
 
 

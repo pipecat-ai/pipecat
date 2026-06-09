@@ -46,7 +46,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use FastAPI websockets, you need to `pip install pipecat-ai[websocket]`."
+        'In order to use FastAPI websockets, you need to `uv add "pipecat-ai[websocket]"`.'
     )
     raise ImportError(f"Missing module: {e}") from e
 

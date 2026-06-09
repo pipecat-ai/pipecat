@@ -32,14 +32,14 @@ if TYPE_CHECKING:
         from faster_whisper import WhisperModel
     except ModuleNotFoundError as e:
         logger.error(f"Exception: {e}")
-        logger.error("In order to use Whisper, you need to `pip install pipecat-ai[whisper]`.")
+        logger.error('In order to use Whisper, you need to `uv add "pipecat-ai[whisper]"`.')
         raise ImportError(f"Missing module: {e}") from e
 
     try:
         import mlx_whisper  # noqa: F401
     except ModuleNotFoundError as e:
         logger.error(f"Exception: {e}")
-        logger.error("In order to use Whisper, you need to `pip install pipecat-ai[mlx-whisper]`.")
+        logger.error('In order to use Whisper, you need to `uv add "pipecat-ai[mlx-whisper]"`.')
         raise ImportError(f"Missing module: {e}") from e
 
 
@@ -327,7 +327,7 @@ class WhisperSTTService(SegmentedSTTService):
             logger.debug("Loaded Whisper model")
         except ModuleNotFoundError as e:
             logger.error(f"Exception: {e}")
-            logger.error("In order to use Whisper, you need to `pip install pipecat-ai[whisper]`.")
+            logger.error('In order to use Whisper, you need to `uv add "pipecat-ai[whisper]"`.')
             self._model = None
 
     @traced_stt
