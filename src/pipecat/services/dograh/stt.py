@@ -27,6 +27,12 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.dograh.mps_billing import (
+    MPS_BILLING_VERSION_KEY,
+    MPS_BILLING_VERSION_V2,
+    get_correlation_id,
+    uses_mps_billing_v2,
+)
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import DOGRAH_TTFS_P99
 from pipecat.services.stt_service import STTService
@@ -67,6 +73,7 @@ class DograhSTTService(STTService, WebsocketService):
         api_key: str,
         base_url: str = "wss://services.dograh.com",
         ws_path: str = "/api/v1/stt/stream",
+        correlation_id: str | None = None,
         sample_rate: int | None = None,
         interim_results: bool = True,
         vad_events: bool = False,
@@ -81,6 +88,7 @@ class DograhSTTService(STTService, WebsocketService):
             api_key: The Dograh API key for authentication.
             base_url: WebSocket base URL for Dograh API. Defaults to "wss://services.dograh.com".
             ws_path: WebSocket path for STT streaming. Defaults to "/api/v1/stt/stream".
+            correlation_id: Optional server-generated correlation ID for MPS billing v2.
             sample_rate: Audio sample rate in Hz. Defaults to None.
             interim_results: Whether to receive interim transcription results.
             vad_events: Whether to receive voice activity detection events.
@@ -106,6 +114,7 @@ class DograhSTTService(STTService, WebsocketService):
         self._api_key = api_key
         self._base_url = base_url
         self._ws_path = ws_path
+        self._correlation_id = correlation_id
         self._interim_results = interim_results
         self._vad_events = vad_events
         self._keyterms = keyterms or []
@@ -139,6 +148,18 @@ class DograhSTTService(STTService, WebsocketService):
         """
         await self._update_settings(STTSettings(language=language))
 
+    def _get_correlation_id(self) -> str | None:
+        return get_correlation_id(
+            explicit_correlation_id=self._correlation_id,
+            start_metadata=self._start_metadata,
+        )
+
+    def _uses_mps_billing_v2(self) -> bool:
+        return uses_mps_billing_v2(
+            explicit_correlation_id=self._correlation_id,
+            start_metadata=self._start_metadata,
+        )
+
     async def _connect_websocket(self):
         """Connect to the WebSocket endpoint."""
         try:
@@ -169,9 +190,11 @@ class DograhSTTService(STTService, WebsocketService):
             if self._keyterms:
                 config_msg["keyterms"] = self._keyterms
 
-            # Add workflow_run_id if available from StartFrame metadata
-            if self._start_metadata and "workflow_run_id" in self._start_metadata:
-                config_msg["correlation_id"] = self._start_metadata["workflow_run_id"]
+            correlation_id = self._get_correlation_id()
+            if correlation_id:
+                config_msg["correlation_id"] = correlation_id
+                if self._uses_mps_billing_v2():
+                    config_msg[MPS_BILLING_VERSION_KEY] = MPS_BILLING_VERSION_V2
 
             await ws.send(json.dumps(config_msg))
 

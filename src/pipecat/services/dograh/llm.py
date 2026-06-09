@@ -13,6 +13,12 @@ from openai.types.chat import ChatCompletionChunk
 from pipecat.frames.frames import ErrorFrame, Frame, StartFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.dograh.mps_billing import (
+    MPS_BILLING_VERSION_KEY,
+    MPS_BILLING_VERSION_V2,
+    get_correlation_id,
+    uses_mps_billing_v2,
+)
 from pipecat.services.openai.base_llm import OpenAILLMInvocationParams, OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 
@@ -35,6 +41,7 @@ class DograhLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://services.dograh.com/api/v1/llm",
+        correlation_id: str | None = None,
         settings: OpenAILLMSettings | None = None,
         **kwargs,
     ):
@@ -43,6 +50,7 @@ class DograhLLMService(OpenAILLMService):
         Args:
             api_key: The Dograh API key for authentication.
             base_url: The base URL for Dograh API. Defaults to "https://services.dograh.com/api/v1/llm".
+            correlation_id: Optional server-generated correlation ID for MPS billing v2.
             settings: LLM settings including model, temperature, etc.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
@@ -50,6 +58,7 @@ class DograhLLMService(OpenAILLMService):
         if settings is not None:
             default_settings.apply_update(settings)
         self._base_url = base_url
+        self._correlation_id = correlation_id
         super().__init__(api_key=api_key, base_url=base_url, settings=default_settings, **kwargs)
         self._start_metadata = None
 
@@ -74,6 +83,18 @@ class DograhLLMService(OpenAILLMService):
 
         await super().process_frame(frame, direction)
 
+    def _get_correlation_id(self) -> str | None:
+        return get_correlation_id(
+            explicit_correlation_id=self._correlation_id,
+            start_metadata=self._start_metadata,
+        )
+
+    def _uses_mps_billing_v2(self) -> bool:
+        return uses_mps_billing_v2(
+            explicit_correlation_id=self._correlation_id,
+            start_metadata=self._start_metadata,
+        )
+
     def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
         """Build parameters for chat completion request with workflow_run_id.
 
@@ -90,14 +111,15 @@ class DograhLLMService(OpenAILLMService):
         # Get base parameters from parent class
         params = super().build_chat_completion_params(params_from_context)
 
-        # Add workflow_run_id to metadata if available from StartFrame metadata
-        if self._start_metadata and "workflow_run_id" in self._start_metadata:
+        correlation_id = self._get_correlation_id()
+        if correlation_id:
             # Initialize metadata dict if not present
             if "metadata" not in params:
                 params["metadata"] = {}
 
-            # Add workflow_run_id to metadata
-            params["metadata"]["correlation_id"] = str(self._start_metadata["workflow_run_id"])
+            params["metadata"]["correlation_id"] = correlation_id
+            if self._uses_mps_billing_v2():
+                params["metadata"][MPS_BILLING_VERSION_KEY] = MPS_BILLING_VERSION_V2
 
         return params
 

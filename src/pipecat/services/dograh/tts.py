@@ -27,6 +27,12 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.dograh.mps_billing import (
+    MPS_BILLING_VERSION_KEY,
+    MPS_BILLING_VERSION_V2,
+    get_correlation_id,
+    uses_mps_billing_v2,
+)
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TextAggregationMode, WebsocketTTSService
 from pipecat.transcriptions.language import Language
@@ -97,6 +103,7 @@ class DograhTTSService(WebsocketTTSService):
         api_key: str,
         base_url: str = "wss://services.dograh.com",
         ws_path: str = "/api/v1/tts/stream",
+        correlation_id: str | None = None,
         sample_rate: int | None = None,
         settings: DograhTTSSettings | None = None,
         text_aggregation_mode: TextAggregationMode | None = None,
@@ -108,6 +115,7 @@ class DograhTTSService(WebsocketTTSService):
             api_key: The Dograh API key for authentication.
             base_url: WebSocket base URL for Dograh API. Defaults to "wss://services.dograh.com".
             ws_path: WebSocket path for TTS streaming. Defaults to "/api/v1/tts/stream".
+            correlation_id: Optional server-generated correlation ID for MPS billing v2.
             sample_rate: Output audio sample rate in Hz. Defaults to None.
             settings: TTS settings including model, voice, speed, pitch, volume.
             text_aggregation_mode: How to aggregate incoming text before synthesis.
@@ -137,6 +145,7 @@ class DograhTTSService(WebsocketTTSService):
         self._api_key = api_key
         self._base_url = base_url
         self._ws_path = ws_path
+        self._correlation_id = correlation_id
         # Only forward fields the upstream provider recognizes. Unknown
         # fields (e.g. pitch/volume/language) get echoed verbatim by MPS to
         # ElevenLabs, which then trips "voice_settings field must not change"
@@ -177,6 +186,18 @@ class DograhTTSService(WebsocketTTSService):
         """
         self._settings.language = language.value
 
+    def _get_correlation_id(self) -> str | None:
+        return get_correlation_id(
+            explicit_correlation_id=self._correlation_id,
+            start_metadata=self._start_metadata,
+        )
+
+    def _uses_mps_billing_v2(self) -> bool:
+        return uses_mps_billing_v2(
+            explicit_correlation_id=self._correlation_id,
+            start_metadata=self._start_metadata,
+        )
+
     async def _connect_websocket(self):
         """Establish the websocket connection to Dograh TTS service."""
         try:
@@ -204,9 +225,11 @@ class DograhTTSService(WebsocketTTSService):
             if self._voice_settings:
                 config_msg["settings"] = self._voice_settings
 
-            # Add workflow_run_id if available from StartFrame metadata
-            if self._start_metadata and "workflow_run_id" in self._start_metadata:
-                config_msg["correlation_id"] = self._start_metadata["workflow_run_id"]
+            correlation_id = self._get_correlation_id()
+            if correlation_id:
+                config_msg["correlation_id"] = correlation_id
+                if self._uses_mps_billing_v2():
+                    config_msg[MPS_BILLING_VERSION_KEY] = MPS_BILLING_VERSION_V2
 
             await ws.send(json.dumps(config_msg))
 
@@ -448,9 +471,11 @@ class DograhTTSService(WebsocketTTSService):
                     if self._voice_settings:
                         context_msg["settings"] = self._voice_settings
 
-                    # Add workflow_run_id if available
-                    if self._start_metadata and "workflow_run_id" in self._start_metadata:
-                        context_msg["correlation_id"] = self._start_metadata["workflow_run_id"]
+                    correlation_id = self._get_correlation_id()
+                    if correlation_id:
+                        context_msg["correlation_id"] = correlation_id
+                        if self._uses_mps_billing_v2():
+                            context_msg[MPS_BILLING_VERSION_KEY] = MPS_BILLING_VERSION_V2
 
                     await self._get_websocket().send(json.dumps(context_msg))
                     self._remote_initialized_context_ids.add(context_id)
