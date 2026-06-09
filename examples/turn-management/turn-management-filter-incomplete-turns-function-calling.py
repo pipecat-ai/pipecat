@@ -21,7 +21,6 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -107,7 +106,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             ),
         ),
     )
-    llm.register_direct_function(get_current_weather)
 
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
@@ -116,7 +114,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    context = LLMContext(tools=ToolsSchema(standard_tools=[get_current_weather]))
+    # Direct functions listed in the context are registered with the LLM automatically
+    context = LLMContext(tools=[get_current_weather])
     # `FilterIncompleteUserTurnStrategies` pairs the default detector
     # chain with `LLMTurnCompletionUserTurnStopStrategy`: detectors
     # trigger LLM inference but the public `on_user_turn_stopped` event

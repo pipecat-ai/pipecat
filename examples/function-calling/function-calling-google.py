@@ -10,8 +10,6 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame, UserImageRequestFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -40,16 +38,26 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
-async def get_current_weather(params: FunctionCallParams):
-    location = params.arguments["location"]
+async def get_current_weather(params: FunctionCallParams, location: str, format: str):
+    """Get the current weather.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+        format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
+    """
     await params.result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
 
 
-async def fetch_restaurant_recommendation(params: FunctionCallParams):
+async def get_restaurant_recommendation(params: FunctionCallParams, location: str):
+    """Get a restaurant recommendation.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+    """
     await params.result_callback({"name": "The Golden Dragon"})
 
 
-async def get_image(params: FunctionCallParams):
+async def get_image(params: FunctionCallParams, user_id: str, question: str):
     """Fetch the user image and push it to the LLM.
 
     When called, this function pushes a UserImageRequestFrame upstream to the
@@ -57,9 +65,11 @@ async def get_image(params: FunctionCallParams):
     UserImageRawFrame downstream which will be added to the context by the LLM
     assistant aggregator. The result_callback will be invoked once the image is
     retrieved and processed.
+
+    Args:
+        user_id: The ID of the user to grab the image from.
+        question: The question that the user is asking about the image.
     """
-    user_id = params.arguments["user_id"]
-    question = params.arguments["question"]
     logger.debug(f"Requesting image with user_id={user_id}, question={question}")
 
     # Request a user image frame and indicate that it should be added to the
@@ -135,59 +145,13 @@ indicate you should use the get_image tool are:
             system_instruction=system_prompt,
         ),
     )
-    llm.register_function("get_current_weather", get_current_weather)
-    llm.register_function("get_image", get_image)
-    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
     @llm.event_handler("on_function_calls_started")
     async def on_function_calls_started(service, function_calls):
         await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
 
-    weather_function = FunctionSchema(
-        name="get_current_weather",
-        description="Get the current weather",
-        properties={
-            "location": {
-                "type": "string",
-                "description": "The city and state, e.g. San Francisco, CA",
-            },
-            "format": {
-                "type": "string",
-                "enum": ["celsius", "fahrenheit"],
-                "description": "The temperature unit to use. Infer this from the user's location.",
-            },
-        },
-        required=["location", "format"],
-    )
-    restaurant_function = FunctionSchema(
-        name="get_restaurant_recommendation",
-        description="Get a restaurant recommendation",
-        properties={
-            "location": {
-                "type": "string",
-                "description": "The city and state, e.g. San Francisco, CA",
-            },
-        },
-        required=["location"],
-    )
-    get_image_function = FunctionSchema(
-        name="get_image",
-        description="Called when the user requests a description of their camera feed",
-        properties={
-            "user_id": {
-                "type": "string",
-                "description": "The ID of the user to grab the image from",
-            },
-            "question": {
-                "type": "string",
-                "description": "The question that the user is asking about the image",
-            },
-        },
-        required=["user_id", "question"],
-    )
-    tools = ToolsSchema(standard_tools=[weather_function, get_image_function, restaurant_function])
-
-    context = LLMContext(tools=tools)
+    # Direct functions listed in the context are registered with the LLM automatically
+    context = LLMContext(tools=[get_current_weather, get_image, get_restaurant_recommendation])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

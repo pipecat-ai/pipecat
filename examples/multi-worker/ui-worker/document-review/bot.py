@@ -64,7 +64,6 @@ import random
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus.messages import BusJobRequestMessage, BusJobResponseMessage
 from pipecat.frames.frames import LLMRunFrame
@@ -448,7 +447,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     llm.register_direct_function(answer_about_screen, cancel_on_interruption=False, timeout_secs=30)
 
-    context = LLMContext(tools=ToolsSchema(standard_tools=[answer_about_screen]))
+    context = LLMContext(tools=[answer_about_screen])
     aggregators = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

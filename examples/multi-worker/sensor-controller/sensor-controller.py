@@ -53,7 +53,6 @@ from dotenv import load_dotenv
 from loguru import logger
 from sensor import SensorReader, SensorStats
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusJobRequestMessage
 from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
@@ -172,14 +171,12 @@ def build_sensor_controller() -> PipelineWorker:
     llm.register_direct_function(set_response_rate)
 
     context = LLMContext(
-        tools=ToolsSchema(
-            standard_tools=[
-                get_current_reading,
-                get_stats,
-                set_target_temperature,
-                set_response_rate,
-            ]
-        )
+        tools=[
+            get_current_reading,
+            get_stats,
+            set_target_temperature,
+            set_response_rate,
+        ]
     )
     aggregators = LLMContextAggregatorPair(context)
 
@@ -273,7 +270,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     llm.register_direct_function(ask_controller, timeout_secs=60)
 
-    context = LLMContext(tools=ToolsSchema(standard_tools=[ask_controller]))
+    context = LLMContext(tools=[ask_controller])
     aggregators = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

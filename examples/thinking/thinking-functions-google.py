@@ -9,7 +9,6 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -99,12 +98,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    llm.register_direct_function(check_flight_status)
-    llm.register_direct_function(book_taxi)
-
-    tools = ToolsSchema(standard_tools=[check_flight_status, book_taxi])
-
-    context = LLMContext(tools=tools)
+    # Direct functions listed in the context are registered with the LLM automatically
+    context = LLMContext(tools=[check_flight_status, book_taxi])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

@@ -31,7 +31,6 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusJobRequestMessage
 from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
@@ -176,7 +175,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     llm.register_direct_function(debate, cancel_on_interruption=False, timeout_secs=60)
 
-    context = LLMContext(tools=ToolsSchema(standard_tools=[debate]))
+    context = LLMContext(tools=[debate])
     aggregators = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
