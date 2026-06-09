@@ -140,6 +140,14 @@ async def bot(runner_args: RunnerArguments):
             audio_out_enabled=True,
         ),
         {% endfor %}
+        {% if enable_eval %}
+        # Behavioral evals: run with `-t eval` to drive this bot via `pipecat eval`.
+        "eval": lambda: WebsocketServerParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            {% if video_input %}video_in_enabled=True,{% endif %}
+        ),
+        {% endif %}
     }
 
     transport = await create_transport(runner_args, transport_params)

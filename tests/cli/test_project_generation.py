@@ -786,6 +786,39 @@ def test_collapsed_transport_construction(temp_output_dir):
     ast.parse(bot)  # raises if the generated bot has a syntax error
 
 
+def test_eval_transport_opt_in(temp_output_dir):
+    """``enable_eval`` adds an inert ``eval`` transport entry; it's absent otherwise."""
+
+    def gen(name, *, enable_eval):
+        path = temp_output_dir / name
+        if path.exists():
+            shutil.rmtree(path)
+        ProjectGenerator(
+            ProjectConfig(
+                project_name=name,
+                bot_type="web",
+                transports=["smallwebrtc"],
+                mode="cascade",
+                stt_service="deepgram_stt",
+                llm_service="openai_llm",
+                tts_service="cartesia_tts",
+                enable_eval=enable_eval,
+            )
+        ).generate(output_dir=temp_output_dir)
+        return (path / "server" / "bot.py").read_text()
+
+    # Off by default: no eval entry, no WebsocketServerParams import.
+    without = gen("eval-off", enable_eval=False)
+    assert '"eval":' not in without
+    assert "WebsocketServerParams" not in without
+
+    # Opted in: the eval entry and its import are generated, and the bot is valid.
+    with_eval = gen("eval-on", enable_eval=True)
+    assert '"eval": lambda: WebsocketServerParams(' in with_eval
+    assert "from pipecat.transports.websocket.server import WebsocketServerParams" in with_eval
+    ast.parse(with_eval)  # raises if the generated bot has a syntax error
+
+
 def _gen_bot(temp_output_dir, name, **kwargs):
     """Generate a telephony cascade bot and return its bot.py text.
 
