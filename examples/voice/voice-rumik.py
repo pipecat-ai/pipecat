@@ -31,6 +31,11 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
+def optional_int_env(name: str) -> int | None:
+    value = os.getenv(name)
+    return int(value) if value else None
+
+
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
@@ -59,7 +64,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         gateway_url=os.environ["RUMIK_GATEWAY_URL"],
         settings=RumikTTSService.Settings(
             model=os.getenv("RUMIK_MODEL", "muga"),
-            speaker_id=int(os.getenv("RUMIK_SPEAKER_ID", "0")),
+            voice=os.getenv("RUMIK_SPEAKER") or None,
+            description=os.getenv("RUMIK_DESCRIPTION") or None,
+            f0_up_key=optional_int_env("RUMIK_F0_UP_KEY"),
         ),
     )
 

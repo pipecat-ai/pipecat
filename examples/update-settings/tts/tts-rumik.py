@@ -31,6 +31,12 @@ from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
+
+def optional_int_env(name: str) -> int | None:
+    value = os.getenv(name)
+    return int(value) if value else None
+
+
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
@@ -57,7 +63,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         gateway_url=os.environ["RUMIK_GATEWAY_URL"],
         settings=RumikTTSService.Settings(
             model=os.getenv("RUMIK_MODEL", "muga"),
-            speaker_id=int(os.getenv("RUMIK_SPEAKER_ID", "0")),
+            voice=os.getenv("RUMIK_SPEAKER") or None,
+            description=os.getenv("RUMIK_DESCRIPTION") or None,
+            f0_up_key=optional_int_env("RUMIK_F0_UP_KEY"),
         ),
     )
 
@@ -105,17 +113,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         await asyncio.sleep(10)
         update_model = os.getenv("RUMIK_UPDATE_MODEL", "mulberry")
-        update_speaker_id = int(
-            os.getenv("RUMIK_UPDATE_SPEAKER_ID", os.getenv("RUMIK_SPEAKER_ID", "0"))
-        )
+        update_speaker = os.getenv("RUMIK_UPDATE_SPEAKER", os.getenv("RUMIK_SPEAKER", ""))
+        update_f0_up_key = os.getenv("RUMIK_UPDATE_F0_UP_KEY")
         logger.info(
-            f'Updating Rumik TTS settings: model="{update_model}", speaker_id={update_speaker_id}'
+            f'Updating Rumik TTS settings: model="{update_model}", voice="{update_speaker}"'
         )
         await worker.queue_frame(
             TTSUpdateSettingsFrame(
                 delta=RumikTTSService.Settings(
                     model=update_model,
-                    speaker_id=update_speaker_id,
+                    voice=update_speaker or None,
+                    f0_up_key=int(update_f0_up_key) if update_f0_up_key else None,
                 )
             )
         )

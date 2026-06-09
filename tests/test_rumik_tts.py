@@ -124,31 +124,35 @@ class RumikTTSSettingsTests(unittest.TestCase):
         self.assertIs(settings.model, NOT_GIVEN)
         self.assertIs(settings.voice, NOT_GIVEN)
         self.assertIs(settings.language, NOT_GIVEN)
-        self.assertIs(settings.speaker_id, NOT_GIVEN)
         self.assertIs(settings.description, NOT_GIVEN)
+        self.assertIs(settings.f0_up_key, NOT_GIVEN)
         self.assertIs(settings.temperature, NOT_GIVEN)
-        self.assertIs(settings.topk, NOT_GIVEN)
+        self.assertIs(settings.top_p, NOT_GIVEN)
+        self.assertIs(settings.top_k, NOT_GIVEN)
+        self.assertIs(settings.repetition_penalty, NOT_GIVEN)
         self.assertIs(settings.max_new_tokens, NOT_GIVEN)
 
     def test_sparse_delta_does_not_reset_existing_store_fields(self):
         settings = RumikTTSSettings(
             model="custom",
-            voice=None,
+            voice="speaker_1",
             language=None,
-            speaker_id=0,
             description="warm",
+            f0_up_key=0,
             temperature=0.7,
-            topk=40,
+            top_p=0.95,
+            top_k=50,
+            repetition_penalty=1.2,
             max_new_tokens=2048,
         )
 
-        changed = settings.apply_update(RumikTTSSettings(speaker_id=2))
+        changed = settings.apply_update(RumikTTSSettings(voice="speaker_2"))
 
-        self.assertEqual(changed, {"speaker_id": 0})
+        self.assertEqual(changed, {"voice": "speaker_1"})
         self.assertEqual(settings.model, "custom")
         self.assertEqual(settings.description, "warm")
         self.assertEqual(settings.temperature, 0.7)
-        self.assertEqual(settings.speaker_id, 2)
+        self.assertEqual(settings.voice, "speaker_2")
 
 
 class RumikHttpTTSServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -161,9 +165,13 @@ class RumikHttpTTSServiceTests(unittest.IsolatedAsyncioTestCase):
             aiohttp_session=session,
             settings=RumikHttpTTSService.Settings(
                 model="mulberry",
+                voice="speaker_2",
                 description="warm",
+                f0_up_key=-1,
                 temperature=0.7,
-                topk=32,
+                top_p=0.9,
+                top_k=32,
+                repetition_penalty=1.1,
                 max_new_tokens=1024,
             ),
         )
@@ -181,8 +189,12 @@ class RumikHttpTTSServiceTests(unittest.IsolatedAsyncioTestCase):
                 "text": "hello world",
                 "model": "mulberry",
                 "description": "warm",
+                "speaker": "speaker_2",
+                "f0_up_key": -1,
                 "temperature": 0.7,
-                "topk": 32,
+                "top_p": 0.9,
+                "top_k": 32,
+                "repetition_penalty": 1.1,
                 "max_new_tokens": 1024,
             },
         )
@@ -248,9 +260,13 @@ class RumikTTSServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service._gateway_url, "https://example.test")
         self.assertEqual(service._init_sample_rate, 24000)
         self.assertEqual(service._settings.model, "muga")
-        self.assertEqual(service._settings.speaker_id, 0)
-        self.assertEqual(service._settings.description, "neutral")
+        self.assertIsNone(service._settings.voice)
+        self.assertIsNone(service._settings.description)
+        self.assertIsNone(service._settings.f0_up_key)
         self.assertEqual(service._settings.temperature, 0.6)
+        self.assertEqual(service._settings.top_p, 0.95)
+        self.assertEqual(service._settings.top_k, 50)
+        self.assertEqual(service._settings.repetition_penalty, 1.2)
 
         aggregations = [
             aggregation async for aggregation in service._text_aggregator.aggregate("Hello. ")
@@ -312,14 +328,34 @@ class RumikTTSServiceTests(unittest.IsolatedAsyncioTestCase):
         service = RumikTTSService(
             api_key="key",
             gateway_url="https://example.test",
-            settings=RumikTTSService.Settings(speaker_id=3),
+            settings=RumikTTSService.Settings(
+                model="mulberry",
+                voice="speaker_3",
+                description="calm narrator",
+                f0_up_key=2,
+            ),
         )
         service._websocket = _FakeWebSocket()
 
         frames = [frame async for frame in service.run_tts(" hello   world ", "ctx-1")]
 
         self.assertEqual(frames, [None])
-        self.assertEqual(service._websocket.sent, [{"text": "hello world", "speaker_id": 3}])
+        self.assertEqual(
+            service._websocket.sent,
+            [
+                {
+                    "text": "hello world",
+                    "description": "calm narrator",
+                    "speaker": "speaker_3",
+                    "f0_up_key": 2,
+                    "temperature": 0.6,
+                    "top_p": 0.95,
+                    "top_k": 50,
+                    "repetition_penalty": 1.2,
+                    "max_new_tokens": 2048,
+                }
+            ],
+        )
         self.assertEqual(service._active_context_id, "ctx-1")
         self.assertTrue(service._synthesis_lock.locked())
 

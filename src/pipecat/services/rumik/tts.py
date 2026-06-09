@@ -14,7 +14,7 @@ authenticate with a Bearer token in the ``Authorization`` header.
 - **RumikTTSService**: WebSocket TTS service for interactive voice agents.
     - Mints a one-time streaming token with ``POST /v1/tts/ws-connect``.
     - Connects to ``/ws/tts`` using the returned ``ws_url`` and token.
-    - Sends ``{"text": ..., "speaker_id": ...}`` messages over one persistent
+    - Sends synthesis parameters over one persistent
       WebSocket connection.
     - Receives raw PCM int16 audio chunks at 24 kHz, mono.
     - Handles ``queued``, ``done``, ``timeout``, and ``error`` control frames.
@@ -30,9 +30,9 @@ authenticate with a Bearer token in the ``Authorization`` header.
 
 - ``muga``: Conversational speech model.
 - ``mulberry``: Higher-quality TTS model when enabled by the Rumik deployment.
-- WebSocket requests use ``speaker_id`` for voice selection.
-- HTTP requests support ``description``, ``temperature``, ``topk``, and
-  ``max_new_tokens``.
+- ``voice`` is sent to Rumik as ``speaker`` for preset Mulberry voices.
+- Synthesis settings include ``description``, ``f0_up_key``, ``temperature``,
+  ``top_p``, ``top_k``, ``repetition_penalty``, and ``max_new_tokens``.
 
 Rumik currently returns 24 kHz mono PCM audio. The ``sample_rate`` parameter
 must therefore be 24000 Hz.
@@ -81,9 +81,10 @@ except ModuleNotFoundError as e:
 
 RUMIK_SAMPLE_RATE = 24000
 RUMIK_DEFAULT_MODEL = "muga"
-RUMIK_DEFAULT_DESCRIPTION = "neutral"
 RUMIK_DEFAULT_TEMPERATURE = 0.6
-RUMIK_DEFAULT_TOPK = 40
+RUMIK_DEFAULT_TOP_P = 0.95
+RUMIK_DEFAULT_TOP_K = 50
+RUMIK_DEFAULT_REPETITION_PENALTY = 1.2
 RUMIK_DEFAULT_MAX_NEW_TOKENS = 2048
 
 
@@ -92,17 +93,21 @@ class RumikTTSSettings(TTSSettings):
     """Settings for Rumik TTS services.
 
     Parameters:
-        speaker_id: Speaker ID used by the Rumik WebSocket TTS API.
-        description: Voice/style description used by the Rumik HTTP TTS API.
-        temperature: Sampling temperature used by the Rumik HTTP TTS API.
-        topk: Top-k sampling value used by the Rumik HTTP TTS API.
-        max_new_tokens: Maximum generated audio tokens used by the Rumik HTTP TTS API.
+        description: Natural-language voice description for Mulberry.
+        f0_up_key: Pitch shift in semitones for Mulberry preset speakers.
+        temperature: Sampling temperature.
+        top_p: Nucleus sampling value.
+        top_k: Top-k sampling value.
+        repetition_penalty: Penalty for repeated tokens.
+        max_new_tokens: Maximum generated audio tokens.
     """
 
-    speaker_id: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     description: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    f0_up_key: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    topk: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    top_p: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    top_k: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    repetition_penalty: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     max_new_tokens: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -122,12 +127,50 @@ def _default_settings() -> RumikTTSSettings:
         model=RUMIK_DEFAULT_MODEL,
         voice=None,
         language=None,
-        speaker_id=0,
-        description=RUMIK_DEFAULT_DESCRIPTION,
+        description=None,
+        f0_up_key=None,
         temperature=RUMIK_DEFAULT_TEMPERATURE,
-        topk=RUMIK_DEFAULT_TOPK,
+        top_p=RUMIK_DEFAULT_TOP_P,
+        top_k=RUMIK_DEFAULT_TOP_K,
+        repetition_penalty=RUMIK_DEFAULT_REPETITION_PENALTY,
         max_new_tokens=RUMIK_DEFAULT_MAX_NEW_TOKENS,
     )
+
+
+def _build_synthesis_payload(
+    settings: RumikTTSSettings, text: str, *, include_model: bool = True
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"text": text}
+
+    model = assert_given(settings.model) or RUMIK_DEFAULT_MODEL
+    voice = assert_given(settings.voice)
+    description = assert_given(settings.description)
+    f0_up_key = assert_given(settings.f0_up_key)
+    temperature = assert_given(settings.temperature)
+    top_p = assert_given(settings.top_p)
+    top_k = assert_given(settings.top_k)
+    repetition_penalty = assert_given(settings.repetition_penalty)
+    max_new_tokens = assert_given(settings.max_new_tokens)
+
+    if include_model:
+        payload["model"] = model
+    if description is not None:
+        payload["description"] = description
+    if voice is not None:
+        payload["speaker"] = voice
+    if f0_up_key is not None:
+        payload["f0_up_key"] = f0_up_key
+    if temperature is not None:
+        payload["temperature"] = temperature
+    if top_p is not None:
+        payload["top_p"] = top_p
+    if top_k is not None:
+        payload["top_k"] = top_k
+    if repetition_penalty is not None:
+        payload["repetition_penalty"] = repetition_penalty
+    if max_new_tokens is not None:
+        payload["max_new_tokens"] = max_new_tokens
+    return payload
 
 
 class _FullResponseTextAggregator(BaseTextAggregator):
@@ -447,9 +490,8 @@ class RumikTTSService(InterruptibleTTSService):
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
-            speaker_id = assert_given(self._settings.speaker_id)
             await self._get_websocket().send(
-                json.dumps({"text": text, "speaker_id": speaker_id})
+                json.dumps(_build_synthesis_payload(self._settings, text, include_model=False))
             )
             await self.start_tts_usage_metrics(text)
             yield None
@@ -509,24 +551,7 @@ class RumikHttpTTSService(TTSService):
         return True
 
     def _payload(self, text: str) -> dict[str, Any]:
-        model = assert_given(self._settings.model) or RUMIK_DEFAULT_MODEL
-        description = assert_given(self._settings.description)
-        temperature = assert_given(self._settings.temperature)
-        topk = assert_given(self._settings.topk)
-        max_new_tokens = assert_given(self._settings.max_new_tokens)
-        payload = {
-            "text": text,
-            "model": model,
-        }
-        if description is not None:
-            payload["description"] = description
-        if temperature is not None:
-            payload["temperature"] = temperature
-        if topk is not None:
-            payload["topk"] = topk
-        if max_new_tokens is not None:
-            payload["max_new_tokens"] = max_new_tokens
-        return payload
+        return _build_synthesis_payload(self._settings, text, include_model=True)
 
     @staticmethod
     def _wav_to_pcm(wav_audio: bytes) -> tuple[bytes, int, int]:

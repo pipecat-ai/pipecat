@@ -32,6 +32,11 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
+def optional_int_env(name: str) -> int | None:
+    value = os.getenv(name)
+    return int(value) if value else None
+
+
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
@@ -62,9 +67,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             aiohttp_session=session,
             settings=RumikHttpTTSService.Settings(
                 model=os.getenv("RUMIK_MODEL", "muga"),
-                description=os.getenv("RUMIK_DESCRIPTION", "neutral"),
+                voice=os.getenv("RUMIK_SPEAKER") or None,
+                description=os.getenv("RUMIK_DESCRIPTION") or None,
+                f0_up_key=optional_int_env("RUMIK_F0_UP_KEY"),
                 temperature=float(os.getenv("RUMIK_TEMPERATURE", "0.6")),
-                topk=int(os.getenv("RUMIK_TOPK", "40")),
+                top_p=float(os.getenv("RUMIK_TOP_P", "0.95")),
+                top_k=int(os.getenv("RUMIK_TOP_K", "50")),
+                repetition_penalty=float(os.getenv("RUMIK_REPETITION_PENALTY", "1.2")),
                 max_new_tokens=int(os.getenv("RUMIK_MAX_NEW_TOKENS", "2048")),
             ),
         )
