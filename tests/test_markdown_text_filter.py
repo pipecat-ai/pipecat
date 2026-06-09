@@ -77,16 +77,21 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
                 expected,
                 f"Failed to handle repeated characters in: '{input_text}'\nExpected: '{expected}'\nGot: '{result}'",
             )
-            
+
     async def test_preserve_repeated_characters(self):
         """Test preservation of repeated characters (5 or more)."""
-        filter = MarkdownTextFilter(params=MarkdownTextFilter.InputParams(filter_repeated_sequences=False))
+        filter = MarkdownTextFilter(
+            params=MarkdownTextFilter.InputParams(filter_repeated_sequences=False)
+        )
         repeated_sequence = "55555"
 
         result = await filter.filter(repeated_sequence)
 
-        self.assertEqual(result, repeated_sequence, f"Preserve repeated sequences failed.\nExpected:\n{repeated_sequence}\nGot:\n{result}")
-
+        self.assertEqual(
+            result,
+            repeated_sequence,
+            f"Preserve repeated sequences failed.\nExpected:\n{repeated_sequence}\nGot:\n{result}",
+        )
 
     async def test_numbered_list_preservation(self):
         """Test that numbered lists are preserved correctly."""
