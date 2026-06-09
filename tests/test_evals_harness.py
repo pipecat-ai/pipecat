@@ -305,6 +305,36 @@ class TestTextContainsResolution(unittest.TestCase):
         self.assertIn("does not contain", failure.reason)
 
 
+class TestAudioSender(unittest.IsolatedAsyncioTestCase):
+    """The continuous mic streams silence and drains injected user audio."""
+
+    async def test_streams_silence_and_injected_audio(self):
+        s = _session(bot_audio=True)
+        sent: list[bytes] = []
+
+        async def fake_send_raw(chunk, sample_rate):
+            sent.append(chunk)
+
+        s._send_raw_audio = fake_send_raw
+        task = asyncio.create_task(s._audio_sender_loop(16000))
+        try:
+            for chunk in (b"\x01\x01", b"\x02\x02", b"\x03\x03"):
+                s._audio_out.put_nowait(chunk)
+            # join() returns once every injected chunk has been sent.
+            await asyncio.wait_for(s._audio_out.join(), timeout=2)
+            await asyncio.sleep(0.05)  # ... and silence keeps streaming after
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        silence = b"\x00\x00" * (16000 * 20 // 1000)
+        self.assertTrue({b"\x01\x01", b"\x02\x02", b"\x03\x03"} <= set(sent))
+        self.assertIn(silence, sent)
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("localhost", 0))

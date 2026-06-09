@@ -93,16 +93,13 @@ SEND_AFTER_MAX_WAIT_S = 30.0
 SEND_AFTER_POLL_S = 0.01
 BOT_READY_TIMEOUT_S = 10.0
 
-# Audio injection: stream the user's audio as ~20ms PCM slices at real-time mic
-# cadence (one frame every ~20ms), padded with ~500ms of leading/trailing silence.
-# The bot's VAD/STT endpoint on wall-clock timing, so bursting the whole utterance
-# compresses the speech/silence boundary and mis-segments it — _send_user_audio
-# paces the sends, which is what makes a short trailing pad enough for the VAD to
-# detect end-of-turn. Padding is added at send time (not baked into the cached
-# audio), so it can change without invalidating the cache.
+# Audio injection: the harness streams a continuous ~20ms-frame "mic" to the bot
+# at real-time cadence (a frame every ~20ms) — the synthesized user utterance when
+# there is one, silence otherwise. A continuous stream (rather than bursts around
+# each turn) is what streaming STT services expect, and the silence between turns
+# gives the bot's VAD a clean speech<->silence boundary to end each turn — so no
+# explicit leading/trailing padding is needed.
 AUDIO_CHUNK_MS = 20
-AUDIO_LEADING_SILENCE_MS = 500
-AUDIO_TRAILING_SILENCE_MS = 500
 
 
 @dataclass
@@ -257,6 +254,12 @@ class EvalSession:
         # One persistent TTS pipeline reused across the scenario's audio turns,
         # started in run(); None for text-mode scenarios.
         self._voice: EvalVoice | None = voice
+
+        # Continuous "mic" (audio mode): a background task streams 20ms frames at
+        # real-time cadence — user-audio chunks queued here when there's something
+        # to say, silence otherwise (see _audio_sender_loop).
+        self._audio_out: asyncio.Queue[bytes] = asyncio.Queue()
+        self._audio_sender_task: asyncio.Task | None = None
 
         # Accumulates the bot's output text for the current response, to
         # synthesize llm_response. Source depends on the mode: bot-llm-text in
@@ -442,16 +445,25 @@ class EvalSession:
                     )
                 )
             else:
+                # Start the continuous mic only once the bot is ready to receive.
+                if self._voice is not None:
+                    self._audio_sender_task = asyncio.create_task(
+                        self._audio_sender_loop(self._voice.sample_rate)
+                    )
                 for turn_idx, turn in enumerate(self._scenario.turns):
                     self._current_turn = turn_idx
                     self._debug(f"--- turn {turn_idx}: {turn.user!r}")
                     failures.extend(await self._run_turn(turn, turn_idx))
         finally:
             reader_task.cancel()
-            try:
-                await reader_task
-            except (asyncio.CancelledError, Exception):
-                pass
+            if self._audio_sender_task is not None:
+                self._audio_sender_task.cancel()
+            for task in (reader_task, self._audio_sender_task):
+                if task is not None:
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        pass
             # Tear each sub-pipeline down under the same eval_pipeline label as its
             # setup, so its shutdown logs (e.g. "Cancelling pipeline worker") are
             # attributed to it rather than leaking into the harness catch-all.
@@ -897,30 +909,59 @@ class EvalSession:
         await self._send(message)
 
     async def _send_user_audio(self, text: str) -> None:
-        """Render ``text`` to audio (cached) and stream it as ``raw-audio`` chunks.
+        """Render ``text`` to audio (cached) and inject it into the mic stream.
 
-        The chunks are sent at real-time mic cadence (one ~20ms frame every ~20ms)
-        rather than in a burst: the bot's VAD/STT endpoint on wall-clock timing, so
-        a bursted utterance compresses the speech/silence boundary and gets
-        mis-segmented. Pacing is monotonic-clock based so it doesn't drift.
+        The continuous sender (:meth:`_audio_sender_loop`) streams these chunks at
+        real-time cadence in place of silence; we wait until they have all been
+        sent so the turn's anchor isn't set before the bot has heard the utterance.
         """
         assert self._voice is not None  # only called for audio-mode turns
         pcm, sample_rate = await self._voice.generate(text)
+        for chunk in _audio_chunks(pcm, sample_rate):
+            self._audio_out.put_nowait(chunk)
+        await self._audio_out.join()
+
+    async def _audio_sender_loop(self, sample_rate: int) -> None:
+        """Stream a continuous real-time mic to the bot for the whole session.
+
+        Sends one ~20ms frame every ~20ms: a queued user-audio chunk when there is
+        one (see :meth:`_send_user_audio`), silence otherwise. Streaming STT
+        services expect an uninterrupted stream, and the silence between turns is
+        what lets the bot's VAD end each turn. ``task_done`` is called for every
+        queued chunk (even if the send fails) so a waiting :meth:`_send_user_audio`
+        never hangs.
+        """
+        silence = b"\x00\x00" * (sample_rate * AUDIO_CHUNK_MS // 1000)
         loop = asyncio.get_running_loop()
         next_send = loop.time()
-        for chunk in _audio_chunks(pcm, sample_rate):
-            message = RTVI.Message(
-                type="raw-audio",
-                id=self._message_id(),
-                data={
-                    "base64Audio": base64.b64encode(chunk).decode("ascii"),
-                    "sampleRate": sample_rate,
-                    "numChannels": 1,
-                },
-            )
-            await self._send(message)
-            next_send += AUDIO_CHUNK_MS / 1000
+        while True:
             await asyncio.sleep(max(0, next_send - loop.time()))
+            next_send += AUDIO_CHUNK_MS / 1000
+            try:
+                chunk = self._audio_out.get_nowait()
+                speaking = True
+            except asyncio.QueueEmpty:
+                chunk, speaking = silence, False
+            try:
+                await self._send_raw_audio(chunk, sample_rate)
+            except Exception:  # noqa: BLE001 — ws likely gone; keep draining the queue
+                pass
+            finally:
+                if speaking:
+                    self._audio_out.task_done()
+
+    async def _send_raw_audio(self, chunk: bytes, sample_rate: int) -> None:
+        """Send one PCM chunk to the bot as an RTVI ``raw-audio`` message."""
+        message = RTVI.Message(
+            type="raw-audio",
+            id=self._message_id(),
+            data={
+                "base64Audio": base64.b64encode(chunk).decode("ascii"),
+                "sampleRate": sample_rate,
+                "numChannels": 1,
+            },
+        )
+        await self._send(message)
 
     async def _wait_for_event(self, event_name: str, timeout_s: float) -> None:
         """Block until ``event_name`` has been seen, or raise TimeoutError."""
@@ -1228,18 +1269,7 @@ class EvalSession:
 
 
 def _audio_chunks(pcm: bytes, sample_rate: int):
-    """Yield ~20ms PCM slices, padded with leading and trailing silence.
-
-    The padding is generated here, at send time, rather than stored in the cached
-    audio, so it can change without invalidating the TTS cache.
-    """
-    samples_per_chunk = sample_rate * AUDIO_CHUNK_MS // 1000
-    silence = b"\x00\x00" * samples_per_chunk
-    bytes_per_chunk = samples_per_chunk * 2  # 16-bit mono
-
-    for _ in range(AUDIO_LEADING_SILENCE_MS // AUDIO_CHUNK_MS):
-        yield silence
+    """Yield ``pcm`` as ~20ms slices (16-bit mono) for injection into the mic stream."""
+    bytes_per_chunk = (sample_rate * AUDIO_CHUNK_MS // 1000) * 2
     for offset in range(0, len(pcm), bytes_per_chunk):
         yield pcm[offset : offset + bytes_per_chunk]
-    for _ in range(AUDIO_TRAILING_SILENCE_MS // AUDIO_CHUNK_MS):
-        yield silence
