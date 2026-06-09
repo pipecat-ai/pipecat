@@ -22,8 +22,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.direct_function import direct_function
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -52,44 +51,27 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
-async def fetch_weather_from_api(params: FunctionCallParams):
+@direct_function(cancel_on_interruption=False)
+async def get_current_weather(params: FunctionCallParams, location: str, format: str):
+    """Get the current weather.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+        format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
+    """
     # Simulate a long-running API call so we can demonstrate that the
     # conversation continues while the tool is in flight.
     await asyncio.sleep(10)
-    temperature = (
-        random.randint(60, 85)
-        if params.arguments["format"] == "fahrenheit"
-        else random.randint(15, 30)
-    )
+    temperature = random.randint(60, 85) if format == "fahrenheit" else random.randint(15, 30)
     await params.result_callback(
         {
             "conditions": "nice",
             "temperature": temperature,
-            "location": params.arguments["location"],
-            "format": params.arguments["format"],
+            "location": location,
+            "format": format,
             "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
         }
     )
-
-
-weather_function = FunctionSchema(
-    name="get_current_weather",
-    description="Get the current weather",
-    properties={
-        "location": {
-            "type": "string",
-            "description": "The city and state, e.g. San Francisco, CA",
-        },
-        "format": {
-            "type": "string",
-            "enum": ["celsius", "fahrenheit"],
-            "description": "The temperature unit to use. Infer this from the users location.",
-        },
-    },
-    required=["location", "format"],
-)
-
-tools = ToolsSchema(standard_tools=[weather_function])
 
 
 system_instruction = (
@@ -141,13 +123,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    llm.register_function(
-        "get_current_weather",
-        fetch_weather_from_api,
-        cancel_on_interruption=False,
-    )
-
-    context = LLMContext(tools=tools)
+    context = LLMContext(tools=[get_current_weather])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         realtime_service_mode=True,

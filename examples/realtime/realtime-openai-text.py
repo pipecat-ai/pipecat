@@ -11,8 +11,6 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -45,53 +43,31 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
-async def fetch_weather_from_api(params: FunctionCallParams):
-    temperature = 75 if params.arguments["format"] == "fahrenheit" else 24
+async def get_current_weather(params: FunctionCallParams, location: str, format: str):
+    """Get the current weather.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+        format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
+    """
+    temperature = 75 if format == "fahrenheit" else 24
     await params.result_callback(
         {
             "conditions": "nice",
             "temperature": temperature,
-            "format": params.arguments["format"],
+            "format": format,
             "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
         }
     )
 
 
-async def fetch_restaurant_recommendation(params: FunctionCallParams):
+async def get_restaurant_recommendation(params: FunctionCallParams, location: str):
+    """Get a restaurant recommendation.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+    """
     await params.result_callback({"name": "The Golden Dragon"})
-
-
-weather_function = FunctionSchema(
-    name="get_current_weather",
-    description="Get the current weather",
-    properties={
-        "location": {
-            "type": "string",
-            "description": "The city and state, e.g. San Francisco, CA",
-        },
-        "format": {
-            "type": "string",
-            "enum": ["celsius", "fahrenheit"],
-            "description": "The temperature unit to use. Infer this from the users location.",
-        },
-    },
-    required=["location", "format"],
-)
-
-restaurant_function = FunctionSchema(
-    name="get_restaurant_recommendation",
-    description="Get a restaurant recommendation",
-    properties={
-        "location": {
-            "type": "string",
-            "description": "The city and state, e.g. San Francisco, CA",
-        },
-    },
-    required=["location"],
-)
-
-# Create tools schema
-tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
 
 
 # We use lambdas to defer transport parameter creation until the transport
@@ -153,7 +129,7 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
                     )
                 ),
                 output_modalities=["text"],
-                # tools=tools,
+                # tools=[get_current_weather, get_restaurant_recommendation],
             ),
         ),
     )
@@ -165,17 +141,12 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         ),
     )
 
-    # you can either register a single function for all function calls, or specific functions
-    # llm.register_function(None, fetch_weather_from_api)
-    llm.register_function("get_current_weather", fetch_weather_from_api)
-    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
-
     # Create a standard OpenAI LLM context object using the normal messages format. The
     # OpenAIRealtimeLLMService will convert this internally to messages that the
     # openai WebSocket API can understand.
     context = LLMContext(
         [{"role": "developer", "content": "Say hello!"}],
-        tools,
+        [get_current_weather, get_restaurant_recommendation],
     )
 
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
