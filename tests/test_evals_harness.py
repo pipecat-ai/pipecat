@@ -147,12 +147,19 @@ class _FakeJudge:
 
     def __init__(self, verdicts: list[str]):
         self._verdicts = list(verdicts)
-        self.calls: list[tuple[str, str]] = []
+        self.calls: list[str] = []
+        self.segments: list[str] = []
 
-    async def evaluate(self, criterion: str, text: str):
+    def add_user_message(self, text):
+        pass
+
+    def add_assistant_message(self, text):
+        self.segments.append(text)
+
+    async def evaluate(self, criterion: str):
         from pipecat.evals.judge import JudgeVerdict
 
-        self.calls.append((criterion, text))
+        self.calls.append(criterion)
         v = self._verdicts.pop(0)
         return JudgeVerdict(verdict=v, reason=f"({v})", raw_response="")
 

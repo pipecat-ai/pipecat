@@ -838,6 +838,10 @@ class EvalSession:
                 await self._send_user_audio(turn.user)
             else:
                 await self._send_user_text(turn.user, self._scenario.bot_audio)
+            # Record the user turn in the judge's conversation, so a later reply is
+            # judged in context (e.g. a terse "That's four" answering this question).
+            if self._judge is not None:
+                self._judge.add_user_message(turn.user)
 
         self._progress(EvalTurnProgress(turn_idx, -1, turn.user or "", "turn"))
 
@@ -1082,7 +1086,13 @@ class EvalSession:
                 return fail(f"not satisfied within {budget_ms}ms: {last_reason}")
 
             seen_any = True
-            aggregate += event.get("text", "")
+            delta = event.get("text", "")
+            aggregate += delta
+            # Feed each segment to the judge as its own assistant message, so it
+            # judges the bot's reply in the conversation's context (the cumulative
+            # `aggregate` is kept only for text_contains and the match summary).
+            if expectation.eval is not None and self._judge is not None:
+                self._judge.add_assistant_message(delta)
             status, reason = await self._evaluate_aggregate(aggregate, expectation)
             self._debug(f"eval: {status} (aggregate={aggregate.strip()!r}) {reason}")
             if status == "pass":
@@ -1201,7 +1211,9 @@ class EvalSession:
             # _match_and_verify guarantees a judge exists before aggregating eval:.
             assert self._judge is not None
             with logger.contextualize(eval_pipeline="judge"):
-                verdict = await self._judge.evaluate(expectation.eval, aggregate)
+                # The reply segments were added to the judge's conversation in the
+                # aggregation loop; the judge evaluates that context, not `aggregate`.
+                verdict = await self._judge.evaluate(expectation.eval)
             if verdict.verdict == "no":
                 return ("fail", f"judge said no: {verdict.reason}")
             if verdict.verdict == "continue":
@@ -1264,7 +1276,8 @@ class EvalSession:
                 reason=f"event has no text/transcript to judge: {event!r}",
             )
 
-        verdict = await self._judge.evaluate(expectation.eval, content)
+        self._judge.add_assistant_message(content)
+        verdict = await self._judge.evaluate(expectation.eval)
         if not verdict.passed:
             return EvalAssertionFailure(
                 turn_index=turn_idx,

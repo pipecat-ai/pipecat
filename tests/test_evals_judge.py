@@ -103,22 +103,49 @@ class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
     async def test_evaluate_pass(self):
         svc = _FakeLLMService(['{"verdict": "yes", "reason": "yes it does"}'])
         judge = EvalJudge(svc)
-        v = await judge.evaluate("mentions weather", "It's raining in Paris.")
+        judge.add_assistant_message("It's raining in Paris.")
+        v = await judge.evaluate("mentions weather")
         self.assertTrue(v.passed)
         self.assertEqual(len(svc.calls), 1)
 
     async def test_evaluate_fail(self):
         svc = _FakeLLMService(['{"verdict": "no", "reason": "no it does not"}'])
         judge = EvalJudge(svc)
-        v = await judge.evaluate("mentions weather", "Hello there.")
+        judge.add_assistant_message("Hello there.")
+        v = await judge.evaluate("mentions weather")
         self.assertFalse(v.passed)
 
-    async def test_caching_avoids_second_call(self):
-        """Same (criterion, text) within one EvalJudge hits the cache."""
+    async def test_evaluate_judges_in_conversation_context(self):
+        """The user turn and reply are both sent to the judge as messages."""
+        svc = _FakeLLMService(['{"verdict": "yes", "reason": "four"}'])
+        judge = EvalJudge(svc)
+        judge.add_user_message("What is two plus two?")
+        judge.add_assistant_message("That's for")  # terse + STT homophone
+        v = await judge.evaluate("answers that two plus two is four")
+        self.assertTrue(v.passed)
+        roles = [m["role"] for m in svc.calls[0]["messages"]]
+        contents = [m["content"] for m in svc.calls[0]["messages"]]
+        self.assertEqual(roles, ["user", "assistant", "user"])  # question, reply, verdict ask
+        self.assertIn("What is two plus two?", contents)
+        self.assertIn("That's for", contents)
+
+    async def test_streamed_segments_are_separate_messages(self):
+        """Each reply segment becomes its own assistant message (no overlap)."""
         svc = _FakeLLMService(['{"verdict": "yes", "reason": "ok"}'])
         judge = EvalJudge(svc)
-        v1 = await judge.evaluate("mentions weather", "It rains.")
-        v2 = await judge.evaluate("mentions weather", "It rains.")
+        judge.add_assistant_message("Let me check on that.")
+        judge.add_assistant_message("It's 72 and sunny.")
+        await judge.evaluate("describes the weather")
+        assistant = [m["content"] for m in svc.calls[0]["messages"] if m["role"] == "assistant"]
+        self.assertEqual(assistant, ["Let me check on that.", "It's 72 and sunny."])
+
+    async def test_caching_avoids_second_call(self):
+        """Same (criterion, conversation) within one EvalJudge hits the cache."""
+        svc = _FakeLLMService(['{"verdict": "yes", "reason": "ok"}'])
+        judge = EvalJudge(svc)
+        judge.add_assistant_message("It rains.")
+        v1 = await judge.evaluate("mentions weather")
+        v2 = await judge.evaluate("mentions weather")
         self.assertTrue(v1.passed)
         self.assertTrue(v2.passed)
         self.assertEqual(len(svc.calls), 1, "second call should be cached")
@@ -131,14 +158,16 @@ class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
                 raise RuntimeError("network down")
 
         judge = EvalJudge(_BoomService())
-        v = await judge.evaluate("anything", "anything")
+        judge.add_assistant_message("anything")
+        v = await judge.evaluate("anything")
         self.assertFalse(v.passed)
         self.assertIn("RuntimeError", v.reason)
 
     async def test_empty_response_fails(self):
         svc = _FakeLLMService([""])
         judge = EvalJudge(svc)
-        v = await judge.evaluate("anything", "anything")
+        judge.add_assistant_message("anything")
+        v = await judge.evaluate("anything")
         self.assertFalse(v.passed)
 
 

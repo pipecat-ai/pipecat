@@ -13,9 +13,15 @@ a one-shot, out-of-pipeline inference via
 so it works with any pipecat LLM service backed by an OpenAI-compatible API
 (OpenAI, Ollama, Together, etc.).
 
-Verdicts are cached by ``(criterion, text)`` hash so that re-runs are stable
-and so that a single scenario doesn't pay multiple judge round-trips for the
-same assertion.
+The judge keeps the conversation as an :class:`LLMContext`: the harness feeds it
+the user turns and the bot's reply segments, and ``evaluate`` judges the most
+recent reply against the criterion *in that context*. This lets it resolve a
+terse or ambiguous reply (e.g. "That's four", which an STT pass might render as
+"That's for") that wouldn't make sense in isolation.
+
+Verdicts are cached by ``(criterion, conversation)`` hash so that re-runs are
+stable and so that a single scenario doesn't pay multiple judge round-trips for
+the same assertion.
 
 Example::
 
@@ -23,10 +29,9 @@ Example::
 
     service = OLLamaLLMService(settings=OLLamaLLMService.Settings(model="qwen2.5:3b"))
     judge = EvalJudge(service)
-    verdict = await judge.evaluate(
-        criterion="describes the bot's capabilities",
-        text="I can help with questions, set reminders, and look things up.",
-    )
+    judge.add_user_message("What can you help me with?")
+    judge.add_assistant_message("I can answer questions, set reminders, and look things up.")
+    verdict = await judge.evaluate("describes the bot's capabilities")
     if not verdict.passed:
         print(f"judge said no: {verdict.reason}")
 """
@@ -45,29 +50,33 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import LLMService
 
 JUDGE_SYSTEM_INSTRUCTION = (
-    "You are a strict but fair judge deciding whether a bot's response satisfies a "
-    "given criterion. The text may be a partial response that is still streaming in. "
-    "When the response was spoken, the text is an automatic speech-to-text "
-    "transcription that may contain homophones or minor errors (for example 'for' "
-    "for 'four', or 'to'/'too' for 'two'); judge it by the intended spoken meaning, "
-    "not its exact spelling. "
+    "You are a strict but fair judge evaluating a conversation between a user and a "
+    "bot under test. The 'user' messages are the user; the 'assistant' messages are "
+    "the bot's replies. Judge only the bot's most recent reply — which may have "
+    "arrived as several consecutive 'assistant' messages — against the given "
+    "criterion, using the earlier turns only as context. The reply may still be "
+    "streaming in. "
+    "When the bot spoke its reply, the 'assistant' text is an automatic speech-to-text "
+    "transcription that may contain homophones or minor errors (for example 'for' for "
+    "'four', or 'to'/'too' for 'two'); judge it by the intended spoken meaning, not its "
+    "exact spelling. "
     "Respond ONLY with a JSON object on a single line containing two fields: "
     '{"verdict": "yes" | "no" | "continue", "reason": "<one short sentence>"}. '
-    'Use "yes" if the text satisfies the criterion. Use "no" if the text gives a '
-    'substantive answer that fails it. Use "continue" if the text so far is only an '
+    'Use "yes" if the reply satisfies the criterion. Use "no" if the reply gives a '
+    'substantive answer that fails it. Use "continue" if the reply so far is only an '
     'interim or filler utterance (e.g. "Let me check on that.", a greeting, or an '
     "obviously incomplete fragment) that does not yet contain enough to decide — more "
     "text is expected. Do not include any other text, explanation, or markdown."
 )
 
-JUDGE_PROMPT_TEMPLATE = """Criterion: {criterion}
-
-Text to evaluate:
-\"\"\"
-{text}
-\"\"\"
-
-Does the text satisfy the criterion? Answer yes, no, or continue."""
+# Transient final user message appended for the judge call. The conversation it
+# refers to ("the bot's most recent reply") is the LLMContext built up by the
+# harness; this just poses the question and is never stored in that context.
+JUDGE_ASK_TEMPLATE = (
+    "Does the bot's most recent reply satisfy this criterion?\n\n"
+    "Criterion: {criterion}\n\n"
+    "Answer yes, no, or continue."
+)
 
 
 @dataclass
@@ -111,6 +120,9 @@ class EvalJudge:
         """
         self._service = service
         self._max_tokens = max_tokens
+        # The conversation the judge evaluates against, grown by the harness over
+        # the scenario (one EvalJudge per scenario, so this starts empty).
+        self._context = LLMContext()
         self._cache: dict[str, JudgeVerdict] = {}
 
     @classmethod
@@ -164,30 +176,71 @@ class EvalJudge:
 
         return cls(llm_service)
 
-    async def evaluate(self, criterion: str, text: str) -> JudgeVerdict:
-        """Ask the judge whether ``text`` satisfies ``criterion``.
+    def add_user_message(self, text: str | None) -> None:
+        """Record a user turn in the conversation the judge evaluates against.
+
+        Called by the harness when it sends a user turn, so a later reply can be
+        judged in context (e.g. a terse "That's four" after "What is two plus two?").
 
         Args:
-            criterion: Natural-language description of what the text should express.
-            text: The actual text to evaluate.
+            text: The user's utterance, or ``None`` for a bot-first turn (ignored).
+        """
+        if text and text.strip():
+            self._context.add_message({"role": "user", "content": text})
+
+    def add_assistant_message(self, text: str | None) -> None:
+        """Append a streamed segment of the bot's current reply to the conversation.
+
+        The bot's reply may arrive in several segments; each is added as its own
+        ``assistant`` message, so the accumulated conversation is exactly what the
+        judge sees — there is no separate "commit" step.
+
+        Args:
+            text: The new reply segment; empty or ``None`` is ignored.
+        """
+        if text and text.strip():
+            self._context.add_message({"role": "assistant", "content": text})
+
+    async def evaluate(self, criterion: str) -> JudgeVerdict:
+        """Judge whether the bot's most recent reply satisfies ``criterion``.
+
+        Evaluates the conversation built up via :meth:`add_user_message` and
+        :meth:`add_assistant_message`. The judge's own answer is never written
+        back into that conversation.
+
+        Args:
+            criterion: Natural-language description of what the reply should express.
 
         Returns:
             A :class:`JudgeVerdict` with the pass/fail decision and a one-sentence
-            justification. The verdict is cached by ``(criterion, text)`` so the
-            same assertion within one run hits the judge only once.
+            justification. Cached by ``(criterion, conversation)`` so the same
+            assertion over the same conversation hits the judge only once.
         """
-        key = _cache_key(criterion, text)
+        messages = self._context.get_messages()
+        key = _cache_key(criterion, messages)
         if key in self._cache:
             return self._cache[key]
 
-        verdict = await self._call_judge(criterion, text)
+        verdict = await self._call_judge(criterion, messages)
         self._cache[key] = verdict
         return verdict
 
-    async def _call_judge(self, criterion: str, text: str) -> JudgeVerdict:
-        """Single round-trip to the judge LLM."""
-        prompt = JUDGE_PROMPT_TEMPLATE.format(criterion=criterion, text=text)
-        context = LLMContext(messages=[{"role": "user", "content": prompt}])
+    async def _call_judge(self, criterion: str, messages: list) -> JudgeVerdict:
+        """Single round-trip to the judge LLM over the conversation + a verdict ask."""
+        # Copy the conversation and append a transient verdict ask, so neither the
+        # ask nor the judge's answer ever lands in the persistent context.
+        context = LLMContext(messages=list(messages))
+        context.add_message(
+            {"role": "user", "content": JUDGE_ASK_TEMPLATE.format(criterion=criterion)}
+        )
+
+        # Log the conversation the judge is about to evaluate, before its verdict,
+        # so the debug log shows exactly what the judge saw (handy when a terse or
+        # mis-transcribed reply gets an unexpected verdict).
+        transcript = "\n".join(f"  [{m.get('role')}] {m.get('content')}" for m in messages)
+        logger.debug(
+            "Judge evaluating {!r} over conversation:\n{}", criterion, transcript or "  (empty)"
+        )
 
         try:
             response = await self._service.run_inference(
@@ -211,12 +264,12 @@ class EvalJudge:
         return _parse_verdict(response)
 
 
-def _cache_key(criterion: str, text: str) -> str:
-    """Hash a (criterion, text) pair for cache lookup."""
+def _cache_key(criterion: str, messages: list) -> str:
+    """Hash a (criterion, conversation) pair for cache lookup."""
     h = hashlib.sha256()
     h.update(criterion.encode("utf-8"))
     h.update(b"\x00")
-    h.update(text.encode("utf-8"))
+    h.update(json.dumps(messages, sort_keys=True, ensure_ascii=False).encode("utf-8"))
     return h.hexdigest()
 
 
