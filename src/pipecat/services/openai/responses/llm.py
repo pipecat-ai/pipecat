@@ -1070,12 +1070,19 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                 elif isinstance(event, ResponseCompletedEvent):
                     response = event.response
                     if response.usage:
+                        # Third-party Responses API servers may omit the
+                        # OpenAI-specific token detail sub-objects, leaving them
+                        # as None. Guard the nested access so a missing
+                        # input_tokens_details/output_tokens_details falls back
+                        # to 0 instead of raising AttributeError on every turn.
+                        input_details = response.usage.input_tokens_details
+                        output_details = response.usage.output_tokens_details
                         tokens = LLMTokenUsage(
                             prompt_tokens=response.usage.input_tokens,
                             completion_tokens=response.usage.output_tokens,
                             total_tokens=response.usage.total_tokens,
-                            cache_read_input_tokens=response.usage.input_tokens_details.cached_tokens,
-                            reasoning_tokens=response.usage.output_tokens_details.reasoning_tokens,
+                            cache_read_input_tokens=getattr(input_details, "cached_tokens", 0) or 0,
+                            reasoning_tokens=getattr(output_details, "reasoning_tokens", 0) or 0,
                         )
                         await self.start_llm_usage_metrics(tokens)
 
