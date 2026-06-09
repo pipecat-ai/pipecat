@@ -4,4 +4,4 @@ eval:
   model: llama3:latest
 transcription:
   service: whisper
-  model: base
+  model: Systran/faster-distil-whisper-small.en

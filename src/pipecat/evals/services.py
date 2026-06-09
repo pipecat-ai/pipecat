@@ -18,6 +18,7 @@ import os
 from typing import Any
 
 from pipecat.services.llm_service import LLMService
+from pipecat.services.settings import NOT_GIVEN
 from pipecat.services.stt_service import STTService
 from pipecat.services.tts_service import TTSService
 
@@ -72,11 +73,13 @@ def whisper_service(config: dict) -> STTService:
     """
     from pipecat.services.whisper.stt import WhisperSTTService
 
-    kwargs: dict = {"no_speech_prob": 1.0}
-    model = config.get("model")
-    if model:
-        kwargs["model"] = str(model)
-    return WhisperSTTService(settings=WhisperSTTService.Settings(**kwargs))
+    # NOT_GIVEN (not None) leaves the model unset so Whisper uses its own default.
+    return WhisperSTTService(
+        settings=WhisperSTTService.Settings(
+            no_speech_prob=1.0,
+            model=config.get("model", NOT_GIVEN),
+        )
+    )
 
 
 def ollama_service(config: dict) -> LLMService[Any]:
