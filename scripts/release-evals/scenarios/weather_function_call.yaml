@@ -9,6 +9,11 @@ judge:
     model: llama3:latest
 
 turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "greets the user, introduces itself, or offers to help"
+
   - user: "What's the weather in San Francisco, California? Use Fahrenheit."
     expect:
       - event: function_call

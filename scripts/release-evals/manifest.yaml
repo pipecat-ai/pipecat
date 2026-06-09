@@ -39,7 +39,6 @@ suite:
   - bot: voice/voice-cartesia.py
     scenarios:
       - simple_math
-      - greeting
       - multi_turn
       - interruption_audio
       - interruption_text
