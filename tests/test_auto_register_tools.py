@@ -9,7 +9,7 @@
 import types
 import unittest
 
-from pipecat.adapters.schemas.direct_function import direct_function
+from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -35,7 +35,7 @@ async def get_restaurant_recommendation(params: FunctionCallParams, location: st
     await params.result_callback({"name": "The Golden Dragon"})
 
 
-@direct_function(cancel_on_interruption=False, timeout=60)
+@tool_options(cancel_on_interruption=False, timeout=60)
 async def end_call(params: FunctionCallParams, reason: str):
     """End the call.
 
@@ -55,7 +55,7 @@ class TestDirectFunctionDecorator(unittest.TestCase):
         self.assertFalse(hasattr(get_current_weather, "timeout"))
 
     def test_decorator_without_args(self):
-        @direct_function
+        @tool_options
         async def some_tool(params: FunctionCallParams, x: str):
             """Docstring.
 

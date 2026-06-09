@@ -289,7 +289,7 @@ class DirectFunctionWrapper(BaseDirectFunctionWrapper):
         return await self.function(params=params, **args)
 
 
-def direct_function(fn=None, *, cancel_on_interruption: bool = True, timeout: float | None = None):
+def tool_options(fn=None, *, cancel_on_interruption: bool = True, timeout: float | None = None):
     """Configure a direct function's call options.
 
     This decorator is optional. A direct function listed in an ``LLMContext``'s
@@ -298,13 +298,16 @@ def direct_function(fn=None, *, cancel_on_interruption: bool = True, timeout: fl
     attaches the options to the function and returns it unchanged — it does not
     register anything, so decorated functions can stay at module level.
 
+    On an ``LLMWorker``, use ``@tool`` instead, which applies these same options
+    and additionally marks the method for collection as one of the worker's tools.
+
     Can be used with or without arguments::
 
-        @direct_function
+        @tool_options
         async def get_weather(params, location: str):
             ...
 
-        @direct_function(cancel_on_interruption=False, timeout=60)
+        @tool_options(cancel_on_interruption=False, timeout=60)
         async def end_call(params, reason: str):
             ...
 

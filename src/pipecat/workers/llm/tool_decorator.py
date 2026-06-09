@@ -6,7 +6,7 @@
 
 """Decorator for marking methods as LLM tools."""
 
-from pipecat.adapters.schemas.direct_function import direct_function
+from pipecat.adapters.schemas.direct_function import tool_options
 
 
 def tool(fn=None, *, cancel_on_interruption=True, timeout=None):
@@ -16,7 +16,7 @@ def tool(fn=None, *, cancel_on_interruption=True, timeout=None):
     registered with the LLM via ``register_direct_function`` and
     included in ``build_tools()``.
 
-    This is the worker-flavored variant of ``@direct_function``: it attaches the
+    This is the worker-flavored variant of ``@tool_options``: it attaches the
     same ``cancel_on_interruption`` / ``timeout`` call options and additionally
     marks the method with ``is_llm_tool`` so the worker collects it from the MRO.
 
@@ -40,7 +40,7 @@ def tool(fn=None, *, cancel_on_interruption=True, timeout=None):
     """
 
     def decorator(fn):
-        fn = direct_function(cancel_on_interruption=cancel_on_interruption, timeout=timeout)(fn)
+        fn = tool_options(cancel_on_interruption=cancel_on_interruption, timeout=timeout)(fn)
         fn.is_llm_tool = True
         return fn
 

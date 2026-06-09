@@ -10,7 +10,7 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.direct_function import direct_function
+from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame, UserImageRequestFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -39,7 +39,7 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
-@direct_function(cancel_on_interruption=False, timeout=30)
+@tool_options(cancel_on_interruption=False, timeout=30)
 async def get_current_weather(params: FunctionCallParams, location: str, format: str):
     """Get the current weather.
 
@@ -161,7 +161,7 @@ indicate you should use the get_image tool are:
             logger.info(f"Function call cancelled: {item.function_name} [{item.tool_call_id}]")
 
     # Direct functions listed in the context are registered with the LLM automatically
-    # cancel_on_interruption=False (set via @direct_function) makes this an async
+    # cancel_on_interruption=False (set via @tool_options) makes this an async
     # function call..
     context = LLMContext(tools=[get_current_weather, get_image, get_restaurant_recommendation])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(

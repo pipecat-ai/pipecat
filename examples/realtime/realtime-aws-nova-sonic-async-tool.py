@@ -22,7 +22,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.direct_function import direct_function
+from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -43,7 +43,7 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
-@direct_function(cancel_on_interruption=False)
+@tool_options(cancel_on_interruption=False)
 async def get_current_weather(params: FunctionCallParams, location: str, format: str):
     """Get the current weather.
 
@@ -119,7 +119,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     #     LLMUserAggregatorParams,
     # )
     # Direct functions listed in the context are registered with the LLM automatically
-    # cancel_on_interruption=False (set via @direct_function) makes this an async function call.
+    # cancel_on_interruption=False (set via @tool_options) makes this an async function call.
     context = LLMContext(tools=[get_current_weather])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,

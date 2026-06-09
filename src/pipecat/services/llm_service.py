@@ -870,7 +870,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         A direct function bundles its handler with its schema, so advertising one
         in the context's tools is enough to make it callable — no explicit
         ``register_direct_function`` call is needed. Per-function options are read
-        from the attributes set by the ``@direct_function`` / ``@tool`` decorator,
+        from the attributes set by the ``@tool_options`` / ``@tool`` decorator,
         falling back to defaults when undecorated.
 
         Any direct function whose name is already registered (explicitly, or from
@@ -890,7 +890,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         Accepts whatever ``LLMContext`` accepts for tools — a ``ToolsSchema``, a
         plain list of direct functions / ``FunctionSchema`` objects, or
         ``NOT_GIVEN`` — normalizing as needed. Per-function options are read from
-        the attributes set by the ``@direct_function`` / ``@tool`` decorator.
+        the attributes set by the ``@tool_options`` / ``@tool`` decorator.
 
         Any direct function whose name is already registered (explicitly, or from
         a previous context / tool set) is left untouched, so explicit registration
