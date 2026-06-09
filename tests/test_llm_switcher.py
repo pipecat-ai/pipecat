@@ -46,10 +46,10 @@ async def get_current_weather(params: FunctionCallParams, location: str):
 class TestLLMSwitcherDirectFunctions(unittest.TestCase):
     """An LLMSwitcher must register context direct functions on every member LLM."""
 
-    def test_register_context_direct_functions_registers_handler(self):
-        """LLMService.register_context_direct_functions registers the handler."""
+    def test_sync_registered_direct_functions_registers_handler(self):
+        """LLMService._sync_registered_direct_functions registers the handler."""
         llm = _MockLLMService()
-        llm.register_context_direct_functions(LLMContext(tools=[get_current_weather]))
+        llm._sync_registered_direct_functions(LLMContext(tools=[get_current_weather]).tools)
         self.assertIn("get_current_weather", llm._functions)
 
     def test_context_direct_functions_registered_on_all_member_llms(self):
@@ -64,7 +64,19 @@ class TestLLMSwitcherDirectFunctions(unittest.TestCase):
         llm2 = _MockLLMService()
         switcher = LLMSwitcher(llms=[llm1, llm2])
 
-        switcher._register_context_direct_functions(LLMContext(tools=[get_current_weather]))
+        switcher._sync_registered_direct_functions(LLMContext(tools=[get_current_weather]).tools)
+
+        for llm in (llm1, llm2):
+            self.assertIn("get_current_weather", llm._functions)
+
+    def test_register_direct_function_is_deprecated_but_fans_out(self):
+        """The deprecated LLMSwitcher.register_direct_function still registers on all members."""
+        llm1 = _MockLLMService()
+        llm2 = _MockLLMService()
+        switcher = LLMSwitcher(llms=[llm1, llm2])
+
+        with self.assertWarns(DeprecationWarning):
+            switcher.register_direct_function(get_current_weather)
 
         for llm in (llm1, llm2):
             self.assertIn("get_current_weather", llm._functions)

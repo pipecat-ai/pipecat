@@ -6,6 +6,7 @@
 
 """LLM switcher for switching between different LLMs at runtime, with different switching strategies."""
 
+import warnings
 from typing import Any, cast
 
 from pipecat.adapters.schemas.direct_function import DirectFunction
@@ -43,16 +44,15 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
         super().__init__(cast(list[FrameProcessor], llms), strategy_type)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process a frame, registering context direct functions on all member LLMs.
+        """Process a frame, syncing context direct functions on all member LLMs.
 
         On an ``LLMContextFrame``, the direct functions advertised in the context
-        are registered on every member LLM — active or not — so that direct
-        functions listed via ``LLMContext(tools=[...])`` keep working across
-        service switches without an explicit ``register_direct_function`` call.
+        are synced on every member LLM — active or not — so that direct functions
+        listed via ``LLMContext(tools=[...])`` keep working across service switches.
 
-        This is needed because member LLMs sit behind per-branch filters: only
-        the active LLM receives the context frame and would otherwise
-        auto-register, leaving inactive LLMs without the handler.
+        This is needed because member LLMs sit behind per-branch filters: only the
+        active LLM receives the context frame and would otherwise sync its handlers,
+        leaving inactive LLMs out of step with the advertised tools.
 
         Args:
             frame: The frame to process.
@@ -60,17 +60,17 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
         """
         await super().process_frame(frame, direction)
         if isinstance(frame, LLMContextFrame):
-            self._register_context_direct_functions(frame.context)
+            self._sync_registered_direct_functions(frame.context.tools)
 
-    def _register_context_direct_functions(self, context: LLMContext) -> None:
-        """Register the context's direct functions on every member LLM.
+    def _sync_registered_direct_functions(self, tools) -> None:
+        """Sync the context's direct functions on every member LLM.
 
         Args:
-            context: The LLM context whose advertised direct functions should be
-                registered on all member LLMs.
+            tools: The advertised tools whose direct-function handlers should be
+                synced on all member LLMs.
         """
         for llm in self.llms:
-            llm.register_context_direct_functions(context)
+            llm._sync_registered_direct_functions(tools)
 
     @property
     def llms(self) -> list[LLMService]:
@@ -141,14 +141,31 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
     ):
         """Register a direct function handler for LLM function calls, on all LLMs, active or not.
 
+        .. deprecated:: 1.4.0
+            Direct functions advertised via ``LLMContext(tools=[...])`` are now
+            registered on every member LLM automatically. List them in the
+            context for tools available at session start, or push an
+            ``LLMSetToolsFrame`` to change tools mid-session. This method will be
+            removed in a future version.
+
         Args:
             handler: The direct function to register. Must follow DirectFunction protocol.
             cancel_on_interruption: Whether to cancel this function call when an
                 interruption occurs. Defaults to True.
             timeout_secs: Optional timeout in seconds for the function call.
         """
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`LLMSwitcher.register_direct_function()` is deprecated since 1.4.0. "
+                "List direct functions in `LLMContext(tools=[...])` (registered on "
+                "all member LLMs automatically), or push an `LLMSetToolsFrame` to "
+                "change tools mid-session.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         for llm in self.llms:
-            llm.register_direct_function(
+            llm._register_direct_function(
                 handler=handler,
                 cancel_on_interruption=cancel_on_interruption,
                 timeout_secs=timeout_secs,

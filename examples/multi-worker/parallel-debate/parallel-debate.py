@@ -134,7 +134,7 @@ class DebateWorker(LLMContextWorker):
         )
 
 
-@tool_options(cancel_on_interruption=False, timeout=60)
+@tool_options(cancel_on_interruption=False, timeout_secs=60)
 async def debate(params: FunctionCallParams, topic: str):
     """Analyze a topic from multiple perspectives (advocate, critic, analyst).
 

@@ -6,7 +6,7 @@
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -17,8 +17,11 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
+    LLMContextFrame,
+    LLMSetToolsFrame,
 )
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
@@ -393,51 +396,21 @@ class TestAppendSystemInstruction(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service._settings.system_instruction, "APP\n\nGUIDE")
 
 
-async def _sample_direct_function(params: FunctionCallParams, location: str):
-    """Get the current weather.
+class TestProcessFrameToolWiring(unittest.IsolatedAsyncioTestCase):
+    """process_frame syncs handlers from the context frame's advertised tools."""
 
-    Args:
-        location: The city and state, e.g. "San Francisco, CA".
-    """
-    await params.result_callback({"conditions": "nice"})
-
-
-class TestRegisterDirectFunctionsFromTools(unittest.TestCase):
-    """Coverage for _register_direct_functions_from_tools (used by LLMSetToolsFrame)."""
-
-    def test_registers_from_plain_list(self):
+    async def test_context_frame_syncs_registered_direct_functions(self):
         service = MockLLMService()
-        service._register_direct_functions_from_tools([_sample_direct_function])
-        self.assertIn("_sample_direct_function", service._functions)
+        service._sync_registered_direct_functions = Mock()
+        ctx = LLMContext(tools=NOT_GIVEN)
+        await service.process_frame(LLMContextFrame(context=ctx), FrameDirection.DOWNSTREAM)
+        service._sync_registered_direct_functions.assert_called_once_with(ctx.tools)
 
-    def test_registers_from_tools_schema(self):
+    async def test_base_service_does_not_handle_set_tools_frame(self):
+        # The base service syncs handlers only from the context frame. An
+        # LLMSetToolsFrame is a pure aggregator concern here; only realtime
+        # services that run continuously handle it for handler sync.
         service = MockLLMService()
-        service._register_direct_functions_from_tools(
-            ToolsSchema(standard_tools=[_sample_direct_function])
-        )
-        self.assertIn("_sample_direct_function", service._functions)
-
-    def test_not_given_is_noop(self):
-        service = MockLLMService()
-        service._register_direct_functions_from_tools(NOT_GIVEN)
-        self.assertEqual(service._functions, {})
-
-    def test_existing_registration_is_preserved(self):
-        service = MockLLMService()
-
-        async def explicit_handler(params: FunctionCallParams, location: str):
-            """Get the current weather.
-
-            Args:
-                location: The city and state.
-            """
-            await params.result_callback({"explicit": True})
-
-        # Register a function under the same name explicitly, then advertise a
-        # different handler with that name via tools. Explicit wins.
-        service.register_direct_function(explicit_handler)
-        registered_before = service._functions["explicit_handler"]
-
-        # A FunctionSchema-only entry (classic) and the existing direct function.
-        service._register_direct_functions_from_tools([explicit_handler])
-        self.assertIs(service._functions["explicit_handler"], registered_before)
+        service._sync_registered_direct_functions = Mock()
+        await service.process_frame(LLMSetToolsFrame(tools=NOT_GIVEN), FrameDirection.DOWNSTREAM)
+        service._sync_registered_direct_functions.assert_not_called()

@@ -295,7 +295,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # to the runner at the end alongside the main worker.
     list_worker = ListWorker()
 
-    @tool_options(timeout=10)
+    @tool_options(timeout_secs=10)
     async def check_list(params: FunctionCallParams):
         """Look up what's currently on the shopping list and what's checked off.
 

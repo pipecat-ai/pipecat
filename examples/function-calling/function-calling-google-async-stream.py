@@ -57,7 +57,7 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
-@tool_options(cancel_on_interruption=False, timeout=30)
+@tool_options(cancel_on_interruption=False, timeout_secs=30)
 async def track_current_location(params: FunctionCallParams):
     """Start tracking the user's current GPS location, reporting position updates until the user reaches their destination.
 

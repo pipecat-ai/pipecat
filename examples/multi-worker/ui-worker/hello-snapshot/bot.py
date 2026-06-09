@@ -173,7 +173,7 @@ class HelloWorker(UIWorker):
         await params.result_callback(None)
 
 
-@tool_options(cancel_on_interruption=False, timeout=60)
+@tool_options(cancel_on_interruption=False, timeout_secs=60)
 async def answer_about_screen(params: FunctionCallParams, query: str):
     """Ask the screen-aware UI layer to answer about the current page.
 

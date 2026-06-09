@@ -194,7 +194,7 @@ class DeixisWorker(ReplyToolMixin, UIWorker):
         super().__init__("ui", llm=llm)
 
 
-@tool_options(cancel_on_interruption=False, timeout=30)
+@tool_options(cancel_on_interruption=False, timeout_secs=30)
 async def answer_about_screen(params: FunctionCallParams, query: str):
     """Ask the screen-aware UI worker to answer about the article / selection.
 

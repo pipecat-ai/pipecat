@@ -211,7 +211,7 @@ class FormWorker(ReplyToolMixin, UIWorker):
         super().__init__("ui", llm=llm)
 
 
-@tool_options(cancel_on_interruption=False, timeout=30)
+@tool_options(cancel_on_interruption=False, timeout_secs=30)
 async def answer_about_screen(params: FunctionCallParams, query: str):
     """Forward the user's words to the UI worker, which fills the form and guides.
 

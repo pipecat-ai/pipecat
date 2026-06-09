@@ -237,7 +237,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    @tool_options(timeout=60)
+    @tool_options(timeout_secs=60)
     async def ask_controller(params: FunctionCallParams, question: str):
         """Ask the temperature sensor controller anything about the sensor.
 

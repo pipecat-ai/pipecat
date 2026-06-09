@@ -49,15 +49,16 @@ from pipecat.frames.frames import (
     LLMContextSummaryResultFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMSetToolsFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     RealtimeServiceMetadataFrame,
     StartFrame,
 )
 from pipecat.processors.aggregators.llm_context import (
+    NOT_GIVEN,
     LLMContext,
     LLMSpecificMessage,
+    NotGiven,
     is_given,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -189,9 +190,12 @@ class FunctionCallParams:
 
 @dataclass
 class FunctionCallRegistryItem:
-    """Represents an entry in the function call registry.
+    """Internal record of a registered function-call handler.
 
-    This is what the user registers when calling register_function.
+    Created by the service when a function is registered — directly via
+    ``register_function`` / ``register_direct_function``, or automatically from a
+    direct function advertised in an ``LLMContext`` / ``LLMSetToolsFrame``.
+    Application code doesn't construct these.
 
     Parameters:
         function_name: The name of the function (None for catch-all handler).
@@ -202,12 +206,17 @@ class FunctionCallRegistryItem:
             result, and the result is injected later via a developer message.
         timeout_secs: Optional per-tool timeout in seconds. Overrides the global
             ``function_call_timeout_secs`` for this specific function.
+        auto_registered: True only for a direct function that was auto-registered
+            from an advertised tool set (listed in an ``LLMContext`` or
+            ``LLMSetToolsFrame``). False for every explicitly registered handler —
+            direct or non-direct — and for the catch-all and built-in handlers.
     """
 
     function_name: str | None
     handler: FunctionCallHandler | DirectFunctionWrapper
     cancel_on_interruption: bool
     timeout_secs: float | None = None
+    auto_registered: bool = False
 
 
 @dataclass
@@ -589,16 +598,17 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             await self._handle_summary_request(frame)
 
         if isinstance(frame, LLMContextFrame):
-            # Auto-register handlers for any direct functions advertised in the
-            # context. Runs before the subclass processes the context (subclasses
-            # call super().process_frame() first), so handlers are in place by the
-            # time the LLM can call them.
-            self._auto_register_direct_functions(frame.context)
-        elif isinstance(frame, LLMSetToolsFrame):
-            # Tools can change mid-conversation. Register handlers for any direct
-            # functions newly advertised by the frame, so they're callable as soon
-            # as the updated tool set takes effect.
-            self._register_direct_functions_from_tools(frame.tools)
+            # Sync the registered handlers with the direct functions advertised in
+            # the context: register any newly advertised, drop the ones we
+            # auto-registered that are no longer advertised. The context carries
+            # the current tool set on every inference, so this is the single place
+            # tool changes take effect for text LLMs.
+            #
+            # Realtime (speech-to-speech) services run continuously and don't get a
+            # fresh context frame per turn, so they additionally call
+            # _sync_registered_direct_functions on their own LLMSetToolsFrame
+            # handling.
+            self._sync_registered_direct_functions(frame.context.tools)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Pushes a frame.
@@ -812,14 +822,25 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self,
         handler: DirectFunction,
         *,
-        cancel_on_interruption: bool = True,
-        timeout_secs: float | None = None,
+        cancel_on_interruption: bool | NotGiven = NOT_GIVEN,
+        timeout_secs: float | None | NotGiven = NOT_GIVEN,
     ):
         """Register a direct function handler for LLM function calls.
+
+        .. deprecated:: 1.4.0
+            Direct functions are now registered automatically. List them in
+            ``LLMContext(tools=[...])`` for tools available at session start, or
+            push an ``LLMSetToolsFrame`` to change tools mid-session. This method
+            will be removed in a future version.
 
         Direct functions have their metadata automatically extracted from their
         signature and docstring, eliminating the need for accompanying
         configurations (as FunctionSchemas or in provider-specific formats).
+
+        Call options resolve with the precedence **explicit argument >
+        ``@tool_options`` decorator > default**. So an option passed
+        here always wins; otherwise the value set by the decorator on the
+        function is used; otherwise the documented default applies.
 
         Args:
             handler: The direct function to register. Must follow DirectFunction protocol.
@@ -827,15 +848,53 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 interruption occurs. When ``False`` the call is treated as
                 asynchronous: the LLM continues the conversation immediately
                 without waiting for the result, and the result is injected later
-                via a developer message. Defaults to True. Note: realtime
-                LLM services deliver only the final result to the provider;
-                intermediate streamed results (reported via
+                via a developer message. When omitted, falls back to the value
+                from the ``@tool_options`` decorator, then to True.
+                Note: realtime LLM services deliver only the final result to the
+                provider; intermediate streamed results (reported via
                 ``FunctionCallResultProperties(is_final=False)``) are
                 dropped and an error is raised. Use a non-realtime LLM
                 service if your tool needs to stream intermediate results.
             timeout_secs: Optional per-tool timeout in seconds. Overrides the global
-                ``function_call_timeout_secs`` for this specific function. Defaults to
-                None, which uses the global timeout.
+                ``function_call_timeout_secs`` for this specific function. When
+                omitted, falls back to the value from the ``@tool_options``
+                decorator, then to None (the global timeout).
+        """
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`register_direct_function()` is deprecated since 1.4.0. List direct "
+                "functions in `LLMContext(tools=[...])` for tools available at session "
+                "start, or push an `LLMSetToolsFrame` to change tools mid-session; "
+                "handlers are then registered automatically.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        self._register_direct_function(
+            handler,
+            cancel_on_interruption=cancel_on_interruption,
+            timeout_secs=timeout_secs,
+        )
+
+    def _register_direct_function(
+        self,
+        handler: DirectFunction,
+        *,
+        cancel_on_interruption: bool | NotGiven = NOT_GIVEN,
+        timeout_secs: float | None | NotGiven = NOT_GIVEN,
+    ):
+        """Register a direct function handler.
+
+        Shared core behind automatic registration (from an ``LLMContext`` or
+        ``LLMSetToolsFrame``). Call options resolve by precedence:
+        explicit argument > ``@tool_options`` decorator > default.
+
+        Args:
+            handler: The direct function to register.
+            cancel_on_interruption: Explicit override, or ``NOT_GIVEN`` to use the
+                decorator value (then the True default).
+            timeout_secs: Explicit override, or ``NOT_GIVEN`` to use the decorator
+                value (then the None default, i.e. the global timeout).
         """
         wrapper = DirectFunctionWrapper(handler)
         if wrapper.name == CANCEL_ASYNC_TOOL_NAME:
@@ -843,6 +902,22 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 f"'{CANCEL_ASYNC_TOOL_NAME}' is a reserved built-in tool name and cannot be "
                 "registered by user code."
             )
+        cancel_on_interruption = self._resolve_tool_option(
+            wrapper.name,
+            cancel_on_interruption,
+            handler,
+            "_pipecat_cancel_on_interruption",
+            default=True,
+        )
+        timeout_secs = self._resolve_tool_option(
+            wrapper.name,
+            timeout_secs,
+            handler,
+            "_pipecat_timeout_secs",
+            default=None,
+        )
+        # The new entry defaults to auto_registered=False, so a handler registered
+        # through this method is treated as explicit and is never auto-pruned.
         self._functions[wrapper.name] = FunctionCallRegistryItem(
             function_name=wrapper.name,
             handler=wrapper,
@@ -850,39 +925,35 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             timeout_secs=timeout_secs,
         )
 
-    def register_context_direct_functions(self, context: LLMContext) -> None:
-        """Register handlers for any direct functions advertised in ``context``.
-
-        This is the same registration that runs automatically when the service
-        processes an ``LLMContextFrame``. It is exposed publicly so that container
-        processors (such as ``LLMSwitcher``) can register handlers on member
-        services that may not individually receive the context frame.
+    def _resolve_tool_option(
+        self, function_name: str, explicit: Any, handler: Any, attr: str, *, default: Any
+    ) -> Any:
+        """Resolve a tool call option by precedence: explicit > decorator > default.
 
         Args:
-            context: The LLM context whose advertised direct functions should be
-                registered on this service.
+            function_name: The tool's name, for logging.
+            explicit: The value passed to ``register_direct_function``, or
+                ``NOT_GIVEN`` if the caller omitted it.
+            handler: The direct function, which may carry decorator-set options.
+            attr: The decorator attribute to read (e.g. ``_pipecat_timeout_secs``).
+            default: The value to use when neither an explicit argument nor a
+                decorator value is present.
+
+        Returns:
+            The resolved option value.
         """
-        self._auto_register_direct_functions(context)
-
-    def _auto_register_direct_functions(self, context: LLMContext) -> None:
-        """Register handlers for direct functions advertised in the context.
-
-        A direct function bundles its handler with its schema, so advertising one
-        in the context's tools is enough to make it callable — no explicit
-        ``register_direct_function`` call is needed. Per-function options are read
-        from the attributes set by the ``@tool_options`` / ``@tool`` decorator,
-        falling back to defaults when undecorated.
-
-        Any direct function whose name is already registered (explicitly, or from
-        a previous context) is left untouched, so explicit registration always
-        wins and repeated context frames don't re-register.
-
-        Args:
-            context: The LLM context whose advertised tools should be scanned.
-        """
-        if context is None:
-            return
-        self._register_direct_functions_from_tools(context.tools)
+        decorated = getattr(handler, attr, NOT_GIVEN)
+        if is_given(explicit):
+            if is_given(decorated) and decorated != explicit:
+                logger.debug(
+                    f"{self}: '{function_name}' registered with explicit "
+                    f"{attr.removeprefix('_pipecat_')}={explicit!r}, overriding the "
+                    f"decorator value {decorated!r}."
+                )
+            return explicit
+        if is_given(decorated):
+            return decorated
+        return default
 
     def _register_direct_functions_from_tools(self, tools: Any) -> None:
         """Register handlers for any direct functions in the given tools.
@@ -890,7 +961,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         Accepts whatever ``LLMContext`` accepts for tools — a ``ToolsSchema``, a
         plain list of direct functions / ``FunctionSchema`` objects, or
         ``NOT_GIVEN`` — normalizing as needed. Per-function options are read from
-        the attributes set by the ``@tool_options`` / ``@tool`` decorator.
+        the attributes set by the ``@tool_options`` decorator.
 
         Any direct function whose name is already registered (explicitly, or from
         a previous context / tool set) is left untouched, so explicit registration
@@ -910,15 +981,75 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         for wrapper in tools.direct_functions:
             if wrapper.name in self._functions:
                 continue
-            handler = wrapper.function
-            self.register_direct_function(
-                handler,
-                cancel_on_interruption=getattr(handler, "cancel_on_interruption", True),
-                timeout_secs=getattr(handler, "timeout", None),
-            )
+            self._register_direct_function(wrapper.function)
+            # Mark the entry as advertised-tool-set-managed so it can be pruned on a
+            # later sync that stops advertising it. Names already in _functions are
+            # skipped above, so explicit registrations keep their default
+            # auto_registered=False and are never pruned.
+            self._functions[wrapper.name].auto_registered = True
+
+    def _sync_registered_direct_functions(self, tools: Any) -> None:
+        """Sync the registered handlers with the direct functions advertised in ``tools``.
+
+        Registers handlers for any direct functions the tool set advertises, then
+        drops the handlers we auto-registered for direct functions it no longer
+        advertises — so the registry matches what the LLM can see.
+
+        This is the single path for keeping handlers in step with the advertised
+        tools. The base service runs it on every ``LLMContextFrame`` (the context
+        carries the current tool set on each inference). Realtime services that
+        support runtime tool changes also call it from their own ``LLMSetToolsFrame``
+        handling, since they run continuously and don't get a context frame per turn.
+
+        Explicit registrations (``register_function`` / ``register_direct_function``),
+        the catch-all handler, and built-in tools are never pruned.
+
+        Args:
+            tools: The advertised tool set (a ``ToolsSchema``, a plain list, or
+                ``None`` / ``NOT_GIVEN`` for "no tools").
+        """
+        # None and an empty list both mean "no tools advertised" (the normalizer
+        # collapses an empty set to NOT_GIVEN), in which case every auto-registered
+        # handler is pruned.
+        normalized = (
+            LLMContext._normalize_and_validate_tools(tools) if tools is not None else NOT_GIVEN
+        )
+        self._register_direct_functions_from_tools(normalized)
+        advertised: set[str | None] = (
+            {wrapper.name for wrapper in normalized.direct_functions}
+            if is_given(normalized)
+            else set()
+        )
+        self._prune_unadvertised_functions(advertised)
+
+    def _prune_unadvertised_functions(self, advertised: set[str | None]) -> None:
+        """Drop auto-registered direct-function handlers no longer advertised.
+
+        Only entries with ``auto_registered=True`` are eligible; explicit
+        registrations, the catch-all handler, and built-in tools are untouched.
+
+        Args:
+            advertised: Names of direct functions in the new advertised tool set.
+        """
+        stale = [
+            name
+            for name, item in self._functions.items()
+            if item.auto_registered and name not in advertised
+        ]
+        for name in stale:
+            del self._functions[name]
+        # If the last async tool was just pruned, tear down the cancellation tool.
+        if stale and self._async_tool_cancellation_enabled and not self._has_async_tools():
+            self._teardown_async_tool_cancellation()
 
     def unregister_function(self, function_name: str | None):
         """Remove a registered function handler.
+
+        Note:
+            This removes the handler but does not stop advertising the tool to
+            the LLM. To remove a tool cleanly, prefer an ``LLMSetToolsFrame`` with
+            the updated tool set — that both stops advertising it and avoids the
+            LLM trying to call a tool that's no longer there.
 
         Args:
             function_name: The name of the function handler to remove.
@@ -929,6 +1060,35 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
     def unregister_direct_function(self, handler: Any):
         """Remove a registered direct function handler.
+
+        .. deprecated:: 1.4.0
+            Direct-function handlers are now managed automatically. To stop
+            advertising a tool, push an ``LLMSetToolsFrame`` with the updated tool
+            set — the service unregisters the handler for any direct function no
+            longer listed. This method will be removed in a future version.
+
+        Note:
+            This removes the handler but does not stop advertising the tool to
+            the LLM. To remove a tool cleanly, prefer an ``LLMSetToolsFrame`` with
+            the updated tool set — that both stops advertising it and avoids the
+            LLM trying to call a tool that's no longer there.
+
+        Args:
+            handler: The direct function handler to remove.
+        """
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`unregister_direct_function()` is deprecated since 1.4.0. Push an "
+                "`LLMSetToolsFrame` with the updated tool set instead; the service "
+                "unregisters the handler for any direct function no longer listed.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        self._unregister_direct_function(handler)
+
+    def _unregister_direct_function(self, handler: Any):
+        """Remove a registered direct function handler (internal; no warning).
 
         Args:
             handler: The direct function handler to remove.

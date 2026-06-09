@@ -39,8 +39,8 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
-@tool_options(cancel_on_interruption=False, timeout=30)
-async def get_current_weather(params: FunctionCallParams, location: str, format: str):
+@tool_options(cancel_on_interruption=False, timeout_secs=30)
+async def get_weather(params: FunctionCallParams, location: str, format: str):
     """Get the current weather.
 
     Args:

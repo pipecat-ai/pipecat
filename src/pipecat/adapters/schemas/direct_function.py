@@ -289,7 +289,9 @@ class DirectFunctionWrapper(BaseDirectFunctionWrapper):
         return await self.function(params=params, **args)
 
 
-def tool_options(fn=None, *, cancel_on_interruption: bool = True, timeout: float | None = None):
+def tool_options(
+    fn=None, *, cancel_on_interruption: bool = True, timeout_secs: float | None = None
+):
     """Configure a direct function's call options.
 
     This decorator is optional. A direct function listed in an ``LLMContext``'s
@@ -307,7 +309,7 @@ def tool_options(fn=None, *, cancel_on_interruption: bool = True, timeout: float
         async def get_weather(params, location: str):
             ...
 
-        @tool_options(cancel_on_interruption=False, timeout=60)
+        @tool_options(cancel_on_interruption=False, timeout_secs=60)
         async def end_call(params, reason: str):
             ...
 
@@ -315,17 +317,18 @@ def tool_options(fn=None, *, cancel_on_interruption: bool = True, timeout: float
         fn: The function to decorate (when used without arguments).
         cancel_on_interruption: Whether to cancel this function call when an
             interruption occurs. Defaults to True.
-        timeout: Optional per-tool timeout in seconds. Defaults to None (uses
+        timeout_secs: Optional per-tool timeout in seconds. Defaults to None (uses
             the LLM service default).
 
     Returns:
-        The decorated function, with ``cancel_on_interruption`` and ``timeout``
-        attributes attached.
+        The decorated function, unchanged except for pipecat call-option metadata
+        attached under private ``_pipecat_*`` attributes (read internally; not
+        part of the public API).
     """
 
     def decorator(fn):
-        fn.cancel_on_interruption = cancel_on_interruption
-        fn.timeout = timeout
+        fn._pipecat_cancel_on_interruption = cancel_on_interruption
+        fn._pipecat_timeout_secs = timeout_secs
         return fn
 
     if fn is not None:
