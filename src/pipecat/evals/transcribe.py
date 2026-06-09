@@ -35,6 +35,14 @@ from pipecat.services.stt_service import STTService
 # STT services expect 16 kHz mono audio.
 STT_SAMPLE_RATE = 16000
 
+# Silence padded onto each captured segment before transcription. The bot-speech
+# buffer starts right at the bot's first audio frame (``bot-started-speaking``),
+# an abrupt onset that makes Whisper drop a short leading word — e.g. a terse
+# "Four." answer transcribes as just the trailing clause. A bit of leading and
+# trailing silence gives Whisper a clean lead-in/lead-out so it keeps the onset
+# and offset words. Kept short so it can't trigger silence hallucinations.
+SILENCE_PAD_S = 0.5
+
 # Upper bound on a single transcription; also the silence fallback (no
 # TranscriptionFrame is emitted for non-speech, so we time out and return "").
 TRANSCRIBE_TIMEOUT_S = 30.0
@@ -159,6 +167,11 @@ class EvalTranscriber:
         if sample_rate != STT_SAMPLE_RATE:
             pcm = await self._resampler.resample(pcm, sample_rate, STT_SAMPLE_RATE)
         self.debug(f"transcribe: resampled {sample_rate}->{STT_SAMPLE_RATE}Hz, {len(pcm)}B")
+
+        # Pad with silence so Whisper has a clean lead-in/lead-out and doesn't
+        # drop a short onset/offset word (see SILENCE_PAD_S).
+        pad = b"\x00\x00" * int(STT_SAMPLE_RATE * SILENCE_PAD_S)
+        pcm = pad + pcm + pad
 
         # VAD start/stop bracket the audio so the SegmentedSTTService buffers it
         # and transcribes the whole segment on stop.
