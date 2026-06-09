@@ -395,6 +395,35 @@ class TestEvalsScenarioParser(unittest.TestCase):
             )
         self.assertIn("'reset:'", str(cm.exception))
 
+    def test_include_resolves_judge_and_user_blocks(self):
+        # `judge: !include ...` / `user: !include ...` let scenarios share config.
+        # Includes resolve relative to the scenario file's directory, so the
+        # fragments are written alongside the scenario.
+        d = Path(tempfile.mkdtemp())
+        (d / "judge_audio.yaml").write_text(
+            "modality: audio\n"
+            "eval: {service: ollama, model: llama3:latest}\n"
+            "transcription: {service: whisper, model: base}\n",
+            encoding="utf-8",
+        )
+        (d / "user_audio.yaml").write_text(
+            "modality: audio\nspeech: {service: kokoro, voice: af_heart}\n", encoding="utf-8"
+        )
+        scenario = d / "math.yaml"
+        scenario.write_text(
+            "name: math\n"
+            "user: !include user_audio.yaml\n"
+            "judge: !include judge_audio.yaml\n"
+            "turns: [{user: hi, expect: [{event: response, eval: ok}]}]\n",
+            encoding="utf-8",
+        )
+
+        s = EvalScenario.load(scenario)
+        self.assertTrue(s.bot_audio)
+        self.assertEqual(s.transcriber, {"service": "whisper", "model": "base"})
+        self.assertEqual(s.judge, {"service": "ollama", "model": "llama3:latest"})
+        self.assertEqual(s.user_audio, {"service": "kokoro", "voice": "af_heart"})
+
 
 if __name__ == "__main__":
     unittest.main()

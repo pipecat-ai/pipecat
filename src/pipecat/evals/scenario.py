@@ -89,6 +89,13 @@ Top-level optional fields:
             actual audio (``tts_response``); ``text`` (the default) skips TTS and
             judges the LLM text (``llm_response``), which is faster and silent.
     fixtures: free-form mapping (e.g. ``bot_url:``).
+
+Any value can be pulled from a separate file with ``!include``, resolved
+relative to the scenario file's directory. This is handy for sharing the
+``judge:`` and ``user:`` blocks across scenarios::
+
+    user: !include user_audio.yaml
+    judge: !include judge_audio.yaml
 """
 
 from dataclasses import dataclass, field
@@ -97,6 +104,7 @@ from typing import Any
 
 import yaml
 from loguru import logger
+from yamlinclude import YamlIncludeConstructor
 
 # Events whose payloads carry bot-generated text the judge can sensibly
 # evaluate. Asserting ``eval:`` on anything else (user transcripts, tool
@@ -255,8 +263,18 @@ class EvalScenario:
             FileNotFoundError: If the path doesn't exist.
         """
         path = Path(path)
+
+        # Support `judge: !include judge_audio.yaml` (and `user:`, etc.) so
+        # scenarios can share judge/user config. Includes resolve relative to the
+        # scenario file's directory. Register the constructor on a private loader
+        # subclass (not the global SafeLoader) so it has no global side effects.
+        class _Loader(yaml.SafeLoader):
+            pass
+
+        YamlIncludeConstructor.add_to_loader_class(loader_class=_Loader, base_dir=str(path.parent))
+
         with path.open() as f:
-            data = yaml.safe_load(f)
+            data = yaml.load(f, _Loader)
 
         if not isinstance(data, dict):
             raise ValueError(f"{path}: top level must be a mapping")

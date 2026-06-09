@@ -3,10 +3,7 @@ name: weather
 # Text, end to end: ask for the weather (no tool call required since it's using
 # another framework). Tests that the bot response correctly, grounded answer.
 
-judge:
-  eval:
-    service: ollama
-    model: llama3:latest
+judge: !include judge_text.yaml
 
 turns:
   # Wait for the bot's on-connect greeting before speaking (avoids barging into it).

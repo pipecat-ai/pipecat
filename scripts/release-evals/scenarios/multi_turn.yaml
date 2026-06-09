@@ -3,10 +3,7 @@ name: multi_turn
 # Text modality: a two-turn conversation where the second turn depends on the
 # first. Tests context retention across turns.
 
-judge:
-  eval:
-    service: ollama
-    model: llama3:latest
+judge: !include judge_text.yaml
 
 turns:
   # Wait for the bot's on-connect greeting before speaking (avoids barging into it).

@@ -5,10 +5,7 @@ name: describe_image
 # transport serves the image registered for this turn as a UserImageRawFrame.
 # Exercises the function-call -> user-image -> describe flow of the *-video bots.
 
-judge:
-  eval:
-    service: ollama
-    model: llama3:latest
+judge: !include judge_text.yaml
 
 turns:
   # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
