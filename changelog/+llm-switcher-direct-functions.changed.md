@@ -1,0 +1,6 @@
+`LLMSwitcher` now registers direct functions advertised via
+`LLMContext(tools=[...])` on all of its member LLMs automatically (active or
+not). Listing a direct function in the context is now enough for it to work
+across service switches — an explicit `register_direct_function()` call is no
+longer required. Added `LLMService.register_context_direct_functions()` to
+support this.

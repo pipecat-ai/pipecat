@@ -116,13 +116,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     # Uses ServiceSwitcherStrategyManual by default
     llm_switcher = LLMSwitcher(llms=[llm_openai, llm_google])
-    # Register the direct functions on the switcher. Unlike a single LLM service
-    # (where listing a direct function in the LLMContext auto-registers it), the
-    # switcher needs each handler registered on every underlying LLM — active or
-    # not — so the tool keeps working across service switches.
-    llm_switcher.register_direct_function(get_current_weather)
-    llm_switcher.register_direct_function(get_restaurant_recommendation)
 
+    # Direct functions listed in the context are registered automatically on
+    # every member LLM (active or not), so the tools keep working across
+    # service switches.
     context = LLMContext(tools=[get_current_weather, get_restaurant_recommendation])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,

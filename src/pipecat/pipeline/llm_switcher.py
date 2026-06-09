@@ -9,13 +9,14 @@
 from typing import Any, cast
 
 from pipecat.adapters.schemas.direct_function import DirectFunction
+from pipecat.frames.frames import Frame, LLMContextFrame
 from pipecat.pipeline.service_switcher import (
     ServiceSwitcher,
     ServiceSwitcherStrategyManual,
     StrategyType,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
 
 
@@ -40,6 +41,36 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
                 Defaults to ``ServiceSwitcherStrategyManual``.
         """
         super().__init__(cast(list[FrameProcessor], llms), strategy_type)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process a frame, registering context direct functions on all member LLMs.
+
+        On an ``LLMContextFrame``, the direct functions advertised in the context
+        are registered on every member LLM — active or not — so that direct
+        functions listed via ``LLMContext(tools=[...])`` keep working across
+        service switches without an explicit ``register_direct_function`` call.
+
+        This is needed because member LLMs sit behind per-branch filters: only
+        the active LLM receives the context frame and would otherwise
+        auto-register, leaving inactive LLMs without the handler.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow.
+        """
+        await super().process_frame(frame, direction)
+        if isinstance(frame, LLMContextFrame):
+            self._register_context_direct_functions(frame.context)
+
+    def _register_context_direct_functions(self, context: LLMContext) -> None:
+        """Register the context's direct functions on every member LLM.
+
+        Args:
+            context: The LLM context whose advertised direct functions should be
+                registered on all member LLMs.
+        """
+        for llm in self.llms:
+            llm.register_context_direct_functions(context)
 
     @property
     def llms(self) -> list[LLMService]:

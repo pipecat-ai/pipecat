@@ -844,6 +844,20 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             timeout_secs=timeout_secs,
         )
 
+    def register_context_direct_functions(self, context: LLMContext) -> None:
+        """Register handlers for any direct functions advertised in ``context``.
+
+        This is the same registration that runs automatically when the service
+        processes an ``LLMContextFrame``. It is exposed publicly so that container
+        processors (such as ``LLMSwitcher``) can register handlers on member
+        services that may not individually receive the context frame.
+
+        Args:
+            context: The LLM context whose advertised direct functions should be
+                registered on this service.
+        """
+        self._auto_register_direct_functions(context)
+
     def _auto_register_direct_functions(self, context: LLMContext) -> None:
         """Register handlers for direct functions advertised in the context.
 
