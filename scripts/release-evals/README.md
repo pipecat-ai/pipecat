@@ -18,44 +18,103 @@ covers many bots.
 
 [`manifest.yaml`](manifest.yaml) maps each bot to the scenarios it runs.
 
+## Prerequisites
+
+The harness runs the judge, the user's voice, and the bot-speech transcriber
+*locally* by default, so you need a few things in place:
+
+- **A judge LLM.** Scenarios judge with [Ollama](https://ollama.com) by default
+  (`http://localhost:11434`). Install Ollama, start it, and pull the model the
+  scenarios use: `ollama pull llama3:latest`. (A scenario's `judge:` block can
+  point at OpenAI instead — set `service: openai` and `$OPENAI_API_KEY`.)
+- **Local audio models** (audio-mode scenarios only). The user's voice is
+  synthesized with Kokoro TTS and the bot's speech is transcribed with Whisper.
+  Both run from local ONNX/model files that download once on first use (cached
+  under `~/.cache`). No keys, no per-run cost.
+- **Each bot's own credentials.** A bot is a real example, so it needs the same
+  service API keys it normally would, in your `.env` (e.g. `$OPENAI_API_KEY`,
+  `$CARTESIA_API_KEY`, `$DEEPGRAM_API_KEY`, ...). A bot whose keys are missing
+  fails its eval.
+
+Install the framework with the eval extras (Kokoro, Whisper, Ollama, and the
+services the bots use):
+
+```sh
+uv sync --group dev --all-extras --no-extra gstreamer --no-extra local
+```
+
 ## Running
 
 ```sh
 ./run.sh                  # everything in the manifest
 ./run.sh -p voice-openai  # only bots whose path contains "voice-openai"
 ./run.sh -s simple_math   # only the simple_math scenario
-./run.sh -c 8 -a          # 8 at a time, record audio
+./run.sh -c 8             # 8 at a time
 ./run.sh -n nightly       # output to test-runs/nightly/ instead of a timestamp
-./run.sh -d               # also save the harness's full per-pipeline debug logs
 ```
 
-Everything except the `suite:` list can be set in the manifest *or* on the
-command line (the command line wins): `--bots-dir`, `--scenarios-dir`,
-`--runs-dir`, `-c/--concurrency`, `--base-port`, `--cache-dir`, `--spawn`,
-`--python`, `-a`, and `-d/--debug`. So a manifest can be just a `suite:` list
-with the rest supplied as flags.
-
-`run.sh` is a thin wrapper over the `pipecat eval suite` command:
+`run.sh` is a thin wrapper over `pipecat eval suite`; it always passes `-d` so
+the full per-pipeline debug logs are saved (see below), and forwards any extra
+flags:
 
 ```sh
-uv run python -m pipecat.evals suite manifest.yaml [-p PATTERN] [-s SCENARIO] [-c N] [-a] [-d]
+uv run python -m pipecat.evals suite -d manifest.yaml [-p PATTERN] [-s SCENARIO] [-c N] [-n NAME] [-t SECS] [-a] [--no-cache]
 ```
 
-Each run writes, under `test-runs/<timestamp>/logs/`:
+Each run writes to `test-runs/<name>/` (a timestamp when `-n` is omitted):
 
-- `<bot>__<scenario>.log` — the bot subprocess output.
-- `<bot>__<scenario>.eval.log` — the harness's decision trace (always; invaluable
-  for diagnosing a flake).
-- `<bot>__<scenario>.debug.log` — with `-d/--debug` only: the harness's full
-  per-pipeline logs (voice / transcription / judge / harness), in one file with a
-  section per pipeline.
+- `logs/<bot>__<scenario>.log` — the bot subprocess output.
+- `logs/<bot>__<scenario>.eval.log` — the harness's decision trace (always
+  written; invaluable for diagnosing a flake).
+- `logs/<bot>__<scenario>.debug.log` — the harness's full per-pipeline logs
+  (voice / transcription / judge / harness), one section per pipeline. Written
+  whenever `-d/--debug` is passed, which `run.sh` always does.
+- `recordings/<bot>__<scenario>.wav` — the conversation audio for audio-mode
+  scenarios. The manifest sets `record: true`, so these are produced by default;
+  pass `-a/--audio` to force recording on if a manifest has it off.
+
+Useful flags: `-c/--concurrency`, `-t/--timeout` (default per-expectation
+timeout in seconds, for expectations without their own `within_ms`), and
+`--no-cache` (re-synthesize user audio every turn instead of reusing the cache).
+Everything in the manifest header except the `suite:` list can also be overridden
+on the command line (the command line wins) — `--bots-dir`, `--scenarios-dir`,
+`--runs-dir`, `--base-port`, `--cache-dir`, `--spawn`, `--python` — so a manifest
+can be just a `suite:` list with the rest supplied as flags.
 
 ## Running one scenario against an already-running bot
 
-If you already have a bot running with `-t eval`, run a scenario directly:
+If you already have a bot running with `-t eval`, run a scenario directly
+(handy while iterating on a scenario or a single bot):
 
 ```sh
 pipecat eval run scenarios/simple_math.yaml --bot-url ws://localhost:7860
+```
+
+## Scenarios
+
+A scenario is a sequence of `turns`. A turn either sends a `user` utterance and
+asserts on the events that come back, or it's observation-only (no `user`) and
+just asserts — used for bot-first turns like an opening greeting. The full file
+format (events, expectations, `send_after:`, `image:`, ...) is documented in the
+[`pipecat.evals.scenario`](../../src/pipecat/evals/scenario.py) module docstring.
+
+Two things worth knowing when authoring:
+
+- **Modality.** `judge:` and `user:` blocks select audio vs text. In audio mode
+  the user's turns are synthesized (exercising the bot's STT for real) and the
+  judge evaluates a Whisper transcription of the bot's actual audio; text mode
+  sends/judges text directly and is faster and silent.
+- **Greet first.** A bot that greets on connect (most do) needs that greeting to
+  finish before the first user turn — otherwise the question barges into it. So
+  user-first scenarios lead with a bot-first turn that expects the greeting.
+
+Shared `judge:`/`user:` config lives in small fragment files
+(`judge_audio.yaml`, `judge_text.yaml`, `user_audio.yaml`) that scenarios pull in
+with `!include` (resolved relative to the scenario file):
+
+```yaml
+user: !include user_audio.yaml
+judge: !include judge_audio.yaml
 ```
 
 ## Vision (image input)
@@ -76,6 +135,10 @@ a relative `image_path` in the body resolves next to the file and the two travel
 together. The `vision_describe` scenario is a bot-first turn (no user input): the
 bot describes the image (a cat) on connect and the judge checks that it described
 a cat.
+
+For function-calling-video bots, a turn can instead register an `image:` that the
+eval transport serves when the bot requests a user image mid-conversation (see
+`describe_image`).
 
 ## Adding coverage
 
