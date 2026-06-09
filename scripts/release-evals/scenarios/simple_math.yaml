@@ -14,7 +14,10 @@ turns:
       - event: response
         eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
 
-  - user: "What is two plus two?"
+  # Ask for a full, plain restatement so the spoken answer is unambiguous when
+  # transcribed: a terse "Four." gets dropped or misheard as "for", and filler
+  # like "Let's see..." can even break some TTS services.
+  - user: "What is two plus two? Please answer in one plain, complete sentence."
     expect:
       - event: response
-        eval: "the response correctly answers that two plus two is four (stated as '4' or 'four')"
+        eval: "the response answers that two plus two is four (as '4' or 'four')"
