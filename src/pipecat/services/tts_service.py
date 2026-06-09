@@ -1091,8 +1091,9 @@ class TTSService(AIService):
         if self._push_start_frame and not self.audio_context_available(context_id):
             await self.create_audio_context(context_id)
             await self.start_ttfb_metrics()
-            # append_to_context is stamped centrally in _handle_audio_context, where
-            # every TTSStartedFrame (base-class- and subclass-emitted) funnels through.
+            # Note: TTSStartedFrame's append_to_context is stamped in
+            # _handle_audio_context, where every TTSStartedFrame
+            # (base-class- and subclass-emitted) funnels through.
             await self.append_to_audio_context(context_id, TTSStartedFrame(context_id=context_id))
 
         # Register this spoken frame so the sequencer can track its completion
@@ -1512,11 +1513,10 @@ class TTSService(AIService):
                 if frame:
                     if isinstance(frame, TTSStartedFrame):
                         should_push_stop_frame = self._push_stop_frames
-                        # Stamp append_to_context from the TTS context (the source of
-                        # truth) onto every TTSStartedFrame here — the single point
-                        # both base-class- and subclass-emitted started frames pass
-                        # through. The assistant aggregator uses it to open a turn for
-                        # TTSSpeakFrame utterances (which lack an LLMFullResponseStartFrame).
+                        # Stamp appropriate append_to_context value onto every
+                        # TTSStartedFrame here — the single point both
+                        # base-class- and subclass-emitted started frames pass
+                        # through.
                         tts_context = self._tts_contexts.get(context_id)
                         if tts_context is not None:
                             frame.append_to_context = tts_context.append_to_context
