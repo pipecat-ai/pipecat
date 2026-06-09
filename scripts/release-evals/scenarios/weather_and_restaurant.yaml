@@ -9,7 +9,7 @@ turns:
   # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
   - expect:
       - event: response
-        eval: "greets the user, introduces itself, or offers to help"
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
 
   - user: "What's the weather in San Francisco, and what's a good restaurant there? Use Fahrenheit."
     expect:

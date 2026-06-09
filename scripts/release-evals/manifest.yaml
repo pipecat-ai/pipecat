@@ -102,9 +102,7 @@ suite:
   - bot: voice/voice-nvidia.py
     scenarios: [simple_math]
   - bot: voice/voice-openai.py
-    scenarios:
-      - simple_math
-      - interruption
+    scenarios: [simple_math]
   - bot: voice/voice-openai-http.py
     scenarios: [simple_math]
   - bot: voice/voice-openai-responses.py

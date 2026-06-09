@@ -453,7 +453,15 @@ class EvalSession:
                 for turn_idx, turn in enumerate(self._scenario.turns):
                     self._current_turn = turn_idx
                     self._debug(f"--- turn {turn_idx}: {turn.user!r}")
-                    failures.extend(await self._run_turn(turn, turn_idx))
+                    turn_failures = await self._run_turn(turn, turn_idx)
+                    failures.extend(turn_failures)
+                    if turn_failures:
+                        # Fail fast: a failed turn leaves the conversation in an
+                        # unknown state, so running the rest just burns another
+                        # timeout per turn (e.g. a broken greeting turn shouldn't
+                        # cost the full budget here and again on the question).
+                        self._debug(f"turn {turn_idx} failed; stopping scenario (fail-fast)")
+                        break
         finally:
             reader_task.cancel()
             if self._audio_sender_task is not None:

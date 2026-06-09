@@ -47,6 +47,10 @@ from pipecat.services.llm_service import LLMService
 JUDGE_SYSTEM_INSTRUCTION = (
     "You are a strict but fair judge deciding whether a bot's response satisfies a "
     "given criterion. The text may be a partial response that is still streaming in. "
+    "When the response was spoken, the text is an automatic speech-to-text "
+    "transcription that may contain homophones or minor errors (for example 'for' "
+    "for 'four', or 'to'/'too' for 'two'); judge it by the intended spoken meaning, "
+    "not its exact spelling. "
     "Respond ONLY with a JSON object on a single line containing two fields: "
     '{"verdict": "yes" | "no" | "continue", "reason": "<one short sentence>"}. '
     'Use "yes" if the text satisfies the criterion. Use "no" if the text gives a '
