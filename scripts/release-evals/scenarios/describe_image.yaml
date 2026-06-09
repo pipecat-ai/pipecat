@@ -11,11 +11,13 @@ judge:
     model: llama3:latest
 
 turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "greets the user, introduces itself, or offers to help"
+
   - user: "What do you see in my camera?"
     image: ../assets/cat.jpg
-    send_after:
-      event: llm_started
-      delay_ms: 2000
     expect:
       - event: function_call
         calls:
