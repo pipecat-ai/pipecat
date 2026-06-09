@@ -136,6 +136,11 @@ class EvalVoice:
         self._runner_task = None
         self._output_generator = None
 
+    @property
+    def sample_rate(self) -> int:
+        """Sample rate (Hz) of the audio this voice generates."""
+        return self._sample_rate
+
     @classmethod
     def from_config(
         cls,
