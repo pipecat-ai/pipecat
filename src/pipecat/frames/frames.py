@@ -1878,9 +1878,13 @@ class TTSStartedFrame(ControlFrame):
 
     Parameters:
         context_id: Unique identifier for this TTS context.
+        append_to_context: Whether the spoken text for this response will be
+            appended to the LLM context. Mirrors the value carried by the
+            response's TTSTextFrames.
     """
 
     context_id: str | None = None
+    append_to_context: bool = True
 
 
 @dataclass

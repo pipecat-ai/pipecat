@@ -61,6 +61,7 @@ from pipecat.frames.frames import (
     TextFrame,
     TranscriptionFrame,
     TranslationFrame,
+    TTSStartedFrame,
     UserImageRawFrame,
     UserMuteStartedFrame,
     UserMuteStoppedFrame,
@@ -1453,6 +1454,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMAssistantPushAggregationFrame):
             await self._handle_push_aggregation()
+        elif isinstance(frame, TTSStartedFrame):
+            await self._handle_tts_started(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, LLMFullResponseStartFrame):
             await self._handle_llm_start(frame)
         elif isinstance(frame, LLMFullResponseEndFrame):
@@ -1866,15 +1870,17 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._paired_user_aggregator._realtime_handoff_flush_immediate()
         await self._trigger_assistant_turn_stopped()
 
-    async def _handle_push_aggregation(self):
-        # LLMAssistantPushAggregationFrame is emitted by TTSService at the end
-        # of a TTSSpeakFrame-driven utterance (no surrounding LLM response
-        # cycle), so no LLMFullResponseStartFrame ever set the turn-start
-        # timestamp. Open a turn now so on_assistant_turn_stopped fires for the
-        # greeting text the same way it did before LLMAssistantPushAggregationFrame
-        # was introduced.
-        if not self._assistant_turn_start_timestamp:
+    async def _handle_tts_started(self, frame: TTSStartedFrame):
+        # If this TTS output will be written to context and we don't already have an
+        # open assistant turn, open one. This handles the case of TTSSpeakFrame-driven
+        # utterances that have no surrounding LLM response frames to signal assistant
+        # turn boundaries, while rightly deferring to any earlier LLM-driven turn start.
+        if frame.append_to_context and not self._assistant_turn_start_timestamp:
             await self._trigger_assistant_turn_started()
+
+    async def _handle_push_aggregation(self):
+        # LLMAssistantPushAggregationFrame is emitted at the end of
+        # a TTSSpeakFrame-driven utterance to commit the spoken text.
         await self._trigger_assistant_turn_stopped()
 
     async def _handle_text(self, frame: TextFrame):
