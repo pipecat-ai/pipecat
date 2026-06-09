@@ -6,30 +6,35 @@
 
 """Bot-audio transcription for the eval harness.
 
-When a scenario asserts on ``tts_response``, the harness needs the text of what
-the bot *actually said* — the transcription of its synthesized audio, not the
-text fed to the TTS. :class:`EvalTranscriber` provides that: it runs an STT
-service in one persistent pipeline (mirroring
-:class:`~pipecat.evals.voice.EvalVoice`) and transcribes buffered audio segments
-on demand.
+When a scenario judges a spoken response, the harness needs the text of what the
+bot *actually said* — the transcription of its synthesized audio, not the text
+fed to the TTS. :class:`EvalTranscriber` provides that by calling an STT
+service's ``run_stt()`` directly on the captured audio, mirroring how
+:class:`~pipecat.evals.judge.EvalJudge` calls ``run_inference()`` — there is no
+pipeline to run.
+
+This works with any STT whose ``run_stt(audio)`` transcribes the buffer and
+returns: local models like Whisper (which loads in its constructor) and HTTP
+services. A live/streaming STT (e.g. Deepgram's WebSocket service) does *not*
+fit — its ``run_stt`` ships audio to a socket and the results arrive out of band,
+so nothing is yielded.
 
 The transcriber takes an already-built ``STTService``;
 :meth:`EvalTranscriber.from_config` constructs one from a scenario's
 ``bot_audio`` mapping — ``service`` (default ``"whisper"``, a local model) and
-``model`` — much like :meth:`pipecat.evals.judge.EvalJudge.from_config`. The
-escape hatch is ``bot_audio.factory: "my_pkg.my_func"`` — an importable callable
-taking ``(config, sample_rate)`` and returning an ``STTService``. Audio is
-resampled to 16 kHz before transcription, a rate STT services expect.
+``model``. The escape hatch is ``bot_audio.factory: "my_pkg.my_func"`` — an
+importable callable taking ``(config, sample_rate)`` and returning an
+``STTService``. Audio is resampled to 16 kHz before transcription, a rate STT
+services expect.
 """
 
-import asyncio
 import importlib
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
+from typing import cast
 
 from loguru import logger
 
 from pipecat.evals.services import whisper_service
-from pipecat.evals.voice import _IdentitySerializer
 from pipecat.services.stt_service import STTService
 
 # STT services expect 16 kHz mono audio.
@@ -39,23 +44,23 @@ STT_SAMPLE_RATE = 16000
 # buffer starts right at the bot's first audio frame (``bot-started-speaking``),
 # an abrupt onset that makes Whisper drop a short leading word — e.g. a terse
 # "Four." answer transcribes as just the trailing clause. A bit of leading and
-# trailing silence gives Whisper a clean lead-in/lead-out so it keeps the onset
+# trailing silence gives the STT a clean lead-in/lead-out so it keeps the onset
 # and offset words. Kept short so it can't trigger silence hallucinations.
-SILENCE_PAD_S = 0.5
-
-# Upper bound on a single transcription; also the silence fallback (no
-# TranscriptionFrame is emitted for non-speech, so we time out and return "").
-TRANSCRIBE_TIMEOUT_S = 30.0
+SILENCE_PAD_S = 2
 
 
 class EvalTranscriber:
-    """Transcribes bot audio with an STT service from one persistent pipeline.
+    """Transcribes bot audio by calling an STT service's ``run_stt()`` directly.
 
     Takes an already-built ``STTService``; :meth:`from_config` builds one from a
     scenario's ``bot_audio`` mapping. Use as an async context manager::
 
         async with EvalTranscriber.from_config({"model": "base"}) as t:
             text = await t.transcribe(pcm, sample_rate=24000)
+
+    Only STTs whose ``run_stt(audio)`` transcribes the buffer and returns are
+    supported (local models like Whisper, HTTP services) — not live/streaming
+    ones, whose results arrive out of band.
     """
 
     def __init__(self, service: STTService):
@@ -65,12 +70,9 @@ class EvalTranscriber:
             service: A constructed ``STTService`` (e.g. from :meth:`from_config`).
         """
         self._service = service
-        self._worker = None
-        self._runner_task = None
-        self._output_generator = None
         self._resampler = None
         # Optional sink for timing diagnostics; the harness points this at its
-        # per-scenario debug trace so a hung transcription is visible.
+        # per-scenario debug trace.
         self.debug: Callable[[str], None] = lambda _msg: None
 
     @classmethod
@@ -94,7 +96,7 @@ class EvalTranscriber:
 
             # In the scenario: bot_audio.factory: "my_pkg.make_stt"
             def make_stt(config, sample_rate):
-                return DeepgramSTTService(...)
+                return WhisperSTTService(...)
         """
         config = config or {}
 
@@ -116,33 +118,17 @@ class EvalTranscriber:
         )
 
     async def start(self) -> None:
-        """Build and start the persistent transcription pipeline."""
+        """Prepare the transcriber. The STT service loads its model on construction."""
         from pipecat.audio.utils import create_file_resampler
-        from pipecat.pipeline.pipeline import Pipeline
-        from pipecat.pipeline.worker import PipelineParams, PipelineWorker
-        from pipecat.processors.async_generator import AsyncGeneratorProcessor
-        from pipecat.workers.runner import WorkerRunner
 
-        grab = AsyncGeneratorProcessor(serializer=_IdentitySerializer())
-        self._worker = PipelineWorker(
-            Pipeline([self._service, grab]),
-            params=PipelineParams(audio_in_sample_rate=STT_SAMPLE_RATE),
-            # Persistent: idles between segments and must not self-cancel.
-            idle_timeout_secs=None,
-            enable_rtvi=False,
-        )
-        runner = WorkerRunner(handle_sigint=False)
-        await runner.add_workers(self._worker)
-        self._runner_task = asyncio.create_task(runner.run())
-        self._output_generator = grab.generator()
         self._resampler = create_file_resampler()
 
     async def transcribe(self, pcm: bytes, sample_rate: int) -> str:
         """Transcribe one audio segment to text.
 
-        Call serially: each call drives the shared pipeline through one
-        speak/stop segment and reads its transcription. Returns ``""`` when the
-        audio contains no recognizable speech.
+        Calls the STT service's ``run_stt()`` on the resampled, padded audio and
+        joins the ``TranscriptionFrame``s it yields. Returns ``""`` when the audio
+        contains no recognizable speech.
 
         Args:
             pcm: Raw 16-bit little-endian mono PCM.
@@ -151,93 +137,41 @@ class EvalTranscriber:
         Returns:
             The transcribed text, stripped, or ``""`` for silence.
         """
-        from pipecat.frames.frames import (
-            ErrorFrame,
-            InputAudioRawFrame,
-            TranscriptionFrame,
-            VADUserStartedSpeakingFrame,
-            VADUserStoppedSpeakingFrame,
-        )
+        from pipecat.frames.frames import ErrorFrame, TranscriptionFrame
 
-        if self._worker is None or self._output_generator is None or self._resampler is None:
+        if self._resampler is None:
             raise RuntimeError("EvalTranscriber.start() was not called")
         if not pcm:
             return ""
 
         if sample_rate != STT_SAMPLE_RATE:
             pcm = await self._resampler.resample(pcm, sample_rate, STT_SAMPLE_RATE)
-        self.debug(f"transcribe: resampled {sample_rate}->{STT_SAMPLE_RATE}Hz, {len(pcm)}B")
 
-        # Pad with silence so Whisper has a clean lead-in/lead-out and doesn't
-        # drop a short onset/offset word (see SILENCE_PAD_S).
+        # Pad with silence so the STT has a clean lead-in/lead-out and doesn't drop
+        # a short onset/offset word (see SILENCE_PAD_S).
         pad = b"\x00\x00" * int(STT_SAMPLE_RATE * SILENCE_PAD_S)
         pcm = pad + pcm + pad
 
-        # VAD start/stop bracket the audio so the SegmentedSTTService buffers it
-        # and transcribes the whole segment on stop.
-        await self._worker.queue_frames(
-            [
-                VADUserStartedSpeakingFrame(),
-                InputAudioRawFrame(audio=pcm, sample_rate=STT_SAMPLE_RATE, num_channels=1),
-                VADUserStoppedSpeakingFrame(),
-            ]
-        )
-        self.debug("transcribe: frames queued, awaiting transcription")
+        # run_stt transcribes the whole buffer and yields its TranscriptionFrame(s),
+        # then the generator ends — so we just collect and join. No pipeline, no
+        # timeout: the generator returning is the "done" signal.
+        # run_stt's base signature types it as a coroutine, but every concrete STT
+        # overrides it as an async generator; iterate it as such.
+        parts: list[str] = []
+        async for frame in cast(AsyncGenerator[object, None], self._service.run_stt(pcm)):
+            if isinstance(frame, TranscriptionFrame):
+                parts.append(frame.text.strip())
+            elif isinstance(frame, ErrorFrame):
+                self.debug(f"transcribe: ErrorFrame {frame.error}")
+                logger.warning(f"EvalTranscriber: transcription error: {frame.error}")
 
-        try:
-            async with asyncio.timeout(TRANSCRIBE_TIMEOUT_S):
-                async for frame in self._output_generator:
-                    if isinstance(frame, TranscriptionFrame):
-                        return frame.text.strip()
-                    if isinstance(frame, ErrorFrame):
-                        self.debug(f"transcribe: ErrorFrame {frame.error}")
-                        logger.warning(f"EvalTranscriber: transcription error: {frame.error}")
-                        return ""
-        except TimeoutError:
-            self.debug(f"transcribe: TIMEOUT after {TRANSCRIBE_TIMEOUT_S}s — no TranscriptionFrame")
-            self._dump_threads()
-            return ""  # no speech detected in the segment
-        return ""
-
-    def _dump_threads(self) -> None:
-        """Dump thread stacks AND asyncio task stacks to the debug trace.
-
-        Used on a transcription timeout to find where the STT inference is parked.
-        Threads catch a hang in C (e.g. ``ctranslate2``); asyncio tasks catch a
-        suspended coroutine (e.g. the STT pipeline worker awaiting something that
-        never arrives), which a thread dump cannot show.
-        """
-        import io
-        import sys
-        import threading
-        import traceback
-
-        names = {t.ident: t.name for t in threading.enumerate()}
-        for tid, frame in sys._current_frames().items():
-            stack = "".join(traceback.format_stack(frame)).rstrip()
-            self.debug(f"--- thread {names.get(tid, '?')} ({tid}) ---\n{stack}")
-
-        try:
-            tasks = asyncio.all_tasks()
-        except RuntimeError:
-            tasks = set()
-        for task in tasks:
-            buf = io.StringIO()
-            task.print_stack(file=buf)
-            self.debug(f"--- task {task.get_name()} ---\n{buf.getvalue().rstrip()}")
+        text = " ".join(p for p in parts if p).strip()
+        self.debug(f"transcribe: {len(parts)} frame(s) -> {text!r}")
+        return text
 
     async def aclose(self) -> None:
-        """Stop the pipeline and release the model."""
-        if self._worker is not None:
-            await self._worker.cancel()
-        if self._runner_task is not None:
-            try:
-                await self._runner_task
-            except (asyncio.CancelledError, Exception):
-                pass
-        self._worker = None
-        self._runner_task = None
-        self._output_generator = None
+        """Release resources. The STT service holds no pipeline-managed state here."""
+        self._resampler = None
 
     async def __aenter__(self) -> "EvalTranscriber":
         await self.start()
