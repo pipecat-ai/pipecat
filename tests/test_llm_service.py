@@ -18,8 +18,8 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
 )
-from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.services.llm_service import LLMService
+from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
+from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
 
@@ -391,3 +391,53 @@ class TestAppendSystemInstruction(unittest.IsolatedAsyncioTestCase):
         # Disabling recomposes back to base + guide.
         service._teardown_async_tool_cancellation()
         self.assertEqual(service._settings.system_instruction, "APP\n\nGUIDE")
+
+
+async def _sample_direct_function(params: FunctionCallParams, location: str):
+    """Get the current weather.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+    """
+    await params.result_callback({"conditions": "nice"})
+
+
+class TestRegisterDirectFunctionsFromTools(unittest.TestCase):
+    """Coverage for _register_direct_functions_from_tools (used by LLMSetToolsFrame)."""
+
+    def test_registers_from_plain_list(self):
+        service = MockLLMService()
+        service._register_direct_functions_from_tools([_sample_direct_function])
+        self.assertIn("_sample_direct_function", service._functions)
+
+    def test_registers_from_tools_schema(self):
+        service = MockLLMService()
+        service._register_direct_functions_from_tools(
+            ToolsSchema(standard_tools=[_sample_direct_function])
+        )
+        self.assertIn("_sample_direct_function", service._functions)
+
+    def test_not_given_is_noop(self):
+        service = MockLLMService()
+        service._register_direct_functions_from_tools(NOT_GIVEN)
+        self.assertEqual(service._functions, {})
+
+    def test_existing_registration_is_preserved(self):
+        service = MockLLMService()
+
+        async def explicit_handler(params: FunctionCallParams, location: str):
+            """Get the current weather.
+
+            Args:
+                location: The city and state.
+            """
+            await params.result_callback({"explicit": True})
+
+        # Register a function under the same name explicitly, then advertise a
+        # different handler with that name via tools. Explicit wins.
+        service.register_direct_function(explicit_handler)
+        registered_before = service._functions["explicit_handler"]
+
+        # A FunctionSchema-only entry (classic) and the existing direct function.
+        service._register_direct_functions_from_tools([explicit_handler])
+        self.assertIs(service._functions["explicit_handler"], registered_before)

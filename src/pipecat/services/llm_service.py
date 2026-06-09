@@ -49,6 +49,7 @@ from pipecat.frames.frames import (
     LLMContextSummaryResultFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMSetToolsFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     RealtimeServiceMetadataFrame,
@@ -593,6 +594,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             # call super().process_frame() first), so handlers are in place by the
             # time the LLM can call them.
             self._auto_register_direct_functions(frame.context)
+        elif isinstance(frame, LLMSetToolsFrame):
+            # Tools can change mid-conversation. Register handlers for any direct
+            # functions newly advertised by the frame, so they're callable as soon
+            # as the updated tool set takes effect.
+            self._register_direct_functions_from_tools(frame.tools)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Pushes a frame.
@@ -874,8 +880,32 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         Args:
             context: The LLM context whose advertised tools should be scanned.
         """
-        tools = context.tools if context is not None else None
-        if tools is None or not is_given(tools):
+        if context is None:
+            return
+        self._register_direct_functions_from_tools(context.tools)
+
+    def _register_direct_functions_from_tools(self, tools: Any) -> None:
+        """Register handlers for any direct functions in the given tools.
+
+        Accepts whatever ``LLMContext`` accepts for tools — a ``ToolsSchema``, a
+        plain list of direct functions / ``FunctionSchema`` objects, or
+        ``NOT_GIVEN`` — normalizing as needed. Per-function options are read from
+        the attributes set by the ``@direct_function`` / ``@tool`` decorator.
+
+        Any direct function whose name is already registered (explicitly, or from
+        a previous context / tool set) is left untouched, so explicit registration
+        always wins and repeated frames don't re-register.
+
+        Args:
+            tools: The tools to scan for direct functions.
+        """
+        # A context's ``tools`` may be ``None`` (rather than ``NOT_GIVEN``) — e.g.
+        # from realtime services or stand-in contexts in tests. is_given(None) is
+        # True and the normalizer rejects None, so guard it explicitly.
+        if tools is None:
+            return
+        tools = LLMContext._normalize_and_validate_tools(tools)
+        if not is_given(tools):
             return
         for wrapper in tools.direct_functions:
             if wrapper.name in self._functions:

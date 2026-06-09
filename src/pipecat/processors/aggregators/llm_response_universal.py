@@ -800,6 +800,11 @@ class LLMUserAggregator(LLMContextAggregator):
         elif isinstance(frame, LLMMessagesTransformFrame):
             await self._handle_llm_messages_transform(frame)
         elif isinstance(frame, LLMSetToolsFrame):
+            # Normalize once (a plain list of direct functions / FunctionSchema
+            # objects becomes a ToolsSchema) so the tool-change diff, set_tools,
+            # and any downstream consumer of the forwarded frame all see a
+            # consistent type.
+            frame.tools = LLMContext._normalize_and_validate_tools(frame.tools)
             self._maybe_add_tool_change_messages(frame.tools)
             self.set_tools(frame.tools)
             # Push the LLMSetToolsFrame as well, since speech-to-speech LLM
@@ -1475,6 +1480,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
         elif isinstance(frame, LLMMessagesTransformFrame):
             await self._handle_llm_messages_transform(frame)
         elif isinstance(frame, LLMSetToolsFrame):
+            # Normalize once (a plain list of direct functions / FunctionSchema
+            # objects becomes a ToolsSchema) so the tool-change diff, set_tools,
+            # and any downstream consumer of the forwarded frame all see a
+            # consistent type.
+            frame.tools = LLMContext._normalize_and_validate_tools(frame.tools)
             self._maybe_add_tool_change_messages(frame.tools)
             self.set_tools(frame.tools)
         elif isinstance(frame, LLMSetToolChoiceFrame):

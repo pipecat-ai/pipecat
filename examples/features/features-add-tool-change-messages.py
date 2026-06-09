@@ -50,7 +50,6 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame, LLMSetToolsFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -87,12 +86,6 @@ async def get_current_weather(params: FunctionCallParams, location: str, format:
         format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
     """
     await params.result_callback({"conditions": "nice", "temperature": "75"})
-
-
-# A ToolsSchema built from the direct function. We need it (rather than a bare
-# `[get_current_weather]` list) because LLMSetToolsFrame re-advertises this tool
-# set mid-conversation, and that frame carries a ToolsSchema.
-weather_tools = ToolsSchema(standard_tools=[get_current_weather])
 
 
 transport_params = {
@@ -139,10 +132,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             ),
         ),
     )
-    # The direct function advertised in the context (via weather_tools) is
-    # registered with the LLM automatically — no separate register_function()
-    # call needed.
-    context = LLMContext(tools=weather_tools)
+    # The direct function advertised in the context is registered with the LLM
+    # automatically. The same goes for tools (re-)advertised later via LLMSetToolsFrame.
+    context = LLMContext(tools=[get_current_weather])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -189,7 +181,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 "=== Phase 2: weather tool RE-ADDED. Ask for the weather again — "
                 "does the LLM call it, or keep refusing? (THIS IS THE TEST.) ==="
             )
-            await worker.queue_frame(LLMSetToolsFrame(tools=weather_tools))
+            await worker.queue_frame(LLMSetToolsFrame(tools=[get_current_weather]))
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
