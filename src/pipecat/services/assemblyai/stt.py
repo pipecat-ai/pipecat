@@ -18,6 +18,8 @@ from typing import Any
 from urllib.parse import urlencode
 
 from loguru import logger
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
@@ -48,14 +50,6 @@ from .models import (
     TerminationMessage,
     TurnMessage,
 )
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error('In order to use AssemblyAI, you need to `uv add "pipecat-ai[assemblyai]"`.')
-    raise ImportError(f"Missing module: {e}") from e
 
 
 def map_language_from_assemblyai(language_code: str) -> Language:

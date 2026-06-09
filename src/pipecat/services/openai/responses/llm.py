@@ -29,6 +29,8 @@ from openai.types.responses import (
     ResponseStreamEvent,
     ResponseTextDeltaEvent,
 )
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.exceptions import ConnectionClosed
 
 from pipecat.adapters.services.open_ai_responses_adapter import (
     OpenAIResponsesLLMAdapter,
@@ -52,15 +54,6 @@ from pipecat.services.llm_service import (
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
 from pipecat.services.settings import LLMSettings, _NotGiven, assert_given
 from pipecat.utils.tracing.service_decorators import traced_llm
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.exceptions import ConnectionClosed
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error('In order to use OpenAI, you need to `uv add "pipecat-ai[openai]"`.')
-    raise ImportError(f"Missing module: {e}") from e
-
 
 # ---------------------------------------------------------------------------
 # Private retry exception classes

@@ -12,6 +12,8 @@ from collections.abc import AsyncGenerator
 
 from loguru import logger
 from pydantic import BaseModel
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     ErrorFrame,
@@ -24,14 +26,6 @@ from pipecat.services.deepgram.flux.base import (
     FluxMessageType,
 )
 from pipecat.services.websocket_service import WebsocketService
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error('In order to use Deepgram Flux, you need to `uv add "pipecat-ai[deepgram]"`.')
-    raise ImportError(f"Missing module: {e}") from e
 
 # Re-export for backward compatibility
 __all__ = [

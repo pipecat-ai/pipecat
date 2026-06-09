@@ -34,16 +34,8 @@ from pipecat import version as pipecat_version
 
 USER_AGENT = f"pipecat/{pipecat_version()}"
 from pydantic import BaseModel
-
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Inworld WebSocket TTS, you need to `uv add websockets`.")
-    raise ImportError(f"Missing module: {e}") from e
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     AggregationType,
@@ -59,6 +51,7 @@ from pipecat.frames.frames import (
     TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts

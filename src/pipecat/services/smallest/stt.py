@@ -21,6 +21,8 @@ from typing import Any
 from urllib.parse import urlencode
 
 from loguru import logger
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
@@ -41,14 +43,6 @@ from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error('In order to use Smallest, you need to `uv add "pipecat-ai[smallest]"`.')
-    raise ImportError(f"Missing module: {e}") from e
 
 
 def language_to_smallest_stt_language(language: Language) -> str:

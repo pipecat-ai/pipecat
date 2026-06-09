@@ -9,15 +9,9 @@
 from dataclasses import dataclass
 
 from loguru import logger
+from websockets.asyncio.client import connect as websocket_connect
 
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error('In order to use Azure Realtime, you need to `uv add "pipecat-ai[openai]"`.')
-    raise ImportError(f"Missing module: {e}") from e
 
 
 @dataclass

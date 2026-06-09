@@ -48,6 +48,8 @@ from typing import Any, ClassVar
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel, Field
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -63,14 +65,6 @@ from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_
 from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error('In order to use Sarvam, you need to `uv add "pipecat-ai[sarvam]"`.')
-    raise ImportError(f"Missing module: {e}") from e
 
 
 class SarvamTTSModel(StrEnum):

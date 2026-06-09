@@ -17,6 +17,7 @@ from typing import Any
 
 from loguru import logger
 from PIL import Image
+from websockets.asyncio.client import connect as websocket_connect
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.open_ai_realtime_adapter import (
@@ -66,14 +67,6 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt
 
 from . import events
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error('In order to use OpenAI, you need to `uv add "pipecat-ai[openai]"`.')
-    raise ImportError(f"Missing module: {e}") from e
-
 
 # Pre-roll cushion added on top of the auto-sized duration (start_secs), to
 # absorb small timing slop between start_secs and the audio actually clipped,

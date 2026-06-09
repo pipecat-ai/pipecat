@@ -23,8 +23,11 @@ from typing import (
 )
 
 import aiohttp
+import websockets
 from loguru import logger
 from pydantic import BaseModel
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -47,16 +50,6 @@ from pipecat.services.tts_service import (
 )
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
-
-# See .env.example for ElevenLabs configuration needed
-try:
-    import websockets
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error('In order to use ElevenLabs, you need to `uv add "pipecat-ai[elevenlabs]"`.')
-    raise ImportError(f"Missing module: {e}") from e
 
 # Models that support language codes
 # The following models are excluded as they don't support language codes:

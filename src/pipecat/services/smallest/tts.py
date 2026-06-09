@@ -19,6 +19,8 @@ from enum import StrEnum
 from typing import Any
 
 from loguru import logger
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
@@ -34,14 +36,6 @@ from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error('In order to use Smallest, you need to `uv add "pipecat-ai[smallest]"`.')
-    raise ImportError(f"Missing module: {e}") from e
 
 
 class SmallestTTSModel(StrEnum):

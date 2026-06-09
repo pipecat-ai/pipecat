@@ -21,6 +21,8 @@ from typing import Any, Literal
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel, Field
+from websockets.asyncio import client as websocket_client
+from websockets.exceptions import ConnectionClosed
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.utils import create_stream_resampler
@@ -51,15 +53,6 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, RealtimeServiceInfo
 from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
 from pipecat.utils.time import time_now_iso8601
-
-try:
-    from websockets.asyncio import client as websocket_client
-    from websockets.exceptions import ConnectionClosed
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error('In order to use Ultravox, you need to `uv add "pipecat-ai[ultravox]"`.')
-    raise ImportError(f"Missing module: {e}") from e
-
 
 # Result shipped as the client_tool_result when we see an async-tool
 # "started" message — i.e. when an async-registered function call

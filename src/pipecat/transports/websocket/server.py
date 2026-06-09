@@ -17,8 +17,11 @@ import time
 import wave
 from collections.abc import Awaitable, Callable
 
+import websockets
 from loguru import logger
 from pydantic import BaseModel
+from websockets.asyncio.server import serve as websocket_serve
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -38,15 +41,6 @@ from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-
-try:
-    import websockets
-    from websockets.asyncio.server import serve as websocket_serve
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error('In order to use websockets, you need to `uv add "pipecat-ai[websocket]"`.')
-    raise ImportError(f"Missing module: {e}") from e
 
 
 class WebsocketServerParams(TransportParams):
