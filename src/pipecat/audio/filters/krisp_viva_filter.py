@@ -47,8 +47,8 @@ class KrispVivaFilter(BaseAudioFilter):
 
     def __init__(
         self,
-        model_path: str = None,
-        tts_model_path: str = None,
+        model_path: str | None = None,
+        tts_model_path: str | None = None,
         frame_duration: int = 10,
         noise_suppression_level: int = 100,
         api_key: str = "",
