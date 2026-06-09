@@ -4,7 +4,39 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Rumik text-to-speech service implementations."""
+"""Rumik Voice API text-to-speech service implementations.
+
+This module provides TTS services using Rumik's Voice API. Requests
+authenticate with a Bearer token in the ``Authorization`` header.
+
+**Service Variants:**
+
+- **RumikTTSService**: WebSocket TTS service for interactive voice agents.
+    - Mints a one-time streaming token with ``POST /v1/tts/ws-connect``.
+    - Connects to ``/ws/tts`` using the returned ``ws_url`` and token.
+    - Sends ``{"text": ..., "speaker_id": ...}`` messages over one persistent
+      WebSocket connection.
+    - Receives raw PCM int16 audio chunks at 24 kHz, mono.
+    - Handles ``queued``, ``done``, ``timeout``, and ``error`` control frames.
+    - Serializes synthesis requests and reconnects on interruption because the
+      WebSocket protocol does not currently echo per-message context IDs.
+
+- **RumikHttpTTSService**: HTTP TTS service for request/response synthesis.
+    - Sends synthesis requests with ``POST /v1/tts``.
+    - Receives WAV audio containing PCM int16 at 24 kHz, mono.
+    - Converts WAV responses to raw PCM frames for Pipecat playback.
+
+**Models and Settings:**
+
+- ``muga``: Conversational speech model.
+- ``mulberry``: Higher-quality TTS model when enabled by the Rumik deployment.
+- WebSocket requests use ``speaker_id`` for voice selection.
+- HTTP requests support ``description``, ``temperature``, ``topk``, and
+  ``max_new_tokens``.
+
+Rumik currently returns 24 kHz mono PCM audio. The ``sample_rate`` parameter
+must therefore be 24000 Hz.
+"""
 
 import asyncio
 import io
