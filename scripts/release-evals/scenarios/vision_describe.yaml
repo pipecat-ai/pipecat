@@ -6,10 +6,7 @@ name: vision_describe
 # end. This is a bot-first turn (no user input): the bot speaks once it has the
 # image.
 
-judge:
-  eval:
-    service: ollama
-    model: llama3:latest
+judge: !include judge_text.yaml
 
 turns:
   - expect:

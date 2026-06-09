@@ -3,10 +3,7 @@ name: weather_and_restaurant
 # Text modality, end to end: ask for two things at once (weather and a
 # restaurant). Tests that the bot handles multiple tool calls in one turn.
 
-judge:
-  eval:
-    service: ollama
-    model: llama3:latest
+judge: !include judge_text.yaml
 
 turns:
   # Wait for the bot's on-connect greeting before speaking (avoids barging into it).

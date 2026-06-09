@@ -1,0 +1,3 @@
+eval:
+  service: ollama
+  model: llama3:latest

@@ -5,10 +5,7 @@ name: interruption_text
 # handling and context ordering). send_after fires 2s after the bot starts its
 # long answer, so there's a real response to interrupt.
 
-judge:
-  eval:
-    service: ollama
-    model: llama3:latest
+judge: !include judge_text.yaml
 
 turns:
   - user: "Tell me a long, detailed story about the history of Paris."

@@ -3,10 +3,7 @@ name: language_switch
 # Text modality: switch languages mid-conversation. Tests that the bot follows a
 # language instruction and responds in the requested language.
 
-judge:
-  eval:
-    service: ollama
-    model: llama3:latest
+judge: !include judge_text.yaml
 
 turns:
   # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
