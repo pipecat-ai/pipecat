@@ -282,6 +282,7 @@ class ProjectGenerator:
             "recording": self.config.recording,
             "transcription": self.config.transcription,
             "observability": self.config.enable_observability,
+            "eval": self.config.enable_eval,
         }
 
         # Get imports
@@ -312,6 +313,7 @@ class ProjectGenerator:
             "transcription": self.config.transcription,
             "enable_krisp": self.config.enable_krisp,
             "enable_observability": self.config.enable_observability,
+            "enable_eval": self.config.enable_eval,
             "service_configs": ServiceRegistry.SERVICE_CONFIGS,
             "daily_pstn_mode": self.config.daily_pstn_mode,
             "twilio_daily_sip_mode": self.config.twilio_daily_sip_mode,

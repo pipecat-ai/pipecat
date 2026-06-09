@@ -57,6 +57,7 @@ def validate_and_build_config(
     deploy_to_cloud: bool = True,
     enable_krisp: bool = False,
     observability: bool = False,
+    enable_eval: bool = False,
 ) -> ProjectConfig:
     """Validate all inputs and build a ProjectConfig.
 
@@ -294,6 +295,7 @@ def validate_and_build_config(
         deploy_to_cloud=deploy_to_cloud,
         enable_krisp=enable_krisp,
         enable_observability=observability,
+        enable_eval=enable_eval,
     )
     return config
 
@@ -333,5 +335,6 @@ def config_to_json(config: ProjectConfig) -> str:
         "deploy_to_cloud": config.deploy_to_cloud,
         "enable_krisp": config.enable_krisp,
         "enable_observability": config.enable_observability,
+        "enable_eval": config.enable_eval,
     }
     return json.dumps(data, indent=2)
