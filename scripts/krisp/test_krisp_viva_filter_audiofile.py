@@ -159,8 +159,8 @@ async def process_audio_file(
         print("\nProcessing audio...")
         filtered_samples = []
         total_frames = 0
-        tts_detection_frames = 0   # frames that passed through during TTS detection phase
-        nc_activated_at_s = None   # audio-elapsed seconds when NC first activated
+        tts_detection_frames = 0  # frames that passed through during TTS detection phase
+        nc_activated_at_s = None  # audio-elapsed seconds when NC first activated
 
         # Use chunk size matching filter frame duration
         chunk_size = int(sample_rate * frame_duration_ms / 1000)
@@ -288,9 +288,7 @@ Optional env var:  KRISP_VIVA_TTS_MODEL_PATH   — path to TTS detection model (
     parser.add_argument(
         "--api-key",
         default="",
-        help=(
-            "Krisp SDK API key. Falls back to KRISP_VIVA_API_KEY env var when not provided."
-        ),
+        help=("Krisp SDK API key. Falls back to KRISP_VIVA_API_KEY env var when not provided."),
     )
     parser.add_argument(
         "--level",

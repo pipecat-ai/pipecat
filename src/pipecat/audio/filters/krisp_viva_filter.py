@@ -206,9 +206,7 @@ class KrispVivaFilter(BaseAudioFilter):
             self._session = self._create_session(sample_rate, self._frame_duration_ms)
 
             if self._tts_model_path:
-                self._tts_detector = self._create_tts_detector(
-                    sample_rate, self._frame_duration_ms
-                )
+                self._tts_detector = self._create_tts_detector(sample_rate, self._frame_duration_ms)
                 self._tts_detection_active = True
                 self._tts_elapsed_s = 0.0
                 self._tts_ever_detected = False
