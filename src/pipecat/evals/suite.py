@@ -47,6 +47,7 @@ import contextlib
 import shlex
 import sys
 import time
+import traceback
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -461,7 +462,16 @@ class EvalSuite:
                         stop_bot=True,
                     ).run()
             except Exception as e:
-                run.error = f"error: {e}"
+                # Errors raised inside EvalSession.run() are caught there and
+                # returned as a structured result; this catches the rest (scenario
+                # load, building the judge/voice/transcriber sub-pipelines, which
+                # load local models and can fail under load). Keep the exception
+                # type and stash the full traceback in <safe>.eval.log so the
+                # cause is recoverable instead of vanishing as a bare "error: ".
+                run.error = f"error: {type(e).__name__}: {e}"
+                with contextlib.suppress(OSError):
+                    logs_dir.mkdir(parents=True, exist_ok=True)
+                    (logs_dir / f"{safe}.eval.log").write_text(traceback.format_exc())
             finally:
                 # Stamp the wall-clock and flip to "done" BEFORE tearing the bot
                 # down, measured the same way as a live counter (now - started_at), so

@@ -64,6 +64,7 @@ import base64
 import json
 import mimetypes
 import time
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -411,26 +412,30 @@ class EvalSession:
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
 
-        # Start the injected sub-pipelines (built by from_scenario from the
-        # scenario config). Each tags its logs with an ``eval_pipeline`` label via
-        # logger.contextualize: the tasks created here inherit it (contextvars
-        # copy into asyncio tasks), so the underlying service's logs carry the
-        # label too, regardless of which TTS/STT/LLM service is used. The CLI
-        # routes each label to its own log file (see _LOG_CATEGORIES).
-        if self._voice is not None:
-            with logger.contextualize(eval_pipeline="voice"):
-                await self._voice.start()
-
-        if self._transcriber is not None:
-            with logger.contextualize(eval_pipeline="transcription"):
-                self._transcriber.debug = self._debug
-                await self._transcriber.start()
-
         failures: list[EvalAssertionFailure] = []
-        reader_task = asyncio.create_task(self._reader_loop())
-
-        self._debug("connected")
+        reader_task: asyncio.Task | None = None
         try:
+            # Start the injected sub-pipelines (built by from_scenario from the
+            # scenario config). Each tags its logs with an ``eval_pipeline`` label
+            # via logger.contextualize: the tasks created here inherit it
+            # (contextvars copy into asyncio tasks), so the underlying service's
+            # logs carry the label too, regardless of which TTS/STT/LLM service is
+            # used. The CLI routes each label to its own log file (see
+            # _LOG_CATEGORIES). These run under the same `try` as the turns so a
+            # sub-pipeline that fails to start (e.g. a local model under load) is
+            # surfaced as a failure rather than propagating out raw (see below).
+            if self._voice is not None:
+                with logger.contextualize(eval_pipeline="voice"):
+                    await self._voice.start()
+
+            if self._transcriber is not None:
+                with logger.contextualize(eval_pipeline="transcription"):
+                    self._transcriber.debug = self._debug
+                    await self._transcriber.start()
+
+            reader_task = asyncio.create_task(self._reader_loop())
+
+            self._debug("connected")
             try:
                 await self._handshake()
                 self._debug("handshake: ok (bot-ready)")
@@ -462,8 +467,27 @@ class EvalSession:
                         # cost the full budget here and again on the question).
                         self._debug(f"turn {turn_idx} failed; stopping scenario (fail-fast)")
                         break
+        except Exception as e:
+            # An unexpected harness-side error (a sub-pipeline failing to start
+            # under load, a judge/transcriber raising mid-turn, ...) would
+            # otherwise propagate up to the suite and be swallowed as a bare
+            # "error: <str>" with no eval.log. Capture it as a failure so the
+            # reason and full traceback land in the result's debug trace (saved
+            # to <bot>.eval.log) and the run still reports a structured outcome.
+            self._debug(f"error: {type(e).__name__}: {e}")
+            for line in traceback.format_exc().rstrip().splitlines():
+                self._debug(line)
+            failures.append(
+                EvalAssertionFailure(
+                    turn_index=self._current_turn,
+                    expectation_index=-1,
+                    event_name="<error>",
+                    reason=f"{type(e).__name__}: {e}",
+                )
+            )
         finally:
-            reader_task.cancel()
+            if reader_task is not None:
+                reader_task.cancel()
             if self._audio_sender_task is not None:
                 self._audio_sender_task.cancel()
             for task in (reader_task, self._audio_sender_task):

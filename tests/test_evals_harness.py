@@ -601,6 +601,34 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.failures[0].event_name, "<connect>")
         self.assertIn("failed to connect", result.failures[0].reason)
 
+    async def test_unexpected_error_surfaced_not_swallowed(self):
+        # A sub-pipeline that fails to start (e.g. a local model thrashing under
+        # load) must be reported as a structured failure with its traceback, not
+        # propagate out raw and get swallowed as a bare "error:" with no eval.log.
+        class _BoomVoice:
+            sample_rate = 16000
+
+            async def start(self):
+                raise RuntimeError("kokoro boom")
+
+            async def aclose(self):
+                pass
+
+        scenario = EvalScenario(
+            name="boom",
+            turns=[EvalTurn(user="hi", expect=[EvalExpectation(event="llm_started")])],
+        )
+        result = await EvalSession.from_scenario(
+            scenario, self.server.url, voice=_BoomVoice()
+        ).run()
+        self.assertFalse(result.passed)
+        self.assertEqual(len(result.failures), 1)
+        self.assertEqual(result.failures[0].event_name, "<error>")
+        self.assertIn("RuntimeError: kokoro boom", result.failures[0].reason)
+        # The full traceback is preserved in the debug trace (saved to <bot>.eval.log).
+        self.assertTrue(any("kokoro boom" in line for line in result.debug_log))
+        self.assertTrue(any("Traceback" in line for line in result.debug_log))
+
     async def test_reset_sends_eval_reset_message(self):
         self.server.on_text("hi", _rtvi("bot-llm-started"), _rtvi("bot-llm-stopped"))
         scenario = EvalScenario(
