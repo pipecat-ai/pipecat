@@ -53,6 +53,7 @@ from dotenv import load_dotenv
 from loguru import logger
 from sensor import SensorReader, SensorStats
 
+from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusJobRequestMessage
 from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
@@ -165,11 +166,7 @@ def build_sensor_controller() -> PipelineWorker:
             ),
         ),
     )
-    llm.register_direct_function(get_current_reading)
-    llm.register_direct_function(get_stats)
-    llm.register_direct_function(set_target_temperature)
-    llm.register_direct_function(set_response_rate)
-
+    # Direct functions listed in the context are registered with the LLM automatically
     context = LLMContext(
         tools=[
             get_current_reading,
@@ -240,6 +237,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
+    @tool_options(timeout=60)
     async def ask_controller(params: FunctionCallParams, question: str):
         """Ask the temperature sensor controller anything about the sensor.
 
@@ -268,8 +266,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             ),
         ),
     )
-    llm.register_direct_function(ask_controller, timeout_secs=60)
-
     context = LLMContext(tools=[ask_controller])
     aggregators = LLMContextAggregatorPair(
         context,

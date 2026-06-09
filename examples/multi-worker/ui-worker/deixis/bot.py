@@ -53,6 +53,7 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.job_context import JobError
@@ -193,6 +194,7 @@ class DeixisWorker(ReplyToolMixin, UIWorker):
         super().__init__("ui", llm=llm)
 
 
+@tool_options(cancel_on_interruption=False, timeout=30)
 async def answer_about_screen(params: FunctionCallParams, query: str):
     """Ask the screen-aware UI worker to answer about the article / selection.
 
@@ -229,7 +231,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(system_instruction=VOICE_PROMPT),
     )
-    llm.register_direct_function(answer_about_screen, cancel_on_interruption=False, timeout_secs=30)
 
     context = LLMContext(tools=[answer_about_screen])
     aggregators = LLMContextAggregatorPair(
