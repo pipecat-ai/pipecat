@@ -283,8 +283,7 @@ class MOQOutputTransport(BaseOutputTransport):
         # — no race with _run() to lose initial audio frames.
         self._moq_transport.open_audio_track(self.sample_rate)
         logger.info(
-            f"MOQ output: sample_rate={self.sample_rate}, "
-            f"chunk_size={self.audio_chunk_size}"
+            f"MOQ output: sample_rate={self.sample_rate}, chunk_size={self.audio_chunk_size}"
         )
         await self.set_transport_ready(frame)
 
@@ -734,8 +733,7 @@ class MOQTransport(BaseTransport):
         track_name, audio = next(iter(catalog.audio.items()))
         if audio.codec != "opus":
             logger.warning(
-                f"MOQ: peer audio codec {audio.codec!r} != opus; "
-                "subscribe may fail. Skipping."
+                f"MOQ: peer audio codec {audio.codec!r} != opus; subscribe may fail. Skipping."
             )
             return
 
