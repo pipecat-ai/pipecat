@@ -33,7 +33,7 @@ import json
 import os
 import re
 from collections.abc import Callable
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import WebSocket
 from loguru import logger
@@ -49,6 +49,15 @@ from pipecat.runner.types import (
     WebSocketRunnerArguments,
 )
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+
+if TYPE_CHECKING:
+    # Imported for type-checking only so the typed guard functions (e.g.
+    # _is_daily) can narrow to the concrete transport types
+    from typing import TypeGuard
+
+    from pipecat.transports.daily.transport import DailyTransport
+    from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
+    from pipecat.transports.vonage.video_connector import VonageVideoConnectorTransport
 
 
 def _detect_transport_type_from_message(message_data: dict) -> str:
@@ -284,6 +293,42 @@ async def parse_telephony_websocket(websocket: WebSocket):
         raise
 
 
+def _transport_is(transport: BaseTransport, class_name: str) -> bool:
+    """Return whether ``transport`` is an instance of ``class_name``.
+
+    Do this without importing, to avoid triggering import-time errors for
+    transports that aren't installed and aren't needed.
+
+    Assumes transport class names are unique, so that matching by name alone
+    (e.g. "DailyTransport") is sufficient to identify it.
+
+    Args:
+        transport: The transport instance to check.
+        class_name: Unqualified name of the transport class to match.
+
+    Returns:
+        ``True`` if ``transport`` is an instance of ``class_name``, else ``False``.
+    """
+    candidates = {type(transport), transport.__class__}
+    return any(base.__name__ == class_name for klass in candidates for base in klass.__mro__)
+
+
+# Typed guards over _transport_is.
+# They narrow the transport to its concrete type so call sites can use
+# transport-specific methods/properties in a type-checker- and
+# auto-complete-friendly way.
+def _is_daily(transport: BaseTransport) -> "TypeGuard[DailyTransport]":
+    return _transport_is(transport, "DailyTransport")
+
+
+def _is_smallwebrtc(transport: BaseTransport) -> "TypeGuard[SmallWebRTCTransport]":
+    return _transport_is(transport, "SmallWebRTCTransport")
+
+
+def _is_vonage(transport: BaseTransport) -> "TypeGuard[VonageVideoConnectorTransport]":
+    return _transport_is(transport, "VonageVideoConnectorTransport")
+
+
 def get_transport_client_id(transport: BaseTransport, client: Any) -> str:
     """Get client identifier from transport-specific client object.
 
@@ -294,30 +339,12 @@ def get_transport_client_id(transport: BaseTransport, client: Any) -> str:
     Returns:
         Client identifier string, empty if transport not supported.
     """
-    # Import conditionally to avoid dependency issues
-    try:
-        from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
-
-        if isinstance(transport, SmallWebRTCTransport):
-            return client.pc_id
-    except ImportError:
-        pass
-
-    try:
-        from pipecat.transports.daily.transport import DailyTransport
-
-        if isinstance(transport, DailyTransport):
-            return client["id"]
-    except ImportError:
-        pass
-
-    try:
-        from pipecat.transports.vonage.video_connector import VonageVideoConnectorTransport
-
-        if isinstance(transport, VonageVideoConnectorTransport):
-            return client["streamId"]
-    except ImportError:
-        pass
+    if _is_smallwebrtc(transport):
+        return client.pc_id
+    if _is_daily(transport):
+        return client["id"]
+    if _is_vonage(transport):
+        return client["streamId"]
 
     logger.warning(f"Unable to get client id from unsupported transport {type(transport)}")
     return ""
@@ -333,41 +360,25 @@ async def maybe_capture_participant_camera(
         client: Transport-specific client object.
         framerate: Video capture framerate. Defaults to 0 (auto).
     """
-    try:
-        from pipecat.transports.daily.transport import DailyTransport
-
-        if isinstance(transport, DailyTransport):
-            await transport.capture_participant_video(
-                client["id"], framerate=framerate, video_source="camera"
-            )
-    except ImportError:
-        pass
-
-    try:
-        from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
-
-        if isinstance(transport, SmallWebRTCTransport):
-            await transport.capture_participant_video(video_source="camera")
-    except ImportError:
-        pass
-
-    try:
-        from pipecat.transports.vonage.video_connector import (
-            SubscribeSettings,
-            VonageVideoConnectorTransport,
+    if _is_daily(transport):
+        await transport.capture_participant_video(
+            client["id"], framerate=framerate, video_source="camera"
         )
+    elif _is_smallwebrtc(transport):
+        await transport.capture_participant_video(video_source="camera")
+    elif _is_vonage(transport):
+        # Imported in-branch (not at module scope) to avoid a hard Vonage dependency;
+        # we only get here when the transport is Vonage, so the extra is installed.
+        from pipecat.transports.vonage.video_connector import SubscribeSettings
 
-        if isinstance(transport, VonageVideoConnectorTransport):
-            await transport.subscribe_to_stream(
-                client["streamId"],
-                SubscribeSettings(
-                    subscribe_to_audio=True,
-                    subscribe_to_video=True,
-                    preferred_framerate=framerate if framerate != 0 else None,
-                ),
-            )
-    except ImportError:
-        pass
+        await transport.subscribe_to_stream(
+            client["streamId"],
+            SubscribeSettings(
+                subscribe_to_audio=True,
+                subscribe_to_video=True,
+                preferred_framerate=framerate if framerate != 0 else None,
+            ),
+        )
 
 
 async def maybe_capture_participant_screen(
@@ -380,24 +391,12 @@ async def maybe_capture_participant_screen(
         client: Transport-specific client object.
         framerate: Video capture framerate. Defaults to 0 (auto).
     """
-    try:
-        from pipecat.transports.daily.transport import DailyTransport
-
-        if isinstance(transport, DailyTransport):
-            await transport.capture_participant_video(
-                client["id"], framerate=framerate, video_source="screenVideo"
-            )
-
-    except ImportError:
-        pass
-
-    try:
-        from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
-
-        if isinstance(transport, SmallWebRTCTransport):
-            await transport.capture_participant_video(video_source="screenVideo")
-    except ImportError:
-        pass
+    if _is_daily(transport):
+        await transport.capture_participant_video(
+            client["id"], framerate=framerate, video_source="screenVideo"
+        )
+    elif _is_smallwebrtc(transport):
+        await transport.capture_participant_video(video_source="screenVideo")
 
 
 def _smallwebrtc_sdp_cleanup_ice_candidates(text: str, pattern: str) -> str:
