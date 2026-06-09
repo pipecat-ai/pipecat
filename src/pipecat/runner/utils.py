@@ -32,7 +32,6 @@ Example::
 import json
 import os
 import re
-import sys
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
@@ -52,10 +51,8 @@ from pipecat.runner.types import (
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 
 if TYPE_CHECKING:
-    # Imported for type-checking only so the typed guards (e.g.
-    # _is_daily_transport) can narrow to the concrete transport types without
-    # importing them at runtime (which would trigger uninstalled transports'
-    # import-time install-hint errors).
+    # Imported for type-checking only so the typed guard functions (e.g.
+    # _is_daily) can narrow to the concrete transport types
     from typing import TypeGuard
 
     from pipecat.transports.daily.transport import DailyTransport
@@ -296,30 +293,24 @@ async def parse_telephony_websocket(websocket: WebSocket):
         raise
 
 
-# (module_name, class_name) of each provider transport class we detect.
-_SMALLWEBRTC_TRANSPORT = ("pipecat.transports.smallwebrtc.transport", "SmallWebRTCTransport")
-_DAILY_TRANSPORT = ("pipecat.transports.daily.transport", "DailyTransport")
-_VONAGE_TRANSPORT = ("pipecat.transports.vonage.video_connector", "VonageVideoConnectorTransport")
+def _transport_is(transport: BaseTransport, class_name: str) -> bool:
+    """Return whether ``transport`` is an instance of ``class_name``.
 
+    Do this without importing, to avoid triggering import-time errors for
+    transports that aren't installed and aren't needed.
 
-def _transport_is(transport: BaseTransport, target: tuple[str, str]) -> bool:
-    """Return whether ``transport`` is an instance of the class named by ``target``.
-
-    We do this by checking for already-imported modules to avoid attempting to
-    import uninstalled transports (which would trigger their install-hint
-    errors).
+    Assumes transport class names are unique, so that matching by name alone
+    (e.g. "DailyTransport") is sufficient to identify it.
 
     Args:
         transport: The transport instance to check.
-        target: ``(module_name, class_name)`` of the class to check against.
+        class_name: Unqualified name of the transport class to match.
 
     Returns:
-        ``True`` if ``transport`` is an instance of the target class; ``False``
-        otherwise.
+        ``True`` if ``transport`` is an instance of ``class_name``, else ``False``.
     """
-    module = sys.modules.get(target[0])
-    cls = getattr(module, target[1], None)
-    return cls is not None and isinstance(transport, cls)
+    candidates = {type(transport), transport.__class__}
+    return any(base.__name__ == class_name for klass in candidates for base in klass.__mro__)
 
 
 # Typed guards over _transport_is.
@@ -327,15 +318,15 @@ def _transport_is(transport: BaseTransport, target: tuple[str, str]) -> bool:
 # transport-specific methods/properties in a type-checker- and
 # auto-complete-friendly way.
 def _is_daily(transport: BaseTransport) -> "TypeGuard[DailyTransport]":
-    return _transport_is(transport, _DAILY_TRANSPORT)
+    return _transport_is(transport, "DailyTransport")
 
 
 def _is_smallwebrtc(transport: BaseTransport) -> "TypeGuard[SmallWebRTCTransport]":
-    return _transport_is(transport, _SMALLWEBRTC_TRANSPORT)
+    return _transport_is(transport, "SmallWebRTCTransport")
 
 
 def _is_vonage(transport: BaseTransport) -> "TypeGuard[VonageVideoConnectorTransport]":
-    return _transport_is(transport, _VONAGE_TRANSPORT)
+    return _transport_is(transport, "VonageVideoConnectorTransport")
 
 
 def get_transport_client_id(transport: BaseTransport, client: Any) -> str:
