@@ -11,13 +11,15 @@ for each user turn using that TTS config and streams it to the bot as RTVI
 ``raw-audio`` messages. The bot's STT then processes it for real, exercising the
 full input audio path.
 
-:class:`EvalSpeech` runs one persistent pipeline around an already-built
-``TTSService`` and reuses it across the scenario's audio turns, so any TTS
-service works (HTTP or streaming/WebSocket) — the audio comes back as
-``TTSAudioRawFrame``s flowing through the pipeline. Generated audio is cached at
-``<cache-dir>/<sha256>.wav`` (keyed by ``cache_key`` + lower-cased text); the cache
-file's actual sample rate is checked on load and regenerated on mismatch, so you
-can experiment with sample rates without bloating the cache.
+:class:`EvalSpeech` sets up an already-built ``TTSService`` with a minimal
+frame-processor lifecycle (no pipeline or worker) and calls its ``run_tts``
+directly for each turn, collecting the ``TTSAudioRawFrame``s. Only local (e.g.
+Kokoro) or HTTP (e.g. ``CartesiaHttpTTSService``) services are supported —
+websocket-streaming TTS needs a pipeline to manage its connection. Generated
+audio is cached at ``<cache-dir>/<sha256>.wav`` (keyed by ``cache_key`` +
+lower-cased text); the cache file's actual sample rate is checked on load and
+regenerated on mismatch, so you can experiment with sample rates without bloating
+the cache.
 
 :meth:`EvalSpeech.from_config` constructs the service from a ``user_audio``
 mapping (dispatch + a ``user_audio.factory`` escape hatch) and wraps it;
@@ -35,9 +37,8 @@ from pathlib import Path
 from loguru import logger
 
 from pipecat.evals.services import cartesia_service, kokoro_service
-from pipecat.frames.frames import Frame
-from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.services.tts_service import TTSService
+from pipecat.services.websocket_service import WebsocketService
 
 
 # Default location for cached audio: <user-cache-dir>/pipecat/tts. Callers can
@@ -53,23 +54,6 @@ DEFAULT_CACHE_DIR = _default_cache_dir()
 
 # Default sample rate for generated audio (matches pipecat input default).
 DEFAULT_SAMPLE_RATE = 16000
-
-
-class _IdentitySerializer(FrameSerializer):
-    """Passes frames through unchanged so ``AsyncGeneratorProcessor`` yields the frames.
-
-    ``AsyncGeneratorProcessor`` serializes each frame and exposes the results via
-    an async generator; an identity serializer lets :class:`EvalSpeech` receive
-    the actual frames and pick out the audio.
-    """
-
-    async def serialize(self, frame: Frame):
-        """Return the frame unchanged."""
-        return frame
-
-    async def deserialize(self, data):
-        """Unused — we only consume the generator."""
-        return None
 
 
 def tts_sample_rate(voice_cfg: dict) -> int:
@@ -91,13 +75,19 @@ def tts_cache_key(voice_cfg: dict) -> str:
 
 
 class EvalSpeech:
-    """Generates user audio for a scenario from one persistent TTS pipeline.
+    """Generates user audio for a scenario by calling a TTS service's ``run_tts``.
 
     Takes an already-built ``TTSService``; :meth:`from_config` builds one from a
-    scenario's ``user_audio`` mapping. Runs one pipeline around the service and
-    reuses it across all the scenario's audio turns — connecting it once instead
-    of per turn. Synthesized audio is cached on disk (keyed by ``cache_key`` +
-    text), so re-runs skip synthesis entirely.
+    scenario's ``user_audio`` mapping. :meth:`start` sets the service up with a
+    minimal frame-processor lifecycle (no pipeline or worker — just a task manager,
+    a clock, and a ``StartFrame``), then :meth:`generate` calls ``run_tts`` directly
+    and collects the audio. Synthesized audio is cached on disk (keyed by
+    ``cache_key`` + text), so re-runs skip synthesis entirely.
+
+    Only **local** (e.g. Kokoro) or **HTTP** (e.g. ``CartesiaHttpTTSService``)
+    services are supported. Websocket-streaming TTS needs a running pipeline to
+    manage its connection lifecycle, which ``run_tts`` alone doesn't drive, so it
+    is rejected (see :meth:`__init__`).
 
     Use as an async context manager::
 
@@ -117,7 +107,8 @@ class EvalSpeech:
         """Initialize the generator.
 
         Args:
-            service: A constructed ``TTSService`` (e.g. from :meth:`from_config`).
+            service: A constructed local or HTTP ``TTSService`` (e.g. from
+                :meth:`from_config`).
             sample_rate: Output sample rate the service produces.
             cache_key: Stable identity for the service config (see
                 :func:`tts_cache_key`); combined with the text to key the cache.
@@ -125,20 +116,28 @@ class EvalSpeech:
                 ``<user-cache-dir>/pipecat/tts`` (or ``$PIPECAT_EVALS_CACHE_DIR``).
             use_cache: When False, ignore any cached audio and don't write new
                 cache files — every utterance is freshly synthesized.
+
+        Raises:
+            ValueError: If ``service`` is a websocket-streaming TTS service
+                (``run_tts`` can't be driven without a pipeline to manage its
+                connection); use a local or HTTP service instead.
         """
+        if isinstance(service, WebsocketService):
+            raise ValueError(
+                f"EvalSpeech supports only local or HTTP TTS services, not the "
+                f"websocket-streaming {type(service).__name__}. Use an HTTP variant "
+                "(e.g. CartesiaHttpTTSService) or a local service (e.g. KokoroTTSService)."
+            )
         self._service = service
         self._sample_rate = sample_rate
         self._cache_key = cache_key
         self._cache_dir_override = Path(cache_dir) if cache_dir else None
         self._use_cache = use_cache
-
-        self._worker = None
-        self._runner_task = None
-        self._output_generator = None
+        self._started = False
 
     @property
     def sample_rate(self) -> int:
-        """Sample rate (Hz) of the audio this voice generates."""
+        """Sample rate (Hz) of the audio this generates."""
         return self._sample_rate
 
     @classmethod
@@ -207,31 +206,36 @@ class EvalSpeech:
         )
 
     async def start(self) -> None:
-        """Build and start the persistent TTS pipeline."""
-        from pipecat.pipeline.pipeline import Pipeline
-        from pipecat.pipeline.worker import PipelineParams, PipelineWorker
-        from pipecat.processors.async_generator import AsyncGeneratorProcessor
-        from pipecat.workers.runner import WorkerRunner
+        """Set the service up so :meth:`generate` can call ``run_tts`` directly.
 
-        grab = AsyncGeneratorProcessor(serializer=_IdentitySerializer())
-        self._worker = PipelineWorker(
-            Pipeline([self._service, grab]),
-            params=PipelineParams(audio_out_sample_rate=self._sample_rate),
-            # Persistent: the pipeline idles between turns and must not self-cancel.
-            idle_timeout_secs=None,
-            # This is an internal synthesis pipeline; no RTVI machinery.
-            enable_rtvi=False,
+        A TTS service normally gets its task manager, clock, and output sample rate
+        from the pipeline that hosts it. Provide a minimal stand-in here (no
+        pipeline, no worker): a ``StartFrame`` sets the sample rate and opens any
+        HTTP session the service needs. ``enable_metrics`` is off so ``run_tts``
+        never tries to push a ``MetricsFrame`` (there is no downstream).
+        """
+        from pipecat.clocks.system_clock import SystemClock
+        from pipecat.frames.frames import StartFrame
+        from pipecat.processors.frame_processor import FrameProcessorSetup
+        from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+
+        task_manager = TaskManager()
+        task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
+        clock = SystemClock()
+        clock.start()
+        await self._service.setup(
+            FrameProcessorSetup(clock=clock, task_manager=task_manager, pipeline_worker=None)
         )
-        runner = WorkerRunner(handle_sigint=False)
-        await runner.add_workers(self._worker)
-        self._runner_task = asyncio.create_task(runner.run())
-        self._output_generator = grab.generator()
+        await self._service.start(
+            StartFrame(audio_out_sample_rate=self._sample_rate, enable_metrics=False)
+        )
+        self._started = True
 
     async def generate(self, text: str) -> tuple[bytes, int]:
         """Return ``(pcm, sample_rate)`` for ``text`` — from cache or freshly synthesized.
 
-        Call serially: each call queues one utterance on the shared pipeline and
-        reads its audio off the single output generator until ``TTSStoppedFrame``.
+        Call serially: each call runs one ``run_tts`` on the shared service and
+        collects its audio.
 
         Args:
             text: The utterance to synthesize.
@@ -259,23 +263,14 @@ class EvalSpeech:
         return pcm, self._sample_rate
 
     async def _synthesize(self, text: str) -> bytes:
-        """Queue one utterance and collect its audio from the shared pipeline."""
-        from pipecat.frames.frames import (
-            ErrorFrame,
-            TTSAudioRawFrame,
-            TTSSpeakFrame,
-            TTSStoppedFrame,
-        )
+        """Run one ``run_tts`` and collect its audio frames into PCM bytes."""
+        from pipecat.frames.frames import ErrorFrame, TTSAudioRawFrame
 
-        if self._worker is None or self._output_generator is None:
+        if not self._started:
             raise RuntimeError("EvalSpeech.start() was not called")
 
-        await self._worker.queue_frames([TTSSpeakFrame(text)])
-
         pcm = bytearray()
-        async for frame in self._output_generator:
-            if isinstance(frame, TTSStoppedFrame):
-                break
+        async for frame in self._service.run_tts(text, context_id="eval"):
             if isinstance(frame, TTSAudioRawFrame):
                 pcm.extend(frame.audio)
             elif isinstance(frame, ErrorFrame):
@@ -285,17 +280,13 @@ class EvalSpeech:
         return bytes(pcm)
 
     async def aclose(self) -> None:
-        """Stop the pipeline and release the TTS service."""
-        if self._worker is not None:
-            await self._worker.cancel()
-        if self._runner_task is not None:
-            try:
-                await self._runner_task
-            except (asyncio.CancelledError, Exception):
-                pass
-        self._worker = None
-        self._runner_task = None
-        self._output_generator = None
+        """Stop and clean up the TTS service (closes any HTTP session)."""
+        from pipecat.frames.frames import EndFrame
+
+        if self._started:
+            await self._service.stop(EndFrame())
+            await self._service.cleanup()
+            self._started = False
 
     async def __aenter__(self) -> "EvalSpeech":
         await self.start()

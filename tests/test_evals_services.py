@@ -75,6 +75,24 @@ class TestVoiceFromConfig(unittest.TestCase):
         self.assertEqual(v._service[0], "FAKE_TTS")
         self.assertEqual(v._service[2], 24000)
 
+    def test_websocket_service_rejected(self):
+        # run_tts can't be driven without a pipeline to manage the connection, so a
+        # websocket-streaming TTS service must be rejected at construction.
+        from pipecat.services.websocket_service import WebsocketService
+
+        class _FakeWS(WebsocketService):
+            async def _connect_websocket(self):
+                pass
+
+            async def _disconnect_websocket(self):
+                pass
+
+            async def _receive_messages(self):
+                pass
+
+        with self.assertRaises(ValueError):
+            EvalSpeech(_FakeWS(), sample_rate=16000, cache_key="k")
+
 
 class TestJudgeFromConfig(unittest.TestCase):
     def test_unknown_service_returns_none(self):
