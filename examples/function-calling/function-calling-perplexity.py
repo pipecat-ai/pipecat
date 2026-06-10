@@ -4,14 +4,15 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""This example demonstrates using the Perplexity API as a drop-in replacement for OpenAI.
+"""This example demonstrates function calling with the Perplexity API.
 
-Note that while this file is in the function-calling examples, Perplexity's API does not
-currently support function calling. The example shows basic chat completion functionality
-using Perplexity's API while maintaining compatibility with the OpenAI interface.
+It runs a simple shop assistant: when the user asks how much an item costs, the
+LLM calls the ``get_item_price`` function, which returns a made-up price (so any
+item works). Perplexity is used as a drop-in replacement for OpenAI.
 """
 
 import os
+import random
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -42,8 +43,10 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
-async def fetch_weather_from_api(params: FunctionCallParams):
-    await params.result_callback({"conditions": "nice", "temperature": "75"})
+async def fetch_item_price(params: FunctionCallParams):
+    # This is just a demo, so we make up a price for whatever item is asked about.
+    price = random.randint(5, 100)
+    await params.result_callback({"item": params.arguments["item"], "price": f"${price}"})
 
 
 # We use lambdas to defer transport parameter creation until the transport
@@ -83,35 +86,30 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = PerplexityLLMService(
         api_key=os.environ["PERPLEXITY_API_KEY"],
         settings=PerplexityLLMService.Settings(
-            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
+            system_instruction="You are a helpful shop assistant in a voice conversation. When the user asks how much an item costs, call the get_item_price function to look it up. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
 
     # You can also register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
-    llm.register_function("get_current_weather", fetch_weather_from_api)
+    llm.register_function("get_item_price", fetch_item_price)
 
     @llm.event_handler("on_function_calls_started")
     async def on_function_calls_started(service, function_calls):
-        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
+        await tts.queue_frame(TTSSpeakFrame("Let me check the price."))
 
-    weather_function = FunctionSchema(
-        name="get_current_weather",
-        description="Get the current weather",
+    price_function = FunctionSchema(
+        name="get_item_price",
+        description="Get the price of an item in the shop",
         properties={
-            "location": {
+            "item": {
                 "type": "string",
-                "description": "The city and state, e.g. San Francisco, CA",
-            },
-            "format": {
-                "type": "string",
-                "enum": ["celsius", "fahrenheit"],
-                "description": "The temperature unit to use. Infer this from the user's location.",
+                "description": "The name of the item, e.g. coffee mug",
             },
         },
-        required=["location", "format"],
+        required=["item"],
     )
-    tools = ToolsSchema(standard_tools=[weather_function])
+    tools = ToolsSchema(standard_tools=[price_function])
 
     context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(

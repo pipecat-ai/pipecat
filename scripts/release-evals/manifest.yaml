@@ -190,7 +190,7 @@ suite:
   - bot: function-calling/function-calling-openrouter.py
     scenarios: [weather_function_call]
   - bot: function-calling/function-calling-perplexity.py
-    scenarios: [weather_function_call]
+    scenarios: [item_price]
   - bot: function-calling/function-calling-qwen.py
     scenarios: [weather_function_call]
   - bot: function-calling/function-calling-sambanova.py
