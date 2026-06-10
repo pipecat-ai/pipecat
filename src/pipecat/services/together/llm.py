@@ -61,7 +61,7 @@ class TogetherLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model="openai/gpt-oss-20b")
+        default_settings = self.Settings(model="zai-org/GLM-5.1")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:

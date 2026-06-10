@@ -95,8 +95,8 @@ class TogetherTTSService(WebsocketTTSService):
             **kwargs: Additional arguments passed to WebsocketTTSService.
         """
         default_settings = self.Settings(
-            model="canopylabs/orpheus-3b-0.1-ft",
-            voice="tara",
+            model="hexgrad/Kokoro-82M",
+            voice="af_heart",
             language=Language.EN,
             max_partial_length=None,
         )

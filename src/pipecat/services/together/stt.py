@@ -220,6 +220,7 @@ class TogetherSTTService(WebsocketSTTService):
             url = (
                 f"{self._base_url}/realtime?intent=transcription"
                 f"&model={self._settings.model}"
+                f"&turn_detection=none"
                 f"&input_audio_format=pcm_s16le_16000"
             )
             headers = {
