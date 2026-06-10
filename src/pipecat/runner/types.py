@@ -300,9 +300,9 @@ class MOQRunnerArguments(RunnerArguments):
     peer_id: str = "client0"
     verify_ssl: bool = True
     serve: bool = False
-    serve_bind: Optional[str] = None
+    serve_bind: str | None = None
     serve_tls_host: str = "localhost"
-    serve_tls_cert: Optional[str] = None
-    serve_tls_key: Optional[str] = None
-    ready_event: Optional[asyncio.Event] = field(default=None, kw_only=True)
+    serve_tls_cert: str | None = None
+    serve_tls_key: str | None = None
+    ready_event: asyncio.Event | None = field(default=None, kw_only=True)
     cert_fingerprints: list[str] = field(default_factory=list, kw_only=True)

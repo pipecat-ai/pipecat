@@ -35,7 +35,7 @@ import json
 import time
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Optional
+from typing import Optional, cast
 
 from loguru import logger
 from pydantic import ConfigDict
@@ -189,7 +189,7 @@ class MOQParams(TransportParams):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    relay_url: Optional[str] = None
+    relay_url: str | None = None
     namespace: str = DEFAULT_NAMESPACE
     participant_id: str = DEFAULT_PARTICIPANT_ID
     peer_id: str = DEFAULT_PEER_ID
@@ -198,10 +198,10 @@ class MOQParams(TransportParams):
     verify_ssl: bool = True
     connection_timeout: float = 30.0
     serve: bool = False
-    serve_bind: Optional[str] = None
+    serve_bind: str | None = None
     serve_tls_host: str = "localhost"
-    serve_tls_cert: Optional[str] = None
-    serve_tls_key: Optional[str] = None
+    serve_tls_cert: str | None = None
+    serve_tls_key: str | None = None
     audio_out_sample_rate: int = 24000
     audio_in_sample_rate: int = 16000
     audio_in_max_latency_ms: int = 500
@@ -320,7 +320,7 @@ class MOQOutputTransport(BaseOutputTransport):
         if not isinstance(payload, (bytes, bytearray)):
             payload = json.dumps(payload).encode("utf-8")
         try:
-            self._moq_transport.publish_transcript(payload)
+            self._moq_transport.publish_transcript(bytes(payload))
         except Exception as e:
             logger.warning(f"Failed to publish transport message: {e}")
 
@@ -369,8 +369,8 @@ class MOQTransport(BaseTransport):
         host: str = "localhost",
         port: int = 4080,
         path: str = "/moq",
-        input_name: Optional[str] = None,
-        output_name: Optional[str] = None,
+        input_name: str | None = None,
+        output_name: str | None = None,
     ):
         """Initialize the MOQ transport.
 
@@ -394,9 +394,9 @@ class MOQTransport(BaseTransport):
         self._url = params.relay_url or f"https://{host}:{port}{path}"
         self._serve_bind = params.serve_bind or f"[::]:{port}"
 
-        self._input: Optional[MOQInputTransport] = None
-        self._output: Optional[MOQOutputTransport] = None
-        self._connection_task: Optional[asyncio.Task] = None
+        self._input: MOQInputTransport | None = None
+        self._output: MOQOutputTransport | None = None
+        self._connection_task: asyncio.Task | None = None
 
         # Owned for the lifetime of this transport. Created synchronously
         # so MOQOutputTransport.start() can publish_audio + write
@@ -409,11 +409,11 @@ class MOQTransport(BaseTransport):
         # rate is known (in :meth:`open_audio_track`). We stash the rate
         # because ``publish_audio`` uses it to convert byte length to
         # wall-clock duration for pacing.
-        self._audio_out: Optional[moq.AudioProducer] = None
-        self._audio_out_sample_rate: Optional[int] = None
+        self._audio_out: moq.AudioProducer | None = None
+        self._audio_out_sample_rate: int | None = None
         # Wall-clock target for the next publish_audio write. ``None``
         # means "reset" — the next write anchors to ``time.monotonic()``.
-        self._publish_audio_clock: Optional[float] = None
+        self._publish_audio_clock: float | None = None
 
         # Track consumers we created so disconnect() can cancel them.
         # Each entry has a sync .cancel() method that terminates any
@@ -585,9 +585,10 @@ class MOQTransport(BaseTransport):
         try:
             async with self._make_transport(origin) as transport:
                 if self._params.serve:
-                    self._cert_fingerprints = transport.cert_fingerprints()
+                    server = cast(moq.Server, transport)
+                    self._cert_fingerprints = server.cert_fingerprints()
                     logger.info(
-                        f"MOQ: bound on {transport.local_addr} "
+                        f"MOQ: bound on {server.local_addr} "
                         f"(cert sha256: {self._cert_fingerprints})"
                     )
 
@@ -602,9 +603,9 @@ class MOQTransport(BaseTransport):
                 # In serve mode, drive the accept loop in the background.
                 # serve() holds each session task until the session closes,
                 # so memory doesn't grow with past connections.
-                serve_task: Optional[asyncio.Task] = None
+                serve_task: asyncio.Task | None = None
                 if self._params.serve:
-                    serve_task = asyncio.create_task(transport.serve())
+                    serve_task = asyncio.create_task(cast(moq.Server, transport).serve())
 
                 try:
                     # Drive the subscribe side. The output side keeps
@@ -680,7 +681,7 @@ class MOQTransport(BaseTransport):
             peer_broadcast = await asyncio.wait_for(
                 announced.available(), timeout=self._params.connection_timeout
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 f"MOQ: peer broadcast {self._peer_broadcast_path!r} did not appear "
                 f"within {self._params.connection_timeout}s"
@@ -719,7 +720,7 @@ class MOQTransport(BaseTransport):
                     )
         except (asyncio.CancelledError, StopAsyncIteration):
             return
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 f"MOQ: peer broadcast never advertised audio within "
                 f"{self._params.connection_timeout}s"
