@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import TTFBMetricsData
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_attributes import (
     add_gemini_live_span_attributes,
     add_llm_span_attributes,
@@ -613,7 +614,11 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
                         span.set_attribute("transcript", " ".join(state["segments"]).strip())
                     span.set_attribute("is_final", bool(frame.finalized))
                     if frame.language:
-                        span.set_attribute("language", str(frame.language))
+                        language = frame.language
+                        span.set_attribute(
+                            "language",
+                            language.value if isinstance(language, Language) else str(language),
+                        )
                     if frame.user_id:
                         span.set_attribute("user_id", frame.user_id)
                     if frame.finalized:

@@ -290,7 +290,10 @@ class DeepgramSageMakerSTTService(STTService):
         if is_given(s.model) and s.model is not None:
             params["model"] = str(s.model)
         if is_given(s.language) and s.language is not None:
-            params["language"] = str(s.language)
+            # Be explicit about enum serialization: use .value rather than str()
+            # so the wire value never depends on StrEnum's __str__ semantics.
+            language = s.language
+            params["language"] = language.value if isinstance(language, Language) else str(language)
 
         # Init-only connection config
         params["encoding"] = self._encoding

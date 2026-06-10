@@ -563,7 +563,12 @@ class DeepgramSTTService(STTService):
         if is_given(s.model) and s.model is not None:
             kwargs["model"] = str(s.model)
         if is_given(s.language) and s.language is not None:
-            kwargs["language"] = str(s.language)
+            # Be explicit about enum serialization: use .value rather than str().
+            # On the 0.0.10x line with Python 3.10, the vendored StrEnum fallback
+            # made str() return the member name ("Language.EN"), which ended up
+            # in the Deepgram query string and caused a WS 400 on every connect.
+            language = s.language
+            kwargs["language"] = language.value if isinstance(language, Language) else str(language)
 
         # Init-only connection config
         kwargs["encoding"] = self._encoding

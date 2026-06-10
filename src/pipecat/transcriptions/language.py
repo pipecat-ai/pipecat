@@ -617,7 +617,7 @@ def resolve_language(
         return result
 
     # Not in map - fall back with warning
-    lang_str = str(language)
+    lang_str = language.value if isinstance(language, Language) else str(language)
 
     if use_base_code:
         # Extract base code (e.g., "en" from "en-US")

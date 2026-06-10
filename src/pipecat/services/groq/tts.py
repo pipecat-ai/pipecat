@@ -144,7 +144,13 @@ class GroqTTSService(TTSService):
         if params is not None:
             self._warn_init_param_moved_to_settings("params")
             if not settings:
-                default_settings.language = str(params.language) if params.language else "en"
+                language = params.language
+                if language:
+                    default_settings.language = (
+                        language.value if isinstance(language, Language) else str(language)
+                    )
+                else:
+                    default_settings.language = "en"
                 default_settings.speed = params.speed
 
         # 4. Apply settings delta (canonical API, always wins)

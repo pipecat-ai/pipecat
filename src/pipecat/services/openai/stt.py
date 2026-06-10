@@ -372,7 +372,8 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             Two-letter ISO-639-1 language code.
         """
         # Language value is e.g. "en", "en-US", "fr", "zh".
-        return str(language).split("-")[0].lower()
+        lang_str = language.value if isinstance(language, Language) else str(language)
+        return lang_str.split("-")[0].lower()
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.

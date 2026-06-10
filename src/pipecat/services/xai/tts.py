@@ -202,7 +202,10 @@ class XAIHttpTTSService(TTSService):
             },
         }
         if self._settings.language:
-            payload["language"] = str(self._settings.language)
+            language = self._settings.language
+            payload["language"] = (
+                language.value if isinstance(language, Language) else str(language)
+            )
 
         headers = {
             "Authorization": f"Bearer {self._api_key}",
