@@ -41,7 +41,9 @@ class TestQueryFlag(unittest.TestCase):
         self.assertTrue(_query_flag(_ws(path="/?skip_tts=YES"), SKIP_TTS_QUERY_PARAM))
 
     def test_capture_audio_flag(self):
-        self.assertTrue(_query_flag(_ws(path="/?capture_audio=true"), CAPTURE_AUDIO_QUERY_PARAM))
+        self.assertTrue(
+            _query_flag(_ws(path="/?capture_bot_audio=true"), CAPTURE_AUDIO_QUERY_PARAM)
+        )
         self.assertFalse(_query_flag(_ws(path="/?skip_tts=true"), CAPTURE_AUDIO_QUERY_PARAM))
 
     def test_false_when_absent(self):

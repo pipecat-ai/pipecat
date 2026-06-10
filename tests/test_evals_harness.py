@@ -295,8 +295,17 @@ class TestConnectURL(unittest.TestCase):
             turns=[EvalTurn(user="x", expect=[EvalExpectation(event="response", eval="ok")])],
         )
         url = EvalSession(scenario, "ws://localhost:7860")._connect_url()
-        self.assertIn("capture_audio=true", url)
+        self.assertIn("capture_bot_audio=true", url)
         self.assertNotIn("skip_tts", url)  # audio mode, so no skip
+
+    def test_speech_adds_user_audio(self):
+        # Audio-mode user turns enable the transport's virtual mic; text-mode
+        # scenarios must not (the mic would feed silence into the bot's STT).
+        scenario = EvalScenario(name="t", turns=[], bot_audio=True)
+        session = EvalSession(scenario, "ws://localhost:7860", speech=object())
+        self.assertIn("user_audio=true", session._connect_url())
+        no_speech = EvalSession(scenario, "ws://localhost:7860")
+        self.assertNotIn("user_audio", no_speech._connect_url())
 
 
 class TestResponseTranscriptionSkip(unittest.IsolatedAsyncioTestCase):

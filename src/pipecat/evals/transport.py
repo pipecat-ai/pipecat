@@ -16,7 +16,7 @@ sets:
   ``on_client_connected`` fires: pipecat processes frames in order, and a bot
   that greets in ``on_client_connected`` queues its greeting there, so a config
   sent afterwards (as a client message) would arrive too late.
-- ``?capture_audio=true`` makes the serializer forward the bot's synthesized
+- ``?capture_bot_audio=true`` makes the serializer forward the bot's synthesized
   audio to the harness (for ``tts_response`` transcription).
 - ``?record=<path>`` records the conversation audio (user + bot) to ``<path>``.
   The recorder is an :class:`~pipecat.processors.audio.audio_buffer_processor.AudioBufferProcessor`
@@ -27,12 +27,14 @@ sets:
   so the disconnect doesn't delay the next connect. Recording is eval-only — the
   generic transport is untouched.
 
-The input side runs a **virtual microphone** (:class:`EvalMicrophone`): the harness
-sends each user utterance as a few large ``raw-audio`` messages, and the input
+The input side runs a **virtual microphone** (:class:`EvalMicrophone`), enabled
+per connection by ``?user_audio=true`` (audio-mode scenarios): the harness sends
+each user utterance as a few large ``raw-audio`` messages, and the input
 transport plays them into the pipeline at real-time cadence (~20ms frames) with
 locally generated silence in between — so VADs, turn models, and streaming STTs
 see exactly what a live client's mic would produce, without a continuous frame
-stream crossing the wire.
+stream crossing the wire. Text-mode scenarios leave the mic off, so no silence
+is ever fed into the bot's STT.
 
 This transport also keeps one bot alive across a whole eval suite: it overrides
 ``_on_client_disconnected`` to detach the connection (and flush the recording)
@@ -67,7 +69,8 @@ from pipecat.transports.websocket.server import (
 )
 
 SKIP_TTS_QUERY_PARAM = "skip_tts"
-CAPTURE_AUDIO_QUERY_PARAM = "capture_audio"
+USER_AUDIO_QUERY_PARAM = "user_audio"
+CAPTURE_AUDIO_QUERY_PARAM = "capture_bot_audio"
 RECORD_QUERY_PARAM = "record"
 
 # One virtual-mic frame per tick — the granularity a live transport delivers and
@@ -208,9 +211,11 @@ class EvalWebsocketServerInputTransport(WebsocketServerInputTransport):
     messages; instead of letting them flood the VAD path at once, they are queued
     on an :class:`EvalMicrophone` that plays them into the pipeline at real-time
     cadence with locally generated silence in between — a virtual microphone.
-    The mic starts when the client signals ready (the ``client-ready`` →
-    ``InputTransportStartAudioStreamingFrame`` path) and runs for the life of the
-    transport, surviving client disconnects like the rest of the eval transport.
+    The mic is enabled per connection by the harness's ``?user_audio=true`` flag
+    (audio-mode scenarios only — a text-mode scenario must not feed silence into
+    the bot's STT, which costs real streaming-STT minutes) and starts when the
+    client signals ready (the ``client-ready`` →
+    ``InputTransportStartAudioStreamingFrame`` path).
 
     Images: a function-calling-video bot pushes a ``UserImageRequestFrame``
     upstream when it needs the user's camera image. There is no camera under
@@ -224,11 +229,25 @@ class EvalWebsocketServerInputTransport(WebsocketServerInputTransport):
         """Initialize the input transport and its virtual mic."""
         super().__init__(*args, **kwargs)
         self._mic = EvalMicrophone(self._push_mic_frame)
+        self._mic_enabled = False
         self._mic_task = None
 
-    def reset_mic(self) -> None:
-        """Drop any leftover utterance audio (called when a new eval client connects)."""
+    async def configure_mic(self, enabled: bool) -> None:
+        """Configure the virtual mic for a new eval client.
+
+        Drops any utterance audio a previous client left queued, and enables or
+        disables the mic for this connection (the harness sets
+        ``?user_audio=true`` for audio-mode scenarios). Disabling stops a mic a
+        previous audio-mode client left running, so a following text-mode
+        scenario doesn't stream silence into the bot's STT.
+
+        Args:
+            enabled: Whether this connection's scenario sends user audio.
+        """
         self._mic.reset()
+        self._mic_enabled = enabled
+        if not enabled:
+            await self._stop_mic()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Route utterance audio to the virtual mic; serve image requests."""
@@ -243,7 +262,7 @@ class EvalWebsocketServerInputTransport(WebsocketServerInputTransport):
 
     async def _start_audio_in_streaming(self):
         """Start the virtual mic (triggered by the client-ready handshake)."""
-        if self._mic_task is None:
+        if self._mic_enabled and self._mic_task is None:
             self._mic_task = self.create_task(self._mic.run(self.sample_rate))
 
     async def stop(self, frame: EndFrame):
@@ -340,9 +359,10 @@ class EvalWebsocketServerTransport(WebsocketServerTransport):
             serializer.set_capture_audio(_query_flag(websocket, CAPTURE_AUDIO_QUERY_PARAM))
 
         # A new eval client starts a fresh conversation: drop any utterance audio
-        # a previous client left queued on the virtual mic.
+        # a previous client left queued, and enable the virtual mic only for
+        # audio-mode scenarios (?user_audio=true).
         if isinstance(self._input, EvalWebsocketServerInputTransport):
-            self._input.reset_mic()
+            await self._input.configure_mic(_query_flag(websocket, USER_AUDIO_QUERY_PARAM))
 
         # Start recording as soon as the client connects so the bot's first audio
         # (e.g. a greeting) is captured. Flushed on disconnect.

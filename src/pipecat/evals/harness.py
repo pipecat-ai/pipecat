@@ -28,7 +28,7 @@ scenario ``event:``         RTVI server message(s)
 ``llm_response``            the LLM text: ``bot-llm-text`` joined at ``bot-llm-stopped``
 ``tts_response``            the TTS's spoken text: one segment per ``bot-tts-text``
                             (audio modality only)
-``response``                local-Whisper transcription of the bot's actual audio
+``response``                local-STT transcription of the bot's actual audio
                             (audio modality only); ``llm_response`` in text modality
 ``function_call``           ``llm-function-call-in-progress``
 ==========================  ==============================================
@@ -532,17 +532,22 @@ class EvalSession:
         ``skip_tts`` (text mode) silences the bot before any LLM runs; the eval
         transport must read it at connect time because frames are ordered and a
         later message can't precede an on-connect greeting (see
-        :mod:`pipecat.evals.transport`). ``capture_audio`` makes the bot forward
-        its synthesized audio for ``tts_response`` transcription. ``record`` asks
-        the eval transport to record the conversation audio (audio mode only).
+        :mod:`pipecat.evals.transport`). ``user_audio`` turns on the transport's
+        virtual mic for audio-mode scenarios; without it the transport plays no
+        mic at all, so a text-mode scenario never feeds silence into the bot's
+        STT. ``capture_bot_audio`` makes the bot forward its synthesized audio for
+        ``tts_response`` transcription. ``record`` asks the eval transport to
+        record the conversation audio (audio mode only).
         """
         from urllib.parse import quote
 
         flags = []
         if not self._scenario.bot_audio:
             flags.append("skip_tts=true")
+        if self._speech is not None:
+            flags.append("user_audio=true")
         if self._wants_response:
-            flags.append("capture_audio=true")
+            flags.append("capture_bot_audio=true")
         if self._record_path and self._scenario.bot_audio:
             flags.append(f"record={quote(self._record_path, safe='')}")
         if not flags:
