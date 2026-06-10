@@ -21,8 +21,9 @@ so nothing is yielded.
 
 The transcriber takes an already-built ``STTService``;
 :meth:`EvalTranscriber.from_config` constructs one from a scenario's
-``bot_audio`` mapping — ``service`` (default ``"whisper"``, a local model) and
-``model``. The escape hatch is ``bot_audio.factory: "my_pkg.my_func"`` — an
+``judge.transcription:`` mapping — ``service`` (default ``"whisper"``, a local
+model), ``model``, and optional ``padding_secs``. The escape hatch is
+``transcription.factory: "my_pkg.my_func"`` — an
 importable callable taking ``(config, sample_rate)`` and returning an
 ``STTService``. Audio is resampled to 16 kHz before transcription, a rate STT
 services expect.
@@ -53,7 +54,7 @@ class EvalTranscriber:
     """Transcribes bot audio by calling an STT service's ``run_stt()`` directly.
 
     Takes an already-built ``STTService``; :meth:`from_config` builds one from a
-    scenario's ``bot_audio`` mapping. Use as an async context manager::
+    scenario's ``judge.transcription:`` mapping. Use as an async context manager::
 
         async with EvalTranscriber.from_config({"model": "base"}) as t:
             text = await t.transcribe(pcm, sample_rate=24000)
@@ -63,18 +64,18 @@ class EvalTranscriber:
     ones, whose results arrive out of band.
     """
 
-    def __init__(self, service: STTService, *, pad_seconds: float = SILENCE_PAD_S):
+    def __init__(self, service: STTService, *, padding_secs: float = SILENCE_PAD_S):
         """Initialize the transcriber.
 
         Args:
             service: A constructed ``STTService`` (e.g. from :meth:`from_config`).
-            pad_seconds: Silence padded onto each side of the segment before
+            padding_secs: Silence padded onto each side of the segment before
                 transcription (see :data:`SILENCE_PAD_S`). Whisper needs it to keep
                 onset/offset words; Moonshine returns empty when fed leading
-                silence, so it uses ``0``.
+                silence, so it defaults to ``0``.
         """
         self._service = service
-        self._pad_seconds = pad_seconds
+        self._padding_secs = padding_secs
         self._resampler = None
         # Optional sink for timing diagnostics; the harness points this at its
         # per-scenario debug trace.
@@ -82,7 +83,7 @@ class EvalTranscriber:
 
     @classmethod
     def from_config(cls, config: dict | None) -> "EvalTranscriber":
-        """Build an :class:`EvalTranscriber` from a scenario's ``bot_audio`` mapping.
+        """Build an :class:`EvalTranscriber` from a scenario's ``judge.transcription:`` mapping.
 
         Honors a custom ``factory`` (dotted path to a callable taking
         ``(config, sample_rate)`` and returning an ``STTService``); otherwise
@@ -92,37 +93,45 @@ class EvalTranscriber:
         :meth:`pipecat.evals.harness.EvalSession.from_scenario`.
 
         Args:
-            config: ``bot_audio`` mapping, or ``None`` for the Whisper default.
+            config: ``transcription`` mapping, or ``None`` for the Whisper default.
+                An optional ``padding_secs`` overrides the silence padding (see
+                :meth:`__init__`); when omitted, the service's default applies —
+                :data:`SILENCE_PAD_S` for Whisper and factories, ``0`` for
+                Moonshine (which returns empty when fed leading silence).
 
         Returns:
             A configured EvalTranscriber (not yet started).
 
         Example::
 
-            # In the scenario: bot_audio.factory: "my_pkg.make_stt"
+            # In the scenario: transcription.factory: "my_pkg.make_stt"
             def make_stt(config, sample_rate):
                 return WhisperSTTService(...)
         """
         config = config or {}
+        padding = config.get("padding_secs")
+
+        def padding_secs(default: float) -> float:
+            return default if padding is None else float(padding)
 
         custom = config.get("factory")
         if custom:
             module_name, _, attr = custom.rpartition(".")
             if not module_name:
-                raise ValueError(f"bot_audio.factory must be a dotted path: {custom!r}")
+                raise ValueError(f"transcription.factory must be a dotted path: {custom!r}")
             factory = getattr(importlib.import_module(module_name), attr)
-            return cls(factory(config, STT_SAMPLE_RATE))
+            return cls(factory(config, STT_SAMPLE_RATE), padding_secs=padding_secs(SILENCE_PAD_S))
 
         name = str(config.get("service", "whisper")).lower()
         if name == "whisper":
-            return cls(whisper_service(config))
+            return cls(whisper_service(config), padding_secs=padding_secs(SILENCE_PAD_S))
         if name == "moonshine":
             # Moonshine returns empty when fed leading silence, so don't pad.
-            return cls(moonshine_service(config), pad_seconds=0)
+            return cls(moonshine_service(config), padding_secs=padding_secs(0))
 
         raise ValueError(
             f"Unknown STT service: {name!r}. Known: whisper, moonshine. "
-            "Or set bot_audio.factory to a 'module.func' returning an STTService."
+            "Or set transcription.factory to a 'module.func' returning an STTService."
         )
 
     async def start(self) -> None:
@@ -156,10 +165,10 @@ class EvalTranscriber:
             pcm = await self._resampler.resample(pcm, sample_rate, STT_SAMPLE_RATE)
 
         # Pad with silence so the STT has a clean lead-in/lead-out and doesn't drop
-        # a short onset/offset word (see SILENCE_PAD_S). Skipped (pad_seconds=0) for
-        # STTs that mishandle leading silence, e.g. Moonshine.
-        if self._pad_seconds:
-            pad = b"\x00\x00" * int(STT_SAMPLE_RATE * self._pad_seconds)
+        # a short onset/offset word (see SILENCE_PAD_S). Skipped (padding_secs=0)
+        # for STTs that mishandle leading silence, e.g. Moonshine.
+        if self._padding_secs:
+            pad = b"\x00\x00" * int(STT_SAMPLE_RATE * self._padding_secs)
             pcm = pad + pcm + pad
 
         # run_stt transcribes the whole buffer and yields its TranscriptionFrame(s),

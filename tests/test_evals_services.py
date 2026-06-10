@@ -43,6 +43,28 @@ class TestTranscriberFromConfig(unittest.TestCase):
         self.assertEqual(t._service[0], "FAKE_STT")
         self.assertEqual(t._service[2], 16000)  # STT_SAMPLE_RATE
 
+    def test_padding_defaults_per_service(self):
+        from pipecat.evals.transcribe import SILENCE_PAD_S
+
+        whisper = EvalTranscriber.from_config({"service": "whisper"})
+        self.assertEqual(whisper._padding_secs, SILENCE_PAD_S)
+        moonshine = EvalTranscriber.from_config({"service": "moonshine"})
+        self.assertEqual(moonshine._padding_secs, 0)
+        factory = EvalTranscriber.from_config({"factory": "tests.test_evals_services._fake_stt"})
+        self.assertEqual(factory._padding_secs, SILENCE_PAD_S)
+
+    def test_padding_secs_override(self):
+        # padding_secs in the transcription config overrides the per-service
+        # default on every path (including 0 to disable Whisper's padding).
+        whisper = EvalTranscriber.from_config({"service": "whisper", "padding_secs": 0})
+        self.assertEqual(whisper._padding_secs, 0)
+        moonshine = EvalTranscriber.from_config({"service": "moonshine", "padding_secs": 1.5})
+        self.assertEqual(moonshine._padding_secs, 1.5)
+        factory = EvalTranscriber.from_config(
+            {"factory": "tests.test_evals_services._fake_stt", "padding_secs": 0.5}
+        )
+        self.assertEqual(factory._padding_secs, 0.5)
+
 
 class TestVoiceFromConfig(unittest.TestCase):
     def test_cache_key_excludes_sample_rate(self):
