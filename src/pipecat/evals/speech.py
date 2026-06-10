@@ -11,7 +11,7 @@ for each user turn using that TTS config and streams it to the bot as RTVI
 ``raw-audio`` messages. The bot's STT then processes it for real, exercising the
 full input audio path.
 
-:class:`EvalVoice` runs one persistent pipeline around an already-built
+:class:`EvalSpeech` runs one persistent pipeline around an already-built
 ``TTSService`` and reuses it across the scenario's audio turns, so any TTS
 service works (HTTP or streaming/WebSocket) — the audio comes back as
 ``TTSAudioRawFrame``s flowing through the pipeline. Generated audio is cached at
@@ -19,7 +19,7 @@ service works (HTTP or streaming/WebSocket) — the audio comes back as
 file's actual sample rate is checked on load and regenerated on mismatch, so you
 can experiment with sample rates without bloating the cache.
 
-:meth:`EvalVoice.from_config` constructs the service from a ``user_audio``
+:meth:`EvalSpeech.from_config` constructs the service from a ``user_audio``
 mapping (dispatch + a ``user_audio.factory`` escape hatch) and wraps it;
 :func:`tts_cache_key` and :func:`tts_sample_rate` derive the cache identity and
 rate.
@@ -59,7 +59,7 @@ class _IdentitySerializer(FrameSerializer):
     """Passes frames through unchanged so ``AsyncGeneratorProcessor`` yields the frames.
 
     ``AsyncGeneratorProcessor`` serializes each frame and exposes the results via
-    an async generator; an identity serializer lets :class:`EvalVoice` receive
+    an async generator; an identity serializer lets :class:`EvalSpeech` receive
     the actual frames and pick out the audio.
     """
 
@@ -82,7 +82,7 @@ def tts_cache_key(voice_cfg: dict) -> str:
 
     Covers the audio's semantic identity (service, voice, model) but not the
     sample rate, so different rates reuse the same slot (a mismatch just triggers
-    regeneration in :meth:`EvalVoice.generate`).
+    regeneration in :meth:`EvalSpeech.generate`).
     """
     service = str(voice_cfg.get("service", "")).lower()
     voice = str(voice_cfg.get("voice", ""))
@@ -90,7 +90,7 @@ def tts_cache_key(voice_cfg: dict) -> str:
     return "\x00".join((service, voice, model))
 
 
-class EvalVoice:
+class EvalSpeech:
     """Generates user audio for a scenario from one persistent TTS pipeline.
 
     Takes an already-built ``TTSService``; :meth:`from_config` builds one from a
@@ -101,8 +101,8 @@ class EvalVoice:
 
     Use as an async context manager::
 
-        async with EvalVoice(service, sample_rate=16000, cache_key="...") as voice:
-            pcm, sample_rate = await voice.generate("hello world")
+        async with EvalSpeech(service, sample_rate=16000, cache_key="...") as speech:
+            pcm, sample_rate = await speech.generate("hello world")
     """
 
     def __init__(
@@ -148,13 +148,13 @@ class EvalVoice:
         *,
         cache_dir: str | Path | None = None,
         use_cache: bool = True,
-    ) -> "EvalVoice":
-        """Build an :class:`EvalVoice` from a scenario's ``user_audio`` mapping.
+    ) -> "EvalSpeech":
+        """Build an :class:`EvalSpeech` from a scenario's ``user_audio`` mapping.
 
         Honors a custom ``factory`` (dotted path to a callable taking
         ``(voice_cfg, sample_rate)`` and returning a ``TTSService``); otherwise
         dispatches on the ``service`` name. Add providers by extending this. To
-        use a fully custom setup, construct ``EvalVoice`` directly with your own
+        use a fully custom setup, construct ``EvalSpeech`` directly with your own
         ``TTSService`` and pass it to :meth:`pipecat.evals.harness.EvalSession.from_scenario`.
 
         Args:
@@ -166,7 +166,7 @@ class EvalVoice:
             use_cache: When False, force fresh synthesis (see :meth:`__init__`).
 
         Returns:
-            A configured EvalVoice (not yet started).
+            A configured EvalSpeech (not yet started).
 
         Example::
 
@@ -268,7 +268,7 @@ class EvalVoice:
         )
 
         if self._worker is None or self._output_generator is None:
-            raise RuntimeError("EvalVoice.start() was not called")
+            raise RuntimeError("EvalSpeech.start() was not called")
 
         await self._worker.queue_frames([TTSSpeakFrame(text)])
 
@@ -297,7 +297,7 @@ class EvalVoice:
         self._runner_task = None
         self._output_generator = None
 
-    async def __aenter__(self) -> "EvalVoice":
+    async def __aenter__(self) -> "EvalSpeech":
         await self.start()
         return self
 

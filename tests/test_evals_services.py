@@ -4,13 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for the eval service constructors (config -> EvalJudge/EvalVoice/EvalTranscriber)."""
+"""Tests for the eval service constructors (config -> EvalJudge/EvalSpeech/EvalTranscriber)."""
 
 import unittest
 
 from pipecat.evals.judge import EvalJudge
+from pipecat.evals.speech import EvalSpeech, tts_cache_key, tts_sample_rate
 from pipecat.evals.transcribe import EvalTranscriber
-from pipecat.evals.voice import EvalVoice, tts_cache_key, tts_sample_rate
 
 
 def _fake_stt(config, sample_rate):
@@ -62,14 +62,14 @@ class TestVoiceFromConfig(unittest.TestCase):
 
     def test_unknown_service_rejected(self):
         with self.assertRaises(ValueError):
-            EvalVoice.from_config({"service": "nope", "voice": "v"})
+            EvalSpeech.from_config({"service": "nope", "voice": "v"})
 
     def test_missing_service_or_voice_rejected(self):
         with self.assertRaises(ValueError):
-            EvalVoice.from_config({})
+            EvalSpeech.from_config({})
 
     def test_factory_escape_hatch(self):
-        v = EvalVoice.from_config(
+        v = EvalSpeech.from_config(
             {"factory": "tests.test_evals_services._fake_tts", "sample_rate": 24000}
         )
         self.assertEqual(v._service[0], "FAKE_TTS")

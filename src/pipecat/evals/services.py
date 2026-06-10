@@ -8,7 +8,7 @@
 
 Each function builds a concrete pipecat service (TTS, STT, or judge LLM) from a
 scenario's config mapping. They are the dispatch targets behind the ``service:``
-name in :meth:`pipecat.evals.voice.EvalVoice.from_config`,
+name in :meth:`pipecat.evals.speech.EvalSpeech.from_config`,
 :meth:`pipecat.evals.transcribe.EvalTranscriber.from_config`, and
 :meth:`pipecat.evals.judge.EvalJudge.from_config`. The heavy provider imports
 stay lazy inside each function so importing this module stays cheap.

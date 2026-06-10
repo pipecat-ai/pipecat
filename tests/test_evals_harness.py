@@ -627,7 +627,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         # A sub-pipeline that fails to start (e.g. a local model thrashing under
         # load) must be reported as a structured failure with its traceback, not
         # propagate out raw and get swallowed as a bare "error:" with no eval.log.
-        class _BoomVoice:
+        class _BoomSpeech:
             sample_rate = 16000
 
             async def start(self):
@@ -641,7 +641,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
             turns=[EvalTurn(user="hi", expect=[EvalExpectation(event="llm_started")])],
         )
         result = await EvalSession.from_scenario(
-            scenario, self.server.url, voice=_BoomVoice()
+            scenario, self.server.url, speech=_BoomSpeech()
         ).run()
         self.assertFalse(result.passed)
         self.assertEqual(len(result.failures), 1)

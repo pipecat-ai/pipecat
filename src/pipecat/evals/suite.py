@@ -74,7 +74,7 @@ DEFAULT_SPAWN = "{python} {bot} -t eval --port {port}"
 # connection, harness internals) falls through to "harness". The label is the
 # human heading used for that pipeline's section in the debug log.
 PIPELINE_LOG_LABELS = {
-    "voice": "user speech logs",
+    "speech": "user speech logs",
     "transcription": "bot speech transcription logs",
     "judge": "judge logs",
     "harness": "harness logs",

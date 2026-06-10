@@ -83,8 +83,8 @@ from pipecat.evals.serializer import (
     EVAL_IMAGE_MESSAGE_TYPE,
     EVAL_RESET_MESSAGE_TYPE,
 )
+from pipecat.evals.speech import EvalSpeech
 from pipecat.evals.transcribe import EvalTranscriber
-from pipecat.evals.voice import EvalVoice
 
 # Generous default so an expectation without an explicit ``within_ms`` waits
 # long enough for slow LLM/TTS responses (and function-call round-trips) rather
@@ -179,7 +179,7 @@ class EvalSession:
 
     Connects as an RTVI client, drives each turn (sending ``send-text`` or
     ``raw-audio``), collects the RTVI events the bot emits, and asserts on them.
-    Build one with :meth:`from_scenario` (which constructs the judge, voice, and
+    Build one with :meth:`from_scenario` (which constructs the judge, speech, and
     transcriber the scenario needs), then await :meth:`run`.
     """
 
@@ -194,12 +194,12 @@ class EvalSession:
         record_path: str | None = None,
         stop_bot: bool = False,
         judge: EvalJudge | None = None,
-        voice: EvalVoice | None = None,
+        speech: EvalSpeech | None = None,
         transcriber: EvalTranscriber | None = None,
     ):
         """Initialize the eval session.
 
-        The ``judge``, ``voice``, and ``transcriber`` are injected pre-built:
+        The ``judge``, ``speech``, and ``transcriber`` are injected pre-built:
         :meth:`from_scenario` constructs the defaults from the scenario's config
         (via the respective ``from_config``) and passes them in. Construct and
         pass your own to override them (e.g. a custom judge LLM or TTS service).
@@ -223,7 +223,7 @@ class EvalSession:
                 up each spawned bot.
             judge: The :class:`~pipecat.evals.judge.EvalJudge` for ``eval:``
                 assertions, or ``None`` if the scenario has none.
-            voice: The :class:`~pipecat.evals.voice.EvalVoice` for synthesizing
+            speech: The :class:`~pipecat.evals.speech.EvalSpeech` for synthesizing
                 user audio, or ``None`` for text-mode scenarios. Started and
                 stopped by the session.
             transcriber: The :class:`~pipecat.evals.transcribe.EvalTranscriber`
@@ -254,7 +254,7 @@ class EvalSession:
 
         # One persistent TTS pipeline reused across the scenario's audio turns,
         # started in run(); None for text-mode scenarios.
-        self._voice: EvalVoice | None = voice
+        self._speech: EvalSpeech | None = speech
 
         # Continuous "mic" (audio mode): a background task streams 20ms frames at
         # real-time cadence — user-audio chunks queued here when there's something
@@ -304,14 +304,14 @@ class EvalSession:
         use_cache: bool = True,
         stop_bot: bool = False,
         judge: EvalJudge | None = None,
-        voice: EvalVoice | None = None,
+        speech: EvalSpeech | None = None,
         transcriber: EvalTranscriber | None = None,
     ) -> "EvalSession":
         """Build a ready-to-run session from a scenario, constructing what it needs.
 
-        Builds the judge, voice, and transcriber the scenario calls for — each via
+        Builds the judge, speech, and transcriber the scenario calls for — each via
         its ``from_config`` — and injects them into a new session. Pass ``judge`` /
-        ``voice`` / ``transcriber`` to override any of them with your own pre-built
+        ``speech`` / ``transcriber`` to override any of them with your own pre-built
         instance. Then await :meth:`run`::
 
             session = EvalSession.from_scenario(scenario, "ws://localhost:7860")
@@ -334,7 +334,7 @@ class EvalSession:
                 teardown. Leave False to keep it running for more scenarios.
             judge: Override the judge (default: built from ``scenario.judge`` when the
                 scenario has ``eval:`` assertions).
-            voice: Override the user-audio generator (default: built from
+            speech: Override the user-audio generator (default: built from
                 ``scenario.user_audio`` in audio mode).
             transcriber: Override the bot-audio transcriber (default: built from
                 ``scenario.transcriber`` when the scenario asserts ``response``).
@@ -347,9 +347,9 @@ class EvalSession:
             with logger.contextualize(eval_pipeline="judge"):
                 judge = EvalJudge.from_config(scenario.judge)
 
-        if voice is None and scenario.user_audio is not None:
-            with logger.contextualize(eval_pipeline="voice"):
-                voice = EvalVoice.from_config(
+        if speech is None and scenario.user_audio is not None:
+            with logger.contextualize(eval_pipeline="speech"):
+                speech = EvalSpeech.from_config(
                     scenario.user_audio, cache_dir=cache_dir, use_cache=use_cache
                 )
 
@@ -367,7 +367,7 @@ class EvalSession:
             record_path=record_path,
             stop_bot=stop_bot,
             judge=judge,
-            voice=voice,
+            speech=speech,
             transcriber=transcriber,
         )
 
@@ -432,9 +432,9 @@ class EvalSession:
             # _LOG_CATEGORIES). These run under the same `try` as the turns so a
             # sub-pipeline that fails to start (e.g. a local model under load) is
             # surfaced as a failure rather than propagating out raw (see below).
-            if self._voice is not None:
-                with logger.contextualize(eval_pipeline="voice"):
-                    await self._voice.start()
+            if self._speech is not None:
+                with logger.contextualize(eval_pipeline="speech"):
+                    await self._speech.start()
 
             if self._transcriber is not None:
                 with logger.contextualize(eval_pipeline="transcription"):
@@ -459,9 +459,9 @@ class EvalSession:
                 )
             else:
                 # Start the continuous mic only once the bot is ready to receive.
-                if self._voice is not None:
+                if self._speech is not None:
                     self._audio_sender_task = asyncio.create_task(
-                        self._audio_sender_loop(self._voice.sample_rate)
+                        self._audio_sender_loop(self._speech.sample_rate)
                     )
                 for turn_idx, turn in enumerate(self._scenario.turns):
                     self._current_turn = turn_idx
@@ -507,9 +507,9 @@ class EvalSession:
             # Tear each sub-pipeline down under the same eval_pipeline label as its
             # setup, so its shutdown logs (e.g. "Cancelling pipeline worker") are
             # attributed to it rather than leaking into the harness catch-all.
-            if self._voice is not None:
-                with logger.contextualize(eval_pipeline="voice"):
-                    await self._voice.aclose()
+            if self._speech is not None:
+                with logger.contextualize(eval_pipeline="speech"):
+                    await self._speech.aclose()
             if self._transcriber is not None:
                 with logger.contextualize(eval_pipeline="transcription"):
                     await self._transcriber.aclose()
@@ -878,8 +878,8 @@ class EvalSession:
             await self._send_image(turn.image)
 
         if turn.user is not None:
-            self._debug(f"send: {turn.user!r} ({'audio' if self._voice is not None else 'text'})")
-            if self._voice is not None:
+            self._debug(f"send: {turn.user!r} ({'audio' if self._speech is not None else 'text'})")
+            if self._speech is not None:
                 await self._send_user_audio(turn.user)
             else:
                 await self._send_user_text(turn.user, self._scenario.bot_audio)
@@ -972,8 +972,8 @@ class EvalSession:
         real-time cadence in place of silence; we wait until they have all been
         sent so the turn's anchor isn't set before the bot has heard the utterance.
         """
-        assert self._voice is not None  # only called for audio-mode turns
-        pcm, sample_rate = await self._voice.generate(text)
+        assert self._speech is not None  # only called for audio-mode turns
+        pcm, sample_rate = await self._speech.generate(text)
         for chunk in _audio_chunks(pcm, sample_rate):
             self._audio_out.put_nowait(chunk)
         await self._audio_out.join()
