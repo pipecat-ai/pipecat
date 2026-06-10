@@ -8,12 +8,14 @@
 
 import json
 import unittest
+import unittest.mock
 from typing import Any
 
 import pytest
 from websockets.protocol import State
 
 from pipecat.services.elevenlabs.tts import (
+    ElevenLabsHttpTTSService,
     ElevenLabsTTSService,
     PronunciationDictionaryLocator,
     _resolve_prefer_normalized,
@@ -299,6 +301,41 @@ def test_prefer_normalized_via_deprecated_input_params():
             ),
         )
     assert service._prefer_normalized is False
+
+
+def test_http_service_prefer_normalized_resolved_at_init():
+    locator = PronunciationDictionaryLocator(
+        pronunciation_dictionary_id="dict_id", version_id="version_id"
+    )
+    session = unittest.mock.MagicMock()
+    assert (
+        ElevenLabsHttpTTSService(api_key="test-key", aiohttp_session=session)._prefer_normalized
+        is False
+    )
+    assert (
+        ElevenLabsHttpTTSService(
+            api_key="test-key",
+            aiohttp_session=session,
+            pronunciation_dictionary_locators=[locator],
+        )._prefer_normalized
+        is True
+    )
+    assert (
+        ElevenLabsHttpTTSService(
+            api_key="test-key",
+            aiohttp_session=session,
+            pronunciation_dictionary_locators=[locator],
+            prefer_normalized_alignment=False,
+        )._prefer_normalized
+        is False
+    )
+    with pytest.warns(DeprecationWarning):
+        service = ElevenLabsHttpTTSService(
+            api_key="test-key",
+            aiohttp_session=session,
+            params=ElevenLabsHttpTTSService.InputParams(prefer_normalized_alignment=True),
+        )
+    assert service._prefer_normalized is True
 
 
 def test_select_alignment_works_with_http_field_names():

@@ -269,12 +269,14 @@ def _select_alignment(
       romanization of non-Latin scripts (e.g., Chinese rendered as pinyin).
     - ``alignment_key`` (``alignment``): the original input characters.
 
-    Prefer ``normalized`` only when a pronunciation dictionary is configured -
-    that's the case where ``alignment`` has overlapping restarts that produce
-    duplicated/garbled words (issue #4316). Otherwise prefer ``alignment`` so
-    the LLM context preserves the original input rather than the normalized
-    form. Fall back to the other field if the preferred one is missing or
-    null - the API schema marks both as nullable.
+    By default the services prefer ``normalized`` only when a pronunciation
+    dictionary is configured - that's the case where ``alignment`` has
+    overlapping restarts that produce duplicated/garbled words (issue #4316).
+    Otherwise they prefer ``alignment`` so the LLM context preserves the
+    original input rather than the normalized form. Callers can override this
+    policy via the services' ``prefer_normalized_alignment`` parameter (see
+    ``_resolve_prefer_normalized``). Fall back to the other field if the
+    preferred one is missing or null - the API schema marks both as nullable.
 
     Args:
         msg: TTS response message from ElevenLabs.
