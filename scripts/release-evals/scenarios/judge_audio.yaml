@@ -5,3 +5,4 @@ eval:
 transcription:
   service: moonshine
   model: small-streaming
+  padding_secs: 1
