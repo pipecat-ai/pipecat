@@ -7,7 +7,7 @@
 #
 #   ./run.sh                       # everything
 #   ./run.sh -p voice-openai       # only matching bots
-#   ./run.sh -s simple_math        # only the simple_math scenario
+#   ./run.sh -s capital_question        # only the capital_question scenario
 #   ./run.sh -c 8 -a               # 8 at a time, record audio
 #
 set -e

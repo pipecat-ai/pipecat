@@ -11,10 +11,10 @@ Each example is a Pipecat **bot**. We run it with its eval transport
 client, plays the user's turns (synthesizing audio when a scenario is in audio
 mode), transcribes the bot's speech, and judges the response with an LLM.
 
-A scenario (`scenarios/<name>.yaml`) is a scripted conversation plus the expected
-results. For example the `simple_math` scenario asks "What is two plus two?" and
-judges that the reply says four. Scenarios are reusable, so one shared scenario
-covers many bots.
+A scenario (`scenarios/<name>.yaml`) is a scripted conversation plus the
+expected results. For example the `capital_question` scenario asks "What is the
+capital of Germany?" and judges that the reply says Berlin. Scenarios are
+reusable, so one shared scenario covers many bots.
 
 [`manifest.yaml`](manifest.yaml) maps each bot to the scenarios it runs.
 
@@ -53,7 +53,7 @@ uv sync --group dev --all-extras --no-extra gstreamer --no-extra local
 ```sh
 ./run.sh                  # everything in the manifest
 ./run.sh -p voice-openai  # only bots whose path contains "voice-openai"
-./run.sh -s simple_math   # only the simple_math scenario
+./run.sh -s capital_question  # only the capital_question scenario
 ./run.sh -c 8             # 8 at a time
 ./run.sh -n nightly       # output to test-runs/nightly/ instead of a timestamp
 ```
@@ -107,7 +107,7 @@ If you already have a bot running with `-t eval`, run a scenario directly
 (handy while iterating on a scenario or a single bot):
 
 ```sh
-pipecat eval run scenarios/simple_math.yaml --bot-url ws://localhost:7860
+pipecat eval run scenarios/capital_question.yaml --bot-url ws://localhost:7860
 ```
 
 ## Scenarios
