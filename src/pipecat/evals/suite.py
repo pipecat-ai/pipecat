@@ -62,7 +62,7 @@ DEFAULT_BASE_PORT = 7900
 DEFAULT_CONCURRENCY = 4
 # How long to wait for a freshly spawned bot to start listening (the harness
 # retries the connect, so this doubles as readiness waiting).
-BOT_READY_TIMEOUT_S = 60.0
+BOT_CONNECT_TIMEOUT_S = 60.0
 # How long to wait for a bot subprocess to exit after the harness asks it to
 # stop (via eval-cancel) before escalating to terminate/kill.
 BOT_STOP_TIMEOUT_S = 10.0
@@ -374,15 +374,16 @@ class EvalSuite:
         if record_dir:
             record_dir.mkdir(parents=True, exist_ok=True)
 
-        # Bound per-model CPU threads so concurrent (CPU) Whisper transcriptions
-        # share the cores instead of each spawning ~all-cores of OpenMP threads.
-        # Scenarios start in lockstep with the same greeting+first-turn duration, so
-        # their first transcriptions fire simultaneously; uncapped, N models each
-        # grab every core and oversubscribe the CPU N-fold (the first turn crawls,
-        # then speeds up only once the runs drift out of sync). Capping each to
-        # cores/concurrency keeps total threads ~= cores on every turn. CTranslate2
-        # honors OMP_NUM_THREADS when cpu_threads=0; setdefault respects an explicit
-        # override. Set before any transcriber loads its model.
+        # Bound per-model CPU threads so concurrent CPU transcriptions share the
+        # cores instead of each spawning ~all-cores of OpenMP threads. This bites
+        # when the transcriber is (CPU) Whisper: CTranslate2 honors OMP_NUM_THREADS
+        # and otherwise grabs every core per model, so N lockstep scenarios whose
+        # first transcriptions fire simultaneously oversubscribe the CPU N-fold
+        # (the first turn crawls, then speeds up only once the runs drift out of
+        # sync). Capping each to cores/concurrency keeps total threads ~= cores on
+        # every turn. The ONNX Runtime models (Moonshine, Kokoro) don't use OpenMP
+        # by default, so for them this is a harmless no-op. setdefault respects an
+        # explicit override. Set before any transcriber loads its model.
         cores = os.cpu_count() or 1
         os.environ.setdefault(
             "OMP_NUM_THREADS", str(max(1, cores // max(1, self.manifest.concurrency)))
@@ -468,7 +469,7 @@ class EvalSuite:
                     run.result = await EvalSession.from_scenario(
                         scenario,
                         f"ws://localhost:{port}",
-                        connect_timeout_s=BOT_READY_TIMEOUT_S,
+                        connect_timeout_s=BOT_CONNECT_TIMEOUT_S,
                         default_timeout_ms=default_timeout_ms,
                         record_path=record_path,
                         cache_dir=self.manifest.cache_dir,

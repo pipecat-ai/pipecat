@@ -31,16 +31,18 @@ The harness runs the judge, the user's voice, and the bot-speech transcriber
   it still fits a 16GB GPU alongside the audio models. (A scenario's `judge:`
   block can point at OpenAI instead — set `service: openai` and `$OPENAI_API_KEY`.)
 - **Local audio models** (audio-mode scenarios only). The user's voice is
-  synthesized with Kokoro TTS and the bot's speech is transcribed with Whisper.
-  Both run from local ONNX/model files that download once on first use (cached
-  under `~/.cache`). No keys, no per-run cost.
+  synthesized with Kokoro TTS and the bot's speech is transcribed with
+  [Moonshine](https://github.com/moonshine-ai/moonshine) (Whisper is available
+  as an alternative via the scenario's `transcription:` block). All run from
+  local ONNX/model files that download once on first use (cached under
+  `~/.cache`). No keys, no per-run cost.
 - **Each bot's own credentials.** A bot is a real example, so it needs the same
   service API keys it normally would, in your `.env` (e.g. `$OPENAI_API_KEY`,
   `$CARTESIA_API_KEY`, `$DEEPGRAM_API_KEY`, ...). A bot whose keys are missing
   fails its eval.
 
-Install the framework with the eval extras (Kokoro, Whisper, Ollama, and the
-services the bots use):
+Install the framework with the eval extras (Kokoro, Moonshine, Whisper,
+Ollama, and the services the bots use):
 
 ```sh
 uv sync --group dev --all-extras --no-extra gstreamer --no-extra local
@@ -70,8 +72,8 @@ Each run writes to `test-runs/<name>/` (a timestamp when `-n` is omitted):
 - `logs/<bot>__<scenario>.eval.log` — the harness's decision trace (always
   written; invaluable for diagnosing a flake).
 - `logs/<bot>__<scenario>.debug.log` — the harness's full per-pipeline logs
-  (voice / transcription / judge / harness), one section per pipeline. Written
-  whenever `-d/--debug` is passed, which `run.sh` always does.
+  (user speech / bot speech transcription / judge / harness), one section per
+  pipeline. Written whenever `-d/--debug` is passed, which `run.sh` always does.
 - `recordings/<bot>__<scenario>.wav` — the conversation audio for audio-mode
   scenarios. The manifest sets `record: true`, so these are produced by default;
   pass `-a/--audio` to force recording on if a manifest has it off.
@@ -89,17 +91,15 @@ can be just a `suite:` list with the rest supplied as flags.
 Only the judge LLM runs on the GPU. Ollama keeps one copy of the judge model
 resident (`gemma2:9b` is ~7.4GB), so GPU use is roughly constant (~8.5GB peak)
 regardless of `-c/--concurrency`. The user's voice (Kokoro) and the bot-speech
-transcriber (Whisper) both run on the CPU — Kokoro via ONNX Runtime, Whisper with
-`device: cpu` (see `whisper_service`) — so they cost no GPU memory. CPU
-transcription is a little slower than GPU, but it happens once per turn off the
-hot path, and it lets the eval suite run a larger, more accurate transcriber
-(`distil-medium`, or even `large-v3-turbo`) at high concurrency on a modest GPU
-(e.g. a 16GB RTX A4000). Concurrency is then bounded by CPU and RAM rather than
-GPU; swapping in a much larger judge is what would pressure GPU memory, and an
-out-of-memory run surfaces as a harness error in that run's `.eval.log`.
+transcriber (Moonshine by default) both run on the CPU via ONNX Runtime, so they
+cost no GPU memory; concurrency is bounded by CPU and RAM rather than GPU. A
+16GB GPU (e.g. an RTX A4000) runs the default setup comfortably; swapping in a
+much larger judge is what would pressure GPU memory, and an out-of-memory run
+surfaces as a harness error in that run's `.eval.log`.
 
-To put Whisper back on the GPU (if you have headroom), set `device: cuda` in the
-scenario's `transcription` config.
+Whisper is available as an alternative transcriber (`transcription: {service:
+whisper}`); it also defaults to the CPU (`device: cpu`, see `whisper_service`),
+and can be put on the GPU with `device: cuda` if you have headroom.
 
 ## Running one scenario against an already-running bot
 
@@ -122,7 +122,7 @@ Two things worth knowing when authoring:
 
 - **Modality.** `judge:` and `user:` blocks select audio vs text. In audio mode
   the user's turns are synthesized (exercising the bot's STT for real) and the
-  judge evaluates a Whisper transcription of the bot's actual audio; text mode
+  judge evaluates a local transcription of the bot's actual audio; text mode
   sends/judges text directly and is faster and silent.
 - **Greet first.** A bot that greets on connect (most do) needs that greeting to
   finish before the first user turn — otherwise the question barges into it. So

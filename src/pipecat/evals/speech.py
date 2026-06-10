@@ -32,7 +32,9 @@ import hashlib
 import importlib
 import os
 import wave
+from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import cast
 
 from loguru import logger
 
@@ -223,8 +225,14 @@ class EvalSpeech:
         task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
         clock = SystemClock()
         clock.start()
+        # There deliberately is no PipelineWorker: the service runs out-of-pipeline,
+        # and the FrameProcessor.pipeline_worker property keeps raising if touched.
         await self._service.setup(
-            FrameProcessorSetup(clock=clock, task_manager=task_manager, pipeline_worker=None)
+            FrameProcessorSetup(
+                clock=clock,
+                task_manager=task_manager,
+                pipeline_worker=None,  # pyright: ignore[reportArgumentType]
+            )
         )
         await self._service.start(
             StartFrame(audio_out_sample_rate=self._sample_rate, enable_metrics=False)
@@ -270,7 +278,11 @@ class EvalSpeech:
             raise RuntimeError("EvalSpeech.start() was not called")
 
         pcm = bytearray()
-        async for frame in self._service.run_tts(text, context_id="eval"):
+        # run_tts's base signature types it as a coroutine, but every concrete TTS
+        # overrides it as an async generator; iterate it as such (mirrors
+        # EvalTranscriber's run_stt handling).
+        frames = cast(AsyncGenerator[object, None], self._service.run_tts(text, context_id="eval"))
+        async for frame in frames:
             if isinstance(frame, TTSAudioRawFrame):
                 pcm.extend(frame.audio)
             elif isinstance(frame, ErrorFrame):

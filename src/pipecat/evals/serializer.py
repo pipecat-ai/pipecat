@@ -64,7 +64,7 @@ EVAL_RESET_MESSAGE_TYPE = "eval-reset"
 EVAL_CONFIGURE_MESSAGE_TYPE = "eval-configure"
 
 # A ``client-message`` with this ``t`` is intercepted and turned into a
-# ``CancelFrame``, so the harness can end a scenario by gracefully tearing down the
+# ``CancelTaskFrame``, so the harness can end a scenario by gracefully tearing down the
 # bot's pipeline (closing its service connections) instead of the orchestrator
 # having to kill the process.
 EVAL_CANCEL_MESSAGE_TYPE = "eval-cancel"
@@ -102,7 +102,7 @@ class RTVIEvalSerializer(FrameSerializer):
         # wire so the harness can observe semantic events.
         super().__init__(params=FrameSerializer.InputParams(ignore_rtvi_messages=False), **kwargs)
         # Off by default; the eval transport flips this on per connection (from
-        # the ?capture_audio query param) only for tts_response scenarios, so we
+        # the ?capture_bot_audio query param) only for tts_response scenarios, so we
         # don't ship the bot's audio over the wire unless something asserts on it.
         self._capture_audio = False
         # The most recent image the harness registered (still-encoded bytes, MIME

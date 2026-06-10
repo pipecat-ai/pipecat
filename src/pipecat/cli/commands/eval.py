@@ -12,9 +12,11 @@ that module. Mounted as the ``eval`` subcommand of the ``pipecat`` CLI (see
 """
 
 import asyncio
+import contextlib
 import shutil
 import sys
 import time
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -199,7 +201,14 @@ async def _execute_scenario(
                 "\n".join(run.result.debug_log) + "\n"
             )
     except Exception as e:  # noqa: BLE001
-        run.error = f"error: {e}"
+        # Errors raised inside EvalSession.run() are caught there and returned as
+        # a structured result; this catches the rest (scenario load, building the
+        # judge/speech/transcriber). Keep the exception type and stash the full
+        # traceback in <scenario>.eval.log, mirroring the suite's behavior.
+        run.error = f"error: {type(e).__name__}: {e}"
+        with contextlib.suppress(OSError):
+            Path(logs_dir).mkdir(parents=True, exist_ok=True)
+            (Path(logs_dir) / f"{run.scenario}.eval.log").write_text(traceback.format_exc())
     finally:
         if run.started_at is not None:
             run.duration_ms = int((time.monotonic() - run.started_at) * 1000)
