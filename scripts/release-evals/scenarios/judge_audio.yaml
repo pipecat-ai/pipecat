@@ -3,5 +3,5 @@ eval:
   service: ollama
   model: gemma2:9b
 transcription:
-  service: whisper
-  model: Systran/faster-distil-whisper-small.en
+  service: moonshine
+  model: small-streaming

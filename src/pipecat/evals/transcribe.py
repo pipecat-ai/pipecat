@@ -34,7 +34,7 @@ from typing import cast
 
 from loguru import logger
 
-from pipecat.evals.services import whisper_service
+from pipecat.evals.services import moonshine_service, whisper_service
 from pipecat.services.stt_service import STTService
 
 # STT services expect 16 kHz mono audio.
@@ -63,13 +63,18 @@ class EvalTranscriber:
     ones, whose results arrive out of band.
     """
 
-    def __init__(self, service: STTService):
+    def __init__(self, service: STTService, *, pad_seconds: float = SILENCE_PAD_S):
         """Initialize the transcriber.
 
         Args:
             service: A constructed ``STTService`` (e.g. from :meth:`from_config`).
+            pad_seconds: Silence padded onto each side of the segment before
+                transcription (see :data:`SILENCE_PAD_S`). Whisper needs it to keep
+                onset/offset words; Moonshine returns empty when fed leading
+                silence, so it uses ``0``.
         """
         self._service = service
+        self._pad_seconds = pad_seconds
         self._resampler = None
         # Optional sink for timing diagnostics; the harness points this at its
         # per-scenario debug trace.
@@ -111,9 +116,12 @@ class EvalTranscriber:
         name = str(config.get("service", "whisper")).lower()
         if name == "whisper":
             return cls(whisper_service(config))
+        if name == "moonshine":
+            # Moonshine returns empty when fed leading silence, so don't pad.
+            return cls(moonshine_service(config), pad_seconds=0)
 
         raise ValueError(
-            f"Unknown STT service: {name!r}. Known: whisper. "
+            f"Unknown STT service: {name!r}. Known: whisper, moonshine. "
             "Or set bot_audio.factory to a 'module.func' returning an STTService."
         )
 
@@ -148,9 +156,11 @@ class EvalTranscriber:
             pcm = await self._resampler.resample(pcm, sample_rate, STT_SAMPLE_RATE)
 
         # Pad with silence so the STT has a clean lead-in/lead-out and doesn't drop
-        # a short onset/offset word (see SILENCE_PAD_S).
-        pad = b"\x00\x00" * int(STT_SAMPLE_RATE * SILENCE_PAD_S)
-        pcm = pad + pcm + pad
+        # a short onset/offset word (see SILENCE_PAD_S). Skipped (pad_seconds=0) for
+        # STTs that mishandle leading silence, e.g. Moonshine.
+        if self._pad_seconds:
+            pad = b"\x00\x00" * int(STT_SAMPLE_RATE * self._pad_seconds)
+            pcm = pad + pcm + pad
 
         # run_stt transcribes the whole buffer and yields its TranscriptionFrame(s),
         # then the generator ends — so we just collect and join. No pipeline, no

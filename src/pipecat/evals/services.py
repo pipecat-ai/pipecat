@@ -95,6 +95,22 @@ def whisper_service(config: dict) -> STTService:
     )
 
 
+def moonshine_service(config: dict) -> STTService:
+    """Build a local Moonshine STT service from the ``bot_audio`` config.
+
+    Moonshine runs on the CPU via ONNX Runtime (no GPU, no API key) and is small
+    and fast. On the short, isolated bot-answer segments the harness transcribes,
+    it tends to keep the answer where Whisper sometimes drops it. ``model`` selects
+    the architecture (a :class:`~pipecat.services.moonshine.stt.Model` value or
+    string; default ``Model.SMALL_STREAMING``).
+    """
+    from pipecat.services.moonshine.stt import Model, MoonshineSTTService
+
+    return MoonshineSTTService(
+        settings=MoonshineSTTService.Settings(model=config.get("model") or Model.SMALL_STREAMING),
+    )
+
+
 def ollama_service(config: dict) -> LLMService[Any]:
     """Build a local Ollama LLM service from the ``judge:`` config."""
     from pipecat.services.ollama.llm import OLLamaLLMService
