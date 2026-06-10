@@ -60,7 +60,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
 
         Args:
             api_key: The API key for accessing SambaNova API.
-            model: The model identifier to use. Defaults to "Llama-4-Maverick-17B-128E-Instruct".
+            model: The model identifier to use. Defaults to "Meta-Llama-3.3-70B-Instruct".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SambaNovaLLMService.Settings(model=...)`` instead.
@@ -71,7 +71,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model="Llama-4-Maverick-17B-128E-Instruct")
+        default_settings = self.Settings(model="Meta-Llama-3.3-70B-Instruct")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
