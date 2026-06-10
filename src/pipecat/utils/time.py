@@ -20,7 +20,7 @@ def time_now_iso8601() -> str:
     Returns:
         The current UTC time in ISO8601 format with millisecond precision.
     """
-    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds")
+    return datetime.datetime.now(datetime.UTC).isoformat(timespec="milliseconds")
 
 
 def seconds_to_nanoseconds(seconds: float) -> int:

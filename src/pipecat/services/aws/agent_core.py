@@ -12,8 +12,7 @@ Amazon Bedrock AgentCore Runtime and streams their responses as LLMTextFrames.
 
 import asyncio
 import json
-import os
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import aioboto3
 from loguru import logger
@@ -26,16 +25,13 @@ from pipecat.frames.frames import (
     LLMTextFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.aws.utils import resolve_credentials
 
 
 def default_context_to_payload_transformer(
-    context: LLMContext | OpenAILLMContext,
-) -> Optional[str]:
+    context: LLMContext,
+) -> str | None:
     """Default transformer to create AgentCore payload from LLM context.
 
     Extracts the latest user or system message text and wraps it in {"prompt": "<text>"}.
@@ -72,7 +68,7 @@ def default_context_to_payload_transformer(
     return json.dumps({"prompt": prompt})
 
 
-def default_response_to_output_transformer(response_line: str) -> Optional[str]:
+def default_response_to_output_transformer(response_line: str) -> str | None:
     """Default transformer to extract output text from AgentCore response.
 
     Expects responses with {"response": "<text>"} format.
@@ -114,22 +110,23 @@ class AWSAgentCoreProcessor(FrameProcessor):
     def __init__(
         self,
         agentArn: str,
-        aws_access_key: Optional[str] = None,
-        aws_secret_key: Optional[str] = None,
-        aws_session_token: Optional[str] = None,
-        aws_region: Optional[str] = None,
-        context_to_payload_transformer: Optional[
-            Callable[[LLMContext | OpenAILLMContext], Optional[str]]
-        ] = None,
-        response_to_output_transformer: Optional[Callable[[str], Optional[str]]] = None,
+        aws_access_key: str | None = None,
+        aws_secret_key: str | None = None,
+        aws_session_token: str | None = None,
+        aws_region: str | None = None,
+        context_to_payload_transformer: Callable[[LLMContext], str | None] | None = None,
+        response_to_output_transformer: Callable[[str], str | None] | None = None,
         **kwargs,
     ):
         """Initialize the AWS AgentCore processor.
 
         Args:
             agentArn: The Amazon Web Services Resource Name (ARN) of the agent.
-            aws_access_key: AWS access key ID. If None, uses default credentials.
-            aws_secret_key: AWS secret access key. If None, uses default credentials.
+            aws_access_key: AWS access key ID. If None, falls back to
+                environment variables and the default boto3 credential chain
+                (instance profiles, IRSA, ECS task roles, SSO, etc.).
+            aws_secret_key: AWS secret access key. Same fallback behaviour as
+                ``aws_access_key``.
             aws_session_token: AWS session token for temporary credentials.
             aws_region: AWS region.
             context_to_payload_transformer: Optional callable to transform
@@ -145,13 +142,13 @@ class AWSAgentCoreProcessor(FrameProcessor):
         self._agentArn = agentArn
         self._aws_session = aioboto3.Session()
 
-        # Store AWS session parameters for creating client in async context
-        self._aws_params = {
-            "aws_access_key_id": aws_access_key or os.getenv("AWS_ACCESS_KEY_ID"),
-            "aws_secret_access_key": aws_secret_key or os.getenv("AWS_SECRET_ACCESS_KEY"),
-            "aws_session_token": aws_session_token or os.getenv("AWS_SESSION_TOKEN"),
-            "region_name": aws_region or os.getenv("AWS_REGION", "us-east-1"),
-        }
+        # Resolve credentials using the shared chain (explicit → env → boto3).
+        self._aws_params = resolve_credentials(
+            aws_access_key_id=aws_access_key,
+            aws_secret_access_key=aws_secret_key,
+            aws_session_token=aws_session_token,
+            region=aws_region,
+        ).to_boto_kwargs()
 
         # Set transformers with defaults
         self._context_to_payload_transformer = (
@@ -163,8 +160,8 @@ class AWSAgentCoreProcessor(FrameProcessor):
 
         # State for managing output response bookends
         self._output_response_open = False
-        self._last_text_frame_time: Optional[float] = None
-        self._close_task: Optional[asyncio.Task] = None
+        self._last_text_frame_time: float | None = None
+        self._close_task: asyncio.Task | None = None
         self._output_response_timeout = 1.0  # seconds
 
     async def _close_output_response_after_timeout(self):
@@ -200,14 +197,19 @@ class AWSAgentCoreProcessor(FrameProcessor):
             direction: The direction of frame flow in the pipeline.
         """
         await super().process_frame(frame, direction)
-        if isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
+        if isinstance(frame, LLMContextFrame):
             # Create payload to invoke AgentCore agent
             payload = self._context_to_payload_transformer(frame.context)
 
             if not payload:
                 return
 
-            async with self._aws_session.client("bedrock-agentcore", **self._aws_params) as client:
+            # aioboto3's `client()` is an async context manager but its stubs don't
+            # advertise `__aenter__` / `__aexit__` in a way pyright can see.
+            async with self._aws_session.client(  # pyright: ignore[reportGeneralTypeIssues]
+                "bedrock-agentcore",
+                **self._aws_params,  # pyright: ignore[reportArgumentType]
+            ) as client:
                 # Invoke the AgentCore agent
                 response = await client.invoke_agent_runtime(
                     agentRuntimeArn=self._agentArn, payload=payload.encode()

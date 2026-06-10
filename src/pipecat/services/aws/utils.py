@@ -4,10 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""AWS Transcribe utility functions and classes for WebSocket streaming.
+"""AWS utility functions for Pipecat services.
 
-This module provides utilities for creating presigned URLs, building event messages,
-and handling AWS event stream protocol for real-time transcription services.
+This module provides shared credential resolution and AWS Transcribe utilities
+for creating presigned URLs, building event messages, and handling AWS event
+stream protocol for real-time transcription services.
 """
 
 import binascii
@@ -15,23 +16,112 @@ import datetime
 import hashlib
 import hmac
 import json
+import os
 import struct
 import urllib.parse
-from typing import Dict, Optional
+from dataclasses import dataclass
+from typing import Any
+
+from loguru import logger
+
+
+@dataclass
+class AWSCredentials:
+    """Resolved AWS credentials ready for use by any AWS service."""
+
+    access_key: str | None
+    secret_key: str | None
+    session_token: str | None
+    region: str
+
+    def to_boto_kwargs(self) -> dict[str, str | None]:
+        """Return credentials as kwargs accepted by ``boto3``/``aioboto3`` clients."""
+        return {
+            "aws_access_key_id": self.access_key,
+            "aws_secret_access_key": self.secret_key,
+            "aws_session_token": self.session_token,
+            "region_name": self.region,
+        }
+
+
+def resolve_credentials(
+    *,
+    aws_access_key_id: str | None = None,
+    aws_secret_access_key: str | None = None,
+    aws_session_token: str | None = None,
+    region: str | None = None,
+) -> AWSCredentials:
+    """Resolve AWS credentials using the standard fallback chain.
+
+    Resolution order:
+    1. Explicit parameters
+    2. Environment variables (``AWS_ACCESS_KEY_ID``, ``AWS_SECRET_ACCESS_KEY``,
+       ``AWS_SESSION_TOKEN``, ``AWS_REGION``)
+    3. Default boto3/botocore credential chain (instance profiles, IRSA,
+       ECS task roles, SSO, credential files, etc.)
+
+    The boto3 fallback (step 3) is only attempted when *both* access key and
+    secret key are still unresolved after steps 1-2.  This avoids replacing
+    explicitly provided credentials with ambient ones.
+
+    Args:
+        aws_access_key_id: Explicit access key ID.
+        aws_secret_access_key: Explicit secret access key.
+        aws_session_token: Explicit session token.
+        region: Explicit AWS region.
+
+    Returns:
+        An :class:`AWSCredentials` instance.  ``access_key`` and
+        ``secret_key`` may still be ``None`` if no credentials could be
+        resolved (the caller should raise an appropriate error).
+    """
+    access_key = aws_access_key_id or os.getenv("AWS_ACCESS_KEY_ID")
+    secret_key = aws_secret_access_key or os.getenv("AWS_SECRET_ACCESS_KEY")
+    session_token = aws_session_token or os.getenv("AWS_SESSION_TOKEN")
+    resolved_region = region or os.getenv("AWS_REGION", "us-east-1")
+
+    # Fall back to the boto3 credential provider chain (pod roles, IRSA,
+    # instance profiles, SSO, credential files, etc.) when explicit
+    # credentials were not supplied.
+    if not access_key and not secret_key:
+        try:
+            import boto3
+
+            session = boto3.Session(region_name=resolved_region)
+            creds = session.get_credentials()
+            if creds:
+                frozen = creds.get_frozen_credentials()
+                access_key = access_key or frozen.access_key
+                secret_key = secret_key or frozen.secret_key
+                session_token = session_token or frozen.token
+        except ImportError:
+            logger.debug(
+                "boto3 not available for credential chain fallback; "
+                "install pipecat-ai[aws] for full credential support."
+            )
+        except Exception as e:
+            logger.warning(f"Failed to resolve AWS credentials via boto3 chain: {e}")
+
+    return AWSCredentials(
+        access_key=access_key,
+        secret_key=secret_key,
+        session_token=session_token,
+        region=resolved_region,
+    )
 
 
 def get_presigned_url(
     *,
     region: str,
-    credentials: Dict[str, Optional[str]],
+    credentials: dict[str, str | None],
     language_code: str,
     media_encoding: str = "pcm",
     sample_rate: int = 16000,
     number_of_channels: int = 1,
     enable_partial_results_stabilization: bool = True,
     partial_results_stability: str = "high",
-    vocabulary_name: Optional[str] = None,
-    vocabulary_filter_name: Optional[str] = None,
+    vocabulary_name: str | None = None,
+    vocabulary_filter_name: str | None = None,
     show_speaker_label: bool = False,
     enable_channel_identification: bool = False,
 ) -> str:
@@ -93,14 +183,18 @@ class AWSTranscribePresignedURL:
     """
 
     def __init__(
-        self, access_key: str, secret_key: str, session_token: str, region: str = "us-east-1"
+        self,
+        access_key: str,
+        secret_key: str,
+        session_token: str | None,
+        region: str = "us-east-1",
     ):
         """Initialize the presigned URL generator.
 
         Args:
             access_key: AWS access key ID.
             secret_key: AWS secret access key.
-            session_token: AWS session token for temporary credentials.
+            session_token: AWS session token for temporary credentials (optional).
             region: AWS region for the service. Defaults to "us-east-1".
         """
         self.access_key = access_key
@@ -130,8 +224,8 @@ class AWSTranscribePresignedURL:
         sample_rate: int,
         language_code: str = "",
         media_encoding: str = "pcm",
-        vocabulary_name: str = "",
-        vocabulary_filter_name: str = "",
+        vocabulary_name: str | None = None,
+        vocabulary_filter_name: str | None = None,
         show_speaker_label: bool = False,
         enable_channel_identification: bool = False,
         number_of_channels: int = 1,
@@ -199,7 +293,7 @@ class AWSTranscribePresignedURL:
             self.canonical_querystring += "&vocabulary-name=" + vocabulary_name
 
         # Create payload hash
-        self.payload_hash = hashlib.sha256("".encode("utf-8")).hexdigest()
+        self.payload_hash = hashlib.sha256(b"").hexdigest()
 
         # Create canonical request
         self.canonical_request = f"{self.method}\n{self.canonical_uri}\n{self.canonical_querystring}\n{self.canonical_headers}\n{self.signed_headers}\n{self.payload_hash}"
@@ -213,7 +307,7 @@ class AWSTranscribePresignedURL:
 
         # Calculate signature
         k_date = hmac.new(
-            f"AWS4{self.secret_key}".encode("utf-8"), self.datestamp.encode("utf-8"), hashlib.sha256
+            f"AWS4{self.secret_key}".encode(), self.datestamp.encode("utf-8"), hashlib.sha256
         ).digest()
         k_region = hmac.new(k_date, self.region.encode("utf-8"), hashlib.sha256).digest()
         k_service = hmac.new(k_region, self.service.encode("utf-8"), hashlib.sha256).digest()

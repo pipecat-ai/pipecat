@@ -6,9 +6,9 @@
 
 import importlib.util
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 GREEN = "\033[92m"
 RED = "\033[91m"
@@ -79,6 +79,8 @@ def load_module_from_path(path: str | Path):
     module_name = path.stem
 
     spec = importlib.util.spec_from_file_location(module_name, str(path))
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load module spec from {path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

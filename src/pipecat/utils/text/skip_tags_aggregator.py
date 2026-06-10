@@ -11,7 +11,7 @@ between specified start/end tag pairs, ensuring that tagged content is processed
 as a unit regardless of internal punctuation.
 """
 
-from typing import AsyncIterator, Optional, Sequence
+from collections.abc import AsyncIterator, Sequence
 
 from pipecat.utils.string import StartEndTags, parse_start_end_tags
 from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType
@@ -41,7 +41,7 @@ class SkipTagsAggregator(SimpleTextAggregator):
         """
         super().__init__(**kwargs)
         self._tags = tags
-        self._current_tag: Optional[StartEndTags] = None
+        self._current_tag: StartEndTags | None = None
         self._current_tag_index: int = 0
 
     async def aggregate(self, text: str) -> AsyncIterator[Aggregation]:

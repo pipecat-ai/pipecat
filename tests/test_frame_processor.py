@@ -7,7 +7,6 @@
 import asyncio
 import unittest
 from dataclasses import dataclass, field
-from typing import List
 
 from pipecat.frames.frames import (
     DataFrame,
@@ -35,7 +34,7 @@ class BroadcastTestFrame(DataFrame):
 
     text: str = ""
     value: int = 0
-    items: List[str] = field(default_factory=list)
+    items: list[str] = field(default_factory=list)
 
 
 class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
@@ -191,8 +190,8 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
 
     async def test_broadcast_frame(self):
         """Test that broadcast_frame creates two separate frames with fresh IDs."""
-        downstream_frames: List[Frame] = []
-        upstream_frames: List[Frame] = []
+        downstream_frames: list[Frame] = []
+        upstream_frames: list[Frame] = []
 
         class BroadcastTestProcessor(FrameProcessor):
             async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -205,7 +204,7 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
                     await self.push_frame(frame, direction)
 
         class CaptureProcessor(FrameProcessor):
-            def __init__(self, capture_list: List[Frame], direction: FrameDirection):
+            def __init__(self, capture_list: list[Frame], direction: FrameDirection):
                 super().__init__()
                 self._capture_list = capture_list
                 self._capture_direction = direction
@@ -256,9 +255,9 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
 
     async def test_broadcast_frame_instance(self):
         """Test that broadcast_frame_instance shallow-copies all fields except id and name."""
-        downstream_frames: List[Frame] = []
-        upstream_frames: List[Frame] = []
-        original_frame: List[Frame] = []
+        downstream_frames: list[Frame] = []
+        upstream_frames: list[Frame] = []
+        original_frame: list[Frame] = []
 
         class BroadcastInstanceTestProcessor(FrameProcessor):
             async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -273,7 +272,7 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
                     await self.push_frame(frame, direction)
 
         class CaptureProcessor(FrameProcessor):
-            def __init__(self, capture_list: List[Frame], direction: FrameDirection):
+            def __init__(self, capture_list: list[Frame], direction: FrameDirection):
                 super().__init__()
                 self._capture_list = capture_list
                 self._capture_direction = direction
@@ -346,7 +345,7 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
         This test simulates issue #3524 where an InterruptionFrame during slow
         processing would cause terminal frames to be lost, freezing the pipeline.
         """
-        received_frames: List[Frame] = []
+        received_frames: list[Frame] = []
 
         class DelayAndInterruptProcessor(FrameProcessor):
             """This processor delays processing and then generates an interruption.
@@ -398,7 +397,7 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
         Similar to test_terminal_frames_survive_interruption but specifically
         for StopFrame.
         """
-        received_frames: List[Frame] = []
+        received_frames: list[Frame] = []
 
         class DelayAndInterruptProcessor(FrameProcessor):
             """This processor delays processing and then generates an interruption."""

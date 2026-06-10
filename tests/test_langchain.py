@@ -6,8 +6,8 @@
 
 import unittest
 
-from langchain.prompts import ChatPromptTemplate
 from langchain_core.language_models import FakeStreamingListLLM
+from langchain_core.prompts import ChatPromptTemplate
 
 from pipecat.frames.frames import (
     InterruptionFrame,

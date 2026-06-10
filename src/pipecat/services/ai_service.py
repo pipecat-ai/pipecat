@@ -10,7 +10,9 @@ Provides the foundation for all AI services in the Pipecat framework, including
 model management, settings handling, and frame processing lifecycle methods.
 """
 
-from typing import Any, AsyncGenerator, Dict
+import warnings
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from loguru import logger
 
@@ -50,7 +52,7 @@ class AIService(FrameProcessor):
             or ServiceSettings()
         )
         self._sync_model_name_to_metrics()
-        self._session_properties: Dict[str, Any] = {}
+        self._session_properties: dict[str, Any] = {}
         self._tracing_enabled: bool = False
         self._tracing_context = None
 
@@ -64,8 +66,9 @@ class AIService(FrameProcessor):
         Args:
             model: The name of the AI model to use.
         """
+        model = self._settings.model
         self.set_core_metrics_data(
-            MetricsData(processor=self.name, model=self._settings.model or "")
+            MetricsData(processor=self.name, model=model if isinstance(model, str) else "")
         )
 
     async def start(self, frame: StartFrame):
@@ -103,7 +106,7 @@ class AIService(FrameProcessor):
         """
         pass
 
-    async def _update_settings(self, delta: ServiceSettings) -> Dict[str, Any]:
+    async def _update_settings(self, delta: ServiceSettings) -> dict[str, Any]:
         """Apply a settings delta and return the changed fields.
 
         The delta is applied to ``_settings`` and a dict mapping each changed
@@ -129,6 +132,43 @@ class AIService(FrameProcessor):
             logger.info(f"{self.name}: updated settings fields: {set(changed)}")
 
         return changed
+
+    def _warn_init_param_moved_to_settings(
+        self,
+        param_name: str,
+        settings_field: str | None = None,
+        stacklevel: int = 3,
+    ):
+        """Warn that an ``__init__`` param has moved to ``Settings``.
+
+        Emits a ``DeprecationWarning`` directing users to the canonical
+        ``settings=ServiceClass.Settings(field=...)`` API.
+
+        Args:
+            param_name: Name of the deprecated ``__init__`` parameter.
+            settings_field: The corresponding field on the ``Settings``
+                dataclass, if different from *param_name*.  When ``None``
+                the message omits the field hint.
+            stacklevel: Stack depth for the warning.  Default ``3`` targets
+                the caller's caller (i.e. user code that instantiated the
+                service).
+        """
+        label = f"{type(self).__name__}.Settings"
+        if settings_field:
+            msg = (
+                f"The `{param_name}` parameter is deprecated. "
+                f"Use `settings={label}({settings_field}=...)` instead. "
+                f"If both are provided, `settings` takes precedence."
+            )
+        else:
+            msg = (
+                f"The `{param_name}` parameter is deprecated. "
+                f"Use `settings={label}(...)` instead. "
+                f"If both are provided, `settings` takes precedence."
+            )
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(msg, DeprecationWarning, stacklevel=stacklevel)
 
     def _warn_unhandled_updated_settings(self, unhandled):
         """Log a warning for settings changes that won't take effect at runtime.

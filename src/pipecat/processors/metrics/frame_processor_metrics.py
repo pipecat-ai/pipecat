@@ -7,7 +7,6 @@
 """Frame processor metrics collection and reporting."""
 
 import time
-from typing import Optional
 
 from loguru import logger
 
@@ -21,7 +20,6 @@ from pipecat.metrics.metrics import (
     TTFBMetricsData,
     TTSUsageMetricsData,
 )
-from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
 
 
@@ -41,36 +39,14 @@ class FrameProcessorMetrics(BaseObject):
         processing times, and usage statistics.
         """
         super().__init__()
-        self._task_manager = None
         self._start_ttfb_time = 0
         self._start_processing_time = 0
         self._start_text_aggregation_time = 0
         self._last_ttfb_time = 0
         self._should_report_ttfb = True
 
-    async def setup(self, task_manager: BaseTaskManager):
-        """Set up the metrics collector with a task manager.
-
-        Args:
-            task_manager: The task manager for handling async operations.
-        """
-        self._task_manager = task_manager
-
-    async def cleanup(self):
-        """Clean up metrics collection resources."""
-        await super().cleanup()
-
     @property
-    def task_manager(self) -> BaseTaskManager:
-        """Get the associated task manager.
-
-        Returns:
-            The task manager instance for async operations.
-        """
-        return self._task_manager
-
-    @property
-    def ttfb(self) -> Optional[float]:
+    def ttfb(self) -> float | None:
         """Get the current TTFB value in seconds.
 
         Returns:
@@ -110,7 +86,7 @@ class FrameProcessorMetrics(BaseObject):
         self._core_metrics_data = MetricsData(processor=name)
 
     async def start_ttfb_metrics(
-        self, *, start_time: Optional[float] = None, report_only_initial_ttfb: bool
+        self, *, start_time: float | None = None, report_only_initial_ttfb: bool
     ):
         """Start measuring time-to-first-byte (TTFB).
 
@@ -124,7 +100,7 @@ class FrameProcessorMetrics(BaseObject):
             self._last_ttfb_time = 0
             self._should_report_ttfb = not report_only_initial_ttfb
 
-    async def stop_ttfb_metrics(self, *, end_time: Optional[float] = None):
+    async def stop_ttfb_metrics(self, *, end_time: float | None = None):
         """Stop TTFB measurement and generate metrics frame.
 
         Args:
@@ -147,7 +123,7 @@ class FrameProcessorMetrics(BaseObject):
         self._start_ttfb_time = 0
         return MetricsFrame(data=[ttfb])
 
-    async def start_processing_metrics(self, *, start_time: Optional[float] = None):
+    async def start_processing_metrics(self, *, start_time: float | None = None):
         """Start measuring processing time.
 
         Args:
@@ -156,7 +132,7 @@ class FrameProcessorMetrics(BaseObject):
         """
         self._start_processing_time = start_time or time.time()
 
-    async def stop_processing_metrics(self, *, end_time: Optional[float] = None):
+    async def stop_processing_metrics(self, *, end_time: float | None = None):
         """Stop processing time measurement and generate metrics frame.
 
         Args:

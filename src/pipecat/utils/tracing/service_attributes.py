@@ -11,7 +11,7 @@ attributes to OpenTelemetry spans, following standard semantic conventions
 where applicable and Pipecat-specific conventions for additional context.
 """
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 # Import for type checking only
 if TYPE_CHECKING:
@@ -25,20 +25,20 @@ if is_tracing_available():
     from opentelemetry.trace import Span
 
 
-def _get_gen_ai_system_from_service_name(service_name: str) -> str:
-    """Extract the standardized gen_ai.system value from a service class name.
+def _get_provider_name_from_service_name(service_name: str) -> str:
+    """Extract the standardized gen_ai.provider.name value from a service class name.
 
     Source:
-    https://opentelemetry.io/docs/specs/semconv/attributes-registry/gen-ai/#gen-ai-system
+    https://opentelemetry.io/docs/specs/semconv/attributes-registry/gen-ai/
 
     Uses standard OTel names where possible, with special case mappings for
     service names that don't follow the pattern.
 
     Args:
-        service_name: The service class name to extract system name from.
+        service_name: The service class name to extract provider name from.
 
     Returns:
-        The standardized gen_ai.system value.
+        The standardized gen_ai.provider.name value.
     """
     SPECIAL_CASE_MAPPINGS = {
         # AWS
@@ -47,7 +47,6 @@ def _get_gen_ai_system_from_service_name(service_name: str) -> str:
         "AzureLLMService": "az.ai.openai",
         # Google
         "GoogleLLMService": "gcp.gemini",
-        "GoogleLLMOpenAIBetaService": "gcp.gemini",
         "GoogleVertexLLMService": "gcp.vertex_ai",
         # Others
         "GrokLLMService": "xai",
@@ -69,11 +68,11 @@ def add_tts_span_attributes(
     service_name: str,
     model: str,
     voice_id: str,
-    text: Optional[str] = None,
+    text: str | None = None,
     settings: Optional["ServiceSettings"] = None,
-    character_count: Optional[int] = None,
+    character_count: int | None = None,
     operation_name: str = "tts",
-    ttfb: Optional[float] = None,
+    ttfb: float | None = None,
     **kwargs,
 ) -> None:
     """Add TTS-specific attributes to a span.
@@ -91,7 +90,7 @@ def add_tts_span_attributes(
         **kwargs: Additional attributes to add.
     """
     # Add standard attributes
-    span.set_attribute("gen_ai.system", service_name.replace("TTSService", "").lower())
+    span.set_attribute("gen_ai.provider.name", service_name.replace("TTSService", "").lower())
     span.set_attribute("gen_ai.request.model", model)
     span.set_attribute("gen_ai.operation.name", operation_name)
     span.set_attribute("gen_ai.output.type", "speech")
@@ -107,7 +106,7 @@ def add_tts_span_attributes(
     if ttfb is not None:
         span.set_attribute("metrics.ttfb", ttfb)
 
-    # Add settings if provided
+    # Use given_fields() defensively in case a service doesn't initialize all settings.
     if settings:
         for key, value in settings.given_fields().items():
             if isinstance(value, (str, int, float, bool)):
@@ -124,13 +123,13 @@ def add_stt_span_attributes(
     service_name: str,
     model: str,
     operation_name: str = "stt",
-    transcript: Optional[str] = None,
-    is_final: Optional[bool] = None,
-    language: Optional[str] = None,
-    user_id: Optional[str] = None,
+    transcript: str | None = None,
+    is_final: bool | None = None,
+    language: str | None = None,
+    user_id: str | None = None,
     settings: Optional["ServiceSettings"] = None,
     vad_enabled: bool = False,
-    ttfb: Optional[float] = None,
+    ttfb: float | None = None,
     **kwargs,
 ) -> None:
     """Add STT-specific attributes to a span.
@@ -150,7 +149,7 @@ def add_stt_span_attributes(
         **kwargs: Additional attributes to add.
     """
     # Add standard attributes
-    span.set_attribute("gen_ai.system", service_name.replace("STTService", "").lower())
+    span.set_attribute("gen_ai.provider.name", service_name.replace("STTService", "").lower())
     span.set_attribute("gen_ai.request.model", model)
     span.set_attribute("gen_ai.operation.name", operation_name)
     span.set_attribute("vad_enabled", vad_enabled)
@@ -171,7 +170,7 @@ def add_stt_span_attributes(
     if ttfb is not None:
         span.set_attribute("metrics.ttfb", ttfb)
 
-    # Add settings if provided
+    # Use given_fields() defensively in case a service doesn't initialize all settings.
     if settings:
         for key, value in settings.given_fields().items():
             if isinstance(value, (str, int, float, bool)):
@@ -188,15 +187,15 @@ def add_llm_span_attributes(
     service_name: str,
     model: str,
     stream: bool = True,
-    messages: Optional[str] = None,
-    output: Optional[str] = None,
-    tools: Optional[str] = None,
-    tool_count: Optional[int] = None,
-    tool_choice: Optional[str] = None,
-    system: Optional[str] = None,
-    parameters: Optional[Dict[str, Any]] = None,
-    extra_parameters: Optional[Dict[str, Any]] = None,
-    ttfb: Optional[float] = None,
+    messages: str | None = None,
+    output: str | None = None,
+    tools: str | None = None,
+    tool_count: int | None = None,
+    tool_choice: str | None = None,
+    system_instructions: str | None = None,
+    parameters: dict[str, Any] | None = None,
+    extra_parameters: dict[str, Any] | None = None,
+    ttfb: float | None = None,
     **kwargs,
 ) -> None:
     """Add LLM-specific attributes to a span.
@@ -211,14 +210,14 @@ def add_llm_span_attributes(
         tools: JSON-serialized tools configuration.
         tool_count: Number of tools available.
         tool_choice: Tool selection configuration.
-        system: System message.
+        system_instructions: System instructions.
         parameters: Service parameters.
         extra_parameters: Additional parameters.
         ttfb: Time to first byte in seconds.
         **kwargs: Additional attributes to add.
     """
     # Add standard attributes
-    span.set_attribute("gen_ai.system", _get_gen_ai_system_from_service_name(service_name))
+    span.set_attribute("gen_ai.provider.name", _get_provider_name_from_service_name(service_name))
     span.set_attribute("gen_ai.request.model", model)
     span.set_attribute("gen_ai.operation.name", "chat")
     span.set_attribute("gen_ai.output.type", "text")
@@ -240,8 +239,8 @@ def add_llm_span_attributes(
     if tool_choice:
         span.set_attribute("tool_choice", tool_choice)
 
-    if system:
-        span.set_attribute("system", system)
+    if system_instructions:
+        span.set_attribute("gen_ai.system_instructions", system_instructions)
 
     if ttfb is not None:
         span.set_attribute("metrics.ttfb", ttfb)
@@ -281,16 +280,16 @@ def add_gemini_live_span_attributes(
     service_name: str,
     model: str,
     operation_name: str,
-    voice_id: Optional[str] = None,
-    language: Optional[str] = None,
-    modalities: Optional[str] = None,
+    voice_id: str | None = None,
+    language: str | None = None,
+    modalities: str | None = None,
     settings: Optional["ServiceSettings"] = None,
-    tools: Optional[List[Dict]] = None,
-    tools_serialized: Optional[str] = None,
-    transcript: Optional[str] = None,
-    is_input: Optional[bool] = None,
-    text_output: Optional[str] = None,
-    audio_data_size: Optional[int] = None,
+    tools: list[dict] | None = None,
+    tools_serialized: str | None = None,
+    transcript: str | None = None,
+    is_input: bool | None = None,
+    text_output: str | None = None,
+    audio_data_size: int | None = None,
     **kwargs,
 ) -> None:
     """Add Gemini Live specific attributes to a span.
@@ -313,7 +312,7 @@ def add_gemini_live_span_attributes(
         **kwargs: Additional attributes to add.
     """
     # Add standard attributes
-    span.set_attribute("gen_ai.system", "gcp.gemini")
+    span.set_attribute("gen_ai.provider.name", "gcp.gemini")
     span.set_attribute("gen_ai.request.model", model)
     span.set_attribute("gen_ai.operation.name", operation_name)
     span.set_attribute("service.operation", operation_name)
@@ -359,7 +358,7 @@ def add_gemini_live_span_attributes(
     if tools_serialized:
         span.set_attribute("tools.definitions", tools_serialized)
 
-    # Add settings if provided
+    # Use given_fields() defensively in case a service doesn't initialize all settings.
     if settings:
         for key, value in settings.given_fields().items():
             if isinstance(value, (str, int, float, bool)):
@@ -386,14 +385,14 @@ def add_openai_realtime_span_attributes(
     service_name: str,
     model: str,
     operation_name: str,
-    session_properties: Optional[Dict[str, Any]] = None,
-    transcript: Optional[str] = None,
-    is_input: Optional[bool] = None,
-    context_messages: Optional[str] = None,
-    function_calls: Optional[List[Dict]] = None,
-    tools: Optional[List[Dict]] = None,
-    tools_serialized: Optional[str] = None,
-    audio_data_size: Optional[int] = None,
+    session_properties: dict[str, Any] | None = None,
+    transcript: str | None = None,
+    is_input: bool | None = None,
+    context_messages: str | None = None,
+    function_calls: list[dict] | None = None,
+    tools: list[dict] | None = None,
+    tools_serialized: str | None = None,
+    audio_data_size: int | None = None,
     **kwargs,
 ) -> None:
     """Add OpenAI Realtime specific attributes to a span.
@@ -414,7 +413,7 @@ def add_openai_realtime_span_attributes(
         **kwargs: Additional attributes to add.
     """
     # Add standard attributes
-    span.set_attribute("gen_ai.system", "openai")
+    span.set_attribute("gen_ai.provider.name", "openai")
     span.set_attribute("gen_ai.request.model", model)
     span.set_attribute("gen_ai.operation.name", operation_name)
     span.set_attribute("service.operation", operation_name)
@@ -441,7 +440,7 @@ def add_openai_realtime_span_attributes(
             if isinstance(tool, dict) and "name" in tool:
                 tool_names.append(tool["name"])
             elif hasattr(tool, "name"):
-                tool_names.append(tool.name)
+                tool_names.append(getattr(tool, "name"))
             elif isinstance(tool, dict) and "function" in tool and "name" in tool["function"]:
                 tool_names.append(tool["function"]["name"])
 
@@ -456,7 +455,7 @@ def add_openai_realtime_span_attributes(
         if function_calls:
             call = function_calls[0]
             if hasattr(call, "name"):
-                span.set_attribute("function_calls.first_name", call.name)
+                span.set_attribute("function_calls.first_name", getattr(call, "name"))
             elif isinstance(call, dict) and "name" in call:
                 span.set_attribute("function_calls.first_name", call["name"])
 

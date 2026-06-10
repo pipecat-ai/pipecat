@@ -23,11 +23,10 @@ Audio Format:
 import json
 import uuid
 from datetime import timedelta
-from enum import Enum
-from typing import Any, Dict, List, Optional
+from enum import StrEnum
+from typing import Any
 
 from loguru import logger
-from pydantic import BaseModel
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.resamplers.soxr_stream_resampler import SOXRStreamAudioResampler
@@ -47,7 +46,7 @@ from pipecat.frames.frames import (
 from pipecat.serializers.base_serializer import FrameSerializer
 
 
-class AudioHookMessageType(str, Enum):
+class AudioHookMessageType(StrEnum):
     """AudioHook protocol message types."""
 
     OPEN = "open"
@@ -64,7 +63,7 @@ class AudioHookMessageType(str, Enum):
     DISCONNECT = "disconnect"
 
 
-class AudioHookChannel(str, Enum):
+class AudioHookChannel(StrEnum):
     """AudioHook audio channel configuration."""
 
     EXTERNAL = "external"  # Customer audio only (mono)
@@ -72,7 +71,7 @@ class AudioHookChannel(str, Enum):
     BOTH = "both"  # Stereo: external=left, internal=right
 
 
-class AudioHookMediaFormat(str, Enum):
+class AudioHookMediaFormat(StrEnum):
     """Supported audio formats."""
 
     PCMU = "PCMU"  # μ-law, 8kHz
@@ -96,8 +95,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
     - Text WebSocket frames for JSON control messages
     - Binary WebSocket frames for audio data
 
-    Example usage:
-        ```python
+    Example usage::
+
         serializer = GenesysAudioHookSerializer(
             params=GenesysAudioHookSerializer.InputParams(
                 channel=AudioHookChannel.EXTERNAL,
@@ -123,9 +122,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
 
         # Set output variables to return to Architect
         serializer.set_output_variables({"intent": "billing", "resolved": True})
-        ```
 
-    Attributes:
+    Parameters:
         PROTOCOL_VERSION: The AudioHook protocol version (currently "2").
     """
 
@@ -134,7 +132,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
     class InputParams(FrameSerializer.InputParams):
         """Configuration parameters for GenesysAudioHookSerializer.
 
-        Attributes:
+        Parameters:
             genesys_sample_rate: Sample rate used by Genesys (default: 8000 Hz).
             sample_rate: Optional override for pipeline input sample rate.
             channel: Which audio channels to process (external, internal, both).
@@ -148,18 +146,18 @@ class GenesysAudioHookSerializer(FrameSerializer):
         """
 
         genesys_sample_rate: int = 8000
-        sample_rate: Optional[int] = None
+        sample_rate: int | None = None
         channel: AudioHookChannel = AudioHookChannel.EXTERNAL
         media_format: AudioHookMediaFormat = AudioHookMediaFormat.PCMU
         process_external: bool = True
         process_internal: bool = False
-        supported_languages: Optional[List[str]] = None
-        selected_language: Optional[str] = None
+        supported_languages: list[str] | None = None
+        selected_language: str | None = None
         start_paused: bool = False
 
     def __init__(
         self,
-        params: Optional[InputParams] = None,
+        params: InputParams | None = None,
         **kwargs,
     ):
         """Initialize the GenesysAudioHookSerializer.
@@ -168,7 +166,9 @@ class GenesysAudioHookSerializer(FrameSerializer):
             params: Configuration parameters.
             **kwargs: Additional arguments passed to BaseObject (e.g., name).
         """
-        super().__init__(params or GenesysAudioHookSerializer.InputParams(), **kwargs)
+        params = params or GenesysAudioHookSerializer.InputParams()
+        super().__init__(params, **kwargs)
+        self._params: GenesysAudioHookSerializer.InputParams = params
 
         self._genesys_sample_rate = self._params.genesys_sample_rate
         self._sample_rate = 0  # Pipeline input rate, set in setup()
@@ -187,12 +187,12 @@ class GenesysAudioHookSerializer(FrameSerializer):
         self._position = timedelta(0)
 
         # Session metadata
-        self._conversation_id: Optional[str] = None
-        self._participant: Optional[Dict[str, Any]] = None
-        self._custom_config: Optional[Dict[str, Any]] = None
-        self._media_info: Optional[List[Dict[str, Any]]] = None
-        self._input_variables: Optional[Dict[str, Any]] = None  # Custom input from Genesys
-        self._output_variables: Optional[Dict[str, Any]] = None  # Custom output to Genesys
+        self._conversation_id: str | None = None
+        self._participant: dict[str, Any] | None = None
+        self._custom_config: dict[str, Any] | None = None
+        self._media_info: list[dict[str, Any]] | None = None
+        self._input_variables: dict[str, Any] | None = None  # Custom input from Genesys
+        self._output_variables: dict[str, Any] | None = None  # Custom output to Genesys
 
         # Event handlers
         self._register_event_handler("on_open")
@@ -209,7 +209,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         return self._session_id
 
     @property
-    def conversation_id(self) -> Optional[str]:
+    def conversation_id(self) -> str | None:
         """Get the Genesys conversation ID."""
         return self._conversation_id
 
@@ -224,21 +224,21 @@ class GenesysAudioHookSerializer(FrameSerializer):
         return self._is_paused
 
     @property
-    def participant(self) -> Optional[Dict[str, Any]]:
+    def participant(self) -> dict[str, Any] | None:
         """Get participant info (ani, dnis, etc.) from the open message."""
         return self._participant
 
     @property
-    def input_variables(self) -> Optional[Dict[str, Any]]:
+    def input_variables(self) -> dict[str, Any] | None:
         """Get custom input variables from the open message."""
         return self._input_variables
 
     @property
-    def output_variables(self) -> Optional[Dict[str, Any]]:
+    def output_variables(self) -> dict[str, Any] | None:
         """Get custom output variables to send back to Genesys."""
         return self._output_variables
 
-    def set_output_variables(self, variables: Dict[str, Any]) -> None:
+    def set_output_variables(self, variables: dict[str, Any]) -> None:
         """Set custom output variables to send back to Genesys on close.
 
         These variables will be included in the 'closed' response when Genesys
@@ -247,8 +247,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
         Args:
             variables: Dictionary of custom variables to send to Genesys.
 
-        Example:
-            ```python
+        Example::
+
             # During the conversation, collect data and set it
             serializer.set_output_variables({
                 "intent": "billing_inquiry",
@@ -256,7 +256,6 @@ class GenesysAudioHookSerializer(FrameSerializer):
                 "summary": "Customer asked about their bill",
                 "transfer_to": "billing_queue"
             })
-            ```
         """
         self._output_variables = variables
         logger.debug(f"Output variables set: {variables}")
@@ -308,9 +307,9 @@ class GenesysAudioHookSerializer(FrameSerializer):
     def _create_message(
         self,
         msg_type: AudioHookMessageType,
-        parameters: Optional[Dict[str, Any]] = None,
+        parameters: dict[str, Any] | None = None,
         include_position: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a protocol message with common fields.
 
         Based on the Genesys AudioHook protocol, responses include:
@@ -337,17 +336,16 @@ class GenesysAudioHookSerializer(FrameSerializer):
         if include_position:
             msg["position"] = self._format_position(self._position)
 
-        if parameters:
-            msg["parameters"] = parameters
+        msg["parameters"] = parameters if parameters is not None else {}
 
         return msg
 
     def create_opened_response(
         self,
         start_paused: bool = False,
-        supported_languages: Optional[List[str]] = None,
-        selected_language: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        supported_languages: list[str] | None = None,
+        selected_language: str | None = None,
+    ) -> dict[str, Any]:
         """Create an 'opened' response message for the client.
 
         This should be sent in response to an 'open' message from Genesys.
@@ -401,8 +399,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
 
     def create_closed_response(
         self,
-        output_variables: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        output_variables: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Create a 'closed' response message.
 
         This should be sent in response to a 'close' message from Genesys.
@@ -415,8 +413,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
         Returns:
             Dictionary of the closed response message.
 
-        Example:
-            ```python
+        Example::
+
             # Pass custom data back to Genesys
             serializer.create_closed_response(
                 output_variables={
@@ -425,9 +423,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
                     "summary": "Customer asked about their bill"
                 }
             )
-            ```
         """
-        parameters: Optional[Dict[str, Any]] = None
+        parameters: dict[str, Any] | None = None
 
         if output_variables:
             parameters = {"outputVariables": output_variables}
@@ -442,7 +439,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
 
         return msg
 
-    def create_pong_response(self) -> Dict[str, Any]:
+    def create_pong_response(self) -> dict[str, Any]:
         """Create a 'pong' response message.
 
         This should be sent in response to a 'ping' message from Genesys.
@@ -453,7 +450,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         msg = self._create_message(AudioHookMessageType.PONG)
         return msg
 
-    def create_resumed_response(self) -> Dict[str, Any]:
+    def create_resumed_response(self) -> dict[str, Any]:
         """Create a 'resumed' response message.
 
         This should be sent in response to a 'pause' message when ready to resume.
@@ -468,7 +465,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
 
         return msg
 
-    def create_barge_in_event(self) -> Dict[str, Any]:
+    def create_barge_in_event(self) -> dict[str, Any]:
         """Create a barge-in event message.
 
         This notifies Genesys Cloud that the user has interrupted the bot's
@@ -490,9 +487,9 @@ class GenesysAudioHookSerializer(FrameSerializer):
         self,
         reason: str = "completed",
         action: str = "transfer",
-        output_variables: Optional[Dict[str, Any]] = None,
-        info: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        output_variables: dict[str, Any] | None = None,
+        info: str | None = None,
+    ) -> dict[str, Any]:
         """Create a 'disconnect' message to initiate session termination.
 
         Args:
@@ -504,7 +501,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         Returns:
             Dictionary of the disconnect message.
         """
-        parameters: Dict[str, Any] = {"reason": reason}
+        parameters: dict[str, Any] = {"reason": reason}
 
         # Build outputVariables
         out_vars = {"action": action}
@@ -528,7 +525,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         code: int,
         message: str,
         retryable: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create an 'error' message.
 
         Args:
@@ -705,7 +702,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
 
         return audio_frame
 
-    async def _handle_control_message(self, message: Dict[str, Any]) -> Frame | None:
+    async def _handle_control_message(self, message: dict[str, Any]) -> Frame | None:
         """Handle a JSON control message from Genesys.
 
         Args:
@@ -753,7 +750,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
             logger.warning(f"Unknown AudioHook message type: {msg_type}")
             return None
 
-    async def _handle_open(self, message: Dict[str, Any]) -> Frame | None:
+    async def _handle_open(self, message: dict[str, Any]) -> Frame | None:
         """Handle an 'open' message from Genesys.
 
         This initializes the session with metadata from Genesys Cloud and
@@ -786,7 +783,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         # media is a list like: [{"type": "audio", "format": "PCMU", "channels": ["external"], "rate": 8000}]
         media_list = self._media_info
         if media_list and isinstance(media_list, list) and len(media_list) > 0:
-            audio_media: Dict[str, Any] = media_list[0]  # Get first media entry
+            audio_media: dict[str, Any] = media_list[0]  # Get first media entry
             channels = audio_media.get("channels", [])
             logger.debug(
                 f"📡 Genesys audio config: format={audio_media.get('format')}, channels={channels}, rate={audio_media.get('rate')}"
@@ -820,7 +817,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
             )
         )
 
-    async def _handle_close(self, message: Dict[str, Any]) -> Frame | None:
+    async def _handle_close(self, message: dict[str, Any]) -> Frame | None:
         """Handle a 'close' message from Genesys.
 
         Automatically responds with a 'closed' message. If output_variables
@@ -851,7 +848,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
             message=self.create_closed_response(output_variables=self._output_variables)
         )
 
-    async def _handle_ping(self, message: Dict[str, Any]) -> Frame | None:
+    async def _handle_ping(self, message: dict[str, Any]) -> Frame | None:
         """Handle a 'ping' message from Genesys.
 
         Automatically responds with a 'pong' message to maintain the connection.
@@ -869,7 +866,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         # Return as urgent frame to be sent through pipeline immediately
         return OutputTransportMessageUrgentFrame(message=self.create_pong_response())
 
-    async def _handle_pause(self, message: Dict[str, Any]) -> Frame | None:
+    async def _handle_pause(self, message: dict[str, Any]) -> Frame | None:
         """Handle a 'pause' message from Genesys.
 
         This is used when audio streaming is temporarily suspended
@@ -893,7 +890,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         # Note: Application should call create_resumed_response() when ready
         return None
 
-    async def _handle_update(self, message: Dict[str, Any]) -> Frame | None:
+    async def _handle_update(self, message: dict[str, Any]) -> Frame | None:
         """Handle an 'update' message from Genesys.
 
         Updates may include changes to participants or configuration.
@@ -915,7 +912,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
 
         return None
 
-    async def _handle_error(self, message: Dict[str, Any]) -> Frame | None:
+    async def _handle_error(self, message: dict[str, Any]) -> Frame | None:
         """Handle an 'error' message from Genesys.
 
         Args:
@@ -934,7 +931,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
 
         return None
 
-    async def _handle_dtmf(self, message: Dict[str, Any]) -> Frame | None:
+    async def _handle_dtmf(self, message: dict[str, Any]) -> Frame | None:
         """Handle a 'dtmf' message from Genesys.
 
         DTMF (Dual-Tone Multi-Frequency) events are sent when the user

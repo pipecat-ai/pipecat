@@ -25,34 +25,6 @@ from pipecat.audio.resamplers.soxr_stream_resampler import SOXRStreamAudioResamp
 SPEAKING_THRESHOLD = 20
 
 
-def create_default_resampler(**kwargs) -> BaseAudioResampler:
-    """Create a default audio resampler instance.
-
-    .. deprecated:: 0.0.74
-        This function is deprecated and will be removed in a future version.
-        Use `create_stream_resampler` for real-time processing scenarios or
-        `create_file_resampler` for batch processing of complete audio files.
-
-    Args:
-        **kwargs: Additional keyword arguments passed to the resampler constructor.
-
-    Returns:
-        A configured SOXRAudioResampler instance.
-    """
-    import warnings
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("always")
-        warnings.warn(
-            "`create_default_resampler` is deprecated. "
-            "Use `create_stream_resampler` for real-time processing scenarios or "
-            "`create_file_resampler` for batch processing of complete audio files.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-    return SOXRAudioResampler(**kwargs)
-
-
 def create_file_resampler(**kwargs) -> BaseAudioResampler:
     """Create an audio resampler instance for batch processing of complete audio files.
 

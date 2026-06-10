@@ -12,7 +12,6 @@ models that support web search and fact grounding capabilities.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 from pipecat.frames.frames import DataFrame
 
@@ -27,7 +26,7 @@ class LLMSearchResult:
     """
 
     text: str
-    confidence: List[float] = field(default_factory=list)
+    confidence: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -40,9 +39,9 @@ class LLMSearchOrigin:
         results: List of search results from this origin.
     """
 
-    site_uri: Optional[str] = None
-    site_title: Optional[str] = None
-    results: List[LLMSearchResult] = field(default_factory=list)
+    site_uri: str | None = None
+    site_title: str | None = None
+    results: list[LLMSearchResult] = field(default_factory=list)
 
 
 @dataclass
@@ -60,9 +59,9 @@ class LLMSearchResponseFrame(DataFrame):
         origins: List of search result origins with detailed information.
     """
 
-    search_result: Optional[str] = None
-    rendered_content: Optional[str] = None
-    origins: List[LLMSearchOrigin] = field(default_factory=list)
+    search_result: str | None = None
+    rendered_content: str | None = None
+    origins: list[LLMSearchOrigin] = field(default_factory=list)
 
     def __str__(self):
         """Return string representation of the search response frame.

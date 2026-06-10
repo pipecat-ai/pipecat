@@ -6,6 +6,9 @@
 
 """Wake phrase detection filter for Pipecat transcription processing.
 
+.. deprecated:: 0.0.106
+    Use :class:`~pipecat.turns.user_start.WakePhraseUserTurnStartStrategy` instead.
+
 This module provides a frame processor that filters transcription frames,
 only allowing them through after wake phrases have been detected. Includes
 keepalive functionality to maintain conversation flow after wake detection.
@@ -13,8 +16,8 @@ keepalive functionality to maintain conversation flow after wake detection.
 
 import re
 import time
+import warnings
 from enum import Enum
-from typing import List
 
 from loguru import logger
 
@@ -24,6 +27,11 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 class WakeCheckFilter(FrameProcessor):
     """Frame processor that filters transcription frames based on wake phrase detection.
+
+    .. deprecated:: 0.0.106
+        Use :class:`~pipecat.turns.user_start.WakePhraseUserTurnStartStrategy` instead,
+        which integrates with the user turn strategy system and supports configurable
+        timeouts and single-activation mode.
 
     This filter monitors transcription frames for configured wake phrases and only
     passes frames through after a wake phrase has been detected. Maintains a
@@ -62,8 +70,11 @@ class WakeCheckFilter(FrameProcessor):
             self.wake_timer = 0.0
             self.accumulator = ""
 
-    def __init__(self, wake_phrases: List[str], keepalive_timeout: float = 3):
+    def __init__(self, wake_phrases: list[str], keepalive_timeout: float = 3):
         """Initialize the wake phrase filter.
+
+        .. deprecated:: 0.0.106
+            Use :class:`~pipecat.turns.user_start.WakePhraseUserTurnStartStrategy` instead.
 
         Args:
             wake_phrases: List of wake phrases to detect in transcriptions.
@@ -71,6 +82,12 @@ class WakeCheckFilter(FrameProcessor):
                 wake detection. Defaults to 3 seconds.
         """
         super().__init__()
+        warnings.warn(
+            "WakeCheckFilter is deprecated since v0.0.106. "
+            "Use WakePhraseUserTurnStartStrategy instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._participant_states = {}
         self._keepalive_timeout = keepalive_timeout
         self._wake_patterns = []

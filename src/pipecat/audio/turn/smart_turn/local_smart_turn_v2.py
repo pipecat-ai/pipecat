@@ -10,7 +10,8 @@ This module provides a smart turn analyzer that uses PyTorch models for
 local end-of-turn detection without requiring network connectivity.
 """
 
-from typing import Any, Dict
+import warnings
+from typing import Any
 
 import numpy as np
 from loguru import logger
@@ -32,7 +33,7 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use LocalSmartTurnAnalyzerV2, you need to `pip install pipecat-ai[local-smart-turn]`."
     )
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 class LocalSmartTurnAnalyzerV2(BaseSmartTurn):
@@ -41,6 +42,10 @@ class LocalSmartTurnAnalyzerV2(BaseSmartTurn):
     Provides end-of-turn detection using locally-stored PyTorch models,
     enabling offline operation without network dependencies. Uses
     Wav2Vec2 architecture for audio sequence classification.
+
+    .. deprecated:: 0.0.106
+        LocalSmartTurnAnalyzerV2 is deprecated and will be removed in a future version.
+        Use LocalSmartTurnAnalyzerV3 instead.
     """
 
     def __init__(self, *, smart_turn_model_path: str, **kwargs):
@@ -52,6 +57,15 @@ class LocalSmartTurnAnalyzerV2(BaseSmartTurn):
             **kwargs: Additional arguments passed to BaseSmartTurn.
         """
         super().__init__(**kwargs)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "LocalSmartTurnAnalyzerV2 is deprecated and will be removed in a future version. "
+                "Use LocalSmartTurnAnalyzerV3 instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         if not smart_turn_model_path:
             # Define the path to the pretrained model on Hugging Face
@@ -73,7 +87,7 @@ class LocalSmartTurnAnalyzerV2(BaseSmartTurn):
         self._turn_model.eval()
         logger.debug("Loaded Local Smart Turn v2")
 
-    def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
+    def _predict_endpoint(self, audio_array: np.ndarray) -> dict[str, Any]:
         """Predict end-of-turn using local PyTorch model."""
         inputs = self._turn_processor(
             audio_array,

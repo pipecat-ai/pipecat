@@ -28,9 +28,9 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.transports.vonage.client import (
-    Session,
-    Stream,
-    Subscriber,
+    Session,  # type: ignore[attr-defined]
+    Stream,  # type: ignore[attr-defined]
+    Subscriber,  # type: ignore[attr-defined]
     VonageClient,
     VonageClientListener,
 )
@@ -392,8 +392,8 @@ class VonageVideoConnectorTransport(BaseTransport):
             )
         )
 
-        self._input: Optional[VonageVideoConnectorInputTransport] = None
-        self._output: Optional[VonageVideoConnectorOutputTransport] = None
+        self._input: VonageVideoConnectorInputTransport | None = None
+        self._output: VonageVideoConnectorOutputTransport | None = None
         self._one_stream_received: bool = False
 
     def input(self) -> FrameProcessor:

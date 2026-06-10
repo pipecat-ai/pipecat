@@ -1,0 +1,143 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+
+import os
+
+from dotenv import load_dotenv
+from loguru import logger
+from mcp.client.session_group import StreamableHttpParameters
+
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import LLMRunFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
+from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
+from pipecat.services.mcp_service import MCPClient
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.workers.runner import WorkerRunner
+
+load_dotenv(override=True)
+
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
+transport_params = {
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+}
+
+
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
+    logger.info(f"Starting bot")
+
+    system = f"""
+    You are a helpful LLM in a voice call.
+    Your goal is to answer questions about the user's GitHub repositories and account.
+    You have access to a number of tools provided by Github. Use any and all tools to help users.
+    Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
+    Don't overexplain what you are doing.
+    Just respond with short sentences when you are carrying out tool calls.
+    """
+
+    # Github MCP docs: https://github.com/github/github-mcp-server
+    # Enable Github Copilot on your GitHub account. Free tier is ok. (https://github.com/settings/copilot)
+    # Generate a personal access token. It must be a Fine-grained token, classic tokens are not supported. (https://github.com/settings/personal-access-tokens)
+    # Set permissions you want to use (eg. "all repositories", "profile: read/write", etc)
+    async with MCPClient(
+        server_params=StreamableHttpParameters(
+            url="https://api.githubcopilot.com/mcp/",
+            headers={"Authorization": f"Bearer {os.getenv('GITHUB_PERSONAL_ACCESS_TOKEN')}"},
+        )
+    ) as mcp:
+        tools = await mcp.get_tools_schema()
+
+        llm = GeminiLiveLLMService(
+            api_key=os.environ["GOOGLE_API_KEY"],
+            system_instruction=system,
+            tools=tools,
+        )
+
+        await mcp.register_tools_schema(tools, llm)
+
+        context = LLMContext([{"role": "user", "content": "Please introduce yourself."}])
+        user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+            context,
+            user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        )
+
+        pipeline = Pipeline(
+            [
+                transport.input(),  # Transport user input
+                user_aggregator,  # User spoken responses
+                llm,  # LLM
+                transport.output(),  # Transport bot output
+                assistant_aggregator,  # Assistant spoken responses and tool context
+            ]
+        )
+
+        worker = PipelineWorker(
+            pipeline,
+            params=PipelineParams(
+                enable_metrics=True,
+                enable_usage_metrics=True,
+            ),
+            idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        )
+
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, client):
+            logger.info(f"Client connected: {client}")
+            # Kick off the conversation.
+            await worker.queue_frames([LLMRunFrame()])
+
+        @transport.event_handler("on_client_disconnected")
+        async def on_client_disconnected(transport, client):
+            logger.info(f"Client disconnected")
+            await worker.cancel()
+
+        runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+        await runner.add_workers(worker)
+        await runner.run()
+
+
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
+
+
+if __name__ == "__main__":
+    if not os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN"):
+        logger.error(
+            f"Please set GITHUB_PERSONAL_ACCESS_TOKEN environment variable for this example."
+        )
+        import sys
+
+        sys.exit(1)
+
+    from pipecat.runner.run import main
+
+    main()

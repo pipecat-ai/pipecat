@@ -8,8 +8,9 @@
 
 import io
 import wave
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, ClassVar, Dict, Optional
+from typing import Literal, cast
 
 from loguru import logger
 from pydantic import BaseModel
@@ -18,10 +19,8 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -31,24 +30,31 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Groq, you need to `pip install pipecat-ai[groq]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
+
+# Hint set for `output_format`. The values mirror the Literal that
+# `groq.resources.audio.speech.AsyncSpeech.create` accepts on its
+# `response_format` parameter (also visible as the `response_format` field of
+# `groq.types.audio.SpeechCreateParams`). The groq SDK does not export this as
+# a named alias, so we redeclare it here.
+#
+# This alias is used in unions like `GroqAudioFormat | str`, so pyright shows
+# these values as completion hints without rejecting other strings. If groq
+# adds a new format before this list is updated, callers can still pass it and
+# we forward it through (with a cast at the API boundary). Keep in sync on a
+# best-effort basis when bumping the groq dep.
+GroqAudioFormat = Literal["flac", "mp3", "mulaw", "ogg", "wav"]
 
 
 @dataclass
 class GroqTTSSettings(TTSSettings):
-    """Settings for the Groq TTS service.
+    """Settings for GroqTTSService.
 
     Parameters:
-        output_format: Audio output format.
         speed: Speech speed multiplier. Defaults to 1.0.
-        groq_sample_rate: Audio sample rate.
     """
 
-    output_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    groq_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-
-    _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice", "sample_rate": "groq_sample_rate"}
 
 
 class GroqTTSService(TTSService):
@@ -59,18 +65,22 @@ class GroqTTSService(TTSService):
     and output formats.
     """
 
-    _settings: GroqTTSSettings
+    Settings = GroqTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Input parameters for Groq TTS configuration.
+
+        .. deprecated:: 0.0.105
+            Use ``settings=GroqTTSService.Settings(...)`` instead.
 
         Parameters:
             language: Language for speech synthesis. Defaults to English.
             speed: Speech speed multiplier. Defaults to 1.0.
         """
 
-        language: Optional[Language] = Language.EN
-        speed: Optional[float] = 1.0
+        language: Language | None = Language.EN
+        speed: float | None = 1.0
 
     GROQ_SAMPLE_RATE = 48000  # Groq TTS only supports 48kHz sample rate
 
@@ -78,11 +88,12 @@ class GroqTTSService(TTSService):
         self,
         *,
         api_key: str,
-        output_format: str = "wav",
-        params: Optional[InputParams] = None,
-        model_name: str = "canopylabs/orpheus-v1-english",
-        voice_id: str = "autumn",
-        sample_rate: Optional[int] = GROQ_SAMPLE_RATE,
+        output_format: GroqAudioFormat | str = "wav",
+        params: InputParams | None = None,
+        model_name: str | None = None,
+        voice_id: str | None = None,
+        sample_rate: int | None = GROQ_SAMPLE_RATE,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize Groq TTS service.
@@ -91,32 +102,66 @@ class GroqTTSService(TTSService):
             api_key: Groq API key for authentication.
             output_format: Audio output format. Defaults to "wav".
             params: Additional input parameters for voice customization.
-            model_name: TTS model to use. Defaults to "playai-tts".
-            voice_id: Voice identifier to use. Defaults to "Celeste-PlayAI".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GroqTTSService.Settings(...)`` instead.
+
+            model_name: TTS model to use.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GroqTTSService.Settings(model=...)`` instead.
+
+            voice_id: Voice identifier to use.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GroqTTSService.Settings(voice=...)`` instead.
+
             sample_rate: Audio sample rate. Must be 48000 Hz for Groq TTS.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService class.
         """
         if sample_rate != self.GROQ_SAMPLE_RATE:
             logger.warning(f"Groq TTS only supports {self.GROQ_SAMPLE_RATE}Hz sample rate. ")
 
-        params = params or GroqTTSService.InputParams()
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model="canopylabs/orpheus-v1-english",
+            voice="autumn",
+            language="en",
+            speed=1.0,
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model_name is not None:
+            self._warn_init_param_moved_to_settings("model_name", "model")
+            default_settings.model = model_name
+        if voice_id is not None:
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            self._warn_init_param_moved_to_settings("params")
+            if not settings:
+                default_settings.language = str(params.language) if params.language else "en"
+                default_settings.speed = params.speed
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             pause_frame_processing=True,
+            push_start_frame=True,
+            push_stop_frames=True,
             sample_rate=sample_rate,
-            settings=GroqTTSSettings(
-                model=model_name,
-                voice=voice_id,
-                language=str(params.language) if params.language else "en",
-                output_format=output_format,
-                speed=params.speed,
-                groq_sample_rate=sample_rate,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
         self._api_key = api_key
-        self._output_format = output_format
+        self._output_format: str = output_format
 
         self._client = AsyncGroq(api_key=self._api_key)
 
@@ -141,17 +186,27 @@ class GroqTTSService(TTSService):
         """
         logger.debug(f"{self}: Generating TTS [{text}]")
         measuring_ttfb = True
-        await self.start_ttfb_metrics()
-        yield TTSStartedFrame(context_id=context_id)
-
         try:
+            model = assert_given(self._settings.model)
+            voice = assert_given(self._settings.voice)
+            speed = assert_given(self._settings.speed)
+            if model is None:
+                raise ValueError("Groq TTS model must be specified")
+            if voice is None:
+                raise ValueError("Groq TTS voice must be specified")
+            if speed is None:
+                raise ValueError("Groq TTS speed must be specified")
             response = await self._client.audio.speech.create(
-                model=self._settings.model,
-                voice=self._settings.voice,
-                response_format=self._output_format,
+                model=model,
+                voice=voice,
+                # Cast satisfies groq's stricter Literal typing while letting
+                # callers pass any string (e.g. a newer groq format we haven't
+                # yet added to GroqAudioFormat). If the value is unsupported,
+                # groq's API will surface a runtime error with a clear message.
+                response_format=cast(GroqAudioFormat, self._output_format),
                 # Note: as of 2026-02-25, only a speed of 1.0 is supported, but
                 # here we pass it for completeness and future-proofing
-                speed=self._settings.speed,
+                speed=speed,
                 input=text,
             )
 
@@ -168,5 +223,3 @@ class GroqTTSService(TTSService):
                     yield TTSAudioRawFrame(bytes, frame_rate, channels, context_id=context_id)
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
-
-        yield TTSStoppedFrame(context_id=context_id)

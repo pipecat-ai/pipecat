@@ -10,7 +10,8 @@ This module provides a smart turn analyzer that uses CoreML models for
 local end-of-turn detection without requiring network connectivity.
 """
 
-from typing import Any, Dict
+import warnings
+from typing import Any
 
 import numpy as np
 from loguru import logger
@@ -26,7 +27,7 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use the LocalSmartTurnAnalyzer, you need to `pip install pipecat-ai[local-smart-turn]`."
     )
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 class LocalCoreMLSmartTurnAnalyzer(BaseSmartTurn):
@@ -35,6 +36,10 @@ class LocalCoreMLSmartTurnAnalyzer(BaseSmartTurn):
     Provides end-of-turn detection using locally-stored CoreML models,
     enabling offline operation without network dependencies. Optimized
     for Apple Silicon and other CoreML-compatible hardware.
+
+    .. deprecated:: 0.0.106
+        LocalCoreMLSmartTurnAnalyzer is deprecated and will be removed in a future version.
+        Use LocalSmartTurnAnalyzerV3 instead.
     """
 
     def __init__(self, *, smart_turn_model_path: str, **kwargs):
@@ -50,6 +55,15 @@ class LocalCoreMLSmartTurnAnalyzer(BaseSmartTurn):
         """
         super().__init__(**kwargs)
 
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "LocalCoreMLSmartTurnAnalyzer is deprecated and will be removed in a future "
+                "version. Use LocalSmartTurnAnalyzerV3 instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         if not smart_turn_model_path:
             logger.error("smart_turn_model_path is not set.")
             raise Exception("smart_turn_model_path must be provided.")
@@ -62,7 +76,7 @@ class LocalCoreMLSmartTurnAnalyzer(BaseSmartTurn):
         self._turn_model = ct.models.MLModel(core_ml_model_path)
         logger.debug("Loaded Local Smart Turn")
 
-    async def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
+    async def _predict_endpoint(self, audio_array: np.ndarray) -> dict[str, Any]:
         """Predict end-of-turn using local CoreML model."""
         inputs = self._turn_processor(
             audio_array,

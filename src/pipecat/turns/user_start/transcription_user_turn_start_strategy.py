@@ -7,6 +7,7 @@
 """User turn start strategy based on transcriptions."""
 
 from pipecat.frames.frames import Frame, InterimTranscriptionFrame, TranscriptionFrame
+from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
 
 
@@ -25,15 +26,20 @@ class TranscriptionUserTurnStartStrategy(BaseUserTurnStartStrategy):
         super().__init__(**kwargs)
         self._use_interim = use_interim
 
-    async def process_frame(self, frame: Frame):
+    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
         """Process an incoming frame to detect the start of a user turn.
 
         Args:
             frame: The frame to be processed.
-        """
-        await super().process_frame(frame)
 
+        Returns:
+            STOP if a transcription was received, CONTINUE otherwise.
+        """
         if isinstance(frame, InterimTranscriptionFrame) and self._use_interim:
             await self.trigger_user_turn_started()
+            return ProcessFrameResult.STOP
         elif isinstance(frame, TranscriptionFrame):
             await self.trigger_user_turn_started()
+            return ProcessFrameResult.STOP
+
+        return ProcessFrameResult.CONTINUE

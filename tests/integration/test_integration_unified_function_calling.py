@@ -88,7 +88,7 @@ async def test_unified_function_calling_openai():
 @pytest.mark.skipif(os.getenv("GOOGLE_API_KEY") is None, reason="GOOGLE_API_KEY is not set")
 @pytest.mark.asyncio
 async def test_unified_function_calling_gemini():
-    llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-2.0-flash-001")
+    llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
     # This will fail if an exception is raised
     await _test_llm_function_calling(llm)
 
@@ -96,8 +96,6 @@ async def test_unified_function_calling_gemini():
 @pytest.mark.skipif(os.getenv("ANTHROPIC_API_KEY") is None, reason="ANTHROPIC_API_KEY is not set")
 @pytest.mark.asyncio
 async def test_unified_function_calling_anthropic():
-    llm = AnthropicLLMService(
-        api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-5-sonnet-20240620"
-    )
+    llm = AnthropicLLMService(api_key=os.getenv("ANTHROPIC_API_KEY"))
     # This will fail if an exception is raised
     await _test_llm_function_calling(llm)

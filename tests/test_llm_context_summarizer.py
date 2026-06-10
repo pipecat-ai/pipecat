@@ -668,6 +668,98 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
 
         await summarizer.cleanup()
 
+    async def test_token_limit_none_only_message_threshold(self):
+        """Test that only message threshold triggers when token limit is None."""
+        config = LLMAutoContextSummarizationConfig(
+            max_context_tokens=None,
+            max_unsummarized_messages=5,
+        )
+
+        summarizer = LLMContextSummarizer(context=self.context, config=config)
+        await summarizer.setup(self.task_manager)
+
+        request_frame = None
+
+        @summarizer.event_handler("on_request_summarization")
+        async def on_request_summarization(summarizer, frame):
+            nonlocal request_frame
+            request_frame = frame
+
+        # Add many tokens but fewer than 5 messages — should NOT trigger
+        for i in range(3):
+            self.context.add_message(
+                {"role": "user", "content": "x" * 10000}  # Lots of tokens
+            )
+
+        await summarizer.process_frame(LLMFullResponseStartFrame())
+        self.assertIsNone(request_frame)
+
+        # Cross the message threshold (5 messages since summary = 6 total including system)
+        for i in range(3):
+            self.context.add_message({"role": "user", "content": f"Message {i}"})
+
+        await summarizer.process_frame(LLMFullResponseStartFrame())
+        self.assertIsNotNone(request_frame)
+
+        await summarizer.cleanup()
+
+    async def test_message_limit_none_only_token_threshold(self):
+        """Test that only token threshold triggers when message limit is None."""
+        config = LLMAutoContextSummarizationConfig(
+            max_context_tokens=100,  # Very low
+            max_unsummarized_messages=None,
+        )
+
+        summarizer = LLMContextSummarizer(context=self.context, config=config)
+        await summarizer.setup(self.task_manager)
+
+        request_frame = None
+
+        @summarizer.event_handler("on_request_summarization")
+        async def on_request_summarization(summarizer, frame):
+            nonlocal request_frame
+            request_frame = frame
+
+        # Add many messages that exceed the token limit
+        for i in range(10):
+            self.context.add_message(
+                {"role": "user", "content": "This is a test message with enough tokens."}
+            )
+
+        await summarizer.process_frame(LLMFullResponseStartFrame())
+        self.assertIsNotNone(request_frame)
+
+        await summarizer.cleanup()
+
+    async def test_message_limit_none_no_trigger_below_tokens(self):
+        """Test that many messages don't trigger when message limit is None and tokens are low."""
+        config = LLMAutoContextSummarizationConfig(
+            max_context_tokens=100000,  # Very high
+            max_unsummarized_messages=None,
+        )
+
+        summarizer = LLMContextSummarizer(context=self.context, config=config)
+        await summarizer.setup(self.task_manager)
+
+        request_frame = None
+
+        @summarizer.event_handler("on_request_summarization")
+        async def on_request_summarization(summarizer, frame):
+            nonlocal request_frame
+            request_frame = frame
+
+        # Add many short messages — would exceed any reasonable message count
+        # but tokens stay well below the limit
+        for i in range(50):
+            self.context.add_message({"role": "user", "content": f"Msg {i}"})
+
+        await summarizer.process_frame(LLMFullResponseStartFrame())
+
+        # Should NOT trigger because token limit is not exceeded
+        self.assertIsNone(request_frame)
+
+        await summarizer.cleanup()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,10 +8,9 @@
 
 import base64
 import json
-from typing import Optional
+from typing import cast
 
 from loguru import logger
-from pydantic import BaseModel
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import create_stream_resampler, pcm_to_ulaw, ulaw_to_pcm
@@ -53,18 +52,18 @@ class TwilioFrameSerializer(FrameSerializer):
         """
 
         twilio_sample_rate: int = 8000
-        sample_rate: Optional[int] = None
+        sample_rate: int | None = None
         auto_hang_up: bool = True
 
     def __init__(
         self,
         stream_sid: str,
-        call_sid: Optional[str] = None,
-        account_sid: Optional[str] = None,
-        auth_token: Optional[str] = None,
-        region: Optional[str] = None,
-        edge: Optional[str] = None,
-        params: Optional[InputParams] = None,
+        call_sid: str | None = None,
+        account_sid: str | None = None,
+        auth_token: str | None = None,
+        region: str | None = None,
+        edge: str | None = None,
+        params: InputParams | None = None,
     ):
         """Initialize the TwilioFrameSerializer.
 
@@ -77,7 +76,9 @@ class TwilioFrameSerializer(FrameSerializer):
             edge: Twilio edge location (e.g., "sydney", "dublin"). Must be specified with region.
             params: Configuration parameters.
         """
-        super().__init__(params or TwilioFrameSerializer.InputParams())
+        params = params or TwilioFrameSerializer.InputParams()
+        super().__init__(params)
+        self._params: TwilioFrameSerializer.InputParams = params
 
         # Validate hangup-related parameters if auto_hang_up is enabled
         if self._params.auto_hang_up:
@@ -180,9 +181,11 @@ class TwilioFrameSerializer(FrameSerializer):
         try:
             import aiohttp
 
-            account_sid = self._account_sid
-            auth_token = self._auth_token
-            call_sid = self._call_sid
+            # __init__ guarantees these are non-None whenever auto_hang_up is True,
+            # which is the only path that reaches this method.
+            account_sid = cast(str, self._account_sid)
+            auth_token = cast(str, self._auth_token)
+            call_sid = cast(str, self._call_sid)
             region = self._region
             edge = self._edge
 
@@ -212,7 +215,7 @@ class TwilioFrameSerializer(FrameSerializer):
                             if error_data.get("code") == 20404:
                                 logger.debug(f"Twilio call {call_sid} was already terminated")
                                 return
-                        except:
+                        except Exception:
                             pass  # Fall through to log the raw error
 
                         # Log other 404 errors

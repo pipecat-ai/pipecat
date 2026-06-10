@@ -11,8 +11,6 @@ collected throughout the pipeline, including timing, token usage, and
 processing statistics.
 """
 
-from typing import Optional
-
 from pydantic import BaseModel
 
 
@@ -25,7 +23,7 @@ class MetricsData(BaseModel):
     """
 
     processor: str
-    model: Optional[str] = None
+    model: str | None = None
 
 
 class TTFBMetricsData(MetricsData):
@@ -62,9 +60,9 @@ class LLMTokenUsage(BaseModel):
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
-    cache_read_input_tokens: Optional[int] = None
-    cache_creation_input_tokens: Optional[int] = None
-    reasoning_tokens: Optional[int] = None
+    cache_read_input_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
+    reasoning_tokens: int | None = None
 
 
 class LLMUsageMetricsData(MetricsData):
