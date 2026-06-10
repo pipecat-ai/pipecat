@@ -774,7 +774,7 @@ def _setup_unified_start_route(
             asyncio.create_task(bot_module.bot(runner_args))
             try:
                 await asyncio.wait_for(ready_event.wait(), timeout=15.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 raise HTTPException(
                     status_code=504,
                     detail="Bot did not become ready within 15s",
