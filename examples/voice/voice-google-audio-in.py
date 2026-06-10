@@ -21,8 +21,8 @@ from pipecat.frames.frames import (
     LLMRunFrame,
     TextFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
-    VADUserStoppedSpeakingFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -90,9 +90,9 @@ class UserAudioCollector(FrameProcessor):
             # We could gracefully handle both audio input and text/transcription input ...
             # but let's leave that as an exercise to the reader. :-)
             return
-        if isinstance(frame, VADUserStartedSpeakingFrame):
+        if isinstance(frame, UserStartedSpeakingFrame):
             self._user_speaking = True
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
             message = await LLMContext.create_audio_message(audio_frames=self._audio_frames)
             await self.push_frame(LLMMessagesAppendFrame(messages=[message], run_llm=True))
