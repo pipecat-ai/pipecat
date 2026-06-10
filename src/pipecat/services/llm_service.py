@@ -1100,11 +1100,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         if item.timeout_secs or self._function_call_timeout_secs:
             timeout_task = self.create_task(timeout_handler())
 
-        # Yield to the event loop so the timeout task coroutine gets entered
-        # before it could be cancelled. Without this, cancelling the task before
-        # it starts would leave the coroutine in a "never awaited" state.
-        await asyncio.sleep(0)
-
         try:
             if isinstance(item.handler, DirectFunctionWrapper):
                 # Handler is a DirectFunctionWrapper
