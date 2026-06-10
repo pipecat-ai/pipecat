@@ -63,6 +63,13 @@ def cartesia_service(voice_cfg: dict, sample_rate: int) -> TTSService:
 def whisper_service(config: dict) -> STTService:
     """Build a local Whisper STT service from the ``bot_audio`` config.
 
+    Runs on the **CPU** by default (``device: cpu``): the GPU is reserved for the
+    judge LLM and the per-run audio models, and bot-speech transcription happens
+    once per turn off the hot path, so the extra latency is fine. This frees enough
+    GPU memory to run a larger, more accurate model (e.g. ``distil-medium`` or
+    ``large-v3-turbo``) at higher concurrency. Override with ``device: cuda`` (and
+    ``compute_type``) in the ``transcription`` config if you have GPU headroom.
+
     The eval transcribes audio it already knows is the bot speaking (the harness
     captures it between ``bot-started-speaking`` and ``bot-stopped-speaking``), so
     Whisper's non-speech filter is counterproductive here: the default
@@ -73,12 +80,18 @@ def whisper_service(config: dict) -> STTService:
     """
     from pipecat.services.whisper.stt import WhisperSTTService
 
+    device = config.get("device", "cpu")
+    # int8 keeps CPU transcription reasonably fast with negligible accuracy loss;
+    # the default ("default") would pick float32 on CPU, which is much slower.
+    compute_type = config.get("compute_type", "int8" if device == "cpu" else "default")
     # NOT_GIVEN (not None) leaves the model unset so Whisper uses its own default.
     return WhisperSTTService(
+        device=device,
+        compute_type=compute_type,
         settings=WhisperSTTService.Settings(
             no_speech_prob=1.0,
             model=config.get("model", NOT_GIVEN),
-        )
+        ),
     )
 
 

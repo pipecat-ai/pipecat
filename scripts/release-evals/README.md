@@ -86,14 +86,20 @@ can be just a `suite:` list with the rest supplied as flags.
 
 ### Concurrency and GPU
 
-By default the judge (Ollama), the user's voice (Kokoro), and the bot-speech
-transcriber (Whisper) all run locally on the GPU. Ollama keeps one copy of the
-judge model resident (`gemma2:9b` is ~7.4GB), while Kokoro and Whisper load per
-concurrent run (~1GB each), so GPU memory use grows with `-c/--concurrency`. The
-manifest defaults to `concurrency: 4`, which fits a 16GB GPU (e.g. an RTX A4000)
-with headroom. Pushing it higher, or swapping in a larger judge, can exhaust GPU
-memory; an out-of-memory run surfaces as a harness error in that run's
-`.eval.log`.
+Only the judge LLM runs on the GPU. Ollama keeps one copy of the judge model
+resident (`gemma2:9b` is ~7.4GB), so GPU use is roughly constant (~8.5GB peak)
+regardless of `-c/--concurrency`. The user's voice (Kokoro) and the bot-speech
+transcriber (Whisper) both run on the CPU — Kokoro via ONNX Runtime, Whisper with
+`device: cpu` (see `whisper_service`) — so they cost no GPU memory. CPU
+transcription is a little slower than GPU, but it happens once per turn off the
+hot path, and it lets the eval suite run a larger, more accurate transcriber
+(`distil-medium`, or even `large-v3-turbo`) at high concurrency on a modest GPU
+(e.g. a 16GB RTX A4000). Concurrency is then bounded by CPU and RAM rather than
+GPU; swapping in a much larger judge is what would pressure GPU memory, and an
+out-of-memory run surfaces as a harness error in that run's `.eval.log`.
+
+To put Whisper back on the GPU (if you have headroom), set `device: cuda` in the
+scenario's `transcription` config.
 
 ## Running one scenario against an already-running bot
 
