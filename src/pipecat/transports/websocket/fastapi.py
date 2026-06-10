@@ -448,6 +448,15 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         """
         await self._write_frame(frame)
 
+    def is_transport_alive(self) -> bool:
+        """Return True while the WebSocket can still receive audio.
+
+        Used by the base output transport's ``with_mixer`` empty-queue
+        branch to bail out of the silence-fill loop on a dead connection —
+        see BaseOutputTransport.is_transport_alive() and issue #4679.
+        """
+        return bool(self._client and self._client.is_connected and not self._client.is_closing)
+
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the WebSocket with timing simulation.
 

@@ -152,6 +152,26 @@ class BaseOutputTransport(FrameProcessor):
         for _, sender in self._media_senders.items():
             await sender.cancel(frame)
 
+    def is_transport_alive(self) -> bool:
+        """Return True if the underlying transport can still deliver frames.
+
+        Used by ``with_mixer()`` to bail out of the empty-queue silence-fill
+        loop when the audio task has survived pipeline cancellation and the
+        underlying transport is closed — see issue #4679. Without this hook
+        the loop runs ``mixer.mix(silence)`` forever on a dead transport and
+        burns a full CPU core indefinitely.
+
+        Subclasses with a connection lifecycle (e.g. WebSocket transports)
+        should override this with a cheap synchronous check on their client
+        state. The default ``True`` keeps existing transports unchanged —
+        they opt into the self-heal behaviour by overriding.
+
+        Returns:
+            True if the transport can still receive audio, False to signal
+            that the audio task should exit because the transport is dead.
+        """
+        return True
+
     async def set_transport_ready(self, frame: StartFrame):
         """Called when the transport is ready to stream.
 
@@ -788,6 +808,27 @@ class BaseOutputTransport(FrameProcessor):
                         yield frame
                         self._audio_queue.task_done()
                     except asyncio.QueueEmpty:
+                        # Cheap dead-transport probe BEFORE doing the heavy
+                        # mixer.mix(silence) work. If the audio task has
+                        # survived pipeline cancellation and the underlying
+                        # transport is closed, exit the generator —
+                        # _audio_task_handler's `async for` ends naturally
+                        # and the asyncio task releases its references.
+                        # Without this, the loop synthesizes silence + mixes
+                        # forever on a dead transport, burning a full CPU
+                        # core (see issue #4679).
+                        #
+                        # is_transport_alive() is a synchronous attribute
+                        # read on subclasses that opt in. Transports that
+                        # haven't overridden it keep the existing
+                        # behaviour (default returns True).
+                        if not self._transport.is_transport_alive():
+                            logger.info(
+                                f"{self._transport} audio task exiting: "
+                                f"transport reports not alive — pipeline "
+                                f"cancellation did not reach this task"
+                            )
+                            return
                         # Fallback: notify the bot stopped speaking upstream if necessary based on timeout.
                         diff_time = time.time() - last_frame_time
                         if diff_time > vad_stop_secs:
