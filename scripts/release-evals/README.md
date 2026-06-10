@@ -25,8 +25,11 @@ The harness runs the judge, the user's voice, and the bot-speech transcriber
 
 - **A judge LLM.** Scenarios judge with [Ollama](https://ollama.com) by default
   (`http://localhost:11434`). Install Ollama, start it, and pull the model the
-  scenarios use: `ollama pull llama3:latest`. (A scenario's `judge:` block can
-  point at OpenAI instead — set `service: openai` and `$OPENAI_API_KEY`.)
+  scenarios use: `ollama pull gemma2:9b`. We use `gemma2:9b` because smaller
+  judges (e.g. `llama3:latest`, `qwen2.5:7b`) too often reject a correct spoken
+  answer the transcriber mangled into a homophone — "four" heard as "for" — and
+  it still fits a 16GB GPU alongside the audio models. (A scenario's `judge:`
+  block can point at OpenAI instead — set `service: openai` and `$OPENAI_API_KEY`.)
 - **Local audio models** (audio-mode scenarios only). The user's voice is
   synthesized with Kokoro TTS and the bot's speech is transcribed with Whisper.
   Both run from local ONNX/model files that download once on first use (cached
@@ -85,11 +88,12 @@ can be just a `suite:` list with the rest supplied as flags.
 
 By default the judge (Ollama), the user's voice (Kokoro), and the bot-speech
 transcriber (Whisper) all run locally on the GPU. Ollama keeps one copy of the
-judge model resident, while Kokoro and Whisper load per concurrent run, so GPU
-memory use grows with `-c/--concurrency`. The manifest defaults to
-`concurrency: 4`, which fits comfortably in a 16GB GPU. Pushing it higher can
-exhaust GPU memory; an out-of-memory run surfaces as a harness error in that
-run's `.eval.log`.
+judge model resident (`gemma2:9b` is ~7.4GB), while Kokoro and Whisper load per
+concurrent run (~1GB each), so GPU memory use grows with `-c/--concurrency`. The
+manifest defaults to `concurrency: 4`, which fits a 16GB GPU (e.g. an RTX A4000)
+with headroom. Pushing it higher, or swapping in a larger judge, can exhaust GPU
+memory; an out-of-memory run surfaces as a harness error in that run's
+`.eval.log`.
 
 ## Running one scenario against an already-running bot
 
