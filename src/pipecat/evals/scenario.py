@@ -427,9 +427,15 @@ def describe_config(scenario: EvalScenario, *, color: bool = False) -> str:
     arrow = paint(" -> ", _CFG_SEP)
     sep = paint(" | ", _CFG_SEP)
 
+    def svc_model(cfg: dict, default_service: str, model_key: str) -> str:
+        service = cfg.get("service", default_service)
+        model = cfg.get(model_key)
+        return f"{service}/{model}" if model else str(service)
+
     user_segs = [seg("modality", "audio" if scenario.user_audio else "text", _CFG_MODALITY)]
     if scenario.user_audio:
-        user_segs.append(seg("speech", scenario.user_audio.get("service", "?"), _CFG_SERVICE))
+        # The TTS "voice" is the speech config's model-equivalent.
+        user_segs.append(seg("speech", svc_model(scenario.user_audio, "?", "voice"), _CFG_SERVICE))
 
     eval_svc = f"{scenario.judge.get('service', '?')}/{scenario.judge.get('model', '?')}"
     judge_segs = [seg("modality", "audio" if scenario.bot_audio else "text", _CFG_MODALITY)]
@@ -437,7 +443,7 @@ def describe_config(scenario: EvalScenario, *, color: bool = False) -> str:
         judge_segs.append(
             seg(
                 "transcription",
-                (scenario.transcriber or {}).get("service", "whisper"),
+                svc_model(scenario.transcriber or {}, "whisper", "model"),
                 _CFG_SERVICE,
             )
         )

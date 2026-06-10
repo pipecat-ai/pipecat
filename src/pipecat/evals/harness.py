@@ -75,7 +75,13 @@ from websockets.asyncio.client import ClientConnection
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.judge import EvalJudge
-from pipecat.evals.scenario import EvalExpectation, EvalScenario, EvalSendAfter, EvalTurn
+from pipecat.evals.scenario import (
+    EvalExpectation,
+    EvalScenario,
+    EvalSendAfter,
+    EvalTurn,
+    describe_config,
+)
 from pipecat.evals.serializer import (
     EVAL_BOT_AUDIO_TYPE,
     EVAL_CANCEL_MESSAGE_TYPE,
@@ -376,6 +382,10 @@ class EvalSession:
         started = time.monotonic()
         self._debug_t0 = started
         self._debug(f"run: scenario {self._scenario.name!r} -> {self._bot_url}")
+        # Record which speech / transcription / judge services and models were used,
+        # so a saved eval.log is self-describing (no need to cross-reference config).
+        for line in describe_config(self._scenario).splitlines():
+            self._debug(line)
 
         # The `response` transcription needs the bot's actual audio; without audio
         # mode there's nothing to transcribe, so skip rather than fail. (Normally
