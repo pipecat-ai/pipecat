@@ -22,10 +22,10 @@ sets:
   The recorder is an :class:`~pipecat.processors.audio.audio_buffer_processor.AudioBufferProcessor`
   placed *after* the real output transport (so both input and output audio flow
   through it); ``output()`` returns that composite. Recording starts on connect
-  and is flushed on disconnect (reliable, unlike at shutdown where the process
-  may exit first) — the audio is snapshotted there and written in the background
-  so the disconnect doesn't delay the next connect. Recording is eval-only — the
-  generic transport is untouched.
+  and is written on disconnect, before the bot's ``on_client_disconnected``
+  handler fires (a bot that cancels its pipeline there may exit right after, so
+  the write must land first). Recording is eval-only — the generic transport is
+  untouched.
 
 The input side runs a **virtual microphone** (:class:`EvalMicrophone`), enabled
 per connection by ``?user_audio=true`` (audio-mode scenarios): the harness sends
@@ -36,10 +36,11 @@ see exactly what a live client's mic would produce, without a continuous frame
 stream crossing the wire. Text-mode scenarios leave the mic off, so no silence
 is ever fed into the bot's STT.
 
-This transport also keeps one bot alive across a whole eval suite: it overrides
-``_on_client_disconnected`` to detach the connection (and flush the recording)
-*without* firing the bot's ``on_client_disconnected`` handler, which would cancel
-the pipeline.
+Client disconnects behave as on any transport: the bot's
+``on_client_disconnected`` handler fires normally, and whether the pipeline
+survives the disconnect is the application's choice. The server itself keeps
+running either way, so a bot that opts not to cancel can serve several
+sequential eval connections.
 """
 
 import asyncio
@@ -323,8 +324,6 @@ class EvalWebsocketServerTransport(WebsocketServerTransport):
         self._audio_buffer = None
         self._record_output = None
         self._record_path: str | None = None
-        # In-flight recording writes, tracked so they aren't garbage-collected.
-        self._write_tasks: set = set()
 
     def input(self) -> WebsocketServerInputTransport:
         """Return an input transport that can serve harness-provided images."""
@@ -377,29 +376,16 @@ class EvalWebsocketServerTransport(WebsocketServerTransport):
         await super()._on_client_connected(websocket)
 
     async def _on_client_disconnected(self, websocket):
-        """Flush the recording and detach — but keep the bot alive for the next eval.
-
-        We do *not* call the bot's ``on_client_disconnected`` handler (it cancels
-        the pipeline); one bot serves the whole suite. Flushing here is reliable,
-        unlike at shutdown where the process may exit before an async save runs.
-        """
+        """Flush the recording, then handle the disconnect normally."""
         if self._audio_buffer is not None:
             if self._record_path and self._audio_buffer.has_audio():
-                # Snapshot the audio and write it in the background, so this
-                # disconnect returns immediately and the input transport can
-                # release the connection before the next eval connects.
-                task = asyncio.create_task(
-                    _write_wav(
-                        self._record_path,
-                        self._audio_buffer.merge_audio_buffers(),
-                        self._audio_buffer.sample_rate,
-                        self._audio_buffer.num_channels,
-                    )
+                await _write_wav(
+                    self._record_path,
+                    self._audio_buffer.merge_audio_buffers(),
+                    self._audio_buffer.sample_rate,
+                    self._audio_buffer.num_channels,
                 )
-                self._write_tasks.add(task)
-                task.add_done_callback(self._write_tasks.discard)
             await self._audio_buffer.stop_recording()
             self._record_path = None
 
-        if self._output is not None:
-            await self._output.set_client_connection(None)
+        await super()._on_client_disconnected(websocket)

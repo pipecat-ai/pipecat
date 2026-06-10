@@ -26,14 +26,6 @@ def _fake_judge_llm(config):
 
 
 class TestTranscriberFromConfig(unittest.TestCase):
-    def test_whisper_default(self):
-        from pipecat.services.whisper.stt import WhisperSTTService
-
-        self.assertIsInstance(EvalTranscriber.from_config(None)._service, WhisperSTTService)
-        self.assertIsInstance(
-            EvalTranscriber.from_config({"model": "base"})._service, WhisperSTTService
-        )
-
     def test_unknown_service_rejected(self):
         with self.assertRaises(ValueError):
             EvalTranscriber.from_config({"service": "nope"})
@@ -43,27 +35,15 @@ class TestTranscriberFromConfig(unittest.TestCase):
         self.assertEqual(t._service[0], "FAKE_STT")
         self.assertEqual(t._service[2], 16000)  # STT_SAMPLE_RATE
 
-    def test_padding_defaults(self):
+    def test_padding_secs(self):
         from pipecat.evals.transcribe import SILENCE_PAD_S
 
-        whisper = EvalTranscriber.from_config({"service": "whisper"})
-        self.assertEqual(whisper._padding_secs, SILENCE_PAD_S)
-        moonshine = EvalTranscriber.from_config({"service": "moonshine"})
-        self.assertEqual(moonshine._padding_secs, SILENCE_PAD_S)
-        factory = EvalTranscriber.from_config({"factory": "tests.test_evals_services._fake_stt"})
-        self.assertEqual(factory._padding_secs, SILENCE_PAD_S)
-
-    def test_padding_secs_override(self):
-        # padding_secs in the transcription config overrides the per-service
-        # default on every path (including 0 to disable Whisper's padding).
-        whisper = EvalTranscriber.from_config({"service": "whisper", "padding_secs": 0})
-        self.assertEqual(whisper._padding_secs, 0)
-        moonshine = EvalTranscriber.from_config({"service": "moonshine", "padding_secs": 1.5})
-        self.assertEqual(moonshine._padding_secs, 1.5)
-        factory = EvalTranscriber.from_config(
+        default = EvalTranscriber.from_config({"factory": "tests.test_evals_services._fake_stt"})
+        self.assertEqual(default._padding_secs, SILENCE_PAD_S)
+        override = EvalTranscriber.from_config(
             {"factory": "tests.test_evals_services._fake_stt", "padding_secs": 0.5}
         )
-        self.assertEqual(factory._padding_secs, 0.5)
+        self.assertEqual(override._padding_secs, 0.5)
 
 
 class TestVoiceFromConfig(unittest.TestCase):

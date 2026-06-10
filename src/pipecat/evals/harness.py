@@ -222,10 +222,8 @@ class EvalSession:
             record_path: When set (and the scenario is audio mode), asks the eval
                 transport to record the conversation audio to this path (bot-side).
             stop_bot: When True, ask the bot to cancel its pipeline (and exit) on
-                teardown via ``eval-cancel``. Leave False to keep the bot running
-                so it can serve more scenarios (the eval transport already
-                survives the WebSocket disconnect). The suite enables it to clean
-                up each spawned bot.
+                teardown via ``eval-cancel``. The suite enables it to clean up
+                each spawned bot.
             judge: The :class:`~pipecat.evals.judge.EvalJudge` for ``eval:``
                 assertions, or ``None`` if the scenario has none.
             speech: The :class:`~pipecat.evals.speech.EvalSpeech` for synthesizing

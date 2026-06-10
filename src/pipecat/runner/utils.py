@@ -730,10 +730,8 @@ async def create_transport(
         if params.serializer is None:
             params.serializer = RTVIEvalSerializer()
 
-        # EvalWebsocketServerTransport handles the eval-only behavior: skip-TTS
-        # before an on-connect greeting, audio capture/recording, and keeping one
-        # bot alive across the suite (it detaches on disconnect without firing the
-        # bot's on_client_disconnected handler, which would cancel the pipeline).
+        # EvalWebsocketServerTransport handles the eval-only behavior: the virtual
+        # mic, skip-TTS before an on-connect greeting, and audio capture/recording.
         return EvalWebsocketServerTransport(
             params=params,
             host=runner_args.host,
