@@ -44,6 +44,21 @@ class TestParseVerdict(unittest.TestCase):
         v = _parse_verdict('```\n{"verdict": "yes", "reason": "ok"}\n```')
         self.assertTrue(v.passed)
 
+    def test_trailing_prose_after_json(self):
+        # gemma2 and similar models sometimes append chatty text after the JSON
+        # object (and "know" contains "no", which used to defeat the fallback).
+        v = _parse_verdict(
+            ' {"verdict": "yes", "reason": "The bot greets the user."}\n\n'
+            "Let me know if you'd like to evaluate any further turns!"
+        )
+        self.assertTrue(v.passed)
+        self.assertEqual(v.reason, "The bot greets the user.")
+
+    def test_leading_prose_before_json(self):
+        v = _parse_verdict('Sure, here is my verdict: {"verdict": "no", "reason": "wrong"}')
+        self.assertFalse(v.passed)
+        self.assertEqual(v.reason, "wrong")
+
     def test_unstructured_yes_fallback(self):
         v = _parse_verdict("yes, this satisfies the criterion")
         self.assertTrue(v.passed)

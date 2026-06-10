@@ -283,30 +283,38 @@ def _parse_verdict(response: str) -> JudgeVerdict:
     if cleaned.startswith("```"):
         cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.MULTILINE).strip()
 
-    try:
-        obj = json.loads(cleaned)
-        verdict = str(obj.get("verdict", "")).strip().lower()
-        if verdict not in ("yes", "no", "continue"):
-            verdict = "no"
-        reason = str(obj.get("reason", "")).strip()
-        return JudgeVerdict(
-            verdict=verdict,
-            reason=reason or "(no reason given)",
-            raw_response=response,
-        )
-    except (json.JSONDecodeError, AttributeError):
-        # Fallback: scan for a verdict keyword in the raw text.
-        lowered = cleaned.lower()
-        if "continue" in lowered:
+    # Parse the first JSON object and ignore anything around it. Some judge models
+    # ignore "respond ONLY with JSON" and wrap the verdict in prose (e.g. a trailing
+    # "Let me know if you'd like to evaluate further turns!"); raw_decode from the
+    # first '{' parses the object and stops, leaving the trailing text out.
+    start = cleaned.find("{")
+    if start != -1:
+        try:
+            obj, _ = json.JSONDecoder().raw_decode(cleaned[start:])
+            verdict = str(obj.get("verdict", "")).strip().lower()
+            if verdict not in ("yes", "no", "continue"):
+                verdict = "no"
+            reason = str(obj.get("reason", "")).strip()
             return JudgeVerdict(
-                verdict="continue", reason="(unstructured continue)", raw_response=response
+                verdict=verdict,
+                reason=reason or "(no reason given)",
+                raw_response=response,
             )
-        if "yes" in lowered and "no" not in lowered:
-            return JudgeVerdict(verdict="yes", reason="(unstructured yes)", raw_response=response)
-        if "no" in lowered and "yes" not in lowered:
-            return JudgeVerdict(verdict="no", reason="(unstructured no)", raw_response=response)
+        except (json.JSONDecodeError, AttributeError):
+            pass
+
+    # Fallback: scan for a verdict keyword in the raw text.
+    lowered = cleaned.lower()
+    if "continue" in lowered:
         return JudgeVerdict(
-            verdict="no",
-            reason=f"could not parse judge response: {response!r}",
-            raw_response=response,
+            verdict="continue", reason="(unstructured continue)", raw_response=response
         )
+    if "yes" in lowered and "no" not in lowered:
+        return JudgeVerdict(verdict="yes", reason="(unstructured yes)", raw_response=response)
+    if "no" in lowered and "yes" not in lowered:
+        return JudgeVerdict(verdict="no", reason="(unstructured no)", raw_response=response)
+    return JudgeVerdict(
+        verdict="no",
+        reason=f"could not parse judge response: {response!r}",
+        raw_response=response,
+    )
