@@ -11,10 +11,10 @@ supporting both Faster Whisper and MLX Whisper backends for efficient inference.
 """
 
 import asyncio
+import platform
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import TYPE_CHECKING
+from enum import StrEnum
 
 import numpy as np
 from loguru import logger
@@ -27,23 +27,27 @@ from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
-if TYPE_CHECKING:
-    try:
-        from faster_whisper import WhisperModel
-    except ModuleNotFoundError as e:
-        logger.error(f"Exception: {e}")
-        logger.error('In order to use Whisper, you need to `uv add "pipecat-ai[whisper]"`.')
-        raise ImportError(f"Missing module: {e}") from e
+try:
+    from faster_whisper import WhisperModel
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error('In order to use Whisper, you need to `uv add "pipecat-ai[whisper]"`.')
+    raise ImportError(f"Missing module: {e}") from e
 
+# MLX Whisper only runs on Apple Silicon. On other platforms the package is
+# unavailable (or installed but unloadable, e.g. a missing ``libmlx.so``), so
+# importing it would break this module everywhere else. Only attempt it on macOS;
+# WhisperSTTServiceMLX imports it lazily when actually used.
+if platform.system() == "Darwin" and platform.machine() == "arm64":
     try:
-        import mlx_whisper  # noqa: F401
+        import mlx_whisper
     except ModuleNotFoundError as e:
         logger.error(f"Exception: {e}")
         logger.error('In order to use Whisper, you need to `uv add "pipecat-ai[mlx-whisper]"`.')
         raise ImportError(f"Missing module: {e}") from e
 
 
-class Model(Enum):
+class Model(StrEnum):
     """Whisper model selection options for Faster Whisper.
 
     Provides various model sizes and specializations for speech recognition,
@@ -73,7 +77,7 @@ class Model(Enum):
     DISTIL_MEDIUM_EN = "Systran/faster-distil-whisper-medium.en"
 
 
-class MLXModel(Enum):
+class MLXModel(StrEnum):
     """MLX Whisper model selection options for Apple Silicon.
 
     Provides various model sizes optimized for Apple Silicon hardware,
@@ -314,21 +318,12 @@ class WhisperSTTService(SegmentedSTTService):
             If this is the first time this model is being run,
             it will take time to download from the Hugging Face model hub.
         """
-        try:
-            from faster_whisper import WhisperModel
-
-            logger.debug("Loading Whisper model...")
-            model_name = assert_given(self._settings.model)
-            if model_name is None:
-                raise ValueError("Whisper model must be specified")
-            self._model = WhisperModel(
-                model_name, device=self._device, compute_type=self._compute_type
-            )
-            logger.debug("Loaded Whisper model")
-        except ModuleNotFoundError as e:
-            logger.error(f"Exception: {e}")
-            logger.error('In order to use Whisper, you need to `uv add "pipecat-ai[whisper]"`.')
-            self._model = None
+        logger.debug("Loading Whisper model...")
+        model_name = assert_given(self._settings.model)
+        if model_name is None:
+            raise ValueError("Whisper model must be specified")
+        self._model = WhisperModel(model_name, device=self._device, compute_type=self._compute_type)
+        logger.debug("Loaded Whisper model")
 
     @traced_stt
     async def _handle_transcription(
@@ -498,6 +493,8 @@ class WhisperSTTServiceMLX(WhisperSTTService):
                   or an ErrorFrame if transcription fails.
         """
         try:
+            # This will trigger an exception in case we want to use
+            # WhisperMLXSTTService in a platform different than macOS.
             import mlx_whisper
 
             await self.start_processing_metrics()
