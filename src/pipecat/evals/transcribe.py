@@ -70,9 +70,9 @@ class EvalTranscriber:
         Args:
             service: A constructed ``STTService`` (e.g. from :meth:`from_config`).
             padding_secs: Silence padded onto each side of the segment before
-                transcription (see :data:`SILENCE_PAD_S`). Whisper needs it to keep
-                onset/offset words; Moonshine returns empty when fed leading
-                silence, so it defaults to ``0``.
+                transcription, giving the STT a clean lead-in/lead-out so it
+                keeps onset/offset words (see :data:`SILENCE_PAD_S`). ``0``
+                disables padding.
         """
         self._service = service
         self._padding_secs = padding_secs
@@ -94,10 +94,8 @@ class EvalTranscriber:
 
         Args:
             config: ``transcription`` mapping, or ``None`` for the Whisper default.
-                An optional ``padding_secs`` overrides the silence padding (see
-                :meth:`__init__`); when omitted, the service's default applies —
-                :data:`SILENCE_PAD_S` for Whisper and factories, ``0`` for
-                Moonshine (which returns empty when fed leading silence).
+                An optional ``padding_secs`` overrides the silence padding
+                (default :data:`SILENCE_PAD_S`; see :meth:`__init__`).
 
         Returns:
             A configured EvalTranscriber (not yet started).
@@ -110,9 +108,7 @@ class EvalTranscriber:
         """
         config = config or {}
         padding = config.get("padding_secs")
-
-        def padding_secs(default: float) -> float:
-            return default if padding is None else float(padding)
+        padding_secs = SILENCE_PAD_S if padding is None else float(padding)
 
         custom = config.get("factory")
         if custom:
@@ -120,14 +116,13 @@ class EvalTranscriber:
             if not module_name:
                 raise ValueError(f"transcription.factory must be a dotted path: {custom!r}")
             factory = getattr(importlib.import_module(module_name), attr)
-            return cls(factory(config, STT_SAMPLE_RATE), padding_secs=padding_secs(SILENCE_PAD_S))
+            return cls(factory(config, STT_SAMPLE_RATE), padding_secs=padding_secs)
 
         name = str(config.get("service", "whisper")).lower()
         if name == "whisper":
-            return cls(whisper_service(config), padding_secs=padding_secs(SILENCE_PAD_S))
+            return cls(whisper_service(config), padding_secs=padding_secs)
         if name == "moonshine":
-            # Moonshine returns empty when fed leading silence, so don't pad.
-            return cls(moonshine_service(config), padding_secs=padding_secs(0))
+            return cls(moonshine_service(config), padding_secs=padding_secs)
 
         raise ValueError(
             f"Unknown STT service: {name!r}. Known: whisper, moonshine. "
@@ -165,8 +160,7 @@ class EvalTranscriber:
             pcm = await self._resampler.resample(pcm, sample_rate, STT_SAMPLE_RATE)
 
         # Pad with silence so the STT has a clean lead-in/lead-out and doesn't drop
-        # a short onset/offset word (see SILENCE_PAD_S). Skipped (padding_secs=0)
-        # for STTs that mishandle leading silence, e.g. Moonshine.
+        # a short onset/offset word (see SILENCE_PAD_S); padding_secs=0 disables it.
         if self._padding_secs:
             pad = b"\x00\x00" * int(STT_SAMPLE_RATE * self._padding_secs)
             pcm = pad + pcm + pad

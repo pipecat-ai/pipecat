@@ -43,13 +43,13 @@ class TestTranscriberFromConfig(unittest.TestCase):
         self.assertEqual(t._service[0], "FAKE_STT")
         self.assertEqual(t._service[2], 16000)  # STT_SAMPLE_RATE
 
-    def test_padding_defaults_per_service(self):
+    def test_padding_defaults(self):
         from pipecat.evals.transcribe import SILENCE_PAD_S
 
         whisper = EvalTranscriber.from_config({"service": "whisper"})
         self.assertEqual(whisper._padding_secs, SILENCE_PAD_S)
         moonshine = EvalTranscriber.from_config({"service": "moonshine"})
-        self.assertEqual(moonshine._padding_secs, 0)
+        self.assertEqual(moonshine._padding_secs, SILENCE_PAD_S)
         factory = EvalTranscriber.from_config({"factory": "tests.test_evals_services._fake_stt"})
         self.assertEqual(factory._padding_secs, SILENCE_PAD_S)
 

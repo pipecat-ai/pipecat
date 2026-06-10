@@ -85,7 +85,7 @@ Top-level optional fields:
                     service: moonshine     # STT for the bot's audio (or whisper)
                     model: small-streaming # optional
                     padding_secs: 0        # optional; silence padded around the
-                                           # segment (default: per-service)
+                                           # segment (default: 2)
 
             ``audio`` makes the bot speak and judges the transcription of its
             actual audio (``tts_response``); ``text`` (the default) skips TTS and
