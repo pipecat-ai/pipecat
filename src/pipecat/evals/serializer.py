@@ -73,8 +73,9 @@ EVAL_CANCEL_MESSAGE_TYPE = "eval-cancel"
 # PNG/JPEG/... bytes plus its MIME ``format``) on the serializer. The eval input
 # transport hands it back as a ``UserImageRawFrame`` when the bot asks for a user
 # image (``UserImageRequestFrame``), so a function-calling-video bot can be driven
-# without a real camera. The image is already encoded, so it flows straight into
-# the LLM context with no decode/re-encode.
+# without a real camera. The harness sends the image encoded over the wire; the
+# eval input transport decodes it and pushes a raw ``UserImageRawFrame`` (matching
+# a real camera transport).
 EVAL_IMAGE_MESSAGE_TYPE = "eval-image"
 
 # Outbound message carrying a chunk of the bot's synthesized audio (base64), used
@@ -104,8 +105,8 @@ class RTVIEvalSerializer(FrameSerializer):
         # the ?capture_audio query param) only for tts_response scenarios, so we
         # don't ship the bot's audio over the wire unless something asserts on it.
         self._capture_audio = False
-        # The most recent image the harness registered (decoded bytes, MIME type),
-        # served back on a UserImageRequestFrame. See EVAL_IMAGE_MESSAGE_TYPE.
+        # The most recent image the harness registered (still-encoded bytes, MIME
+        # type), served back on a UserImageRequestFrame. See EVAL_IMAGE_MESSAGE_TYPE.
         self._user_image: tuple[bytes, str] | None = None
 
     def set_capture_audio(self, capture: bool) -> None:

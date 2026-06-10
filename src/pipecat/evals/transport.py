@@ -41,6 +41,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import aiofiles
 from loguru import logger
+from PIL import Image
 
 from pipecat.frames.frames import (
     Frame,
@@ -127,14 +128,18 @@ class EvalWebsocketServerInputTransport(WebsocketServerInputTransport):
         if image is None:
             logger.warning(f"{self}: UserImageRequestFrame but no eval image registered")
             return
-        data, fmt = image
-        # The image is already encoded, so ``format`` is its MIME type and ``size``
-        # is unused (the LLM context uses the encoded bytes as-is).
+        data, _fmt = image
+        # The harness sends the image encoded over the wire, but a real camera
+        # transport pushes raw frames -- so decode it to raw RGB here and serve a
+        # genuine ``UserImageRawFrame``. The LLM context re-encodes raw frames to
+        # JPEG anyway, and consumers that decode directly (e.g. a local vision
+        # model doing ``Image.frombytes``) need the raw pixels and real size.
+        decoded = await asyncio.to_thread(lambda: Image.open(io.BytesIO(data)).convert("RGB"))
         await self.push_frame(
             UserImageRawFrame(
-                image=data,
-                size=(0, 0),
-                format=fmt,
+                image=decoded.tobytes(),
+                size=decoded.size,
+                format="RGB",
                 user_id=request.user_id,
                 text=request.text,
                 append_to_context=request.append_to_context,
