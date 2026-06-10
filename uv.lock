@@ -3460,6 +3460,26 @@ wheels = [
 ]
 
 [[package]]
+name = "moonshine-voice"
+version = "0.0.62"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "filelock" },
+    { name = "numpy" },
+    { name = "platformdirs" },
+    { name = "requests" },
+    { name = "sounddevice" },
+    { name = "tqdm" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3f/aa/a43e042880fe0d4a4447a7bc178ca45ca5076882fa749e5fdc13e2d30b81/moonshine_voice-0.0.62-py3-none-macosx_15_0_arm64.whl", hash = "sha256:5fd0ec3db109d0f24ca970d5d89664489749696c79b2ffa093aeb93aaa899576", size = 81299261, upload-time = "2026-06-02T00:05:03.53Z" },
+    { url = "https://files.pythonhosted.org/packages/87/c5/13279708d1a538ea498580fea25f0566e8f2cbd99f2014b8b450df7d016f/moonshine_voice-0.0.62-py3-none-manylinux_2_31_aarch64.manylinux_2_39_aarch64.whl", hash = "sha256:c91c13a1604f81c5e58d166228a9628132d2ee710e4d7e939edb06448e0cb538", size = 60715318, upload-time = "2026-06-02T04:23:14.099Z" },
+    { url = "https://files.pythonhosted.org/packages/c5/6a/956ce3f5a4167a56e608e70e4add670c252a7c6eae0b85efb3e0fa44590e/moonshine_voice-0.0.62-py3-none-manylinux_2_34_aarch64.whl", hash = "sha256:d5aad3e444801261f906128eb4dc6a2253f76a2d90d5b7d7ffa44f89852f1a07", size = 88377260, upload-time = "2026-06-02T00:21:25.855Z" },
+    { url = "https://files.pythonhosted.org/packages/63/4d/566ce6a74dd0ad67aed70c8b0537fdaca0b715ba22dcbb7cbe301886eb3f/moonshine_voice-0.0.62-py3-none-manylinux_2_34_x86_64.whl", hash = "sha256:bb272b92104f05c2a6a44493fce7d708af8e5f840145c58dbab4ff2f20c22fa5", size = 89538712, upload-time = "2026-06-02T00:14:55.704Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/7f/c00f0423dc41f0f5c351f772341f16530bbb1f0add7b7238eb3a0db977da/moonshine_voice-0.0.62-py3-none-win_amd64.whl", hash = "sha256:6773f6a439de360bb676bcddac1493a4c232fe05f9c12a70f646fbc9292894f2", size = 57574086, upload-time = "2026-06-02T05:17:38.122Z" },
+]
+
+[[package]]
 name = "more-itertools"
 version = "11.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4454,6 +4474,9 @@ moondream = [
     { name = "timm" },
     { name = "transformers" },
 ]
+moonshine = [
+    { name = "moonshine-voice" },
+]
 nvidia = [
     { name = "nvidia-riva-client" },
     { name = "protobuf" },
@@ -4590,6 +4613,7 @@ requires-dist = [
     { name = "mem0ai", marker = "extra == 'mem0'", specifier = ">=2,<3" },
     { name = "mistralai", marker = "extra == 'mistral'", specifier = ">=2.0.0,<3" },
     { name = "mlx-whisper", marker = "extra == 'mlx-whisper'", specifier = "~=0.4.2" },
+    { name = "moonshine-voice", marker = "extra == 'moonshine'", specifier = ">=0.0.62" },
     { name = "nltk", specifier = ">=3.9.4,<4" },
     { name = "numba", specifier = ">=0.61.2,<1" },
     { name = "numpy", specifier = ">=1.26.4,<3" },
@@ -4644,7 +4668,7 @@ requires-dist = [
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1,<1" },
     { name = "websockets", specifier = ">=13.1" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "camb", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "koala", "kokoro", "langchain", "lemonslice", "livekit", "lmnt", "local", "local-smart-turn", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "nebius", "neuphonic", "novita", "nvidia", "openai", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "qwen", "redis", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "vonage-video-connector", "webrtc", "websocket", "whisper", "xai", "cli"]
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "camb", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "koala", "kokoro", "langchain", "lemonslice", "livekit", "lmnt", "local", "local-smart-turn", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "moonshine", "nebius", "neuphonic", "novita", "nvidia", "openai", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "qwen", "redis", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "vonage-video-connector", "webrtc", "websocket", "whisper", "xai", "cli"]
 
 [package.metadata.requires-dev]
 dev = [

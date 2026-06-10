@@ -81,6 +81,7 @@ IMPORTS = {
     "sarvam_stt": ["from pipecat.services.sarvam.stt import SarvamSTTService"],
     "soniox_stt": ["from pipecat.services.soniox.stt import SonioxSTTService"],
     "speechmatics_stt": ["from pipecat.services.speechmatics.stt import SpeechmaticsSTTService"],
+    "moonshine_stt": ["from pipecat.services.moonshine.stt import MoonshineSTTService"],
     "whisper_stt": ["from pipecat.services.whisper.stt import WhisperSTTService"],
     "xai_stt": ["from pipecat.services.xai.stt import XAISTTService"],
     # LLM Services

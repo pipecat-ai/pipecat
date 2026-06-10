@@ -88,6 +88,13 @@ SERVICE_CONFIGS = {
     ),
     "soniox_stt": 'SonioxSTTService(api_key=os.getenv("SONIOX_API_KEY"))',
     "speechmatics_stt": 'SpeechmaticsSTTService(api_key=os.getenv("SPEECHMATICS_API_KEY"))',
+    "moonshine_stt": (
+        "MoonshineSTTService(\n"
+        "        settings=MoonshineSTTService.Settings(\n"
+        '            model=os.getenv("MOONSHINE_STT_MODEL"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "whisper_stt": (
         "WhisperSTTService(\n"
         "        settings=WhisperSTTService.Settings(\n"
