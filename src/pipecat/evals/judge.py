@@ -27,7 +27,7 @@ Example::
 
     from pipecat.services.ollama.llm import OLLamaLLMService
 
-    service = OLLamaLLMService(settings=OLLamaLLMService.Settings(model="qwen2.5:3b"))
+    service = OLLamaLLMService(settings=OLLamaLLMService.Settings(model="gemma2:9b"))
     judge = EvalJudge(service)
     judge.add_user_message("What can you help me with?")
     judge.add_assistant_message("I can answer questions, set reminders, and look things up.")
@@ -129,7 +129,7 @@ class EvalJudge:
         self._cache: dict[str, JudgeVerdict] = {}
 
     @classmethod
-    def from_config(cls, judge_config: dict | None) -> "EvalJudge | None":
+    def from_config(cls, judge_config: dict | None) -> "EvalJudge":
         """Build an :class:`EvalJudge` from a scenario's ``judge.eval:`` config block.
 
         Honors a custom ``factory`` (dotted path to a callable taking ``(config)``
@@ -140,12 +140,16 @@ class EvalJudge:
 
         Args:
             judge_config: Mapping with keys ``service`` (default ``"ollama"``),
-                ``model`` (default ``"qwen2.5:3b"``), and optional ``endpoint``
+                ``model`` (default ``"gemma2:9b"``), and optional ``endpoint``
                 (service-specific default if omitted). ``None`` uses all defaults.
 
         Returns:
-            A configured EvalJudge, or ``None`` if construction fails (caller
-            decides whether to skip ``eval:`` assertions or fail the scenario).
+            A configured EvalJudge.
+
+        Raises:
+            ValueError: If ``service`` is unknown (matching
+                :meth:`pipecat.evals.speech.EvalSpeech.from_config` and
+                :meth:`pipecat.evals.transcribe.EvalTranscriber.from_config`).
 
         Example::
 
@@ -164,18 +168,15 @@ class EvalJudge:
             return cls(factory(config))
 
         service_name = str(config.get("service", "ollama")).lower()
-
-        try:
-            if service_name == "ollama":
-                llm_service = ollama_service(config)
-            elif service_name == "openai":
-                llm_service = openai_service(config)
-            else:
-                logger.error(f"Unknown judge service: {service_name!r}")
-                return None
-        except ImportError as e:
-            logger.error(f"Failed to construct judge service {service_name!r}: {e}")
-            return None
+        if service_name == "ollama":
+            llm_service = ollama_service(config)
+        elif service_name == "openai":
+            llm_service = openai_service(config)
+        else:
+            raise ValueError(
+                f"Unknown judge service: {service_name!r}. Known: ollama, openai. "
+                "Or set judge.eval.factory to a 'module.func' returning an LLM service."
+            )
 
         return cls(llm_service)
 

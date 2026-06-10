@@ -28,9 +28,9 @@ Event names are the friendly names the harness maps RTVI server messages onto:
 
 The bot's reply can be asserted three ways:
     response       the transcription of the bot's *actual synthesized audio* (a
-                   local Whisper model run by the harness) in audio modality, or
-                   the LLM text in text modality. The real end-to-end check —
-                   prefer this.
+                   local STT — Moonshine or Whisper — run by the harness) in
+                   audio modality, or the LLM text in text modality. The real
+                   end-to-end check — prefer this.
     llm_response   the LLM's text output (``bot-llm-text``). Available in both
                    modalities.
     tts_response   the text the TTS reports speaking (``bot-tts-text``, with
@@ -82,8 +82,8 @@ Top-level optional fields:
                     service: openai
                     model: gpt-4o-mini
                   transcription:           # required when modality is audio
-                    service: whisper       # STT for the bot's audio
-                    model: base            # optional
+                    service: moonshine     # STT for the bot's audio (or whisper)
+                    model: small-streaming # optional
 
             ``audio`` makes the bot speak and judges the transcription of its
             actual audio (``tts_response``); ``text`` (the default) skips TTS and
@@ -136,11 +136,12 @@ class EvalExpectation:
 
     Parameters:
         event: Required — the semantic event name (e.g. ``user_stopped_speaking``).
-        within_ms: Optional latency budget, measured from the turn's ``user_input``
-            send — all of a turn's expectations share that one anchor, so a stalled
-            turn fails within a single budget rather than one per expectation.
-            Defaults to 60s when omitted, so timing isn't asserted unless set
-            explicitly.
+        within_ms: Optional latency budget, measured from the turn's user send —
+            all of a turn's expectations share that one anchor, so a stalled turn
+            fails within a single budget rather than one per expectation. For audio
+            turns the anchor is when the utterance was *sent*, not when it finishes
+            playing out of the transport's virtual mic. Defaults to 60s when
+            omitted, so timing isn't asserted unless set explicitly.
         text_contains: Optional substring check on the event's text content
             (``llm_response.text`` or ``user_transcription.transcript``).
         calls: For a ``function_call`` event, the set of calls expected in the
@@ -148,8 +149,9 @@ class EvalExpectation:
             only when all of them are found. Built from ``calls:`` in the YAML, or
             from the single ``name:``/``args:`` shorthand.
         eval: Optional natural-language criterion the event's text content
-            must satisfy. Evaluated by a judge LLM. Only meaningful on
-            ``llm_response`` (the text the bot produced for this turn).
+            must satisfy. Evaluated by a judge LLM. Only meaningful on the
+            bot-generated text events: ``response``, ``llm_response``, and
+            ``tts_response``.
     """
 
     event: str
@@ -161,7 +163,7 @@ class EvalExpectation:
 
 @dataclass
 class EvalSendAfter:
-    """Event-driven scheduling for a turn's ``user_input`` send.
+    """Event-driven scheduling for a turn's user send.
 
     When set on a :class:`EvalTurn`, the harness waits for ``event`` to have been
     seen (either earlier in the run or arriving now), then waits an additional
@@ -187,8 +189,10 @@ class EvalTurn:
     like opening greetings).
 
     Parameters:
-        user: Optional text to send as ``{"type": "user_input", "text": ...}``.
-            If absent, the turn just waits for and asserts on expected events.
+        user: Optional text the harness sends as the user's turn — an RTVI
+            ``send-text`` in text modality, or synthesized speech (``raw-audio``)
+            in audio modality. If absent, the turn just waits for and asserts on
+            expected events.
         expect: Expected events, in the order they should arrive.
         send_after: Optional event-driven schedule for when the ``user`` send
             should fire. Only meaningful when ``user`` is set.
@@ -212,23 +216,23 @@ class EvalScenario:
         name: The eval name (from ``name:``).
         turns: Ordered list of turns.
         reset: Messages to seed the bot's LLM context with before this eval
-            runs. Sent by the harness as a ``{"type": "reset", "messages":
-            ...}`` message right after the initial ``ready`` handshake. Empty
-            list (the default) clears the context entirely; bots without an
-            LLM context aggregator ignore the resulting frame.
+            runs. Sent by the harness as an ``eval-reset`` client message right
+            after the bot-ready handshake (the eval serializer turns it into an
+            ``LLMMessagesUpdateFrame``). Empty list (the default) clears the
+            context entirely; bots without an LLM context aggregator ignore the
+            resulting frame.
         judge: Judge LLM configuration dict with keys ``service``, ``model``,
             and optional ``endpoint``. Defaults to
-            ``{"service": "ollama", "model": "qwen2.5:3b"}``.
-        bot_audio: Whether the bot produces speech (parsed from a bool or a
-            mapping). Default False: the bot skips TTS, the harness configures
-            skip-TTS at connect, and even an on-connect greeting is silent. True
-            (or a mapping) makes the bot speak. A mapping additionally enables
-            ``tts_response`` and configures the STT (``service`` / ``model``)
-            used to transcribe the bot's audio (see :attr:`transcriber`).
-        transcriber: Parsed from a mapping ``bot_audio``; the STT config
-            (``service`` defaults to ``whisper``, plus ``model``) used to
-            transcribe the bot's audio for ``tts_response`` (``None`` when
-            ``bot_audio`` is a plain bool).
+            ``{"service": "ollama", "model": "gemma2:9b"}``.
+        bot_audio: Whether the bot produces speech, derived from
+            ``judge.modality``. False (text, the default): the bot skips TTS —
+            the harness configures skip-TTS at connect, so even an on-connect
+            greeting is silent. True (audio): the bot speaks, and the judge
+            evaluates the transcription of its actual audio.
+        transcriber: Parsed from the ``judge.transcription:`` block; the STT
+            config (``service`` defaults to ``whisper``, plus ``model``) used to
+            transcribe the bot's audio for the ``response`` event (``None`` in
+            text modality).
         user_audio: TTS config the harness uses to generate user audio. When
             present, the harness streams RTVI ``raw-audio`` (not ``send-text``)
             to the bot, exercising its STT for real. Mapping with ``service``,
@@ -241,7 +245,7 @@ class EvalScenario:
     name: str
     turns: list[EvalTurn]
     reset: list[dict] = field(default_factory=list)
-    judge: dict = field(default_factory=lambda: {"service": "ollama", "model": "qwen2.5:3b"})
+    judge: dict = field(default_factory=lambda: {"service": "ollama", "model": "gemma2:9b"})
     bot_audio: bool = False
     transcriber: dict | None = None
     user_audio: dict | None = None
@@ -325,7 +329,7 @@ class EvalScenario:
         )
 
 
-_DEFAULT_JUDGE = {"service": "ollama", "model": "qwen2.5:3b"}
+_DEFAULT_JUDGE = {"service": "ollama", "model": "gemma2:9b"}
 
 
 def _parse_user_block(user: Any, path: Path) -> dict | None:
@@ -414,8 +418,8 @@ def describe_config(scenario: EvalScenario, *, color: bool = False) -> str:
         A ``user`` line and a ``judge`` line, each a set of ``key: value`` segments
         separated by ``|``, e.g.::
 
-            user  -> modality: audio | speech: kokoro
-            judge -> modality: audio | eval: ollama/llama3:latest | transcription: whisper
+            user  -> modality: audio | speech: kokoro/af_heart
+            judge -> modality: audio | transcription: moonshine/small-streaming | eval: ollama/gemma2:9b
     """
 
     def paint(text: str, code: str) -> str:

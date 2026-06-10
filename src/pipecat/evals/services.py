@@ -118,7 +118,7 @@ def ollama_service(config: dict) -> LLMService[Any]:
     base_url = config.get("endpoint") or "http://localhost:11434/v1"
     return OLLamaLLMService(
         base_url=base_url,
-        settings=OLLamaLLMService.Settings(model=config.get("model", "qwen2.5:3b")),
+        settings=OLLamaLLMService.Settings(model=config.get("model", "gemma2:9b")),
     )
 
 

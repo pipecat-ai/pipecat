@@ -94,9 +94,54 @@ class TestVoiceFromConfig(unittest.TestCase):
             EvalSpeech(_FakeWS(), sample_rate=16000, cache_key="k")
 
 
+class _CountingTTS:
+    """Minimal stand-in for a TTSService: run_tts yields one audio frame."""
+
+    def __init__(self, pcm: bytes, sample_rate: int):
+        self.pcm = pcm
+        self.sample_rate = sample_rate
+        self.calls = 0
+
+    async def run_tts(self, text, context_id):
+        from pipecat.frames.frames import TTSAudioRawFrame
+
+        self.calls += 1
+        yield TTSAudioRawFrame(audio=self.pcm, sample_rate=self.sample_rate, num_channels=1)
+
+
+class TestSpeechCache(unittest.IsolatedAsyncioTestCase):
+    async def test_cache_round_trip_and_sr_mismatch(self):
+        import tempfile
+
+        pcm = b"\x01\x02" * 1600  # 100ms of 16kHz mono
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tts = _CountingTTS(pcm, 16000)
+            speech = EvalSpeech(tts, sample_rate=16000, cache_key="k", cache_dir=tmp)
+            speech._started = True  # skip the FrameProcessor lifecycle
+
+            out, sr = await speech.generate("hello")
+            self.assertEqual((out, sr), (pcm, 16000))
+            self.assertEqual(tts.calls, 1)
+
+            # Second call hits the WAV cache; the service is not called again.
+            out2, _ = await speech.generate("hello")
+            self.assertEqual(out2, pcm)
+            self.assertEqual(tts.calls, 1)
+
+            # A different requested sample rate misses the cached file's rate and
+            # regenerates (the cache slot is shared across rates by design).
+            tts24 = _CountingTTS(pcm, 24000)
+            speech24 = EvalSpeech(tts24, sample_rate=24000, cache_key="k", cache_dir=tmp)
+            speech24._started = True
+            await speech24.generate("hello")
+            self.assertEqual(tts24.calls, 1)
+
+
 class TestJudgeFromConfig(unittest.TestCase):
-    def test_unknown_service_returns_none(self):
-        self.assertIsNone(EvalJudge.from_config({"service": "nope"}))
+    def test_unknown_service_rejected(self):
+        with self.assertRaises(ValueError):
+            EvalJudge.from_config({"service": "nope"})
 
     def test_factory_escape_hatch(self):
         j = EvalJudge.from_config({"factory": "tests.test_evals_services._fake_judge_llm"})

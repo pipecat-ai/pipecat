@@ -259,7 +259,7 @@ class TestEvalsScenarioParser(unittest.TestCase):
         s = EvalScenario.load(
             _write("name: e\nturns: [{user: hi, expect: [{event: user_stopped_speaking}]}]\n")
         )
-        self.assertEqual(s.judge, {"service": "ollama", "model": "qwen2.5:3b"})
+        self.assertEqual(s.judge, {"service": "ollama", "model": "gemma2:9b"})
 
     def test_judge_block_non_mapping_rejected(self):
         with self.assertRaises(ValueError) as cm:
