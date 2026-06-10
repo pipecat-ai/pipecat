@@ -335,33 +335,28 @@ class TestTextContainsResolution(unittest.TestCase):
 
 
 class TestAudioSender(unittest.IsolatedAsyncioTestCase):
-    """The continuous mic streams silence and drains injected user audio."""
+    """User audio goes out whole; the eval transport's virtual mic paces it bot-side."""
 
-    async def test_streams_silence_and_injected_audio(self):
+    async def test_send_user_audio_sends_whole_utterance(self):
         s = _session(bot_audio=True)
-        sent: list[bytes] = []
+        sent: list[tuple[bytes, int]] = []
+
+        class _FakeSpeech:
+            sample_rate = 16000
+
+            async def generate(self, text):
+                return b"\x01\x02" * 16000 * 2, 16000  # 2s of 16kHz mono
 
         async def fake_send_raw(chunk, sample_rate):
-            sent.append(chunk)
+            sent.append((chunk, sample_rate))
 
+        s._speech = _FakeSpeech()
         s._send_raw_audio = fake_send_raw
-        task = asyncio.create_task(s._audio_sender_loop(16000))
-        try:
-            for chunk in (b"\x01\x01", b"\x02\x02", b"\x03\x03"):
-                s._audio_out.put_nowait(chunk)
-            # join() returns once every injected chunk has been sent.
-            await asyncio.wait_for(s._audio_out.join(), timeout=2)
-            await asyncio.sleep(0.05)  # ... and silence keeps streaming after
-        finally:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        await s._send_user_audio("hello")
 
-        silence = b"\x00\x00" * (16000 * 20 // 1000)
-        self.assertTrue({b"\x01\x01", b"\x02\x02", b"\x03\x03"} <= set(sent))
-        self.assertIn(silence, sent)
+        self.assertEqual(len(sent), 2)  # 2s -> two ~1s slices
+        self.assertEqual(b"".join(chunk for chunk, _ in sent), b"\x01\x02" * 16000 * 2)
+        self.assertTrue(all(rate == 16000 for _, rate in sent))
 
 
 def _free_port() -> int:

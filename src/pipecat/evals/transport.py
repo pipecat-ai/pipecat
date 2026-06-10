@@ -27,6 +27,13 @@ sets:
   so the disconnect doesn't delay the next connect. Recording is eval-only — the
   generic transport is untouched.
 
+The input side runs a **virtual microphone** (:class:`EvalMicrophone`): the harness
+sends each user utterance as a few large ``raw-audio`` messages, and the input
+transport plays them into the pipeline at real-time cadence (~20ms frames) with
+locally generated silence in between — so VADs, turn models, and streaming STTs
+see exactly what a live client's mic would produce, without a continuous frame
+stream crossing the wire.
+
 This transport also keeps one bot alive across a whole eval suite: it overrides
 ``_on_client_disconnected`` to detach the connection (and flush the recording)
 *without* firing the bot's ``on_client_disconnected`` handler, which would cancel
@@ -36,6 +43,7 @@ the pipeline.
 import asyncio
 import io
 import wave
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -44,7 +52,10 @@ from loguru import logger
 from PIL import Image
 
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     Frame,
+    InputAudioRawFrame,
     LLMConfigureOutputFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
@@ -58,6 +69,10 @@ from pipecat.transports.websocket.server import (
 SKIP_TTS_QUERY_PARAM = "skip_tts"
 CAPTURE_AUDIO_QUERY_PARAM = "capture_audio"
 RECORD_QUERY_PARAM = "record"
+
+# One virtual-mic frame per tick — the granularity a live transport delivers and
+# what VAD/turn models consume.
+AUDIO_CHUNK_MS = 20
 
 
 def _query_string(websocket) -> str:
@@ -103,22 +118,154 @@ async def _write_wav(path: str, audio: bytes, sample_rate: int, num_channels: in
     logger.info(f"Eval recording saved: {p} ({len(audio)} bytes)")
 
 
-class EvalWebsocketServerInputTransport(WebsocketServerInputTransport):
-    """Input transport that answers image requests with the harness's image.
+class EvalMicrophone:
+    """Plays harness-sent utterances into the pipeline at real-time cadence.
 
-    A function-calling-video bot pushes a ``UserImageRequestFrame`` upstream when
-    it needs the user's camera image. There is no camera under eval, so we serve
-    the image the harness registered for the turn (an ``eval-image`` message,
-    stored on the serializer) as a ``UserImageRawFrame`` — mirroring
-    ``daily/transport.py`` but sourcing the image from the serializer instead of a
-    live video frame.
+    The harness sends each user utterance as a few large ``raw-audio`` messages
+    (cheap on the wire — no continuous frame stream to encode and ship). A real
+    microphone, though, delivers small frames at real-time pace, and
+    timing-sensitive consumers rely on that: VAD start windows, Krisp IP/turn
+    models, and turn-detecting STTs all break if a whole utterance floods the
+    pipeline at once. This class is the eval transport's virtual microphone:
+    every ~20ms tick it pushes one frame — utterance audio when queued, locally
+    generated silence otherwise — so the bot hears exactly what a live client
+    would produce, including the silence that lets its VAD end each turn.
+
+    Speech that falls behind after a late wake-up is sent back-to-back until
+    caught up (the utterance content must stay gap-free); silence never catches
+    up (the end-of-turn gap must stay honest).
     """
 
+    def __init__(self, push: Callable[[bytes, int], Awaitable[None]]):
+        """Initialize the microphone.
+
+        Args:
+            push: Async callable ``(pcm: bytes, sample_rate: int)`` invoked with
+                each ~20ms mic frame.
+        """
+        self._push = push
+        self._queue: asyncio.Queue[tuple[bytes, int]] = asyncio.Queue()
+        self._pcm = b""
+        self._rate = 0
+        self._offset = 0
+
+    def add_audio(self, pcm: bytes, sample_rate: int) -> None:
+        """Queue one utterance (or a piece of one) for real-time playout."""
+        self._queue.put_nowait((pcm, sample_rate))
+
+    def reset(self) -> None:
+        """Drop queued and in-progress utterance audio (a new eval client starts fresh)."""
+        while not self._queue.empty():
+            self._queue.get_nowait()
+        self._pcm, self._offset = b"", 0
+
+    def _next_chunk(self) -> tuple[bytes, int]:
+        """The next ~20ms of queued speech, or ``(b"", 0)`` when there is none."""
+        while self._offset >= len(self._pcm):
+            try:
+                self._pcm, self._rate = self._queue.get_nowait()
+                self._offset = 0
+            except asyncio.QueueEmpty:
+                return b"", 0
+        bytes_per_chunk = (self._rate * AUDIO_CHUNK_MS // 1000) * 2
+        chunk = self._pcm[self._offset : self._offset + bytes_per_chunk]
+        self._offset += bytes_per_chunk
+        return chunk, self._rate
+
+    async def run(self, silence_sample_rate: int) -> None:
+        """Emit one mic frame per ~20ms tick, forever (cancel to stop).
+
+        Args:
+            silence_sample_rate: Sample rate for the generated silence frames
+                (the transport's input rate).
+        """
+        silence = b"\x00\x00" * (silence_sample_rate * AUDIO_CHUNK_MS // 1000)
+        tick = AUDIO_CHUNK_MS / 1000
+        loop = asyncio.get_running_loop()
+        next_send = loop.time()
+        while True:
+            chunk, rate = self._next_chunk()
+            speaking = bool(chunk)
+            if not speaking:
+                chunk, rate = silence, silence_sample_rate
+            await self._push(chunk, rate)
+            next_send += tick
+            now = loop.time()
+            if not speaking:
+                # Never burst silence to catch up: re-anchor instead, so the
+                # bot's VAD gets the full end-of-turn gap.
+                next_send = max(next_send, now)
+            if next_send > now:
+                await asyncio.sleep(next_send - now)
+            # Speech behind schedule loops immediately: catch-up keeps the
+            # utterance gap-free after a late wake-up.
+
+
+class EvalWebsocketServerInputTransport(WebsocketServerInputTransport):
+    """Input transport that plays a virtual mic and serves the harness's images.
+
+    Audio: the harness sends each user utterance as a few large ``raw-audio``
+    messages; instead of letting them flood the VAD path at once, they are queued
+    on an :class:`EvalMicrophone` that plays them into the pipeline at real-time
+    cadence with locally generated silence in between — a virtual microphone.
+    The mic starts when the client signals ready (the ``client-ready`` →
+    ``InputTransportStartAudioStreamingFrame`` path) and runs for the life of the
+    transport, surviving client disconnects like the rest of the eval transport.
+
+    Images: a function-calling-video bot pushes a ``UserImageRequestFrame``
+    upstream when it needs the user's camera image. There is no camera under
+    eval, so we serve the image the harness registered for the turn (an
+    ``eval-image`` message, stored on the serializer) as a ``UserImageRawFrame``
+    — mirroring ``daily/transport.py`` but sourcing the image from the serializer
+    instead of a live video frame.
+    """
+
+    def __init__(self, *args, **kwargs):
+        """Initialize the input transport and its virtual mic."""
+        super().__init__(*args, **kwargs)
+        self._mic = EvalMicrophone(self._push_mic_frame)
+        self._mic_task = None
+
+    def reset_mic(self) -> None:
+        """Drop any leftover utterance audio (called when a new eval client connects)."""
+        self._mic.reset()
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Serve the registered image in response to a ``UserImageRequestFrame``."""
+        """Route utterance audio to the virtual mic; serve image requests."""
+        # Harness-sent utterance audio (decoded by the RTVIProcessor upstream):
+        # queue it for real-time playout instead of letting it through in a burst.
+        if isinstance(frame, InputAudioRawFrame):
+            self._mic.add_audio(frame.audio, frame.sample_rate)
+            return
         await super().process_frame(frame, direction)
         if isinstance(frame, UserImageRequestFrame):
             await self._serve_user_image(frame)
+
+    async def _start_audio_in_streaming(self):
+        """Start the virtual mic (triggered by the client-ready handshake)."""
+        if self._mic_task is None:
+            self._mic_task = self.create_task(self._mic.run(self.sample_rate))
+
+    async def stop(self, frame: EndFrame):
+        """Stop the virtual mic, then the transport."""
+        await self._stop_mic()
+        await super().stop(frame)
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the virtual mic, then the transport."""
+        await self._stop_mic()
+        await super().cancel(frame)
+
+    async def _stop_mic(self) -> None:
+        if self._mic_task is not None:
+            await self.cancel_task(self._mic_task)
+            self._mic_task = None
+
+    async def _push_mic_frame(self, pcm: bytes, sample_rate: int) -> None:
+        """Feed one mic frame through the normal input path (filters, VAD)."""
+        await self.push_audio_frame(
+            InputAudioRawFrame(audio=pcm, sample_rate=sample_rate, num_channels=1)
+        )
 
     async def _serve_user_image(self, request: UserImageRequestFrame) -> None:
         serializer = getattr(self._params, "serializer", None)
@@ -191,6 +338,11 @@ class EvalWebsocketServerTransport(WebsocketServerTransport):
         serializer = getattr(self._params, "serializer", None)
         if serializer is not None and hasattr(serializer, "set_capture_audio"):
             serializer.set_capture_audio(_query_flag(websocket, CAPTURE_AUDIO_QUERY_PARAM))
+
+        # A new eval client starts a fresh conversation: drop any utterance audio
+        # a previous client left queued on the virtual mic.
+        if isinstance(self._input, EvalWebsocketServerInputTransport):
+            self._input.reset_mic()
 
         # Start recording as soon as the client connects so the bot's first audio
         # (e.g. a greeting) is captured. Flushed on disconnect.
