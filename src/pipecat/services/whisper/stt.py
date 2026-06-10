@@ -14,7 +14,7 @@ import asyncio
 import platform
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 import numpy as np
 from loguru import logger
@@ -47,7 +47,7 @@ if platform.system() == "Darwin" and platform.machine() == "arm64":
         raise ImportError(f"Missing module: {e}") from e
 
 
-class Model(Enum):
+class Model(StrEnum):
     """Whisper model selection options for Faster Whisper.
 
     Provides various model sizes and specializations for speech recognition,
@@ -77,7 +77,7 @@ class Model(Enum):
     DISTIL_MEDIUM_EN = "Systran/faster-distil-whisper-medium.en"
 
 
-class MLXModel(Enum):
+class MLXModel(StrEnum):
     """MLX Whisper model selection options for Apple Silicon.
 
     Provides various model sizes optimized for Apple Silicon hardware,
