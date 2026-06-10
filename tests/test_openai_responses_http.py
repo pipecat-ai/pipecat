@@ -130,3 +130,47 @@ class TestHttpTokenUsageMetrics:
         assert tokens.total_tokens == 15
         assert tokens.cache_read_input_tokens == 0
         assert tokens.reasoning_tokens == 0
+
+    @pytest.mark.asyncio
+    async def test_token_usage_with_empty_details(self):
+        """A third-party server may send empty detail sub-objects.
+
+        The detail object is present but its fields (cached_tokens/
+        reasoning_tokens) come back as None under the SDK's lenient parse. The
+        handler must coalesce those to 0 rather than leak None into metrics.
+        """
+        service = _make_service()
+
+        usage = ResponseUsage.construct(
+            input_tokens=10,
+            output_tokens=5,
+            total_tokens=15,
+            input_tokens_details=InputTokensDetails.construct(),
+            output_tokens_details=OutputTokensDetails.construct(),
+        )
+        await _run(service, _completed_event(usage))
+
+        assert service.start_llm_usage_metrics.called
+        tokens = service.start_llm_usage_metrics.call_args[0][0]
+        assert tokens.cache_read_input_tokens == 0
+        assert tokens.reasoning_tokens == 0
+
+    @pytest.mark.asyncio
+    async def test_token_usage_with_missing_top_level_counts(self):
+        """A third-party server may omit the top-level token counts.
+
+        The SDK's lenient parse leaves omitted required counts as None. The
+        handler must coalesce them to 0 so metrics never receive None.
+        """
+        service = _make_service()
+
+        usage = ResponseUsage.construct(input_tokens=10)
+        await _run(service, _completed_event(usage))
+
+        assert service.start_llm_usage_metrics.called
+        tokens = service.start_llm_usage_metrics.call_args[0][0]
+        assert tokens.prompt_tokens == 10
+        assert tokens.completion_tokens == 0
+        assert tokens.total_tokens == 0
+        assert tokens.cache_read_input_tokens == 0
+        assert tokens.reasoning_tokens == 0

@@ -1070,19 +1070,26 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                 elif isinstance(event, ResponseCompletedEvent):
                     response = event.response
                     if response.usage:
-                        # Third-party Responses API servers may omit the
-                        # OpenAI-specific token detail sub-objects, leaving them
-                        # as None. Guard the nested access so a missing
-                        # input_tokens_details/output_tokens_details falls back
-                        # to 0 instead of raising AttributeError on every turn.
-                        input_details = response.usage.input_tokens_details
-                        output_details = response.usage.output_tokens_details
+                        usage = response.usage
+                        # Third-party Responses API servers may omit fields the
+                        # OpenAI SDK treats as required. The SDK's lenient
+                        # streaming decoder leaves anything omitted as None — at
+                        # the top level (token counts), as a missing detail
+                        # sub-object, or as a missing field inside one. Coalesce
+                        # each to 0 so a partial usage payload can't raise or
+                        # leak None into metrics.
+                        input_details = usage.input_tokens_details
+                        output_details = usage.output_tokens_details
                         tokens = LLMTokenUsage(
-                            prompt_tokens=response.usage.input_tokens,
-                            completion_tokens=response.usage.output_tokens,
-                            total_tokens=response.usage.total_tokens,
-                            cache_read_input_tokens=getattr(input_details, "cached_tokens", 0) or 0,
-                            reasoning_tokens=getattr(output_details, "reasoning_tokens", 0) or 0,
+                            prompt_tokens=usage.input_tokens or 0,
+                            completion_tokens=usage.output_tokens or 0,
+                            total_tokens=usage.total_tokens or 0,
+                            cache_read_input_tokens=(input_details.cached_tokens or 0)
+                            if input_details
+                            else 0,
+                            reasoning_tokens=(output_details.reasoning_tokens or 0)
+                            if output_details
+                            else 0,
                         )
                         await self.start_llm_usage_metrics(tokens)
 
