@@ -57,9 +57,12 @@ JUDGE_SYSTEM_INSTRUCTION = (
     "criterion, using the earlier turns only as context. The reply may still be "
     "streaming in. "
     "When the bot spoke its reply, the 'assistant' text is an automatic speech-to-text "
-    "transcription that may contain homophones or minor errors (for example 'for' for "
-    "'four', or 'to'/'too' for 'two'); judge it by the intended spoken meaning, not its "
-    "exact spelling. "
+    "transcription, so it may contain homophones, misspellings, split or merged words, and "
+    "missing punctuation. Always judge it by the intended spoken meaning, never by its exact "
+    "spelling. In particular, treat a number as the same value whether it is spelled out, "
+    "written as a digit, or transcribed as a homophone: 'for' and 'fore' mean 'four' (4), and "
+    "'to' and 'too' mean 'two' (2). Never answer 'no' solely because of a transcription error "
+    "when the intended spoken meaning satisfies the criterion. "
     "Respond ONLY with a JSON object on a single line containing two fields: "
     '{"verdict": "yes" | "no" | "continue", "reason": "<one short sentence>"}. '
     'Use "yes" if the reply satisfies the criterion. Use "no" if the reply gives a '
