@@ -1,0 +1,9 @@
+Added a `prefer_normalized_alignment` constructor parameter to
+`ElevenLabsTTSService` and `ElevenLabsHttpTTSService` to control which
+alignment field drives word timestamps, transcripts, and LLM context. By
+default (`None`), behavior is unchanged: normalized alignment is used only
+when `pronunciation_dictionary_locators` is configured. Set it to `False` to
+keep the original input text in the context while still applying a
+pronunciation dictionary to the audio (note that `alignment` may contain
+duplicated words on chunks where substitutions fire, per #4316), or `True` to
+always use normalized alignment.

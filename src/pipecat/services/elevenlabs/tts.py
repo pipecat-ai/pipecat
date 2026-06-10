@@ -280,7 +280,9 @@ def _select_alignment(
         msg: TTS response message from ElevenLabs.
         normalized_key: Key for the normalized-alignment field on this transport.
         alignment_key: Key for the original-alignment field on this transport.
-        prefer_normalized: True iff the caller is using pronunciation dictionaries.
+        prefer_normalized: True to prefer the normalized field. By default this
+            is true iff the caller is using pronunciation dictionaries; callers
+            can override it via ``prefer_normalized_alignment``.
 
     Returns:
         The chosen alignment dict, or ``None`` if both fields are absent/null.
@@ -288,6 +290,21 @@ def _select_alignment(
     if prefer_normalized:
         return msg.get(normalized_key) or msg.get(alignment_key)
     return msg.get(alignment_key) or msg.get(normalized_key)
+
+
+def _resolve_prefer_normalized(
+    prefer_normalized_alignment: bool | None,
+    pronunciation_dictionary_locators: list[PronunciationDictionaryLocator] | None,
+) -> bool:
+    """Resolve which alignment field a service should prefer.
+
+    An explicit ``prefer_normalized_alignment`` wins. When it's None, prefer
+    normalized only when pronunciation dictionaries are configured (the #4316
+    case where ``alignment`` has overlapping restarts).
+    """
+    if prefer_normalized_alignment is not None:
+        return prefer_normalized_alignment
+    return bool(pronunciation_dictionary_locators)
 
 
 def _strip_utterance_leading_spaces(
@@ -414,6 +431,9 @@ class ElevenLabsTTSService(WebsocketTTSService):
             enable_logging: Whether to enable ElevenLabs logging.
             apply_text_normalization: Text normalization mode ("auto", "on", "off").
             pronunciation_dictionary_locators: List of pronunciation dictionary locators to use.
+            prefer_normalized_alignment: Which alignment field to use for word
+                timestamps, transcripts, and LLM context. None (default) uses
+                normalized alignment only when pronunciation dictionaries are set.
         """
 
         language: Language | None = None
@@ -427,6 +447,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
         enable_logging: bool | None = None
         apply_text_normalization: Literal["auto", "on", "off"] | None = None
         pronunciation_dictionary_locators: list[PronunciationDictionaryLocator] | None = None
+        prefer_normalized_alignment: bool | None = None
 
     def __init__(
         self,
@@ -440,6 +461,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
         enable_ssml_parsing: bool | None = None,
         enable_logging: bool | None = None,
         pronunciation_dictionary_locators: list[PronunciationDictionaryLocator] | None = None,
+        prefer_normalized_alignment: bool | None = None,
         params: InputParams | None = None,
         settings: Settings | None = None,
         text_aggregation_mode: TextAggregationMode | None = None,
@@ -473,6 +495,15 @@ class ElevenLabsTTSService(WebsocketTTSService):
             enable_logging: Whether to enable ElevenLabs server-side logging.
             pronunciation_dictionary_locators: List of pronunciation dictionary
                 locators to use.
+            prefer_normalized_alignment: Which alignment field to use for word
+                timestamps, transcripts, and LLM context. When None (default),
+                normalized alignment is used only when
+                ``pronunciation_dictionary_locators`` is set. Set to False to
+                keep the original input text even with a pronunciation
+                dictionary configured (dictionary substitutions then stay out
+                of the context, but ``alignment`` may contain duplicated words
+                on chunks where substitutions fire, per issue #4316). Set to
+                True to always use normalized alignment.
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
@@ -528,6 +559,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
 
         # 3. Apply params overrides — only if settings not provided
         _pronunciation_dictionary_locators = pronunciation_dictionary_locators
+        _prefer_normalized_alignment = prefer_normalized_alignment
         if params is not None:
             self._warn_init_param_moved_to_settings("params")
             if not settings:
@@ -553,6 +585,8 @@ class ElevenLabsTTSService(WebsocketTTSService):
                     default_settings.apply_text_normalization = params.apply_text_normalization
                 if _pronunciation_dictionary_locators is None:
                     _pronunciation_dictionary_locators = params.pronunciation_dictionary_locators
+                if _prefer_normalized_alignment is None:
+                    _prefer_normalized_alignment = params.prefer_normalized_alignment
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -591,6 +625,9 @@ class ElevenLabsTTSService(WebsocketTTSService):
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
         self._pronunciation_dictionary_locators = _pronunciation_dictionary_locators
+        self._prefer_normalized = _resolve_prefer_normalized(
+            _prefer_normalized_alignment, _pronunciation_dictionary_locators
+        )
 
         self._cumulative_time = 0
         # Track partial words that span across alignment chunks
@@ -881,7 +918,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
                 msg,
                 normalized_key="normalizedAlignment",
                 alignment_key="alignment",
-                prefer_normalized=bool(self._pronunciation_dictionary_locators),
+                prefer_normalized=self._prefer_normalized,
             )
             if raw_alignment:
                 alignment = _strip_utterance_leading_spaces(
@@ -1053,6 +1090,9 @@ class ElevenLabsHttpTTSService(TTSService):
             speed: Voice speed control (0.25 to 4.0).
             apply_text_normalization: Text normalization mode ("auto", "on", "off").
             pronunciation_dictionary_locators: List of pronunciation dictionary locators to use.
+            prefer_normalized_alignment: Which alignment field to use for word
+                timestamps, transcripts, and LLM context. None (default) uses
+                normalized alignment only when pronunciation dictionaries are set.
         """
 
         language: Language | None = None
@@ -1064,6 +1104,7 @@ class ElevenLabsHttpTTSService(TTSService):
         speed: float | None = None
         apply_text_normalization: Literal["auto", "on", "off"] | None = None
         pronunciation_dictionary_locators: list[PronunciationDictionaryLocator] | None = None
+        prefer_normalized_alignment: bool | None = None
 
     def __init__(
         self,
@@ -1076,6 +1117,7 @@ class ElevenLabsHttpTTSService(TTSService):
         sample_rate: int | None = None,
         enable_logging: bool | None = None,
         pronunciation_dictionary_locators: list[PronunciationDictionaryLocator] | None = None,
+        prefer_normalized_alignment: bool | None = None,
         params: InputParams | None = None,
         settings: Settings | None = None,
         text_aggregation_mode: TextAggregationMode | None = None,
@@ -1103,6 +1145,15 @@ class ElevenLabsHttpTTSService(TTSService):
                 Set to False for zero retention mode (enterprise only).
             pronunciation_dictionary_locators: List of pronunciation dictionary
                 locators to use.
+            prefer_normalized_alignment: Which alignment field to use for word
+                timestamps, transcripts, and LLM context. When None (default),
+                normalized alignment is used only when
+                ``pronunciation_dictionary_locators`` is set. Set to False to
+                keep the original input text even with a pronunciation
+                dictionary configured (dictionary substitutions then stay out
+                of the context, but ``alignment`` may contain duplicated words
+                on chunks where substitutions fire, per issue #4316). Set to
+                True to always use normalized alignment.
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
@@ -1142,6 +1193,7 @@ class ElevenLabsHttpTTSService(TTSService):
 
         # 3. Apply params overrides — only if settings not provided
         _pronunciation_dictionary_locators = pronunciation_dictionary_locators
+        _prefer_normalized_alignment = prefer_normalized_alignment
         if params is not None:
             self._warn_init_param_moved_to_settings("params")
             if not settings:
@@ -1163,6 +1215,8 @@ class ElevenLabsHttpTTSService(TTSService):
                     default_settings.apply_text_normalization = params.apply_text_normalization
                 if _pronunciation_dictionary_locators is None:
                     _pronunciation_dictionary_locators = params.pronunciation_dictionary_locators
+                if _prefer_normalized_alignment is None:
+                    _prefer_normalized_alignment = params.prefer_normalized_alignment
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -1187,6 +1241,9 @@ class ElevenLabsHttpTTSService(TTSService):
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
         self._pronunciation_dictionary_locators = _pronunciation_dictionary_locators
+        self._prefer_normalized = _resolve_prefer_normalized(
+            _prefer_normalized_alignment, _pronunciation_dictionary_locators
+        )
 
         # Track cumulative time to properly sequence word timestamps across utterances
         self._cumulative_time = 0
@@ -1429,7 +1486,7 @@ class ElevenLabsHttpTTSService(TTSService):
                             data,
                             normalized_key="normalized_alignment",
                             alignment_key="alignment",
-                            prefer_normalized=bool(self._pronunciation_dictionary_locators),
+                            prefer_normalized=self._prefer_normalized,
                         )
                         if raw_alignment:
                             alignment = _strip_utterance_leading_spaces(
