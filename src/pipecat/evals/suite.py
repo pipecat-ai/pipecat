@@ -44,6 +44,7 @@ the same values passed as CLI overrides resolve against the working directory.
 
 import asyncio
 import contextlib
+import os
 import shlex
 import sys
 import time
@@ -372,6 +373,21 @@ class EvalSuite:
         logs_dir.mkdir(parents=True, exist_ok=True)
         if record_dir:
             record_dir.mkdir(parents=True, exist_ok=True)
+
+        # Bound per-model CPU threads so concurrent (CPU) Whisper transcriptions
+        # share the cores instead of each spawning ~all-cores of OpenMP threads.
+        # Scenarios start in lockstep with the same greeting+first-turn duration, so
+        # their first transcriptions fire simultaneously; uncapped, N models each
+        # grab every core and oversubscribe the CPU N-fold (the first turn crawls,
+        # then speeds up only once the runs drift out of sync). Capping each to
+        # cores/concurrency keeps total threads ~= cores on every turn. CTranslate2
+        # honors OMP_NUM_THREADS when cpu_threads=0; setdefault respects an explicit
+        # override. Set before any transcriber loads its model.
+        cores = os.cpu_count() or 1
+        os.environ.setdefault(
+            "OMP_NUM_THREADS", str(max(1, cores // max(1, self.manifest.concurrency)))
+        )
+
         sem = asyncio.Semaphore(self.manifest.concurrency)
         await asyncio.gather(
             *(
