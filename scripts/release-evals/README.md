@@ -81,6 +81,16 @@ on the command line (the command line wins) — `--bots-dir`, `--scenarios-dir`,
 `--runs-dir`, `--base-port`, `--cache-dir`, `--spawn`, `--python` — so a manifest
 can be just a `suite:` list with the rest supplied as flags.
 
+### Concurrency and GPU
+
+By default the judge (Ollama), the user's voice (Kokoro), and the bot-speech
+transcriber (Whisper) all run locally on the GPU. Ollama keeps one copy of the
+judge model resident, while Kokoro and Whisper load per concurrent run, so GPU
+memory use grows with `-c/--concurrency`. The manifest defaults to
+`concurrency: 4`, which fits comfortably in a 16GB GPU. Pushing it higher can
+exhaust GPU memory; an out-of-memory run surfaces as a harness error in that
+run's `.eval.log`.
+
 ## Running one scenario against an already-running bot
 
 If you already have a bot running with `-t eval`, run a scenario directly
