@@ -968,9 +968,9 @@ class EvalSession:
     async def _send_user_audio(self, text: str) -> None:
         """Render ``text`` to audio (cached) and inject it into the mic stream.
 
-        The continuous sender (:meth:`_audio_sender_loop`) streams these chunks at
-        real-time cadence in place of silence; we wait until they have all been
-        sent so the turn's anchor isn't set before the bot has heard the utterance.
+        The continuous sender (:meth:`_audio_sender_loop`) drains these chunks
+        promptly in place of silence; we wait until they have all been sent so the
+        turn's anchor isn't set before the bot has heard the utterance.
         """
         assert self._speech is not None  # only called for audio-mode turns
         pcm, sample_rate = await self._speech.generate(text)
@@ -979,33 +979,49 @@ class EvalSession:
         await self._audio_out.join()
 
     async def _audio_sender_loop(self, sample_rate: int) -> None:
-        """Stream a continuous real-time mic to the bot for the whole session.
+        """Stream a continuous mic to the bot for the whole session.
 
-        Sends one ~20ms frame every ~20ms: a queued user-audio chunk when there is
-        one (see :meth:`_send_user_audio`), silence otherwise. Streaming STT
-        services expect an uninterrupted stream, and the silence between turns is
-        what lets the bot's VAD end each turn. ``task_done`` is called for every
-        queued chunk (even if the send fails) so a waiting :meth:`_send_user_audio`
-        never hangs.
+        Silence is paced in real time (one ~20ms frame every ~20ms) so the bot's
+        VAD sees a natural speech<->silence boundary and ends each turn. Queued
+        user audio, though, is drained *promptly* — ahead of real time — rather
+        than one frame per tick: the suite runs several sessions on one event loop,
+        which under load can slip a 20ms tick by hundreds of ms, and a gap in the
+        middle of an utterance makes a turn-detecting STT (e.g. Deepgram Flux)
+        finalize early, splitting "what is two plus two" into "what is two" + "plus
+        two". The samples are contiguous, so delivering the whole utterance in a
+        burst keeps it gap-free regardless of loop stalls; the real-time silence
+        that follows still ends the turn. ``task_done`` is called for every queued
+        chunk (even if the send fails) so a waiting :meth:`_send_user_audio` never
+        hangs.
         """
         silence = b"\x00\x00" * (sample_rate * AUDIO_CHUNK_MS // 1000)
         loop = asyncio.get_running_loop()
         next_send = loop.time()
         while True:
+            # Drain all queued user audio as fast as the socket allows, so a loop
+            # stall can't open a gap mid-utterance that splits the turn.
+            drained = False
+            while not self._audio_out.empty():
+                chunk = self._audio_out.get_nowait()
+                try:
+                    await self._send_raw_audio(chunk, sample_rate)
+                except Exception:  # noqa: BLE001 — ws likely gone; keep draining
+                    pass
+                finally:
+                    self._audio_out.task_done()
+                drained = True
+            if drained:
+                # Resume real-time silence from now; don't "catch up" by bursting
+                # silence, which would deny the bot's VAD the gap it needs.
+                next_send = loop.time()
+                continue
+            # Nothing queued: emit one silence frame at real-time cadence.
             await asyncio.sleep(max(0, next_send - loop.time()))
             next_send += AUDIO_CHUNK_MS / 1000
             try:
-                chunk = self._audio_out.get_nowait()
-                speaking = True
-            except asyncio.QueueEmpty:
-                chunk, speaking = silence, False
-            try:
-                await self._send_raw_audio(chunk, sample_rate)
-            except Exception:  # noqa: BLE001 — ws likely gone; keep draining the queue
+                await self._send_raw_audio(silence, sample_rate)
+            except Exception:  # noqa: BLE001 — ws likely gone
                 pass
-            finally:
-                if speaking:
-                    self._audio_out.task_done()
 
     async def _send_raw_audio(self, chunk: bytes, sample_rate: int) -> None:
         """Send one PCM chunk to the bot as an RTVI ``raw-audio`` message."""
