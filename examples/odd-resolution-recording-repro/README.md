@@ -37,6 +37,18 @@ compare:
 The gray gradient background makes contrast shifts obvious; the white border
 makes edge artifacts obvious.
 
+## Comparison frames
+
+300x169 (corrupt): green/yellow border bars and a ghosted double image on
+the moving box.
+
+![corrupt frame at 8s](corrupt-frame-8s.png)
+![corrupt frame at 11s](corrupt-frame-11s.png)
+
+320x176 (clean control):
+
+![control frame at 8s](control-frame-8s.png)
+
 ## Why these numbers
 
 The recordings are I420 (4:2:0), where chroma planes are half the height. An
