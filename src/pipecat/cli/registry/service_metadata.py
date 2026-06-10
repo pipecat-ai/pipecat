@@ -432,6 +432,13 @@ class ServiceRegistry:
             include_params=["api_key"],
         ),
         ServiceDefinition(
+            value="moonshine_stt",
+            label="Moonshine",
+            package="pipecat-ai[moonshine]",
+            class_name=["MoonshineSTTService"],
+            settings_params=["model"],
+        ),
+        ServiceDefinition(
             value="whisper_stt",
             label="Whisper (Local)",
             package="pipecat-ai[whisper]",
