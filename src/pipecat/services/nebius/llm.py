@@ -55,7 +55,7 @@ class NebiusLLMService(OpenAILLMService):
         """
         # Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="openai/gpt-oss-120b",
+            model="Qwen/Qwen3-30B-A3B-Instruct-2507",
         )
 
         # Apply settings delta (canonical API, always wins)
