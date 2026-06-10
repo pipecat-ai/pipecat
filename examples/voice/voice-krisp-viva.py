@@ -67,6 +67,7 @@ transport_params = {
     "eval": lambda: WebsocketServerParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
+        audio_in_filter=KrispVivaFilter(),
     ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
