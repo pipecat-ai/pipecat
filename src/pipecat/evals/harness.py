@@ -267,6 +267,14 @@ class EvalSession:
         # text mode (skip-TTS), bot-tts-text in audio mode (what was spoken).
         self._text_buffer: list[str] = []
 
+        # Set on an interruption, cleared at the next bot-llm-started. While set,
+        # llm_response segments are dropped: the interrupted response can still
+        # flush a trailing token *after* the interruption event (it was generated
+        # before the interrupt propagated), and that straggler must not be
+        # attributed to the new turn. The genuinely new response begins at the
+        # next bot-llm-started.
+        self._awaiting_llm_restart: bool = False
+
         # Text content of the most recently matched event (the bot's response, or
         # a user transcript), surfaced to verbose progress. Empty for events with
         # no text (llm_started, function_call, speaking events).
@@ -746,6 +754,7 @@ class EvalSession:
                 # A new user turn in audio mode. Drop any leftover bot output from
                 # a prior turn so it isn't aggregated into this one.
                 self._discard_interrupted_output()
+                self._awaiting_llm_restart = True
                 return [{"type": "user_started_speaking"}]
             case "bot-interrupted":
                 # The bot's in-flight output was cut off — a VAD barge-in or a
@@ -753,6 +762,7 @@ class EvalSession:
                 # *after* the interruption is matched. Service-independent, the same
                 # path for both modalities, and no timestamps.
                 self._discard_interrupted_output()
+                self._awaiting_llm_restart = True
                 return [{"type": "bot_interrupted"}]
             case "user-stopped-speaking":
                 return [{"type": "user_stopped_speaking"}]
@@ -761,15 +771,26 @@ class EvalSession:
                     return [{"type": "user_transcription", "transcript": data.get("text", "")}]
                 return []
             case "bot-llm-started":
+                # The genuinely new response begins here, so stragglers from an
+                # interrupted prior response are now behind us.
+                self._awaiting_llm_restart = False
                 self._text_buffer = []
                 return [{"type": "llm_started"}]
             case "bot-llm-text":
                 # The LLM's text output -> llm_response (both modalities). Buffer
                 # it and emit one segment at bot-llm-stopped (a clean boundary —
                 # bot-llm-text reliably precedes bot-llm-stopped).
+                if self._awaiting_llm_restart:
+                    return []
                 self._text_buffer.append(data.get("text", ""))
                 return []
             case "bot-llm-stopped":
+                # A stopped that arrives before the post-interruption restart is the
+                # tail of the interrupted response; drop it instead of emitting it
+                # as this turn's llm_response.
+                if self._awaiting_llm_restart:
+                    self._text_buffer = []
+                    return []
                 return [self._segment_event("llm_response", "".join(self._text_buffer))]
             case "bot-tts-text":
                 # Audio mode: the text the TTS reports speaking -> tts_response,

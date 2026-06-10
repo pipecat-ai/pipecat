@@ -96,6 +96,28 @@ class TestTranslate(unittest.TestCase):
             {"type": "llm_response", "text": "Hello world"},
         )
 
+    def test_interruption_suppresses_straggler_llm_response(self):
+        # After an interruption, the interrupted response can still flush a trailing
+        # token. It must be dropped (not attributed to the new turn); the new
+        # response begins at the next bot-llm-started.
+        s = _session(bot_audio=False)
+        s._translate({"type": "bot-llm-started"})
+        s._translate({"type": "bot-llm-text", "data": {"text": "Tell me about Paris"}})
+        # User barges in: the bot is interrupted.
+        self.assertEqual(s._translate({"type": "bot-interrupted"}), [{"type": "bot_interrupted"}])
+        # Straggler from the interrupted response arrives just after the interrupt.
+        self.assertEqual(
+            s._translate({"type": "bot-llm-text", "data": {"text": " what would"}}), []
+        )
+        self.assertEqual(s._translate({"type": "bot-llm-stopped"}), [])  # straggler dropped
+        # The genuinely new response.
+        self.assertEqual(s._translate({"type": "bot-llm-started"}), [{"type": "llm_started"}])
+        self.assertEqual(s._translate({"type": "bot-llm-text", "data": {"text": "Tokyo"}}), [])
+        self.assertEqual(
+            self._one_event(s._translate({"type": "bot-llm-stopped"})),
+            {"type": "llm_response", "text": "Tokyo"},
+        )
+
     def test_audio_mode_llm_text_and_tts_text(self):
         # Audio mode (bot_audio=True): bot-llm-text -> llm_response (the LLM text),
         # bot-tts-text -> tts_response (the TTS's spoken text, one per segment).
