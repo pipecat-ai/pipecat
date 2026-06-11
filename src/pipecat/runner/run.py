@@ -314,6 +314,16 @@ def _extract_ws_token(websocket) -> str | None:
     return websocket.query_params.get("token")
 
 
+def _print_ws_security_status(args: argparse.Namespace):
+    """Print WebSocket security status lines (auth + origin restriction)."""
+    if args.ws_auth == "token":
+        print("   → WebSocket auth:    token (HMAC, call /start to obtain a token)")
+    if args.allowed_origins:
+        print(f"   → WebSocket origins: {', '.join(args.allowed_origins)}")
+    else:
+        print("   → WebSocket origins: all (no restriction)")
+
+
 def _print_startup_message(args: argparse.Namespace):
     """Print connection information for the development runner."""
     print()
@@ -324,6 +334,7 @@ def _print_startup_message(args: argparse.Namespace):
         print(f"   → Enabled transports: {_format_transport_status(enabled)}")
         if disabled:
             print(f"   → Disabled transports: {_format_transport_status(disabled)}")
+        _print_ws_security_status(args)
     elif args.transport == "webrtc":
         if args.esp32:
             print("🚀 Bot ready! (ESP32 mode)")
@@ -356,8 +367,7 @@ def _print_startup_message(args: argparse.Namespace):
             if args.proxy:
                 print(f"   → XML webhook: http://{args.host}:{args.port}/")
             print(f"   → WebSocket:   ws://{args.host}:{args.port}/ws")
-            if args.ws_auth == "token":
-                print("   → WebSocket auth: token (HMAC, call /start to obtain a token)")
+            _print_ws_security_status(args)
     elif args.transport == "websocket":
         print("🚀 Bot ready! (WebSocket)")
         if not _transport_routes_enabled("websocket"):
@@ -366,8 +376,7 @@ def _print_startup_message(args: argparse.Namespace):
             print(f"   → Open: {_runner_url(args)}")
             scheme = "wss" if args.host != "localhost" else "ws"
             print(f"   → WebSocket:   {scheme}://{args.host}:{args.port}/ws-client")
-            if args.ws_auth == "token":
-                print("   → WebSocket auth: token (HMAC, call /start to obtain a token)")
+            _print_ws_security_status(args)
     elif args.transport == "vonage":
         print()
         print("🚀 Bot ready!")
