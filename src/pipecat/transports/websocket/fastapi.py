@@ -63,7 +63,7 @@ class FastAPIWebsocketParams(TransportParams):
             Useful when the remote WebSocket media endpoint requires strict audio framing.
         allowed_origins: List of allowed WebSocket origins. Empty list allows all
             origins. When set, connections with a missing or disallowed Origin header
-            are rejected. Defaults to ``PIPECAT_WEBSOCKET_ALLOWED_ORIGINS`` env var
+            are rejected. Defaults to ``PIPECAT_ALLOWED_ORIGINS`` env var
             (comma-separated).
     """
 

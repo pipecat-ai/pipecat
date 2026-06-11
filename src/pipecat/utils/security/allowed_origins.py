@@ -10,12 +10,12 @@ import os
 
 
 def default_allowed_origins() -> list[str]:
-    """Return allowed origins from the ``PIPECAT_WEBSOCKET_ALLOWED_ORIGINS`` env var.
+    """Return allowed origins from the ``PIPECAT_ALLOWED_ORIGINS`` env var.
 
     Parses a comma-separated list of origin strings. Returns an empty list
     (allow all) when the variable is unset or empty.
     """
-    val = os.getenv("PIPECAT_WEBSOCKET_ALLOWED_ORIGINS", "")
+    val = os.getenv("PIPECAT_ALLOWED_ORIGINS", "")
     return [o.strip() for o in val.split(",") if o.strip()]
 
 

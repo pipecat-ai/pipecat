@@ -498,7 +498,7 @@ def _configure_server_app(args: argparse.Namespace):
     """Configure the module-level FastAPI app with routes for all transports."""
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=args.allowed_origins or ["*"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -1495,9 +1495,7 @@ def main(parser: argparse.ArgumentParser | None = None):
         ),
     )
     _env_origins = [
-        o.strip()
-        for o in os.getenv("PIPECAT_WEBSOCKET_ALLOWED_ORIGINS", "").split(",")
-        if o.strip()
+        o.strip() for o in os.getenv("PIPECAT_ALLOWED_ORIGINS", "").split(",") if o.strip()
     ]
     parser.add_argument(
         "--allowed-origins",
@@ -1508,7 +1506,7 @@ def main(parser: argparse.ArgumentParser | None = None):
             "Allowed WebSocket origins (e.g. https://example.com). "
             "Omit or leave empty to allow all origins. Non-browser clients "
             "(no Origin header) are always allowed. "
-            "Defaults to the PIPECAT_WEBSOCKET_ALLOWED_ORIGINS environment variable "
+            "Defaults to the PIPECAT_ALLOWED_ORIGINS environment variable "
             "(comma-separated)."
         ),
     )

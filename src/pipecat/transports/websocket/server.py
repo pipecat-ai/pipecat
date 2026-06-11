@@ -54,7 +54,7 @@ class WebsocketServerParams(TransportParams):
         session_timeout: Timeout in seconds for client sessions.
         allowed_origins: List of allowed WebSocket origins. Empty list allows all
             origins. When set, connections with a missing or disallowed Origin header
-            are rejected. Defaults to ``PIPECAT_WEBSOCKET_ALLOWED_ORIGINS`` env var
+            are rejected. Defaults to ``PIPECAT_ALLOWED_ORIGINS`` env var
             (comma-separated).
     """
 
