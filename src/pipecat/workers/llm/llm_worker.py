@@ -120,7 +120,7 @@ class LLMWorker(PipelineWorker):
             name=name,
             bridged=bridged,
             exclude_frames=(PipelineFlushFrame,),
-            enable_rtvi=False,
+            enable_rtvi=bridged is None,
             idle_timeout_secs=None,
             params=PipelineParams(
                 enable_metrics=True,
