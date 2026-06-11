@@ -997,11 +997,6 @@ class LLMUserAggregator(LLMContextAggregator):
             self._realtime_deferred_handoff_flush(),
             name=f"{self}::realtime_handoff_flush",
         )
-        # Yield so the task's wrapper coroutine starts running before
-        # any immediate cancellation by the failsafe path — otherwise
-        # asyncio GCs the inner coroutine without ever entering it and
-        # emits a "coroutine was never awaited" warning.
-        await asyncio.sleep(0)
 
     async def _realtime_deferred_handoff_flush(self) -> None:
         """Wait one ``ttfs_p99_latency`` window, then flush whatever has arrived."""

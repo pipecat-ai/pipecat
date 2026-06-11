@@ -197,9 +197,6 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
                 f"{self}::_stt_timeout_handler",
             )
 
-        # Make sure the tasks are scheduled.
-        await asyncio.sleep(0)
-
     async def _handle_transcription(self, frame: TranscriptionFrame):
         """Handle user transcription."""
         self._text += frame.text
@@ -238,9 +235,6 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
             self._user_speech_timeout_handler(self._user_speech_timeout),
             f"{self}::_user_speech_timeout_handler",
         )
-        # Make sure the task is scheduled so it can't be cancelled before
-        # starting (which would leave its coroutine un-awaited).
-        await asyncio.sleep(0)
 
     async def _user_speech_timeout_handler(self, timeout: float):
         """Wait user_speech_timeout then attempt to trigger user turn stopped.
