@@ -606,6 +606,9 @@ class BaseWorker(BaseObject, BusSubscriber):
                 the target.
         """
         if self._active and deactivate_self:
+            # Deactivate immediately (don't wait for the bus round-trip) so this
+            # worker and the target are never briefly active at the same time.
+            self._active = False
             await self.deactivate_worker(self.name)
         await self.send_bus_message(
             BusActivateWorkerMessage(
