@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""WebSocket origin validation utilities."""
+"""Origin validation utilities."""
 
 import os
 

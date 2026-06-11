@@ -52,7 +52,7 @@ class WebsocketServerParams(TransportParams):
         add_wav_header: Whether to add WAV headers to audio frames.
         serializer: Frame serializer for message encoding/decoding.
         session_timeout: Timeout in seconds for client sessions.
-        allowed_origins: List of allowed WebSocket origins. Empty list allows all
+        allowed_origins: List of allowed origins. Empty list allows all
             origins. When set, connections with a missing or disallowed Origin header
             are rejected. Defaults to ``PIPECAT_ALLOWED_ORIGINS`` env var
             (comma-separated).

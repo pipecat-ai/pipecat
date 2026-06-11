@@ -272,7 +272,7 @@ class TestRunnerRun(unittest.TestCase):
                 "   → Enabled transports: telephony, websocket\n"
                 "   → Disabled transports: daily (install pipecat-ai[daily]), "
                 "webrtc (install pipecat-ai[webrtc])\n"
-                "   → WebSocket origins: all (no restriction)\n"
+                "   → Allowed origins: all (no restriction)\n"
                 "\n"
             ),
         )
@@ -292,7 +292,7 @@ class TestRunnerRun(unittest.TestCase):
                 "🚀 Bot ready!\n"
                 "   → Open: http://localhost:7860\n"
                 "   → Enabled transports: daily, webrtc, telephony, websocket\n"
-                "   → WebSocket origins: all (no restriction)\n"
+                "   → Allowed origins: all (no restriction)\n"
                 "\n"
             ),
         )
