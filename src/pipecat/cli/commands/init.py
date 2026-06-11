@@ -44,6 +44,7 @@ def _list_options_callback(value: bool):
 
 
 def init_command(
+    ctx: typer.Context,
     target: str | None = typer.Argument(
         None,
         help="Target directory; use '.' to scaffold into the current directory "
@@ -186,37 +187,53 @@ def init_command(
             # Load from config file if provided
             if config is not None:
                 file_data = load_config_from_file(config)
-                # CLI flags override file values
-                name = name or file_data.get("name") or file_data.get("project_name")
-                bot_type = bot_type or file_data.get("bot_type")
-                transport = transport or file_data.get("transports") or file_data.get("transport")
-                mode = mode or file_data.get("mode")
-                stt = stt or file_data.get("stt") or file_data.get("stt_service")
-                llm = llm or file_data.get("llm") or file_data.get("llm_service")
-                tts = tts or file_data.get("tts") or file_data.get("tts_service")
-                realtime = (
-                    realtime or file_data.get("realtime") or file_data.get("realtime_service")
+
+                # Merge file values with CLI flags. An explicit CLI flag always wins;
+                # the file value only applies when the flag was omitted.
+                def from_cli(param):
+                    """True only if the user typed this flag (vs. falling back to its default).
+
+                    Compares the parameter source by enum member name rather than identity:
+                    Typer vendors its own copy of Click, so the ``ParameterSource`` returned
+                    here is a different enum object than ``click.core.ParameterSource``.
+                    """
+                    source = ctx.get_parameter_source(param)
+                    return source is not None and source.name == "COMMANDLINE"
+
+                def pick(value, param, *file_keys):
+                    """Explicit CLI flag wins; else first file key present; else the flag's default."""
+                    if from_cli(param):
+                        return value
+                    for key in file_keys:
+                        if key in file_data:
+                            return file_data[key]
+                    return value
+
+                name = pick(name, "name", "name", "project_name")
+                bot_type = pick(bot_type, "bot_type", "bot_type")
+                transport = pick(transport, "transport", "transports", "transport")
+                mode = pick(mode, "mode", "mode")
+                stt = pick(stt, "stt", "stt", "stt_service")
+                llm = pick(llm, "llm", "llm", "llm_service")
+                tts = pick(tts, "tts", "tts", "tts_service")
+                realtime = pick(realtime, "realtime", "realtime", "realtime_service")
+                video = pick(video, "video", "video", "video_service")
+                client_framework = pick(client_framework, "client_framework", "client_framework")
+                client_server = pick(client_server, "client_server", "client_server")
+                daily_pstn_mode = pick(daily_pstn_mode, "daily_pstn_mode", "daily_pstn_mode")
+                twilio_daily_sip_mode = pick(
+                    twilio_daily_sip_mode, "twilio_daily_sip_mode", "twilio_daily_sip_mode"
                 )
-                video = video or file_data.get("video") or file_data.get("video_service")
-                client_framework = client_framework or file_data.get("client_framework")
-                client_server = client_server or file_data.get("client_server")
-                daily_pstn_mode = daily_pstn_mode or file_data.get("daily_pstn_mode")
-                twilio_daily_sip_mode = twilio_daily_sip_mode or file_data.get(
-                    "twilio_daily_sip_mode"
+                recording = pick(recording, "recording", "recording")
+                transcription = pick(transcription, "transcription", "transcription")
+                video_input = pick(video_input, "video_input", "video_input")
+                video_output = pick(video_output, "video_output", "video_output")
+                deploy_to_cloud = pick(deploy_to_cloud, "deploy_to_cloud", "deploy_to_cloud")
+                enable_krisp = pick(enable_krisp, "enable_krisp", "enable_krisp")
+                observability = pick(
+                    observability, "observability", "observability", "enable_observability"
                 )
-                recording = recording or file_data.get("recording", False)
-                transcription = transcription or file_data.get("transcription", False)
-                video_input = video_input or file_data.get("video_input", False)
-                video_output = video_output or file_data.get("video_output", False)
-                if "deploy_to_cloud" in file_data:
-                    deploy_to_cloud = file_data["deploy_to_cloud"]
-                enable_krisp = enable_krisp or file_data.get("enable_krisp", False)
-                observability = observability or file_data.get(
-                    "observability", file_data.get("enable_observability", False)
-                )
-                enable_eval = enable_eval or file_data.get(
-                    "enable_eval", file_data.get("eval", False)
-                )
+                enable_eval = pick(enable_eval, "enable_eval", "enable_eval", "eval")
 
             try:
                 project_config = validate_and_build_config(

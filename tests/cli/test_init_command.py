@@ -13,6 +13,7 @@ generating any files — exercising the merge logic in ``init_command`` end to e
 
 import json
 
+import pytest
 from typer.testing import CliRunner
 
 from pipecat.cli.main import app
@@ -92,3 +93,38 @@ class TestFlagPrecedence:
         config_path = _write_config(tmp_path)  # no observability key -> defaults off
         resolved = _dry_run(["--config", str(config_path), "--observability"])
         assert resolved["enable_observability"] is True
+
+    # Negatable booleans default to False, so an explicit --no-<flag> looks identical
+    # to an omitted flag by value alone. These prove the explicit flag still beats a
+    # file value that enabled the setting — the general fix, not just for --eval.
+    @pytest.mark.parametrize(
+        "flag, file_key, output_key",
+        [
+            ("--no-eval", "enable_eval", "enable_eval"),
+            ("--no-recording", "recording", "recording"),
+            ("--no-transcription", "transcription", "transcription"),
+            ("--no-observability", "enable_observability", "enable_observability"),
+        ],
+    )
+    def test_negated_flag_disables_over_file_value(self, tmp_path, flag, file_key, output_key):
+        config_path = _write_config(tmp_path, **{file_key: True})
+        resolved = _dry_run(["--config", str(config_path), flag])
+        assert resolved[output_key] is False
+
+    def test_no_deploy_to_cloud_flag_disables_over_file_value(self, tmp_path):
+        """The True-default flag can be disabled even when the file enables it."""
+        config_path = _write_config(tmp_path, deploy_to_cloud=True)
+        resolved = _dry_run(["--config", str(config_path), "--no-deploy-to-cloud"])
+        assert resolved["deploy_to_cloud"] is False
+
+    def test_enable_krisp_flag_enables_over_file_value(self, tmp_path):
+        # Krisp requires deploy_to_cloud (config_validator cross-field rule).
+        config_path = _write_config(tmp_path, enable_krisp=False, deploy_to_cloud=True)
+        resolved = _dry_run(["--config", str(config_path), "--enable-krisp"])
+        assert resolved["enable_krisp"] is True
+
+    def test_boolean_file_value_applies_when_flag_omitted(self, tmp_path):
+        """With no flag, the file value still drives the setting — it's the flag that flips it."""
+        config_path = _write_config(tmp_path, enable_eval=True)
+        resolved = _dry_run(["--config", str(config_path)])
+        assert resolved["enable_eval"] is True
