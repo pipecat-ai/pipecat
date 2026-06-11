@@ -92,3 +92,25 @@ class TestFlagPrecedence:
         config_path = _write_config(tmp_path)  # no observability key -> defaults off
         resolved = _dry_run(["--config", str(config_path), "--observability"])
         assert resolved["enable_observability"] is True
+
+    def test_no_eval_flag_disables_over_file_value(self, tmp_path):
+        """An explicit --no-eval beats "enable_eval": true in the config file."""
+        config_path = _write_config(tmp_path, enable_eval=True)
+        resolved = _dry_run(["--config", str(config_path), "--no-eval"])
+        assert resolved["enable_eval"] is False
+
+    def test_eval_flag_enables_over_file_value(self, tmp_path):
+        """An explicit --eval beats "enable_eval": false in the config file."""
+        config_path = _write_config(tmp_path, enable_eval=False)
+        resolved = _dry_run(["--config", str(config_path), "--eval"])
+        assert resolved["enable_eval"] is True
+
+    def test_eval_file_value_applies_when_flag_omitted(self, tmp_path):
+        config_path = _write_config(tmp_path, enable_eval=True)
+        resolved = _dry_run(["--config", str(config_path)])
+        assert resolved["enable_eval"] is True
+
+    def test_eval_defaults_off_without_flag_or_file_key(self, tmp_path):
+        config_path = _write_config(tmp_path)
+        resolved = _dry_run(["--config", str(config_path)])
+        assert resolved["enable_eval"] is False

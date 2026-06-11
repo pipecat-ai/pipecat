@@ -110,8 +110,8 @@ def init_command(
     observability: bool = typer.Option(
         False, "--observability/--no-observability", help="Enable observability"
     ),
-    enable_eval: bool = typer.Option(
-        False,
+    enable_eval: bool | None = typer.Option(
+        None,
         "--eval/--no-eval",
         help="Add an 'eval' transport so the bot is runnable with `-t eval` for "
         "behavioral evals (see `pipecat eval`). Off by default.",
@@ -214,9 +214,10 @@ def init_command(
                 observability = observability or file_data.get(
                     "observability", file_data.get("enable_observability", False)
                 )
-                enable_eval = enable_eval or file_data.get(
-                    "enable_eval", file_data.get("eval", False)
-                )
+                # Tri-state: an explicit --eval/--no-eval always beats the file value;
+                # the file only applies when the flag was omitted.
+                if enable_eval is None:
+                    enable_eval = file_data.get("enable_eval", file_data.get("eval", False))
 
             try:
                 project_config = validate_and_build_config(
@@ -240,7 +241,7 @@ def init_command(
                     deploy_to_cloud=deploy_to_cloud,
                     enable_krisp=enable_krisp,
                     observability=observability,
-                    enable_eval=enable_eval,
+                    enable_eval=bool(enable_eval),
                 )
             except ConfigValidationError as e:
                 console.print(f"\n[red]{e}[/red]")
