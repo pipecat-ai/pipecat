@@ -28,8 +28,7 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import FunctionCallResultProperties, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -54,8 +53,11 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
+@tool_options(cancel_on_interruption=False, timeout_secs=30)
 async def track_current_location(params: FunctionCallParams):
-    """Simulate a GPS tracker reporting position during a road trip.
+    """Start tracking the user's current GPS location, reporting position updates until the user reaches their destination.
+
+    Simulates a GPS tracker reporting position during a road trip:
 
     Step 1 – San Francisco (trip start)     (update)
     Step 2 – Los Angeles   (passing through) (update)
@@ -132,29 +134,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    # cancel_on_interruption=False makes this an async function call: the LLM
-    # continues the conversation immediately and receives updates/result later.
-    llm.register_function(
-        "track_current_location",
-        track_current_location,
-        cancel_on_interruption=False,
-        timeout_secs=30,
-    )
-
     @llm.event_handler("on_function_calls_cancelled")
     async def on_function_calls_cancelled(service, function_calls):
         for item in function_calls:
             logger.info(f"Function call cancelled: {item.function_name} [{item.tool_call_id}]")
 
-    location_function = FunctionSchema(
-        name="track_current_location",
-        description="Start tracking the user's current GPS location, reporting position updates until the user reaches their destination.",
-        properties={},
-        required=[],
-    )
-    tools = ToolsSchema(standard_tools=[location_function])
-
-    context = LLMContext(tools=tools)
+    # Direct functions listed in the context are registered with the LLM automatically
+    # cancel_on_interruption=False (set via @tool_options) makes this an async
+    # function call: the LLM continues the conversation immediately and receives
+    # updates/result later.
+    context = LLMContext(tools=[track_current_location])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

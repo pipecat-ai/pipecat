@@ -28,8 +28,6 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.observers.loggers.transcription_log_observer import (
@@ -60,21 +58,26 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
-async def fetch_weather_from_api(params: FunctionCallParams):
-    """Handle weather function calls."""
-    temperature = 75 if params.arguments.get("format") == "fahrenheit" else 24
+async def get_current_weather(params: FunctionCallParams, location: str, format: str):
+    """Get the current weather.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+        format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
+    """
+    temperature = 75 if format == "fahrenheit" else 24
     await params.result_callback(
         {
             "conditions": "nice",
             "temperature": temperature,
-            "format": params.arguments.get("format", "celsius"),
+            "format": format,
             "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
         }
     )
 
 
 async def get_current_time(params: FunctionCallParams):
-    """Handle time function calls."""
+    """Get the current time."""
     await params.result_callback(
         {
             "time": datetime.now().strftime("%H:%M:%S"),
@@ -84,9 +87,12 @@ async def get_current_time(params: FunctionCallParams):
     )
 
 
-async def get_restaurant_recommendation(params: FunctionCallParams):
-    """Handle restaurant recommendation function calls."""
-    location = params.arguments.get("location", "unknown")
+async def get_restaurant_recommendation(params: FunctionCallParams, location: str):
+    """Get a restaurant recommendation.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+    """
     await params.result_callback(
         {
             "name": "The Golden Dragon",
@@ -95,45 +101,6 @@ async def get_restaurant_recommendation(params: FunctionCallParams):
             "rating": 4.5,
         }
     )
-
-
-weather_function = FunctionSchema(
-    name="get_current_weather",
-    description="Get the current weather for a location",
-    properties={
-        "location": {
-            "type": "string",
-            "description": "The city and state, e.g. San Francisco, CA",
-        },
-        "format": {
-            "type": "string",
-            "enum": ["celsius", "fahrenheit"],
-            "description": "The temperature unit to use.",
-        },
-    },
-    required=["location", "format"],
-)
-
-time_function = FunctionSchema(
-    name="get_current_time",
-    description="Get the current time and date",
-    properties={},
-    required=[],
-)
-
-restaurant_function = FunctionSchema(
-    name="get_restaurant_recommendation",
-    description="Get a restaurant recommendation for a location",
-    properties={
-        "location": {
-            "type": "string",
-            "description": "The city and state, e.g. San Francisco, CA",
-        },
-    },
-    required=["location"],
-)
-
-tools = ToolsSchema(standard_tools=[weather_function, time_function, restaurant_function])
 
 
 transport_params = {
@@ -190,13 +157,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    llm.register_function("get_current_weather", fetch_weather_from_api)
-    llm.register_function("get_current_time", get_current_time)
-    llm.register_function("get_restaurant_recommendation", get_restaurant_recommendation)
-
     context = LLMContext(
         [{"role": "developer", "content": "Say hello and introduce yourself!"}],
-        tools,
+        [get_current_weather, get_current_time, get_restaurant_recommendation],
     )
 
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(

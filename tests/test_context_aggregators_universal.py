@@ -1709,6 +1709,23 @@ class TestToolChangeMessages(unittest.IsolatedAsyncioTestCase):
         self.assertIn("`x`", msgs[0])
         self.assertIn("`y`", msgs[0])
 
+    async def test_set_tools_accepts_plain_list(self):
+        # Regression: a bare list (e.g. direct functions / FunctionSchema objects,
+        # not wrapped in a ToolsSchema) must be normalized rather than raise
+        # "'list' object has no attribute 'standard_tools'". Mirrors re-adding a
+        # tool via LLMSetToolsFrame(tools=[...]) after it was removed.
+        context = LLMContext()  # tools default to NOT_GIVEN
+        aggregator = LLMUserAggregator(
+            context, params=LLMUserAggregatorParams(add_tool_change_messages=True)
+        )
+        await self._send_set_tools_to_user_aggregator(aggregator, [_function_schema("b")])
+        msgs = _developer_messages(context)
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("just been added", msgs[0])
+        self.assertIn("`b`", msgs[0])
+        # The bare list was normalized into a ToolsSchema in the context.
+        self.assertEqual({s.name for s in context.tools.standard_tools}, {"b"})
+
     async def test_custom_tools_only_change_no_message(self):
         # Standard tools identical; only custom tools differ → no announcement.
         context = LLMContext(

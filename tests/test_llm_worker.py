@@ -29,7 +29,7 @@ def _create_task():
             await params.result_callback("done")
 
     llm = MagicMock()
-    llm.register_direct_function = MagicMock()
+    llm._register_direct_function = MagicMock()
     task = StubLLMTask("test_task", llm=llm, bridged=())
 
     # Capture frames passed to PipelineWorker.queue_frame (i.e. super().queue_frame).

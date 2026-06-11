@@ -35,6 +35,8 @@ from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
 
 if TYPE_CHECKING:
+    from pipecat.adapters.schemas.direct_function import DirectFunction
+    from pipecat.adapters.schemas.function_schema import FunctionSchema
     from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage, NotGiven
     from pipecat.processors.frame_processor import FrameProcessor
     from pipecat.services.settings import ServiceSettings
@@ -643,15 +645,16 @@ class LLMMessagesTransformFrame(DataFrame):
 class LLMSetToolsFrame(DataFrame):
     """Frame containing tools for LLM function calling.
 
-    A frame containing a list of tools for an LLM to use for function calling.
-    The specific format depends on the LLM being used, but it should typically
-    contain JSON Schema objects.
+    Used to change the set of tools advertised to the LLM mid-conversation.
 
     Parameters:
-        tools: List of tool/function definitions for the LLM.
+        tools: The tools to advertise. May be a ``ToolsSchema``, a plain list of
+            direct functions and/or ``FunctionSchema`` objects (normalized to a
+            ``ToolsSchema``, with direct-function handlers auto-registered), a
+            list of provider-specific tool dicts, or ``NOT_GIVEN`` to clear tools.
     """
 
-    tools: list[dict] | ToolsSchema | NotGiven
+    tools: list[dict] | list[FunctionSchema | DirectFunction] | ToolsSchema | NotGiven
 
 
 @dataclass

@@ -31,7 +31,7 @@ from code_worker import CodeWorker
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -72,6 +72,7 @@ transport_params = {
 }
 
 
+@tool_options(cancel_on_interruption=False)
 async def ask_code(params: FunctionCallParams, question: str):
     """Ask a question about the codebase. A Claude Code worker will
     explore the project by reading files, searching code, and running
@@ -121,9 +122,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    llm.register_direct_function(ask_code, cancel_on_interruption=False)
-
-    context = LLMContext(tools=ToolsSchema(standard_tools=[ask_code]))
+    context = LLMContext(tools=[ask_code])
     aggregators = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

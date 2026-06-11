@@ -255,10 +255,10 @@ class LLMWorker(PipelineWorker):
         """Register ``@tool`` methods on the LLM in place."""
         for method in _collect_tools(self):
             tracked = self._track_tool_call(method)
-            llm.register_direct_function(
+            llm._register_direct_function(
                 tracked,
-                cancel_on_interruption=method.cancel_on_interruption,
-                timeout_secs=method.timeout,
+                cancel_on_interruption=method._pipecat_cancel_on_interruption,
+                timeout_secs=method._pipecat_timeout_secs,
             )
 
     def _track_tool_call(self, method: Callable) -> Callable:

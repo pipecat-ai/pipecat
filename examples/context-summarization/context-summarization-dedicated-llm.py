@@ -83,9 +83,13 @@ Be concise. Use clear, factual statements grouped by topic.
 Omit greetings, small talk, and resolved tangents."""
 
 
-# Tool functions for the LLM
-async def get_current_weather(params: FunctionCallParams):
-    """Get the current weather."""
+async def get_current_weather(params: FunctionCallParams, location: str, format: str):
+    """Get the current weather.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+        format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
+    """
     logger.info("Tool called: get_current_weather")
     await asyncio.sleep(1)  # Simulate some processing
     await params.result_callback({"conditions": "nice", "temperature": "75"})
@@ -128,28 +132,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    # Register tool functions
-    llm.register_function("get_current_weather", get_current_weather)
-
-    weather_function = FunctionSchema(
-        name="get_current_weather",
-        description="Get the current weather",
-        properties={
-            "location": {
-                "type": "string",
-                "description": "The city and state, e.g. San Francisco, CA",
-            },
-            "format": {
-                "type": "string",
-                "enum": ["celsius", "fahrenheit"],
-                "description": "The temperature unit to use. Infer this from the user's location.",
-            },
-        },
-        required=["location", "format"],
-    )
-    tools = ToolsSchema(standard_tools=[weather_function])
-
-    context = LLMContext(tools=tools)
+    context = LLMContext(tools=[get_current_weather])
 
     # Create aggregators with custom summarization
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(

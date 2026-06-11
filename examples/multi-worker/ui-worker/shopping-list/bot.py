@@ -65,7 +65,7 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.job_context import JobError
@@ -295,6 +295,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # to the runner at the end alongside the main worker.
     list_worker = ListWorker()
 
+    @tool_options(timeout_secs=10)
     async def check_list(params: FunctionCallParams):
         """Look up what's currently on the shopping list and what's checked off.
 
@@ -307,9 +308,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"check_list -> {summary!r}")
         await params.result_callback(summary)
 
-    llm.register_direct_function(check_list, cancel_on_interruption=True, timeout_secs=10)
-
-    context = LLMContext(tools=ToolsSchema(standard_tools=[check_list]))
+    context = LLMContext(tools=[check_list])
     aggregators = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

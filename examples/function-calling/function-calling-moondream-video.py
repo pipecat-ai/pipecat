@@ -9,8 +9,6 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     Frame,
@@ -49,16 +47,18 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
-async def fetch_user_image(params: FunctionCallParams):
+async def fetch_user_image(params: FunctionCallParams, user_id: str, question: str):
     """Fetch the user image.
 
     When called, this function pushes a UserImageRequestFrame upstream to the
     transport. As a result, the transport will request the user image and push a
     UserImageRawFrame downstream. The result_callback will be invoked once the
     image is retrieved and processed.
+
+    Args:
+        user_id: The ID of the user to grab the image from.
+        question: The question that the user is asking about the image.
     """
-    user_id = params.arguments["user_id"]
-    question = params.arguments["question"]
     logger.debug(f"Requesting image with user_id={user_id}, question={question}")
 
     # Request a user image frame. In this case, we don't want the requested
@@ -137,30 +137,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way. You are able to describe images from the user camera.",
         ),
     )
-    llm.register_function("fetch_user_image", fetch_user_image)
 
     @llm.event_handler("on_function_calls_started")
     async def on_function_calls_started(service, function_calls):
         await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
 
-    fetch_image_function = FunctionSchema(
-        name="fetch_user_image",
-        description="Called when the user requests a description of their camera feed",
-        properties={
-            "user_id": {
-                "type": "string",
-                "description": "The ID of the user to grab the image from",
-            },
-            "question": {
-                "type": "string",
-                "description": "The question that the user is asking about the image",
-            },
-        },
-        required=["user_id", "question"],
-    )
-    tools = ToolsSchema(standard_tools=[fetch_image_function])
-
-    context = LLMContext(tools=tools)
+    # Direct functions listed in the context are registered with the LLM automatically
+    context = LLMContext(tools=[fetch_user_image])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

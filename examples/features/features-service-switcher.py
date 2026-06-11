@@ -10,8 +10,6 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame, ManuallySwitchServiceFrame
 from pipecat.pipeline.llm_switcher import LLMSwitcher
@@ -41,12 +39,16 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
-# "Classic" function
-async def fetch_weather_from_api(params: FunctionCallParams):
+async def get_current_weather(params: FunctionCallParams, location: str, format: str):
+    """Get the current weather.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+        format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
+    """
     await params.result_callback({"conditions": "nice", "temperature": "75"})
 
 
-# "Direct" function
 async def get_restaurant_recommendation(params: FunctionCallParams, location: str):
     """
     Get a restaurant recommendation.
@@ -82,23 +84,6 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    weather_function = FunctionSchema(
-        name="get_current_weather",
-        description="Get the current weather",
-        properties={
-            "location": {
-                "type": "string",
-                "description": "The city and state, e.g. San Francisco, CA",
-            },
-            "format": {
-                "type": "string",
-                "enum": ["celsius", "fahrenheit"],
-                "description": "The temperature unit to use. Infer this from the user's location.",
-            },
-        },
-        required=["location", "format"],
-    )
-
     stt_cartesia = CartesiaSTTService(api_key=os.environ["CARTESIA_API_KEY"])
     stt_deepgram = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
     # Uses ServiceSwitcherStrategyManual by default
@@ -131,14 +116,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     # Uses ServiceSwitcherStrategyManual by default
     llm_switcher = LLMSwitcher(llms=[llm_openai, llm_google])
-    # Register a "classic" function
-    llm_switcher.register_function("get_current_weather", fetch_weather_from_api)
-    # Register a "direct" function
-    llm_switcher.register_direct_function(get_restaurant_recommendation)
 
-    tools = ToolsSchema(standard_tools=[weather_function, get_restaurant_recommendation])
-
-    context = LLMContext(tools=tools)
+    # Direct functions listed in the context are registered automatically on
+    # every member LLM (active or not), so the tools keep working across
+    # service switches.
+    context = LLMContext(tools=[get_current_weather, get_restaurant_recommendation])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
