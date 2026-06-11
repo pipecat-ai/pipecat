@@ -362,6 +362,8 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         self._speech_synthesizer = None
         self._audio_queue = asyncio.Queue()
         self._word_boundary_queue = asyncio.Queue()
+        # Event loop captured in start(); used to marshal SDK-thread callback puts.
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._word_processor_task = None
         self._cumulative_audio_offset: float = 0.0  # Cumulative audio duration in seconds
         self._current_sentence_base_offset: float = 0.0  # Base offset for current sentence
@@ -388,6 +390,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             frame: Start frame containing initialization parameters.
         """
         await super().start(frame)
+        self._loop = self.get_event_loop()
 
         if self._speech_config:
             return
@@ -506,7 +509,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
     def _emit_pending_word(self):
         """Emit the currently buffered word if one exists."""
         if self._last_word is not None:
-            self._word_boundary_queue.put_nowait((self._last_word, self._last_timestamp))
+            self._put_threadsafe(self._word_boundary_queue, (self._last_word, self._last_timestamp))
             self._last_word = None
             self._last_timestamp = None
 
@@ -560,7 +563,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
 
         # Regular word: emit previous, store current
         if self._last_word is not None:
-            self._word_boundary_queue.put_nowait((self._last_word, self._last_timestamp))
+            self._put_threadsafe(self._word_boundary_queue, (self._last_word, self._last_timestamp))
         self._last_word = word
         self._last_timestamp = timestamp
 
@@ -590,6 +593,27 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             except Exception as e:
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
+    def _put_threadsafe(self, queue: asyncio.Queue, item) -> None:
+        """Put onto an asyncio queue from an SDK callback thread, safely.
+
+        Azure's Speech SDK fires synthesis callbacks from native (non-event-loop)
+        threads. A bare ``put_nowait()`` schedules the awaiting getter's wake-up via
+        ``call_soon()``, which does NOT wake an idle selector — so on a quiet loop
+        (e.g. a headless pipeline with no transport pumping audio) the queued item
+        sits unread until some other timer happens to wake the loop.
+        ``call_soon_threadsafe()`` wakes the loop. Falls back to a direct put before
+        the loop is captured, and ignores a closed loop during shutdown (matching the
+        old no-raise behavior).
+        """
+        loop = self._loop
+        if loop is None:
+            queue.put_nowait(item)
+            return
+        try:
+            loop.call_soon_threadsafe(queue.put_nowait, item)
+        except RuntimeError:
+            pass
+
     def _handle_synthesizing(self, evt):
         """Handle audio chunks as they arrive.
 
@@ -597,7 +621,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             evt: Synthesis event containing audio data.
         """
         if evt.result and evt.result.audio_data:
-            self._audio_queue.put_nowait(evt.result.audio_data)
+            self._put_threadsafe(self._audio_queue, evt.result.audio_data)
 
     def _handle_completed(self, evt):
         """Handle synthesis completion.
@@ -611,7 +635,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
 
         # Flush any pending word before completing
         if self._last_word is not None:
-            self._word_boundary_queue.put_nowait((self._last_word, self._last_timestamp))
+            self._put_threadsafe(self._word_boundary_queue, (self._last_word, self._last_timestamp))
             self._last_word = None
             self._last_timestamp = None
 
@@ -619,7 +643,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         # task drains all pending words before signaling audio stream completion.
         # Without this, the last word's TTSTextFrame may arrive after
         # TTSStoppedFrame, causing it to be missed by observers and the UI.
-        self._word_boundary_queue.put_nowait(None)
+        self._put_threadsafe(self._word_boundary_queue, None)
 
     def _handle_canceled(self, evt):
         """Handle synthesis cancellation.
@@ -631,13 +655,13 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         # User cancellation (from interruption) is expected, not an error
         if reason == CancellationReason.CancelledByUser:
             logger.debug(f"{self}: Speech synthesis canceled by user (interruption)")
-            self._audio_queue.put_nowait(None)
+            self._put_threadsafe(self._audio_queue, None)
         else:
             details = evt.result.cancellation_details
             error_msg = f"Azure TTS synthesis canceled: {reason}"
             if details.error_details:
                 error_msg += f" - {details.error_details}"
-            self._audio_queue.put_nowait(Exception(error_msg))
+            self._put_threadsafe(self._audio_queue, Exception(error_msg))
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame and handle state changes.
