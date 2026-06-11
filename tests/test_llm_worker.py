@@ -6,9 +6,15 @@
 
 import asyncio
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
-from pipecat.frames.frames import LLMMessagesAppendFrame, PipelineFlushFrame
+from pipecat.frames.frames import (
+    FunctionCallResultProperties,
+    LLMContextFrame,
+    LLMFullResponseEndFrame,
+    LLMMessagesAppendFrame,
+    PipelineFlushFrame,
+)
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.workers.llm import LLMWorker, tool
@@ -257,6 +263,79 @@ class TestToolCallTracking(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(delivered), 2)
         self.assertIs(delivered[0][0], frame_a)
         self.assertIs(delivered[1][0], frame_b)
+
+    async def test_result_callback_marks_triggered_run_pending(self):
+        """A final tool result with default properties marks an LLM run as pending."""
+        task = self._track(_create_task())
+
+        @tool
+        async def reporting_tool(self, params):
+            """Delivers a result."""
+            await params.result_callback("done")
+
+        wrapped = task._track_tool_call(reporting_tool.__get__(task))
+        params = MagicMock()
+        original_callback = AsyncMock()
+        params.result_callback = original_callback
+        await wrapped(params)
+
+        self.assertTrue(task._triggered_run_pending)
+        self.assertFalse(task._triggered_run_done.is_set())
+        original_callback.assert_awaited_once()
+
+    async def test_silent_or_intermediate_results_not_pending(self):
+        """run_llm=False and is_final=False results don't mark a run as pending."""
+        task = self._track(_create_task())
+
+        for properties in (
+            FunctionCallResultProperties(run_llm=False),
+            FunctionCallResultProperties(is_final=False),
+        ):
+
+            @tool
+            async def silent_tool(self, params):
+                """Delivers a silent result."""
+                await params.result_callback("done", properties=properties)
+
+            wrapped = task._track_tool_call(silent_tool.__get__(task))
+            params = MagicMock()
+            params.result_callback = AsyncMock()
+            await wrapped(params)
+
+            self.assertFalse(task._triggered_run_pending)
+
+    async def test_context_frame_bypasses_deferral_when_run_pending(self):
+        """A context frame is not deferred while a tool-triggered run is pending."""
+        task = self._track(_create_task())
+        task._tool_call_inflight = 1
+        task._triggered_run_pending = True
+
+        context_frame = LLMContextFrame(context=MagicMock())
+        other_frame = _make_frame("deferred")
+        await task.queue_frame(context_frame)
+        await task.queue_frame(other_frame)
+
+        delivered = _get_delivered_frames(task)
+        self.assertEqual(len(delivered), 1)
+        self.assertIs(delivered[0][0], context_frame)
+        self.assertEqual(len(task._deferred_frames), 1)
+
+    async def test_wait_for_triggered_run_released_by_response_end(self):
+        """The wait returns immediately when idle and releases on LLMFullResponseEndFrame."""
+        task = self._track(_create_task())
+
+        # Nothing pending: returns immediately.
+        await asyncio.wait_for(task._wait_for_triggered_run(), timeout=1)
+
+        task._triggered_run_pending = True
+        task._triggered_run_done.clear()
+        waiter = asyncio.create_task(task._wait_for_triggered_run())
+        await asyncio.sleep(0)
+        self.assertFalse(waiter.done())
+
+        await task._on_frame_reached_downstream(task, LLMFullResponseEndFrame())
+        await asyncio.wait_for(waiter, timeout=1)
+        self.assertFalse(task._triggered_run_pending)
 
     async def test_tool_error_still_decrements_and_flushes(self):
         """If a tool raises, the counter still decrements and deferred frames flush."""

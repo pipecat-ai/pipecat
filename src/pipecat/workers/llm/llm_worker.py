@@ -10,6 +10,7 @@ Provides the `LLMWorker` class that extends `PipelineWorker` with an LLM
 pipeline and automatic tool registration.
 """
 
+import asyncio
 import functools
 import warnings
 from collections import deque
@@ -17,10 +18,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from loguru import logger
+
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
     Frame,
     FunctionCallResultProperties,
+    LLMContextFrame,
+    LLMFullResponseEndFrame,
     LLMMessagesAppendFrame,
     LLMSetToolsFrame,
     PipelineFlushFrame,
@@ -100,6 +105,10 @@ class LLMWorker(PipelineWorker):
         self._tool_call_inflight: int = 0
         self._deferred_frames: deque[tuple[Frame, FrameDirection]] = deque()
         self._closing: bool = False
+        # Set when a tool delivers a final result that may trigger an LLM run;
+        # cleared (and the event set) when the response completes.
+        self._triggered_run_pending: bool = False
+        self._triggered_run_done = asyncio.Event()
 
         self._llm = llm
         self._register_tools(llm)
@@ -121,6 +130,9 @@ class LLMWorker(PipelineWorker):
         # PipelineWorker's __init__ doesn't accept active; configure after.
         self._active = active
         self._pending_activation = active
+
+        self.add_reached_downstream_filter((LLMFullResponseEndFrame,))
+        self.add_event_handler("on_frame_reached_downstream", self._on_frame_reached_downstream)
 
     @property
     def llm(self) -> LLMService:
@@ -159,14 +171,23 @@ class LLMWorker(PipelineWorker):
 
         When tool calls are in progress, the frame is held in an internal
         queue and delivered automatically once the last tool finishes.
-        When no tools are active, the frame is queued immediately.
+        When no tools are active, the frame is queued immediately. A context
+        frame triggered by a tool's own result (e.g. round-tripping back over
+        the bus from a bridged worker's context aggregator) is never deferred,
+        so the LLM can respond to the result while the tool is still running.
 
         Args:
             frame: Any ``Frame`` to deliver.
             direction: Direction the frame should travel. Defaults to
                 ``FrameDirection.DOWNSTREAM``.
         """
-        if self._defer_tool_frames and self._tool_call_inflight > 0 and not self._closing:
+        bypass = self._triggered_run_pending and isinstance(frame, LLMContextFrame)
+        if (
+            self._defer_tool_frames
+            and self._tool_call_inflight > 0
+            and not self._closing
+            and not bypass
+        ):
             self._deferred_frames.append((frame, direction))
         else:
             await super().queue_frame(frame, direction)
@@ -217,6 +238,8 @@ class LLMWorker(PipelineWorker):
                 stacklevel=2,
             )
             await self._finish_function_call(result_callback, messages=messages)
+        else:
+            await self._wait_for_triggered_run()
         await super().end(reason=reason)
 
     async def activate_worker(
@@ -263,6 +286,7 @@ class LLMWorker(PipelineWorker):
             )
             await self._finish_function_call(result_callback, messages=messages)
         else:
+            await self._wait_for_triggered_run()
             await self.flush_pipeline(timeout=END_FLUSH_TIMEOUT_SECS)
         await super().activate_worker(worker_name, args=args, deactivate_self=deactivate_self)
 
@@ -293,9 +317,45 @@ class LLMWorker(PipelineWorker):
                 timeout_secs=method._pipecat_timeout_secs,
             )
 
+    async def _on_frame_reached_downstream(self, worker, frame: Frame) -> None:
+        """Mark a tool-triggered LLM run as complete when its response ends."""
+        if isinstance(frame, LLMFullResponseEndFrame):
+            self._triggered_run_pending = False
+            self._triggered_run_done.set()
+
+    async def _wait_for_triggered_run(self) -> None:
+        """Wait for the LLM response triggered by a just-delivered tool result.
+
+        The result round-trips through the context aggregator (over the bus
+        when bridged) before the run starts, so a pipeline flush can't order
+        itself behind it; wait for the response-end frame instead. The timeout
+        is a safety net for runs the aggregator skips (e.g. the user is
+        speaking).
+        """
+        if not self._triggered_run_pending:
+            return
+        try:
+            await asyncio.wait_for(self._triggered_run_done.wait(), END_FLUSH_TIMEOUT_SECS)
+        except TimeoutError:
+            logger.warning(f"{self}: timed out waiting for the LLM response to a tool result")
+
     def _track_tool_call(self, method: Callable) -> Callable:
         @functools.wraps(method)
         async def wrapper(params, *args, **kwargs):
+            original_callback = params.result_callback
+
+            async def tracked_result_callback(result, *, properties=None):
+                is_final = properties.is_final if properties else True
+                run_llm = properties.run_llm if properties else None
+                if is_final and run_llm is not False:
+                    # The result may trigger an LLM run; end() and
+                    # activate_worker() wait for the response to complete.
+                    self._triggered_run_pending = True
+                    self._triggered_run_done.clear()
+                await original_callback(result, properties=properties)
+
+            params.result_callback = tracked_result_callback
+
             self._tool_call_inflight += 1
             try:
                 return await method(params, *args, **kwargs)
