@@ -12,14 +12,13 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
-from pipecat.frames.frames import EndTaskFrame, LLMRunFrame
+from pipecat.frames.frames import EndWorkerFrame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
@@ -51,7 +50,7 @@ async def fetch_restaurant_recommendation(params: FunctionCallParams):
 
 async def end_conversation(params: FunctionCallParams):
     await params.result_callback({"success": True})
-    await params.llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+    await params.llm.push_frame(EndWorkerFrame())
 
 
 # NOTE: we can ask the model to say something *after* the call to

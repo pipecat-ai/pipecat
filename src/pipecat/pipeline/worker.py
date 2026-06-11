@@ -43,19 +43,19 @@ from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
     BotSpeakingFrame,
     CancelFrame,
-    CancelTaskFrame,
+    CancelWorkerFrame,
     EndFrame,
-    EndTaskFrame,
+    EndWorkerFrame,
     ErrorFrame,
     Frame,
     HeartbeatFrame,
     InterruptionFrame,
-    InterruptionTaskFrame,
+    InterruptionWorkerFrame,
     MetricsFrame,
     PipelineFlushFrame,
     StartFrame,
     StopFrame,
-    StopTaskFrame,
+    StopWorkerFrame,
     TTSSpeakFrame,
     UserSpeakingFrame,
 )
@@ -1108,7 +1108,7 @@ class PipelineWorker(BaseWorker):
 
         This is the worker that processes frames coming upstream from the
         pipeline. These frames might indicate, for example, that we want the
-        pipeline to be stopped (e.g. EndTaskFrame) in which case we would send
+        pipeline to be stopped (e.g. EndWorkerFrame) in which case we would send
         an EndFrame down the pipeline.
         """
         if isinstance(frame, tuple(self._reached_upstream_types)):
@@ -1123,19 +1123,19 @@ class PipelineWorker(BaseWorker):
                 frame.event.set()
             return
 
-        if isinstance(frame, EndTaskFrame):
+        if isinstance(frame, EndWorkerFrame):
             # Tell the worker we should end nicely.
             logger.debug(f"{self}: received end worker frame upstream {frame}")
             await self.queue_frame(EndFrame(reason=frame.reason))
-        elif isinstance(frame, CancelTaskFrame):
+        elif isinstance(frame, CancelWorkerFrame):
             # Tell the worker we should end right away.
             logger.debug(f"{self}: received cancel worker frame upstream {frame}")
             await self.queue_frame(CancelFrame(reason=frame.reason))
-        elif isinstance(frame, StopTaskFrame):
+        elif isinstance(frame, StopWorkerFrame):
             # Tell the worker we should stop nicely.
             logger.debug(f"{self}: received stop worker frame upstream {frame}")
             await self.queue_frame(StopFrame())
-        elif isinstance(frame, InterruptionTaskFrame):
+        elif isinstance(frame, InterruptionWorkerFrame):
             # Tell the worker we should interrupt the pipeline. Note that we are
             # bypassing the push queue and directly queue into the
             # pipeline. This is in case the push worker is blocked waiting for a
@@ -1189,18 +1189,18 @@ class PipelineWorker(BaseWorker):
             self._pipeline_end_event.set()
         elif isinstance(frame, HeartbeatFrame):
             await self._heartbeat_queue.put(frame)
-        elif isinstance(frame, EndTaskFrame):
+        elif isinstance(frame, EndWorkerFrame):
             logger.debug(f"{self}: received end worker frame downstream {frame}")
-            await self.queue_frame(EndTaskFrame(reason=frame.reason), FrameDirection.UPSTREAM)
-        elif isinstance(frame, StopTaskFrame):
+            await self.queue_frame(EndWorkerFrame(reason=frame.reason), FrameDirection.UPSTREAM)
+        elif isinstance(frame, StopWorkerFrame):
             logger.debug(f"{self}: received stop worker frame downstream {frame}")
-            await self.queue_frame(StopTaskFrame(), FrameDirection.UPSTREAM)
-        elif isinstance(frame, CancelTaskFrame):
+            await self.queue_frame(StopWorkerFrame(), FrameDirection.UPSTREAM)
+        elif isinstance(frame, CancelWorkerFrame):
             logger.debug(f"{self}: received cancel worker frame downstream {frame}")
-            await self.queue_frame(CancelTaskFrame(reason=frame.reason), FrameDirection.UPSTREAM)
-        elif isinstance(frame, InterruptionTaskFrame):
+            await self.queue_frame(CancelWorkerFrame(reason=frame.reason), FrameDirection.UPSTREAM)
+        elif isinstance(frame, InterruptionWorkerFrame):
             logger.debug(f"{self}: received interruption worker frame downstream {frame}")
-            await self.queue_frame(InterruptionTaskFrame(), FrameDirection.UPSTREAM)
+            await self.queue_frame(InterruptionWorkerFrame(), FrameDirection.UPSTREAM)
 
     async def _heartbeat_push_handler(self):
         """Push heartbeat frames at regular intervals."""

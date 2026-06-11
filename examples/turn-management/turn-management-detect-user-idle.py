@@ -14,7 +14,7 @@ from loguru import logger
 from pipecat.adapters.base_llm_adapter import LLMContextMessage
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
-    EndTaskFrame,
+    EndWorkerFrame,
     LLMMessagesAppendFrame,
     LLMRunFrame,
     TTSSpeakFrame,
@@ -27,7 +27,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -76,7 +75,7 @@ class IdleHandler:
             await aggregator.push_frame(
                 TTSSpeakFrame("It seems like you're busy right now. Have a nice day!")
             )
-            await aggregator.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+            await aggregator.push_frame(EndWorkerFrame())
 
 
 async def get_current_weather(params: FunctionCallParams, location: str, format: str):
