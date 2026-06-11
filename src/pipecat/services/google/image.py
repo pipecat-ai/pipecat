@@ -181,7 +181,7 @@ class GoogleImageGenService(ImageGenService):
                     url=None,  # Google doesn't provide URLs, only image data
                     image=image.tobytes(),
                     size=image.size,
-                    format=image.format,
+                    format=image.mode,
                 )
                 yield frame
 

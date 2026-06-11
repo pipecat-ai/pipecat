@@ -162,7 +162,7 @@ class OpenAIImageGenService(ImageGenService):
             frame = URLImageRawFrame(
                 image=image.tobytes(),
                 size=image.size,
-                format=image.format,
+                format=image.mode,
                 url=image_url,
             )
             yield frame

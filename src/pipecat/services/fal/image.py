@@ -181,7 +181,7 @@ class FalImageGenService(ImageGenService):
         def load_image_bytes(encoded_image: bytes):
             buffer = io.BytesIO(encoded_image)
             image = Image.open(buffer)
-            return (image.tobytes(), image.size, image.format)
+            return (image.tobytes(), image.size, image.mode)
 
         logger.debug(f"Generating image from prompt: {prompt}")
 
