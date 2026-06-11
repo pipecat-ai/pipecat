@@ -36,6 +36,7 @@ from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.server import WebsocketServerParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -129,7 +130,7 @@ and helpful way.
 
 You have several tools you can use to help you.
 
-You can respond to questions about the weather using the get_weather tool.
+You can respond to questions about the weather using the get_current_weather tool.
 
 You can save the current conversation using the save_conversation tool. This tool allows you to save
 the current conversation to external storage. If the user asks you to save the conversation, use this
@@ -227,6 +228,10 @@ tools = ToolsSchema(
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: WebsocketServerParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,

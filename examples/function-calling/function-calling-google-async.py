@@ -34,12 +34,13 @@ from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.server import WebsocketServerParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
 
-async def get_weather(params: FunctionCallParams):
+async def get_current_weather(params: FunctionCallParams):
     # Simulate a long-running API call, so we can test async function calls (cancel_on_interruption=False).
     await asyncio.sleep(20)
     location = params.arguments["location"]
@@ -82,6 +83,10 @@ async def get_image(params: FunctionCallParams):
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: WebsocketServerParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -112,9 +117,9 @@ You are a helpful assistant who converses with a user and answers questions. Res
 
 Your response will be turned into speech so use only simple words and punctuation.
 
-You have access to three tools: get_weather, get_restaurant_recommendation, and get_image.
+You have access to three tools: get_current_weather, get_restaurant_recommendation, and get_image.
 
-You can respond to questions about the weather using the get_weather tool.
+You can respond to questions about the weather using the get_current_weather tool.
 
 You can answer questions about the user's video stream using the get_image tool. Some examples of phrases that \
 indicate you should use the get_image tool are:
@@ -133,7 +138,9 @@ indicate you should use the get_image tool are:
             system_instruction=system_prompt,
         ),
     )
-    llm.register_function("get_weather", get_weather, cancel_on_interruption=False, timeout_secs=30)
+    llm.register_function(
+        "get_current_weather", get_current_weather, cancel_on_interruption=False, timeout_secs=30
+    )
     llm.register_function("get_image", get_image)
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
@@ -147,7 +154,7 @@ indicate you should use the get_image tool are:
             logger.info(f"Function call cancelled: {item.function_name} [{item.tool_call_id}]")
 
     weather_function = FunctionSchema(
-        name="get_weather",
+        name="get_current_weather",
         description="Get the current weather",
         properties={
             "location": {

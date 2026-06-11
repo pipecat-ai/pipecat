@@ -6,11 +6,32 @@
 
 """RTVI pipeline frame definitions."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pipecat.frames.frames import SystemFrame
 from pipecat.processors.frameworks.rtvi.models import UIJobGroupData
+
+if TYPE_CHECKING:
+    # Imported for typing only: observer.py imports this module, so a runtime
+    # import back would be circular. With ``from __future__ import annotations``
+    # the annotation below is just a string and the field's value is a plain dict.
+    from pipecat.processors.frameworks.rtvi.observer import RTVIFunctionCallReportLevel
+
+
+@dataclass
+class RTVIClientMessageFrame(SystemFrame):
+    """A frame for sending messages from the client to the RTVI server.
+
+    This frame is meant for custom messaging from the client to the server
+    and expects a server-response message.
+    """
+
+    msg_id: str
+    type: str
+    data: Any | None = None
 
 
 @dataclass
@@ -26,6 +47,50 @@ class RTVIServerMessageFrame(SystemFrame):
     def __str__(self):
         """String representation of the RTVI server message frame."""
         return f"{self.name}(data: {self.data})"
+
+
+@dataclass
+class RTVIServerResponseFrame(SystemFrame):
+    """A frame for responding to a client RTVI message.
+
+    This frame should be sent in response to an RTVIClientMessageFrame
+    and include the original RTVIClientMessageFrame to ensure the response
+    is properly attributed to the original request. To respond with an error,
+    set the `error` field to a string describing the error. This will result
+    in the client receiving an `error-response` message instead of a
+    `server-response` message.
+    """
+
+    client_msg: RTVIClientMessageFrame
+    data: Any | None = None
+    error: str | None = None
+
+
+@dataclass
+class RTVIConfigureObserverFrame(SystemFrame):
+    """Dynamically reconfigure a running :class:`RTVIObserver`.
+
+    Lets a trusted, server-side source adjust what the observer exposes at
+    runtime without baking the setting into the agent (where it would apply to
+    every client). Only the fields that are set are applied; ``None`` fields
+    leave the current observer configuration unchanged.
+
+    The eval harness pushes this (via the eval-only
+    :class:`~pipecat.evals.serializer.RTVIEvalSerializer`) to raise the
+    function-call report level for the calls a scenario asserts on, so
+    production agents can keep the secure default.
+
+    Parameters:
+        function_call_report_level: Per-function report-level map to apply to the
+            observer (e.g. ``{"*": RTVIFunctionCallReportLevel.FULL}``), or
+            ``None`` to leave it unchanged.
+    """
+
+    function_call_report_level: dict[str, RTVIFunctionCallReportLevel] | None = None
+
+    def __str__(self):
+        """String representation of the observer-config frame."""
+        return f"{self.name}(function_call_report_level: {self.function_call_report_level})"
 
 
 @dataclass
@@ -151,33 +216,3 @@ class RTVIUICancelJobGroupFrame(SystemFrame):
     def __str__(self):
         """String representation of the UI cancel-job-group frame."""
         return f"{self.name}(job_id: {self.job_id})"
-
-
-@dataclass
-class RTVIClientMessageFrame(SystemFrame):
-    """A frame for sending messages from the client to the RTVI server.
-
-    This frame is meant for custom messaging from the client to the server
-    and expects a server-response message.
-    """
-
-    msg_id: str
-    type: str
-    data: Any | None = None
-
-
-@dataclass
-class RTVIServerResponseFrame(SystemFrame):
-    """A frame for responding to a client RTVI message.
-
-    This frame should be sent in response to an RTVIClientMessageFrame
-    and include the original RTVIClientMessageFrame to ensure the response
-    is properly attributed to the original request. To respond with an error,
-    set the `error` field to a string describing the error. This will result
-    in the client receiving an `error-response` message instead of a
-    `server-response` message.
-    """
-
-    client_msg: RTVIClientMessageFrame
-    data: Any | None = None
-    error: str | None = None

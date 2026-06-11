@@ -1,0 +1,20 @@
+name: weather_function_call
+
+# Text, end to end: ask for the weather (which requires a tool call). Tests that
+# the bot invokes a function and speaks a correct, grounded answer.
+
+judge: !include judge_text.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "What's the weather in San Francisco, California? Use Fahrenheit."
+    expect:
+      - event: function_call
+        calls:
+          - name: get_current_weather
+      - event: response
+        eval: "the response describes the weather in San Francisco, including a temperature in degrees"

@@ -213,6 +213,7 @@ FEATURE_IMPORTS = {
         "from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies"
     ],
     "create_transport": ["from pipecat.runner.utils import create_transport"],
+    "eval": ["from pipecat.transports.websocket.server import WebsocketServerParams"],
 }
 
 # Base imports always included in generated bot files

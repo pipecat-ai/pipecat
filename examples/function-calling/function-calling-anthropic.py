@@ -30,12 +30,13 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.transports.websocket.server import WebsocketServerParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
 
-async def get_weather(params: FunctionCallParams):
+async def get_current_weather(params: FunctionCallParams):
     location = params.arguments["location"]
     await params.result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
 
@@ -47,6 +48,10 @@ async def fetch_restaurant_recommendation(params: FunctionCallParams):
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: WebsocketServerParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -80,11 +85,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
-    llm.register_function("get_weather", get_weather)
+    llm.register_function("get_current_weather", get_current_weather)
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
     weather_function = FunctionSchema(
-        name="get_weather",
+        name="get_current_weather",
         description="Get the current weather",
         properties={
             "location": {

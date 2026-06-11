@@ -30,6 +30,7 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.transports.websocket.server import WebsocketServerParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -42,6 +43,10 @@ async def fetch_weather_from_api(params: FunctionCallParams):
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: WebsocketServerParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -80,7 +85,7 @@ You have one functions available:
 
 Infer whether to use Fahrenheit or Celsius automatically based on the location, unless the user specifies a preference.
 
-Start by asking me for my location. Then, use 'get_weather_current' to give me a forecast.
+Start by asking me for my location. Then, use 'get_current_weather' to give me a forecast.
 
     Respond to what the user said in a creative and helpful way.""",
         ),

@@ -52,6 +52,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     InterruptionTaskFrame,
     MetricsFrame,
+    PipelineFlushFrame,
     StartFrame,
     StopFrame,
     StopTaskFrame,
@@ -742,6 +743,32 @@ class PipelineWorker(BaseWorker):
             for frame in frames:
                 await self.queue_frame(frame, direction)
 
+    async def flush_pipeline(self, timeout: float = 5.0) -> bool:
+        """Flush all in-flight frames from the pipeline and wait for it to drain.
+
+        Pushes a :class:`~pipecat.frames.frames.PipelineFlushFrame` downstream;
+        the sink bounces it back upstream and the source sets its event once it
+        completes the round-trip, signalling that every frame queued ahead of it
+        has been processed. The probe is injected straight into the pipeline so
+        it bypasses any ``queue_frame`` override (e.g. tool-call deferral).
+
+        Args:
+            timeout: Seconds to wait before giving up. On timeout a warning is
+                logged and ``False`` is returned rather than blocking forever
+                (e.g. if a processor swallows the probe).
+
+        Returns:
+            True if the pipeline drained, False if the wait timed out.
+        """
+        event = asyncio.Event()
+        await self._pipeline.queue_frame(PipelineFlushFrame(event=event))
+        try:
+            await asyncio.wait_for(event.wait(), timeout)
+            return True
+        except TimeoutError:
+            logger.warning(f"{self}: pipeline flush timed out after {timeout}s")
+            return False
+
     async def on_bus_message(self, message: BusMessage) -> None:
         """Handle outbound bus messages: TTS playback and RTVI UI translation.
 
@@ -1087,6 +1114,15 @@ class PipelineWorker(BaseWorker):
         if isinstance(frame, tuple(self._reached_upstream_types)):
             await self._call_event_handler("on_frame_reached_upstream", frame)
 
+        if isinstance(frame, PipelineFlushFrame):
+            # The flush probe completed its round-trip (down to the sink, back up
+            # to the source). Everything queued ahead of it has been processed;
+            # release whoever is awaiting it.
+            logger.debug(f"{self}: flush probe reached source — pipeline drained")
+            if frame.event:
+                frame.event.set()
+            return
+
         if isinstance(frame, EndTaskFrame):
             # Tell the worker we should end nicely.
             logger.debug(f"{self}: received end worker frame upstream {frame}")
@@ -1125,6 +1161,14 @@ class PipelineWorker(BaseWorker):
         """
         if isinstance(frame, tuple(self._reached_downstream_types)):
             await self._call_event_handler("on_frame_reached_downstream", frame)
+
+        if isinstance(frame, PipelineFlushFrame):
+            # The flush probe reached the sink. Bounce the same instance back
+            # upstream so it returns to the source (carrying its event) and the
+            # round-trip drains both directions.
+            logger.debug(f"{self}: flush probe reached sink — bouncing upstream")
+            await self._sink.push_frame(frame, FrameDirection.UPSTREAM)
+            return
 
         if isinstance(frame, StartFrame):
             await self._call_event_handler("on_pipeline_started", frame)

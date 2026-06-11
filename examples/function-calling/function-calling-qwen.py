@@ -30,6 +30,7 @@ from pipecat.services.qwen.llm import QwenLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.transports.websocket.server import WebsocketServerParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -42,6 +43,10 @@ async def fetch_weather_from_api(params: FunctionCallParams):
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: WebsocketServerParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -72,7 +77,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = QwenLLMService(
         api_key=os.environ["QWEN_API_KEY"],
         settings=QwenLLMService.Settings(
-            model="qwen2.5-72b-instruct",
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )

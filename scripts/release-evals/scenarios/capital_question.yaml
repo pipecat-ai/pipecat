@@ -1,0 +1,26 @@
+name: capital_question
+
+# Audio modality, end to end: ask a simple question and judge the bot's
+# actual spoken answer (transcribed locally). Tests that the full
+# STT -> LLM -> TTS pipeline works for a given service stack.
+#
+# A geography question with a distinctive one-word answer ("Berlin") is far more
+# robust to transcription than arithmetic: numbers are homophone-prone on both
+# sides (four/for, two/to, digits vs words), and a single mangled number flips
+# the answer's truth value. The question also has no comma, so synthesized
+# speech has no mid-utterance pause for aggressive turn detectors to split on.
+
+user: !include user_audio.yaml
+
+judge: !include judge_audio.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "What is the capital of Germany?"
+    expect:
+      - event: response
+        eval: "the response says the capital of Germany is Berlin"

@@ -4,20 +4,23 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""This example demonstrates using the Perplexity API as a drop-in replacement for OpenAI.
+"""This example demonstrates function calling with the Perplexity API.
 
-Note that while this file is in the function-calling examples, Perplexity's API does not
-currently support function calling. The example shows basic chat completion functionality
-using Perplexity's API while maintaining compatibility with the OpenAI interface.
+It runs a simple shop assistant: when the user asks how much an item costs, the
+LLM calls the ``get_item_price`` function, which returns a made-up price (so any
+item works). Perplexity is used as a drop-in replacement for OpenAI.
 """
 
 import os
+import random
 
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -29,17 +32,30 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.perplexity.llm import PerplexityLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.transports.websocket.server import WebsocketServerParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
+
+async def fetch_item_price(params: FunctionCallParams):
+    # This is just a demo, so we make up a price for whatever item is asked about.
+    price = random.randint(5, 100)
+    await params.result_callback({"item": params.arguments["item"], "price": f"${price}"})
+
+
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: WebsocketServerParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -70,11 +86,32 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = PerplexityLLMService(
         api_key=os.environ["PERPLEXITY_API_KEY"],
         settings=PerplexityLLMService.Settings(
-            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
+            system_instruction="You are a helpful shop assistant in a voice conversation. When the user asks how much an item costs, call the get_item_price function to look it up. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
 
-    context = LLMContext()
+    # You can also register a function_name of None to get all functions
+    # sent to the same callback with an additional function_name parameter.
+    llm.register_function("get_item_price", fetch_item_price)
+
+    @llm.event_handler("on_function_calls_started")
+    async def on_function_calls_started(service, function_calls):
+        await tts.queue_frame(TTSSpeakFrame("Let me check the price."))
+
+    price_function = FunctionSchema(
+        name="get_item_price",
+        description="Get the price of an item in the shop",
+        properties={
+            "item": {
+                "type": "string",
+                "description": "The name of the item, e.g. coffee mug",
+            },
+        },
+        required=["item"],
+    )
+    tools = ToolsSchema(standard_tools=[price_function])
+
+    context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

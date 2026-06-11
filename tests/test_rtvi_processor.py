@@ -5,9 +5,14 @@
 #
 
 import unittest
-from unittest.mock import AsyncMock
+import warnings
+from unittest.mock import AsyncMock, Mock
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
+from pipecat.frames.frames import (
+    InputAudioRawFrame,
+    InputTransportStartAudioStreamingFrame,
+)
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 
 
@@ -21,7 +26,6 @@ class TestRTVIClientReadyVersionHandling(unittest.IsolatedAsyncioTestCase):
     async def _call_handle_client_ready(self, data):
         """Helper to call _handle_client_ready with a mocked _send_error_response."""
         self.processor._send_error_response = AsyncMock()
-        self.processor._input_transport = None
         self.processor.set_client_ready = AsyncMock()
         await self.processor._handle_client_ready("req-1", data)
 
@@ -110,6 +114,34 @@ class TestRTVIClientReadyVersionHandling(unittest.IsolatedAsyncioTestCase):
     async def test_client_ready_is_set_when_no_data(self):
         await self._call_handle_client_ready(None)
         self.processor.set_client_ready.assert_called_once()
+
+    async def test_client_ready_pushes_start_audio_streaming_frame(self):
+        self.processor.push_frame = AsyncMock()
+        await self._call_handle_client_ready(None)
+        pushed = [c.args[0] for c in self.processor.push_frame.call_args_list]
+        self.assertTrue(any(isinstance(f, InputTransportStartAudioStreamingFrame) for f in pushed))
+
+
+class TestRTVIFrameBasedAudio(unittest.IsolatedAsyncioTestCase):
+    async def asyncTearDown(self):
+        await self.processor.cleanup()
+
+    async def test_transport_param_is_deprecated(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            self.processor = RTVIProcessor(transport=Mock())
+        self.assertTrue(any(issubclass(w.category, DeprecationWarning) for w in caught))
+
+    async def test_audio_buffer_pushes_input_audio_frame_downstream(self):
+        self.processor = RTVIProcessor()
+        self.processor.push_frame = AsyncMock()
+        await self.processor._handle_audio_buffer(
+            {"base64Audio": "AAAA", "sampleRate": 16000, "numChannels": 1}
+        )
+        pushed = [c.args[0] for c in self.processor.push_frame.call_args_list]
+        self.assertEqual(len(pushed), 1)
+        self.assertIsInstance(pushed[0], InputAudioRawFrame)
+        self.assertEqual(pushed[0].sample_rate, 16000)
 
 
 if __name__ == "__main__":

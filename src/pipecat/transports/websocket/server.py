@@ -35,6 +35,7 @@ from pipecat.frames.frames import (
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
     StartFrame,
+    TaskSystemFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.serializers.base_serializer import FrameSerializer
@@ -212,6 +213,11 @@ class WebsocketServerInputTransport(BaseInputTransport):
                     await self.push_audio_frame(frame)
                 elif isinstance(frame, InputTransportMessageFrame):
                     await self.broadcast_frame(InputTransportMessageFrame, message=frame.message)
+                elif isinstance(frame, TaskSystemFrame):
+                    # A client-initiated task frame (e.g. CancelTaskFrame) is meant
+                    # for the pipeline task, so route it upstream rather than into
+                    # the pipeline.
+                    await self.push_frame(frame, FrameDirection.UPSTREAM)
                 else:
                     await self.push_frame(frame)
         except Exception as e:
@@ -221,7 +227,11 @@ class WebsocketServerInputTransport(BaseInputTransport):
         await self._callbacks.on_client_disconnected(websocket)
 
         await websocket.close()
-        self._websocket = None
+        # Only clear if it's still ours: the next client may have already
+        # connected and replaced it (e.g. back-to-back evals on a kept-alive
+        # server), and we must not null out their connection.
+        if self._websocket is websocket:
+            self._websocket = None
 
         logger.info(f"Client {websocket.remote_address} disconnected")
 
@@ -278,8 +288,9 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
             websocket: The WebSocket connection to set as active, or None to clear.
         """
         if self._websocket:
+            if websocket:
+                logger.warning("Only one client allowed, using new connection")
             await self._websocket.close()
-            logger.warning("Only one client allowed, using new connection")
         self._websocket = websocket
 
     async def start(self, frame: StartFrame):

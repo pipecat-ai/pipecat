@@ -1,0 +1,3 @@
+eval:
+  service: ollama
+  model: gemma2:9b

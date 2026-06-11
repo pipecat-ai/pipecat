@@ -1,0 +1,21 @@
+name: weather_and_restaurant
+
+# Text modality, end to end: ask for two things at once (weather and a
+# restaurant). Tests that the bot handles multiple tool calls in one turn.
+
+judge: !include judge_text.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "What's the weather in San Francisco, and what's a good restaurant there? Use Fahrenheit."
+    expect:
+      - event: function_call
+        calls:
+          - name: get_current_weather
+          - name: get_restaurant_recommendation
+      - event: response
+        eval: "the response covers the weather in San Francisco (with a temperature in degrees) and recommends a restaurant there"
