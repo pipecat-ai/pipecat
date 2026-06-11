@@ -131,7 +131,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         # NOTE: A common pattern is to end pipeline after the voicemail is left.
         # Uncomment the following line to end the pipeline after leaving the voicemail.
-        # await processor.push_frame(EndWorkerFrame(), FrameDirection.UPSTREAM)
+        # await processor.push_frame(EndWorkerFrame())
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 

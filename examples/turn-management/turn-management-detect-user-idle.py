@@ -29,7 +29,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -78,7 +77,7 @@ class IdleHandler:
             await aggregator.push_frame(
                 TTSSpeakFrame("It seems like you're busy right now. Have a nice day!")
             )
-            await aggregator.push_frame(EndWorkerFrame(), FrameDirection.UPSTREAM)
+            await aggregator.push_frame(EndWorkerFrame())
 
 
 async def fetch_weather_from_api(params: FunctionCallParams):

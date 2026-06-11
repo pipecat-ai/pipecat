@@ -199,9 +199,9 @@ class RTVIEvalSerializer(FrameSerializer):
     def _maybe_cancel_frame(self, message: dict) -> Frame | None:
         """Return a ``CancelWorkerFrame`` for the eval-cancel message, else None.
 
-        The harness sends this when a scenario finishes. The input transport routes
-        it upstream to the pipeline worker, which cancels the whole pipeline (source
-        included, so the WebSocket server stops too) and tears down service
+        The harness sends this when a scenario finishes. The input transport pushes
+        it downstream to the pipeline worker, which cancels the whole pipeline
+        (source included, so the WebSocket server stops too) and tears down service
         connections gracefully — the bot process then exits on its own instead of
         being killed mid-flight.
         """

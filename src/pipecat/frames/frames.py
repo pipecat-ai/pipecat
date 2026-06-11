@@ -1508,10 +1508,12 @@ class ServiceSwitcherRequestMetadataFrame(ControlFrame):
 class WorkerFrame(ControlFrame):
     """Base frame for worker frames.
 
-    This is a base class for frames that are meant to be sent and handled
-    upstream by the pipeline worker. This might result in a corresponding frame
-    sent downstream (e.g. `InterruptionWorkerFrame` / `InterruptionFrame` or
-    `EndWorkerFrame` / `EndFrame`).
+    This is a base class for frames that are handled by the pipeline worker.
+    This might result in a corresponding frame sent downstream (e.g.
+    `InterruptionWorkerFrame` / `InterruptionFrame` or `EndWorkerFrame` /
+    `EndFrame`). Push these frames downstream (the default direction) so frames
+    queued ahead of them are processed first; pushing them upstream is also
+    supported.
 
     """
 
@@ -1522,10 +1524,11 @@ class WorkerFrame(ControlFrame):
 class WorkerSystemFrame(SystemFrame):
     """Base frame for worker system frames.
 
-    This is a base class for frames that are meant to be sent and handled
-    upstream by the pipeline worker. This might result in a corresponding frame
-    sent downstream (e.g. `InterruptionWorkerFrame` / `InterruptionFrame` or
-    `EndWorkerFrame` / `EndFrame`).
+    This is a base class for system frames that are handled by the pipeline
+    worker. This might result in a corresponding frame sent downstream (e.g.
+    `InterruptionWorkerFrame` / `InterruptionFrame` or `CancelWorkerFrame` /
+    `CancelFrame`). They can be pushed in either direction (downstream is the
+    default); being system frames, they are processed immediately either way.
 
     """
 
@@ -1538,7 +1541,8 @@ class EndWorkerFrame(WorkerFrame, UninterruptibleFrame):
 
     This is used to notify the pipeline worker that the pipeline should be
     closed nicely (flushing all the queued frames) by pushing an EndFrame
-    downstream. This frame should be pushed upstream.
+    downstream. Push this frame downstream (the default direction) so frames
+    queued ahead of it are flushed before the pipeline ends.
 
     Parameters:
         reason: Optional reason for pushing an end frame.
@@ -1556,8 +1560,8 @@ class StopWorkerFrame(WorkerFrame, UninterruptibleFrame):
 
     This is used to notify the pipeline worker that it should be stopped as
     soon as possible (flushing all the queued frames) but that the pipeline
-    processors should be kept in a running state. This frame should be pushed
-    upstream.
+    processors should be kept in a running state. Push this frame downstream
+    (the default direction) so frames queued ahead of it are flushed first.
     """
 
     pass
@@ -1568,8 +1572,8 @@ class CancelWorkerFrame(WorkerSystemFrame):
     """Frame to request immediate pipeline worker cancellation.
 
     This is used to notify the pipeline worker that the pipeline should be
-    stopped immediately by pushing a CancelFrame downstream. This frame
-    should be pushed upstream.
+    stopped immediately by pushing a CancelFrame downstream. It can be pushed
+    in either direction; being a system frame, it is processed immediately.
 
     Parameters:
         reason: Optional reason for pushing a cancel frame.
@@ -1585,9 +1589,9 @@ class CancelWorkerFrame(WorkerSystemFrame):
 class InterruptionWorkerFrame(WorkerSystemFrame):
     """Frame indicating the pipeline should be interrupted.
 
-    This frame should be pushed upstream to indicate the pipeline should be
-    interrupted. The pipeline worker converts this into an `InterruptionFrame`
-    and sends it downstream.
+    The pipeline worker converts this into an `InterruptionFrame` and sends it
+    downstream. It can be pushed in either direction; being a system frame, it
+    is processed immediately.
     """
 
     pass

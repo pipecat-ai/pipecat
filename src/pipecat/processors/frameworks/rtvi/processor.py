@@ -301,7 +301,7 @@ class RTVIProcessor(FrameProcessor):
                         data = RTVI.ClientReadyData(version=version, about=about)
                     await self._handle_client_ready(message.id, data)
                 case "disconnect-bot":
-                    await self.push_frame(EndWorkerFrame(), FrameDirection.UPSTREAM)
+                    await self.push_frame(EndWorkerFrame())
                 case "client-message":
                     data = RTVI.RawClientMessageData.model_validate(message.data)
                     await self._handle_client_message(message.id, data)
