@@ -7,11 +7,11 @@
 """Tests for AzureTTSService cross-thread audio delivery.
 
 Azure's Speech SDK fires its synthesis callbacks from native (non-event-loop)
-threads. Those callbacks must wake the awaiting ``run_tts`` getter even when the
-event loop is otherwise idle — e.g. a headless pipeline with no output transport
-pumping audio. A bare ``asyncio.Queue.put_nowait()`` from another thread schedules
-the getter's wake-up via ``call_soon()``, which does NOT wake an idle selector, so
-the audio sits unread; the callbacks must marshal via ``loop.call_soon_threadsafe()``.
+threads. Those callbacks must deliver to the awaiting ``run_tts`` getter even when
+the event loop is otherwise idle — e.g. a headless pipeline with no output transport
+pumping audio. A bare ``asyncio.Queue.put_nowait()`` from another thread does NOT
+wake an idle selector, so the audio sits unread; the callbacks marshal onto the loop
+with ``asyncio.run_coroutine_threadsafe(queue.put(...), self.get_event_loop())``.
 
 These are deterministic regression tests: the getter is parked on an idle loop
 *first*, then the callback is fired from a real thread. With the fix the getter wakes
@@ -42,7 +42,12 @@ _MAX_DELIVERY = 1.0
 
 
 def _make_service() -> AzureTTSService:
-    return AzureTTSService(api_key="test-key", region="eastus")
+    svc = AzureTTSService(api_key="test-key", region="eastus")
+    # The SDK callbacks call get_event_loop(); without a started pipeline there is no
+    # task manager, so point it at the running test loop.
+    loop = asyncio.get_running_loop()
+    svc.get_event_loop = lambda: loop
+    return svc
 
 
 async def _assert_idle_loop_wakeup(get_coro, fire):
@@ -64,7 +69,6 @@ async def _assert_idle_loop_wakeup(get_coro, fire):
 async def test_synthesizing_audio_wakes_idle_loop():
     """Audio pushed from an SDK thread reaches a parked getter on an idle loop."""
     svc = _make_service()
-    svc._loop = asyncio.get_running_loop()
 
     audio = b"\x00\x01" * 256
     evt = Mock()
@@ -80,7 +84,6 @@ async def test_synthesizing_audio_wakes_idle_loop():
 async def test_canceled_error_wakes_idle_loop():
     """A non-user cancellation delivers its error to a parked getter on an idle loop."""
     svc = _make_service()
-    svc._loop = asyncio.get_running_loop()
 
     evt = Mock()
     evt.result.cancellation_details.reason = CancellationReason.Error
@@ -100,7 +103,6 @@ async def test_completion_sentinel_wakes_idle_loop():
     put and must wake an idle loop.
     """
     svc = _make_service()
-    svc._loop = asyncio.get_running_loop()
 
     evt = Mock()
     evt.result.audio_duration = None  # skip duration bookkeeping
@@ -109,12 +111,3 @@ async def test_completion_sentinel_wakes_idle_loop():
         svc._word_boundary_queue.get(), lambda: svc._handle_completed(evt)
     )
     assert item is None
-
-
-@pytest.mark.asyncio
-async def test_put_threadsafe_falls_back_before_loop_captured():
-    """Before start() captures the loop, _put_threadsafe still enqueues directly."""
-    svc = _make_service()
-    assert svc._loop is None
-    svc._put_threadsafe(svc._audio_queue, b"data")
-    assert svc._audio_queue.get_nowait() == b"data"
