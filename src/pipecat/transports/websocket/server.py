@@ -35,7 +35,7 @@ from pipecat.frames.frames import (
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
     StartFrame,
-    TaskSystemFrame,
+    WorkerSystemFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.serializers.base_serializer import FrameSerializer
@@ -213,9 +213,9 @@ class WebsocketServerInputTransport(BaseInputTransport):
                     await self.push_audio_frame(frame)
                 elif isinstance(frame, InputTransportMessageFrame):
                     await self.broadcast_frame(InputTransportMessageFrame, message=frame.message)
-                elif isinstance(frame, TaskSystemFrame):
-                    # A client-initiated task frame (e.g. CancelTaskFrame) is meant
-                    # for the pipeline task, so route it upstream rather than into
+                elif isinstance(frame, WorkerSystemFrame):
+                    # A client-initiated worker frame (e.g. CancelWorkerFrame) is meant
+                    # for the pipeline worker, so route it upstream rather than into
                     # the pipeline.
                     await self.push_frame(frame, FrameDirection.UPSTREAM)
                 else:

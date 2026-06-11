@@ -40,7 +40,7 @@ from loguru import logger
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
-    CancelTaskFrame,
+    CancelWorkerFrame,
     Frame,
     InputTransportMessageFrame,
     LLMMessagesUpdateFrame,
@@ -64,7 +64,7 @@ EVAL_RESET_MESSAGE_TYPE = "eval-reset"
 EVAL_CONFIGURE_MESSAGE_TYPE = "eval-configure"
 
 # A ``client-message`` with this ``t`` is intercepted and turned into a
-# ``CancelTaskFrame``, so the harness can end a scenario by gracefully tearing down the
+# ``CancelWorkerFrame``, so the harness can end a scenario by gracefully tearing down the
 # bot's pipeline (closing its service connections) instead of the orchestrator
 # having to kill the process.
 EVAL_CANCEL_MESSAGE_TYPE = "eval-cancel"
@@ -197,10 +197,10 @@ class RTVIEvalSerializer(FrameSerializer):
         return LLMMessagesUpdateFrame(messages=list(messages), run_llm=False)
 
     def _maybe_cancel_frame(self, message: dict) -> Frame | None:
-        """Return a ``CancelTaskFrame`` for the eval-cancel message, else None.
+        """Return a ``CancelWorkerFrame`` for the eval-cancel message, else None.
 
         The harness sends this when a scenario finishes. The input transport routes
-        it upstream to the pipeline task, which cancels the whole pipeline (source
+        it upstream to the pipeline worker, which cancels the whole pipeline (source
         included, so the WebSocket server stops too) and tears down service
         connections gracefully — the bot process then exits on its own instead of
         being killed mid-flight.
@@ -210,7 +210,7 @@ class RTVIEvalSerializer(FrameSerializer):
         data: Any = message.get("data") or {}
         if not isinstance(data, dict) or data.get("t") != EVAL_CANCEL_MESSAGE_TYPE:
             return None
-        return CancelTaskFrame()
+        return CancelWorkerFrame()
 
     def _maybe_store_image(self, message: dict) -> bool:
         """Store the image from an eval-image message; return True if consumed.

@@ -1500,18 +1500,18 @@ class ServiceSwitcherRequestMetadataFrame(ControlFrame):
 
 
 #
-# Task frames
+# Worker frames
 #
 
 
 @dataclass
-class TaskFrame(ControlFrame):
-    """Base frame for task frames.
+class WorkerFrame(ControlFrame):
+    """Base frame for worker frames.
 
     This is a base class for frames that are meant to be sent and handled
-    upstream by the pipeline task. This might result in a corresponding frame
-    sent downstream (e.g. `InterruptionTaskFrame` / `InterruptionFrame` or
-    `EndTaskFrame` / `EndFrame`).
+    upstream by the pipeline worker. This might result in a corresponding frame
+    sent downstream (e.g. `InterruptionWorkerFrame` / `InterruptionFrame` or
+    `EndWorkerFrame` / `EndFrame`).
 
     """
 
@@ -1519,13 +1519,13 @@ class TaskFrame(ControlFrame):
 
 
 @dataclass
-class TaskSystemFrame(SystemFrame):
-    """Base frame for task system frames.
+class WorkerSystemFrame(SystemFrame):
+    """Base frame for worker system frames.
 
     This is a base class for frames that are meant to be sent and handled
-    upstream by the pipeline task. This might result in a corresponding frame
-    sent downstream (e.g. `InterruptionTaskFrame` / `InterruptionFrame` or
-    `EndTaskFrame` / `EndFrame`).
+    upstream by the pipeline worker. This might result in a corresponding frame
+    sent downstream (e.g. `InterruptionWorkerFrame` / `InterruptionFrame` or
+    `EndWorkerFrame` / `EndFrame`).
 
     """
 
@@ -1533,10 +1533,10 @@ class TaskSystemFrame(SystemFrame):
 
 
 @dataclass
-class EndTaskFrame(TaskFrame, UninterruptibleFrame):
-    """Frame to request graceful pipeline task closure.
+class EndWorkerFrame(WorkerFrame, UninterruptibleFrame):
+    """Frame to request graceful pipeline worker closure.
 
-    This is used to notify the pipeline task that the pipeline should be
+    This is used to notify the pipeline worker that the pipeline should be
     closed nicely (flushing all the queued frames) by pushing an EndFrame
     downstream. This frame should be pushed upstream.
 
@@ -1551,10 +1551,10 @@ class EndTaskFrame(TaskFrame, UninterruptibleFrame):
 
 
 @dataclass
-class StopTaskFrame(TaskFrame, UninterruptibleFrame):
-    """Frame to request pipeline task stop while keeping processors running.
+class StopWorkerFrame(WorkerFrame, UninterruptibleFrame):
+    """Frame to request pipeline worker stop while keeping processors running.
 
-    This is used to notify the pipeline task that it should be stopped as
+    This is used to notify the pipeline worker that it should be stopped as
     soon as possible (flushing all the queued frames) but that the pipeline
     processors should be kept in a running state. This frame should be pushed
     upstream.
@@ -1564,10 +1564,10 @@ class StopTaskFrame(TaskFrame, UninterruptibleFrame):
 
 
 @dataclass
-class CancelTaskFrame(TaskSystemFrame):
-    """Frame to request immediate pipeline task cancellation.
+class CancelWorkerFrame(WorkerSystemFrame):
+    """Frame to request immediate pipeline worker cancellation.
 
-    This is used to notify the pipeline task that the pipeline should be
+    This is used to notify the pipeline worker that the pipeline should be
     stopped immediately by pushing a CancelFrame downstream. This frame
     should be pushed upstream.
 
@@ -1582,15 +1582,110 @@ class CancelTaskFrame(TaskSystemFrame):
 
 
 @dataclass
-class InterruptionTaskFrame(TaskSystemFrame):
+class InterruptionWorkerFrame(WorkerSystemFrame):
     """Frame indicating the pipeline should be interrupted.
 
     This frame should be pushed upstream to indicate the pipeline should be
-    interrupted. The pipeline task converts this into an `InterruptionFrame`
+    interrupted. The pipeline worker converts this into an `InterruptionFrame`
     and sends it downstream.
     """
 
     pass
+
+
+#
+# Deprecated task frame aliases (the pipeline "task" was renamed to "worker").
+#
+
+
+@dataclass
+class TaskFrame(WorkerFrame):
+    """Deprecated alias for :class:`WorkerFrame`.
+
+    .. deprecated:: 1.4.0
+        Use :class:`WorkerFrame` instead.
+    """
+
+    pass
+
+
+@dataclass
+class TaskSystemFrame(WorkerSystemFrame):
+    """Deprecated alias for :class:`WorkerSystemFrame`.
+
+    .. deprecated:: 1.4.0
+        Use :class:`WorkerSystemFrame` instead.
+    """
+
+    pass
+
+
+@dataclass
+class EndTaskFrame(EndWorkerFrame, TaskFrame):
+    """Deprecated alias for :class:`EndWorkerFrame`.
+
+    .. deprecated:: 1.4.0
+        Use :class:`EndWorkerFrame` instead.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        warnings.warn(
+            "EndTaskFrame is deprecated, use EndWorkerFrame instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+
+@dataclass
+class StopTaskFrame(StopWorkerFrame, TaskFrame):
+    """Deprecated alias for :class:`StopWorkerFrame`.
+
+    .. deprecated:: 1.4.0
+        Use :class:`StopWorkerFrame` instead.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        warnings.warn(
+            "StopTaskFrame is deprecated, use StopWorkerFrame instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+
+@dataclass
+class CancelTaskFrame(CancelWorkerFrame, TaskSystemFrame):
+    """Deprecated alias for :class:`CancelWorkerFrame`.
+
+    .. deprecated:: 1.4.0
+        Use :class:`CancelWorkerFrame` instead.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        warnings.warn(
+            "CancelTaskFrame is deprecated, use CancelWorkerFrame instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+
+@dataclass
+class InterruptionTaskFrame(InterruptionWorkerFrame, TaskSystemFrame):
+    """Deprecated alias for :class:`InterruptionWorkerFrame`.
+
+    .. deprecated:: 1.4.0
+        Use :class:`InterruptionWorkerFrame` instead.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        warnings.warn(
+            "InterruptionTaskFrame is deprecated, use InterruptionWorkerFrame instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
 
 #

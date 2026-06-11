@@ -16,7 +16,7 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
-    EndTaskFrame,
+    EndWorkerFrame,
     LLMMessagesAppendFrame,
     LLMRunFrame,
     TTSSpeakFrame,
@@ -78,7 +78,7 @@ class IdleHandler:
             await aggregator.push_frame(
                 TTSSpeakFrame("It seems like you're busy right now. Have a nice day!")
             )
-            await aggregator.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+            await aggregator.push_frame(EndWorkerFrame(), FrameDirection.UPSTREAM)
 
 
 async def fetch_weather_from_api(params: FunctionCallParams):
