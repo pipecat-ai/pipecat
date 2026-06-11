@@ -87,14 +87,14 @@ Runnable examples live in `examples/multi-worker/` (local handoff, distributed h
 
 ### Important Patterns
 
-- **Context Aggregation**: `LLMContext` accumulates messages for LLM calls; `UserResponse` aggregates user input
+- **Context Aggregation**: `LLMContext` accumulates messages for LLM calls; the aggregators created by `LLMContextAggregatorPair` keep it updated with user and assistant turns
 
 - **Turn Management**: Turn management is done through `LLMUserAggregator` and
   `LLMAssistantAggregator`, created with `LLMContextAggregatorPair`
 
 - **User turn strategies**: Detection of when the user starts and stops speaking is done via user turn start/stop strategies. They push `UserStartedSpeakingFrame` and `UserStoppedSpeakingFrame` respectively.
 
-- **Interruptions**: Interruptions are usually triggered by a user turn start strategy (e.g. `VADUserTurnStartStrategy`) but they can be triggered by other processors as well, in which case the user turn start strategies don't need to. An `InterruptionFrame` carries an optional `asyncio.Event` that is set when the frame reaches the pipeline sink. If a processor stops an `InterruptionFrame` from propagating downstream (i.e., doesn't push it), it **must** call `frame.complete()` to avoid stalling `push_interruption_task_frame_and_wait()` callers.
+- **Interruptions**: Interruptions are usually triggered by a user turn start strategy (e.g. `VADUserTurnStartStrategy`), but any processor can trigger one by calling `await self.broadcast_interruption()`, which broadcasts an `InterruptionFrame` both upstream and downstream. The old `push_interruption_task_frame_and_wait()` is deprecated and delegates to `broadcast_interruption()`.
 
 - **Uninterruptible Frames**: These are frames that will not be removed from internal queues even if there's an interruption. For example, `EndFrame` and `StopFrame`.
 
@@ -122,6 +122,11 @@ Runnable examples live in `examples/multi-worker/` (local handoff, distributed h
 | `src/pipecat/observers/`   | Pipeline observers for monitoring frame flow       |
 | `src/pipecat/audio/`       | VAD, filters, mixers, turn detection, DTMF         |
 | `src/pipecat/turns/`       | User turn management                               |
+| `src/pipecat/adapters/`    | LLM provider adapters (context/tools conversion)   |
+| `src/pipecat/runner/`      | Development runner (multi-transport bot hosting)   |
+| `src/pipecat/cli/`         | `pipecat` CLI (`init`, `eval`)                     |
+| `src/pipecat/evals/`       | Behavioral eval framework (run via `pipecat eval`) |
+| `src/pipecat/metrics/`     | Metrics data models                                |
 
 ## Code Style
 
