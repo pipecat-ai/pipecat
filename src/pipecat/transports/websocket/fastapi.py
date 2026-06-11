@@ -19,7 +19,7 @@ import wave
 from collections.abc import Awaitable, Callable
 
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -39,6 +39,7 @@ from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.utils.security.allowed_origins import default_allowed_origins, is_origin_allowed
 
 try:
     from fastapi import WebSocket
@@ -60,12 +61,17 @@ class FastAPIWebsocketParams(TransportParams):
         session_timeout: Session timeout in seconds, None for no timeout.
         fixed_audio_packet_size: Optional fixed-size packetization for raw PCM audio payloads.
             Useful when the remote WebSocket media endpoint requires strict audio framing.
+        allowed_origins: List of allowed WebSocket origins. Empty list allows all
+            origins. When set, connections with a missing or disallowed Origin header
+            are rejected. Defaults to ``PIPECAT_WEBSOCKET_ALLOWED_ORIGINS`` env var
+            (comma-separated).
     """
 
     add_wav_header: bool = False
     serializer: FrameSerializer | None = None
     session_timeout: int | None = None
     fixed_audio_packet_size: int | None = None
+    allowed_origins: list[str] = Field(default_factory=default_allowed_origins)
 
 
 class FastAPIWebsocketCallbacks(BaseModel):
@@ -557,12 +563,21 @@ class FastAPIWebsocketTransport(BaseTransport):
     ):
         """Initialize the FastAPI WebSocket transport.
 
+        Raises ``ValueError`` if ``params.allowed_origins`` is set and the
+        connection's Origin header is missing or not in the allowed list. The
+        caller is responsible for closing the WebSocket in that case.
+
         Args:
             websocket: The FastAPI WebSocket connection.
             params: Transport configuration parameters.
             input_name: Optional name for the input processor.
             output_name: Optional name for the output processor.
         """
+        if params.allowed_origins:
+            origin = websocket.headers.get("origin", "")
+            if not is_origin_allowed(origin, params.allowed_origins):
+                raise ValueError(f"WebSocket connection rejected: origin '{origin}' not allowed")
+
         super().__init__(input_name=input_name, output_name=output_name)
 
         self._params = params

@@ -119,6 +119,7 @@ from pipecat.runner.types import (
     WebSocketRunnerArguments,
 )
 from pipecat.runner.vonage import configure as configure_vonage
+from pipecat.utils.security.allowed_origins import is_origin_allowed
 
 try:
     import uvicorn
@@ -464,6 +465,11 @@ def _setup_websocket_routes(app: FastAPI, args: argparse.Namespace, ws_used_toke
                 logger.warning("WebSocket connection rejected: invalid or missing token")
                 await websocket.close(code=4003)
                 return
+        origin = websocket.headers.get("origin", "")
+        if not is_origin_allowed(origin, args.allowed_origins):
+            logger.warning(f"WebSocket connection rejected: origin '{origin}' not allowed")
+            await websocket.close(code=4003)
+            return
         await websocket.accept()
         logger.debug("Plain WebSocket connection accepted")
         await _run_websocket_bot(websocket, args)
@@ -1247,6 +1253,11 @@ def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace, ws_used_toke
                 logger.warning("WebSocket connection rejected: invalid or missing token")
                 await websocket.close(code=4003)
                 return
+        origin = websocket.headers.get("origin", "")
+        if not is_origin_allowed(origin, args.allowed_origins):
+            logger.warning(f"WebSocket connection rejected: origin '{origin}' not allowed")
+            await websocket.close(code=4003)
+            return
         await websocket.accept()
         logger.debug("WebSocket connection accepted")
         await _run_telephony_bot(websocket, args)
@@ -1472,6 +1483,24 @@ def main(parser: argparse.ArgumentParser | None = None):
             "and obtain a signed HMAC session token before connecting to /ws or "
             "/ws-client. Defaults to the PIPECAT_WEBSOCKET_AUTH environment variable "
             "or 'none'."
+        ),
+    )
+    _env_origins = [
+        o.strip()
+        for o in os.getenv("PIPECAT_WEBSOCKET_ALLOWED_ORIGINS", "").split(",")
+        if o.strip()
+    ]
+    parser.add_argument(
+        "--allowed-origins",
+        dest="allowed_origins",
+        nargs="*",
+        default=_env_origins,
+        help=(
+            "Allowed WebSocket origins (e.g. https://example.com). "
+            "Omit or leave empty to allow all origins. Non-browser clients "
+            "(no Origin header) are always allowed. "
+            "Defaults to the PIPECAT_WEBSOCKET_ALLOWED_ORIGINS environment variable "
+            "(comma-separated)."
         ),
     )
 

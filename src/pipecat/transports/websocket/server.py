@@ -19,7 +19,7 @@ from collections.abc import Awaitable, Callable
 
 import websockets
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from websockets.asyncio.server import serve as websocket_serve
 from websockets.protocol import State
 
@@ -42,6 +42,7 @@ from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.utils.security.allowed_origins import default_allowed_origins
 
 
 class WebsocketServerParams(TransportParams):
@@ -51,11 +52,16 @@ class WebsocketServerParams(TransportParams):
         add_wav_header: Whether to add WAV headers to audio frames.
         serializer: Frame serializer for message encoding/decoding.
         session_timeout: Timeout in seconds for client sessions.
+        allowed_origins: List of allowed WebSocket origins. Empty list allows all
+            origins. When set, connections with a missing or disallowed Origin header
+            are rejected. Defaults to ``PIPECAT_WEBSOCKET_ALLOWED_ORIGINS`` env var
+            (comma-separated).
     """
 
     add_wav_header: bool = False
     serializer: FrameSerializer | None = None
     session_timeout: int | None = None
+    allowed_origins: list[str] = Field(default_factory=default_allowed_origins)
 
 
 class WebsocketServerCallbacks(BaseModel):
@@ -176,7 +182,10 @@ class WebsocketServerInputTransport(BaseInputTransport):
     async def _server_task_handler(self):
         """Handle WebSocket server startup and client connections."""
         logger.info(f"Starting websocket server on {self._host}:{self._port}")
-        async with websocket_serve(self._client_handler, self._host, self._port) as server:
+        origins = self._params.allowed_origins or None
+        async with websocket_serve(
+            self._client_handler, self._host, self._port, origins=origins
+        ) as server:
             await self._callbacks.on_websocket_ready()
             await self._stop_server_event.wait()
 
