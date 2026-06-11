@@ -21,7 +21,7 @@ so nothing is yielded.
 
 The transcriber takes an already-built ``STTService``;
 :meth:`EvalTranscriber.from_config` constructs one from a scenario's
-``judge.transcription:`` mapping — ``service`` (default ``"whisper"``, a local
+``judge.transcription:`` mapping — ``service`` (default ``"moonshine"``, a local
 model), ``model``, and optional ``padding_secs``. The escape hatch is
 ``transcription.factory: "my_pkg.my_func"`` — an
 importable callable taking ``(config, sample_rate)`` and returning an
@@ -87,13 +87,13 @@ class EvalTranscriber:
 
         Honors a custom ``factory`` (dotted path to a callable taking
         ``(config, sample_rate)`` and returning an ``STTService``); otherwise
-        dispatches on the ``service`` name (default ``"whisper"``). Add providers
+        dispatches on the ``service`` name (default ``"moonshine"``). Add providers
         by extending this. To use a fully custom setup, construct
         ``EvalTranscriber`` directly with your own ``STTService`` and pass it to
         :meth:`pipecat.evals.harness.EvalSession.from_scenario`.
 
         Args:
-            config: ``transcription`` mapping, or ``None`` for the Whisper default.
+            config: ``transcription`` mapping, or ``None`` for the Moonshine default.
                 An optional ``padding_secs`` overrides the silence padding
                 (default :data:`SILENCE_PAD_S`; see :meth:`__init__`).
 
@@ -118,7 +118,7 @@ class EvalTranscriber:
             factory = getattr(importlib.import_module(module_name), attr)
             return cls(factory(config, STT_SAMPLE_RATE), padding_secs=padding_secs)
 
-        name = str(config.get("service", "whisper")).lower()
+        name = str(config.get("service", "moonshine")).lower()
         if name == "whisper":
             return cls(whisper_service(config), padding_secs=padding_secs)
         if name == "moonshine":
