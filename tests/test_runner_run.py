@@ -253,7 +253,9 @@ class TestRunnerRun(unittest.TestCase):
         )
 
     def test_startup_message_all_transports_shows_open_url_and_transport_status(self):
-        args = argparse.Namespace(transport=None, host="localhost", port=7860)
+        args = argparse.Namespace(
+            transport=None, host="localhost", port=7860, ws_auth="none", allowed_origins=[]
+        )
 
         def routes_enabled(transport: str) -> bool:
             return transport in {"telephony", "websocket"}
@@ -270,12 +272,15 @@ class TestRunnerRun(unittest.TestCase):
                 "   → Enabled transports: telephony, websocket\n"
                 "   → Disabled transports: daily (install pipecat-ai[daily]), "
                 "webrtc (install pipecat-ai[webrtc])\n"
+                "   → WebSocket origins: all (no restriction)\n"
                 "\n"
             ),
         )
 
     def test_startup_message_all_transports_omits_disabled_status_when_all_enabled(self):
-        args = argparse.Namespace(transport=None, host="localhost", port=7860)
+        args = argparse.Namespace(
+            transport=None, host="localhost", port=7860, ws_auth="none", allowed_origins=[]
+        )
 
         with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
             output = self._capture_startup_message(args)
@@ -287,6 +292,7 @@ class TestRunnerRun(unittest.TestCase):
                 "🚀 Bot ready!\n"
                 "   → Open: http://localhost:7860\n"
                 "   → Enabled transports: daily, webrtc, telephony, websocket\n"
+                "   → WebSocket origins: all (no restriction)\n"
                 "\n"
             ),
         )
@@ -318,6 +324,7 @@ class TestRunnerRun(unittest.TestCase):
             port=7860,
             proxy="example.ngrok.io",
             ws_auth="none",
+            allowed_origins=[],
         )
 
         with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
@@ -501,7 +508,7 @@ class TestWsAuthConnectionBehavior(unittest.TestCase):
 
     def _make_ws_client_app(self, ws_auth: str) -> tuple[FastAPI, set]:
         app = FastAPI()
-        args = argparse.Namespace(ws_auth=ws_auth)
+        args = argparse.Namespace(ws_auth=ws_auth, allowed_origins=[])
         used: set[str] = set()
         with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
             _setup_websocket_routes(app, args, used)
@@ -509,7 +516,7 @@ class TestWsAuthConnectionBehavior(unittest.TestCase):
 
     def _make_telephony_app(self, ws_auth: str) -> tuple[FastAPI, set]:
         app = FastAPI()
-        args = argparse.Namespace(ws_auth=ws_auth, transport=None)
+        args = argparse.Namespace(ws_auth=ws_auth, transport=None, allowed_origins=[])
         used: set[str] = set()
         with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
             _setup_telephony_routes(app, args, used)
@@ -580,6 +587,108 @@ class TestWsAuthConnectionBehavior(unittest.TestCase):
         app, _ = self._make_telephony_app(ws_auth="none")
         with patch("pipecat.runner.run._run_telephony_bot", new=AsyncMock()):
             with TestClient(app).websocket_connect("/ws"):
+                pass
+
+
+class TestAllowedOriginsUtil(unittest.TestCase):
+    """Unit tests for the is_origin_allowed utility."""
+
+    def setUp(self):
+        from pipecat.utils.security.allowed_origins import is_origin_allowed
+
+        self.is_origin_allowed = is_origin_allowed
+
+    def test_empty_list_allows_any_origin(self):
+        self.assertTrue(self.is_origin_allowed("https://example.com", []))
+
+    def test_empty_list_allows_missing_origin(self):
+        self.assertTrue(self.is_origin_allowed("", []))
+
+    def test_matching_origin_is_allowed(self):
+        self.assertTrue(self.is_origin_allowed("https://example.com", ["https://example.com"]))
+
+    def test_non_matching_origin_is_rejected(self):
+        self.assertFalse(self.is_origin_allowed("https://evil.com", ["https://example.com"]))
+
+    def test_missing_origin_is_rejected_when_origins_configured(self):
+        self.assertFalse(self.is_origin_allowed("", ["https://example.com"]))
+
+    def test_matching_is_case_insensitive(self):
+        self.assertTrue(self.is_origin_allowed("https://Example.COM", ["https://example.com"]))
+
+    def test_multiple_allowed_origins(self):
+        allowed = ["https://a.com", "https://b.com"]
+        self.assertTrue(self.is_origin_allowed("https://a.com", allowed))
+        self.assertTrue(self.is_origin_allowed("https://b.com", allowed))
+        self.assertFalse(self.is_origin_allowed("https://c.com", allowed))
+
+
+class TestWsOriginConnectionBehavior(unittest.TestCase):
+    """WebSocket connection tests verifying origin enforcement at the ASGI layer."""
+
+    def _make_ws_client_app(self, allowed_origins: list) -> FastAPI:
+        app = FastAPI()
+        args = argparse.Namespace(ws_auth="none", allowed_origins=allowed_origins)
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
+            _setup_websocket_routes(app, args, set())
+        return app
+
+    def _make_telephony_app(self, allowed_origins: list) -> FastAPI:
+        app = FastAPI()
+        args = argparse.Namespace(ws_auth="none", transport=None, allowed_origins=allowed_origins)
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
+            _setup_telephony_routes(app, args, set())
+        return app
+
+    # /ws-client (plain WebSocket)
+
+    def test_plain_ws_rejects_disallowed_origin(self):
+        app = self._make_ws_client_app(allowed_origins=["https://allowed.com"])
+        with self.assertRaises(WebSocketDisconnect) as cm:
+            with TestClient(app).websocket_connect(
+                "/ws-client", headers={"Origin": "https://evil.com"}
+            ):
+                pass
+        self.assertEqual(cm.exception.code, 4003)
+
+    def test_plain_ws_rejects_missing_origin_when_origins_configured(self):
+        app = self._make_ws_client_app(allowed_origins=["https://allowed.com"])
+        with self.assertRaises(WebSocketDisconnect) as cm:
+            with TestClient(app).websocket_connect("/ws-client"):
+                pass
+        self.assertEqual(cm.exception.code, 4003)
+
+    def test_plain_ws_accepts_allowed_origin(self):
+        app = self._make_ws_client_app(allowed_origins=["https://allowed.com"])
+        with patch("pipecat.runner.run._run_websocket_bot", new=AsyncMock()):
+            with TestClient(app).websocket_connect(
+                "/ws-client", headers={"Origin": "https://allowed.com"}
+            ):
+                pass
+
+    def test_plain_ws_allows_any_origin_when_origins_not_configured(self):
+        app = self._make_ws_client_app(allowed_origins=[])
+        with patch("pipecat.runner.run._run_websocket_bot", new=AsyncMock()):
+            with TestClient(app).websocket_connect(
+                "/ws-client", headers={"Origin": "https://anyone.com"}
+            ):
+                pass
+
+    # /ws (telephony WebSocket)
+
+    def test_telephony_ws_rejects_disallowed_origin(self):
+        app = self._make_telephony_app(allowed_origins=["https://allowed.com"])
+        with self.assertRaises(WebSocketDisconnect) as cm:
+            with TestClient(app).websocket_connect("/ws", headers={"Origin": "https://evil.com"}):
+                pass
+        self.assertEqual(cm.exception.code, 4003)
+
+    def test_telephony_ws_accepts_allowed_origin(self):
+        app = self._make_telephony_app(allowed_origins=["https://allowed.com"])
+        with patch("pipecat.runner.run._run_telephony_bot", new=AsyncMock()):
+            with TestClient(app).websocket_connect(
+                "/ws", headers={"Origin": "https://allowed.com"}
+            ):
                 pass
 
 
