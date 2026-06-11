@@ -4668,7 +4668,7 @@ requires-dist = [
     { name = "transformers", marker = "extra == 'moondream'", specifier = ">=4.48.0,<6" },
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.20.0,<1" },
     { name = "uvicorn", marker = "extra == 'runner'", specifier = ">=0.32.0,<1.0.0" },
-    { name = "vonage-video-connector", marker = "python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'vonage-video-connector'", specifier = "~=0.2.3b0" },
+    { name = "vonage-video-connector", marker = "python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'vonage-video-connector'", specifier = "~=1.0.2" },
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1,<1" },
     { name = "websockets", specifier = ">=13.1" },
 ]
@@ -7507,14 +7507,14 @@ wheels = [
 
 [[package]]
 name = "vonage-video-connector"
-version = "0.2.3b0"
+version = "1.0.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic", version = "2.11.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.13.*'" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8a/db/385df7fd618b31f0def554aca568d87b4b2f9ccc3a1457ae7eea5e8bf775/vonage_video_connector-0.2.3b0-py3-none-manylinux_2_35_aarch64.whl", hash = "sha256:9d1ffa93f3aadd24a980294df2b63b0f853b8dfa25b277690e0864e7586f8bb7", size = 12101114, upload-time = "2026-03-02T15:34:45.007Z" },
-    { url = "https://files.pythonhosted.org/packages/9f/4e/03b183599370473c3277140e9ecbb33621449935a02042ecbcf8c555ebad/vonage_video_connector-0.2.3b0-py3-none-manylinux_2_35_x86_64.whl", hash = "sha256:718e39e7e488ac50fecda75e24ab01c9d16d4078bb4f79ee7857e282493e2e4e", size = 13971535, upload-time = "2026-03-02T15:34:47.186Z" },
+    { url = "https://files.pythonhosted.org/packages/73/9f/430ce1642c161b27645b2a940b64eb05b2e4a781a8f63704af96f8129a5d/vonage_video_connector-1.0.2-py3-none-manylinux_2_35_aarch64.whl", hash = "sha256:aa3a027c7e3c291caf70dea5d1aad96804d92a2276a3774752f4c0dea270c61d", size = 12321598, upload-time = "2026-06-02T12:51:59.4Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/99/066e2ed1d8e88ec77f150ed09f3f488f875d2d75a1f91f2c22f5e1ef1a9a/vonage_video_connector-1.0.2-py3-none-manylinux_2_35_x86_64.whl", hash = "sha256:04205deee028d48dc3fe1edbfbf980aa6f921945238b036b3069a6a2497e9ff7", size = 14207068, upload-time = "2026-06-02T12:52:01.417Z" },
 ]
 
 [[package]]
