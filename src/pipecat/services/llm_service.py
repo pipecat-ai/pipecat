@@ -957,7 +957,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             return explicit
         return decorated if decorated is not None else default
 
-    def _register_direct_functions_from_tools(self, tools: Any) -> None:
+    def _register_advertised_direct_functions(self, tools: Any) -> None:
         """Register handlers for any direct functions in the given tools.
 
         Accepts whatever ``LLMContext`` accepts for tools — a ``ToolsSchema``, a
@@ -1016,15 +1016,15 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         normalized = (
             LLMContext._normalize_and_validate_tools(tools) if tools is not None else NOT_GIVEN
         )
-        self._register_direct_functions_from_tools(normalized)
+        self._register_advertised_direct_functions(normalized)
         advertised: set[str | None] = (
             {wrapper.name for wrapper in normalized.direct_functions}
             if is_given(normalized)
             else set()
         )
-        self._prune_unadvertised_functions(advertised)
+        self._unregister_unadvertised_direct_functions(advertised)
 
-    def _prune_unadvertised_functions(self, advertised: set[str | None]) -> None:
+    def _unregister_unadvertised_direct_functions(self, advertised: set[str | None]) -> None:
         """Drop auto-registered direct-function handlers no longer advertised.
 
         Only entries with ``auto_registered=True`` are eligible; explicit
