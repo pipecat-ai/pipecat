@@ -139,9 +139,8 @@ def _record_path(record_dir: str | None, scenario_name: str) -> str | None:
 def _build_scenario_runs(paths: list[Path], bot_url: str) -> list[EvalRun]:
     """Build an EvalRun per scenario YAML, each run against ``bot_url`` (no spawn).
 
-    A scenario's ``fixtures.bot_url`` overrides the URL. A scenario that fails to
-    load becomes an EvalRun already marked done with an error, so it shows in the
-    dashboard and the final tally like any other failure.
+    A scenario that fails to load becomes an EvalRun already marked done with an
+    error, so it shows in the dashboard and the final tally like any other failure.
     """
     runs: list[EvalRun] = []
     for path in paths:
@@ -153,8 +152,9 @@ def _build_scenario_runs(paths: list[Path], bot_url: str) -> list[EvalRun]:
             run.error = f"failed to load: {e}"
             runs.append(run)
             continue
-        url = scenario.fixtures.get("bot_url") or bot_url
-        runs.append(EvalRun(bot=url, scenario=scenario.name, scenario_path=path, bot_url=url))
+        runs.append(
+            EvalRun(bot=bot_url, scenario=scenario.name, scenario_path=path, bot_url=bot_url)
+        )
     return runs
 
 
@@ -267,8 +267,7 @@ def run(
     bot_url: str = typer.Option(
         "ws://localhost:7860",
         "--bot-url",
-        help="WebSocket URL of the bot's eval transport. "
-        "Overridden per-scenario by fixtures.bot_url.",
+        help="WebSocket URL of the bot's eval transport.",
     ),
     verbose: bool = typer.Option(
         False,

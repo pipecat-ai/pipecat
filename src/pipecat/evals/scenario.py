@@ -90,7 +90,6 @@ Top-level optional fields:
             ``audio`` makes the bot speak and judges the transcription of its
             actual audio (``tts_response``); ``text`` (the default) skips TTS and
             judges the LLM text (``llm_response``), which is faster and silent.
-    fixtures: free-form mapping (e.g. ``bot_url:``).
 
 Any value can be pulled from a separate file with ``!include``, resolved
 relative to the scenario file's directory. This is handy for sharing the
@@ -240,7 +239,6 @@ class EvalScenario:
             to the bot, exercising its STT for real. Mapping with ``service``,
             ``voice``, and optional ``model`` / ``sample_rate`` /
             ``api_key``. Omit for text-only evals (default).
-        fixtures: Optional fixtures dict (e.g. ``bot_url:``).
         source_path: Path the scenario was loaded from, for error messages.
     """
 
@@ -251,7 +249,6 @@ class EvalScenario:
     bot_audio: bool = False
     transcriber: dict | None = None
     user_audio: dict | None = None
-    fixtures: dict = field(default_factory=dict)
     source_path: Path | None = None
 
     @classmethod
@@ -326,7 +323,6 @@ class EvalScenario:
             bot_audio=bot_audio,
             transcriber=transcriber,
             user_audio=user_audio,
-            fixtures=data.get("fixtures") or {},
             source_path=path,
         )
 

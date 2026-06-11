@@ -231,7 +231,7 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertIsNone(s.turns[0].user)
         self.assertEqual(s.turns[0].expect[0].event, "llm_response")
 
-    def test_judge_eval_and_fixtures_preserved(self):
+    def test_judge_eval_preserved(self):
         s = EvalScenario.load(
             _write(
                 """
@@ -241,8 +241,6 @@ class TestEvalsScenarioParser(unittest.TestCase):
                     service: openai
                     model: gpt-4o-mini
                     endpoint: http://custom-endpoint
-                fixtures:
-                  bot_url: ws://localhost:9000
                 turns:
                   - user: "hi"
                     expect: [{event: user_stopped_speaking}]
@@ -253,7 +251,6 @@ class TestEvalsScenarioParser(unittest.TestCase):
             s.judge,
             {"service": "openai", "model": "gpt-4o-mini", "endpoint": "http://custom-endpoint"},
         )
-        self.assertEqual(s.fixtures, {"bot_url": "ws://localhost:9000"})
 
     def test_judge_block_defaults_to_ollama(self):
         s = EvalScenario.load(
