@@ -29,6 +29,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
+from pipecat.frames.frames import FunctionCallResultProperties
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -90,13 +91,13 @@ class AcmeLLMTask(LLMWorker):
             reason (str): Why the user is being transferred.
         """
         logger.info(f"Task '{self.name}': transferring to '{agent}' ({reason})")
+        await params.result_callback(None, properties=FunctionCallResultProperties(run_llm=False))
         await self.activate_worker(
             agent,
             args=LLMWorkerActivationArgs(
                 messages=[{"role": "developer", "content": reason}],
             ),
             deactivate_self=True,
-            result_callback=params.result_callback,
         )
 
     @tool
@@ -107,11 +108,8 @@ class AcmeLLMTask(LLMWorker):
             reason (str): Why the conversation is ending.
         """
         logger.info(f"Task '{self.name}': ending conversation ({reason})")
-        await self.end(
-            reason=reason,
-            messages=[{"role": "developer", "content": reason}],
-            result_callback=params.result_callback,
-        )
+        await params.result_callback(reason)
+        await self.end(reason=reason)
 
 
 def build_greeter() -> AcmeLLMTask:

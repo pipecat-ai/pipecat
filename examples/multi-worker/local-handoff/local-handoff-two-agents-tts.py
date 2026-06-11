@@ -111,19 +111,13 @@ class AcmeTTSTask(LLMWorker):
             reason (str): Why the user is being transferred.
         """
         logger.info(f"Task '{self.name}': transferring to '{agent}' ({reason})")
+        await params.result_callback(f"Tell the user about the transfer ({reason}).")
         await self.activate_worker(
             agent,
-            messages=[
-                {
-                    "role": "developer",
-                    "content": f"Tell the user about the transfer ({reason}).",
-                }
-            ],
             args=LLMWorkerActivationArgs(
                 messages=[{"role": "developer", "content": reason}],
             ),
             deactivate_self=True,
-            result_callback=params.result_callback,
         )
 
     @tool
@@ -134,11 +128,8 @@ class AcmeTTSTask(LLMWorker):
             reason (str): Why the conversation is ending.
         """
         logger.info(f"Task '{self.name}': ending conversation ({reason})")
-        await self.end(
-            reason=reason,
-            messages=[{"role": "developer", "content": reason}],
-            result_callback=params.result_callback,
-        )
+        await params.result_callback(reason)
+        await self.end(reason=reason)
 
 
 def build_greeter() -> AcmeTTSTask:
