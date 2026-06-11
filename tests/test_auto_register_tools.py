@@ -228,13 +228,13 @@ class TestRegisterDirectFunctionOptionPrecedence(unittest.TestCase):
         self.assertFalse(item.cancel_on_interruption)  # decorator still applies
         self.assertEqual(item.timeout_secs, 5)  # explicit wins
 
-    def test_explicit_none_timeout_overrides_decorator(self):
-        # Explicit None must override the decorator's timeout, not be mistaken
-        # for "not provided".
+    def test_explicit_none_timeout_falls_back_to_decorator(self):
+        # None means "not provided": it falls back to the decorator value rather
+        # than forcing the global default past the decorator.
         service = self._service()
         service._register_direct_function(end_call, timeout_secs=None)
         item = service._functions["end_call"]
-        self.assertIsNone(item.timeout_secs)
+        self.assertEqual(item.timeout_secs, 60)
 
 
 class TestAutoUnregisterFromToolSet(unittest.TestCase):

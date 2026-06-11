@@ -58,7 +58,6 @@ from pipecat.processors.aggregators.llm_context import (
     NOT_GIVEN,
     LLMContext,
     LLMSpecificMessage,
-    NotGiven,
     is_given,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -822,8 +821,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self,
         handler: DirectFunction,
         *,
-        cancel_on_interruption: bool | NotGiven = NOT_GIVEN,
-        timeout_secs: float | None | NotGiven = NOT_GIVEN,
+        cancel_on_interruption: bool | None = None,
+        timeout_secs: float | None = None,
     ):
         """Register a direct function handler for LLM function calls.
 
@@ -838,9 +837,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         configurations (as FunctionSchemas or in provider-specific formats).
 
         Call options resolve with the precedence **explicit argument >
-        ``@tool_options`` decorator > default**. So an option passed
-        here always wins; otherwise the value set by the decorator on the
-        function is used; otherwise the documented default applies.
+        ``@tool_options`` decorator > default**. ``None`` (the default) means
+        "not provided" — the option falls back to the decorator value, then the
+        documented default.
 
         Args:
             handler: The direct function to register. Must follow DirectFunction protocol.
@@ -848,17 +847,17 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 interruption occurs. When ``False`` the call is treated as
                 asynchronous: the LLM continues the conversation immediately
                 without waiting for the result, and the result is injected later
-                via a developer message. When omitted, falls back to the value
-                from the ``@tool_options`` decorator, then to True.
+                via a developer message. Defaults to ``None`` (fall back to the
+                ``@tool_options`` decorator value, then to True).
                 Note: realtime LLM services deliver only the final result to the
                 provider; intermediate streamed results (reported via
                 ``FunctionCallResultProperties(is_final=False)``) are
                 dropped and an error is raised. Use a non-realtime LLM
                 service if your tool needs to stream intermediate results.
-            timeout_secs: Optional per-tool timeout in seconds. Overrides the global
-                ``function_call_timeout_secs`` for this specific function. When
-                omitted, falls back to the value from the ``@tool_options``
-                decorator, then to None (the global timeout).
+            timeout_secs: Optional per-tool timeout in seconds, overriding the
+                global ``function_call_timeout_secs``. Defaults to ``None`` (fall
+                back to the ``@tool_options`` decorator value, then to the global
+                timeout).
         """
         with warnings.catch_warnings():
             warnings.simplefilter("always")
@@ -880,8 +879,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self,
         handler: DirectFunction,
         *,
-        cancel_on_interruption: bool | NotGiven = NOT_GIVEN,
-        timeout_secs: float | None | NotGiven = NOT_GIVEN,
+        cancel_on_interruption: bool | None = None,
+        timeout_secs: float | None = None,
     ):
         """Register a direct function handler.
 
@@ -891,9 +890,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
         Args:
             handler: The direct function to register.
-            cancel_on_interruption: Explicit override, or ``NOT_GIVEN`` to use the
+            cancel_on_interruption: Explicit override, or ``None`` to use the
                 decorator value (then the True default).
-            timeout_secs: Explicit override, or ``NOT_GIVEN`` to use the decorator
+            timeout_secs: Explicit override, or ``None`` to use the decorator
                 value (then the None default, i.e. the global timeout).
         """
         wrapper = DirectFunctionWrapper(handler)
@@ -930,10 +929,15 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
     ) -> Any:
         """Resolve a tool call option by precedence: explicit > decorator > default.
 
+        An explicit ``None`` is treated as "not provided" and falls back to the
+        decorator value, then the default — so ``None`` can't be passed to force a
+        default past a decorator value (an intentionally unsupported niche; set
+        ``function_call_timeout_secs`` on the service for that).
+
         Args:
             function_name: The tool's name, for logging.
-            explicit: The value passed to ``register_direct_function``, or
-                ``NOT_GIVEN`` if the caller omitted it.
+            explicit: The value passed to ``register_direct_function``, or ``None``
+                if the caller omitted it.
             handler: The direct function, which may carry decorator-set options.
             attr: The decorator attribute to read (e.g. ``_pipecat_timeout_secs``).
             default: The value to use when neither an explicit argument nor a
@@ -942,18 +946,16 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         Returns:
             The resolved option value.
         """
-        decorated = getattr(handler, attr, NOT_GIVEN)
-        if is_given(explicit):
-            if is_given(decorated) and decorated != explicit:
+        decorated = getattr(handler, attr, None)
+        if explicit is not None:
+            if decorated is not None and decorated != explicit:
                 logger.debug(
                     f"{self}: '{function_name}' registered with explicit "
                     f"{attr.removeprefix('_pipecat_')}={explicit!r}, overriding the "
                     f"decorator value {decorated!r}."
                 )
             return explicit
-        if is_given(decorated):
-            return decorated
-        return default
+        return decorated if decorated is not None else default
 
     def _register_direct_functions_from_tools(self, tools: Any) -> None:
         """Register handlers for any direct functions in the given tools.
