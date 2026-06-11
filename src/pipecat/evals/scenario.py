@@ -231,7 +231,7 @@ class EvalScenario:
             greeting is silent. True (audio): the bot speaks, and the judge
             evaluates the transcription of its actual audio.
         transcriber: Parsed from the ``judge.transcription:`` block; the STT
-            config (``service`` defaults to ``whisper``, plus ``model``) used to
+            config (``service`` defaults to ``moonshine``, plus ``model``) used to
             transcribe the bot's audio for the ``response`` event (``None`` in
             text modality).
         user_audio: TTS config the harness uses to generate user audio. When
