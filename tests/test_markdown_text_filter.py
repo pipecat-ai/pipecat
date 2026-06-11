@@ -20,14 +20,14 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             **Bold text** and *italic text*
             1. Numbered list item
             - Bullet point
-            Some `inline code` here
+            Some `inline code` here\n\n## Subtitle
         """
 
         expected_text = """
             Bold text and italic text
             1. Numbered list item
             - Bullet point
-            Some inline code here
+            Some inline code here\nSubtitle
         """
 
         result = await self.filter.filter(input_text)
@@ -258,6 +258,26 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             await filter.filter(input_text),
             "bold and italic",
             "Text filtering should be re-enabled",
+        )
+
+    async def test_header_stripping(self):
+        """Test that markdown headers are stripped to plain text."""
+        input_text = (
+            "# Title\n"  # fmt: skip
+            "\n"
+            "## Subtitle\n"
+        )
+        expected = (
+            "Title\n"  # fmt: skip
+            "Subtitle"
+        )
+
+        result = await self.filter.filter(input_text)
+
+        self.assertEqual(
+            result.strip(),
+            expected,
+            f"Header stripping failed.\nInput:\n{input_text}\nExpected:\n{expected}\nGot:\n{result.strip()}",
         )
 
 

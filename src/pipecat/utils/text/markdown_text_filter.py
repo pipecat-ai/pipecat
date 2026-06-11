@@ -77,8 +77,14 @@ class MarkdownTextFilter(BaseTextFilter):
             The filtered text with Markdown formatting removed or converted.
         """
         if self._settings.enable_text_filter:
+            # Strip markdown header markers along with any preceding blank lines
+            # (headers require # at column 0, but the newline collapse below
+            # would inject a space that breaks header recognition by md.convert)
+            filtered_text = re.sub(r"(\n\s*\n)(#{1,6}\s+)", r"\n", text, flags=re.MULTILINE)
+            filtered_text = re.sub(r"^#{1,6}\s+", "", filtered_text, flags=re.MULTILINE)
+
             # Remove newlines and replace with a space only when there's no text before or after
-            filtered_text = re.sub(r"^\s*\n", " ", text, flags=re.MULTILINE)
+            filtered_text = re.sub(r"^\s*\n", " ", filtered_text, flags=re.MULTILINE)
 
             # Remove backticks from inline code, but not from code blocks
             filtered_text = re.sub(r"(?<!`)`([^`\n]+)`(?!`)", r"\1", filtered_text)
