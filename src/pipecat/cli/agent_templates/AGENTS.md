@@ -58,7 +58,7 @@ mybot/
 └── README.md
 ```
 
-**`bot.py` is a runnable bot, not a blank skeleton — and the services are *generated*, not yours to hand-write.** For the `--stt`/`--llm`/`--tts` you chose, the scaffold emits the **constructed service objects** (keys read from env), the `transport_params`, the **canonical pipeline + context aggregators**, the runner wiring, and an **on-connect handler that speaks the first turn** (`queue_frames([LLMRunFrame()])`). You **modify this in place** — system prompt, function-calling tools, business logic, the greeting text — you do **not** re-declare the STT/LLM/TTS constructors, rebuild the pipeline, or write your own connect handler. Nearly every provider is a scaffold value (`pipecat create --list-options` to confirm yours); only drop to hand-wiring a service if `--list-options` genuinely doesn't list it.
+**`bot.py` is a runnable bot, not a blank skeleton — and the services are *generated*, not yours to hand-write.** For the `--stt`/`--llm`/`--tts` you chose, the scaffold emits the **constructed service objects** (keys read from env), the `transport_params`, the **canonical pipeline + context aggregators**, the runner wiring, and an **on-connect handler that speaks the first turn** (`queue_frames([LLMRunFrame()])`). You **modify this in place** — system prompt, function-calling tools (§4 shows the pattern), business logic, the greeting text — you do **not** re-declare the STT/LLM/TTS constructors, rebuild the pipeline, or write your own connect handler. Nearly every provider is a scaffold value (`pipecat create --list-options` to confirm yours); only drop to hand-wiring a service if `--list-options` genuinely doesn't list it.
 
 Every bot exposes an async `bot(runner_args)` entry point that the dev runner discovers and executes per session. Keep that contract.
 
@@ -144,6 +144,25 @@ Core concepts:
   ```
   In **both**, the **assistant aggregator goes after `transport.output()`** so it records what was actually produced. Getting this order wrong is a common, subtle bug.
 - **Context aggregation** accumulates conversation messages for the LLM. User and assistant aggregators are created together (a pair) and bracket the response leg (LLM→TTS in cascade; the S2S service in realtime) as shown above.
+- **Function calling (tools)** — how the bot *does* things, and where most of your app code goes. A tool is a plain async function: its **name, typed signature, and docstring become the schema automatically**, and it reports back through `params.result_callback` — that's what feeds the result into the conversation so the LLM can speak it:
+  ```python
+  async def check_stock(params: FunctionCallParams, item: str):
+      """Check whether an item is in stock.
+
+      Args:
+          item: The item to look up, e.g. "tulips".
+      """
+      await params.result_callback({"in_stock": True})
+  ```
+  List tools on the context — `LLMContext(tools=[check_stock, ...])` — and they register with the LLM service by themselves; there is no separate registration step to write. To share backend handles or per-session state across handlers, pass `app_resources=` to `PipelineWorker` and read `params.app_resources` (don't use globals). An explicit-schema path (`FunctionSchema` + `llm.register_function`) exists for dynamic tool sets — confirm via §3 if you need it.
+- **Ending the conversation from a tool** (the "goodbye" / hang-up feature nearly every phone bot needs) — push `EndWorkerFrame` from the handler, *after* reporting the result:
+  ```python
+  async def end_call(params: FunctionCallParams):
+      """End the call once the user has said goodbye."""
+      await params.result_callback({"success": True})
+      await params.llm.push_frame(EndWorkerFrame())
+  ```
+  Downstream (the default) is correct: queued frames flush, so the bot can finish speaking before the pipeline ends. Don't invent shutdown paths (`sys.exit`, cancelling tasks) and don't use the deprecated `EndTaskFrame` your training data may suggest. For the prompt pattern that gets the bot to say a goodbye *around* the tool call, find a "graceful end" example via `search_examples` (§3).
 - **Turns** — the system detects when the user starts/stops speaking via turn strategies (e.g. VAD-based), which drive `UserStartedSpeaking` / `UserStoppedSpeaking`.
 - **Interruptions** — when the user barges in, an interruption propagates (up- and downstream) and clears in-flight work. Most apps get this for free from the turn strategy; to trigger one yourself (rare), call `await self.broadcast_interruption()` from a processor — *not* the deprecated `push_interruption_task_frame_and_wait()`.
 - **Background work inside a processor/worker** — when you're *inside* a class that derives from the framework's `BaseObject` (a `FrameProcessor`, a custom worker, a service), use `self.create_task(coro, name)` rather than raw `asyncio.create_task` so the task is tracked and cleaned up on shutdown; cancel with `await self.cancel_task(task, timeout)`. This applies only to `BaseObject` subclasses — plain application code that isn't one of these can use `asyncio` directly.
