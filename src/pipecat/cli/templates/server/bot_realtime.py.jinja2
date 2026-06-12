@@ -23,6 +23,7 @@ Run the bot using::
 {% import 'server/_macros/event_handlers.jinja2' as handlers %}
 {% import 'server/_macros/pipeline_components.jinja2' as pipeline %}
 {% import 'server/_macros/helper_functions.jinja2' as helpers %}
+{% import 'server/_macros/transport_setup.jinja2' as transport_setup %}
 
 {# Standard imports #}
 {{ imports|join('\n') }}
@@ -46,7 +47,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
 
     Args:
         transport: The transport for this session, built by ``create_transport``
-            (or by hand for the dial-out/SIP flows).
+            (or by hand for the dial-out/SIP production flows).
         runner_args: Runner session arguments. Carries the request ``body``
             (e.g. dial-out settings, SIP call details) and ``session_id``; the
             standard web/telephony pipelines don't need it.
@@ -75,75 +76,22 @@ async def bot(runner_args: RunnerArguments):
         krisp_filter = None
 
     {% endif %}
-    {# Bot entry point. Dial-out and SIP keep a bespoke flow (room/token + dial-out
-       settings arrive in the request body, built by server.py); everything else —
-       including Daily PSTN dial-in — goes through the unified create_transport path. #}
+    {# Bot entry point. Dial-out and SIP keep a bespoke production flow (room/token
+       + call settings arrive in the request body, built by server.py) with an
+       optional create_transport fallback for local testing (webrtc/eval);
+       everything else — including Daily PSTN dial-in — goes through the unified
+       create_transport path. #}
     {% if 'daily_pstn_dialout' in transports %}
     {# Daily PSTN dial-out has its own special flow with server.py. #}
 {% include 'server/_blocks/bot_entry_daily_pstn.jinja2' %}
     {% elif 'twilio_daily_sip_dialin' in transports or 'twilio_daily_sip_dialout' in transports %}
-    {# Twilio + Daily SIP has its own special flow with server.py, so it doesn't use match/case #}
+    {# Twilio + Daily SIP has its own special flow with server.py. #}
 {% include 'server/_blocks/bot_entry_twilio_daily_sip.jinja2' %}
     {% else %}
     {# Single, unified path: create_transport builds the right transport from the
        runner_args type. You supply only the params; serializers and telephony parsing
        are handled for you. #}
-    transport_params = {
-        {% if 'daily' in transports or 'daily_pstn_dialin' in transports %}
-        "daily": lambda: DailyParams(
-            audio_in_enabled=True,
-            {% if enable_krisp %}audio_in_filter=krisp_filter,{% endif %}
-            audio_out_enabled=True,
-            {% if video_input %}video_in_enabled=True,{% endif %}
-            {% if video_output %}
-            video_out_enabled=True,
-            video_out_is_live=True,
-            video_out_width=1024,
-            video_out_height=768,
-            {% endif %}
-        ),
-        {% endif %}
-        {% if 'smallwebrtc' in transports %}
-        "webrtc": lambda: TransportParams(
-            audio_in_enabled=True,
-            {% if enable_krisp %}audio_in_filter=krisp_filter,{% endif %}
-            audio_out_enabled=True,
-            {% if video_input %}video_in_enabled=True,{% endif %}
-            {% if video_output %}
-            video_out_is_live=True,
-            video_out_width=1024,
-            video_out_height=768,
-            {% endif %}
-        ),
-        {% endif %}
-        {% if 'websocket' in transports %}
-        "websocket": lambda: FastAPIWebsocketParams(
-            audio_in_enabled=True,
-            {% if enable_krisp %}audio_in_filter=krisp_filter,{% endif %}
-            audio_out_enabled=True,
-            add_wav_header=False,
-            serializer=ProtobufFrameSerializer(),
-        ),
-        {% endif %}
-        {% for provider in ['twilio', 'telnyx', 'plivo', 'exotel'] if provider in transports %}
-        # create_transport sets the {{ provider }} serializer and add_wav_header automatically.
-        "{{ provider }}": lambda: FastAPIWebsocketParams(
-            audio_in_enabled=True,
-            {% if enable_krisp %}audio_in_filter=krisp_filter,{% endif %}
-            audio_out_enabled=True,
-        ),
-        {% endfor %}
-        {% if enable_eval %}
-        # Behavioral evals: run with `-t eval` to drive this bot via `pipecat eval`.
-        "eval": lambda: WebsocketServerParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            {% if video_input %}video_in_enabled=True,{% endif %}
-        ),
-        {% endif %}
-    }
-
-    transport = await create_transport(runner_args, transport_params)
+{{ transport_setup.transport_params(transports, enable_krisp, enable_eval, video_input, video_output) | indent(4, first=True) }}
 
     {% if 'twilio' in transports %}
     # OPTIONAL personalization: create_transport parsed the Twilio websocket, so the

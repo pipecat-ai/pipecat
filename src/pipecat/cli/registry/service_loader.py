@@ -263,16 +263,23 @@ class ServiceLoader:
             imports.update(ServiceRegistry.FEATURE_IMPORTS["eval"])
 
         # Most bots build transports via create_transport, so import it whenever the
-        # bot uses that collapsed path. Only dial-out and SIP keep a bespoke flow that
-        # constructs the transport by hand; Daily PSTN dial-in is collapsed and goes
-        # through create_transport like the rest.
+        # bot uses that collapsed path. Dial-out and SIP keep a bespoke production
+        # flow that constructs the transport by hand, but fall back to
+        # create_transport when a local transport (webrtc/daily) or evals are
+        # enabled; Daily PSTN dial-in is collapsed and goes through
+        # create_transport like the rest.
         _bespoke_transport = {
             "daily_pstn_dialout",
             "twilio_daily_sip_dialin",
             "twilio_daily_sip_dialout",
         }
         transport_values = set(transport_list) if "transports" in services else set()
-        if transport_values and not (transport_values & _bespoke_transport):
+        uses_create_transport = transport_values and (
+            not (transport_values & _bespoke_transport)
+            or bool(transport_values - _bespoke_transport)
+            or features.get("eval")
+        )
+        if uses_create_transport:
             imports.update(ServiceRegistry.FEATURE_IMPORTS["create_transport"])
 
         # LLMRunFrame kicks off the conversation on connect. Dial-out bots wait for the
