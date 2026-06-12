@@ -11,6 +11,10 @@ Writes the Pipecat coding-agent guide into a project so an AI coding agent
 
 - ``AGENTS.md`` — the guide itself (read natively by most coding agents).
 - ``CLAUDE.md`` — a one-line ``@AGENTS.md`` import so Claude Code loads it too.
+- ``GETTING_STARTED.md`` — for the *developer*: how to drive the agent well
+  (MCP setup, how to write the first prompt, what to expect in a session).
+  Deliberately not in CLAUDE.md/AGENTS.md — those cost agent context every
+  session, and this guidance is for the human.
 
 The guide then drives the agent to scaffold the app with ``pipecat create``.
 
@@ -39,6 +43,7 @@ _AGENT_TEMPLATES = Path(pipecat.cli.__file__).parent / "agent_templates"
 
 _AGENTS_FILE = "AGENTS.md"
 _CLAUDE_FILE = "CLAUDE.md"
+_GETTING_STARTED_FILE = "GETTING_STARTED.md"
 
 
 def init_command(
@@ -53,10 +58,10 @@ def init_command(
         help=f"Also overwrite an existing {_CLAUDE_FILE} ({_AGENTS_FILE} is always refreshed).",
     ),
 ):
-    """Make a project agent-ready by writing AGENTS.md + CLAUDE.md.
+    """Make a project agent-ready: AGENTS.md + CLAUDE.md + GETTING_STARTED.md.
 
-    Run this first, then open a coding session — the guide drives your agent to
-    scaffold the app with ``pipecat create``.
+    Run this first, read GETTING_STARTED.md, then open a coding session — the
+    guide drives your agent to scaffold the app with ``pipecat create``.
 
     Examples::
 
@@ -81,8 +86,8 @@ def init_command(
         unexpected = " ".join(ctx.args)
         console.print(
             f"[red]Unexpected arguments:[/red] {unexpected}\n\n"
-            "`pipecat init` now makes a project agent-ready (writes AGENTS.md + CLAUDE.md); "
-            "it takes only an optional target directory and `--force`.\n"
+            "`pipecat init` now makes a project agent-ready (writes AGENTS.md, CLAUDE.md, "
+            "and GETTING_STARTED.md); it takes only an optional target directory and `--force`.\n"
             "The project scaffolder moved to [bold]`pipecat create`[/bold] — run "
             "`pipecat create --help`."
         )
@@ -102,6 +107,7 @@ def init_command(
     try:
         agents_src = (_AGENT_TEMPLATES / _AGENTS_FILE).read_text(encoding="utf-8")
         claude_src = (_AGENT_TEMPLATES / _CLAUDE_FILE).read_text(encoding="utf-8")
+        getting_started_src = (_AGENT_TEMPLATES / _GETTING_STARTED_FILE).read_text(encoding="utf-8")
     except OSError as e:  # bundled data missing — a packaging regression
         console.print(f"[red]Error: bundled agent guide not found:[/red] {e}")
         raise typer.Exit(1)
@@ -124,6 +130,15 @@ def init_command(
         agents_path.write_text(agents_src + footer, encoding="utf-8")
         console.print(f"[green]✔[/green] {'Refreshed' if refreshed else 'Wrote'} {agents_path}")
 
+        getting_started_path = target_dir / _GETTING_STARTED_FILE
+        # GETTING_STARTED.md is pipecat-owned developer guidance: always (re)write, like
+        # AGENTS.md. (Only CLAUDE.md, the developer's own entry point, is clobber-protected.)
+        refreshed = getting_started_path.exists()
+        getting_started_path.write_text(getting_started_src + footer, encoding="utf-8")
+        console.print(
+            f"[green]✔[/green] {'Refreshed' if refreshed else 'Wrote'} {getting_started_path}"
+        )
+
         claude_path = target_dir / _CLAUDE_FILE
         # CLAUDE.md is the developer's entry point: never clobber an existing one without --force.
         if claude_path.exists() and not force:
@@ -138,6 +153,7 @@ def init_command(
         raise typer.Exit(1)
 
     console.print(
-        "\n[bold]Project is agent-ready.[/bold] Open a coding session here and ask your agent "
-        "to build — it will scaffold the app with `pipecat create`."
+        f"\n[bold]Project is agent-ready.[/bold] Read [bold]{_GETTING_STARTED_FILE}[/bold] for "
+        "how to prompt your agent, then open a coding session here — it will scaffold the app "
+        "with `pipecat create`."
     )
