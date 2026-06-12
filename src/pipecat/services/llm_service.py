@@ -368,6 +368,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # FunctionSchema already carries a handler), so the warning fires once
         # rather than on every context frame.
         self._redundant_registration_warned: set[str] = set()
+        # Names explicitly unregistered (via unregister_function /
+        # unregister_direct_function) that auto-registration must not re-register
+        # while they're still advertised — otherwise a standalone unregister would
+        # be undone by the next context frame. Cleared when the name is registered
+        # again or stops being advertised (see _sync_registered_tool_handlers).
+        self._explicitly_unregistered_function_names: set[str | None] = set()
         self._function_call_tasks: dict[asyncio.Task | None, FunctionCallRunnerItem] = {}
         self._sequential_runner_task: asyncio.Task | None = None
         self._skip_tts: bool | None = None
@@ -820,6 +826,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 f"'{CANCEL_ASYNC_TOOL_NAME}' is a reserved built-in tool name and cannot be "
                 "registered by user code."
             )
+        # Explicitly registering a handler clears any standalone-unregister
+        # suppression for its name.
+        self._explicitly_unregistered_function_names.discard(function_name)
         # Registering a function with the function_name set to None will run
         # that handler for all functions
         self._functions[function_name] = FunctionCallRegistryItem(
@@ -935,6 +944,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             "_pipecat_timeout_secs",
             default=None,
         )
+        # Explicitly registering a handler clears any standalone-unregister
+        # suppression for its name. (Auto-registration skips suppressed names
+        # before reaching this method, so this only fires for explicit calls.)
+        self._explicitly_unregistered_function_names.discard(wrapper.name)
         # The new entry defaults to auto_registered=False, so a handler registered
         # through this method is treated as explicit and is never auto-pruned.
         self._functions[wrapper.name] = FunctionCallRegistryItem(
@@ -1010,12 +1023,19 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         for wrapper in tools.direct_functions:
             if wrapper.name in self._functions:
                 continue
+            if wrapper.name in self._explicitly_unregistered_function_names:
+                # Explicitly unregistered while still advertised — leave it gone so
+                # calls hit the missing-handler recovery path.
+                continue
             self._register_direct_function(wrapper.function)
             # Mark the entry as advertised-tool-set-managed so it can be pruned on a
             # later sync that stops advertising it. Names already in _functions are
             # skipped above, so explicit registrations keep their default
             # auto_registered=False and are never pruned.
             self._functions[wrapper.name].auto_registered = True
+            logger.debug(
+                f"{self}: auto-registered handler for advertised direct function '{wrapper.name}'"
+            )
 
         # Register the handlers that FunctionSchemas carry. A schema handler
         # registers like any classic handler — register_function reads its
@@ -1027,8 +1047,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             if schema.name in self._functions:
                 self._warn_if_redundant_manual_registration(schema.name)
                 continue
+            if schema.name in self._explicitly_unregistered_function_names:
+                continue
             self.register_function(schema.name, schema.handler)
             self._functions[schema.name].auto_registered = True
+            logger.debug(
+                f"{self}: auto-registered handler for advertised FunctionSchema '{schema.name}'"
+            )
 
     def _warn_if_redundant_manual_registration(self, function_name: str) -> None:
         """Warn that a manual registration is unnecessary, once per function.
@@ -1086,6 +1111,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             advertised |= {wrapper.name for wrapper in normalized.direct_functions}
             advertised |= {s.name for s in normalized.standard_tools if s.handler is not None}
         self._unregister_unadvertised_tool_handlers(advertised)
+        # A standalone unregister only suppresses re-registration while the tool is
+        # still advertised. Once it leaves the advertised set, drop the suppression
+        # so re-advertising it (a later tool-set change) registers it afresh.
+        self._explicitly_unregistered_function_names &= advertised
 
     def _unregister_unadvertised_tool_handlers(self, advertised: set[str | None]) -> None:
         """Drop auto-registered handlers for tools no longer advertised.
@@ -1120,6 +1149,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             function_name: The name of the function handler to remove.
         """
         del self._functions[function_name]
+        # Remember the explicit removal so auto-registration doesn't bring the
+        # handler back on the next context frame while the tool is still advertised.
+        self._explicitly_unregistered_function_names.add(function_name)
         if self._async_tool_cancellation_enabled and not self._has_async_tools():
             self._teardown_async_tool_cancellation()
 
@@ -1160,6 +1192,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         """
         wrapper = DirectFunctionWrapper(handler)
         del self._functions[wrapper.name]
+        # Remember the explicit removal so auto-registration doesn't bring the
+        # handler back on the next context frame while the tool is still advertised.
+        self._explicitly_unregistered_function_names.add(wrapper.name)
         # Note: no need to remove start callback here, as direct functions don't support start callbacks.
         if self._async_tool_cancellation_enabled and not self._has_async_tools():
             self._teardown_async_tool_cancellation()

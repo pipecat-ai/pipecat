@@ -327,29 +327,56 @@ class TestRedundantManualRegistrationWarning(unittest.TestCase):
 
 
 class TestUnregisterInteractionWithAutoRegister(unittest.TestCase):
-    """The advertised set is the source of truth for which handlers exist."""
+    """A standalone unregister sticks; the advertised set doesn't resurrect it."""
 
     def _service(self) -> LLMService:
         return LLMService()
 
-    def test_unregister_of_still_advertised_direct_function_re_registers(self):
-        # Manually unregistering a direct function that's still advertised in the
-        # context is undone by the next context frame — the advertised set wins.
-        # (To actually remove a tool, stop advertising it; see below.)
+    def test_unregister_of_still_advertised_direct_function_sticks(self):
+        # Unregistering a direct function that's still advertised must stick: the
+        # next context frame must not auto-re-register it (a "zombie"), so calls
+        # to it hit the missing-handler recovery path instead.
         service = self._service()
         context = LLMContext(tools=[get_current_weather])
         service._sync_registered_tool_handlers(context.tools)
         service._unregister_direct_function(get_current_weather)
         self.assertNotIn("get_current_weather", service._functions)
         service._sync_registered_tool_handlers(context.tools)
-        self.assertTrue(service.has_function("get_current_weather"))
+        self.assertNotIn("get_current_weather", service._functions)
 
-    def test_explicit_reregister_restores_function(self):
+    def test_unregister_of_still_advertised_schema_handler_sticks(self):
+        # Same guarantee for a FunctionSchema-carried handler removed via
+        # unregister_function.
+        service = self._service()
+        service._sync_registered_tool_handlers([lookup_order_schema()])
+        service.unregister_function("lookup_order")
+        service._sync_registered_tool_handlers([lookup_order_schema()])
+        self.assertNotIn("lookup_order", service._functions)
+
+    def test_explicit_reregister_overrides_suppression(self):
+        # Explicitly registering again clears the suppression and survives the
+        # next context frame.
         service = self._service()
         context = LLMContext(tools=[get_current_weather])
         service._sync_registered_tool_handlers(context.tools)
         service._unregister_direct_function(get_current_weather)
         service._register_direct_function(get_current_weather)
+        self.assertTrue(service.has_function("get_current_weather"))
+        service._sync_registered_tool_handlers(context.tools)
+        self.assertTrue(service.has_function("get_current_weather"))
+
+    def test_deadvertising_clears_suppression_so_readvertising_restores(self):
+        # The suppression only holds while the tool stays advertised. Dropping it
+        # from the tool set and advertising it again brings the handler back.
+        service = self._service()
+        service._sync_registered_tool_handlers([get_current_weather])
+        service._unregister_direct_function(get_current_weather)
+        service._sync_registered_tool_handlers([get_current_weather])
+        self.assertNotIn("get_current_weather", service._functions)
+        # Drop it from the advertised set...
+        service._sync_registered_tool_handlers([])
+        # ...then advertise it again: it auto-registers afresh.
+        service._sync_registered_tool_handlers([get_current_weather])
         self.assertTrue(service.has_function("get_current_weather"))
 
 
