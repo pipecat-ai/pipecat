@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Init command implementation for creating new Pipecat projects."""
+"""Create command implementation for scaffolding new Pipecat projects."""
 
 import json
 from pathlib import Path
@@ -43,7 +43,7 @@ def _list_options_callback(value: bool):
     raise typer.Exit(0)
 
 
-def init_command(
+def create_command(
     ctx: typer.Context,
     target: str | None = typer.Argument(
         None,
@@ -124,7 +124,7 @@ def init_command(
         False, "--dry-run", help="Print resolved config as JSON without generating files"
     ),
 ):
-    r"""Initialize a new Pipecat project.
+    r"""Create a new Pipecat project.
 
     Creates a complete project structure with bot.py, dependencies, and configuration files.
 
@@ -134,22 +134,25 @@ def init_command(
 
     Examples::
 
-        pc init                                          # Interactive wizard
-        pc init .                                        # Scaffold into the current dir
-        pc init --name my-bot --bot-type web \
+        pc create                                          # Interactive wizard
+        pc create .                                        # Scaffold into the current dir
+        pc create --name my-bot --bot-type web \
           --transport daily --mode cascade \
           --stt deepgram_stt --llm openai_llm \
           --tts cartesia_tts                             # Non-interactive
-        pc init . --bot-type web -t daily -m cascade \
+        pc create . --bot-type web -t daily -m cascade \
           --stt deepgram_stt --llm openai_llm \
           --tts cartesia_tts                             # In-place, name from dir
-        pc init --config project-config.json             # From config file
-        pc init --name my-bot ... --dry-run              # Preview config as JSON
+        pc create --config project-config.json             # From config file
+        pc create --name my-bot ... --dry-run              # Preview config as JSON
     """
     # `quickstart` is dispatched here rather than as a subcommand: a positional arg on a
     # Typer *group* can't be followed by options (Click stops parsing at the first
-    # positional), which would break `pc init . --bot-type ...`. Keeping `init` a plain
-    # command and routing the `quickstart` token preserves `pc init quickstart [-o ...]`.
+    # positional), which would break `pc create . --bot-type ...`. Keeping `create` a plain
+    # command and routing the `quickstart` token preserves `pc create quickstart [-o ...]`.
+    #
+    # NOTE: this is the `pipecat create` scaffolder (formerly `pipecat init`). `pipecat init`
+    # is now a separate command that makes a project agent-ready (see commands/init.py).
     if target == "quickstart":
         return quickstart_command(output_dir=output_dir)
 
@@ -304,8 +307,8 @@ def quickstart_command(output_dir: Path | None = None):
     """Create a new Pipecat project with quickstart defaults.
 
     Sets up a project with SmallWebRTC, Deepgram STT, OpenAI LLM, and Cartesia TTS
-    — the fastest way to get a voice agent running. Dispatched from ``init_command``
-    when the target is ``quickstart`` (e.g. ``pc init quickstart [-o DIR]``).
+    — the fastest way to get a voice agent running. Dispatched from ``create_command``
+    when the target is ``quickstart`` (e.g. ``pc create quickstart [-o DIR]``).
     """
     try:
         project_name = "pipecat-quickstart"
