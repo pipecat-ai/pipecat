@@ -112,10 +112,11 @@ class LLMContext:
             messages: Initial list of conversation messages.
             tools: Available tools for the LLM to use. May be a ``ToolsSchema``
                 or a plain list of direct functions and/or ``FunctionSchema``
-                objects (normalized to a ``ToolsSchema`` internally). Direct
-                functions in the list are registered with the LLM service
-                automatically — no separate ``register_direct_function`` call is
-                needed.
+                objects (normalized to a ``ToolsSchema`` internally). Any tool
+                that carries a handler — a direct function, or a
+                ``FunctionSchema`` with its ``handler`` set — is registered with
+                the LLM service automatically, so no separate
+                ``register_function`` call is needed.
             tool_choice: Tool selection strategy for the LLM.
         """
         self._messages: list[LLMContextMessage] = messages if messages else []
