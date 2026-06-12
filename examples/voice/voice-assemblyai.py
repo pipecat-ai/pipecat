@@ -21,9 +21,10 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.services.anthropic.llm import AnthropicLLMService
+from pipecat.services.assemblyai.observer import AssemblyAIContextObserver
 from pipecat.services.assemblyai.stt import AssemblyAISTTService
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -69,9 +70,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    llm = OpenAILLMService(
-        api_key=os.environ["OPENAI_API_KEY"],
-        settings=OpenAILLMService.Settings(
+    # Defaults to claude-sonnet-4-6. For lower latency/cost use
+    # AnthropicLLMService.Settings(model="claude-haiku-4-5", ...); for max
+    # quality use model="claude-opus-4-8".
+    llm = AnthropicLLMService(
+        api_key=os.environ["ANTHROPIC_API_KEY"],
+        settings=AnthropicLLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
@@ -94,12 +98,23 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ]
     )
 
+    # Feed each bot reply back to AssemblyAI as context carryover (u3-rt-pro),
+    # improving transcription of the user's next turn.
+    context_observer = AssemblyAIContextObserver(stt)
+
+    @context_observer.event_handler("on_agent_context")
+    async def on_agent_context(observer, text):
+        # A visible signal that context carryover is working: this fires once
+        # per bot reply, right after the text is sent to AssemblyAI.
+        logger.info(f"📤 Sent agent_context to AssemblyAI: {text!r}")
+
     worker = PipelineWorker(
         pipeline,
         params=PipelineParams(
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        observers=[context_observer],
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
