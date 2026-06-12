@@ -11,7 +11,7 @@
 
 1. **Scaffold first. Never hand-write boilerplate.** Start every new app from the Pipecat CLI scaffold (§1) — it generates a *runnable* bot (services + pipeline already wired), not a bare skeleton. Modify what it generates; don't rebuild it or invent your own structure.
 2. **Never trust your training data for Pipecat APIs.** Pipecat moves fast and your priors are stale. Before writing any service config, pipeline wiring, or import, confirm it against a **live source** (§3). Confidently-wrong old APIs are the #1 failure mode.
-3. **Make it verifiable before you make it fancy.** Pipecat ships a behavioral **eval harness** (§6): wire your bot's `eval` transport, write a YAML scenario, and check every change by running it — no live voice call. Stand up that loop before adding features.
+3. **Make it verifiable before you make it fancy.** Pipecat ships a behavioral **eval harness** (§6): scaffold with `--eval` and check every change by running scenarios headless — no live voice call. Stand up that loop before adding features.
 4. **Ask for credentials; don't invent them.** Model names, voice IDs, and API keys are provider-specific and change often. If you don't have one, stop and ask — list exactly which keys are needed.
 
 ---
@@ -29,6 +29,7 @@ uv tool install "pipecat-ai[cli]"   # provides the `pipecat` (alias `pc`) comman
 
 ```bash
 # Headless: --name (or --config) switches to non-interactive mode.
+# The service values below are EXAMPLES — map the user's actual choices, don't copy these.
 pipecat create --name mybot --bot-type web \
   --transport smallwebrtc --mode cascade \
   --stt deepgram_stt --llm openai_llm --tts cartesia_tts \
@@ -41,7 +42,7 @@ pipecat create --name mybot --bot-type web \
 # Humans (interactive wizard): `pipecat create quickstart` (defaults) or `pipecat create`.
 ```
 
-**Choose *with* the user, not for them.** Map their requirements to the real options and confirm transport / services / mode / deployment (§7) before scaffolding — don't silently pick or guess. One choice still affects testing: **cascade (STT→LLM→TTS)** gets the fastest verification loop — text mode (§6) skips STT/TTS and judges the LLM's text in seconds — but **realtime (speech-to-speech) is fully testable too**, in audio mode (synthesize the user's voice in, transcribe the bot's voice out). Both run headless, so pick the mode the use case needs.
+**Choose *with* the user, not for them.** Map their requirements to the real options and confirm transport / services / mode / deployment (§7) before scaffolding — don't silently pick or guess. Mode affects testing speed — **cascade (STT→LLM→TTS)** gets the fast text-mode eval loop (§6); **realtime (speech-to-speech)** is tested in audio mode — but both run headless, so pick the mode the use case needs.
 
 The scaffold pins a Pipecat version (treat it as the world you're building in — §3) and produces:
 
@@ -58,7 +59,7 @@ mybot/
 └── README.md
 ```
 
-**`bot.py` is a runnable bot, not a blank skeleton — and the services are *generated*, not yours to hand-write.** For the `--stt`/`--llm`/`--tts` you chose, the scaffold emits the **constructed service objects** (keys read from env), the `transport_params`, the **canonical pipeline + context aggregators**, the runner wiring, and an **on-connect handler that speaks the first turn** (`queue_frames([LLMRunFrame()])`). You **modify this in place** — system prompt, function-calling tools (§4 shows the pattern), business logic, the greeting text — you do **not** re-declare the STT/LLM/TTS constructors, rebuild the pipeline, or write your own connect handler. Nearly every provider is a scaffold value (`pipecat create --list-options` to confirm yours); only drop to hand-wiring a service if `--list-options` genuinely doesn't list it.
+**`bot.py` is a runnable bot, not a blank skeleton.** For the services you chose, the scaffold emits the **constructed service objects** (keys read from env), the `transport_params`, the canonical pipeline + context aggregators, the runner wiring, and an on-connect handler that speaks the first turn. **Modify it in place** — system prompt, function-calling tools (§4 shows the pattern), business logic, the greeting — do **not** re-declare the service constructors, rebuild the pipeline, or write your own connect handler. Nearly every provider is a scaffold value; hand-wire a service only if `--list-options` genuinely doesn't list it.
 
 Every bot exposes an async `bot(runner_args)` entry point that the dev runner discovers and executes per session. Keep that contract.
 
@@ -74,8 +75,8 @@ Transport and services are scaffold inputs (the `--transport` / `--stt` / `--llm
 - **Web / mobile voice** — `DailyTransport` or `SmallWebRTCTransport`.
 - **Telephony** — a WebSocket transport + the provider's serializer (Twilio, Telnyx, …), or Daily PSTN.
 
-A bot can register **several transports at once** (they coexist in `transport_params`; `-t <name>` picks one per run). It's not a hard rule, but a convenient dev setup is your production transport *plus*:
-- **`SmallWebRTCTransport` + Pipecat Prebuilt** — when running the bot, the dev runner serves **Pipecat Prebuilt**, a built-in browser test UI (open `http://localhost:7860`), so you can talk to the bot with no telephony/PSTN setup. This pairing is the effective way to dev/test a **telephony** bot locally.
+A bot can register **several transports at once** (they coexist in `transport_params`; `-t <name>` picks one per run). A convenient dev setup is your production transport *plus*:
+- **`SmallWebRTCTransport` + Pipecat Prebuilt** — the dev runner serves a built-in browser test UI at `http://localhost:7860`, so you can talk to the bot with no telephony/PSTN setup. This is how you dev/test a **telephony** bot locally.
 - **the `eval` transport (§6)** — drive it headless with scripted scenarios to confirm behavior, tune prompts, and catch regressions.
 
 **Services** — STT, TTS, LLM are independent choices. Confirm the exact service class, model name, and params via §3; do not assume.
@@ -86,11 +87,11 @@ When the user describes a use case, find the closest example via `search_example
 
 ## 3. Find current truth (anti-staleness)
 
-You have live sources for current truth — never substitute your memory. **First, check whether a Pipecat MCP is configured. If none is, stop and ask the user to set one up** before you write service code — without it you're guessing at APIs (the #1 failure mode). Two MCPs, a precision-vs-setup tradeoff — tell the user both so they can choose:
+You have live sources for current truth — never substitute your memory. **First, check whether a Pipecat MCP is configured. If none is, stop and ask the user to set one up** before you write service code. Two MCPs, a precision-vs-setup tradeoff — tell the user both so they can choose:
 
-1. **MCP — `pipecat-docs`** (cloud-hosted; **easiest — the on-ramp**). One command, nothing to clone, auto-fresh server-side. It returns synthesized answers with citations (good for concepts and "how do I…"), not raw source — so it's slightly less precise for exact signatures. Recommend this when the user just wants to get going.
+1. **MCP — `pipecat-docs`** (cloud-hosted; **easiest**). One command, nothing to clone, auto-fresh. Returns synthesized answers with citations — good for concepts and "how do I…", less precise for exact signatures.
    `claude mcp add --transport http pipecat-docs https://daily-docs.mcp.kapa.ai`
-2. **MCP — `pipecat-context-hub`** (local vector DB; **most precise — the workhorse**). Returns *primary source* (actual signatures, code, deprecation status) you reason over directly, plus purpose-built tools:
+2. **MCP — `pipecat-context-hub`** (local vector DB; **most precise**). Returns *primary source* — actual signatures, code, deprecation status — plus purpose-built tools:
    - `check_deprecation` — **run this on any API you're unsure about.** The direct antidote to stale training data (e.g. `PipelineTask`→`PipelineWorker`).
    - `search_api` / `get_code_snippet` — exact current signatures and usage.
    - `search_examples` — find a working example for a capability (see also the examples repo, below).
@@ -123,7 +124,7 @@ These concepts are stable; the signatures around them are not. Internalize these
 Core concepts:
 
 - **Everything is a Frame moving through a pipeline of FrameProcessors.** Frames flow **downstream** (input → output) or **upstream** (errors/acknowledgments). A processor receives a frame, does its work, and pushes it along — by default in the direction it came.
-- **A worker runs the show.** For the common single-bot case, wrap your pipeline in a `PipelineWorker`, then run it with a `WorkerRunner`: register with `await runner.add_workers(worker)`, then `await runner.run()`. The runner owns the shared bus, handles SIGINT/SIGTERM, and by default ends once every root worker finishes. For a long-lived host (e.g. a FastAPI server adding/removing sessions) call `await runner.run(auto_end=False)`. (Note: the dev runner discovers your `bot(runner_args)` entry point and drives this for you per session — you usually don't wire the runner by hand in a scaffolded app.)
+- **A worker runs the show.** For the common single-bot case, wrap your pipeline in a `PipelineWorker`, then run it with a `WorkerRunner`: `await runner.add_workers(worker)`, then `await runner.run()`. The runner owns the shared bus, handles SIGINT/SIGTERM, and by default ends once every root worker finishes; a long-lived host (e.g. a FastAPI server adding/removing sessions) passes `auto_end=False`. In a scaffolded app the dev runner drives all of this per session via your `bot(runner_args)` entry point — you don't wire it by hand.
 - **Pipeline order matters.** The canonical **cascade** voice loop is:
   ```
   transport.input()
@@ -181,9 +182,9 @@ Core concepts:
 
 ## 6. Verify your work (the eval harness)
 
-A voice app can't be eyeballed like a web page — but you don't need a live call to test it. Pipecat ships a **behavioral eval harness** (`pipecat.evals`) that drives your *running bot* with scripted turns and asserts on what it does: deterministic checks (substring, function name/args, latency) plus an optional LLM **judge** for natural-language criteria. It exercises the *whole* pipeline — STT→LLM→TTS, turns, context, tools, interruptions — end-to-end. Scenarios are written as YAML.
+A voice app can't be eyeballed like a web page — but you don't need a live call to test it. Pipecat ships a **behavioral eval harness** (`pipecat.evals`): scripted YAML scenarios drive your *running bot* and assert on what it does — deterministic checks (substring, function name/args, latency) plus an optional LLM **judge** for natural-language criteria — exercising the whole pipeline (STT→LLM→TTS, turns, context, tools, interruptions) end to end.
 
-> **Deep reference:** the **Pipecat Evals docs** are the authoritative spec — look them up via your Pipecat MCP (§3). Key pages: **Overview**, **Writing Scenarios** (the scenario schema + the two modality axes), **Using the Library** (the Python API — `EvalScenario.load()` + `EvalSession.from_scenario(...).run()`), and **Agent Self-Improvement** (the closed-loop workflow this section describes). For working examples, start from the **scaffolded starters in `server/evals/`** (below) — copy one when adding a scenario rather than writing YAML from scratch. `pipecat eval` is a **built-in command** of `pipecat-ai[cli]`; run it from the **bot's own environment**, which already has `pipecat.evals` and the `-t eval` transport.
+> **Deep reference:** the **Pipecat Evals docs** are the authoritative spec — look them up via your Pipecat MCP (§3): **Overview**, **Writing Scenarios** (the schema + the two modality axes), **Using the Library** (the Python API), **Agent Self-Improvement** (the closed-loop workflow this section describes). For working examples, copy the **scaffolded starters in `server/evals/`** rather than writing YAML from scratch. `pipecat eval` is a **built-in command** of `pipecat-ai[cli]`; run it from the **bot's own environment**.
 
 **Make your bot eval-able.** Scaffold with `pipecat create --eval` (headless) — pass it whenever you scaffold a bot you intend to test. The generated bot has the `eval` transport entry, eval dependencies in its env, and **runnable starter scenarios in `server/evals/`**: `starter_text.yaml` (the fast inner loop; cascade only) and `starter_audio.yaml` (the full round trip). They pass against the freshly scaffolded bot, so run them *first* to prove the loop, then edit them to match the bot you're building and copy them to grow the suite. For an **existing** bot, add the transport entry by hand (a one-time change; RTVI is already on by default for `PipelineWorker`, so that's the only edit):
 ```python
@@ -194,13 +195,13 @@ transport_params = {
     # ... your real transports (smallwebrtc, daily, …) stay as-is
 }
 ```
-The dev runner wraps this in the eval transport + serializer for you when you pass `-t eval`; you don't construct them. `examples/voice/voice-cartesia.py` is the reference target. Two kinds of checks follow: quick smoke checks when you wire it up, then the eval loop you run as you work.
+The dev runner wraps this in the eval transport + serializer when you pass `-t eval`; you don't construct them. Two kinds of checks follow: quick smoke checks when you wire it up, then the eval loop you run as you work.
 
 **Smoke checks (when you wire it up).** Two fast "did I break the plumbing" checks before any scenario:
 - **Logs** — the bot logs to stdout (loguru). Tee it so you can read it without asking the user to copy-paste: `uv run bot.py -t eval 2>&1 | tee /tmp/pipecat-output.txt`.
 - **Clean boot** — `uv run bot.py -t eval` boots the bot as a headless eval WebSocket server (default `ws://localhost:7860`). No exceptions + pipeline assembled is your fastest "did I wire it right" signal.
 
-**The eval loop (where you live).** Leave the bot running and drive scenarios against it from a second terminal — it stays alive across the whole suite, so re-run as you edit. Start in **text mode** (the default), the fast inner loop. A minimal scenario:
+**The eval loop (where you live).** Leave the bot running and drive scenarios against it from a second terminal — it stays alive across runs, so re-run as you edit. Start in **text mode** (the default), the fast inner loop. A minimal scenario:
 ```yaml
 name: capital_of_france
 turns:
@@ -210,11 +211,11 @@ turns:
         text_contains: "Paris"
 ```
 ```bash
-python -m pipecat.evals run my_scenario.yaml -v     # or: pipecat eval run my_scenario.yaml -v
+uv run pipecat eval run my_scenario.yaml -v
 ```
-It **bypasses STT, VAD, and TTS** (the `user:` turn is sent as text, no audio blocks), so assert on what the bot *produced* (`response`/`llm_response`, `function_call`), not on `user_*_speaking`. Prefer the modality-agnostic `response` event — it resolves to `llm_response` in text mode and to the bot's transcribed audio in audio mode. Exit code is non-zero if any non-skipped scenario fails.
+Text mode **bypasses STT, VAD, and TTS** (the `user:` turn is sent as text), so assert on what the bot *produced* (`response`, `function_call`), not on `user_*_speaking` events. Prefer the modality-agnostic `response` event — it resolves to the LLM text in text mode and to the bot's transcribed audio in audio mode. Exit code is non-zero if any non-skipped scenario fails.
 
-**Escalate to audio mode** for the full round trip (pre-ship / CI). Set `user: {modality: audio, speech: {service: kokoro, voice: af_heart}}` and the harness synthesizes speech, so the bot's **real VAD + STT** run; set `judge: {modality: audio}` so the bot **speaks** and the harness transcribes that audio into the `response` event (the TTS's own reported text is separately available as `tts_response`). Kokoro (user TTS) and Moonshine (bot transcription — runs on CPU, the default; Whisper also available) run **locally with no API key**, so audio mode is slower but still free — run it before shipping and in CI, not on every edit.
+**Escalate to audio mode** for the full round trip. Set `user: {modality: audio, speech: {service: kokoro, voice: af_heart}}` and the harness synthesizes the user's speech, so the bot's **real VAD + STT** run; set `judge: {modality: audio}` (with a `transcription:` block) so the bot **speaks** and the harness transcribes that audio into the `response` event. Kokoro (user TTS) and Moonshine (bot transcription) run **locally with no API key** — audio mode is slower but free, so run it before shipping and in CI, not on every edit.
 
 **Which mode — iterate in text, confirm in audio.** Default to **text** for the inner loop and anything about the bot's *decisions* (LLM content, system-prompt adherence, function calls, multi-turn context, barge-in) — it's fast and cheap, so run it constantly. Escalate a scenario to **audio** when text mode would *lie*, i.e. when the thing under test is the audio path itself:
 
@@ -228,7 +229,7 @@ It **bypasses STT, VAD, and TTS** (the `user:` turn is sent as text, no audio bl
 
 Heuristic: **text tests the brain; audio tests the ears and mouth.** The **judge is orthogonal to the mode** — `eval:` natural-language criteria work in either (a local Ollama with `gemma2:9b` by default, or `judge: {service: openai, model: gpt-4.1}`).
 
-**Realtime (speech-to-speech) bots are audio-mode only.** An S2S model has no separate text LLM step to assert on, so text mode doesn't apply — you eval it the same way a person would talk to it: set `user: {modality: audio}` to synthesize the user's voice *into* the model, and `judge: {modality: audio}` to transcribe its spoken output *for* the judge. It's the same Kokoro-in / Moonshine-out path as above (both local, no key), just **required** rather than an escalation. Everything else — scenarios, the judge, `response` / `function_call` assertions — is identical to a cascade bot. This is what makes the harness work for *any* bot: cascade gets the fast text loop, realtime uses the audio loop, and both reach the same pass/fail signal.
+**Realtime (speech-to-speech) bots are audio-mode only.** An S2S model has no separate text LLM step to assert on, so text mode doesn't apply — eval it the same way a person would talk to it: `user: {modality: audio}` to synthesize the user's voice in, `judge: {modality: audio}` to transcribe its spoken output for the judge. Same Kokoro-in / Moonshine-out path as above, just **required** rather than an escalation; scenarios, the judge, and assertions are otherwise identical to a cascade bot.
 
 > **Gotchas:** give the judge LLM a **separate API key (or provider) from the bot** — sharing one can throttle or truncate the concurrent calls. `eval:` assertions need a judge reachable — a local Ollama with the default model pulled (`ollama pull gemma2:9b`), or an OpenAI key. Audio-mode scenarios need `audio_in_enabled=True` on the eval transport (above).
 
@@ -238,7 +239,7 @@ This is the difference between an open loop (write → hand to human → wait) a
 
 ## 7. Deploying (optional — Pipecat Cloud)
 
-[Pipecat Cloud](https://www.daily.co/products/pipecat-cloud/) is a **hosted** option — deploying there is optional (run locally or host elsewhere instead). **It's a scaffold-time choice:** `--deploy-to-cloud` (default on, §1) generates the `Dockerfile` + `pcc-deploy.toml` (`agent_name`, `secret_set`, profile, scaling); scaffold with `--no-deploy-to-cloud` and you'd add those by hand later. **Before deploying, confirm the user wants Pipecat Cloud and has an account** — you can't create one for them.
+[Pipecat Cloud](https://www.daily.co/products/pipecat-cloud/) is a **hosted** option — deploying there is optional (run locally or host elsewhere instead). It's a scaffold-time choice: `--deploy-to-cloud` (default on, §1) generates the `Dockerfile` + `pcc-deploy.toml`; with `--no-deploy-to-cloud` you'd add those by hand later. **Before deploying, confirm the user wants Pipecat Cloud and has an account** — you can't create one for them.
 
 > `pipecat cloud` is an **optional plugin**, not bundled with `pipecat-ai[cli]`. Install it alongside: `uv tool install "pipecat-ai[cli]" --with pipecatcloud`. (Without it, `pipecat cloud` lists in `--help` but prints how to enable it when run.)
 
@@ -258,7 +259,10 @@ pipecat cloud deploy --yes
 
 Re-set the secrets whenever keys change. Tail a live bot with `pipecat cloud agent logs <agent-name>`.
 
-**Krisp noise cancellation** (`--enable-krisp`, requires cloud) is **Cloud-provided, and the scaffold already wires it correctly — keep that block, don't re-wire it.** The generated bot guards Krisp with `if os.environ.get("ENV") != "local"`, and the **dev runner forces `ENV=local` on every local run** (including `-t eval`), so a scaffolded Krisp bot **boots locally with no `.kef` model and no license** and turns Krisp on only once deployed to Pipecat Cloud. Don't add your own env-var guard, and **don't ask how to wire Krisp** when the deploy target is known: Pipecat Cloud → Cloud-provided, the scaffold default is already right. Only raise it if the user wants Krisp with *no* cloud deploy — then they self-host the SDK + model locally (`KRISP_VIVA_FILTER_MODEL_PATH`, `KRISP_VIVA_API_KEY`).
+**Krisp noise cancellation** (`--enable-krisp`, requires cloud) is Cloud-provided, and **the scaffold already wires it correctly — keep that block, don't re-wire it**:
+- The generated `if os.environ.get("ENV") != "local"` guard, plus the dev runner forcing `ENV=local` on every local run (including `-t eval`), means the bot boots locally with no Krisp model or license and turns Krisp on only once deployed to Pipecat Cloud. Don't add your own guard.
+- Deploying to Pipecat Cloud → the scaffold default is already right; don't ask the user how to wire Krisp.
+- Krisp with **no** cloud deploy is the only case to raise: the user self-hosts the SDK + model (`KRISP_VIVA_FILTER_MODEL_PATH`, `KRISP_VIVA_API_KEY`).
 
 ---
 
