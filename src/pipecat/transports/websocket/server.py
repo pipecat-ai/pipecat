@@ -14,6 +14,7 @@ handling, and frame serialization.
 import asyncio
 import io
 import time
+import warnings
 import wave
 from collections.abc import Awaitable, Callable
 
@@ -430,6 +431,13 @@ class WebsocketServerTransport(BaseTransport):
     output transports, client connection management, and event handling for
     real-time audio and data streaming applications.
 
+    .. deprecated:: 1.4.0
+        :class:`WebsocketServerTransport` was intended for development and testing
+        only. It has a critical limitation: it only supports a single client at a
+        time. Use
+        :class:`~pipecat.transports.websocket.fastapi.FastAPIWebsocketTransport`
+        instead for production use.
+
     Event handlers available:
 
     - on_client_connected(transport, websocket): Client WebSocket connected
@@ -461,6 +469,14 @@ class WebsocketServerTransport(BaseTransport):
             input_name: Optional name for the input processor.
             output_name: Optional name for the output processor.
         """
+        warnings.warn(
+            "WebsocketServerTransport is deprecated and will be removed in a future version. "
+            "It was intended for development and testing only and has a critical limitation: "
+            "it only supports a single client at a time. "
+            "Use FastAPIWebsocketTransport instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         super().__init__(input_name=input_name, output_name=output_name)
         self._host = host
         self._port = port
