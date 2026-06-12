@@ -87,28 +87,40 @@ When the user describes a use case, find the closest example via `search_example
 
 ## 3. Find current truth (anti-staleness)
 
-You have live sources for current truth — never substitute your memory. **First, check whether a Pipecat MCP is configured. If none is, stop and ask the user to set one up** before you write service code. Two MCPs, a precision-vs-setup tradeoff — tell the user both so they can choose:
+You have live sources for current truth — never substitute your memory. Use the **highest rung of this ladder that works right now** — every rung is something you can do yourself, so never fall back to guessing:
 
-1. **MCP — `pipecat-docs`** (cloud-hosted; **easiest**). One command, nothing to clone, auto-fresh. Returns synthesized answers with citations — good for concepts and "how do I…", less precise for exact signatures.
-   `claude mcp add --transport http pipecat-docs https://daily-docs.mcp.kapa.ai`
-2. **MCP — `pipecat-context-hub`** (local vector DB; **most precise**). Returns *primary source* — actual signatures, code, deprecation status — plus purpose-built tools:
-   - `check_deprecation` — **run this on any API you're unsure about.** The direct antidote to stale training data (e.g. `PipelineTask`→`PipelineWorker`).
-   - `search_api` / `get_code_snippet` — exact current signatures and usage.
-   - `search_examples` — find a working example for a capability (see also the examples repo, below).
-   - `search_docs` — guides and concepts.
-
-   Setup (more involved): clone the context-hub repo, `uv sync`, then
-   `claude mcp add pipecat-context-hub -- uv run --directory /path/to/pipecat-context-hub pipecat-context-hub serve`.
-   The index is **local**, so **run `uv run pipecat-context-hub refresh` at the start of each session** (and after any Pipecat version bump) so it reflects the current code.
-3. **Installed package source** — the pinned version is on disk; the code cannot be stale. Read it when MCP is ambiguous:
+1. **A configured Pipecat MCP** (check your tool list) — the warm path. Two servers exist; see below.
+2. **No MCP? Query the same index from your shell** — zero setup beyond `uv`:
+   ```bash
+   uvx pipecat-ai-context-hub check-deprecation PipelineTask     # the reflex check; <1s
+   uvx pipecat-ai-context-hub search-api "WebsocketServerParams"
+   uvx pipecat-ai-context-hub search-examples "twilio bot" --domain backend
+   uvx pipecat-ai-context-hub status                             # index health / freshness
+   ```
+   Stdout is the tool's JSON. **Exit 2 means the local index isn't built yet** — run `uvx pipecat-ai-context-hub refresh` once (downloads the package + local models and indexes the sources; allow several minutes), then re-run the query. Afterwards, **set up future sessions**: `claude mcp add pipecat-context-hub -- uvx pipecat-ai-context-hub serve`. A newly added MCP server loads at the *next* session start, never mid-session — so keep using the CLI for the current one.
+3. **Installed package source** — the pinned version is on disk; the code cannot be stale. Read it when the index is ambiguous:
    ```bash
    python -c "import pipecat, os; print(os.path.dirname(pipecat.__file__))"
    ```
-4. **`llms.txt`** — machine-readable docs index at `https://docs.pipecat.ai/llms.txt` (full content: `llms-full.txt`). Useful when MCP isn't configured.
+4. **`llms.txt`** — machine-readable docs index at `https://docs.pipecat.ai/llms.txt` (full content: `llms-full.txt`). The last resort when nothing local works.
+
+**The two MCPs** (a user can run both; mention both when setting one up):
+
+- **`pipecat-docs`** (cloud-hosted; easiest). One command, auto-fresh, synthesized answers with citations — good for concepts and "how do I…", less precise for exact signatures.
+  `claude mcp add --transport http pipecat-docs https://daily-docs.mcp.kapa.ai`
+- **`pipecat-context-hub`** (local index; most precise). *Primary source* — actual signatures, code, deprecation status — via the same tools the CLI above exposes:
+  - `check_deprecation` — **run this on any API you're unsure about.** The direct antidote to stale training data (e.g. `PipelineTask`→`PipelineWorker`).
+  - `search_api` / `get_code_snippet` — exact current signatures and usage.
+  - `search_examples` — find a working example for a capability. Examples can lag the framework — `check_deprecation` any symbol you copy from one.
+  - `search_docs` — guides and concepts.
+
+  Setup: `uvx pipecat-ai-context-hub refresh` once, then `claude mcp add pipecat-context-hub -- uvx pipecat-ai-context-hub serve`. The index is **local** — check `get_hub_status` / `status` for `last_refresh_at`, and refresh when it's stale or after a Pipecat version bump.
+
+(Naming: the *package* is `pipecat-ai-context-hub`; the command and MCP server are `pipecat-context-hub`. Both spellings of the command work once installed.)
 
 For browsing examples directly, the **`pipecat-examples` repo** groups demos by category in its README (telephony, vision, etc.); `scripts/demos.json` lists each example's run command.
 
-**Rule of thumb:** if you're about to type a Pipecat class name, import path, or service parameter from memory — stop and confirm via your MCP first (on context-hub: `check_deprecation` / `search_api`; on pipecat-docs: just ask).
+**Rule of thumb:** if you're about to type a Pipecat class name, import path, or service parameter from memory — stop and confirm first, via MCP or the rung-2 CLI (`check_deprecation` / `search_api`; on pipecat-docs: just ask).
 
 ---
 
