@@ -417,9 +417,11 @@ class GladiaSTTService(WebsocketSTTService):
         await self._connect()
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
-        """Apply settings delta.
+        """Apply settings delta and reconnect with a new Gladia session.
 
-        Settings are stored but not applied to the active session.
+        Clears the current session so that the next connection initializes a
+        fresh session with the updated settings. Reconnection is deferred
+        until after the current user turn if the user is speaking.
 
         Args:
             delta: A settings delta.
@@ -432,14 +434,9 @@ class GladiaSTTService(WebsocketSTTService):
         if not changed:
             return changed
 
-        # TODO: someday we could reconnect here to apply updated settings.
-        # Code might look something like the below:
-        # self._session_url = None
-        # self._session_id = None
-        # await self._disconnect()
-        # await self._connect()
-
-        self._warn_unhandled_updated_settings(changed)
+        self._session_url = None
+        self._session_id = None
+        await self._request_reconnect()
 
         return changed
 
