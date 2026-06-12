@@ -183,6 +183,13 @@ class MyParams(BaseModel):
     old_setting: str | None = None
 ```
 
+## Writing for Future Readers
+
+This applies to everything that documents the code — comments, docstrings, commit messages, changelog entries, PR descriptions. Write for a future reader of the codebase, NOT for whoever is reviewing and collaborating on the work right now.
+
+- **Leave the current moment out of it.** Detail that feels important while making a change — alternatives considered and not taken, what the code used to do, shorthand that only made sense while the work was in progress — usually isn't worth a future reader's time, and may not even make sense to them. Include it only when they genuinely need it to understand the code as it stands.
+- **Match the weight of the prose to the code.** Keep it general, high-level, and concise. Reserve long comments for architecturally salient pieces, genuinely tricky sections, or decisions non-obvious enough that a reader would otherwise be puzzled. Routine code needs a short note or none at all.
+
 ## Service Implementation
 
 When adding a new service:
