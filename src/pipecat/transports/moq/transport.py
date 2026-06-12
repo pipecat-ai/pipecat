@@ -265,7 +265,13 @@ class MOQOutputTransport(BaseOutputTransport):
         params: MOQParams,
         **kwargs,
     ):
-        """Initialize the MOQ output transport."""
+        """Initialize the MOQ output transport.
+
+        Args:
+            transport: The parent MOQTransport managing the MoQ session.
+            params: MOQ transport configuration parameters.
+            **kwargs: Additional arguments passed to the parent class.
+        """
         super().__init__(params, **kwargs)
         self._moq_transport = transport
         self._params = params
