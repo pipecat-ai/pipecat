@@ -32,7 +32,7 @@ uv tool install "pipecat-ai[cli]"   # provides the `pipecat` (alias `pc`) comman
 pipecat create --name mybot --bot-type web \
   --transport smallwebrtc --mode cascade \
   --stt deepgram_stt --llm openai_llm --tts cartesia_tts \
-  --eval                             # scaffold the eval transport for verification (§6)
+  --eval                             # eval transport + starter scenarios, for verification (§6)
 #   • Don't hand-write flags from memory — discover them:
 #       pipecat create --help          # available flags
 #       pipecat create --list-options  # valid service/transport VALUES
@@ -49,6 +49,7 @@ The scaffold pins a Pipecat version (treat it as the world you're building in �
 mybot/
 ├── server/
 │   ├── bot.py            # entry point: an async `bot(runner_args)` function + `main()`
+│   ├── evals/            # starter eval scenarios, with --eval (§6)
 │   ├── pyproject.toml
 │   ├── .env.example      # required env vars
 │   ├── Dockerfile        # if cloud enabled
@@ -163,9 +164,9 @@ Core concepts:
 
 A voice app can't be eyeballed like a web page — but you don't need a live call to test it. Pipecat ships a **behavioral eval harness** (`pipecat.evals`) that drives your *running bot* with scripted turns and asserts on what it does: deterministic checks (substring, function name/args, latency) plus an optional LLM **judge** for natural-language criteria. It exercises the *whole* pipeline — STT→LLM→TTS, turns, context, tools, interruptions — end-to-end. Scenarios are written as YAML.
 
-> **Deep reference:** the **Pipecat Evals docs** are the authoritative spec — look them up via your Pipecat MCP (§3). Key pages: **Overview**, **Writing Scenarios** (the scenario schema + the two modality axes), **Using the Library** (the Python API — `EvalScenario.load()` + `EvalSession.from_scenario(...).run()`), and **Agent Self-Improvement** (the closed-loop workflow this section describes). Read them before writing scenarios, and copy from the shipped examples in `scripts/release-evals/scenarios/*.yaml`. `pipecat eval` is a **built-in command** of `pipecat-ai[cli]`; run it from the **bot's own environment**, which already has `pipecat.evals` and the `-t eval` transport.
+> **Deep reference:** the **Pipecat Evals docs** are the authoritative spec — look them up via your Pipecat MCP (§3). Key pages: **Overview**, **Writing Scenarios** (the scenario schema + the two modality axes), **Using the Library** (the Python API — `EvalScenario.load()` + `EvalSession.from_scenario(...).run()`), and **Agent Self-Improvement** (the closed-loop workflow this section describes). For working examples, start from the **scaffolded starters in `server/evals/`** (below) — copy one when adding a scenario rather than writing YAML from scratch. `pipecat eval` is a **built-in command** of `pipecat-ai[cli]`; run it from the **bot's own environment**, which already has `pipecat.evals` and the `-t eval` transport.
 
-**Make your bot eval-able.** Scaffold with `pipecat create --eval` (headless) and the generated bot already has the `eval` transport entry — pass it whenever you scaffold a bot you intend to test. For an **existing** bot, add the entry by hand (a one-time change; RTVI is already on by default for `PipelineWorker`, so that's the only edit):
+**Make your bot eval-able.** Scaffold with `pipecat create --eval` (headless) — pass it whenever you scaffold a bot you intend to test. The generated bot has the `eval` transport entry, eval dependencies in its env, and **runnable starter scenarios in `server/evals/`**: `starter_text.yaml` (the fast inner loop; cascade only) and `starter_audio.yaml` (the full round trip). They pass against the freshly scaffolded bot, so run them *first* to prove the loop, then edit them to match the bot you're building and copy them to grow the suite. For an **existing** bot, add the transport entry by hand (a one-time change; RTVI is already on by default for `PipelineWorker`, so that's the only edit):
 ```python
 from pipecat.transports.websocket.server import WebsocketServerParams
 

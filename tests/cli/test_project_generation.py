@@ -819,6 +819,69 @@ def test_eval_transport_opt_in(temp_output_dir):
     ast.parse(with_eval)  # raises if the generated bot has a syntax error
 
 
+def test_eval_starter_scenarios(temp_output_dir):
+    """``enable_eval`` scaffolds runnable starter scenarios plus the deps to run them."""
+    from pipecat.evals.scenario import EvalScenario
+
+    def gen(name, *, enable_eval, mode="cascade", **kwargs):
+        path = temp_output_dir / name
+        if path.exists():
+            shutil.rmtree(path)
+        ProjectGenerator(
+            ProjectConfig(
+                project_name=name,
+                bot_type="web",
+                transports=["smallwebrtc"],
+                mode=mode,
+                enable_eval=enable_eval,
+                **kwargs,
+            )
+        ).generate(output_dir=temp_output_dir)
+        return path / "server"
+
+    cascade_services = {
+        "stt_service": "deepgram_stt",
+        "llm_service": "openai_llm",
+        "tts_service": "cartesia_tts",
+    }
+
+    # Off by default: no evals directory, no eval extras.
+    server = gen("starters-off", enable_eval=False, **cascade_services)
+    assert not (server / "evals").exists()
+    pyproject = (server / "pyproject.toml").read_text()
+    assert "kokoro" not in pyproject and "moonshine" not in pyproject
+
+    # Cascade: both starters are generated and parse against the real scenario
+    # schema (EvalScenario.load is the validator the harness itself uses).
+    server = gen("starters-cascade", enable_eval=True, **cascade_services)
+    text_path = server / "evals" / "starter_text.yaml"
+    audio_path = server / "evals" / "starter_audio.yaml"
+    assert EvalScenario.load(text_path).name == "starter_text"
+    audio = EvalScenario.load(audio_path)
+    assert audio.name == "starter_audio"
+    assert audio.user_audio is not None  # audio starter drives real speech in
+
+    # The project env carries what the harness needs: the `pipecat eval` command
+    # (cli) and the local speech stack for audio mode (kokoro + moonshine).
+    pyproject = (server / "pyproject.toml").read_text()
+    for extra in ("cli", "kokoro", "moonshine"):
+        assert extra in pyproject
+
+    # The README documents the eval loop.
+    readme = (server.parent / "README.md").read_text()
+    assert "evals/starter_text.yaml" in readme
+
+    # Realtime: no separate text LLM step, so only the audio starter is generated.
+    server = gen(
+        "starters-realtime",
+        enable_eval=True,
+        mode="realtime",
+        realtime_service="openai_realtime",
+    )
+    assert not (server / "evals" / "starter_text.yaml").exists()
+    assert EvalScenario.load(server / "evals" / "starter_audio.yaml").name == "starter_audio"
+
+
 def _gen_bot(temp_output_dir, name, *, mode="cascade", **kwargs):
     """Generate a telephony bot (cascade by default) and return its bot.py text.
 
