@@ -138,7 +138,7 @@ class MCPClient(BaseObject):
             self._exit_stack = exit_stack
             self._active_session = session
 
-        except Exception:
+        except BaseException:
             await exit_stack.aclose()
             raise
 
