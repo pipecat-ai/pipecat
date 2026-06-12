@@ -82,7 +82,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     """Run the bot with the given transport."""
     logger.info("Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
