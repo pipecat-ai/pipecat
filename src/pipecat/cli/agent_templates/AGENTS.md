@@ -199,7 +199,7 @@ transport_params = {
 The dev runner wraps this in the eval transport + serializer when you pass `-t eval`; you don't construct them. Two kinds of checks follow: quick smoke checks when you wire it up, then the eval loop you run as you work.
 
 **Smoke checks (when you wire it up).** Two fast "did I break the plumbing" checks before any scenario:
-- **Logs** — the bot logs to stdout (loguru). Tee it so you can read it without asking the user to copy-paste: `uv run bot.py -t eval 2>&1 | tee /tmp/pipecat-output.txt`.
+- **Logs** — the bot logs to stdout (loguru). However you run it, keep the output durable and greppable — e.g. `uv run bot.py -t eval 2>&1 | tee /tmp/pipecat-output.txt` — so when a scenario fails you can grep the file for the traceback instead of re-running. If your harness captures background-process output natively, that works too.
 - **Clean boot** — `uv run bot.py -t eval` boots the bot as a headless eval WebSocket server (default `ws://localhost:7860`). No exceptions + pipeline assembled is your fastest "did I wire it right" signal.
 
 **The eval loop (where you live).** Leave the bot running and drive scenarios against it from a second terminal — it stays alive across runs, so re-run as you edit. Start in **text mode** (the default), the fast inner loop. A minimal scenario:
