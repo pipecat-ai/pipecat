@@ -114,6 +114,9 @@ FEATURE_DEFINITIONS: dict[str, list[str]] = {
     # The "eval" transport entry (pc init --eval) needs WebsocketServerParams so the
     # generated bot is runnable with `-t eval` for behavioral evals.
     "eval": ["WebsocketServerParams"],
+    # Bespoke telephony bots (dial-out/SIP) build their transport by hand, so their
+    # eval branch needs to detect eval runs and route through create_transport.
+    "eval_bespoke": ["EvalRunnerArguments"],
 }
 
 
