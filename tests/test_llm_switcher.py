@@ -46,10 +46,10 @@ async def get_current_weather(params: FunctionCallParams, location: str):
 class TestLLMSwitcherDirectFunctions(unittest.TestCase):
     """An LLMSwitcher must register context direct functions on every member LLM."""
 
-    def test_sync_registered_direct_functions_registers_handler(self):
-        """LLMService._sync_registered_direct_functions registers the handler."""
+    def test_sync_registered_tool_handlers_registers_handler(self):
+        """LLMService._sync_registered_tool_handlers registers the handler."""
         llm = _MockLLMService()
-        llm._sync_registered_direct_functions(LLMContext(tools=[get_current_weather]).tools)
+        llm._sync_registered_tool_handlers(LLMContext(tools=[get_current_weather]).tools)
         self.assertIn("get_current_weather", llm._functions)
 
     def test_context_direct_functions_registered_on_all_member_llms(self):
@@ -64,7 +64,7 @@ class TestLLMSwitcherDirectFunctions(unittest.TestCase):
         llm2 = _MockLLMService()
         switcher = LLMSwitcher(llms=[llm1, llm2])
 
-        switcher._sync_registered_direct_functions(LLMContext(tools=[get_current_weather]).tools)
+        switcher._sync_registered_tool_handlers(LLMContext(tools=[get_current_weather]).tools)
 
         for llm in (llm1, llm2):
             self.assertIn("get_current_weather", llm._functions)

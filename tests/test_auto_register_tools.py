@@ -4,10 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for automatic registration of direct functions advertised in a context."""
+"""Tests for automatic registration of tool handlers advertised in a context."""
 
+import io
 import types
 import unittest
+
+from loguru import logger
 
 from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -66,6 +69,22 @@ async def async_task_2(params: FunctionCallParams, query: str):
     await params.result_callback({"status": "done"})
 
 
+async def lookup_order_handler(params: FunctionCallParams):
+    """A classic (non-direct) handler bundled on a FunctionSchema."""
+    await params.result_callback({"status": "shipped"})
+
+
+def lookup_order_schema() -> FunctionSchema:
+    """Build a handler-carrying FunctionSchema for ``lookup_order``."""
+    return FunctionSchema(
+        name="lookup_order",
+        description="Look up an order.",
+        properties={"order_id": {"type": "string"}},
+        required=["order_id"],
+        handler=lookup_order_handler,
+    )
+
+
 class TestToolsSchemaRetainsCallables(unittest.TestCase):
     def test_direct_functions_become_schemas_and_retain_wrappers(self):
         schema = FunctionSchema(name="advertise_only", description="d", properties={}, required=[])
@@ -106,7 +125,7 @@ class TestAutoRegister(unittest.TestCase):
     def test_auto_registers_with_defaults(self):
         service = self._service()
         context = LLMContext(tools=[get_current_weather, get_restaurant_recommendation])
-        service._sync_registered_direct_functions(context.tools)
+        service._sync_registered_tool_handlers(context.tools)
         self.assertTrue(service.has_function("get_current_weather"))
         self.assertTrue(service.has_function("get_restaurant_recommendation"))
         item = service._functions["get_current_weather"]
@@ -116,7 +135,7 @@ class TestAutoRegister(unittest.TestCase):
     def test_auto_register_reads_decorator_options(self):
         service = self._service()
         context = LLMContext(tools=[end_call])
-        service._sync_registered_direct_functions(context.tools)
+        service._sync_registered_tool_handlers(context.tools)
         item = service._functions["end_call"]
         self.assertFalse(item.cancel_on_interruption)
         self.assertEqual(item.timeout_secs, 60)
@@ -128,7 +147,7 @@ class TestAutoRegister(unittest.TestCase):
             get_current_weather, cancel_on_interruption=False, timeout_secs=99
         )
         context = LLMContext(tools=[get_current_weather])
-        service._sync_registered_direct_functions(context.tools)
+        service._sync_registered_tool_handlers(context.tools)
         item = service._functions["get_current_weather"]
         # The explicit registration's options survive (no clobber).
         self.assertFalse(item.cancel_on_interruption)
@@ -138,14 +157,14 @@ class TestAutoRegister(unittest.TestCase):
         service = self._service()
         schema = FunctionSchema(name="advertise_only", description="d", properties={}, required=[])
         context = LLMContext(tools=[get_current_weather, schema])
-        service._sync_registered_direct_functions(context.tools)
+        service._sync_registered_tool_handlers(context.tools)
         self.assertTrue(service.has_function("get_current_weather"))
         # 'advertise_only' has no handler; it must not be auto-registered.
         self.assertNotIn("advertise_only", service._functions)
 
     def test_no_tools_is_safe(self):
         service = self._service()
-        service._sync_registered_direct_functions(LLMContext().tools)
+        service._sync_registered_tool_handlers(LLMContext().tools)
         self.assertEqual(service._functions, {})
 
     def test_none_tools_is_safe(self):
@@ -154,16 +173,132 @@ class TestAutoRegister(unittest.TestCase):
         # is True, so this must be guarded explicitly.
         service = self._service()
         ctx = types.SimpleNamespace(tools=None)
-        service._sync_registered_direct_functions(ctx.tools)
+        service._sync_registered_tool_handlers(ctx.tools)
         self.assertEqual(service._functions, {})
 
     def test_idempotent_across_repeated_contexts(self):
         service = self._service()
         context = LLMContext(tools=[end_call])
-        service._sync_registered_direct_functions(context.tools)
+        service._sync_registered_tool_handlers(context.tools)
         # A second pass must not change anything (and must not raise).
-        service._sync_registered_direct_functions(context.tools)
+        service._sync_registered_tool_handlers(context.tools)
         self.assertEqual(list(service._functions.keys()), ["end_call"])
+
+
+class TestAutoRegisterSchemaHandlers(unittest.TestCase):
+    """A FunctionSchema that carries a handler is auto-registered like a direct function."""
+
+    def _service(self) -> LLMService:
+        return LLMService()
+
+    def test_schema_handler_is_registered_with_defaults(self):
+        service = self._service()
+        service._sync_registered_tool_handlers([lookup_order_schema()])
+        item = service._functions["lookup_order"]
+        self.assertIs(item.handler, lookup_order_handler)
+        # Registered from the advertised set, so it's prunable (like a direct function).
+        self.assertTrue(item.auto_registered)
+        # Schemas have no @tool_options equivalent; the classic defaults apply.
+        self.assertTrue(item.cancel_on_interruption)
+        self.assertIsNone(item.timeout_secs)
+
+    def test_handlerless_schema_is_still_advertise_only(self):
+        service = self._service()
+        advertise_only = FunctionSchema(
+            name="advertise_only", description="d", properties={}, required=[]
+        )
+        service._sync_registered_tool_handlers([advertise_only, lookup_order_schema()])
+        self.assertNotIn("advertise_only", service._functions)
+        self.assertTrue(service.has_function("lookup_order"))
+
+    def test_deadvertised_schema_handler_is_pruned(self):
+        service = self._service()
+        service._sync_registered_tool_handlers([lookup_order_schema()])
+        self.assertTrue(service.has_function("lookup_order"))
+        # A new tool set that no longer advertises it drops the handler.
+        service._sync_registered_tool_handlers([])
+        self.assertNotIn("lookup_order", service._functions)
+
+    def test_idempotent_across_repeated_contexts(self):
+        service = self._service()
+        service._sync_registered_tool_handlers([lookup_order_schema()])
+        service._sync_registered_tool_handlers([lookup_order_schema()])
+        self.assertEqual(list(service._functions.keys()), ["lookup_order"])
+
+    def test_reserved_name_rejected(self):
+        service = self._service()
+        schema = FunctionSchema(
+            name=CANCEL_ASYNC_TOOL_NAME,
+            description="d",
+            properties={},
+            required=[],
+            handler=lookup_order_handler,
+        )
+        with self.assertRaises(ValueError):
+            service._sync_registered_tool_handlers([schema])
+
+
+class TestRedundantManualRegistrationWarning(unittest.TestCase):
+    """Manually registering a handler the schema already carries warns, once."""
+
+    def _service(self) -> LLMService:
+        return LLMService()
+
+    def _capture_warnings(self):
+        sink = io.StringIO()
+        handler_id = logger.add(sink, level="WARNING", format="{message}")
+        return sink, handler_id
+
+    def test_explicit_registration_wins_and_warns(self):
+        service = self._service()
+
+        async def explicit_handler(params: FunctionCallParams):
+            await params.result_callback({})
+
+        service.register_function("lookup_order", explicit_handler)
+        sink, handler_id = self._capture_warnings()
+        try:
+            service._sync_registered_tool_handlers([lookup_order_schema()])
+        finally:
+            logger.remove(handler_id)
+        # The explicit handler is left in place (the schema's handler doesn't clobber it).
+        self.assertIs(service._functions["lookup_order"].handler, explicit_handler)
+        self.assertIn("lookup_order", sink.getvalue())
+        self.assertIn("unnecessary", sink.getvalue())
+
+    def test_warning_fires_once_across_repeated_syncs(self):
+        service = self._service()
+
+        async def explicit_handler(params: FunctionCallParams):
+            await params.result_callback({})
+
+        service.register_function("lookup_order", explicit_handler)
+        sink, handler_id = self._capture_warnings()
+        try:
+            for _ in range(3):
+                service._sync_registered_tool_handlers([lookup_order_schema()])
+        finally:
+            logger.remove(handler_id)
+        # Sync runs per inference; the advisory must not repeat every turn.
+        self.assertEqual(sink.getvalue().count("lookup_order"), 1)
+
+    def test_no_warning_for_advertise_only_schema(self):
+        service = self._service()
+
+        async def explicit_handler(params: FunctionCallParams):
+            await params.result_callback({})
+
+        # Classic pattern: register a handler and advertise a handlerless schema.
+        service.register_function("advertise_only", explicit_handler)
+        advertise_only = FunctionSchema(
+            name="advertise_only", description="d", properties={}, required=[]
+        )
+        sink, handler_id = self._capture_warnings()
+        try:
+            service._sync_registered_tool_handlers([advertise_only])
+        finally:
+            logger.remove(handler_id)
+        self.assertEqual(sink.getvalue(), "")
 
 
 class TestUnregisterInteractionWithAutoRegister(unittest.TestCase):
@@ -178,16 +313,16 @@ class TestUnregisterInteractionWithAutoRegister(unittest.TestCase):
         # (To actually remove a tool, stop advertising it; see below.)
         service = self._service()
         context = LLMContext(tools=[get_current_weather])
-        service._sync_registered_direct_functions(context.tools)
+        service._sync_registered_tool_handlers(context.tools)
         service._unregister_direct_function(get_current_weather)
         self.assertNotIn("get_current_weather", service._functions)
-        service._sync_registered_direct_functions(context.tools)
+        service._sync_registered_tool_handlers(context.tools)
         self.assertTrue(service.has_function("get_current_weather"))
 
     def test_explicit_reregister_restores_function(self):
         service = self._service()
         context = LLMContext(tools=[get_current_weather])
-        service._sync_registered_direct_functions(context.tools)
+        service._sync_registered_tool_handlers(context.tools)
         service._unregister_direct_function(get_current_weather)
         service._register_direct_function(get_current_weather)
         self.assertTrue(service.has_function("get_current_weather"))
@@ -246,31 +381,31 @@ class TestAutoUnregisterFromToolSet(unittest.TestCase):
     def test_deadvertised_direct_function_is_unregistered(self):
         service = self._service()
         # Auto-register two from the initial context.
-        service._sync_registered_direct_functions(
+        service._sync_registered_tool_handlers(
             LLMContext(tools=[get_current_weather, end_call]).tools
         )
         self.assertTrue(service.has_function("get_current_weather"))
         self.assertTrue(service.has_function("end_call"))
         # A new tool set advertises only one of them.
-        service._sync_registered_direct_functions([get_current_weather])
+        service._sync_registered_tool_handlers([get_current_weather])
         self.assertTrue(service.has_function("get_current_weather"))
         self.assertNotIn("end_call", service._functions)
 
     def test_readvertising_brings_handler_back(self):
         service = self._service()
-        service._sync_registered_direct_functions(LLMContext(tools=[end_call]).tools)
-        service._sync_registered_direct_functions([get_current_weather])
+        service._sync_registered_tool_handlers(LLMContext(tools=[end_call]).tools)
+        service._sync_registered_tool_handlers([get_current_weather])
         self.assertNotIn("end_call", service._functions)
         # Re-advertising registers it again (not blocked as "unregistered").
-        service._sync_registered_direct_functions([get_current_weather, end_call])
+        service._sync_registered_tool_handlers([get_current_weather, end_call])
         self.assertTrue(service.has_function("end_call"))
 
     def test_empty_tool_set_prunes_all(self):
         service = self._service()
-        service._sync_registered_direct_functions(
+        service._sync_registered_tool_handlers(
             LLMContext(tools=[get_current_weather, end_call]).tools
         )
-        service._sync_registered_direct_functions([])  # clear all tools
+        service._sync_registered_tool_handlers([])  # clear all tools
         self.assertEqual(service._functions, {})
 
     def test_explicitly_registered_handler_is_not_pruned(self):
@@ -278,7 +413,7 @@ class TestAutoUnregisterFromToolSet(unittest.TestCase):
         # Explicit registration is outside the advertised-tool-set lifecycle.
         service._register_direct_function(get_current_weather)
         # A tool set that doesn't advertise it must not remove it.
-        service._sync_registered_direct_functions([end_call])
+        service._sync_registered_tool_handlers([end_call])
         self.assertTrue(service.has_function("get_current_weather"))
         self.assertTrue(service.has_function("end_call"))
 
@@ -289,8 +424,8 @@ class TestAutoUnregisterFromToolSet(unittest.TestCase):
             await params.result_callback({})
 
         service.register_function(None, catch_all)
-        service._sync_registered_direct_functions(LLMContext(tools=[end_call]).tools)
-        service._sync_registered_direct_functions([get_current_weather])
+        service._sync_registered_tool_handlers(LLMContext(tools=[end_call]).tools)
+        service._sync_registered_tool_handlers([get_current_weather])
         # Catch-all survives; the de-advertised direct function is pruned.
         self.assertIn(None, service._functions)
         self.assertNotIn("end_call", service._functions)
@@ -408,23 +543,21 @@ class TestAsyncToolCancellationPruning(unittest.TestCase):
 
     def test_pruning_last_async_tool_tears_down_cancellation(self):
         service = LLMService()
-        service._sync_registered_direct_functions(LLMContext(tools=[async_task]).tools)
+        service._sync_registered_tool_handlers(LLMContext(tools=[async_task]).tools)
         service._setup_async_tool_cancellation()
         self.assertIn(CANCEL_ASYNC_TOOL_NAME, service._functions)
         # Drop the only async tool from the advertised set.
-        service._sync_registered_direct_functions([])
+        service._sync_registered_tool_handlers([])
         self.assertNotIn("async_task", service._functions)
         # No async tools remain, so the built-in cancel tool is torn down.
         self.assertNotIn(CANCEL_ASYNC_TOOL_NAME, service._functions)
 
     def test_builtin_cancel_tool_survives_while_async_tools_remain(self):
         service = LLMService()
-        service._sync_registered_direct_functions(
-            LLMContext(tools=[async_task, async_task_2]).tools
-        )
+        service._sync_registered_tool_handlers(LLMContext(tools=[async_task, async_task_2]).tools)
         service._setup_async_tool_cancellation()
         # Drop one async tool; another remains.
-        service._sync_registered_direct_functions([async_task])
+        service._sync_registered_tool_handlers([async_task])
         self.assertTrue(service.has_function("async_task"))
         self.assertNotIn("async_task_2", service._functions)
         # The built-in cancel tool isn't auto_registered, so the prune loop

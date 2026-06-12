@@ -44,11 +44,11 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
         super().__init__(cast(list[FrameProcessor], llms), strategy_type)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process a frame, syncing context direct functions on all member LLMs.
+        """Process a frame, syncing context tool handlers on all member LLMs.
 
-        On an ``LLMContextFrame``, the direct functions advertised in the context
-        are synced on every member LLM — active or not — so that direct functions
-        listed via ``LLMContext(tools=[...])`` keep working across service switches.
+        On an ``LLMContextFrame``, the handlers advertised in the context are
+        synced on every member LLM — active or not — so that tools listed via
+        ``LLMContext(tools=[...])`` keep working across service switches.
 
         This is needed because member LLMs sit behind per-branch filters: only the
         active LLM receives the context frame and would otherwise sync its handlers,
@@ -60,17 +60,17 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
         """
         await super().process_frame(frame, direction)
         if isinstance(frame, LLMContextFrame):
-            self._sync_registered_direct_functions(frame.context.tools)
+            self._sync_registered_tool_handlers(frame.context.tools)
 
-    def _sync_registered_direct_functions(self, tools) -> None:
-        """Sync the context's direct functions on every member LLM.
+    def _sync_registered_tool_handlers(self, tools) -> None:
+        """Sync the context's tool handlers on every member LLM.
 
         Args:
-            tools: The advertised tools whose direct-function handlers should be
-                synced on all member LLMs.
+            tools: The advertised tools whose handlers should be synced on all
+                member LLMs.
         """
         for llm in self.llms:
-            llm._sync_registered_direct_functions(tools)
+            llm._sync_registered_tool_handlers(tools)
 
     @property
     def llms(self) -> list[LLMService]:

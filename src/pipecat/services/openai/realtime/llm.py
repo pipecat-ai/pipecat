@@ -648,9 +648,9 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             await self._handle_messages_append(frame)
         elif isinstance(frame, LLMSetToolsFrame):
             # Continuous session: no fresh context frame per turn, so sync the
-            # registered direct-function handlers to the new tool set here (the
-            # base service only does this on LLMContextFrame).
-            self._sync_registered_direct_functions(frame.tools)
+            # registered tool handlers to the new tool set here (the base service
+            # only does this on LLMContextFrame).
+            self._sync_registered_tool_handlers(frame.tools)
             await self._send_session_update()
 
         await self.push_frame(frame, direction)
