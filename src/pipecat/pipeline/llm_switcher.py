@@ -137,7 +137,7 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
         self,
         handler: DirectFunction,
         *,
-        cancel_on_interruption: bool = True,
+        cancel_on_interruption: bool | None = None,
         timeout_secs: float | None = None,
     ):
         """Register a direct function handler for LLM function calls, on all LLMs, active or not.
@@ -152,7 +152,8 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
         Args:
             handler: The direct function to register. Must follow DirectFunction protocol.
             cancel_on_interruption: Whether to cancel this function call when an
-                interruption occurs. Defaults to True.
+                interruption occurs. Defaults to ``None`` (fall back to the
+                ``@tool_options`` decorator value on the handler, then to True).
             timeout_secs: Optional timeout in seconds for the function call.
         """
         with warnings.catch_warnings():
