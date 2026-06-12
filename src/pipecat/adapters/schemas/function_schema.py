@@ -47,7 +47,9 @@ class FunctionSchema:
             handler: Optional handler servicing calls to this function. When
                 provided, the LLM service registers it automatically wherever the
                 schema is advertised in the `LLMContext`, making a separate
-                ``register_function`` call unnecessary.
+                ``register_function`` call unnecessary. Decorate the handler with
+                ``@tool_options`` to override its default call options
+                (``cancel_on_interruption``, ``timeout_secs``).
         """
         self._name = name
         self._description = description

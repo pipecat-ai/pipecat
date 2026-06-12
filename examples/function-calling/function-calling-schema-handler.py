@@ -61,6 +61,8 @@ load_dotenv(override=True)
 # A handler bundled on a FunctionSchema is a classic function-call handler: it
 # takes the FunctionCallParams and reads the LLM-supplied arguments from
 # params.arguments (the schema, not the signature, defines the tool's shape).
+# Decorate it with @tool_options to override the default call options
+# (cancel_on_interruption, timeout_secs), just as you would a direct function.
 async def fetch_current_weather(params: FunctionCallParams):
     location = params.arguments["location"]
     logger.info(f"Fetching weather for {location}")

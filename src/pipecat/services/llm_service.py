@@ -784,10 +784,15 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         function_name: str | None,
         handler: Any,
         *,
-        cancel_on_interruption: bool = True,
+        cancel_on_interruption: bool | None = None,
         timeout_secs: float | None = None,
     ):
         """Register a function handler for LLM function calls.
+
+        Call options resolve with the precedence **explicit argument >
+        ``@tool_options`` decorator > default**. ``None`` (the default) means
+        "not provided" — the option falls back to the ``@tool_options`` value on
+        the handler, then to the documented default.
 
         Args:
             function_name: The name of the function to handle. Use None to handle
@@ -798,15 +803,17 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 interruption occurs. When ``False`` the call is treated as
                 asynchronous: the LLM continues the conversation immediately
                 without waiting for the result, and the result is injected later
-                via a developer message. Defaults to True. Note: realtime
+                via a developer message. Defaults to ``None`` (fall back to the
+                ``@tool_options`` decorator value, then to True). Note: realtime
                 LLM services deliver only the final result to the provider;
                 intermediate streamed results (reported via
                 ``FunctionCallResultProperties(is_final=False)``) are
                 dropped and an error is raised. Use a non-realtime LLM
                 service if your tool needs to stream intermediate results.
-            timeout_secs: Optional per-tool timeout in seconds. Overrides the global
-                ``function_call_timeout_secs`` for this specific function. Defaults to
-                None, which uses the global timeout.
+            timeout_secs: Optional per-tool timeout in seconds, overriding the
+                global ``function_call_timeout_secs``. Defaults to ``None`` (fall
+                back to the ``@tool_options`` decorator value, then to the global
+                timeout).
         """
         if function_name == CANCEL_ASYNC_TOOL_NAME:
             raise ValueError(
@@ -818,8 +825,16 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self._functions[function_name] = FunctionCallRegistryItem(
             function_name=function_name,
             handler=handler,
-            cancel_on_interruption=cancel_on_interruption,
-            timeout_secs=timeout_secs,
+            cancel_on_interruption=self._resolve_tool_option(
+                function_name,
+                cancel_on_interruption,
+                handler,
+                "_pipecat_cancel_on_interruption",
+                default=True,
+            ),
+            timeout_secs=self._resolve_tool_option(
+                function_name, timeout_secs, handler, "_pipecat_timeout_secs", default=None
+            ),
         )
 
     def register_direct_function(
@@ -930,7 +945,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         )
 
     def _resolve_tool_option(
-        self, function_name: str, explicit: Any, handler: Any, attr: str, *, default: Any
+        self, function_name: str | None, explicit: Any, handler: Any, attr: str, *, default: Any
     ) -> Any:
         """Resolve a tool call option by precedence: explicit > decorator > default.
 
@@ -973,9 +988,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
         Accepts whatever ``LLMContext`` accepts for tools — a ``ToolsSchema``, a
         plain list of direct functions / ``FunctionSchema`` objects, or
-        ``NOT_GIVEN`` — normalizing as needed. Direct-function options are read
-        from the attributes set by the ``@tool_options`` decorator; schema
-        handlers register with the default options.
+        ``NOT_GIVEN`` — normalizing as needed.
 
         Any tool whose name is already registered (explicitly, or from a previous
         context / tool set) is left untouched, so explicit registration always
@@ -1004,7 +1017,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             # auto_registered=False and are never pruned.
             self._functions[wrapper.name].auto_registered = True
 
-        # Register the handlers that FunctionSchemas carry.
+        # Register the handlers that FunctionSchemas carry. A schema handler
+        # registers like any classic handler — register_function reads its
+        # @tool_options off the handler — only marked auto_registered so it's
+        # pruned when no longer advertised.
         for schema in tools.standard_tools:
             if schema.handler is None:
                 continue

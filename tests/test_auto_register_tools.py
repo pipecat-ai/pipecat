@@ -85,6 +85,23 @@ def lookup_order_schema() -> FunctionSchema:
     )
 
 
+@tool_options(cancel_on_interruption=False, timeout_secs=60)
+async def end_call_handler(params: FunctionCallParams):
+    """A schema handler whose call options come from @tool_options."""
+    await params.result_callback({"status": "ending"})
+
+
+def end_call_schema() -> FunctionSchema:
+    """Build a handler-carrying FunctionSchema for ``end_call``."""
+    return FunctionSchema(
+        name="end_call",
+        description="End the call.",
+        properties={},
+        required=[],
+        handler=end_call_handler,
+    )
+
+
 class TestToolsSchemaRetainsCallables(unittest.TestCase):
     def test_direct_functions_become_schemas_and_retain_wrappers(self):
         schema = FunctionSchema(name="advertise_only", description="d", properties={}, required=[])
@@ -198,9 +215,17 @@ class TestAutoRegisterSchemaHandlers(unittest.TestCase):
         self.assertIs(item.handler, lookup_order_handler)
         # Registered from the advertised set, so it's prunable (like a direct function).
         self.assertTrue(item.auto_registered)
-        # Schemas have no @tool_options equivalent; the classic defaults apply.
+        # An undecorated handler gets the classic defaults.
         self.assertTrue(item.cancel_on_interruption)
         self.assertIsNone(item.timeout_secs)
+
+    def test_schema_handler_reads_tool_options_decorator(self):
+        service = self._service()
+        service._sync_registered_tool_handlers([end_call_schema()])
+        item = service._functions["end_call"]
+        # Options come from @tool_options on the handler, just like a direct function.
+        self.assertFalse(item.cancel_on_interruption)
+        self.assertEqual(item.timeout_secs, 60)
 
     def test_handlerless_schema_is_still_advertise_only(self):
         service = self._service()
@@ -529,6 +554,28 @@ class TestClassicRegisterFunction(unittest.TestCase):
         self.assertEqual(item.timeout_secs, 12)
         # Classic registrations are explicit, never advertised-set-managed.
         self.assertFalse(item.auto_registered)
+
+    def test_reads_tool_options_decorator_when_args_omitted(self):
+        service = LLMService()
+        service.register_function("end_call", end_call_handler)
+        item = service._functions["end_call"]
+        # With no explicit args, options come from @tool_options on the handler.
+        self.assertFalse(item.cancel_on_interruption)
+        self.assertEqual(item.timeout_secs, 60)
+
+    def test_explicit_args_override_decorator(self):
+        service = LLMService()
+        service.register_function("end_call", end_call_handler, cancel_on_interruption=True)
+        item = service._functions["end_call"]
+        self.assertTrue(item.cancel_on_interruption)  # explicit wins
+        self.assertEqual(item.timeout_secs, 60)  # decorator still applies
+
+    def test_undecorated_handler_uses_defaults(self):
+        service = LLMService()
+        service.register_function("do_thing", self._handler)
+        item = service._functions["do_thing"]
+        self.assertTrue(item.cancel_on_interruption)
+        self.assertIsNone(item.timeout_secs)
 
     def test_unregister_function_removes_handler(self):
         service = LLMService()

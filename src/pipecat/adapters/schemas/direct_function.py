@@ -292,13 +292,14 @@ class DirectFunctionWrapper(BaseDirectFunctionWrapper):
 def tool_options(
     fn=None, *, cancel_on_interruption: bool = True, timeout_secs: float | None = None
 ):
-    """Configure a direct function's call options.
+    """Configure a handler's call options.
 
-    This decorator is optional. A direct function listed in an ``LLMContext``'s
-    tools is registered automatically with default call options, so the
-    decorator is only needed when you want to override those defaults. It
-    attaches the options to the function and returns it unchanged — it does not
-    register anything, so decorated functions can stay at module level.
+    This decorator is optional. A handler advertised in an ``LLMContext``'s
+    tools — a direct function, or the ``handler`` a ``FunctionSchema`` carries —
+    is registered automatically with default call options, so the decorator is
+    only needed when you want to override those defaults. It attaches the options
+    to the handler and returns it unchanged — it does not register anything, so
+    decorated handlers can stay at module level.
 
     On an ``LLMWorker``, use ``@tool`` instead, which applies these same options
     and additionally marks the method for collection as one of the worker's tools.
