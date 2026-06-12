@@ -157,6 +157,29 @@ async def on_client_disconnected(transport, client):
     await worker.cancel()
 {% endmacro %}
 
+{# Eval-mode event handlers: telephony events (dial-in/dial-out) never fire on the
+   eval websocket transport, so only connect/disconnect wiring is needed. Dial-out
+   bots wait for the "callee" (the eval harness) to speak first, so greet=False. #}
+{% macro eval_handlers(recording=False, greet=False) %}
+@transport.event_handler("on_client_connected")
+async def on_client_connected(transport, client):
+    logger.info("Client connected")
+    {% if recording %}
+    # Start recording audio
+    await audio_buffer.start_recording()
+    {% endif %}
+    {% if greet %}
+    # Kick off the conversation
+    context.add_message({"role": "developer", "content": "Start by concisely introducing yourself."})
+    await worker.queue_frames([LLMRunFrame()])
+    {% endif %}
+
+@transport.event_handler("on_client_disconnected")
+async def on_client_disconnected(transport, client):
+    logger.info("Client disconnected")
+    await worker.cancel()
+{% endmacro %}
+
 {# Transcription event handler (feature-based) #}
 {% macro transcription_handler() %}
 @user_aggregator.event_handler("on_user_turn_stopped")

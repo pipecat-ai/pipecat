@@ -274,6 +274,12 @@ class ServiceLoader:
         transport_values = set(transport_list) if "transports" in services else set()
         if transport_values and not (transport_values & _bespoke_transport):
             imports.update(ServiceRegistry.FEATURE_IMPORTS["create_transport"])
+        elif features.get("eval") and (transport_values & _bespoke_transport):
+            # Bespoke telephony bots normally build their transport by hand, but
+            # their eval branch routes through create_transport and needs to
+            # detect eval runs via EvalRunnerArguments.
+            imports.update(ServiceRegistry.FEATURE_IMPORTS["create_transport"])
+            imports.update(ServiceRegistry.FEATURE_IMPORTS["eval_bespoke"])
 
         # LLMRunFrame kicks off the conversation on connect. Dial-out bots wait for the
         # callee instead, so they neither queue nor import it.

@@ -2,6 +2,23 @@
    room URL/token and dial-out settings arrive in the request body (AgentRequest).
    The transport is built by hand here; run_bot reads the dial-out settings from
    runner_args.body. (Dial-in goes through the unified create_transport path.) #}
+{% if enable_eval %}
+    # Behavioral evals: run with `-t eval` to drive this bot via `pipecat eval`.
+    # Eval runs don't dial out — the harness connects over a local WebSocket.
+    if isinstance(runner_args, EvalRunnerArguments):
+        transport = await create_transport(
+            runner_args,
+            {
+                "eval": lambda: WebsocketServerParams(
+                    audio_in_enabled=True,
+                    audio_out_enabled=True,
+                ),
+            },
+        )
+        await run_bot(transport, runner_args)
+        return
+
+{% endif %}
     try:
         request = AgentRequest.model_validate(runner_args.body)
 

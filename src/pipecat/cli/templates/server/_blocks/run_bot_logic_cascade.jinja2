@@ -1,11 +1,29 @@
 {# Main bot logic for cascade mode - uses indent_level variable passed from parent #}
 {% if 'twilio_daily_sip_dialin' in transports %}
+{% if enable_eval %}
+{{ "# SIP call details (sip_uri, call_sid) arrive in the request body (eval runs have none)" | indent(indent_level, first=True) }}
+{{ "request = (" | indent(indent_level, first=True) }}
+{{ "AgentRequest.model_validate(runner_args.body)" | indent(indent_level + 4, first=True) }}
+{{ "if not isinstance(runner_args, EvalRunnerArguments)" | indent(indent_level + 4, first=True) }}
+{{ "else None" | indent(indent_level + 4, first=True) }}
+{{ ")" | indent(indent_level, first=True) }}
+{% else %}
 {{ "# SIP call details (sip_uri, call_sid) arrive in the request body" | indent(indent_level, first=True) }}
 {{ "request = AgentRequest.model_validate(runner_args.body)" | indent(indent_level, first=True) }}
+{% endif %}
 
 {% elif 'daily_pstn_dialout' in transports or 'twilio_daily_sip_dialout' in transports %}
+{% if enable_eval %}
+{{ "# Outbound call settings arrive in the request body (eval runs have none)" | indent(indent_level, first=True) }}
+{{ "dialout_settings = (" | indent(indent_level, first=True) }}
+{{ "AgentRequest.model_validate(runner_args.body).dialout_settings" | indent(indent_level + 4, first=True) }}
+{{ "if not isinstance(runner_args, EvalRunnerArguments)" | indent(indent_level + 4, first=True) }}
+{{ "else None" | indent(indent_level + 4, first=True) }}
+{{ ")" | indent(indent_level, first=True) }}
+{% else %}
 {{ "# Outbound call settings arrive in the request body" | indent(indent_level, first=True) }}
 {{ "dialout_settings = AgentRequest.model_validate(runner_args.body).dialout_settings" | indent(indent_level, first=True) }}
+{% endif %}
 
 {% endif %}
 {{ "# Speech-to-Text service" | indent(indent_level, first=True) }}
@@ -55,19 +73,47 @@
 {{ ")" | indent(indent_level, first=True) }}
 
 {% if 'daily_pstn_dialout' in transports or 'twilio_daily_sip_dialout' in transports %}
+{% if enable_eval %}
+{{ "# Dial-out only applies to real calls; eval runs get minimal handlers below." | indent(indent_level, first=True) }}
+{{ "if dialout_settings is not None:" | indent(indent_level, first=True) }}
+{{ "# Initialize dialout manager" | indent(indent_level + 4, first=True) }}
+{{ "dialout_manager = DialoutManager(transport, dialout_settings)" | indent(indent_level + 4, first=True) }}
+
+{% else %}
 {{ "# Initialize dialout manager" | indent(indent_level, first=True) }}
 {{ "dialout_manager = DialoutManager(transport, dialout_settings)" | indent(indent_level, first=True) }}
 
 {% endif %}
-{# Event handlers - use macros based on transport type #}
+{% endif %}
+{# Event handlers - use macros based on transport type. With evals enabled, the
+   telephony-specific handlers only apply to real calls; eval runs get a minimal set. #}
 {% if 'daily_pstn_dialin' in transports %}
 {{ handlers.daily_pstn_dialin_handlers(recording) | indent(indent_level, first=True) }}
 {% elif 'daily_pstn_dialout' in transports %}
+{% if enable_eval %}
+{{ handlers.daily_pstn_dialout_handlers(recording) | indent(indent_level + 4, first=True) }}
+{{ "else:" | indent(indent_level, first=True) }}
+{{ handlers.eval_handlers(recording) | indent(indent_level + 4, first=True) }}
+{% else %}
 {{ handlers.daily_pstn_dialout_handlers(recording) | indent(indent_level, first=True) }}
+{% endif %}
 {% elif 'twilio_daily_sip_dialin' in transports %}
+{% if enable_eval %}
+{{ "if request is not None:" | indent(indent_level, first=True) }}
+{{ handlers.twilio_daily_sip_dialin_handlers(recording) | indent(indent_level + 4, first=True) }}
+{{ "else:" | indent(indent_level, first=True) }}
+{{ handlers.eval_handlers(recording, greet=True) | indent(indent_level + 4, first=True) }}
+{% else %}
 {{ handlers.twilio_daily_sip_dialin_handlers(recording) | indent(indent_level, first=True) }}
+{% endif %}
 {% elif 'twilio_daily_sip_dialout' in transports %}
+{% if enable_eval %}
+{{ handlers.twilio_daily_sip_dialout_handlers(recording) | indent(indent_level + 4, first=True) }}
+{{ "else:" | indent(indent_level, first=True) }}
+{{ handlers.eval_handlers(recording) | indent(indent_level + 4, first=True) }}
+{% else %}
 {{ handlers.twilio_daily_sip_dialout_handlers(recording) | indent(indent_level, first=True) }}
+{% endif %}
 {% else %}
 {{ handlers.standard_handlers(recording, bot_type) | indent(indent_level, first=True) }}
 {% endif %}

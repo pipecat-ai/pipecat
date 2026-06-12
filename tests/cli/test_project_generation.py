@@ -920,6 +920,77 @@ def test_dialout_and_sip_keep_bespoke_but_standard_run_bot(temp_output_dir):
         ast.parse(bot)
 
 
+def test_eval_transport_dialout_scaffold(temp_output_dir):
+    """``enable_eval`` on bespoke telephony bots (dial-out/SIP) wires a real eval
+    branch: the bot detects EvalRunnerArguments, builds the eval transport via
+    create_transport, and skips the dial-out/SIP-only body parsing and handlers."""
+    scenarios = {
+        "evdout": dict(transports=["daily_pstn_dialout"], daily_pstn_mode="dial-out"),
+        "evsin": dict(transports=["twilio_daily_sip_dialin"], twilio_daily_sip_mode="dial-in"),
+        "evsout": dict(transports=["twilio_daily_sip_dialout"], twilio_daily_sip_mode="dial-out"),
+    }
+    for name, kwargs in scenarios.items():
+        bot = _gen_bot(temp_output_dir, name, enable_eval=True, **kwargs)
+
+        # Eval branch in bot(): detect eval runs and route through create_transport.
+        assert "if isinstance(runner_args, EvalRunnerArguments):" in bot
+        assert '"eval": lambda: WebsocketServerParams(' in bot
+        assert "from pipecat.runner.types import EvalRunnerArguments" in bot
+        assert "from pipecat.runner.utils import create_transport" in bot
+        assert "from pipecat.transports.websocket.server import WebsocketServerParams" in bot
+
+        # The real-call path is still bespoke.
+        assert "DailyTransport(" in bot
+        assert "AgentRequest.model_validate(runner_args.body)" in bot
+
+        if kwargs["transports"][0].endswith("dialout"):
+            # Body parsing and DialoutManager are guarded for eval runs.
+            assert "if not isinstance(runner_args, EvalRunnerArguments)" in bot
+            assert "if dialout_settings is not None:" in bot
+        else:
+            assert "if request is not None:" in bot
+
+        ast.parse(bot)
+
+
+def test_eval_transport_dialout_off_by_default(temp_output_dir):
+    """Without ``enable_eval``, dial-out bots have no eval wiring at all."""
+    bot = _gen_bot(
+        temp_output_dir, "noevdout", transports=["daily_pstn_dialout"], daily_pstn_mode="dial-out"
+    )
+
+    assert "WebsocketServerParams" not in bot
+    assert "EvalRunnerArguments" not in bot
+    assert "from pipecat.runner.utils import create_transport" not in bot
+    assert '"eval":' not in bot
+    ast.parse(bot)
+
+
+def test_eval_transport_dialout_realtime_scaffold(temp_output_dir):
+    """The eval branch is also wired for realtime-mode dial-out bots."""
+    name = "evdoutrt"
+    path = temp_output_dir / name
+    if path.exists():
+        shutil.rmtree(path)
+    ProjectGenerator(
+        ProjectConfig(
+            project_name=name,
+            bot_type="telephony",
+            mode="realtime",
+            realtime_service="openai_realtime",
+            transports=["daily_pstn_dialout"],
+            daily_pstn_mode="dial-out",
+            enable_eval=True,
+        )
+    ).generate(output_dir=temp_output_dir)
+    bot = (path / "server" / "bot.py").read_text()
+
+    assert "if isinstance(runner_args, EvalRunnerArguments):" in bot
+    assert '"eval": lambda: WebsocketServerParams(' in bot
+    assert "if dialout_settings is not None:" in bot
+    ast.parse(bot)
+
+
 def test_run_bot_signature_uniform_across_modes(temp_output_dir):
     """Every generated bot — web, telephony, dial-out — shares one run_bot signature."""
     path = temp_output_dir / "webrb"

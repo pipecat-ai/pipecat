@@ -214,6 +214,9 @@ FEATURE_IMPORTS = {
     ],
     "create_transport": ["from pipecat.runner.utils import create_transport"],
     "eval": ["from pipecat.transports.websocket.server import WebsocketServerParams"],
+    # Bespoke telephony bots (dial-out/SIP) build their transport by hand, so their
+    # eval branch needs to detect eval runs and route through create_transport.
+    "eval_bespoke": ["from pipecat.runner.types import EvalRunnerArguments"],
 }
 
 # Base imports always included in generated bot files
