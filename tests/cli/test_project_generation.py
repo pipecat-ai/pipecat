@@ -819,8 +819,8 @@ def test_eval_transport_opt_in(temp_output_dir):
     ast.parse(with_eval)  # raises if the generated bot has a syntax error
 
 
-def _gen_bot(temp_output_dir, name, **kwargs):
-    """Generate a telephony cascade bot and return its bot.py text.
+def _gen_bot(temp_output_dir, name, *, mode="cascade", **kwargs):
+    """Generate a telephony bot (cascade by default) and return its bot.py text.
 
     Also asserts the generated server is formatting- and Pyflakes-clean, so the
     dial-in/dial-out/SIP bots (not covered by TEST_CONFIGS) are lint-guarded too.
@@ -828,14 +828,20 @@ def _gen_bot(temp_output_dir, name, **kwargs):
     path = temp_output_dir / name
     if path.exists():
         shutil.rmtree(path)
+    if mode == "cascade":
+        services = dict(
+            stt_service="deepgram_stt",
+            llm_service="openai_llm",
+            tts_service="cartesia_tts",
+        )
+    else:
+        services = dict(realtime_service="openai_realtime")
     ProjectGenerator(
         ProjectConfig(
             project_name=name,
             bot_type="telephony",
-            mode="cascade",
-            stt_service="deepgram_stt",
-            llm_service="openai_llm",
-            tts_service="cartesia_tts",
+            mode=mode,
+            **services,
             **kwargs,
         )
     ).generate(output_dir=temp_output_dir)
@@ -917,7 +923,149 @@ def test_dialout_and_sip_keep_bespoke_but_standard_run_bot(temp_output_dir):
         assert "DailyTransport(" in bot
         assert "AgentRequest.model_validate(runner_args.body)" in bot
 
+        # Production-only project (no local transport, no evals): no fallback.
+        assert "from pipecat.runner.utils import create_transport" not in bot
+        assert "transport_params = {" not in bot
+
         ast.parse(bot)
+
+
+_BODY_DISCRIMINATOR = 'isinstance(runner_args.body, dict) and "room_url" in runner_args.body'
+
+
+def test_bespoke_scenarios_local_fallback(temp_output_dir):
+    """With a local webrtc transport and evals enabled, the dial-out/SIP bots keep
+    the bespoke production path but fall back to create_transport for local runs.
+
+    The discriminator is the request-body shape (production requests carry a
+    room_url), NOT the runner-args type: the dev runner's /start endpoint passes
+    plain RunnerArguments for these flows."""
+    scenarios = {
+        "doutlf": dict(
+            transports=["daily_pstn_dialout", "smallwebrtc"], daily_pstn_mode="dial-out"
+        ),
+        "sinlf": dict(
+            transports=["twilio_daily_sip_dialin", "smallwebrtc"], twilio_daily_sip_mode="dial-in"
+        ),
+        "soutlf": dict(
+            transports=["twilio_daily_sip_dialout", "smallwebrtc"],
+            twilio_daily_sip_mode="dial-out",
+        ),
+    }
+    for name, kwargs in scenarios.items():
+        bot = _gen_bot(temp_output_dir, name, enable_eval=True, **kwargs)
+
+        # Production path is still bespoke and guarded by the body shape.
+        assert "DailyTransport(" in bot
+        assert "AgentRequest.model_validate(runner_args.body)" in bot
+        assert _BODY_DISCRIMINATOR in bot
+
+        # Local fallback: create_transport with the webrtc and eval entries.
+        assert "transport_params = {" in bot
+        assert '"webrtc": lambda: TransportParams(' in bot
+        assert '"eval": lambda: WebsocketServerParams(' in bot
+        assert "transport = await create_transport(runner_args, transport_params)" in bot
+        assert "from pipecat.runner.utils import create_transport" in bot
+
+        ast.parse(bot)
+
+
+def test_dialout_local_run_skips_dialout_machinery(temp_output_dir):
+    """In a local run there are no dial-out settings: run_bot only creates the
+    DialoutManager and registers the dial-out handlers when the body carried
+    them, and the bot stays silent otherwise (no greeting — the user or eval
+    harness initiates)."""
+    scenarios = {
+        "doutsk": dict(
+            transports=["daily_pstn_dialout", "smallwebrtc"], daily_pstn_mode="dial-out"
+        ),
+        "soutsk": dict(
+            transports=["twilio_daily_sip_dialout", "smallwebrtc"],
+            twilio_daily_sip_mode="dial-out",
+        ),
+    }
+    for name, kwargs in scenarios.items():
+        bot = _gen_bot(temp_output_dir, name, **kwargs)
+
+        assert "dialout_settings = None" in bot
+        assert "if dialout_settings:" in bot
+        assert "dialout_manager = DialoutManager(transport, dialout_settings)" in bot
+        # Dial-out bots wait for the callee to speak; local runs stay silent too.
+        assert "LLMRunFrame" not in bot
+
+        ast.parse(bot)
+
+
+def test_sip_dialin_local_run_skips_call_forwarding(temp_output_dir):
+    """In a local run there is no Twilio call: the SIP dial-in bot only forwards
+    the call when the body carried the call details."""
+    bot = _gen_bot(
+        temp_output_dir,
+        "sinsk",
+        transports=["twilio_daily_sip_dialin", "smallwebrtc"],
+        twilio_daily_sip_mode="dial-in",
+    )
+
+    assert "request = None" in bot
+    assert "if request:" in bot
+    assert "on_dialin_ready" in bot
+
+    ast.parse(bot)
+
+
+def test_bespoke_eval_only_fallback(temp_output_dir):
+    """Evals alone (no extra webrtc transport) still produce the fallback, with
+    just the eval entry."""
+    bot = _gen_bot(
+        temp_output_dir,
+        "douteval",
+        transports=["daily_pstn_dialout"],
+        daily_pstn_mode="dial-out",
+        enable_eval=True,
+    )
+
+    assert _BODY_DISCRIMINATOR in bot
+    assert '"eval": lambda: WebsocketServerParams(' in bot
+    assert '"webrtc":' not in bot
+    assert "transport = await create_transport(runner_args, transport_params)" in bot
+
+    ast.parse(bot)
+
+
+def test_bespoke_daily_local_transport(temp_output_dir):
+    """Choosing Daily as the local WebRTC transport emits a "daily" entry in the
+    fallback (used by the dev runner's /daily route)."""
+    bot = _gen_bot(
+        temp_output_dir,
+        "doutdaily",
+        transports=["daily_pstn_dialout", "daily"],
+        daily_pstn_mode="dial-out",
+    )
+
+    assert '"daily": lambda: DailyParams(' in bot
+    assert "transport = await create_transport(runner_args, transport_params)" in bot
+
+    ast.parse(bot)
+
+
+def test_bespoke_local_fallback_realtime(temp_output_dir):
+    """The local fallback also applies to realtime bots (shared template blocks)."""
+    bot = _gen_bot(
+        temp_output_dir,
+        "doutrt",
+        mode="realtime",
+        transports=["daily_pstn_dialout", "smallwebrtc"],
+        daily_pstn_mode="dial-out",
+        enable_eval=True,
+    )
+
+    assert _BODY_DISCRIMINATOR in bot
+    assert '"webrtc": lambda: TransportParams(' in bot
+    assert '"eval": lambda: WebsocketServerParams(' in bot
+    assert "dialout_settings = None" in bot
+    assert "if dialout_settings:" in bot
+
+    ast.parse(bot)
 
 
 def test_run_bot_signature_uniform_across_modes(temp_output_dir):

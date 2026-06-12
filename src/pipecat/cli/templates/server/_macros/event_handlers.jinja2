@@ -56,8 +56,8 @@ async def on_dialin_error(transport, data):
     await worker.cancel()
 {% endmacro %}
 
-{# Daily PSTN dial-out event handlers #}
-{% macro daily_pstn_dialout_handlers(recording=False) %}
+{# Dial-out call handlers shared by Daily PSTN and Twilio + Daily SIP dial-out #}
+{% macro _dialout_call_handlers(recording=False) %}
 @transport.event_handler("on_joined")
 async def on_joined(transport, data):
     await dialout_manager.attempt_dialout()
@@ -80,6 +80,21 @@ async def on_dialout_error(transport, data: Any):
     else:
         logger.error("No more retries allowed, stopping bot.")
         await worker.cancel()
+{% endmacro %}
+
+{# Daily PSTN dial-out event handlers. With guarded=True the bot also supports
+   local runs (webrtc/eval): the dial-out machinery is only set up when the
+   request carried dial-out settings, and the bot stays silent otherwise. #}
+{% macro daily_pstn_dialout_handlers(recording=False, guarded=False) %}
+{% if guarded %}
+if dialout_settings:
+    # Production flow: place the outbound call once the bot has joined the room.
+    dialout_manager = DialoutManager(transport, dialout_settings)
+
+{{ _dialout_call_handlers(recording) | indent(4, first=True) }}
+{% else %}
+{{ _dialout_call_handlers(recording) }}
+{% endif %}
 
 @transport.event_handler("on_client_disconnected")
 async def on_client_disconnected(transport, client):
@@ -87,8 +102,8 @@ async def on_client_disconnected(transport, client):
     await worker.cancel()
 {% endmacro %}
 
-{# Twilio + Daily SIP dial-in event handlers #}
-{% macro twilio_daily_sip_dialin_handlers(recording=False) %}
+{# Twilio call-forwarding handlers used by the SIP dial-in scenario #}
+{% macro _sip_dialin_call_handlers() %}
 @transport.event_handler("on_dialin_ready")
 async def on_dialin_ready(transport, sip_endpoint):
     logger.info(f"Forwarding call {request.call_sid} to {request.sip_uri}")
@@ -109,6 +124,19 @@ async def on_dialin_ready(transport, sip_endpoint):
 async def on_dialin_error(transport, data):
     logger.error(f"Dial-in error: {data}")
     await worker.cancel()
+{% endmacro %}
+
+{# Twilio + Daily SIP dial-in event handlers. With guarded=True the bot also
+   supports local runs (webrtc/eval): the Twilio call forwarding only happens
+   when the request carried the SIP call details. #}
+{% macro twilio_daily_sip_dialin_handlers(recording=False, guarded=False) %}
+{% if guarded %}
+if request:
+    # Production flow: forward the Twilio call to the Daily SIP endpoint.
+{{ _sip_dialin_call_handlers() | indent(4, first=True) }}
+{% else %}
+{{ _sip_dialin_call_handlers() }}
+{% endif %}
 
 @transport.event_handler("on_client_connected")
 async def on_client_connected(transport, client):
@@ -127,34 +155,8 @@ async def on_client_disconnected(transport, client):
 {% endmacro %}
 
 {# Twilio + Daily SIP dial-out event handlers (same as Daily PSTN dial-out) #}
-{% macro twilio_daily_sip_dialout_handlers(recording=False) %}
-@transport.event_handler("on_joined")
-async def on_joined(transport, data):
-    await dialout_manager.attempt_dialout()
-
-@transport.event_handler("on_dialout_answered")
-async def on_dialout_answered(transport, data):
-    logger.debug(f"Dial-out answered: {data}")
-    dialout_manager.mark_successful()
-    {% if recording %}
-    # Start recording audio
-    await audio_buffer.start_recording()
-    {% endif %}
-
-@transport.event_handler("on_dialout_error")
-async def on_dialout_error(transport, data: Any):
-    logger.error(f"Dial-out error, retrying: {data}")
-
-    if dialout_manager.should_retry():
-        await dialout_manager.attempt_dialout()
-    else:
-        logger.error("No more retries allowed, stopping bot.")
-        await worker.cancel()
-
-@transport.event_handler("on_client_disconnected")
-async def on_client_disconnected(transport, client):
-    logger.info("Client disconnected")
-    await worker.cancel()
+{% macro twilio_daily_sip_dialout_handlers(recording=False, guarded=False) %}
+{{ daily_pstn_dialout_handlers(recording, guarded) -}}
 {% endmacro %}
 
 {# Transcription event handler (feature-based) #}

@@ -1,11 +1,28 @@
 {# Main bot logic for realtime mode - uses indent_level variable passed from parent #}
+{% set has_local_transport = 'smallwebrtc' in transports or 'daily' in transports or enable_eval %}
 {% if 'twilio_daily_sip_dialin' in transports %}
+{% if has_local_transport %}
+{{ "# SIP call details (sip_uri, call_sid) arrive in the request body in the" | indent(indent_level, first=True) }}
+{{ "# production flow (server.py). In a local run (webrtc/eval) there is no call." | indent(indent_level, first=True) }}
+{{ "request = None" | indent(indent_level, first=True) }}
+{{ 'if isinstance(runner_args.body, dict) and "room_url" in runner_args.body:' | indent(indent_level, first=True) }}
+{{ "request = AgentRequest.model_validate(runner_args.body)" | indent(indent_level + 4, first=True) }}
+{% else %}
 {{ "# SIP call details (sip_uri, call_sid) arrive in the request body" | indent(indent_level, first=True) }}
 {{ "request = AgentRequest.model_validate(runner_args.body)" | indent(indent_level, first=True) }}
+{% endif %}
 
 {% elif 'daily_pstn_dialout' in transports or 'twilio_daily_sip_dialout' in transports %}
+{% if has_local_transport %}
+{{ "# Outbound call settings arrive in the request body in the production flow" | indent(indent_level, first=True) }}
+{{ "# (server.py). In a local run (webrtc/eval) there is no call to place." | indent(indent_level, first=True) }}
+{{ "dialout_settings = None" | indent(indent_level, first=True) }}
+{{ 'if isinstance(runner_args.body, dict) and "room_url" in runner_args.body:' | indent(indent_level, first=True) }}
+{{ "dialout_settings = AgentRequest.model_validate(runner_args.body).dialout_settings" | indent(indent_level + 4, first=True) }}
+{% else %}
 {{ "# Outbound call settings arrive in the request body" | indent(indent_level, first=True) }}
 {{ "dialout_settings = AgentRequest.model_validate(runner_args.body).dialout_settings" | indent(indent_level, first=True) }}
+{% endif %}
 
 {% endif %}
 {{ "# Realtime LLM service (handles STT, LLM, and TTS internally)" | indent(indent_level, first=True) }}
@@ -40,20 +57,22 @@
 {% endif %}
 {{ ")" | indent(indent_level, first=True) }}
 
-{% if 'daily_pstn_dialout' in transports or 'twilio_daily_sip_dialout' in transports %}
+{% if ('daily_pstn_dialout' in transports or 'twilio_daily_sip_dialout' in transports) and not has_local_transport %}
 {{ "# Initialize dialout manager" | indent(indent_level, first=True) }}
 {{ "dialout_manager = DialoutManager(transport, dialout_settings)" | indent(indent_level, first=True) }}
 
 {% endif %}
-{# Event handlers - use macros based on transport type #}
+{# Event handlers - use macros based on transport type. For the PSTN/SIP flows
+   with a local transport (webrtc/eval), guarded=True wraps the call-specific
+   handlers so a local run skips the telephony machinery. #}
 {% if 'daily_pstn_dialin' in transports %}
 {{ handlers.daily_pstn_dialin_handlers(recording) | indent(indent_level, first=True) }}
 {% elif 'daily_pstn_dialout' in transports %}
-{{ handlers.daily_pstn_dialout_handlers(recording) | indent(indent_level, first=True) }}
+{{ handlers.daily_pstn_dialout_handlers(recording, guarded=has_local_transport) | indent(indent_level, first=True) }}
 {% elif 'twilio_daily_sip_dialin' in transports %}
-{{ handlers.twilio_daily_sip_dialin_handlers(recording) | indent(indent_level, first=True) }}
+{{ handlers.twilio_daily_sip_dialin_handlers(recording, guarded=has_local_transport) | indent(indent_level, first=True) }}
 {% elif 'twilio_daily_sip_dialout' in transports %}
-{{ handlers.twilio_daily_sip_dialout_handlers(recording) | indent(indent_level, first=True) }}
+{{ handlers.twilio_daily_sip_dialout_handlers(recording, guarded=has_local_transport) | indent(indent_level, first=True) }}
 {% else %}
 {{ handlers.standard_handlers(recording, bot_type) | indent(indent_level, first=True) }}
 {% endif %}
