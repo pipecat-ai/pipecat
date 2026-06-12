@@ -145,6 +145,7 @@ Core concepts:
   ```
   In **both**, the **assistant aggregator goes after `transport.output()`** so it records what was actually produced. Getting this order wrong is a common, subtle bug.
 - **Context aggregation** accumulates conversation messages for the LLM. User and assistant aggregators are created together (a pair) and bracket the response leg (LLM→TTS in cascade; the S2S service in realtime) as shown above.
+- **The LLM's output is spoken.** TTS reads exactly what the LLM writes — markdown, emojis, and bullet lists come out as noise. The scaffold's `system_instruction` already guards this: *"Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken."* When you rewrite the prompt for the use case, **carry that sentence over**.
 - **Function calling (tools)** — how the bot *does* things, and where most of your app code goes. A tool is a plain async function: its **name, typed signature, and docstring become the schema automatically**, and it reports back through `params.result_callback` — that's what feeds the result into the conversation so the LLM can speak it:
   ```python
   async def check_stock(params: FunctionCallParams, item: str):
@@ -263,7 +264,3 @@ Re-set the secrets whenever keys change. Tail a live bot with `pipecat cloud age
 - The generated `if os.environ.get("ENV") != "local"` guard, plus the dev runner forcing `ENV=local` on every local run (including `-t eval`), means the bot boots locally with no Krisp model or license and turns Krisp on only once deployed to Pipecat Cloud. Don't add your own guard.
 - Deploying to Pipecat Cloud → the scaffold default is already right; don't ask the user how to wire Krisp.
 - Krisp with **no** cloud deploy is the only case to raise: the user self-hosts the SDK + model (`KRISP_VIVA_FILTER_MODEL_PATH`, `KRISP_VIVA_API_KEY`).
-
----
-
-_Concepts and structure above are intended to be stable; keep API specifics out of this file and in the live sources (§3). When in doubt about any signature, confirm it via the configured Pipecat MCP before writing it._
