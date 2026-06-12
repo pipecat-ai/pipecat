@@ -716,6 +716,8 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
             boosted_lm_score=4.0,
             max_alternatives=1,
             word_time_offsets=False,
+            speaker_diarization=False,
+            diarization_max_speakers=0,
         )
 
         # 2. (no deprecated direct args for this service)
