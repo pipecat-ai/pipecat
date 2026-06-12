@@ -6082,7 +6082,7 @@ PIPECAT_SETUP_FILES="setup1.py:setup.py:..."`). Each file must define a
   `@transport.output().event_handler("on_after_push_frame")` event handler or a
   custom processor.
 
-## Fixed
+### Fixed
 
 - Fixed an issue in `AWSBedrockLLMService` where timeout exceptions weren't
   being detected.
