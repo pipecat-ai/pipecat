@@ -1,7 +1,7 @@
 {# Twilio + Daily SIP bot entry point (both dial-in and dial-out) #}
 {% if enable_eval %}
     # Behavioral evals: run with `-t eval` to drive this bot via `pipecat eval`.
-    # Eval runs don't place calls — the harness connects over a local WebSocket.
+    # Eval runs don't place calls: the harness connects over a local WebSocket.
     if isinstance(runner_args, EvalRunnerArguments):
         transport = await create_transport(
             runner_args,

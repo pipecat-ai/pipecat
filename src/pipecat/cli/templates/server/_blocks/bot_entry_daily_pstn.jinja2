@@ -4,7 +4,7 @@
    runner_args.body. (Dial-in goes through the unified create_transport path.) #}
 {% if enable_eval %}
     # Behavioral evals: run with `-t eval` to drive this bot via `pipecat eval`.
-    # Eval runs don't dial out — the harness connects over a local WebSocket.
+    # Eval runs don't dial out: the harness connects over a local WebSocket.
     if isinstance(runner_args, EvalRunnerArguments):
         transport = await create_transport(
             runner_args,
