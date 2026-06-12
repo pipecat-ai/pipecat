@@ -24,8 +24,8 @@ class FunctionSchema:
     This schema defines the function's name, description, parameter properties, and
     required parameters, following specifications required by AI service providers.
 
-    A schema may also carry the ``handler`` that services the function call. When
-    set, the LLM service registers it automatically for any `LLMContext` that
+    A schema may also carry the ``handler`` that runs when the function is called.
+    When set, the LLM service registers it automatically for any `LLMContext` that
     advertises the schema, so no separate ``register_function`` call is needed.
     """
 
@@ -44,9 +44,9 @@ class FunctionSchema:
             description: Description of what the function does.
             properties: Dictionary defining parameter types, descriptions, and constraints.
             required: List of property names that are required parameters.
-            handler: Optional handler servicing calls to this function. When
-                provided, the LLM service registers it automatically wherever the
-                schema is advertised in the `LLMContext`, making a separate
+            handler: Optional handler for this function. When provided, the LLM
+                service registers it automatically wherever the schema is
+                advertised in the `LLMContext`, making a separate
                 ``register_function`` call unnecessary. Decorate the handler with
                 ``@tool_options`` to override its default call options
                 (``cancel_on_interruption``, ``timeout_secs``).
@@ -111,10 +111,10 @@ class FunctionSchema:
 
     @property
     def handler(self) -> "FunctionCallHandler | None":
-        """Get the handler servicing calls to this function.
+        """Get the handler for this function, if any.
 
         Returns:
-            The handler servicing calls to this function, or ``None`` if handler
-            is provided separately, through ``register_function``.
+            The handler for this function, or ``None`` if it's provided
+            separately, through ``register_function``.
         """
         return self._handler

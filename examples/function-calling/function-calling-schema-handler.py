@@ -6,10 +6,10 @@
 
 """Demonstration of bundling a handler on a ``FunctionSchema``.
 
-A ``FunctionSchema`` can carry the ``handler`` that services its calls. When it
-does, the LLM service registers that handler automatically wherever the schema
-is advertised (in an ``LLMContext`` or via an ``LLMSetToolsFrame``), so there's
-no separate ``llm.register_function(...)`` call to keep in sync.
+A ``FunctionSchema`` can carry the ``handler`` that runs when the LLM calls it.
+When it does, the LLM service registers that handler automatically wherever the
+schema is advertised (in an ``LLMContext`` or via an ``LLMSetToolsFrame``), so
+there's no separate ``llm.register_function(...)`` call to keep in sync.
 
 This sits between the two other ways to define a tool:
 
