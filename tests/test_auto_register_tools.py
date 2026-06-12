@@ -380,27 +380,61 @@ class TestUnregisterInteractionWithAutoRegister(unittest.TestCase):
         self.assertTrue(service.has_function("get_current_weather"))
 
 
-class TestRegisterDirectFunctionOptionPrecedence(unittest.TestCase):
-    """Explicit arg > @tool_options/@tool decorator > default, on the explicit path."""
+class TestRegisterFunctionOptionPrecedence(unittest.TestCase):
+    """Explicit arg > @tool_options/@tool decorator > default.
+
+    register_function and register_direct_function share the resolution
+    (_resolve_tool_option), so both registrars are exercised here. The
+    timeout-specific edge cases are covered once, via the direct path.
+    """
 
     def _service(self) -> LLMService:
         return LLMService()
 
-    def test_decorator_values_used_when_no_explicit_args(self):
+    # -- register_function --------------------------------------------------
+
+    def test_register_function_decorator_values_used_when_no_explicit_args(self):
+        service = self._service()
+        service.register_function("end_call", end_call_handler)  # decorated: False / 60
+        item = service._functions["end_call"]
+        self.assertFalse(item.cancel_on_interruption)
+        self.assertEqual(item.timeout_secs, 60)
+
+    def test_register_function_defaults_used_for_undecorated_handler(self):
+        service = self._service()
+
+        async def handler(params: FunctionCallParams):
+            await params.result_callback({})
+
+        service.register_function("do_thing", handler)  # undecorated
+        item = service._functions["do_thing"]
+        self.assertTrue(item.cancel_on_interruption)
+        self.assertIsNone(item.timeout_secs)
+
+    def test_register_function_explicit_arg_overrides_decorator(self):
+        service = self._service()
+        service.register_function("end_call", end_call_handler, cancel_on_interruption=True)
+        item = service._functions["end_call"]
+        self.assertTrue(item.cancel_on_interruption)  # explicit wins
+        self.assertEqual(item.timeout_secs, 60)  # decorator still applies
+
+    # -- register_direct_function -------------------------------------------
+
+    def test_register_direct_function_decorator_values_used_when_no_explicit_args(self):
         service = self._service()
         service._register_direct_function(end_call)  # decorated: False / 60
         item = service._functions["end_call"]
         self.assertFalse(item.cancel_on_interruption)
         self.assertEqual(item.timeout_secs, 60)
 
-    def test_defaults_used_for_undecorated_function(self):
+    def test_register_direct_function_defaults_used_for_undecorated_function(self):
         service = self._service()
         service._register_direct_function(get_current_weather)  # undecorated
         item = service._functions["get_current_weather"]
         self.assertTrue(item.cancel_on_interruption)
         self.assertIsNone(item.timeout_secs)
 
-    def test_explicit_arg_overrides_decorator(self):
+    def test_register_direct_function_explicit_arg_overrides_decorator(self):
         service = self._service()
         # Override one option explicitly; the other still comes from the decorator.
         service._register_direct_function(end_call, cancel_on_interruption=True)
@@ -408,14 +442,14 @@ class TestRegisterDirectFunctionOptionPrecedence(unittest.TestCase):
         self.assertTrue(item.cancel_on_interruption)  # explicit wins
         self.assertEqual(item.timeout_secs, 60)  # decorator still applies
 
-    def test_explicit_timeout_overrides_decorator(self):
+    def test_register_direct_function_explicit_timeout_overrides_decorator(self):
         service = self._service()
         service._register_direct_function(end_call, timeout_secs=5)
         item = service._functions["end_call"]
         self.assertFalse(item.cancel_on_interruption)  # decorator still applies
         self.assertEqual(item.timeout_secs, 5)  # explicit wins
 
-    def test_explicit_none_timeout_falls_back_to_decorator(self):
+    def test_register_direct_function_explicit_none_timeout_falls_back_to_decorator(self):
         # None means "not provided": it falls back to the decorator value rather
         # than forcing the global default past the decorator.
         service = self._service()
@@ -566,7 +600,10 @@ class TestReservedToolName(unittest.TestCase):
 
 
 class TestClassicRegisterFunction(unittest.TestCase):
-    """register_function (non-direct handlers): options, removal, and prune-immunity."""
+    """register_function (non-direct handlers): registration and removal.
+
+    Option precedence is covered in TestRegisterFunctionOptionPrecedence.
+    """
 
     async def _handler(self, params: FunctionCallParams):
         await params.result_callback({})
@@ -581,28 +618,6 @@ class TestClassicRegisterFunction(unittest.TestCase):
         self.assertEqual(item.timeout_secs, 12)
         # Classic registrations are explicit, never advertised-set-managed.
         self.assertFalse(item.auto_registered)
-
-    def test_reads_tool_options_decorator_when_args_omitted(self):
-        service = LLMService()
-        service.register_function("end_call", end_call_handler)
-        item = service._functions["end_call"]
-        # With no explicit args, options come from @tool_options on the handler.
-        self.assertFalse(item.cancel_on_interruption)
-        self.assertEqual(item.timeout_secs, 60)
-
-    def test_explicit_args_override_decorator(self):
-        service = LLMService()
-        service.register_function("end_call", end_call_handler, cancel_on_interruption=True)
-        item = service._functions["end_call"]
-        self.assertTrue(item.cancel_on_interruption)  # explicit wins
-        self.assertEqual(item.timeout_secs, 60)  # decorator still applies
-
-    def test_undecorated_handler_uses_defaults(self):
-        service = LLMService()
-        service.register_function("do_thing", self._handler)
-        item = service._functions["do_thing"]
-        self.assertTrue(item.cancel_on_interruption)
-        self.assertIsNone(item.timeout_secs)
 
     def test_unregister_function_removes_handler(self):
         service = LLMService()
