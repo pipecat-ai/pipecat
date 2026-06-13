@@ -178,11 +178,13 @@ class InworldHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=InworldHttpTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             model: ID of the model to use for synthesis.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=InworldHttpTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             streaming: Whether to use streaming mode.
             sample_rate: Audio sample rate in Hz.
@@ -192,7 +194,8 @@ class InworldHttpTTSService(TTSService):
             params: Input parameters for Inworld TTS configuration.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=InworldHttpTTSService.Settings(...)`` instead.
+                    Use ``settings=InworldHttpTTSService.Settings(...)`` instead. Will
+                    be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

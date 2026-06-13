@@ -148,7 +148,7 @@ class LLMUserAggregatorParams:
 
             .. deprecated:: 1.2.0
                 Use ``user_turn_strategies=FilterIncompleteUserTurnStrategies()``
-                instead. Will be removed in version 2.0.0.
+                instead. Will be removed in 2.0.0.
 
         user_turn_completion_config: Configuration for turn
             completion behavior including custom instructions, timeouts, and
@@ -159,7 +159,7 @@ class LLMUserAggregatorParams:
             .. deprecated:: 1.2.0
                 Pass the config directly to
                 ``FilterIncompleteUserTurnStrategies(config=...)`` instead.
-                Will be removed in version 2.0.0.
+                Will be removed in 2.0.0.
     """
 
     add_tool_change_messages: bool = False
@@ -227,13 +227,13 @@ class LLMAssistantAggregatorParams:
 
             .. deprecated:: 1.2.0
                 Use :attr:`enable_auto_context_summarization` instead. Will be
-                removed in version 2.0.0.
+                removed in 2.0.0.
 
         context_summarization_config: Legacy field name.
 
             .. deprecated:: 1.2.0
                 Use :attr:`auto_context_summarization_config` instead. Will be
-                removed in version 2.0.0.
+                removed in 2.0.0.
     """
 
     enable_auto_context_summarization: bool = False

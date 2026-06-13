@@ -272,7 +272,8 @@ class CartesiaTTSService(WebsocketTTSService):
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=CartesiaTTSService.Settings(...)`` instead.
+                    Use ``settings=CartesiaTTSService.Settings(...)`` instead. Will
+                    be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -280,7 +281,7 @@ class CartesiaTTSService(WebsocketTTSService):
             aggregate_sentences: Whether to aggregate sentences within the TTSService.
 
                 .. deprecated:: 0.0.104
-                    Use ``text_aggregation_mode`` instead.
+                    Use ``text_aggregation_mode`` instead. Will be removed in 2.0.0.
 
             **kwargs: Additional arguments passed to the parent service.
         """
