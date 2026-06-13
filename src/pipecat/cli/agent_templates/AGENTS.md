@@ -152,7 +152,7 @@ Core concepts:
   ```
   In **both**, the **assistant aggregator goes after `transport.output()`** so it records what was actually produced. Getting this order wrong is a common, subtle bug.
 - **Context aggregation** accumulates conversation messages for the LLM. User and assistant aggregators are created together (a pair) and bracket the response leg (LLM→TTS in cascade; the S2S service in realtime) as shown above.
-- **The LLM's output is spoken.** TTS reads exactly what the LLM writes — markdown, emojis, and bullet lists come out as noise. The scaffold's `system_instruction` already guards this: *"Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken."* When you rewrite the prompt for the use case, **carry that sentence over**.
+- **The LLM's output is spoken.** TTS reads exactly what the LLM writes — markdown, emojis, and bullet lists come out as noise. The scaffold's `system_instruction` already guards this: *"Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken."* When you rewrite the prompt for the use case, **carry that sentence over**. The bot's turns — including the on-connect greeting — are composed by the LLM by default; making it speak a fixed, verbatim line is a separate mechanism (confirm via §3).
 - **Function calling (tools)** — how the bot *does* things, and where most of your app code goes. A tool is a plain async function: its **name, typed signature, and docstring become the schema automatically**, and it reports back through `params.result_callback` — that's what feeds the result into the conversation so the LLM can speak it:
   ```python
   async def check_stock(params: FunctionCallParams, item: str):
