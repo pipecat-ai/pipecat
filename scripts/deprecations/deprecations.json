@@ -3501,17 +3501,6 @@
       "location": "pipecat/transports/base_transport.py (TransportParams.video_out_bitrate)"
     },
     {
-      "subject": "WebsocketServerTransport",
-      "module": "pipecat.transports.websocket.server",
-      "kind": "class",
-      "deprecated_in": "1.4.0",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "FastAPIWebsocketTransport",
-      "message": "`WebsocketServerTransport` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `FastAPIWebsocketTransport` instead.",
-      "location": "pipecat/transports/websocket/server.py:431"
-    },
-    {
       "subject": "WhatsAppClient.handle_webhook_request.connection_callback",
       "module": "pipecat.transports.whatsapp.client",
       "kind": "parameter",
