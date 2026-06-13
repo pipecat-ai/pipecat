@@ -201,6 +201,8 @@ where = ["src"]
 "pipecat.cli" = [
     "templates/**/*",
     "templates/**/.gitignore",
+    # Agent-readiness files written by `pipecat init` (AGENTS.md + CLAUDE.md).
+    "agent_templates/**/*",
 ]
 
 [tool.pytest.ini_options]
