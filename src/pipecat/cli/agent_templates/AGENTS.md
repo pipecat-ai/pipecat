@@ -209,7 +209,7 @@ The dev runner wraps this in the eval transport + serializer when you pass `-t e
 - **Logs** — the bot logs to stdout (loguru). However you run it, keep the output durable and greppable — e.g. `uv run bot.py -t eval 2>&1 | tee /tmp/pipecat-output.txt` — so when a scenario fails you can grep the file for the traceback instead of re-running. If your harness captures background-process output natively, that works too.
 - **Clean boot** — `uv run bot.py -t eval` boots the bot as a headless eval WebSocket server (default `ws://localhost:7860`). No exceptions + pipeline assembled is your fastest "did I wire it right" signal.
 
-**The eval loop (where you live).** Boot the bot (`uv run bot.py -t eval`), then drive a scenario against it from a second terminal. The bot serves that one eval session and exits when the run finishes — the same one-bot-per-session lifecycle as production — so boot it fresh for each run as you iterate (or use `pipecat eval suite` to spawn a fresh bot per scenario from a manifest). Start in **text mode** (the default), the fast inner loop. A minimal scenario:
+**The eval loop (where you live).** Boot the bot (`uv run bot.py -t eval`), then drive a scenario against it from a second terminal. The bot serves that one eval session and exits when the run finishes, so boot it fresh for each run as you iterate (or use `pipecat eval suite` to spawn a fresh bot per scenario from a manifest). Start in **text mode** (the default), the fast inner loop. A minimal scenario:
 ```yaml
 name: capital_of_germany
 turns:
@@ -226,9 +226,9 @@ turns:
 ```bash
 uv run pipecat eval run my_scenario.yaml -v
 ```
-Text mode **bypasses STT, VAD, and TTS** (the `user:` turn is sent as text), so assert on what the bot *produced* (`response`, `function_call`), not on `user_*_speaking` events. Prefer the modality-agnostic `response` event — it resolves to the LLM text in text mode and to the bot's transcribed audio in audio mode. Exit code is non-zero if any non-skipped scenario fails.
+Text mode **bypasses STT, VAD, and TTS** (the `user:` turn is sent as text), so assert on what the bot *produced* (`response`, `function_call`), not on `user_*_speaking` events. Prefer the modality-agnostic `response` event — it resolves to the LLM text in text mode and to the bot's transcribed audio in audio mode. Exit code is non-zero if any non-skipped scenario fails. When a run fails in a confusing way, re-run with `-d` to also write `<scenario>.debug.log` — the harness's full logs for the eval STT, TTS, and LLM judge.
 
-**Escalate to audio mode** for the full round trip. Set `user: {modality: audio, speech: {service: kokoro, voice: af_heart}}` and the harness synthesizes the user's speech, so the bot's **real VAD + STT** run; set `judge: {modality: audio}` (with a `transcription:` block) so the bot **speaks** and the harness transcribes that audio into the `response` event. Kokoro (user TTS) and Moonshine (bot transcription) run **locally with no API key** — audio mode is slower but free.
+**Escalate to audio mode** for the full round trip. Set `user: {modality: audio, speech: {service: kokoro, voice: af_heart}}` and the harness synthesizes the user's speech, so the bot's **real VAD + STT** run; set `judge: {modality: audio}` (with a `transcription:` block) so the bot **speaks** and the harness transcribes that audio into the `response` event. Kokoro (user TTS) and Moonshine (bot transcription) run **locally with no API key** — audio mode is slower but free. Add `-a` to save the conversation to `<record-dir>/<scenario>.wav` for a human to listen back and confirm it sounds right.
 
 **Which mode — iterate in text, confirm in audio.** Default to **text** for the inner loop and anything about the bot's *decisions* (LLM content, system-prompt adherence, function calls, multi-turn context, barge-in) — it's fast and cheap, so run it constantly. Escalate a scenario to **audio** when text mode would *lie*, i.e. when the thing under test is the audio path itself:
 
