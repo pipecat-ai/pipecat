@@ -47,7 +47,7 @@ Want to build beautiful and engaging experiences? Checkout the [Voice UI Kit](ht
 
 ### 🛠️ Create and deploy projects
 
-Create a new project in under a minute with the [Pipecat CLI](https://github.com/pipecat-ai/pipecat-cli). Then use the CLI to monitor and deploy your agent to production.
+The [Pipecat CLI](https://docs.pipecat.ai/api-reference/cli/overview) ships with `pipecat-ai` — install it with `uv tool install "pipecat-ai[cli]"`. Scaffold a project in under a minute with `pipecat create`, or run `pipecat init` to make a project agent-ready so an AI coding assistant (Claude Code, Codex) builds it for you. Then use the CLI to monitor and deploy your agent to production.
 
 ### 🔍 Debugging
 
