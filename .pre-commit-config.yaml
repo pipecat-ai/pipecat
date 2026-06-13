@@ -30,3 +30,14 @@ repos:
         language: system
         pass_filenames: false
         files: ^src/pipecat/cli/registry/.*\.py$
+      # Audit deprecation markers: every @deprecated message matches the canonical
+      # template (subject/version/replacement consistent), every `.. deprecated::`
+      # directive parses, and every warnings.warn(DeprecationWarning) is documented.
+      # AST-based and whole-tree, so runs once when any source file changes. Same
+      # check CI runs (tests.yaml), reused here for fast local feedback.
+      - id: pipecat-deprecation-markers
+        name: check deprecation markers
+        entry: uv run pytest tests/test_deprecation_markers.py -q
+        language: system
+        pass_filenames: false
+        files: ^(src/pipecat/.*\.py|tests/test_deprecation_markers\.py)$
