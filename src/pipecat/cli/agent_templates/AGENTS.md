@@ -73,7 +73,7 @@ Transport and services are scaffold inputs (the `--transport` / `--stt` / `--llm
 
 **Transport — by where the bot runs:**
 - **Web / mobile voice** — `DailyTransport` or `SmallWebRTCTransport`.
-- **Telephony** — a WebSocket transport + the provider's serializer (Twilio, Telnyx, …), or Daily PSTN.
+- **Telephony** — a WebSocket transport (`FastAPIWebsocketTransport`) + the provider's serializer (Twilio, Telnyx, …), or `DailyTransport` for Daily PSTN/SIP.
 
 A bot can register **several transports at once** (they coexist in `transport_params`; `-t <name>` picks one per run). A convenient dev setup is your production transport *plus*:
 - **`SmallWebRTCTransport` + Pipecat Prebuilt** — the dev runner serves a built-in browser test UI at `http://localhost:7860`, so you can talk to the bot with no telephony/PSTN setup. This is how you dev/test a **telephony** bot locally.
