@@ -34,6 +34,7 @@ from loguru import logger
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.vad.aic_vad import AICVADAnalyzer
 from pipecat.frames.frames import FilterControlFrame, FilterEnableFrame
+from pipecat.utils.deprecation import deprecated
 
 # Telemetry identifier registered with the AIC SDK; identifies pipecat to the
 # vendor's usage pipeline. Kept private (leading underscore) to avoid making it
@@ -300,6 +301,10 @@ class AICFilter(BaseAudioFilter):
             raise RuntimeError("AIC processor not initialized yet. Call start(sample_rate) first.")
         return self._vad_ctx
 
+    @deprecated(
+        "`AICFilter.create_vad_analyzer` is deprecated since 1.4.0 and will be removed in 1.6.0. "
+        "Use `AICQuailVADAnalyzer` instead."
+    )
     def create_vad_analyzer(
         self,
         *,
@@ -310,8 +315,8 @@ class AICFilter(BaseAudioFilter):
         """Return an analyzer that will lazily instantiate the AIC VAD when ready.
 
         .. deprecated:: 1.4.0
-            AICFilter.create_vad_analyzer is deprecated and will be removed in Pipecat 1.6.0.
-            Construct AICQuailVADAnalyzer directly instead.
+            Construct :class:`AICQuailVADAnalyzer` directly instead.
+            Will be removed in 1.6.0.
 
         AIC VAD parameters:
           - speech_hold_duration:
@@ -336,12 +341,6 @@ class AICFilter(BaseAudioFilter):
             A lazily-initialized AICVADAnalyzer that will bind to the VAD context
             once the filter's processor has been created (after start(sample_rate)).
         """
-        warnings.warn(
-            "AICFilter.create_vad_analyzer is deprecated and will be removed "
-            "in Pipecat 1.6.0. Construct AICQuailVADAnalyzer directly instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         # Suppress AICVADAnalyzer's own DeprecationWarning here — the factory's
         # warning already informed the caller; emitting both would surface two
         # warnings for one factory call (and uncaught the inner one before

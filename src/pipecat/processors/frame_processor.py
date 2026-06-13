@@ -47,6 +47,7 @@ from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FrameP
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.frame_queue import FrameQueue
 
 if TYPE_CHECKING:
@@ -86,9 +87,8 @@ class FrameProcessorSetup:
             ``setup.pipeline_worker.app_resources`` instead.
 
             .. deprecated:: 1.2.0
-                Reading this attribute emits a ``DeprecationWarning``. Read
-                ``setup.pipeline_worker.app_resources`` instead.
-                ``tool_resources`` will be removed in a future version.
+                Read ``setup.pipeline_worker.app_resources`` instead. Will be
+                removed in 2.0.0.
     """
 
     clock: BaseClock
@@ -382,17 +382,16 @@ class FrameProcessor(BaseObject):
         return self._pipeline_worker
 
     @property
+    @deprecated(
+        "`FrameProcessor.pipeline_task` is deprecated since 1.3.0 and will be removed in 2.0.0. "
+        "Use `pipeline_worker` instead."
+    )
     def pipeline_task(self) -> PipelineWorker:
         """Deprecated alias for :attr:`pipeline_worker`.
 
         .. deprecated:: 1.3.0
-            Use :attr:`pipeline_worker` instead.
+            Use :attr:`pipeline_worker` instead. Will be removed in 2.0.0.
         """
-        warnings.warn(
-            "FrameProcessor.pipeline_task is deprecated, use pipeline_worker instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         return self.pipeline_worker
 
     def processors_with_metrics(self):
@@ -722,24 +721,18 @@ class FrameProcessor(BaseObject):
         await self.stop_all_metrics()
         await self.broadcast_frame(InterruptionFrame)
 
+    @deprecated(
+        "`FrameProcessor.push_interruption_task_frame_and_wait` is deprecated since 0.0.104 "
+        "and will be removed in 2.0.0. Use `broadcast_interruption` instead."
+    )
     async def push_interruption_task_frame_and_wait(self, *, timeout: float = 5.0):
         """Push an interruption task frame upstream and wait for the interruption.
 
         .. deprecated:: 0.0.104
             Use :meth:`broadcast_interruption` instead. This method now
             delegates to ``broadcast_interruption()`` and ignores *timeout*.
+            Will be removed in 2.0.0.
         """
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "`FrameProcessor.push_interruption_task_frame_and_wait()` is deprecated. "
-                "Use `FrameProcessor.broadcast_interruption()` instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
         await self.broadcast_interruption()
 
     async def broadcast_frame(self, frame_cls: type[Frame], **kwargs):

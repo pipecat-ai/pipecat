@@ -30,6 +30,7 @@ from pipecat.audio.turn.base_turn_analyzer import BaseTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.text.base_text_aggregator import AggregationType
 from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
@@ -1605,94 +1606,96 @@ class InterruptionWorkerFrame(WorkerSystemFrame):
 #
 
 
+@deprecated(
+    "`TaskFrame` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `WorkerFrame` instead."
+)
 @dataclass
 class TaskFrame(WorkerFrame):
     """Deprecated alias for :class:`WorkerFrame`.
 
     .. deprecated:: 1.4.0
-        Use :class:`WorkerFrame` instead.
+        Use :class:`WorkerFrame` instead. Will be removed in 2.0.0.
     """
 
     pass
 
 
+@deprecated(
+    "`TaskSystemFrame` is deprecated since 1.4.0 and will be removed in 2.0.0. "
+    "Use `WorkerSystemFrame` instead."
+)
 @dataclass
 class TaskSystemFrame(WorkerSystemFrame):
     """Deprecated alias for :class:`WorkerSystemFrame`.
 
     .. deprecated:: 1.4.0
-        Use :class:`WorkerSystemFrame` instead.
+        Use :class:`WorkerSystemFrame` instead. Will be removed in 2.0.0.
     """
 
     pass
 
 
-@dataclass
-class EndTaskFrame(EndWorkerFrame, TaskFrame):
-    """Deprecated alias for :class:`EndWorkerFrame`.
+# The leaf aliases below intentionally subclass the deprecated TaskFrame /
+# TaskSystemFrame bases; silence the subclassing DeprecationWarning that
+# @deprecated would otherwise emit while this module is imported.
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", DeprecationWarning)
 
-    .. deprecated:: 1.4.0
-        Use :class:`EndWorkerFrame` instead.
-    """
+    @deprecated(
+        "`EndTaskFrame` is deprecated since 1.4.0 and will be removed in 2.0.0. "
+        "Use `EndWorkerFrame` instead."
+    )
+    @dataclass
+    class EndTaskFrame(EndWorkerFrame, TaskFrame):
+        """Deprecated alias for :class:`EndWorkerFrame`.
 
-    def __post_init__(self):
-        super().__post_init__()
-        warnings.warn(
-            "EndTaskFrame is deprecated, use EndWorkerFrame instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        .. deprecated:: 1.4.0
+            Use :class:`EndWorkerFrame` instead. Will be removed in 2.0.0.
+        """
 
+        pass
 
-@dataclass
-class StopTaskFrame(StopWorkerFrame, TaskFrame):
-    """Deprecated alias for :class:`StopWorkerFrame`.
+    @deprecated(
+        "`StopTaskFrame` is deprecated since 1.4.0 and will be removed in 2.0.0. "
+        "Use `StopWorkerFrame` instead."
+    )
+    @dataclass
+    class StopTaskFrame(StopWorkerFrame, TaskFrame):
+        """Deprecated alias for :class:`StopWorkerFrame`.
 
-    .. deprecated:: 1.4.0
-        Use :class:`StopWorkerFrame` instead.
-    """
+        .. deprecated:: 1.4.0
+            Use :class:`StopWorkerFrame` instead. Will be removed in 2.0.0.
+        """
 
-    def __post_init__(self):
-        super().__post_init__()
-        warnings.warn(
-            "StopTaskFrame is deprecated, use StopWorkerFrame instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        pass
 
+    @deprecated(
+        "`CancelTaskFrame` is deprecated since 1.4.0 and will be removed in 2.0.0. "
+        "Use `CancelWorkerFrame` instead."
+    )
+    @dataclass
+    class CancelTaskFrame(CancelWorkerFrame, TaskSystemFrame):
+        """Deprecated alias for :class:`CancelWorkerFrame`.
 
-@dataclass
-class CancelTaskFrame(CancelWorkerFrame, TaskSystemFrame):
-    """Deprecated alias for :class:`CancelWorkerFrame`.
+        .. deprecated:: 1.4.0
+            Use :class:`CancelWorkerFrame` instead. Will be removed in 2.0.0.
+        """
 
-    .. deprecated:: 1.4.0
-        Use :class:`CancelWorkerFrame` instead.
-    """
+        pass
 
-    def __post_init__(self):
-        super().__post_init__()
-        warnings.warn(
-            "CancelTaskFrame is deprecated, use CancelWorkerFrame instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+    @deprecated(
+        "`InterruptionTaskFrame` is deprecated since 1.4.0 and will be removed in 2.0.0. "
+        "Use `InterruptionWorkerFrame` instead."
+    )
+    @dataclass
+    class InterruptionTaskFrame(InterruptionWorkerFrame, TaskSystemFrame):
+        """Deprecated alias for :class:`InterruptionWorkerFrame`.
 
+        .. deprecated:: 1.4.0
+            Use :class:`InterruptionWorkerFrame` instead. Will be removed in 2.0.0.
+        """
 
-@dataclass
-class InterruptionTaskFrame(InterruptionWorkerFrame, TaskSystemFrame):
-    """Deprecated alias for :class:`InterruptionWorkerFrame`.
-
-    .. deprecated:: 1.4.0
-        Use :class:`InterruptionWorkerFrame` instead.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-        warnings.warn(
-            "InterruptionTaskFrame is deprecated, use InterruptionWorkerFrame instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        pass
 
 
 #
@@ -2048,6 +2051,7 @@ class ServiceUpdateSettingsFrame(ControlFrame, UninterruptibleFrame):
 
             .. deprecated:: 0.0.104
                 Use ``delta`` with a typed settings object instead.
+                Will be removed in 2.0.0.
 
         delta: :class:`~pipecat.services.settings.ServiceSettings` delta-mode
             object describing the fields to change.

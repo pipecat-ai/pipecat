@@ -41,6 +41,7 @@ from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_
 from pipecat.services.stt_latency import GOOGLE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -376,6 +377,8 @@ class GoogleSTTSettings(STTSettings):
                 Use ``languages`` instead. If both are provided, ``languages``
                 takes precedence. This field is here just for backward
                 compatibility with dict-based settings updates.
+                Will be removed in 2.0.0.
+
         use_separate_recognition_per_channel: Process each audio channel separately.
         enable_automatic_punctuation: Add punctuation to transcripts.
         enable_spoken_punctuation: Include spoken punctuation in transcript.
@@ -427,11 +430,16 @@ class GoogleSTTService(STTService):
 
     STREAMING_LIMIT = 240000  # 4 minutes in milliseconds
 
+    @deprecated(
+        "`GoogleSTTService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `GoogleSTTService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Configuration parameters for Google Speech-to-Text.
 
         .. deprecated:: 0.0.105
             Use ``settings=GoogleSTTService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             languages: Single language or list of recognition languages. First language is primary.
@@ -507,6 +515,7 @@ class GoogleSTTService(STTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GoogleSTTService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 ``params``, ``settings`` values take precedence.
@@ -660,23 +669,20 @@ class GoogleSTTService(STTService):
             await self._disconnect()
             await self._connect()
 
+    @deprecated(
+        "`GoogleSTTService.set_languages` is deprecated since 0.0.104 and will be removed in "
+        "2.0.0. Use `STTUpdateSettingsFrame` instead."
+    )
     async def set_languages(self, languages: list[Language]):
         """Update the service's recognition languages.
 
         .. deprecated:: 0.0.104
-            Use ``STTUpdateSettingsFrame`` with ``GoogleSTTService.Settings(languages=...)``
-            instead.
+            Use :class:`STTUpdateSettingsFrame` with ``GoogleSTTService.Settings(languages=...)``
+            instead. Will be removed in 2.0.0.
 
         Args:
             languages: List of languages for recognition. First language is primary.
         """
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "set_languages() is deprecated. Use STTUpdateSettingsFrame with "
-                "self.Settings(languages=...) instead.",
-                DeprecationWarning,
-            )
         logger.debug(f"Switching STT languages to: {languages}")
         await self._update_settings(self.Settings(languages=list(languages)))
 
@@ -747,6 +753,10 @@ class GoogleSTTService(STTService):
         await super().cancel(frame)
         await self._disconnect()
 
+    @deprecated(
+        "`GoogleSTTService.update_options` is deprecated since 0.0.104 and will be removed in "
+        "2.0.0. Use `STTUpdateSettingsFrame` instead."
+    )
     async def update_options(
         self,
         *,
@@ -765,8 +775,8 @@ class GoogleSTTService(STTService):
         """Update service options dynamically.
 
         .. deprecated:: 0.0.104
-            Use ``STTUpdateSettingsFrame`` with ``GoogleSTTService.Settings(...)``
-            instead.
+            Use :class:`STTUpdateSettingsFrame` with ``GoogleSTTService.Settings(...)``
+            instead. Will be removed in 2.0.0.
 
         Args:
             languages: New list of recognition languages.
@@ -785,13 +795,6 @@ class GoogleSTTService(STTService):
             Changes that affect the streaming configuration will cause
             the stream to be reconnected.
         """
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "update_options() is deprecated. Use STTUpdateSettingsFrame with "
-                "self.Settings(...) instead.",
-                DeprecationWarning,
-            )
         # Build a settings delta from the provided options
         delta = self.Settings()
 

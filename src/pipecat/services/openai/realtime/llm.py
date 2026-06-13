@@ -257,6 +257,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAIRealtimeLLMService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
                 This is a connection-level parameter set via the WebSocket URL query
                 parameter and cannot be changed during the session.
@@ -268,6 +269,8 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAIRealtimeLLMService.Settings(session_properties=...)``
                     instead.
+                    Will be removed in 2.0.0.
+
             settings: Runtime-updatable settings for this service.
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             start_video_paused: Whether to start with video input paused. Defaults to False.

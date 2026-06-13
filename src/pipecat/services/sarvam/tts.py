@@ -64,6 +64,7 @@ from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given, is_given
 from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
@@ -349,11 +350,16 @@ class SarvamHttpTTSService(TTSService):
     Settings = SarvamHttpTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`SarvamHttpTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `SarvamHttpTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Sarvam TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``SarvamHttpTTSService.Settings`` directly via the ``settings`` parameter instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language for synthesis. Defaults to English (India).
@@ -423,6 +429,7 @@ class SarvamHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamHttpTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             model: TTS model to use. Options:
                 - "bulbul:v2" (default): Standard model with pitch/loudness support
@@ -430,6 +437,7 @@ class SarvamHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamHttpTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             base_url: Sarvam AI API base URL. Defaults to "https://api.sarvam.ai".
             sample_rate: Audio sample rate in Hz (8000, 16000, 22050, 24000).
@@ -438,6 +446,7 @@ class SarvamHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamHttpTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -710,11 +719,16 @@ class SarvamTTSService(InterruptibleTTSService):
     Settings = SarvamTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`SarvamTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `SarvamTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Configuration parameters for Sarvam TTS WebSocket service.
 
         .. deprecated:: 0.0.105
             Use ``SarvamTTSService.Settings`` directly via the ``settings`` parameter instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             pitch: Voice pitch adjustment (-0.75 to 0.75). Defaults to 0.0.
@@ -821,17 +835,20 @@ class SarvamTTSService(InterruptibleTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             voice_id: Speaker voice ID. If None, uses model-appropriate default.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             url: WebSocket URL for the TTS backend (default production URL).
             aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
 
                 .. deprecated:: 0.0.104
                     Use ``text_aggregation_mode`` instead.
+                    Will be removed in 2.0.0.
 
             text_aggregation_mode: How to aggregate text before synthesis.
             sample_rate: Output audio sample rate in Hz (8000, 16000, 22050, 24000).
@@ -840,6 +857,7 @@ class SarvamTTSService(InterruptibleTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

@@ -41,6 +41,7 @@ from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.security.allowed_origins import default_allowed_origins
 
 
@@ -423,6 +424,10 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
             self._next_send_time += self._send_interval
 
 
+@deprecated(
+    "`WebsocketServerTransport` is deprecated since 1.4.0 and will be removed in 2.0.0. "
+    "Use `FastAPIWebsocketTransport` instead."
+)
 class WebsocketServerTransport(BaseTransport):
     """WebSocket server transport for bidirectional real-time communication.
 

@@ -32,6 +32,7 @@ from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_
 from pipecat.services.stt_latency import SONIOX_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -71,11 +72,16 @@ class SonioxContextObject(BaseModel):
     translation_terms: list[SonioxContextTranslationTerm] | None = None
 
 
+@deprecated(
+    "`SonioxInputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use "
+    "`SonioxSTTService.Settings` instead."
+)
 class SonioxInputParams(BaseModel):
     """Real-time transcription settings.
 
     .. deprecated:: 0.0.105
         Use ``settings=SonioxSTTService.Settings(...)`` instead.
+        Will be removed in 2.0.0.
 
     See Soniox WebSocket API documentation for more details:
     https://soniox.com/docs/speech-to-text/api-reference/websocket-api#configuration-parameters
@@ -277,6 +283,7 @@ class SonioxSTTService(WebsocketSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SonioxSTTService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             audio_format: Audio format for transcription. Defaults to ``"pcm_s16le"``.
             num_channels: Number of audio channels. Defaults to 1.
@@ -285,6 +292,7 @@ class SonioxSTTService(WebsocketSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SonioxSTTService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             vad_force_turn_endpoint: Listen to `VADUserStoppedSpeakingFrame` to send finalize message to Soniox.
                 If disabled, Soniox will detect the end of the speech. Defaults to True.

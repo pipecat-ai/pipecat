@@ -74,6 +74,7 @@ class DeepgramTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=DeepgramTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             base_url: WebSocket base URL for Deepgram API. Defaults to "wss://api.deepgram.com".
             sample_rate: Audio sample rate in Hz. If None, uses service default.
@@ -392,6 +393,7 @@ class DeepgramHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=DeepgramHttpTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             aiohttp_session: Shared aiohttp session for HTTP requests with connection pooling.
             base_url: Custom base URL for Deepgram API. Defaults to "https://api.deepgram.com".

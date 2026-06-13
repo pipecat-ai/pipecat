@@ -98,6 +98,7 @@ class MoondreamService(VisionService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=MoondreamService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             revision: Specific model revision to use.
             use_cpu: Whether to force CPU usage instead of hardware acceleration.

@@ -4,14 +4,12 @@ This module provides VAD analyzer implementations that query the AIC SDK's
 ``is_speech_detected()`` and map it to a float confidence (1.0/0.0).
 
 .. deprecated:: 1.4.0
-    AICVADAnalyzer is deprecated and will be removed in Pipecat 1.6.0.
-    Use AICQuailVADAnalyzer instead.
+    Use :class:`AICQuailVADAnalyzer` instead. Will be removed in 1.6.0.
 
 Classes:
     AICVADAnalyzer: For aic-sdk (uses 'aic_sdk' module). Deprecated.
 """
 
-import warnings
 from collections.abc import Callable
 from typing import Any
 
@@ -19,14 +17,18 @@ from aic_sdk import VadParameter
 from loguru import logger
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
+from pipecat.utils.deprecation import deprecated
 
 
+@deprecated(
+    "`AICVADAnalyzer` is deprecated since 1.4.0 and will be removed in 1.6.0. "
+    "Use `AICQuailVADAnalyzer` instead."
+)
 class AICVADAnalyzer(VADAnalyzer):
     """VAD analyzer that lazily binds to the AIC VadContext via a factory.
 
     .. deprecated:: 1.4.0
-        AICVADAnalyzer is deprecated and will be removed in Pipecat 1.6.0.
-        Use AICQuailVADAnalyzer instead.
+        Use :class:`AICQuailVADAnalyzer` instead. Will be removed in 1.6.0.
 
     The analyzer can be constructed before the AIC Processor exists. Once the filter has
     started and the Processor is available, the provided factory will succeed and the
@@ -64,8 +66,7 @@ class AICVADAnalyzer(VADAnalyzer):
         """Create an AIC VAD analyzer.
 
         .. deprecated:: 1.4.0
-            AICVADAnalyzer is deprecated and will be removed in Pipecat 1.6.0.
-            Use AICQuailVADAnalyzer instead.
+            Use :class:`AICQuailVADAnalyzer` instead. Will be removed in 1.6.0.
 
         Args:
             vad_context_factory:
@@ -86,17 +87,6 @@ class AICVADAnalyzer(VADAnalyzer):
                 Range: 1.0 to 15.0. Energy threshold = 10 ** (-sensitivity).
                 If None, the SDK default (6.0) is used.
         """
-        # Note: deliberately not wrapping in `catch_warnings`/`simplefilter("always")`
-        # (unlike the `LocalSmartTurnAnalyzerV2` precedent) so `AICFilter.create_vad_analyzer`
-        # can suppress this warning while emitting its own — avoids two DeprecationWarnings
-        # firing for one factory call.
-        warnings.warn(
-            "AICVADAnalyzer is deprecated and will be removed in Pipecat 1.6.0. "
-            "Use AICQuailVADAnalyzer instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-
         # Use fixed VAD parameters for AIC: no user override
         fixed_params = VADParams(confidence=0.5, start_secs=0.0, stop_secs=0.0, min_volume=0.0)
         super().__init__(sample_rate=None, params=fixed_params)

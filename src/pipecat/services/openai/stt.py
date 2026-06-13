@@ -88,6 +88,7 @@ class OpenAISTTService(BaseWhisperSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAISTTService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             api_key: OpenAI API key. Defaults to None.
             base_url: API base URL. Defaults to None.
@@ -95,16 +96,19 @@ class OpenAISTTService(BaseWhisperSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAISTTService.Settings(language=...)`` instead.
+                    Will be removed in 2.0.0.
 
             prompt: Optional text to guide the model's style or continue a previous segment.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAISTTService.Settings(prompt=...)`` instead.
+                    Will be removed in 2.0.0.
 
             temperature: Optional sampling temperature between 0 and 1. Defaults to 0.0.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAISTTService.Settings(temperature=...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -256,6 +260,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAIRealtimeSTTService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             base_url: WebSocket base URL for the Realtime API.
                 Defaults to ``"wss://api.openai.com/v1/realtime"``.
@@ -263,6 +268,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAIRealtimeSTTService.Settings(language=...)`` instead.
+                    Will be removed in 2.0.0.
 
             prompt: Optional prompt text to guide transcription style
                 or provide keyword hints. Not supported by
@@ -270,6 +276,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAIRealtimeSTTService.Settings(prompt=...)`` instead.
+                    Will be removed in 2.0.0.
 
             turn_detection: Server-side VAD configuration. Defaults to
                 ``False`` (disabled), which relies on a local VAD
@@ -282,6 +289,8 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
                 .. deprecated:: 0.0.106
                     Use ``settings=OpenAIRealtimeSTTService.Settings(noise_reduction=...)`` instead.
+                    Will be removed in 2.0.0.
+
             should_interrupt: Whether to interrupt bot output when
                 speech is detected by server-side VAD. Only applies when
                 turn detection is enabled. Defaults to True.

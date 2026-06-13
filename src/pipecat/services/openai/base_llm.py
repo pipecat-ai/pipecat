@@ -40,6 +40,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
 from pipecat.services.settings import LLMSettings, _NotGiven, assert_given
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 
@@ -92,12 +93,17 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
     messages to "user" messages before sending them to the API.
     """
 
+    @deprecated(
+        "`BaseOpenAILLMService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `BaseOpenAILLMService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for OpenAI model configuration.
 
         .. deprecated:: 0.0.105
             Use ``settings=BaseOpenAILLMService.Settings(...)`` instead of
             ``params=InputParams(...)``.
+            Will be removed in 2.0.0.
 
         Parameters:
             frequency_penalty: Penalty for frequent tokens (-2.0 to 2.0).
@@ -148,6 +154,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=BaseOpenAILLMService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             api_key: OpenAI API key. If None, uses environment variable.
             base_url: Custom base URL for OpenAI API. If None, uses default.
@@ -159,6 +166,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=BaseOpenAILLMService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

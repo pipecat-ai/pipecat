@@ -35,6 +35,7 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import CARTESIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -46,12 +47,17 @@ class CartesiaSTTSettings(STTSettings):
     pass
 
 
+@deprecated(
+    "`CartesiaLiveOptions` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+    "Use `CartesiaSTTService.Settings` instead."
+)
 class CartesiaLiveOptions:
     """Configuration options for Cartesia Live STT service.
 
     .. deprecated:: 0.0.105
         Use ``settings=CartesiaSTTService.Settings(...)`` for model/language and
         direct ``__init__`` parameters for encoding/sample_rate instead.
+        Will be removed in 2.0.0.
     """
 
     def __init__(
@@ -169,6 +175,7 @@ class CartesiaSTTService(WebsocketSTTService):
                 .. deprecated:: 0.0.105
                     Use ``settings=CartesiaSTTService.Settings(...)`` for model/language
                     and direct init parameters for encoding/sample_rate instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

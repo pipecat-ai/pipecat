@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
+from pipecat.utils.deprecation import deprecated
 
 AUDIO_INPUT_TIMEOUT_SECS = 0.5
 
@@ -83,6 +84,10 @@ class BaseInputTransport(FrameProcessor):
         logger.debug(f"Enabling audio on start. {enabled}")
         self._params.audio_in_stream_on_start = enabled
 
+    @deprecated(
+        "`BaseInputTransport.start_audio_in_streaming` is deprecated since 1.4.0 and will be "
+        "removed in 2.0.0. Use `InputTransportStartAudioStreamingFrame` instead."
+    )
     async def start_audio_in_streaming(self):
         """Start audio input streaming.
 
@@ -90,15 +95,8 @@ class BaseInputTransport(FrameProcessor):
             Push an :class:`~pipecat.frames.frames.InputTransportStartAudioStreamingFrame`
             downstream instead of calling this directly. Subclasses should
             override :meth:`_start_audio_in_streaming`.
+            Will be removed in 2.0.0.
         """
-        import warnings
-
-        warnings.warn(
-            "start_audio_in_streaming() is deprecated since 1.4.0; push an "
-            "InputTransportStartAudioStreamingFrame downstream instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         await self._start_audio_in_streaming()
 
     async def _start_audio_in_streaming(self):

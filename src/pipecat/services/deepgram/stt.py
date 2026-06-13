@@ -34,6 +34,7 @@ from pipecat.services.settings import (
 from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -52,6 +53,10 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 
+@deprecated(
+    "`LiveOptions` is deprecated since 0.0.105 and will be removed in 2.0.0. Use "
+    "`DeepgramSTTService.Settings` instead."
+)
 class LiveOptions:
     """Deepgram live transcription options.
 
@@ -61,6 +66,7 @@ class LiveOptions:
     .. deprecated:: 0.0.105
         Use ``settings=DeepgramSTTService.Settings(...)`` for runtime-updatable fields
         and direct ``__init__`` parameters for connection-level config instead.
+        Will be removed in 2.0.0.
     """
 
     def __init__(
@@ -331,6 +337,7 @@ class DeepgramSTTService(STTService):
                 .. deprecated:: 0.0.105
                     Use ``settings=DeepgramSTTService.Settings(...)`` for runtime-updatable
                     fields and direct init parameters for connection-level config.
+                    Will be removed in 2.0.0.
 
             addons: Additional Deepgram features to enable.
             settings: Runtime-updatable settings. When provided alongside

@@ -6,7 +6,6 @@
 
 """LLM switcher for switching between different LLMs at runtime, with different switching strategies."""
 
-import warnings
 from typing import Any, cast
 
 from pipecat.adapters.schemas.direct_function import DirectFunction
@@ -19,6 +18,7 @@ from pipecat.pipeline.service_switcher import (
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
+from pipecat.utils.deprecation import deprecated
 
 
 class LLMSwitcher(ServiceSwitcher[StrategyType]):
@@ -133,6 +133,10 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
                 timeout_secs=timeout_secs,
             )
 
+    @deprecated(
+        "`LLMSwitcher.register_direct_function` is deprecated since 1.4.0 and will be removed "
+        "in 2.0.0. Use `LLMContext(tools=[...])` instead."
+    )
     def register_direct_function(
         self,
         handler: DirectFunction,
@@ -143,11 +147,10 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
         """Register a direct function handler for LLM function calls, on all LLMs, active or not.
 
         .. deprecated:: 1.4.0
-            Direct functions advertised via ``LLMContext(tools=[...])`` are now
-            registered on every member LLM automatically. List them in the
-            context for tools available at session start, or push an
-            ``LLMSetToolsFrame`` to change tools mid-session. This method will be
-            removed in a future version.
+            Use :class:`LLMContext` with ``tools=[...]`` instead. Direct functions
+            listed in the context are registered on every member LLM automatically
+            — at session start, or push an :class:`LLMSetToolsFrame` to change tools
+            mid-session. Will be removed in 2.0.0.
 
         Args:
             handler: The direct function to register. Must follow DirectFunction protocol.
@@ -156,16 +159,6 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
                 ``@tool_options`` decorator value on the handler, then to True).
             timeout_secs: Optional timeout in seconds for the function call.
         """
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "`LLMSwitcher.register_direct_function()` is deprecated since 1.4.0. "
-                "List direct functions in `LLMContext(tools=[...])` (registered on "
-                "all member LLMs automatically), or push an `LLMSetToolsFrame` to "
-                "change tools mid-session.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
         for llm in self.llms:
             llm._register_direct_function(
                 handler=handler,

@@ -66,12 +66,14 @@ class RTVIProcessor(FrameProcessor):
             transport: Deprecated and ignored.
 
                 .. deprecated:: 1.4.0
-                    The processor no longer needs a transport reference. Audio
-                    input and audio-streaming start are now driven by frames
-                    (``InputAudioRawFrame`` and
-                    ``InputTransportStartAudioStreamingFrame``) pushed
+                    No replacement; the parameter is ignored. Will be removed in 2.0.0.
+                    The processor no longer needs a transport reference — audio input and
+                    audio-streaming start are driven by frames
+                    (:class:`InputAudioRawFrame` and
+                    :class:`InputTransportStartAudioStreamingFrame`) pushed
                     downstream. For client-ready audio gating, set
                     ``audio_in_stream_on_start=False`` on the transport params.
+
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
@@ -180,8 +182,9 @@ class RTVIProcessor(FrameProcessor):
 
         .. deprecated:: 0.0.102
             This method is deprecated. Function call events are now automatically
-            sent by ``RTVIObserver`` using the ``llm-function-call-in-progress`` event.
+            sent by :class:`RTVIObserver` using the ``llm-function-call-in-progress`` event.
             Configure reporting level via ``RTVIObserverParams.function_call_report_level``.
+            Will be removed in 2.0.0.
         """
         import warnings
 

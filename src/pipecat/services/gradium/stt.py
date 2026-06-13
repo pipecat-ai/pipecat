@@ -37,6 +37,7 @@ from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_
 from pipecat.services.stt_latency import GRADIUM_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -121,11 +122,16 @@ class GradiumSTTService(WebsocketSTTService):
     Settings = GradiumSTTSettings
     _settings: Settings
 
+    @deprecated(
+        "`GradiumSTTService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `GradiumSTTService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Configuration parameters for Gradium STT API.
 
         .. deprecated:: 0.0.105
             Use ``settings=GradiumSTTService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Expected language of the audio (e.g., "en", "es", "fr").
@@ -168,11 +174,13 @@ class GradiumSTTService(WebsocketSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GradiumSTTService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             json_config: Optional JSON configuration string for additional model settings.
 
                 .. deprecated:: 0.0.101
                     Use `params` instead for type-safe configuration.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -184,7 +192,7 @@ class GradiumSTTService(WebsocketSTTService):
             import warnings
 
             warnings.warn(
-                "Parameter 'json_config' is deprecated and will be removed in a future version, use 'params' instead.",
+                "Parameter 'json_config' is deprecated and will be removed in 2.0.0, use 'params' instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )

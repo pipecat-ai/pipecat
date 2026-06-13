@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
@@ -146,11 +147,16 @@ class MiniMaxHttpTTSService(TTSService):
     Settings = MiniMaxTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`MiniMaxHttpTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `MiniMaxHttpTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Configuration parameters for MiniMax TTS.
 
         .. deprecated:: 0.0.105
             Use ``MiniMaxHttpTTSService.Settings`` directly via the ``settings`` parameter instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language for TTS generation. Supports 40 languages.
@@ -205,11 +211,13 @@ class MiniMaxHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=MiniMaxHttpTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             voice_id: Voice identifier. Defaults to "Calm_Woman".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=MiniMaxHttpTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             aiohttp_session: aiohttp.ClientSession for API communication.
             sample_rate: Output audio sample rate in Hz. If None, uses pipeline default.
@@ -218,6 +226,7 @@ class MiniMaxHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=MiniMaxHttpTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

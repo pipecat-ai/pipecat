@@ -34,6 +34,7 @@ from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_
 from pipecat.services.stt_latency import NVIDIA_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -232,11 +233,16 @@ class NvidiaSTTService(STTService):
     Settings = NvidiaSTTSettings
     _settings: Settings
 
+    @deprecated(
+        "`NvidiaSTTService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `NvidiaSTTService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Configuration parameters for NVIDIA Nemotron Speech STT service.
 
         .. deprecated:: 0.0.105
             Use ``settings=NvidiaSTTService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Target language for transcription. Defaults to EN_US.
@@ -281,6 +287,7 @@ class NvidiaSTTService(STTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=NvidiaSTTService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             use_ssl: Whether to use SSL for the gRPC connection. Defaults to True
                 for the NVIDIA cloud endpoint. Set to False for local deployments.
@@ -433,12 +440,17 @@ class NvidiaSTTService(STTService):
 
         return changed
 
+    @deprecated(
+        "`NvidiaSTTService.set_model` is deprecated since 0.0.104 and will be removed in 2.0.0. "
+        "No replacement."
+    )
     async def set_model(self, model: str):
         """Set the ASR model for transcription.
 
         .. deprecated:: 0.0.104
-            Model cannot be changed after initialization for NVIDIA Nemotron Speech streaming STT.
-            Set model and function id in the constructor instead.
+            No replacement. Model cannot be changed after initialization for NVIDIA Nemotron
+            Speech streaming STT; set model and function id in the constructor instead.
+            Will be removed in 2.0.0.
 
             Example::
 
@@ -450,19 +462,6 @@ class NvidiaSTTService(STTService):
         Args:
             model: Model name to set.
         """
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "'set_model' is deprecated. Model cannot be changed after initialization"
-                " for NVIDIA Nemotron Speech streaming STT. Set model and function id in the"
-                " constructor instead, e.g.:"
-                " NvidiaSTTService(api_key=..., model_function_map="
-                "{'function_id': '<UUID>', 'model_name': '<model_name>'})",
-                DeprecationWarning,
-                stacklevel=2,
-            )
 
     async def start(self, frame: StartFrame):
         """Start the NVIDIA Nemotron Speech STT service and initialize streaming configuration.
@@ -642,11 +641,16 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
     Settings = NvidiaSegmentedSTTSettings
     _settings: Settings
 
+    @deprecated(
+        "`NvidiaSegmentedSTTService.InputParams` is deprecated since 0.0.105 and will be removed "
+        "in 2.0.0. Use `NvidiaSegmentedSTTService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Configuration parameters for NVIDIA Nemotron Speech segmented STT service.
 
         .. deprecated:: 0.0.105
             Use ``settings=NvidiaSegmentedSTTService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Target language for transcription. Defaults to EN_US.
@@ -694,6 +698,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=NvidiaSegmentedSTTService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             use_ssl: Whether to use SSL for the gRPC connection. Defaults to True
                 for the NVIDIA cloud endpoint. Set to False for local deployments.

@@ -223,21 +223,25 @@ class LLMAssistantAggregatorParams:
             (LLM-specific) tools are ignored. When using
             ``LLMContextAggregatorPair``, prefer setting this via its
             ``add_tool_change_messages`` argument instead. Defaults to False.
+        enable_context_summarization: Legacy field name.
+
+            .. deprecated:: 1.2.0
+                Use :attr:`enable_auto_context_summarization` instead. Will be
+                removed in version 2.0.0.
+
+        context_summarization_config: Legacy field name.
+
+            .. deprecated:: 1.2.0
+                Use :attr:`auto_context_summarization_config` instead. Will be
+                removed in version 2.0.0.
     """
 
     enable_auto_context_summarization: bool = False
     auto_context_summarization_config: LLMAutoContextSummarizationConfig | None = None
     add_tool_change_messages: bool = False
 
-    # ---------------------------------------------------------------------------
-    # Deprecated field names — kept for backward compatibility.
-    # Use enable_auto_context_summarization and auto_context_summarization_config instead.
-    #
-    # .. deprecated:: 1.2.0
-    #     Use ``enable_auto_context_summarization`` and
-    #     ``auto_context_summarization_config`` instead. Will be removed in
-    #     version 2.0.0.
-    # ---------------------------------------------------------------------------
+    # Deprecated field names — kept for backward compatibility. See the
+    # ``.. deprecated::`` directives in the class docstring above.
     enable_context_summarization: bool | None = None
     context_summarization_config: LLMContextSummarizationConfig | None = None
 

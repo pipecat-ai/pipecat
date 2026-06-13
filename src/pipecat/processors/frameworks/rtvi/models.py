@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict
 from pipecat.frames.frames import (
     AggregationType,
 )
+from pipecat.utils.deprecation import deprecated
 
 # -- Constants --
 PROTOCOL_VERSION = "1.4.0"
@@ -178,13 +179,17 @@ class BotReady(BaseModel):
     data: BotReadyData
 
 
+@deprecated(
+    "`LLMFunctionCallMessageData` is deprecated since 0.0.102 and will be removed in 2.0.0. "
+    "Use `LLMFunctionCallInProgressMessageData` instead."
+)
 class LLMFunctionCallMessageData(BaseModel):
     """Data for LLM function call notification.
 
     Contains function call details including name, ID, and arguments.
 
     .. deprecated:: 0.0.102
-        Use ``LLMFunctionCallInProgressMessageData`` instead.
+        Use :class:`LLMFunctionCallInProgressMessageData` instead. Will be removed in 2.0.0.
     """
 
     function_name: str
@@ -192,14 +197,18 @@ class LLMFunctionCallMessageData(BaseModel):
     args: Mapping[str, Any]
 
 
+@deprecated(
+    "`LLMFunctionCallMessage` is deprecated since 0.0.102 and will be removed in 2.0.0. "
+    "Use `LLMFunctionCallInProgressMessage` instead."
+)
 class LLMFunctionCallMessage(BaseModel):
     """Message notifying of an LLM function call.
 
     Sent when the LLM makes a function call.
 
     .. deprecated:: 0.0.102
-        Use ``LLMFunctionCallInProgressMessage`` with the
-        ``llm-function-call-in-progress`` event type instead.
+        Use :class:`LLMFunctionCallInProgressMessage` with the
+        ``llm-function-call-in-progress`` event type instead. Will be removed in 2.0.0.
     """
 
     label: MessageLiteral = MESSAGE_LABEL
