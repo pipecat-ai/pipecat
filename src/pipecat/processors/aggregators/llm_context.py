@@ -46,10 +46,10 @@ from pipecat.frames.frames import AudioRawFrame
 # and we want to continue supporting them). In the meantime, code at the
 # LLMContext/OpenAI boundary should use explicit casts rather than rely on
 # the aliasing.
-LLMStandardMessage = ChatCompletionMessageParam
-LLMContextToolChoice = ChatCompletionToolChoiceOptionParam
+LLMStandardMessage: TypeAlias = ChatCompletionMessageParam
+LLMContextToolChoice: TypeAlias = ChatCompletionToolChoiceOptionParam
 NOT_GIVEN = OPEN_AI_NOT_GIVEN
-NotGiven = OpenAINotGiven
+NotGiven: TypeAlias = OpenAINotGiven
 
 
 _T = TypeVar("_T")
