@@ -1,0 +1,5824 @@
+{
+  "_meta": {
+    "description": "Machine-readable Pipecat deprecation/removal registry. Consumed by tooling such as check_deprecation (Pipecat Context Hub). Human-readable form lives in CHANGELOG.md; this file is the structured mirror so tools never have to parse prose.",
+    "schema_version": 1,
+    "record_count": 331,
+    "provenance": {
+      "seeded_by": "one-time LLM backfill of GitHub release notes (### Deprecated / ### Removed sections)",
+      "covered_through_release": "v1.3.0",
+      "generated_on": "2026-06-12",
+      "pipecat_main_at_proposal": "57dfabbebfcee152581b407ad7cfb28d9bd0acf7",
+      "unreleased_fragments_at_proposal": "none (no *.deprecated.md / *.removed.md pending), so the backfill is current as of this commit",
+      "verification": "0/576 symbols hallucinated (every subject + replacement target traces verbatim to its source release note); 0 self-replacements; 2 records flagged confidence=low. The source-tree existence oracle (does each symbol still exist at its tagged version?) has NOT yet been run.",
+      "low_confidence_records": [
+        "InputParams",
+        "MiniMaxHttpTTSService.english_normalization"
+      ],
+      "how_to_rebackfill": "Re-run the structuring over release notes published after v1.3.0 to extend, or re-derive all records from CHANGELOG.md to regenerate. Update covered_through_release + generated_on when you do."
+    },
+    "record_schema": {
+      "subject": "deprecated/removed symbol; dotted Owner.member for members",
+      "subject_kind": "symbol|module|param|field|method|event|alias|extra|nested_class",
+      "owner": "owning class for member kinds (stays current), else null",
+      "status": "deprecated|removed",
+      "deprecated_in": "version or null",
+      "removed_in": "version or null",
+      "reason": "rename|move|split|merged|use_existing|behavior_default|unmaintained|vendor_gone|alias|other",
+      "replacement": {
+        "relation": "none|rename|move|split|merged_into|use_existing",
+        "targets": "[] of symbols (never the subject)"
+      },
+      "migration": "short how-to or null",
+      "source_version": "release the record was derived from",
+      "confidence": "high|medium|low"
+    }
+  },
+  "entries": [
+    {
+      "subject": "FrameProcessor.pipeline_task",
+      "subject_kind": "param",
+      "owner": "FrameProcessor",
+      "status": "deprecated",
+      "deprecated_in": "1.3.0",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "FrameProcessor.pipeline_worker"
+        ]
+      },
+      "migration": "Read FrameProcessor.pipeline_worker instead.",
+      "source_version": "1.3.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "WorkerRunner.run.worker",
+      "subject_kind": "param",
+      "owner": "WorkerRunner",
+      "status": "deprecated",
+      "deprecated_in": "1.3.0",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "WorkerRunner.add_workers"
+        ]
+      },
+      "migration": "Register the worker with WorkerRunner.add_workers() before calling run().",
+      "source_version": "1.3.0",
+      "confidence": "medium",
+      "notes": "Subject is the 'worker' argument to run(); replacement is a different method add_workers()."
+    },
+    {
+      "subject": "PipelineTask",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "1.3.0",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "PipelineWorker"
+        ]
+      },
+      "migration": "Use PipelineWorker instead.",
+      "source_version": "1.3.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "PipelineTaskParams",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "1.3.0",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "WorkerParams"
+        ]
+      },
+      "migration": "Use WorkerParams instead.",
+      "source_version": "1.3.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.pipeline.task",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "1.3.0",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "pipecat.pipeline.worker"
+        ]
+      },
+      "migration": "Module renamed to pipecat.pipeline.worker.",
+      "source_version": "1.3.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "PipelineRunner",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "1.3.0",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "WorkerRunner"
+        ]
+      },
+      "migration": "Import WorkerRunner from pipecat.workers.runner.",
+      "source_version": "1.3.0",
+      "confidence": "high",
+      "notes": "Renamed AND moved; treated as rename (same thing, new name) with new location noted in migration."
+    },
+    {
+      "subject": "Language.KA",
+      "subject_kind": "field",
+      "owner": "SonioxSTTService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.3.0",
+      "reason": "unmaintained",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Georgian language mapping removed from SonioxSTTService.",
+      "source_version": "1.3.0",
+      "confidence": "medium",
+      "notes": "Unsupported language mapping removal; treated as a member (field) of SonioxSTTService."
+    },
+    {
+      "subject": "LLMUserAggregatorParams.filter_incomplete_user_turns",
+      "subject_kind": "param",
+      "owner": "LLMUserAggregatorParams",
+      "status": "deprecated",
+      "deprecated_in": "1.2.0",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "FilterIncompleteUserTurnStrategies",
+          "LLMTurnCompletionUserTurnStopStrategy"
+        ]
+      },
+      "migration": "Use user_turn_strategies=FilterIncompleteUserTurnStrategies() instead.",
+      "source_version": "1.2.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "ResampyResampler",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "1.2.0",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "SOXRAudioResampler"
+        ]
+      },
+      "migration": "Use SOXRAudioResampler (or create_file_resampler()/create_stream_resampler()).",
+      "source_version": "1.2.0",
+      "confidence": "high",
+      "notes": "Replaced by a different existing resampler class, not a rename."
+    },
+    {
+      "subject": "TransportParams.video_out_bitrate",
+      "subject_kind": "param",
+      "owner": "TransportParams",
+      "status": "deprecated",
+      "deprecated_in": "1.1.0",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "DailyParams.camera_out_send_settings"
+        ]
+      },
+      "migration": "Use DailyParams.camera_out_send_settings instead.",
+      "source_version": "1.1.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "OpenPipeLLMService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "vendor_gone",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "OpenAILLMService"
+        ]
+      },
+      "migration": "OpenPipe acquired/unmaintained; use underlying provider directly or OpenAILLMService with base_url.",
+      "source_version": "1.0.0",
+      "confidence": "high",
+      "notes": "External cause (vendor) AND a use-existing alternative (OpenAILLMService). reason=vendor_gone, relation=use_existing."
+    },
+    {
+      "subject": "openpipe",
+      "subject_kind": "extra",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "vendor_gone",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "openpipe extra removed.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "NoisereduceFilter",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Use system-level noise reduction or a service-based alternative.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "TransportParams.vad_enabled",
+      "subject_kind": "param",
+      "owner": "TransportParams",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "TransportParams.vad_audio_passthrough",
+      "subject_kind": "param",
+      "owner": "TransportParams",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "TransportParams.camera_in_enabled",
+      "subject_kind": "param",
+      "owner": "TransportParams",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": []
+      },
+      "migration": "Use the video_in_* and video_out_* equivalents instead.",
+      "source_version": "1.0.0",
+      "confidence": "medium",
+      "notes": "Replacement family (video_*) named generically, not per-param verbatim, so targets empty."
+    },
+    {
+      "subject": "TransportParams.camera_in_is_live",
+      "subject_kind": "param",
+      "owner": "TransportParams",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": []
+      },
+      "migration": "Use the video_in_* and video_out_* equivalents instead.",
+      "source_version": "1.0.0",
+      "confidence": "medium",
+      "notes": "Replacement family (video_*) named generically, not per-param verbatim, so targets empty."
+    },
+    {
+      "subject": "TransportParams.camera_in_width",
+      "subject_kind": "param",
+      "owner": "TransportParams",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": []
+      },
+      "migration": "Use the video_in_* and video_out_* equivalents instead.",
+      "source_version": "1.0.0",
+      "confidence": "medium",
+      "notes": "Replacement family (video_*) named generically, not per-param verbatim, so targets empty."
+    },
+    {
+      "subject": "TransportParams.camera_in_height",
+      "subject_kind": "param",
+      "owner": "TransportParams",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": []
+      },
+      "migration": "Use the video_in_* and video_out_* equivalents instead.",
+      "source_version": "1.0.0",
+      "confidence": "medium",
+      "notes": "Replacement family (video_*) named generically, not per-param verbatim, so targets empty."
+    },
+    {
+      "subject": "TransportParams.camera_out_enabled",
+      "subject_kind": "param",
+      "owner": "TransportParams",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": []
+      },
+      "migration": "Use the video_in_* and video_out_* equivalents instead.",
+      "source_version": "1.0.0",
+      "confidence": "medium",
+      "notes": "Replacement family (video_*) named generically, not per-param verbatim, so targets empty."
+    },
+    {
+      "subject": "TransportParams.camera_out_is_live",
+      "subject_kind": "param",
+      "owner": "TransportParams",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": []
+      },
+      "migration": "Use the video_in_* and video_out_* equivalents instead.",
+      "source_version": "1.0.0",
+      "confidence": "medium",
+      "notes": "Replacement family (video_*) named generically, not per-param verbatim, so targets empty."
+    },
+    {
+      "subject": "TransportParams.camera_out_width",
+      "subject_kind": "param",
+      "owner": "TransportParams",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": []
+      },
+      "migration": "Use the video_in_* and video_out_* equivalents instead.",
+      "source_version": "1.0.0",
+      "confidence": "medium",
+      "notes": "Replacement family (video_*) named generically, not per-param verbatim, so targets empty."
+    },
+    {
+      "subject": "TransportParams.camera_out_height",
+      "subject_kind": "param",
+      "owner": "TransportParams",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": []
+      },
+      "migration": "Use the video_in_* and video_out_* equivalents instead.",
+      "source_version": "1.0.0",
+      "confidence": "medium",
+      "notes": "Replacement family (video_*) named generically, not per-param verbatim, so targets empty."
+    },
+    {
+      "subject": "TransportParams.camera_out_color",
+      "subject_kind": "param",
+      "owner": "TransportParams",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": []
+      },
+      "migration": "Use the video_in_* and video_out_* equivalents instead.",
+      "source_version": "1.0.0",
+      "confidence": "medium",
+      "notes": "Replacement family (video_*) named generically, not per-param verbatim, so targets empty."
+    },
+    {
+      "subject": "FrameProcessor.wait_for_task",
+      "subject_kind": "method",
+      "owner": "FrameProcessor",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "create_task",
+          "TaskManager"
+        ]
+      },
+      "migration": "Use create_task() and the built-in TaskManager instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "TransportMessageFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "OutputTransportMessageFrame"
+        ]
+      },
+      "migration": "Use OutputTransportMessageFrame instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "TransportMessageUrgentFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "OutputTransportMessageUrgentFrame"
+        ]
+      },
+      "migration": "Use OutputTransportMessageUrgentFrame instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "InputTransportMessageUrgentFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "InputTransportMessageFrame"
+        ]
+      },
+      "migration": "Use InputTransportMessageFrame instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "DailyTransportMessageFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "DailyOutputTransportMessageFrame"
+        ]
+      },
+      "migration": "Use DailyOutputTransportMessageFrame instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "DailyTransportMessageUrgentFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "DailyOutputTransportMessageUrgentFrame"
+        ]
+      },
+      "migration": "Use DailyOutputTransportMessageUrgentFrame instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "create_default_resampler",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "create_default_resampler() removed from pipecat.audio.utils.",
+      "source_version": "1.0.0",
+      "confidence": "medium",
+      "notes": "Module-level function in pipecat.audio.utils; no owner class, treated as bare symbol/method."
+    },
+    {
+      "subject": "DailyRunner.configure_with_args",
+      "subject_kind": "method",
+      "owner": "DailyRunner",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "PipelineRunner",
+          "RunnerArguments"
+        ]
+      },
+      "migration": "Use PipelineRunner with RunnerArguments instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "PipelineTask.on_pipeline_ended",
+      "subject_kind": "event",
+      "owner": "PipelineTask",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "merged",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "on_pipeline_finished"
+        ]
+      },
+      "migration": "Use on_pipeline_finished instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "PipelineTask.on_pipeline_cancelled",
+      "subject_kind": "event",
+      "owner": "PipelineTask",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "merged",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "on_pipeline_finished"
+        ]
+      },
+      "migration": "Use on_pipeline_finished instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "PipelineTask.on_pipeline_stopped",
+      "subject_kind": "event",
+      "owner": "PipelineTask",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "merged",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "on_pipeline_finished"
+        ]
+      },
+      "migration": "Use on_pipeline_finished instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "LLMService.arguments",
+      "subject_kind": "param",
+      "owner": "LLMService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "behavior_default",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Functions must use named parameters instead of a single arguments parameter.",
+      "source_version": "1.0.0",
+      "confidence": "medium",
+      "notes": "Single-argument function call support removed; subject is the 'arguments' param of function calls on LLMService."
+    },
+    {
+      "subject": "FalSmartTurnAnalyzer",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "LocalSmartTurnAnalyzer",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "RTVIObserver.errors_enabled",
+      "subject_kind": "param",
+      "owner": "RTVIObserver",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "RTVIConfig",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": []
+      },
+      "migration": "Use the updated RTVI processor API instead.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "RTVIServiceConfig",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": []
+      },
+      "migration": "Use the updated RTVI processor API instead.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "RTVIServiceOptionConfig",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": []
+      },
+      "migration": "Use the updated RTVI processor API instead.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "RTVIActionFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": []
+      },
+      "migration": "Use the updated RTVI processor API instead.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "RTVIProcessor.handle_function_call",
+      "subject_kind": "method",
+      "owner": "RTVIProcessor",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": []
+      },
+      "migration": "Use the updated RTVI processor API instead.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "RTVIProcessor.handle_function_call_start",
+      "subject_kind": "method",
+      "owner": "RTVIProcessor",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": []
+      },
+      "migration": "Use the updated RTVI processor API instead.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "KeypadEntryFrame",
+      "subject_kind": "alias",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "alias",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "KeypadEntryFrame alias removed.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "StartInterruptionFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "InterruptionFrame"
+        ]
+      },
+      "migration": "Use InterruptionFrame instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "BotInterruptionFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "InterruptionTaskFrame"
+        ]
+      },
+      "migration": "Use InterruptionTaskFrame instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "LLMService.request_image_frame",
+      "subject_kind": "method",
+      "owner": "LLMService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "UserImageRequestFrame"
+        ]
+      },
+      "migration": "Push a UserImageRequestFrame instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "TTSService.say",
+      "subject_kind": "method",
+      "owner": "TTSService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "TTSSpeakFrame"
+        ]
+      },
+      "migration": "Push a TTSSpeakFrame into the pipeline instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "KrispFilter",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "KrispFilter removed; krisp extra removed.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "krisp",
+      "subject_kind": "extra",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "krisp extra removed from pyproject.toml.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "AudioBufferProcessor.user_continuous_stream",
+      "subject_kind": "param",
+      "owner": "AudioBufferProcessor",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "user_audio_passthrough"
+        ]
+      },
+      "migration": "Use user_audio_passthrough instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "LLMService.start_callback",
+      "subject_kind": "param",
+      "owner": "LLMService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "on_llm_response_start"
+        ]
+      },
+      "migration": "Register an on_llm_response_start event handler instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "PipelineParams.observers",
+      "subject_kind": "field",
+      "owner": "PipelineParams",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "move",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "PipelineTask"
+        ]
+      },
+      "migration": "Pass observers directly to PipelineTask constructor instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.services.openai_realtime",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.openai.realtime"
+        ]
+      },
+      "migration": "Use pipecat.services.openai.realtime instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.services.google.llm_vertex",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.google.vertex.llm"
+        ]
+      },
+      "migration": "Use pipecat.services.google.vertex.llm instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "GoogleLLMOpenAIBetaService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "GoogleLLMService"
+        ]
+      },
+      "migration": "Use GoogleLLMService from pipecat.services.google.llm instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "OpenAIRealtimeBetaLLMService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "OpenAIRealtimeLLMService"
+        ]
+      },
+      "migration": "Use OpenAIRealtimeLLMService instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "AzureRealtimeBetaLLMService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "AzureRealtimeLLMService"
+        ]
+      },
+      "migration": "Use AzureRealtimeLLMService instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.services.ai_services",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "split",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.ai_service",
+          "pipecat.services.llm_service",
+          "pipecat.services.stt_service",
+          "pipecat.services.tts_service"
+        ]
+      },
+      "migration": "Import from the per-service modules instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.services.gemini_multimodal_live",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.google.gemini_live"
+        ]
+      },
+      "migration": "Use pipecat.services.google.gemini_live; class names drop 'Multimodal' (GeminiMultimodalLiveLLMService -> GeminiLiveLLMService).",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.services.google.gemini_live.llm_vertex",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.google.gemini_live.vertex.llm"
+        ]
+      },
+      "migration": "Use pipecat.services.google.gemini_live.vertex.llm instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.services.nim",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.nvidia.llm"
+        ]
+      },
+      "migration": "Use pipecat.services.nvidia.llm (NimLLMService -> NvidiaLLMService).",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.services.deepgram.stt_sagemaker",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.deepgram.sagemaker.stt"
+        ]
+      },
+      "migration": "Use pipecat.services.deepgram.sagemaker.stt instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.services.deepgram.tts_sagemaker",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.deepgram.sagemaker.tts"
+        ]
+      },
+      "migration": "Use pipecat.services.deepgram.sagemaker.tts instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.services.aws_nova_sonic",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.aws.nova_sonic"
+        ]
+      },
+      "migration": "Use pipecat.services.aws.nova_sonic instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.services.riva",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "split",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.nvidia.stt",
+          "pipecat.services.nvidia.tts"
+        ]
+      },
+      "migration": "Use pipecat.services.nvidia.stt and pipecat.services.nvidia.tts (RivaSTTService->NvidiaSTTService, RivaTTSService->NvidiaTTSService).",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.services.openai_realtime_beta",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.openai.realtime"
+        ]
+      },
+      "migration": "Use pipecat.services.openai.realtime instead.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "pipecat.services.openai_realtime.context",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "pipecat.services.openai_realtime.frames",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "pipecat.services.openai.realtime.context",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "pipecat.services.openai.realtime.frames",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "pipecat.services.gemini_multimodal_live",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.google.gemini_live"
+        ]
+      },
+      "migration": "Use pipecat.services.google.gemini_live instead.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "pipecat.services.aws_nova_sonic.context",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.aws.nova_sonic"
+        ]
+      },
+      "migration": "Use pipecat.services.aws.nova_sonic instead.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "pipecat.services.google.openai",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.google.llm"
+        ]
+      },
+      "migration": "Use pipecat.services.google.llm instead.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "pipecat.services.google.llm_openai",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.google.llm"
+        ]
+      },
+      "migration": "Use pipecat.services.google.llm instead.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "VisionImageFrameAggregator",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "merged",
+      "replacement": {
+        "relation": "merged_into",
+        "targets": [
+          "LLMContext"
+        ]
+      },
+      "migration": "Vision/image handling is now built into LLMContext.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "OpenAILLMContext",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContext"
+        ]
+      },
+      "migration": "Use LLMContext and LLMContextAggregatorPair instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "OpenAILLMContextFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContextFrame"
+        ]
+      },
+      "migration": "Use LLMContextFrame instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "OpenAILLMContext.from_messages",
+      "subject_kind": "method",
+      "owner": "OpenAILLMContext",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContext"
+        ]
+      },
+      "migration": "Use LLMContext instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "LLMMessagesFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContextFrame",
+          "LLMMessagesUpdateFrame"
+        ]
+      },
+      "migration": "Use LLMContextFrame, or LLMMessagesUpdateFrame with run_llm=True.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "OpenAILLMContextAssistantTimestampFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "GatedOpenAILLMContextAggregator",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "GatedLLMContextAggregator"
+        ]
+      },
+      "migration": "Use GatedLLMContextAggregator instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "AnthropicLLMContext",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContext"
+        ]
+      },
+      "migration": "Superseded by the universal LLMContext system; use LLMContext / LLMContextAggregatorPair.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "AnthropicContextAggregatorPair",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContext"
+        ]
+      },
+      "migration": "Superseded by the universal LLMContext system; use LLMContext / LLMContextAggregatorPair.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "AWSBedrockLLMContext",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContext"
+        ]
+      },
+      "migration": "Superseded by the universal LLMContext system; use LLMContext / LLMContextAggregatorPair.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "AWSBedrockContextAggregatorPair",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContext"
+        ]
+      },
+      "migration": "Superseded by the universal LLMContext system; use LLMContext / LLMContextAggregatorPair.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "OpenAIContextAggregatorPair",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContext"
+        ]
+      },
+      "migration": "Superseded by the universal LLMContext system; use LLMContext / LLMContextAggregatorPair.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "BaseLLMResponseAggregator",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContext"
+        ]
+      },
+      "migration": "Superseded by the universal LLMContext system; use LLMContext / LLMContextAggregatorPair.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "LLMContextResponseAggregator",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContext"
+        ]
+      },
+      "migration": "Superseded by the universal LLMContext system; use LLMContext / LLMContextAggregatorPair.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "LLMUserContextAggregator",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContext"
+        ]
+      },
+      "migration": "Superseded by the universal LLMContext system; use LLMContext / LLMContextAggregatorPair.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "LLMAssistantContextAggregator",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContext"
+        ]
+      },
+      "migration": "Superseded by the universal LLMContext system; use LLMContext / LLMContextAggregatorPair.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "LLMUserResponseAggregator",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContext"
+        ]
+      },
+      "migration": "Superseded by the universal LLMContext system; use LLMContext / LLMContextAggregatorPair.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "LLMAssistantResponseAggregator",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContext"
+        ]
+      },
+      "migration": "Superseded by the universal LLMContext system; use LLMContext / LLMContextAggregatorPair.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "LLMService.create_context_aggregator",
+      "subject_kind": "method",
+      "owner": "LLMService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContextAggregatorPair"
+        ]
+      },
+      "migration": "Use LLMContextAggregatorPair instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "OpenAILLMService.create_context_aggregator",
+      "subject_kind": "method",
+      "owner": "OpenAILLMService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContextAggregatorPair"
+        ]
+      },
+      "migration": "Use LLMContextAggregatorPair instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "AnthropicLLMService.create_context_aggregator",
+      "subject_kind": "method",
+      "owner": "AnthropicLLMService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContextAggregatorPair"
+        ]
+      },
+      "migration": "Use LLMContextAggregatorPair instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "AWSBedrockLLMService.create_context_aggregator",
+      "subject_kind": "method",
+      "owner": "AWSBedrockLLMService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContextAggregatorPair"
+        ]
+      },
+      "migration": "Use LLMContextAggregatorPair instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "TranscriptionMessage",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "ThoughtTranscriptionMessage",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "TranscriptionUpdateFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "PipelineParams.allow_interruptions",
+      "subject_kind": "param",
+      "owner": "PipelineParams",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "behavior_default",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Interruptions are now always allowed by default.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "StartFrame.allow_interruptions",
+      "subject_kind": "param",
+      "owner": "StartFrame",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "behavior_default",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Interruptions are now always allowed by default.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "FrameProcessor.allow_interruptions",
+      "subject_kind": "param",
+      "owner": "FrameProcessor",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "behavior_default",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Interruptions are now always allowed by default.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "STTMuteFilter",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMUserAggregator"
+        ]
+      },
+      "migration": "Use pipecat.turns.user_mute strategies with LLMUserAggregator.user_mute_strategies.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "STTMuteConfig",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMUserAggregator"
+        ]
+      },
+      "migration": "Use pipecat.turns.user_mute strategies with LLMUserAggregator.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "STTMuteStrategy",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMUserAggregator"
+        ]
+      },
+      "migration": "Use pipecat.turns.user_mute strategies with LLMUserAggregator.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.processors.transcript_processor",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": []
+      },
+      "migration": "Use pipeline observers instead.",
+      "source_version": "1.0.0",
+      "confidence": "high",
+      "notes": "TranscriptProcessor/TranscriptProcessorConfig module removed; replacement is observers (not a named symbol)."
+    },
+    {
+      "subject": "EmulateUserStartedSpeakingFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "EmulateUserStoppedSpeakingFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "UserStartedSpeakingFrame.emulated",
+      "subject_kind": "field",
+      "owner": "UserStartedSpeakingFrame",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "UserStoppedSpeakingFrame.emulated",
+      "subject_kind": "field",
+      "owner": "UserStoppedSpeakingFrame",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "PipelineParams.interruption_strategies",
+      "subject_kind": "param",
+      "owner": "PipelineParams",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMUserAggregator"
+        ]
+      },
+      "migration": "Use LLMUserAggregator.user_turn_strategies instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "StartFrame.interruption_strategies",
+      "subject_kind": "param",
+      "owner": "StartFrame",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMUserAggregator"
+        ]
+      },
+      "migration": "Use LLMUserAggregator.user_turn_strategies instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "FrameProcessor.interruption_strategies",
+      "subject_kind": "param",
+      "owner": "FrameProcessor",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMUserAggregator"
+        ]
+      },
+      "migration": "Use LLMUserAggregator.user_turn_strategies instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.audio.interruptions",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "MinWordsUserTurnStartStrategy"
+        ]
+      },
+      "migration": "Use pipecat.turns.user_start.MinWordsUserTurnStartStrategy with LLMUserAggregator.user_turn_strategies.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.utils.tracing.class_decorators",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.utils.tracing.service_decorators"
+        ]
+      },
+      "migration": "Use pipecat.utils.tracing.service_decorators instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "PatternPairAggregator.add_pattern_pair",
+      "subject_kind": "method",
+      "owner": "PatternPairAggregator",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "add_pattern"
+        ]
+      },
+      "migration": "Use add_pattern instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "UserResponseAggregator",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMUserAggregator"
+        ]
+      },
+      "migration": "Use LLMUserAggregator instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "ExternalUserTurnStrategies",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Removed along with the automatic fallback in LLMUserAggregator.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "TransportParams.vad_analyzer",
+      "subject_kind": "param",
+      "owner": "TransportParams",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "behavior_default",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "VAD and turn detection now handled entirely by LLMUserAggregator.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "TransportParams.turn_analyzer",
+      "subject_kind": "param",
+      "owner": "TransportParams",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "behavior_default",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "VAD and turn detection now handled entirely by LLMUserAggregator.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "TranscriptionUserTurnStopStrategy",
+      "subject_kind": "alias",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "SpeechTimeoutUserTurnStopStrategy"
+        ]
+      },
+      "migration": "Use SpeechTimeoutUserTurnStopStrategy instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "DeepgramSTTService.vad_events",
+      "subject_kind": "param",
+      "owner": "DeepgramSTTService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Use Silero VAD for voice activity detection instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "DeepgramSTTService.should_interrupt",
+      "subject_kind": "param",
+      "owner": "DeepgramSTTService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Use Silero VAD for voice activity detection instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "OpenAIRealtimeLLMService.send_transcription_frames",
+      "subject_kind": "param",
+      "owner": "OpenAIRealtimeLLMService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "behavior_default",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Transcription frames are always sent.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "UserIdleProcessor",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMUserAggregator"
+        ]
+      },
+      "migration": "Use LLMUserAggregator with the user_idle_timeout parameter instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "UserBotLatencyLogObserver",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "UserBotLatencyObserver"
+        ]
+      },
+      "migration": "Use UserBotLatencyObserver with its on_latency_measured event handler.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "riva",
+      "subject_kind": "extra",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "nvidia"
+        ]
+      },
+      "migration": "Use the nvidia extra instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "remote-smart-turn",
+      "subject_kind": "extra",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Empty no-op extra removed.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "DeprecatedModuleProxy",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Flat service imports no longer work; use full submodule path.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "PIPECAT_OBSERVER_FILES",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "PIPECAT_SETUP_FILES"
+        ]
+      },
+      "migration": "Use PIPECAT_SETUP_FILES instead.",
+      "source_version": "1.0.0",
+      "confidence": "high",
+      "notes": "Environment variable rename."
+    },
+    {
+      "subject": "PollyTTSService",
+      "subject_kind": "alias",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "AWSTTSService"
+        ]
+      },
+      "migration": "Use AWSTTSService.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "TTSService.text_aggregator",
+      "subject_kind": "param",
+      "owner": "TTSService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "TTSService.text_filter",
+      "subject_kind": "param",
+      "owner": "TTSService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "AWSNovaSonicLLMService.send_transcription_frames",
+      "subject_kind": "param",
+      "owner": "AWSNovaSonicLLMService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "behavior_default",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "DeepgramSTTService.url",
+      "subject_kind": "param",
+      "owner": "DeepgramSTTService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "base_url"
+        ]
+      },
+      "migration": "Use base_url instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "FishAudioTTSService.model",
+      "subject_kind": "param",
+      "owner": "FishAudioTTSService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "reference_id"
+        ]
+      },
+      "migration": "Use reference_id or settings.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "GladiaSTTService.language",
+      "subject_kind": "field",
+      "owner": "GladiaSTTService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "language removed from GladiaInputParams.",
+      "source_version": "1.0.0",
+      "confidence": "high",
+      "notes": "Field of GladiaInputParams; owner recorded as GladiaSTTService per bullet subject."
+    },
+    {
+      "subject": "GladiaSTTService.confidence",
+      "subject_kind": "field",
+      "owner": "GladiaSTTService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "confidence removed from GladiaInputParams.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "InputParams",
+      "subject_kind": "alias",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "alias",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "GladiaSTTService InputParams class alias removed.",
+      "source_version": "1.0.0",
+      "confidence": "low",
+      "notes": "Generic 'InputParams class alias' for Gladia; not a globally-unique name, low confidence on subject identity."
+    },
+    {
+      "subject": "GeminiTTSService.api_key",
+      "subject_kind": "param",
+      "owner": "GeminiTTSService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "GeminiLiveLLMService.base_url",
+      "subject_kind": "param",
+      "owner": "GeminiLiveLLMService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "http_options"
+        ]
+      },
+      "migration": "Use http_options.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "GoogleVertexLLMService.InputParams",
+      "subject_kind": "nested_class",
+      "owner": "GoogleVertexLLMService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Use direct init params; project_id required, location defaults to us-east4.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "MiniMaxHttpTTSService.english_normalization",
+      "subject_kind": "field",
+      "owner": "MiniMaxHttpTTSService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "text_normalization"
+        ]
+      },
+      "migration": "Use text_normalization.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "SimliVideoService.simli_config",
+      "subject_kind": "param",
+      "owner": "SimliVideoService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "api_key",
+          "face_id"
+        ]
+      },
+      "migration": "Use api_key/face_id (now required).",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "SimliVideoService.use_turn_server",
+      "subject_kind": "param",
+      "owner": "SimliVideoService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "AnthropicLLMService.enable_prompt_caching_beta",
+      "subject_kind": "field",
+      "owner": "AnthropicLLMService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "enable_prompt_caching"
+        ]
+      },
+      "migration": "Use enable_prompt_caching.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.transports.services",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.transports.daily.transport"
+        ]
+      },
+      "migration": "Update imports to pipecat.transports.daily.transport etc.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "pipecat.transports.network",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.transports.websocket"
+        ]
+      },
+      "migration": "Update imports to pipecat.transports.websocket.* / webrtc.* etc.",
+      "source_version": "1.0.0",
+      "confidence": "medium"
+    },
+    {
+      "subject": "pipecat.sync",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "1.0.0",
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.utils.sync"
+        ]
+      },
+      "migration": "Use pipecat.utils.sync instead.",
+      "source_version": "1.0.0",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.services.grok.llm",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.108",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.xai.llm"
+        ]
+      },
+      "migration": "Use pipecat.services.xai.llm instead.",
+      "source_version": "0.0.108",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.services.grok.realtime.llm",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.108",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.xai.realtime.llm"
+        ]
+      },
+      "migration": "Use pipecat.services.xai.realtime.llm instead.",
+      "source_version": "0.0.108",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.services.grok.realtime.events",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.108",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.xai.realtime.events"
+        ]
+      },
+      "migration": "Use pipecat.services.xai.realtime.events instead.",
+      "source_version": "0.0.108",
+      "confidence": "high"
+    },
+    {
+      "subject": "TTSService.add_word_timestamps",
+      "subject_kind": "method",
+      "owner": "TTSService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.108",
+      "reason": "behavior_default",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "No longer supports 'Reset'/'TTSStoppedFrame' sentinel strings; use append_to_audio_context with TTSStoppedFrame.",
+      "source_version": "0.0.108",
+      "confidence": "medium",
+      "notes": "Method itself not removed; sentinel-string support removed (behavior change). Recorded against the method."
+    },
+    {
+      "subject": "SambaNovaSTTService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.108",
+      "reason": "vendor_gone",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "SambaNova no longer offers STT; use another STT provider.",
+      "source_version": "0.0.108",
+      "confidence": "high"
+    },
+    {
+      "subject": "SimliVideoService.InputParams",
+      "subject_kind": "nested_class",
+      "owner": "SimliVideoService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.106",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Use direct constructor params max_session_length, max_idle_time, enable_logging.",
+      "source_version": "0.0.106",
+      "confidence": "high"
+    },
+    {
+      "subject": "LocalSmartTurnAnalyzerV2",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.106",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "LocalSmartTurnAnalyzerV3"
+        ]
+      },
+      "migration": "Use LocalSmartTurnAnalyzerV3 instead.",
+      "source_version": "0.0.106",
+      "confidence": "high"
+    },
+    {
+      "subject": "LocalCoreMLSmartTurnAnalyzer",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.106",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "LocalSmartTurnAnalyzerV3"
+        ]
+      },
+      "migration": "Use LocalSmartTurnAnalyzerV3 instead.",
+      "source_version": "0.0.106",
+      "confidence": "high"
+    },
+    {
+      "subject": "WakeCheckFilter",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.106",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "WakePhraseUserTurnStartStrategy"
+        ]
+      },
+      "migration": "Use WakePhraseUserTurnStartStrategy instead.",
+      "source_version": "0.0.106",
+      "confidence": "high"
+    },
+    {
+      "subject": "AudioContextTTSService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.105",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "WebsocketTTSService"
+        ]
+      },
+      "migration": "Subclass WebsocketTTSService directly; audio context mgmt now in base TTSService.",
+      "source_version": "0.0.105",
+      "confidence": "high"
+    },
+    {
+      "subject": "AudioContextWordTTSService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.105",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "WebsocketTTSService"
+        ]
+      },
+      "migration": "Subclass WebsocketTTSService directly; audio context mgmt now in base TTSService.",
+      "source_version": "0.0.105",
+      "confidence": "high"
+    },
+    {
+      "subject": "WordTTSService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.105",
+      "removed_in": null,
+      "reason": "merged",
+      "replacement": {
+        "relation": "merged_into",
+        "targets": [
+          "TTSService"
+        ]
+      },
+      "migration": "Word timestamp logic always active in TTSService.",
+      "source_version": "0.0.105",
+      "confidence": "high"
+    },
+    {
+      "subject": "WebsocketWordTTSService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.105",
+      "removed_in": null,
+      "reason": "merged",
+      "replacement": {
+        "relation": "merged_into",
+        "targets": [
+          "TTSService"
+        ]
+      },
+      "migration": "Word timestamp logic always active in TTSService.",
+      "source_version": "0.0.105",
+      "confidence": "high"
+    },
+    {
+      "subject": "InterruptibleWordTTSService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.105",
+      "removed_in": null,
+      "reason": "merged",
+      "replacement": {
+        "relation": "merged_into",
+        "targets": [
+          "TTSService"
+        ]
+      },
+      "migration": "Word timestamp logic always active in TTSService.",
+      "source_version": "0.0.105",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.services.google.llm_vertex",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.105",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.google.vertex.llm"
+        ]
+      },
+      "migration": "Use pipecat.services.google.vertex.llm instead.",
+      "source_version": "0.0.105",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.services.google.llm_openai",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.105",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.google.openai.llm"
+        ]
+      },
+      "migration": "Use pipecat.services.google.openai.llm instead.",
+      "source_version": "0.0.105",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.services.google.gemini_live.llm_vertex",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.105",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.google.gemini_live.vertex.llm"
+        ]
+      },
+      "migration": "Use pipecat.services.google.gemini_live.vertex.llm instead.",
+      "source_version": "0.0.105",
+      "confidence": "high"
+    },
+    {
+      "subject": "TTSService.supports_word_timestamps",
+      "subject_kind": "param",
+      "owner": "TTSService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.105",
+      "reason": "behavior_default",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Word timestamp logic now always active; remove the argument.",
+      "source_version": "0.0.105",
+      "confidence": "high"
+    },
+    {
+      "subject": "TTSService.aggregate_sentences",
+      "subject_kind": "param",
+      "owner": "TTSService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.104",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "TextAggregationMode"
+        ]
+      },
+      "migration": "Use text_aggregation_mode=TextAggregationMode.SENTENCE/TOKEN instead.",
+      "source_version": "0.0.104",
+      "confidence": "high"
+    },
+    {
+      "subject": "set_model",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.104",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "TTSUpdateSettingsFrame",
+          "STTUpdateSettingsFrame",
+          "LLMUpdateSettingsFrame"
+        ]
+      },
+      "migration": "Use runtime *UpdateSettingsFrame instead.",
+      "source_version": "0.0.104",
+      "confidence": "high",
+      "notes": "Methods on AI services generally; no single owner class named, recorded as bare symbol."
+    },
+    {
+      "subject": "set_voice",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.104",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "TTSUpdateSettingsFrame",
+          "STTUpdateSettingsFrame",
+          "LLMUpdateSettingsFrame"
+        ]
+      },
+      "migration": "Use runtime *UpdateSettingsFrame instead.",
+      "source_version": "0.0.104",
+      "confidence": "high"
+    },
+    {
+      "subject": "set_language",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.104",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "TTSUpdateSettingsFrame",
+          "STTUpdateSettingsFrame",
+          "LLMUpdateSettingsFrame"
+        ]
+      },
+      "migration": "Use runtime *UpdateSettingsFrame instead.",
+      "source_version": "0.0.104",
+      "confidence": "high"
+    },
+    {
+      "subject": "settings",
+      "subject_kind": "param",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.104",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "delta"
+        ]
+      },
+      "migration": "Pass typed settings delta objects via delta={...} instead of settings={...}.",
+      "source_version": "0.0.104",
+      "confidence": "medium",
+      "notes": "Dict-based settings= arg across *UpdateSettingsFrame classes; generic owner."
+    },
+    {
+      "subject": "WordTTSService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.104",
+      "removed_in": null,
+      "reason": "merged",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "TTSService"
+        ]
+      },
+      "migration": "Use TTSService(supports_word_timestamps=True).",
+      "source_version": "0.0.104",
+      "confidence": "high",
+      "notes": "Duplicate of 0.0.105 deprecation; here migration targets non-word counterpart with supports_word_timestamps=True."
+    },
+    {
+      "subject": "WebsocketWordTTSService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.104",
+      "removed_in": null,
+      "reason": "merged",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "WebsocketTTSService"
+        ]
+      },
+      "migration": "Use WebsocketTTSService(supports_word_timestamps=True).",
+      "source_version": "0.0.104",
+      "confidence": "high"
+    },
+    {
+      "subject": "AudioContextWordTTSService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.104",
+      "removed_in": null,
+      "reason": "merged",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "AudioContextTTSService"
+        ]
+      },
+      "migration": "Use AudioContextTTSService(supports_word_timestamps=True).",
+      "source_version": "0.0.104",
+      "confidence": "high"
+    },
+    {
+      "subject": "InterruptibleWordTTSService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.104",
+      "removed_in": null,
+      "reason": "merged",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "InterruptibleTTSService"
+        ]
+      },
+      "migration": "Use InterruptibleTTSService(supports_word_timestamps=True).",
+      "source_version": "0.0.104",
+      "confidence": "high"
+    },
+    {
+      "subject": "SmartTurnMetricsData",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.104",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "TurnMetricsData"
+        ]
+      },
+      "migration": "Use TurnMetricsData; BaseSmartTurn emits it directly.",
+      "source_version": "0.0.104",
+      "confidence": "high"
+    },
+    {
+      "subject": "LLMContextSummarizationConfig",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.104",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMAutoContextSummarizationConfig",
+          "LLMContextSummaryConfig"
+        ]
+      },
+      "migration": "Use LLMAutoContextSummarizationConfig with a nested LLMContextSummaryConfig.",
+      "source_version": "0.0.104",
+      "confidence": "high"
+    },
+    {
+      "subject": "FrameProcessor.push_interruption_task_frame_and_wait",
+      "subject_kind": "method",
+      "owner": "FrameProcessor",
+      "status": "deprecated",
+      "deprecated_in": "0.0.104",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "broadcast_interruption"
+        ]
+      },
+      "migration": "Use broadcast_interruption() instead.",
+      "source_version": "0.0.104",
+      "confidence": "high"
+    },
+    {
+      "subject": "local-smart-turn-v3",
+      "subject_kind": "extra",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.104",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "transformers/onnxruntime now core deps.",
+      "source_version": "0.0.104",
+      "confidence": "high"
+    },
+    {
+      "subject": "PlayHTTTSService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.104",
+      "reason": "vendor_gone",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "PlayHT shut down.",
+      "source_version": "0.0.104",
+      "confidence": "high"
+    },
+    {
+      "subject": "PlayHTHttpTTSService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.104",
+      "reason": "vendor_gone",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "PlayHT shut down.",
+      "source_version": "0.0.104",
+      "confidence": "high"
+    },
+    {
+      "subject": "Traceable",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.103",
+      "removed_in": null,
+      "reason": "unmaintained",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Unused; module will be removed.",
+      "source_version": "0.0.103",
+      "confidence": "high"
+    },
+    {
+      "subject": "traceable",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.103",
+      "removed_in": null,
+      "reason": "unmaintained",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Unused decorator.",
+      "source_version": "0.0.103",
+      "confidence": "high"
+    },
+    {
+      "subject": "traced",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.103",
+      "removed_in": null,
+      "reason": "unmaintained",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Unused decorator.",
+      "source_version": "0.0.103",
+      "confidence": "high"
+    },
+    {
+      "subject": "AttachmentStrategy",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.103",
+      "removed_in": null,
+      "reason": "unmaintained",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Unused.",
+      "source_version": "0.0.103",
+      "confidence": "high"
+    },
+    {
+      "subject": "UserBotLatencyLogObserver",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.102",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "UserBotLatencyObserver"
+        ]
+      },
+      "migration": "Use UserBotLatencyObserver with on_latency_measured.",
+      "source_version": "0.0.102",
+      "confidence": "high"
+    },
+    {
+      "subject": "RTVILLMFunctionCallMessage",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.102",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Use the llm-function-call-in-progress event from RTVIObserver.",
+      "source_version": "0.0.102",
+      "confidence": "high"
+    },
+    {
+      "subject": "RTVILLMFunctionCallMessageData",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.102",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Use the llm-function-call-in-progress event from RTVIObserver.",
+      "source_version": "0.0.102",
+      "confidence": "high"
+    },
+    {
+      "subject": "RTVIProcessor.handle_function_call",
+      "subject_kind": "method",
+      "owner": "RTVIProcessor",
+      "status": "deprecated",
+      "deprecated_in": "0.0.102",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Use the llm-function-call-in-progress event from RTVIObserver.",
+      "source_version": "0.0.102",
+      "confidence": "high"
+    },
+    {
+      "subject": "TurnAnalyzerUserTurnStopStrategy.timeout",
+      "subject_kind": "param",
+      "owner": "TurnAnalyzerUserTurnStopStrategy",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.102",
+      "reason": "behavior_default",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Timeout now managed internally based on STT latency.",
+      "source_version": "0.0.102",
+      "confidence": "high"
+    },
+    {
+      "subject": "BaseInputTransport.vad_analyzer",
+      "subject_kind": "param",
+      "owner": "BaseInputTransport",
+      "status": "deprecated",
+      "deprecated_in": "0.0.101",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMUserAggregatorParams",
+          "VADProcessor"
+        ]
+      },
+      "migration": "Pass vad_analyzer to LLMUserAggregatorParams or use VADProcessor.",
+      "source_version": "0.0.101",
+      "confidence": "high"
+    },
+    {
+      "subject": "AICFilter.enhancement_level",
+      "subject_kind": "param",
+      "owner": "AICFilter",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.101",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "0.0.101",
+      "confidence": "high"
+    },
+    {
+      "subject": "AICFilter.voice_gain",
+      "subject_kind": "param",
+      "owner": "AICFilter",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.101",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "0.0.101",
+      "confidence": "high"
+    },
+    {
+      "subject": "AICFilter.noise_gate_enable",
+      "subject_kind": "param",
+      "owner": "AICFilter",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.101",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "0.0.101",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.turns.mute",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.100",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "pipecat.turns.user_mute"
+        ]
+      },
+      "migration": "Use pipecat.turns.user_mute instead.",
+      "source_version": "0.0.100",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.audio.interruptions.MinWordsInterruptionStrategy",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.turns.user_start.MinWordsUserTurnStartStrategy"
+        ]
+      },
+      "migration": "Use pipecat.turns.user_start.MinWordsUserTurnStartStrategy.",
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "FrameProcessor.interruption_strategies",
+      "subject_kind": "param",
+      "owner": "FrameProcessor",
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMUserAggregator"
+        ]
+      },
+      "migration": "Use LLMUserAggregator.user_turn_strategies.",
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "LLMUserAggregatorParams",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContext",
+          "LLMContextAggregatorPair"
+        ]
+      },
+      "migration": "Use universal LLMContext and LLMContextAggregatorPair.",
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "LLMAssistantAggregatorParams",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContext",
+          "LLMContextAggregatorPair"
+        ]
+      },
+      "migration": "Use universal LLMContext and LLMContextAggregatorPair.",
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "UserStartedSpeakingFrame.emulated",
+      "subject_kind": "field",
+      "owner": "UserStartedSpeakingFrame",
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "UserStoppedSpeakingFrame.emulated",
+      "subject_kind": "field",
+      "owner": "UserStoppedSpeakingFrame",
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "EmulateUserStartedSpeakingFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "EmulateUserStoppedSpeakingFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "TransportParams.turn_analyzer",
+      "subject_kind": "param",
+      "owner": "TransportParams",
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMUserAggregator"
+        ]
+      },
+      "migration": "Use LLMUserAggregator.user_turn_strategies.",
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "SpeechmaticsSTTService.end_of_utterance_mode",
+      "subject_kind": "param",
+      "owner": "SpeechmaticsSTTService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "turn_detection_mode"
+        ]
+      },
+      "migration": "Use turn_detection_mode with TurnDetectionMode.* instead.",
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "SpeechmaticsSTTService.enable_vad",
+      "subject_kind": "param",
+      "owner": "SpeechmaticsSTTService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "behavior_default",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Inferred from turn_detection_mode.",
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "OpenAILLMContext",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContext"
+        ]
+      },
+      "migration": "Use the universal LLMContext and LLMContextAggregatorPair.",
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "STTMuteFilter",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMUserAggregator"
+        ]
+      },
+      "migration": "Use LLMUserAggregator.user_mute_strategies.",
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "FrameProcessor.interruptions_allowed",
+      "subject_kind": "param",
+      "owner": "FrameProcessor",
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMUserAggregator"
+        ]
+      },
+      "migration": "Use LLMUserAggregator.user_mute_strategies.",
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "PipelineParams.allow_interruptions",
+      "subject_kind": "param",
+      "owner": "PipelineParams",
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMUserAggregator"
+        ]
+      },
+      "migration": "Use LLMUserAggregator.user_turn_strategies.",
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "TranscriptProcessor",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMUserAggregator",
+          "LLMAssistantAggregator"
+        ]
+      },
+      "migration": "Use LLMUserAggregator/LLMAssistantAggregator events on_user_turn_stopped/on_assistant_turn_stopped.",
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "TranscriptionMessage",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMUserAggregator",
+          "LLMAssistantAggregator"
+        ]
+      },
+      "migration": "Use the new aggregator turn events.",
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "ThoughtTranscriptionMessage",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMUserAggregator",
+          "LLMAssistantAggregator"
+        ]
+      },
+      "migration": "Use the new aggregator turn events.",
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "TranscriptionUpdateFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMUserAggregator",
+          "LLMAssistantAggregator"
+        ]
+      },
+      "migration": "Use the new aggregator turn events.",
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "DeepgramSTTService.vad_events",
+      "subject_kind": "param",
+      "owner": "DeepgramSTTService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Use a local Silero VAD for VAD events.",
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "DeepgramSTTService.should_interrupt",
+      "subject_kind": "param",
+      "owner": "DeepgramSTTService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.99",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Will be removed with vad_events support.",
+      "source_version": "0.0.99",
+      "confidence": "high"
+    },
+    {
+      "subject": "FalSmartTurnAnalyzer",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.98",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "LocalSmartTurnAnalyzerV3"
+        ]
+      },
+      "migration": "Use LocalSmartTurnAnalyzerV3 instead.",
+      "source_version": "0.0.98",
+      "confidence": "high"
+    },
+    {
+      "subject": "LocalSmartTurnAnalyzer",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.98",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "LocalSmartTurnAnalyzerV3"
+        ]
+      },
+      "migration": "Use LocalSmartTurnAnalyzerV3 instead.",
+      "source_version": "0.0.98",
+      "confidence": "high"
+    },
+    {
+      "subject": "NimLLMService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.97",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "NvidiaLLMService"
+        ]
+      },
+      "migration": "Use NvidiaLLMService instead.",
+      "source_version": "0.0.97",
+      "confidence": "high"
+    },
+    {
+      "subject": "RivaSTTService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.97",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "NvidiaSTTService"
+        ]
+      },
+      "migration": "Use NvidiaSTTService instead.",
+      "source_version": "0.0.97",
+      "confidence": "high"
+    },
+    {
+      "subject": "RivaTTSService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.97",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "NvidiaTTSService"
+        ]
+      },
+      "migration": "Use NvidiaTTSService instead.",
+      "source_version": "0.0.97",
+      "confidence": "high"
+    },
+    {
+      "subject": "AICFilter.noise_gate_enable",
+      "subject_kind": "param",
+      "owner": "AICFilter",
+      "status": "deprecated",
+      "deprecated_in": "0.0.97",
+      "removed_in": null,
+      "reason": "behavior_default",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "AICFilter.create_vad_analyzer"
+        ]
+      },
+      "migration": "No effect; noise gating automatic. Use AICFilter.create_vad_analyzer() for VAD.",
+      "source_version": "0.0.97",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.sync",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.97",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.utils.sync"
+        ]
+      },
+      "migration": "Use pipecat.utils.sync instead.",
+      "source_version": "0.0.97",
+      "confidence": "high"
+    },
+    {
+      "subject": "TTSService.text_aggregator",
+      "subject_kind": "param",
+      "owner": "TTSService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.96",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMTextProcessor"
+        ]
+      },
+      "migration": "Use the new LLMTextProcessor to override aggregation behavior.",
+      "source_version": "0.0.96",
+      "confidence": "high"
+    },
+    {
+      "subject": "PatternPairAggregator.add_pattern_pair",
+      "subject_kind": "method",
+      "owner": "PatternPairAggregator",
+      "status": "deprecated",
+      "deprecated_in": "0.0.96",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "add_pattern"
+        ]
+      },
+      "migration": "Use add_pattern (type/action) instead.",
+      "source_version": "0.0.96",
+      "confidence": "high"
+    },
+    {
+      "subject": "MiniMaxHttpTTSService.english_normalization",
+      "subject_kind": "param",
+      "owner": "MiniMaxHttpTTSService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.96",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "test_normalization"
+        ]
+      },
+      "migration": "Use test_normalization instead.",
+      "source_version": "0.0.96",
+      "confidence": "low",
+      "notes": "Replacement 'test_normalization' is almost certainly a typo for text_normalization, but kept verbatim per hard rule."
+    },
+    {
+      "subject": "GeminiTTSService.api_key",
+      "subject_kind": "param",
+      "owner": "GeminiTTSService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.95",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "credentials",
+          "credentials_path"
+        ]
+      },
+      "migration": "Use credentials or credentials_path.",
+      "source_version": "0.0.95",
+      "confidence": "high"
+    },
+    {
+      "subject": "KrispFilter",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.94",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "KrispVivaFilter"
+        ]
+      },
+      "migration": "Use KrispVivaFilter instead.",
+      "source_version": "0.0.94",
+      "confidence": "high"
+    },
+    {
+      "subject": "LivekitFrameSerializer",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.94",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LiveKitTransport"
+        ]
+      },
+      "migration": "Use LiveKitTransport instead.",
+      "source_version": "0.0.94",
+      "confidence": "high"
+    },
+    {
+      "subject": "LLMService.needs_mcp_alternate_schema",
+      "subject_kind": "method",
+      "owner": "LLMService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.93",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Mechanism removed.",
+      "source_version": "0.0.93",
+      "confidence": "high"
+    },
+    {
+      "subject": "LLMAssistantAggregatorParams.expect_stripped_words",
+      "subject_kind": "param",
+      "owner": "LLMAssistantAggregatorParams",
+      "status": "deprecated",
+      "deprecated_in": "0.0.92",
+      "removed_in": null,
+      "reason": "behavior_default",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Ignored with the newer LLMAssistantAggregator; word spacing handled automatically.",
+      "source_version": "0.0.92",
+      "confidence": "high"
+    },
+    {
+      "subject": "LLMService.request_image_frame",
+      "subject_kind": "method",
+      "owner": "LLMService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.92",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "UserImageRequestFrame"
+        ]
+      },
+      "migration": "Push a UserImageRequestFrame instead.",
+      "source_version": "0.0.92",
+      "confidence": "high"
+    },
+    {
+      "subject": "UserResponseAggregator",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.92",
+      "removed_in": null,
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "0.0.92",
+      "confidence": "high"
+    },
+    {
+      "subject": "OpenAIRealtimeLLMService.send_transcription_frames",
+      "subject_kind": "param",
+      "owner": "OpenAIRealtimeLLMService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.92",
+      "removed_in": null,
+      "reason": "behavior_default",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Transcription frames now always sent.",
+      "source_version": "0.0.92",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.services.openai.realtime.context",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.92",
+      "removed_in": null,
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "No longer used by OpenAIRealtimeLLMService.",
+      "source_version": "0.0.92",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.services.openai.realtime.frames",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.92",
+      "removed_in": null,
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "No longer used by OpenAIRealtimeLLMService.",
+      "source_version": "0.0.92",
+      "confidence": "high"
+    },
+    {
+      "subject": "SimliVideoService.simli_config",
+      "subject_kind": "param",
+      "owner": "SimliVideoService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.92",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "api_key",
+          "face_id"
+        ]
+      },
+      "migration": "Use api_key and face_id.",
+      "source_version": "0.0.92",
+      "confidence": "high"
+    },
+    {
+      "subject": "SonioxSTTService.enable_non_final_tokens",
+      "subject_kind": "param",
+      "owner": "SonioxSTTService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.92",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "0.0.92",
+      "confidence": "high"
+    },
+    {
+      "subject": "SonioxSTTService.max_non_final_tokens_duration_ms",
+      "subject_kind": "param",
+      "owner": "SonioxSTTService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.92",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "0.0.92",
+      "confidence": "high"
+    },
+    {
+      "subject": "SarvamTTSService.aiohttp_session",
+      "subject_kind": "param",
+      "owner": "SarvamTTSService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.92",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "No longer used.",
+      "source_version": "0.0.92",
+      "confidence": "high"
+    },
+    {
+      "subject": "AWSNovaSonicLLMService.send_transcription_frames",
+      "subject_kind": "param",
+      "owner": "AWSNovaSonicLLMService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.91",
+      "removed_in": null,
+      "reason": "behavior_default",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Transcription frames now always sent.",
+      "source_version": "0.0.91",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.services.aws.nova_sonic.context",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.91",
+      "removed_in": null,
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Deprecated due to LLMContext changes.",
+      "source_version": "0.0.91",
+      "confidence": "high"
+    },
+    {
+      "subject": "LivekitFrameSerializer",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.90",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LiveKitTransport"
+        ]
+      },
+      "migration": "Use LiveKitTransport instead.",
+      "source_version": "0.0.90",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.service.openai_realtime",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.90",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.openai.realtime"
+        ]
+      },
+      "migration": "Use pipecat.services.openai.realtime (or azure.realtime).",
+      "source_version": "0.0.90",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.service.aws_nova_sonic",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.90",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.aws.nova_sonic"
+        ]
+      },
+      "migration": "Use pipecat.services.aws.nova_sonic instead.",
+      "source_version": "0.0.90",
+      "confidence": "high"
+    },
+    {
+      "subject": "GeminiMultimodalLiveLLMService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.90",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "GeminiLiveLLMService"
+        ]
+      },
+      "migration": "Use GeminiLiveLLMService.",
+      "source_version": "0.0.90",
+      "confidence": "high"
+    },
+    {
+      "subject": "PlayHTTTSService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.88",
+      "removed_in": null,
+      "reason": "vendor_gone",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "PlayHT shutting down their API Dec 31 2025.",
+      "source_version": "0.0.88",
+      "confidence": "high"
+    },
+    {
+      "subject": "PlayHTHttpTTSService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.88",
+      "removed_in": null,
+      "reason": "vendor_gone",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "PlayHT shutting down their API Dec 31 2025.",
+      "source_version": "0.0.88",
+      "confidence": "high"
+    },
+    {
+      "subject": "DailyTransportMessageFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.87",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "DailyOutputTransportMessageFrame"
+        ]
+      },
+      "migration": "Use DailyOutputTransportMessageFrame.",
+      "source_version": "0.0.87",
+      "confidence": "high"
+    },
+    {
+      "subject": "DailyTransportMessageUrgentFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.87",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "DailyOutputTransportMessageUrgentFrame"
+        ]
+      },
+      "migration": "Use DailyOutputTransportMessageUrgentFrame.",
+      "source_version": "0.0.87",
+      "confidence": "high"
+    },
+    {
+      "subject": "LiveKitTransportMessageFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.87",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "LiveKitOutputTransportMessageFrame"
+        ]
+      },
+      "migration": "Use LiveKitOutputTransportMessageFrame.",
+      "source_version": "0.0.87",
+      "confidence": "high"
+    },
+    {
+      "subject": "LiveKitTransportMessageUrgentFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.87",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "LiveKitOutputTransportMessageUrgentFrame"
+        ]
+      },
+      "migration": "Use LiveKitOutputTransportMessageUrgentFrame.",
+      "source_version": "0.0.87",
+      "confidence": "high"
+    },
+    {
+      "subject": "TransportMessageFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.87",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "OutputTransportMessageFrame"
+        ]
+      },
+      "migration": "Use OutputTransportMessageFrame.",
+      "source_version": "0.0.87",
+      "confidence": "high"
+    },
+    {
+      "subject": "TransportMessageUrgentFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.87",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "OutputTransportMessageUrgentFrame"
+        ]
+      },
+      "migration": "Use OutputTransportMessageUrgentFrame.",
+      "source_version": "0.0.87",
+      "confidence": "high"
+    },
+    {
+      "subject": "InputTransportMessageUrgentFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.87",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "InputTransportMessageFrame"
+        ]
+      },
+      "migration": "Use InputTransportMessageFrame.",
+      "source_version": "0.0.87",
+      "confidence": "high"
+    },
+    {
+      "subject": "DailyUpdateRemoteParticipantsFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.87",
+      "removed_in": null,
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Create a custom frame and handle it in on_after_push_frame or a custom processor.",
+      "source_version": "0.0.87",
+      "confidence": "high"
+    },
+    {
+      "subject": "GladiaSTTService.confidence",
+      "subject_kind": "param",
+      "owner": "GladiaSTTService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.86",
+      "removed_in": null,
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "confidence no longer needed.",
+      "source_version": "0.0.86",
+      "confidence": "high"
+    },
+    {
+      "subject": "PipelineTask.on_pipeline_stopped",
+      "subject_kind": "event",
+      "owner": "PipelineTask",
+      "status": "deprecated",
+      "deprecated_in": "0.0.86",
+      "removed_in": null,
+      "reason": "merged",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "on_pipeline_finished"
+        ]
+      },
+      "migration": "Use on_pipeline_finished instead.",
+      "source_version": "0.0.86",
+      "confidence": "high"
+    },
+    {
+      "subject": "PipelineTask.on_pipeline_ended",
+      "subject_kind": "event",
+      "owner": "PipelineTask",
+      "status": "deprecated",
+      "deprecated_in": "0.0.86",
+      "removed_in": null,
+      "reason": "merged",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "on_pipeline_finished"
+        ]
+      },
+      "migration": "Use on_pipeline_finished instead.",
+      "source_version": "0.0.86",
+      "confidence": "high"
+    },
+    {
+      "subject": "PipelineTask.on_pipeline_cancelled",
+      "subject_kind": "event",
+      "owner": "PipelineTask",
+      "status": "deprecated",
+      "deprecated_in": "0.0.86",
+      "removed_in": null,
+      "reason": "merged",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "on_pipeline_finished"
+        ]
+      },
+      "migration": "Use on_pipeline_finished instead.",
+      "source_version": "0.0.86",
+      "confidence": "high"
+    },
+    {
+      "subject": "VisionImageRawFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.85",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "LLMContextFrame",
+          "OpenAILLMContextFrame"
+        ]
+      },
+      "migration": "Use context frames instead.",
+      "source_version": "0.0.85",
+      "confidence": "high"
+    },
+    {
+      "subject": "BotInterruptionFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.85",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "InterruptionTaskFrame"
+        ]
+      },
+      "migration": "Use InterruptionTaskFrame.",
+      "source_version": "0.0.85",
+      "confidence": "high"
+    },
+    {
+      "subject": "StartInterruptionFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.85",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "InterruptionFrame"
+        ]
+      },
+      "migration": "Use InterruptionFrame.",
+      "source_version": "0.0.85",
+      "confidence": "high"
+    },
+    {
+      "subject": "VisionImageFrameAggregator",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.85",
+      "removed_in": null,
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Deprecated because VisionImageRawFrame removed.",
+      "source_version": "0.0.85",
+      "confidence": "high"
+    },
+    {
+      "subject": "NoisereduceFilter",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.85",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "KrispFilter",
+          "AICFilter"
+        ]
+      },
+      "migration": "Use other audio filters like KrispFilter or AICFilter.",
+      "source_version": "0.0.85",
+      "confidence": "high"
+    },
+    {
+      "subject": "OpenAIRealtimeBetaLLMService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.85",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "OpenAIRealtimeLLMService"
+        ]
+      },
+      "migration": "Use OpenAIRealtimeLLMService.",
+      "source_version": "0.0.85",
+      "confidence": "high"
+    },
+    {
+      "subject": "AzureRealtimeBetaLLMService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.85",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "AzureRealtimeLLMService"
+        ]
+      },
+      "migration": "Use AzureRealtimeLLMService.",
+      "source_version": "0.0.85",
+      "confidence": "high"
+    },
+    {
+      "subject": "StopInterruptionFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.83",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "UserStoppedSpeakingFrame"
+        ]
+      },
+      "migration": "Use UserStoppedSpeakingFrame.",
+      "source_version": "0.0.83",
+      "confidence": "high"
+    },
+    {
+      "subject": "DailyTransport.write_dtmf",
+      "subject_kind": "method",
+      "owner": "DailyTransport",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.83",
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "BaseOutputTransport.write_dtmf"
+        ]
+      },
+      "migration": "Use generic BaseOutputTransport.write_dtmf().",
+      "source_version": "0.0.83",
+      "confidence": "high"
+    },
+    {
+      "subject": "DailyTransport.send_dtmf",
+      "subject_kind": "method",
+      "owner": "DailyTransport",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.83",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "0.0.83",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.transports.network.small_webrtc",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.83",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.transports.smallwebrtc.transport"
+        ]
+      },
+      "migration": "Use pipecat.transports.smallwebrtc.transport instead.",
+      "source_version": "0.0.83",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.transports.network.webrtc_connection",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.83",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.transports.smallwebrtc.connection"
+        ]
+      },
+      "migration": "Use pipecat.transports.smallwebrtc.connection instead.",
+      "source_version": "0.0.83",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.transports.network.websocket_client",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.83",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.transports.websocket.client"
+        ]
+      },
+      "migration": "Use pipecat.transports.websocket.client instead.",
+      "source_version": "0.0.83",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.transports.network.websocket_server",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.83",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.transports.websocket.server"
+        ]
+      },
+      "migration": "Use pipecat.transports.websocket.server instead.",
+      "source_version": "0.0.83",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.transports.network.fastapi_websocket",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.83",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.transports.websocket.fastapi"
+        ]
+      },
+      "migration": "Use pipecat.transports.websocket.fastapi instead.",
+      "source_version": "0.0.83",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.transports.services.daily",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.83",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.transports.daily.transport"
+        ]
+      },
+      "migration": "Use pipecat.transports.daily.transport instead.",
+      "source_version": "0.0.83",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.transports.services.helpers.daily_rest",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.83",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.transports.daily.utils"
+        ]
+      },
+      "migration": "Use pipecat.transports.daily.utils instead.",
+      "source_version": "0.0.83",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.transports.services.livekit",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.83",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.transports.livekit.transport"
+        ]
+      },
+      "migration": "Use pipecat.transports.livekit.transport instead.",
+      "source_version": "0.0.83",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.transports.services.tavus",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.83",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.transports.tavus.transport"
+        ]
+      },
+      "migration": "Use pipecat.transports.tavus.transport instead.",
+      "source_version": "0.0.83",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.frames.frames.KeypadEntry",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.83",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.audio.dtmf.types.KeypadEntry"
+        ]
+      },
+      "migration": "Use pipecat.audio.dtmf.types.KeypadEntry instead.",
+      "source_version": "0.0.83",
+      "confidence": "high"
+    },
+    {
+      "subject": "FrameProcessor.wait_for_task",
+      "subject_kind": "method",
+      "owner": "FrameProcessor",
+      "status": "deprecated",
+      "deprecated_in": "0.0.81",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Use 'await task' or asyncio.wait_for(task, timeout).",
+      "source_version": "0.0.81",
+      "confidence": "high"
+    },
+    {
+      "subject": "FrameProcessor.set_parent",
+      "subject_kind": "method",
+      "owner": "FrameProcessor",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.81",
+      "reason": "unmaintained",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Unused.",
+      "source_version": "0.0.81",
+      "confidence": "high"
+    },
+    {
+      "subject": "FrameProcessor.get_parent",
+      "subject_kind": "method",
+      "owner": "FrameProcessor",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.81",
+      "reason": "unmaintained",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Unused.",
+      "source_version": "0.0.81",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.runner.daily.configure_with_args",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.78",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "configure"
+        ]
+      },
+      "migration": "Use configure() instead.",
+      "source_version": "0.0.78",
+      "confidence": "medium",
+      "notes": "Function in pipecat.runner.daily; recorded as dotted module-qualified function."
+    },
+    {
+      "subject": "FishAudioTTSService.model",
+      "subject_kind": "param",
+      "owner": "FishAudioTTSService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.74",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "reference_id"
+        ]
+      },
+      "migration": "Use reference_id instead.",
+      "source_version": "0.0.74",
+      "confidence": "high"
+    },
+    {
+      "subject": "AudioBufferProcessor.user_continuos_stream",
+      "subject_kind": "param",
+      "owner": "AudioBufferProcessor",
+      "status": "deprecated",
+      "deprecated_in": "0.0.72",
+      "removed_in": null,
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "0.0.72",
+      "confidence": "medium",
+      "notes": "Param name 'user_continuos_stream' is misspelled in the changelog; kept verbatim per hard rule."
+    },
+    {
+      "subject": "DailyTransport.send_dtmf",
+      "subject_kind": "method",
+      "owner": "DailyTransport",
+      "status": "deprecated",
+      "deprecated_in": "0.0.69",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "OutputDTMFFrame",
+          "OutputDTMFUrgentFrame"
+        ]
+      },
+      "migration": "Push an OutputDTMFFrame or OutputDTMFUrgentFrame instead.",
+      "source_version": "0.0.69",
+      "confidence": "high"
+    },
+    {
+      "subject": "CartesiaTTSService.emotion",
+      "subject_kind": "param",
+      "owner": "CartesiaTTSService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.68",
+      "removed_in": null,
+      "reason": "vendor_gone",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "emotion deprecated by Cartesia.",
+      "source_version": "0.0.68",
+      "confidence": "high"
+    },
+    {
+      "subject": "CartesiaHttpTTSService.emotion",
+      "subject_kind": "param",
+      "owner": "CartesiaHttpTTSService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.68",
+      "removed_in": null,
+      "reason": "vendor_gone",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "emotion deprecated by Cartesia.",
+      "source_version": "0.0.68",
+      "confidence": "high"
+    },
+    {
+      "subject": "GeminiMultimodalLiveLLMService.transcribe_user_audio",
+      "subject_kind": "param",
+      "owner": "GeminiMultimodalLiveLLMService",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.68",
+      "reason": "behavior_default",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Audio is now transcribed automatically.",
+      "source_version": "0.0.68",
+      "confidence": "high"
+    },
+    {
+      "subject": "SileroVAD",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.68",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "SileroVADAnalyzer"
+        ]
+      },
+      "migration": "Use SileroVADAnalyzer instead.",
+      "source_version": "0.0.68",
+      "confidence": "high"
+    },
+    {
+      "subject": "PollyTTSService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.67",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "AWSPollyTTSService"
+        ]
+      },
+      "migration": "Use AWSPollyTTSService instead.",
+      "source_version": "0.0.67",
+      "confidence": "high"
+    },
+    {
+      "subject": "on_push_frame",
+      "subject_kind": "event",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.67",
+      "removed_in": null,
+      "reason": "behavior_default",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Use on_push_frame(data: FramePushed) signature instead.",
+      "source_version": "0.0.67",
+      "confidence": "medium",
+      "notes": "Observer callback signature change; subject is the on_push_frame event/callback."
+    },
+    {
+      "subject": "CanonicalMetricsService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.67",
+      "reason": "unmaintained",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "No longer maintained.",
+      "source_version": "0.0.67",
+      "confidence": "high"
+    },
+    {
+      "subject": "TransportParams.camera_*",
+      "subject_kind": "param",
+      "owner": "TransportParams",
+      "status": "deprecated",
+      "deprecated_in": "0.0.66",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": []
+      },
+      "migration": "Use TransportParams.video_* instead.",
+      "source_version": "0.0.66",
+      "confidence": "medium",
+      "notes": "Glob 'camera_*' is the verbatim token used; replacement video_* also glob, no verbatim per-name target."
+    },
+    {
+      "subject": "TransportParams.vad_enabled",
+      "subject_kind": "param",
+      "owner": "TransportParams",
+      "status": "deprecated",
+      "deprecated_in": "0.0.66",
+      "removed_in": null,
+      "reason": "split",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "TransportParams.audio_in_enabled",
+          "TransportParams.vad_analyzer"
+        ]
+      },
+      "migration": "Use TransportParams.audio_in_enabled and TransportParams.vad_analyzer instead.",
+      "source_version": "0.0.66",
+      "confidence": "high"
+    },
+    {
+      "subject": "TransportParams.vad_audio_passthrough",
+      "subject_kind": "param",
+      "owner": "TransportParams",
+      "status": "deprecated",
+      "deprecated_in": "0.0.66",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "TransportParams.audio_in_passthrough"
+        ]
+      },
+      "migration": "Use TransportParams.audio_in_passthrough instead.",
+      "source_version": "0.0.66",
+      "confidence": "high"
+    },
+    {
+      "subject": "ParakeetSTTService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.66",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "RivaSTTService"
+        ]
+      },
+      "migration": "Use RivaSTTService instead.",
+      "source_version": "0.0.66",
+      "confidence": "high"
+    },
+    {
+      "subject": "FastPitchTTSService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.66",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "RivaTTSService"
+        ]
+      },
+      "migration": "Use RivaTTSService instead.",
+      "source_version": "0.0.66",
+      "confidence": "high"
+    },
+    {
+      "subject": "DeepgramSTTService.url",
+      "subject_kind": "param",
+      "owner": "DeepgramSTTService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.64",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "base_url"
+        ]
+      },
+      "migration": "Use base_url instead.",
+      "source_version": "0.0.64",
+      "confidence": "high"
+    },
+    {
+      "subject": "create_context_aggregator.user_kwargs",
+      "subject_kind": "param",
+      "owner": "create_context_aggregator",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.64",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "user_params"
+        ]
+      },
+      "migration": "Use user_params instead.",
+      "source_version": "0.0.64",
+      "confidence": "medium",
+      "notes": "Param of create_context_aggregator(); recorded as that function's param."
+    },
+    {
+      "subject": "create_context_aggregator.assistant_kwargs",
+      "subject_kind": "param",
+      "owner": "create_context_aggregator",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.64",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "assistant_params"
+        ]
+      },
+      "migration": "Use assistant_params instead.",
+      "source_version": "0.0.64",
+      "confidence": "medium"
+    },
+    {
+      "subject": "pipecat.services.ai_services",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.62",
+      "removed_in": null,
+      "reason": "split",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.services.ai_service",
+          "pipecat.services.image_service",
+          "pipecat.services.llm_service",
+          "pipecat.services.stt_service",
+          "pipecat.services.vision_service"
+        ]
+      },
+      "migration": "Import base classes from the per-service modules.",
+      "source_version": "0.0.62",
+      "confidence": "high"
+    },
+    {
+      "subject": "GladiaSTTService.language",
+      "subject_kind": "param",
+      "owner": "GladiaSTTService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.62",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "language_config"
+        ]
+      },
+      "migration": "Use language_config instead.",
+      "source_version": "0.0.62",
+      "confidence": "high"
+    },
+    {
+      "subject": "GladiaSTTService.InputParams",
+      "subject_kind": "nested_class",
+      "owner": "GladiaSTTService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.62",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "GladiaInputParams"
+        ]
+      },
+      "migration": "Use the GladiaInputParams class instead.",
+      "source_version": "0.0.62",
+      "confidence": "high"
+    },
+    {
+      "subject": "LLMService.register_function.start_callback",
+      "subject_kind": "param",
+      "owner": "LLMService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.59",
+      "removed_in": null,
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Move the start-callback code into the function call.",
+      "source_version": "0.0.59",
+      "confidence": "medium",
+      "notes": "start_callback arg to register_function()."
+    },
+    {
+      "subject": "TTSService.text_filter",
+      "subject_kind": "param",
+      "owner": "TTSService",
+      "status": "deprecated",
+      "deprecated_in": "0.0.59",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "rename",
+        "targets": [
+          "text_filters"
+        ]
+      },
+      "migration": "Use text_filters (now a list) instead.",
+      "source_version": "0.0.59",
+      "confidence": "high"
+    },
+    {
+      "subject": "audio.resample_audio",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.59",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "create_default_resampler"
+        ]
+      },
+      "migration": "Use create_default_resampler() instead.",
+      "source_version": "0.0.59",
+      "confidence": "high"
+    },
+    {
+      "subject": "STTMuteFilter.stt_service",
+      "subject_kind": "param",
+      "owner": "STTMuteFilter",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.59",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": null,
+      "source_version": "0.0.59",
+      "confidence": "high"
+    },
+    {
+      "subject": "AWSTTSService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.59",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "PollyTTSService"
+        ]
+      },
+      "migration": "Use PollyTTSService instead.",
+      "source_version": "0.0.59",
+      "confidence": "high",
+      "notes": "Reverse direction from 0.0.52 deprecation (naming churn); kept verbatim per text."
+    },
+    {
+      "subject": "DailyTranscriptionSettings.tier",
+      "subject_kind": "field",
+      "owner": "DailyTranscriptionSettings",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.59",
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "model"
+        ]
+      },
+      "migration": "Use model instead.",
+      "source_version": "0.0.59",
+      "confidence": "high"
+    },
+    {
+      "subject": "pipecat.vad",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.59",
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "pipecat.audio.vad"
+        ]
+      },
+      "migration": "Use pipecat.audio.vad instead.",
+      "source_version": "0.0.59",
+      "confidence": "high"
+    },
+    {
+      "subject": "PipelineParams.observers",
+      "subject_kind": "field",
+      "owner": "PipelineParams",
+      "status": "deprecated",
+      "deprecated_in": "0.0.58",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "PipelineTask"
+        ]
+      },
+      "migration": "Use the new PipelineTask observers parameter.",
+      "source_version": "0.0.58",
+      "confidence": "high"
+    },
+    {
+      "subject": "TransportParams.audio_out_is_live",
+      "subject_kind": "param",
+      "owner": "TransportParams",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.58",
+      "reason": "unmaintained",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Not used.",
+      "source_version": "0.0.58",
+      "confidence": "high"
+    },
+    {
+      "subject": "STTMuteFilter.stt_service",
+      "subject_kind": "param",
+      "owner": "STTMuteFilter",
+      "status": "deprecated",
+      "deprecated_in": "0.0.57",
+      "removed_in": null,
+      "reason": "behavior_default",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "Filter now manages mute state internally.",
+      "source_version": "0.0.57",
+      "confidence": "high"
+    },
+    {
+      "subject": "RTVI.observer",
+      "subject_kind": "method",
+      "owner": "RTVI",
+      "status": "deprecated",
+      "deprecated_in": "0.0.57",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "RTVIObserver"
+        ]
+      },
+      "migration": "Instantiate an RTVIObserver directly instead.",
+      "source_version": "0.0.57",
+      "confidence": "high"
+    },
+    {
+      "subject": "RTVISpeakingProcessor",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.57",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "RTVIObserver"
+        ]
+      },
+      "migration": "Instantiate an RTVIObserver instead.",
+      "source_version": "0.0.57",
+      "confidence": "high"
+    },
+    {
+      "subject": "RTVIBotLLMProcessor",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.57",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "RTVIObserver"
+        ]
+      },
+      "migration": "Instantiate an RTVIObserver instead.",
+      "source_version": "0.0.57",
+      "confidence": "high"
+    },
+    {
+      "subject": "resample_audio",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.55",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "create_default_resampler"
+        ]
+      },
+      "migration": "Use create_default_resampler() instead.",
+      "source_version": "0.0.55",
+      "confidence": "high"
+    },
+    {
+      "subject": "AudioBufferProcessor.reset_audio_buffers",
+      "subject_kind": "method",
+      "owner": "AudioBufferProcessor",
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.55",
+      "reason": "split",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "AudioBufferProcessor.start_recording",
+          "AudioBufferProcessor.stop_recording"
+        ]
+      },
+      "migration": "Use start_recording() and stop_recording() instead.",
+      "source_version": "0.0.55",
+      "confidence": "high"
+    },
+    {
+      "subject": "AWSTTSService",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.52",
+      "removed_in": null,
+      "reason": "rename",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "PollyTTSService"
+        ]
+      },
+      "migration": "Use PollyTTSService instead.",
+      "source_version": "0.0.52",
+      "confidence": "high",
+      "notes": "Naming churn; later reversed (0.0.59 removes AWSTTSService pointing back to PollyTTSService, then 1.0.0 removes PollyTTSService alias -> AWSTTSService)."
+    },
+    {
+      "subject": "AppFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.50",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "No use case.",
+      "source_version": "0.0.50",
+      "confidence": "high"
+    },
+    {
+      "subject": "LLMUserResponseAggregator",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.46",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "OpenAILLMContext"
+        ]
+      },
+      "migration": "Use OpenAILLMContext instead.",
+      "source_version": "0.0.46",
+      "confidence": "high"
+    },
+    {
+      "subject": "LLMAssistantResponseAggregator",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.46",
+      "removed_in": null,
+      "reason": "use_existing",
+      "replacement": {
+        "relation": "use_existing",
+        "targets": [
+          "OpenAILLMContext"
+        ]
+      },
+      "migration": "Use OpenAILLMContext instead.",
+      "source_version": "0.0.46",
+      "confidence": "high"
+    },
+    {
+      "subject": "vad",
+      "subject_kind": "module",
+      "owner": null,
+      "status": "deprecated",
+      "deprecated_in": "0.0.46",
+      "removed_in": null,
+      "reason": "move",
+      "replacement": {
+        "relation": "move",
+        "targets": [
+          "audio.vad"
+        ]
+      },
+      "migration": "Use audio.vad instead.",
+      "source_version": "0.0.46",
+      "confidence": "medium",
+      "notes": "Bare 'vad'/'audio.vad' package names as written in the bullet."
+    },
+    {
+      "subject": "LLMResponseStartFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.37",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "No longer needed; interruptions handled via StartInterruptionFrame.",
+      "source_version": "0.0.37",
+      "confidence": "high"
+    },
+    {
+      "subject": "LLMResponseEndFrame",
+      "subject_kind": "symbol",
+      "owner": null,
+      "status": "removed",
+      "deprecated_in": null,
+      "removed_in": "0.0.37",
+      "reason": "other",
+      "replacement": {
+        "relation": "none",
+        "targets": []
+      },
+      "migration": "No longer needed.",
+      "source_version": "0.0.37",
+      "confidence": "high"
+    }
+  ]
+}
