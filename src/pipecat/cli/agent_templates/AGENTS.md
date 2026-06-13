@@ -38,6 +38,7 @@ pipecat create --name mybot --bot-type web \
 #       pipecat create --help          # available flags
 #       pipecat create --list-options  # valid service/transport VALUES
 #   • --dry-run prints the resolved config as JSON; --config project.json drives it from a file.
+#   • --transport is repeatable — pass each transport you want (production + a local-dev one, §2).
 
 # Humans (interactive wizard): `pipecat create quickstart` (defaults) or `pipecat create`.
 ```
@@ -75,8 +76,8 @@ Transport and services are scaffold inputs (the `--transport` / `--stt` / `--llm
 - **Web / mobile voice** — `DailyTransport` or `SmallWebRTCTransport`.
 - **Telephony** — a WebSocket transport (`FastAPIWebsocketTransport`) + the provider's serializer (Twilio, Telnyx, …), or `DailyTransport` for Daily PSTN/SIP.
 
-A bot can register **several transports at once** (they coexist in `transport_params`; `-t <name>` picks one per run). A convenient dev setup is your production transport *plus*:
-- **`SmallWebRTCTransport` + Pipecat Prebuilt** — the dev runner serves a built-in browser test UI at `http://localhost:7860`, so you can talk to the bot with no telephony/PSTN setup. This is how you dev/test a **telephony** bot locally.
+**Scaffold every transport you need at once** — repeat `--transport` (e.g. `--transport twilio --transport smallwebrtc`); the scaffold wires each one's params and dependencies. They coexist in `transport_params`; `-t <name>` picks one per run. A **telephony** bot can include a WebRTC transport for local testing. A convenient dev setup is your production transport *plus*:
+- **`SmallWebRTCTransport` + Pipecat Prebuilt** — scaffold it in (`--transport smallwebrtc`) for a built-in browser test UI at `http://localhost:7860`, so you can talk to the bot with no telephony/PSTN setup — how you dev/test a **telephony** bot locally.
 - **the `eval` transport (§6)** — drive it headless with scripted scenarios to confirm behavior, tune prompts, and catch regressions.
 
 **Services** — STT, TTS, LLM are independent choices. Confirm the exact service class, model name, and params via §3; do not assume.
