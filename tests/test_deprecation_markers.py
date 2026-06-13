@@ -161,20 +161,27 @@ def test_task_frame_aliases_warn(frame_cls):
 
 
 def test_no_deprecation_warnings_at_import_time():
-    """Importing the modules with deprecated shims must not warn.
+    """Importing the modules with deprecated shims must not emit a pipecat DeprecationWarning.
 
-    Guards the suppression of @deprecated subclassing warnings for the
-    task frame aliases defined inside pipecat.frames.frames.
+    Guards the suppression of @deprecated subclassing warnings for the task frame
+    aliases defined inside pipecat.frames.frames. Done in a subprocess for a
+    fresh import, and filtered to pipecat's own deprecations (the canonical
+    "... is deprecated since X.Y.Z ..." message) so unrelated stdlib warnings —
+    e.g. ``audioop`` on Python 3.12 — don't trip it.
     """
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-W",
-            "error::DeprecationWarning",
-            "-c",
-            "import pipecat.frames.frames, pipecat.pipeline.worker, pipecat.pipeline.runner",
-        ],
-        capture_output=True,
-        text=True,
+    script = (
+        "import sys, warnings\n"
+        "with warnings.catch_warnings(record=True) as caught:\n"
+        "    warnings.simplefilter('always')\n"
+        "    import pipecat.frames.frames\n"
+        "    import pipecat.pipeline.worker\n"
+        "    import pipecat.pipeline.runner\n"
+        "bad = [str(w.message) for w in caught\n"
+        "       if issubclass(w.category, DeprecationWarning)\n"
+        "       and ' is deprecated since ' in str(w.message)]\n"
+        "if bad:\n"
+        "    sys.stderr.write('pipecat import-time deprecation warnings:\\n' + '\\n'.join(bad))\n"
+        "    sys.exit(1)\n"
     )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
