@@ -17,6 +17,8 @@ from starlette.websockets import WebSocketState
 from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketCallbacks,
     FastAPIWebsocketClient,
+    FastAPIWebsocketParams,
+    FastAPIWebsocketTransport,
     _WebSocketMessageIterator,
 )
 
@@ -313,6 +315,15 @@ class TestDisconnectCloseTimeout(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(client._close_task.done())
         self.assertIsInstance(client._close_task.exception(), RuntimeError)
         self.assertIn("exception while closing the websocket", logs.getvalue())
+
+    async def test_transport_passes_ws_close_timeout_to_client(self):
+        """The transport wires params.ws_close_timeout through to its client."""
+        mock_ws = AsyncMock()
+        params = FastAPIWebsocketParams(ws_close_timeout=1.25)
+
+        transport = FastAPIWebsocketTransport(mock_ws, params)
+
+        self.assertEqual(transport._client._ws_close_timeout, 1.25)
 
 
 if __name__ == "__main__":
