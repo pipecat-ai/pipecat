@@ -66,6 +66,7 @@ from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, RealtimeServiceInfo
 from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt
@@ -280,11 +281,16 @@ class ContextWindowCompressionParams(BaseModel):
     trigger_tokens: int | None = Field(default=None)  # None = use default (80% of context window)
 
 
+@deprecated(
+    "`InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use "
+    "`GeminiLiveLLMService.Settings` instead."
+)
 class InputParams(BaseModel):
     """Input parameters for Gemini Live generation.
 
     .. deprecated:: 0.0.105
         Use ``GeminiLiveLLMService.Settings`` instead.
+        Will be removed in 2.0.0.
 
     Parameters:
         frequency_penalty: Frequency penalty for generation (0.0-2.0). Defaults to None.
@@ -436,11 +442,14 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GeminiLiveLLMService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             voice_id: TTS voice identifier. Defaults to "Charon".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GeminiLiveLLMService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
+
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             start_video_paused: Whether to start with video input paused. Defaults to False.
             system_instruction: System prompt for the model. Defaults to None.
@@ -449,6 +458,7 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GeminiLiveLLMService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Gemini Live LLM settings. If provided together with deprecated
                 top-level parameters, the ``settings`` values take precedence.

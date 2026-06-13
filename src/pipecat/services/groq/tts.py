@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -68,11 +69,16 @@ class GroqTTSService(TTSService):
     Settings = GroqTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`GroqTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `GroqTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Groq TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``settings=GroqTTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language for speech synthesis. Defaults to English.
@@ -105,16 +111,19 @@ class GroqTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GroqTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             model_name: TTS model to use.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GroqTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             voice_id: Voice identifier to use.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GroqTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate. Must be 48000 Hz for Groq TTS.
             settings: Runtime-updatable settings. When provided alongside deprecated

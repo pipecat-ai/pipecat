@@ -26,6 +26,7 @@ from pipecat.services.aws.utils import resolve_credentials
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -153,11 +154,16 @@ class AWSPollyTTSService(TTSService):
     Settings = AWSPollyTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`AWSPollyTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `AWSPollyTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for AWS Polly TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``AWSPollyTTSService.Settings`` directly via the ``settings`` parameter instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             engine: TTS engine to use ('standard', 'neural', etc.).
@@ -202,12 +208,14 @@ class AWSPollyTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSPollyTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate. If None, uses service default.
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSPollyTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

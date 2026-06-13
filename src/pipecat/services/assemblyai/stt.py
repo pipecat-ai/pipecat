@@ -173,6 +173,7 @@ class AssemblyAISTTService(WebsocketSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AssemblyAISTTService.Settings(language=...)`` instead.
+                    Will be removed in 2.0.0.
 
             api_endpoint_base_url: WebSocket endpoint URL. Defaults to AssemblyAI's streaming endpoint.
             sample_rate: Audio sample rate in Hz. Defaults to 16000.
@@ -181,6 +182,7 @@ class AssemblyAISTTService(WebsocketSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AssemblyAISTTService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             vad_force_turn_endpoint: Controls turn detection mode.
                 When True (Pipecat mode, default): Forces AssemblyAI to return finals ASAP

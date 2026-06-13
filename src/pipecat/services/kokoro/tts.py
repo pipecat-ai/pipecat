@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
 from pipecat.services.settings import TTSSettings, assert_given
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -104,11 +105,16 @@ class KokoroTTSService(TTSService):
     Settings = KokoroTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`KokoroTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `KokoroTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Kokoro TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``KokoroTTSService.Settings`` directly via the ``settings`` parameter instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language to use for synthesis.
@@ -133,6 +139,7 @@ class KokoroTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=KokoroTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             model_path: Path to the kokoro ONNX model file. Defaults to auto-downloaded file.
             voices_path: Path to the voices binary file. Defaults to auto-downloaded file.
@@ -140,6 +147,7 @@ class KokoroTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=KokoroTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

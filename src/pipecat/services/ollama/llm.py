@@ -51,6 +51,7 @@ class OLLamaLLMService(OpenAILLMService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OLLamaLLMService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             base_url: The base URL for the OLLama API endpoint.
                     Defaults to "http://localhost:11434/v1".

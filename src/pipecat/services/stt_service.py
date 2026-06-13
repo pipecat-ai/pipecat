@@ -39,6 +39,7 @@ from pipecat.services.settings import STTSettings, is_given
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.deprecation import deprecated
 
 # Duration in seconds of silent audio sent for WebSocket keepalive (100ms).
 _KEEPALIVE_SILENCE_DURATION = 0.1
@@ -224,42 +225,38 @@ class STTService(AIService):
         """
         return self._sample_rate
 
+    @deprecated(
+        "`STTService.set_model` is deprecated since 0.0.104 and will be removed in 2.0.0. "
+        "Use `STTUpdateSettingsFrame(model=...)` instead."
+    )
     async def set_model(self, model: str):
         """Set the speech recognition model.
 
         .. deprecated:: 0.0.104
             Use ``STTUpdateSettingsFrame(model=...)`` instead.
+            Will be removed in 2.0.0.
 
         Args:
             model: The name of the model to use for speech recognition.
         """
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "'set_model' is deprecated, use 'STTUpdateSettingsFrame(model=...)' instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
         logger.info(f"Switching STT model to: [{model}]")
         settings_cls = type(self._settings)
         await self._update_settings(settings_cls(model=model))
 
+    @deprecated(
+        "`STTService.set_language` is deprecated since 0.0.104 and will be removed in 2.0.0. "
+        "Use `STTUpdateSettingsFrame(language=...)` instead."
+    )
     async def set_language(self, language: Language):
         """Set the language for speech recognition.
 
         .. deprecated:: 0.0.104
             Use ``STTUpdateSettingsFrame(language=...)`` instead.
+            Will be removed in 2.0.0.
 
         Args:
             language: The language to use for speech recognition.
         """
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "'set_language' is deprecated, use 'STTUpdateSettingsFrame(language=...)' instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
         logger.info(f"Switching STT language to: [{language}]")
         settings_cls = type(self._settings)
         await self._update_settings(settings_cls(language=language))

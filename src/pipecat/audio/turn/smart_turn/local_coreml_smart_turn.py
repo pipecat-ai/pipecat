@@ -10,13 +10,13 @@ This module provides a smart turn analyzer that uses CoreML models for
 local end-of-turn detection without requiring network connectivity.
 """
 
-import warnings
 from typing import Any
 
 import numpy as np
 from loguru import logger
 
 from pipecat.audio.turn.smart_turn.base_smart_turn import BaseSmartTurn
+from pipecat.utils.deprecation import deprecated
 
 try:
     import coremltools as ct
@@ -30,6 +30,10 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 
+@deprecated(
+    "`LocalCoreMLSmartTurnAnalyzer` is deprecated since 0.0.106 and will be removed in 2.0.0. "
+    "Use `LocalSmartTurnAnalyzerV3` instead."
+)
 class LocalCoreMLSmartTurnAnalyzer(BaseSmartTurn):
     """Local smart turn analyzer using CoreML models.
 
@@ -38,8 +42,7 @@ class LocalCoreMLSmartTurnAnalyzer(BaseSmartTurn):
     for Apple Silicon and other CoreML-compatible hardware.
 
     .. deprecated:: 0.0.106
-        LocalCoreMLSmartTurnAnalyzer is deprecated and will be removed in a future version.
-        Use LocalSmartTurnAnalyzerV3 instead.
+        Use :class:`LocalSmartTurnAnalyzerV3` instead. Will be removed in 2.0.0.
     """
 
     def __init__(self, *, smart_turn_model_path: str, **kwargs):
@@ -54,15 +57,6 @@ class LocalCoreMLSmartTurnAnalyzer(BaseSmartTurn):
             Exception: If smart_turn_model_path is not provided or model loading fails.
         """
         super().__init__(**kwargs)
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "LocalCoreMLSmartTurnAnalyzer is deprecated and will be removed in a future "
-                "version. Use LocalSmartTurnAnalyzerV3 instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
 
         if not smart_turn_model_path:
             logger.error("smart_turn_model_path is not set.")

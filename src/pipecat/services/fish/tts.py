@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -86,11 +87,16 @@ class FishAudioTTSService(InterruptibleTTSService):
     Settings = FishAudioTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`FishAudioTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `FishAudioTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Fish Audio TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``settings=FishAudioTTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language for synthesis. Defaults to English.
@@ -126,11 +132,13 @@ class FishAudioTTSService(InterruptibleTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=FishAudioTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             model_id: Specify which Fish Audio TTS model to use (e.g. "s1").
 
                 .. deprecated:: 0.0.105
                     Use ``settings=FishAudioTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             output_format: Audio output format. Defaults to "pcm".
             sample_rate: Audio sample rate. If None, uses default.
@@ -138,6 +146,7 @@ class FishAudioTTSService(InterruptibleTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=FishAudioTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

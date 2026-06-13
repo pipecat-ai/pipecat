@@ -250,6 +250,7 @@ class CartesiaTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=CartesiaTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             cartesia_version: API version string for Cartesia service.
             url: WebSocket URL for Cartesia TTS API.
@@ -257,6 +258,7 @@ class CartesiaTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=CartesiaTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate. If None, uses default.
             encoding: Audio encoding format.
@@ -270,7 +272,8 @@ class CartesiaTTSService(WebsocketTTSService):
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=CartesiaTTSService.Settings(...)`` instead.
+                    Use ``settings=CartesiaTTSService.Settings(...)`` instead. Will
+                    be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -278,7 +281,7 @@ class CartesiaTTSService(WebsocketTTSService):
             aggregate_sentences: Whether to aggregate sentences within the TTSService.
 
                 .. deprecated:: 0.0.104
-                    Use ``text_aggregation_mode`` instead.
+                    Use ``text_aggregation_mode`` instead. Will be removed in 2.0.0.
 
             **kwargs: Additional arguments passed to the parent service.
         """
@@ -796,11 +799,13 @@ class CartesiaHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=CartesiaHttpTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             model: TTS model to use.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=CartesiaHttpTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             base_url: Base URL for Cartesia HTTP API.
             cartesia_version: API version string for Cartesia service.
@@ -813,6 +818,7 @@ class CartesiaHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=CartesiaHttpTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

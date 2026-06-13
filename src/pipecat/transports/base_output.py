@@ -96,8 +96,8 @@ class BaseOutputTransport(FrameProcessor):
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
-                    "Transport parameter `video_out_bitrate` is deprecated and will be removed in a future "
-                    "version. Use provider specific settings instead.",
+                    "Transport parameter `video_out_bitrate` is deprecated and will be removed in "
+                    "2.0.0. Use provider specific settings instead.",
                     DeprecationWarning,
                     stacklevel=2,
                 )

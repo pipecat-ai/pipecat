@@ -233,6 +233,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
                 .. deprecated:: 0.0.105
                     Use ``settings=GrokRealtimeLLMService.Settings(session_properties=...)``
                     instead.
+                    Will be removed in 2.0.0.
 
                 To set a different voice, configure it in session_properties:
 

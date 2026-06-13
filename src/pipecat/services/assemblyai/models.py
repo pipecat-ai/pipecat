@@ -15,6 +15,8 @@ from typing import Literal
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from pipecat.utils.deprecation import deprecated
+
 
 class Word(BaseModel):
     """Represents a single word in a transcription with timing and confidence.
@@ -121,11 +123,15 @@ class TerminationMessage(BaseMessage):
 AnyMessage = BeginMessage | TurnMessage | SpeechStartedMessage | TerminationMessage
 
 
+@deprecated(
+    "`AssemblyAIConnectionParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+    "Use `AssemblyAISTTService.Settings` instead."
+)
 class AssemblyAIConnectionParams(BaseModel):
     """Configuration parameters for AssemblyAI WebSocket connection.
 
     .. deprecated:: 0.0.105
-        Use ``settings=AssemblyAISTTService.Settings(foo=...)`` instead.
+        Use ``settings=AssemblyAISTTService.Settings(foo=...)`` instead. Will be removed in 2.0.0.
 
     Parameters:
         sample_rate: Audio sample rate in Hz. Defaults to 16000.
@@ -178,7 +184,7 @@ class AssemblyAIConnectionParams(BaseModel):
         if self.min_end_of_turn_silence_when_confident is not None:
             logger.warning(
                 "The 'min_end_of_turn_silence_when_confident' parameter is deprecated and will be "
-                "removed in a future version. Please use 'min_turn_silence' instead."
+                "removed in 2.0.0. Please use 'min_turn_silence' instead."
             )
             # If min_turn_silence is not set, use the deprecated value
             if self.min_turn_silence is None:

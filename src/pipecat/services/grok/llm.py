@@ -7,8 +7,8 @@
 """Grok LLM service implementation.
 
 .. deprecated:: 0.0.108
-    This module is deprecated. Please use GrokLLMService from
-    pipecat.services.xai.llm instead.
+    Use :mod:`pipecat.services.xai.llm` instead.
+    Will be removed in 2.0.0.
 """
 
 import warnings

@@ -64,6 +64,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SambaNovaLLMService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             base_url: The base URL for SambaNova API. Defaults to "https://api.sambanova.ai/v1".
             settings: Runtime-updatable settings. When provided alongside deprecated
