@@ -209,14 +209,19 @@ The dev runner wraps this in the eval transport + serializer when you pass `-t e
 - **Logs** — the bot logs to stdout (loguru). However you run it, keep the output durable and greppable — e.g. `uv run bot.py -t eval 2>&1 | tee /tmp/pipecat-output.txt` — so when a scenario fails you can grep the file for the traceback instead of re-running. If your harness captures background-process output natively, that works too.
 - **Clean boot** — `uv run bot.py -t eval` boots the bot as a headless eval WebSocket server (default `ws://localhost:7860`). No exceptions + pipeline assembled is your fastest "did I wire it right" signal.
 
-**The eval loop (where you live).** Leave the bot running and drive scenarios against it from a second terminal — it stays alive across runs, so re-run as you edit. Start in **text mode** (the default), the fast inner loop. A minimal scenario:
+**The eval loop (where you live).** Boot the bot (`uv run bot.py -t eval`), then drive a scenario against it from a second terminal. The bot serves that one eval session and exits when the run finishes — the same one-bot-per-session lifecycle as production — so boot it fresh for each run as you iterate (or use `pipecat eval suite` to spawn a fresh bot per scenario from a manifest). Start in **text mode** (the default), the fast inner loop. A minimal scenario:
 ```yaml
-name: capital_of_france
+name: capital_of_germany
 turns:
-  - user: "What's the capital of France?"
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "What is the capital of Germany?"
     expect:
       - event: response
-        text_contains: "Paris"
+        eval: "the response says the capital of Germany is Berlin"
 ```
 ```bash
 uv run pipecat eval run my_scenario.yaml -v
