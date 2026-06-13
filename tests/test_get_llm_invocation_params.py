@@ -1294,6 +1294,51 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         # Check second text part (moved to third position)
         self.assertEqual(user_msg["content"][2]["text"], "Please describe it in detail.")
 
+    def test_image_first_content_preserved(self):
+        """Test that image-before-text content is converted without raising (image stays first)."""
+        # OpenAI-format content where the image comes before the text (e.g. a
+        # UserImageRawFrame followed by a prompt). The single image is already
+        # ahead of the text, so no reordering is needed.
+        image_first_message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/jpeg;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+                    },
+                },
+                {"type": "text", "text": "What do you see in this image?"},
+            ],
+        }
+
+        messages = [
+            image_first_message,
+            {"role": "assistant", "content": "I can see the image clearly."},
+        ]
+
+        # Create context
+        context = LLMContext(messages=messages)
+
+        # Get invocation params (must not raise UnboundLocalError)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        # Verify the image-first message is converted and ordering is preserved
+        self.assertEqual(len(params["messages"]), 2)
+        user_msg = params["messages"][0]
+        self.assertEqual(user_msg["role"], "user")
+        self.assertIsInstance(user_msg["content"], list)
+        self.assertEqual(len(user_msg["content"]), 2)
+
+        # Image part stays first and is converted from image_url to image
+        self.assertIn("image", user_msg["content"][0])
+        self.assertEqual(user_msg["content"][0]["image"]["format"], "jpeg")
+        self.assertIn("source", user_msg["content"][0]["image"])
+        self.assertIn("bytes", user_msg["content"][0]["image"]["source"])
+
+        # Text part stays second
+        self.assertEqual(user_msg["content"][1]["text"], "What do you see in this image?")
+
     def test_multiple_system_instructions_handling(self):
         """Test that first system instruction is extracted, later ones converted to user messages."""
         messages = [
