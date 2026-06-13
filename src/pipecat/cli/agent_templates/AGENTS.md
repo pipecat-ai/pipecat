@@ -120,7 +120,7 @@ For browsing examples directly, the **`pipecat-examples` repo** groups demos by 
 
 ## 4. Mental model (concepts, not APIs)
 
-These concepts are stable; the signatures around them are not. Internalize these so the code you write *flows* correctly even as APIs change.
+These concepts are stable even as signatures change — internalize them so your code flows correctly.
 
 **Terminology (current).** Get this vocabulary right — the framework renamed these and old terms are deprecated:
 - **Worker** — the top-level runnable unit. A single bot is a `PipelineWorker` (it wraps your pipeline). *Replaces the old "pipeline task"; `PipelineTask` is a deprecated alias.*
@@ -223,7 +223,7 @@ uv run pipecat eval run my_scenario.yaml -v
 ```
 Text mode **bypasses STT, VAD, and TTS** (the `user:` turn is sent as text), so assert on what the bot *produced* (`response`, `function_call`), not on `user_*_speaking` events. Prefer the modality-agnostic `response` event — it resolves to the LLM text in text mode and to the bot's transcribed audio in audio mode. Exit code is non-zero if any non-skipped scenario fails.
 
-**Escalate to audio mode** for the full round trip. Set `user: {modality: audio, speech: {service: kokoro, voice: af_heart}}` and the harness synthesizes the user's speech, so the bot's **real VAD + STT** run; set `judge: {modality: audio}` (with a `transcription:` block) so the bot **speaks** and the harness transcribes that audio into the `response` event. Kokoro (user TTS) and Moonshine (bot transcription) run **locally with no API key** — audio mode is slower but free, so run it before shipping and in CI, not on every edit.
+**Escalate to audio mode** for the full round trip. Set `user: {modality: audio, speech: {service: kokoro, voice: af_heart}}` and the harness synthesizes the user's speech, so the bot's **real VAD + STT** run; set `judge: {modality: audio}` (with a `transcription:` block) so the bot **speaks** and the harness transcribes that audio into the `response` event. Kokoro (user TTS) and Moonshine (bot transcription) run **locally with no API key** — audio mode is slower but free.
 
 **Which mode — iterate in text, confirm in audio.** Default to **text** for the inner loop and anything about the bot's *decisions* (LLM content, system-prompt adherence, function calls, multi-turn context, barge-in) — it's fast and cheap, so run it constantly. Escalate a scenario to **audio** when text mode would *lie*, i.e. when the thing under test is the audio path itself:
 
@@ -233,15 +233,13 @@ Text mode **bypasses STT, VAD, and TTS** (the `user:` turn is sent as text), so 
 | turn-taking / end-of-turn / VAD timing matters | text skips VAD |
 | you assert `user_started_speaking` / `user_stopped_speaking` / `user_transcription` / `tts_response` | these events **only fire in audio mode** |
 | TTS intelligibility / pronunciation matters | needs `judge: {modality: audio}` so you judge the transcription of real speech (`response`) |
-| final pre-ship / CI confidence pass over the real round trip | text covers the brain, not the ears and mouth |
+| final pre-ship / CI confidence pass over the real round trip | text never exercises the real STT/VAD/TTS round trip |
 
 Heuristic: **text tests the brain; audio tests the ears and mouth.** The **judge is orthogonal to the mode** — `eval:` natural-language criteria work in either (a local Ollama with `gemma2:9b` by default, or `judge: {service: openai, model: gpt-4.1}`).
 
 **Realtime (speech-to-speech) bots are audio-mode only.** An S2S model has no separate text LLM step to assert on, so text mode doesn't apply — eval it the same way a person would talk to it: `user: {modality: audio}` to synthesize the user's voice in, `judge: {modality: audio}` to transcribe its spoken output for the judge. Same Kokoro-in / Moonshine-out path as above, just **required** rather than an escalation; scenarios, the judge, and assertions are otherwise identical to a cascade bot.
 
 > **Gotchas:** give the judge LLM a **separate API key (or provider) from the bot** — sharing one can throttle or truncate the concurrent calls. `eval:` assertions need a judge reachable — a local Ollama with the default model pulled (`ollama pull gemma2:9b`), or an OpenAI key. Audio-mode scenarios need `audio_in_enabled=True` on the eval transport (above).
-
-This is the difference between an open loop (write → hand to human → wait) and a closed one (write → run scenario → fix yourself). Use it.
 
 ---
 
