@@ -65,9 +65,6 @@ class AICVADAnalyzer(VADAnalyzer):
     ):
         """Create an AIC VAD analyzer.
 
-        .. deprecated:: 1.4.0
-            Use :class:`AICQuailVADAnalyzer` instead. Will be removed in 1.6.0.
-
         Args:
             vad_context_factory:
                 Zero-arg callable that returns the AIC VadContext.

@@ -10,7 +10,7 @@ Single source of truth for reading ``.. deprecated::`` directives and PEP 702
 ``@deprecated`` decorators out of the pipecat source tree. Both the audit
 (``tests/test_deprecation_markers.py``) and the registry generator
 (``scripts/deprecations/generate.py``) import this module, so the enforced
-grammar and the generated registry can never drift.
+grammar, the validation, and the generated registry can never drift.
 
 The module is pure tooling: it depends only on the standard library plus
 ``DEPRECATION_MESSAGE_RE`` from ``pipecat.utils.deprecation``, and reads source
@@ -38,6 +38,12 @@ BACKTICK_TOKEN_RE = re.compile(r"`([^`]+)`")
 DIRECTIVE_TARGET_RE = re.compile(
     r":(?:class|meth|func|attr|mod|obj|data|exc):`~?[^`]+`|``?[^`]+``?"
 )
+# The first reference in a directive body (role or backtick) — the replacement,
+# per the "first reference is the replacement" rule. Capture groups: role
+# target, double-backtick token, single-backtick token.
+FIRST_REFERENCE_RE = re.compile(
+    r":(?:class|meth|func|attr|mod|obj|data|exc):`~?([^`]+)`|``([^`]+)``|`([^`]+)`"
+)
 # Phrases that genuinely signal "no replacement". Deliberately excludes
 # "removed" — it appears in the removal-timeline sentence of nearly every
 # directive ("will be removed in 2.0.0"), so matching it would let a directive
@@ -48,37 +54,12 @@ NO_REPLACEMENT_RE = re.compile(
 # The removal version stated in a directive body ("... will be removed in 2.0.0.").
 REMOVAL_RE = re.compile(r"removed in (\d+\.\d+\.\d+)", re.IGNORECASE)
 _DIRECTIVE_VERSION_RE = re.compile(r"v?\d+\.\d+\.\d+")
-
-# ``warnings.warn(DeprecationWarning)`` call sites with no associable directive
-# in their module / function / enclosing class. These are structural cases the
-# static check can't follow, not undocumented deprecations:
-#   - shared helpers that emit warnings on behalf of their callers
-#   - the actual directive lives on a parameter/field in a *different* symbol
-#   - behavior/value-change deprecations with no single owning symbol
-#   - one non-deprecation that (mis)uses DeprecationWarning
-# Keyed by "<path relative to src>::<enclosing qualified name>". Should shrink.
-WARN_WITHOUT_DIRECTIVE = frozenset(
-    {
-        # Shared helpers that warn on behalf of the deprecated param/arg, which
-        # carries its own directive at the call site.
-        "pipecat/services/ai_service.py::AIService._warn_init_param_moved_to_settings",
-        "pipecat/services/speechmatics/stt.py::SpeechmaticsSTTService._check_deprecated_args._deprecation_warning",
-        # Directive lives on the deprecated parameter/field, in a different symbol
-        # than where the warning fires.
-        "pipecat/services/mem0/memory.py::Mem0MemoryService.__init__",
-        "pipecat/transports/base_output.py::BaseOutputTransport.__init__",
-        "pipecat/utils/startup.py::run_setup_hook",
-        # Behavior / value-change deprecations with no single owning symbol to
-        # attach a directive to (dict-form settings frames, None-coercion, a
-        # deprecated value passed in a config list).
-        "pipecat/frames/frames.py::TTSSpeakFrame.__post_init__",
-        "pipecat/observers/loggers/metrics_log_observer.py::MetricsLogObserver.__init__",
-        "pipecat/services/google/stt.py::GoogleSTTService._update_settings",
-        "pipecat/services/llm_service.py::LLMService.process_frame",
-        "pipecat/services/stt_service.py::STTService.process_frame",
-        "pipecat/services/tts_service.py::TTSService.process_frame",
-    }
+# Section headers that end the parameter list while scanning a docstring.
+_SECTION_RE = re.compile(
+    r"^(Parameters|Args|Arguments|Attributes|Returns|Raises|Yields|Example)s?:"
 )
+# A parameter/field entry within an Args/Parameters section ("voice: The voice ...").
+_PARAM_ENTRY_RE = re.compile(r"^([A-Za-z_]\w*):\s")
 
 
 @dataclass
@@ -89,6 +70,7 @@ class Symbol:
     qualname: str
     lineno: int
     name: str
+    kind: str  # class | function | method | property
     docstring: str
     has_decorator: bool
     decorator_message: str | None  # @deprecated literal arg, if any (None if absent/non-literal)
@@ -104,12 +86,14 @@ class Directive:
 
     relpath: str
     owner: str  # qualname of the symbol the docstring belongs to, or "<module>"
+    param: str | None  # parameter/field name when the directive is nested under one
     version: str | None
     body: str
 
     @property
     def location(self) -> str:
-        return f"{self.relpath} ({self.owner})"
+        where = f"{self.owner}.{self.param}" if self.param else self.owner
+        return f"{self.relpath} ({where})"
 
 
 @dataclass
@@ -134,12 +118,15 @@ class Scan:
     definitions: set[str] = field(default_factory=set)
     directives: list[Directive] = field(default_factory=list)
     warn_sites: list[WarnSite] = field(default_factory=list)
-    # qualnames (and "<module>") that have at least one .. deprecated:: directive
-    documented: set[str] = field(default_factory=set)
 
 
 def iter_directives(docstring: str):
-    """Yield ``(version, body)`` for each ``.. deprecated::`` block in a docstring."""
+    """Yield ``(version, body, param)`` for each ``.. deprecated::`` block.
+
+    ``param`` is the name of the ``Args:``/``Parameters:`` entry the directive
+    is nested under (a parameter/field deprecation), or ``None`` when the
+    directive sits at the docstring's top level (the symbol itself is deprecated).
+    """
     if not docstring:
         return
     lines = docstring.splitlines()
@@ -151,6 +138,7 @@ def iter_directives(docstring: str):
             continue
         base_indent = len(match.group(1))
         version = match.group(2).strip() or None
+        param = _enclosing_param(lines, i, base_indent)
         body: list[str] = []
         j = i + 1
         while j < len(lines):
@@ -167,8 +155,26 @@ def iter_directives(docstring: str):
                 break
             body.append(lines[j].strip())
             j += 1
-        yield version, " ".join(body).strip()
+        yield version, " ".join(body).strip(), param
         i = j
+
+
+def _enclosing_param(lines: list[str], directive_index: int, directive_indent: int) -> str | None:
+    """The parameter entry a directive is nested under, scanning upward, or None."""
+    for k in range(directive_index - 1, -1, -1):
+        stripped = lines[k].strip()
+        if not stripped:
+            continue
+        indent = len(lines[k]) - len(lines[k].lstrip())
+        if indent >= directive_indent:
+            continue
+        # A less-indented line: either the param entry that owns the directive,
+        # or a section header / prose that means the directive is top-level.
+        if _SECTION_RE.match(stripped):
+            return None
+        entry = _PARAM_ENTRY_RE.match(stripped)
+        return entry.group(1) if entry else None
+    return None
 
 
 def directive_parses(version: str | None, body: str) -> bool:
@@ -182,6 +188,41 @@ def directive_removal(body: str) -> str | None:
     """The removal version stated in a directive body, or None if absent."""
     match = REMOVAL_RE.search(body)
     return match.group(1) if match else None
+
+
+def first_reference(body: str) -> str | None:
+    """The first role/backtick reference in a directive body — the replacement."""
+    match = FIRST_REFERENCE_RE.search(body)
+    if not match:
+        return None
+    return next(group for group in match.groups() if group)
+
+
+_FIRST_REF_IS_MODULE_RE = re.compile(r"^[^`]*:mod:`")
+
+
+def relation_for(body: str, replacement: str | None) -> str:
+    """Classify the migration relation from the directive's leading verb/target."""
+    low = body.lower()
+    if re.search(r"\brenamed to\b", low):
+        return "rename"
+    if re.search(r"\bmerged into\b", low):
+        return "merged"
+    if re.search(r"\bmoved to\b", low) or _FIRST_REF_IS_MODULE_RE.match(body):
+        # A directive whose first reference is a :mod: target is a module move
+        # (e.g. ``Use :mod:`pipecat.services.xai.llm` instead``).
+        return "move"
+    if replacement is None:
+        return "none"
+    return "use_existing"
+
+
+def primary_replacement(text: str | None) -> str | None:
+    """The first backticked target in a replacement clause, or None."""
+    if not text:
+        return None
+    tokens = BACKTICK_TOKEN_RE.findall(text)
+    return tokens[0] if tokens else None
 
 
 def deprecated_message(node) -> tuple[bool, str | None]:
@@ -218,16 +259,27 @@ def is_deprecation_warn(call) -> bool:
     ) == "DeprecationWarning"
 
 
+def _symbol_kind(node, parent_is_class: bool) -> str:
+    if isinstance(node, ast.ClassDef):
+        return "class"
+    decorators = {
+        (d.id if isinstance(d, ast.Name) else getattr(d, "attr", None)) for d in node.decorator_list
+    }
+    if "property" in decorators:
+        return "property"
+    return "method" if parent_is_class else "function"
+
+
+def module_path(relpath: str) -> str:
+    """Dotted module path for a source file ("pipecat/services/grok/llm.py")."""
+    parts = relpath[:-3].split("/") if relpath.endswith(".py") else relpath.split("/")
+    if parts and parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts)
+
+
 def scan_source(src_root: Path, *, exclude: frozenset[str] = DEFAULT_EXCLUDE) -> Scan:
-    """Walk ``src_root`` and collect deprecation markers.
-
-    Args:
-        src_root: The ``.../src/pipecat`` directory.
-        exclude: Paths (relative to ``src_root``'s parent) to skip.
-
-    Returns:
-        A :class:`Scan` with every symbol, directive, and warn site.
-    """
+    """Walk ``src_root`` and collect deprecation markers."""
     scan = Scan()
     for py_file in sorted(src_root.rglob("*.py")):
         relpath = str(py_file.relative_to(src_root.parent))
@@ -235,11 +287,10 @@ def scan_source(src_root: Path, *, exclude: frozenset[str] = DEFAULT_EXCLUDE) ->
             continue
         tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
 
-        for version, body in iter_directives(ast.get_docstring(tree) or ""):
-            scan.directives.append(Directive(relpath, "<module>", version, body))
-            scan.documented.add(f"{relpath}::<module>")
+        for version, body, param in iter_directives(ast.get_docstring(tree) or ""):
+            scan.directives.append(Directive(relpath, "<module>", param, version, body))
 
-        def visit(node, prefix: str) -> None:
+        def visit(node, prefix: str, parent_is_class: bool) -> None:
             for child in ast.iter_child_nodes(node):
                 if isinstance(child, ast.Assign):
                     for target in child.targets:
@@ -260,19 +311,19 @@ def scan_source(src_root: Path, *, exclude: frozenset[str] = DEFAULT_EXCLUDE) ->
                             qualname=qualname,
                             lineno=child.lineno,
                             name=child.name,
+                            kind=_symbol_kind(child, parent_is_class),
                             docstring=docstring,
                             has_decorator=has_dec,
                             decorator_message=message,
                         )
                     )
-                    for version, body in iter_directives(docstring):
-                        scan.directives.append(Directive(relpath, qualname, version, body))
-                        scan.documented.add(f"{relpath}::{qualname}")
-                    visit(child, qualname)
+                    for version, body, param in iter_directives(docstring):
+                        scan.directives.append(Directive(relpath, qualname, param, version, body))
+                    visit(child, qualname, isinstance(child, ast.ClassDef))
                 else:
-                    visit(child, prefix)
+                    visit(child, prefix, parent_is_class)
 
-        visit(tree, "")
+        visit(tree, "", False)
     return scan
 
 
@@ -284,6 +335,115 @@ def parsed_decorated(scan: Scan):
         match = DEPRECATION_MESSAGE_RE.match(sym.decorator_message)
         if match:
             yield sym, match.groupdict()
+
+
+# --- Registry records --------------------------------------------------------
+
+
+def build_records(scan: Scan) -> list[dict]:
+    """Build deprecation registry records from the scan.
+
+    One record per deprecated thing — a symbol (from its ``@deprecated``
+    message, the structured source), or a parameter/module deprecation (from
+    its ``.. deprecated::`` directive). Behavior deprecations that have only a
+    bare ``warnings.warn`` and no directive are not captured (see
+    :func:`undocumented_warn_sites`).
+    """
+    decorated = {(s.relpath, s.qualname): s for s in scan.symbols if s.has_decorator}
+    symbol_directive = {(d.relpath, d.owner): d for d in scan.directives if d.param is None}
+    symbol_kind = {(s.relpath, s.qualname): s.kind for s in scan.symbols}
+
+    records: list[dict] = []
+
+    # 1. @deprecated symbols — fields come from the structured decorator message;
+    #    the relation verb (rename/move/merged) comes from the docstring directive.
+    for (relpath, qualname), sym in decorated.items():
+        match = DEPRECATION_MESSAGE_RE.match(sym.decorator_message or "")
+        if not match:
+            continue  # off-template; the audit fails the build before we get here
+        fields = match.groupdict()
+        directive = symbol_directive.get((relpath, qualname))
+        body = directive.body if directive else ""
+        replacement = primary_replacement(fields["replacement"])
+        records.append(
+            {
+                "subject": fields["subject"],
+                "module": module_path(relpath),
+                "kind": sym.kind,
+                "deprecated_in": fields["version"],
+                "removed_in": fields["removal"],
+                "relation": relation_for(body, replacement),
+                "replacement": replacement,
+                "message": sym.decorator_message,
+                "location": f"{relpath}:{sym.lineno}",
+            }
+        )
+
+    # 2. Directive-only deprecations: parameters, and module-move shims.
+    for directive in scan.directives:
+        is_symbol_level_of_decorated = (
+            directive.param is None and (directive.relpath, directive.owner) in decorated
+        )
+        if is_symbol_level_of_decorated:
+            continue  # already captured from the decorator above
+        if directive.owner == "<module>" and directive.param is None:
+            subject = module_path(directive.relpath)
+            kind = "module"
+        elif directive.param is not None:
+            owner = directive.owner.removesuffix(".__init__")
+            subject = f"{owner}.{directive.param}" if owner else directive.param
+            kind = "parameter"
+        else:
+            # A directive on a non-decorated symbol (a method/function deprecated
+            # via directive + manual warn rather than @deprecated).
+            subject = directive.owner
+            kind = symbol_kind.get((directive.relpath, directive.owner), "symbol")
+        replacement = first_reference(directive.body)
+        records.append(
+            {
+                "subject": subject,
+                "module": module_path(directive.relpath),
+                "kind": kind,
+                "deprecated_in": directive.version,
+                "removed_in": directive_removal(directive.body),
+                "relation": relation_for(directive.body, replacement),
+                "replacement": replacement,
+                "message": directive.body,
+                "location": directive.location,
+            }
+        )
+
+    records.sort(key=lambda r: (r["module"], r["subject"], r["kind"]))
+    return records
+
+
+def undocumented_warn_sites(scan: Scan) -> list[str]:
+    """warnings.warn(DeprecationWarning) sites with no directive in module/function/class.
+
+    These are not captured in the registry — shared warning helpers, behavior
+    deprecations with no owning symbol, or cross-symbol param warns whose
+    directive lives elsewhere. Surfaced (non-gating) so a maintainer can see
+    what the registry does not cover.
+    """
+    documented = {f"{d.relpath}::{d.owner}" for d in scan.directives if d.owner != "<module>"} | {
+        f"{d.relpath}::<module>" for d in scan.directives if d.owner == "<module>"
+    }
+    out = []
+    for site in scan.warn_sites:
+        if not site.enclosing:
+            covered = f"{site.relpath}::<module>" in documented
+        else:
+            parts = site.enclosing.split(".")
+            covered = (
+                any(
+                    f"{site.relpath}::{'.'.join(parts[:k])}" in documented
+                    for k in range(len(parts), 0, -1)
+                )
+                or f"{site.relpath}::<module>" in documented
+            )
+        if not covered:
+            out.append(site.key)
+    return sorted(out)
 
 
 # --- Validators: each returns a list of human-readable violation strings ----
@@ -363,33 +523,16 @@ def check_decorator_replacements_exist(scan: Scan) -> list[str]:
     return violations
 
 
-def check_warn_coverage(
-    scan: Scan, allowlist: frozenset[str] = WARN_WITHOUT_DIRECTIVE
-) -> list[str]:
-    """Every warnings.warn(DeprecationWarning) is documented by a directive."""
-    violations = []
-    for site in scan.warn_sites:
-        if site.key in allowlist:
-            continue
-        if not site.enclosing:
-            covered = f"{site.relpath}::<module>" in scan.documented
-        else:
-            parts = site.enclosing.split(".")
-            covered = (
-                any(
-                    f"{site.relpath}::{'.'.join(parts[:k])}" in scan.documented
-                    for k in range(len(parts), 0, -1)
-                )
-                or f"{site.relpath}::<module>" in scan.documented
-            )
-        if not covered:
-            violations.append(site.key)
-    return violations
-
-
-def check_warn_allowlist_current(
-    scan: Scan, allowlist: frozenset[str] = WARN_WITHOUT_DIRECTIVE
-) -> list[str]:
-    """Every allowlist entry still names a real warn site."""
-    live = {s.key for s in scan.warn_sites}
-    return sorted(key for key in allowlist if key not in live)
+def all_violations(scan: Scan) -> list[str]:
+    """Every validation failure, for the generator to refuse on."""
+    out = []
+    for check in (
+        check_directives_parse,
+        check_directive_removal_versions,
+        check_decorator_messages,
+        check_decorator_subjects,
+        check_decorator_versions,
+        check_decorator_replacements_exist,
+    ):
+        out.extend(f"{check.__name__}: {v}" for v in check(scan))
+    return out

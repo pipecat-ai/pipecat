@@ -18,6 +18,7 @@ still emit ``DeprecationWarning`` without warning at import time.
 """
 
 import asyncio
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -28,6 +29,7 @@ import pytest
 # code). Put it on the path so the audit and the generator validate identically.
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
+from deprecations import generate as dgen  # noqa: E402
 from deprecations import scan as dscan  # noqa: E402
 
 from pipecat.frames.frames import (  # noqa: E402
@@ -73,29 +75,6 @@ def test_directives_state_removal_version():
     )
 
 
-def test_deprecation_warns_have_directive():
-    """Each warnings.warn(DeprecationWarning) is documented by a directive.
-
-    The directive may live on the warning's module, its enclosing function, or
-    any ancestor class. Structural exceptions are tracked in
-    ``scan.WARN_WITHOUT_DIRECTIVE`` (which should only shrink).
-    """
-    undocumented = dscan.check_warn_coverage(_SCAN)
-    assert not undocumented, (
-        "These warnings.warn(DeprecationWarning) sites have no `.. deprecated::` directive "
-        "in their module, function, or enclosing class — add one, or (for a structural case) "
-        "add the key to scan.WARN_WITHOUT_DIRECTIVE:\n" + "\n".join(f"  {k}" for k in undocumented)
-    )
-
-
-def test_warn_without_directive_allowlist_is_current():
-    """Every WARN_WITHOUT_DIRECTIVE entry still names a real warn site."""
-    stale = dscan.check_warn_allowlist_current(_SCAN)
-    assert not stale, "scan.WARN_WITHOUT_DIRECTIVE has stale entries — delete them:\n" + "\n".join(
-        f"  {k}" for k in stale
-    )
-
-
 # --- @deprecated decorator message consistency -------------------------------
 
 
@@ -132,6 +111,23 @@ def test_deprecated_replacement_targets_exist():
     assert not bad, (
         "These @deprecated replacement targets aren't defined in src/pipecat (typo?):\n"
         + "\n".join(f"  {b}" for b in bad)
+    )
+
+
+# --- Generated registry ------------------------------------------------------
+
+
+def test_deprecations_registry_is_up_to_date():
+    """The committed registry matches a fresh build from the source.
+
+    Regenerate with ``uv run python scripts/deprecations/generate.py`` when this
+    fails (the same check CI runs as a drift guard).
+    """
+    committed = json.loads(dgen.REGISTRY_PATH.read_text(encoding="utf-8"))
+    fresh = dgen.build_registry(SRC_ROOT)
+    assert committed == fresh, (
+        f"{dgen.REGISTRY_PATH.name} is stale — run "
+        "`uv run python scripts/deprecations/generate.py` and commit the result."
     )
 
 

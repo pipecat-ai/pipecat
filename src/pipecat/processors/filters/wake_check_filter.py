@@ -78,10 +78,6 @@ class WakeCheckFilter(FrameProcessor):
     def __init__(self, wake_phrases: list[str], keepalive_timeout: float = 3):
         """Initialize the wake phrase filter.
 
-        .. deprecated:: 0.0.106
-            Use :class:`~pipecat.turns.user_start.WakePhraseUserTurnStartStrategy` instead.
-            Will be removed in 2.0.0.
-
         Args:
             wake_phrases: List of wake phrases to detect in transcriptions.
             keepalive_timeout: Duration in seconds to keep passing frames after
