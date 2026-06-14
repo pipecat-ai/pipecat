@@ -30,7 +30,7 @@ uv tool install "pipecat-ai[cli]"   # provides the `pipecat` (alias `pc`) comman
 ```bash
 # Headless: --name (or --config) switches to non-interactive mode.
 # The service values below are EXAMPLES — map the user's actual choices, don't copy these.
-pipecat create --name mybot --bot-type web \
+pipecat create --name mybot \
   --transport smallwebrtc --mode cascade \
   --stt deepgram_stt --llm openai_llm --tts cartesia_tts \
   --eval                             # eval transport + starter scenarios, for verification (§6)
@@ -39,6 +39,7 @@ pipecat create --name mybot --bot-type web \
 #       pipecat create --list-options  # valid service/transport VALUES
 #   • --dry-run prints the resolved config as JSON; --config project.json drives it from a file.
 #   • --transport is repeatable — pass each transport you want (production + a local-dev one, §2).
+#   • --bot-type is inferred from --transport (telephony if any telephony transport, else web) — omit it.
 
 # Humans (interactive wizard): `pipecat create quickstart` (defaults) or `pipecat create`.
 ```
@@ -76,7 +77,7 @@ Transport and services are scaffold inputs (the `--transport` / `--stt` / `--llm
 - **Web / mobile voice** — `DailyTransport` or `SmallWebRTCTransport`.
 - **Telephony** — a WebSocket transport (`FastAPIWebsocketTransport`) + the provider's serializer (Twilio, Telnyx, …), or `DailyTransport` for Daily PSTN/SIP.
 
-**Scaffold every transport you need at once** — repeat `--transport` (e.g. `--transport twilio --transport smallwebrtc`); the scaffold wires each one's params and dependencies. They coexist in `transport_params`; `-t <name>` picks one per run. A **telephony** bot can include a WebRTC transport for local testing. A convenient dev setup is your production transport *plus*:
+**Scaffold every transport you need at once** — repeat `--transport` (e.g. `--transport twilio --transport smallwebrtc`); the scaffold wires each one's params and dependencies. They coexist in `transport_params`; `-t <name>` picks one per run. `--bot-type` is inferred from your transports (telephony if any telephony transport, else web), so you can omit it. A **telephony** bot can include a WebRTC transport for local testing. A convenient dev setup is your production transport *plus*:
 - **`SmallWebRTCTransport` + Pipecat Prebuilt** — scaffold it in (`--transport smallwebrtc`) for a built-in browser test UI at `http://localhost:7860`, so you can talk to the bot with no telephony/PSTN setup — how you dev/test a **telephony** bot locally.
 - **the `eval` transport (§6)** — drive it headless with scripted scenarios to confirm behavior, tune prompts, and catch regressions.
 
