@@ -246,7 +246,7 @@ Heuristic: **text tests the brain; audio tests the ears and mouth.** The **judge
 
 **Realtime (speech-to-speech) bots are audio-mode only.** An S2S model has no separate text LLM step to assert on, so text mode doesn't apply — eval it the same way a person would talk to it: `user: {modality: audio}` to synthesize the user's voice in, `judge: {modality: audio}` to transcribe its spoken output for the judge. Same Kokoro-in / Moonshine-out path as above, just **required** rather than an escalation; scenarios, the judge, and assertions are otherwise identical to a cascade bot.
 
-> **Gotchas:** give the judge LLM a **separate API key (or provider) from the bot** — sharing one can throttle or truncate the concurrent calls. `eval:` assertions need a judge reachable — a local Ollama with the default model pulled (`ollama pull gemma2:9b`), or an OpenAI key. Audio-mode scenarios need `audio_in_enabled=True` on the eval transport (above).
+> **Gotchas:** give the judge LLM a **separate API key (or provider) from the bot** — sharing one can throttle or truncate the concurrent calls. Only `eval:` natural-language criteria need a judge — deterministic checks (`text_contains`, `function_call`) need none, so test what you can without one. When you do need it: a local Ollama (`ollama pull gemma2:9b` — a ~5 GB download, so confirm with the user before pulling) or a separate provider key. Audio-mode scenarios need `audio_in_enabled=True` on the eval transport (above).
 
 ---
 
