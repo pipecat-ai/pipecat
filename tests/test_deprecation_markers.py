@@ -30,6 +30,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 from deprecations import generate as dgen  # noqa: E402
+from deprecations import generate_removals as drem  # noqa: E402
 from deprecations import scan as dscan  # noqa: E402
 
 from pipecat.frames.frames import (  # noqa: E402
@@ -185,3 +186,101 @@ def test_no_deprecation_warnings_at_import_time():
     )
     result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+# --- Removal history (removals.json) ------------------------------------------
+#
+# Removals are detected at release-prep by diffing the previous release tag's
+# registry against the working tree (generate_removals.py). The full
+# rebuild-from-tags drift check is deferred until removals actually exist
+# (~1.6.0/2.0.0); for now we keep a schema-sanity backstop plus unit tests over
+# the pure diff logic.
+
+_REMOVAL_FIELDS = {
+    "subject",
+    "module",
+    "kind",
+    "deprecated_in",
+    "removed_in",
+    "announced_removed_in",
+    "relation",
+    "replacement",
+    "message",
+}
+
+
+def _dep_registry(*records):
+    """A minimal ``deprecations.json``-shaped document for the given records."""
+    return {"schema_version": 1, "deprecations": list(records)}
+
+
+def _dep_record(subject, **overrides):
+    """A deprecation record with sensible defaults, overridable per field."""
+    rec = {
+        "subject": subject,
+        "module": "pipecat.x",
+        "kind": "class",
+        "deprecated_in": "1.3.0",
+        "removed_in": "2.0.0",
+        "relation": "use_existing",
+        "replacement": "Y",
+        "message": f"`{subject}` is deprecated since 1.3.0 and will be removed in 2.0.0. Use `Y` instead.",
+        "location": "pipecat/x.py:1",
+    }
+    rec.update(overrides)
+    return rec
+
+
+def test_removals_registry_schema_is_valid():
+    """The committed removals.json is well-formed (schema-sanity backstop)."""
+    doc = json.loads(drem.REMOVALS_PATH.read_text(encoding="utf-8"))
+    assert doc.get("schema_version") == drem.SCHEMA_VERSION
+    assert isinstance(doc.get("removals"), list)
+    seen = set()
+    for rec in doc["removals"]:
+        assert set(rec) == _REMOVAL_FIELDS, f"unexpected fields on {rec.get('subject')!r}"
+        assert "location" not in rec  # dropped — points at source that's gone
+        assert rec["subject"] and rec["subject"] not in seen, f"duplicate {rec['subject']!r}"
+        seen.add(rec["subject"])
+        assert drem._VERSION_RE.match(rec["removed_in"]), rec["removed_in"]
+
+
+def test_compute_removals_detects_disappeared_symbol():
+    prev = _dep_registry(_dep_record("Gone"), _dep_record("Kept"))
+    current = _dep_registry(_dep_record("Kept"))
+    removals = drem.compute_removals(prev, current, "2.0.0", [])
+    assert [r["subject"] for r in removals] == ["Gone"]
+    gone = removals[0]
+    assert set(gone) == _REMOVAL_FIELDS  # exactly the removal schema, no location
+    assert gone["removed_in"] == "2.0.0"
+    assert gone["replacement"] == "Y"
+
+
+def test_compute_removals_no_change_when_nothing_removed():
+    prev = _dep_registry(_dep_record("A"))
+    current = _dep_registry(_dep_record("A"))
+    assert drem.compute_removals(prev, current, "2.0.0", []) == []
+
+
+def test_compute_removals_is_idempotent():
+    """A subject already recorded as removed is not appended again."""
+    prev = _dep_registry(_dep_record("Gone"))
+    current = _dep_registry()
+    first = drem.compute_removals(prev, current, "2.0.0", [])
+    second = drem.compute_removals(prev, current, "2.0.0", first)
+    assert first == second
+
+
+def test_compute_removals_bootstrap_has_no_previous():
+    """The first registry-bearing release has no previous registry → empty."""
+    current = _dep_registry(_dep_record("A"))
+    assert drem.compute_removals(None, current, "1.4.0", []) == []
+
+
+def test_compute_removals_records_actual_vs_announced_version():
+    """removed_in is the real disappearance; announced_removed_in is the promise."""
+    prev = _dep_registry(_dep_record("Slipped", removed_in="2.0.0"))
+    current = _dep_registry()
+    removals = drem.compute_removals(prev, current, "2.1.0", [])  # slipped past 2.0.0
+    assert removals[0]["removed_in"] == "2.1.0"
+    assert removals[0]["announced_removed_in"] == "2.0.0"
