@@ -65,7 +65,10 @@ def create_command(
         None, "--name", "-n", help="Project name (triggers non-interactive mode)"
     ),
     bot_type: str | None = typer.Option(
-        None, "--bot-type", "-b", help="Bot type: 'web' or 'telephony'"
+        None,
+        "--bot-type",
+        "-b",
+        help="Bot type: 'web' or 'telephony' (inferred from --transport if omitted)",
     ),
     transport: list[str] | None = typer.Option(
         None, "--transport", "-t", help="Transport (repeatable, e.g. -t daily -t smallwebrtc)"
