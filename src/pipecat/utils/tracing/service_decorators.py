@@ -207,6 +207,7 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
 
         def end_tts_span(service, context_id, *, interrupted=False):
             """End the TTS span for ``context_id`` if still open. Idempotent."""
+            getattr(service, "_tts_pending_run_tts_attributes", {}).pop(context_id, None)
             entry = service._tts_spans.pop(context_id, None)
             if not entry:
                 return
@@ -257,6 +258,7 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                 return
             service.__tts_tracing_patches_installed__ = True
             service._tts_spans = {}
+            service._tts_pending_run_tts_attributes = {}
 
             orig_create = service.create_audio_context
             orig_append = service.append_to_audio_context
@@ -282,6 +284,12 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                             settings=settings,
                             operation_name="tts",
                         )
+                        pending_attributes = service._tts_pending_run_tts_attributes.pop(
+                            context_id, None
+                        )
+                        if pending_attributes:
+                            for key, value in pending_attributes.items():
+                                span.set_attribute(key, value)
                     except Exception as e:
                         logging.warning(f"Error opening TTS span: {e}")
                 return await orig_create(context_id)
@@ -319,6 +327,7 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                     logging.warning(f"Error recording TTS ttfb from MetricsFrame: {e}")
 
             async def traced_remove_audio_context(context_id):
+                getattr(service, "_tts_pending_run_tts_attributes", {}).pop(context_id, None)
                 entry = service._tts_spans.pop(context_id, None)
                 if entry:
                     try:
@@ -369,11 +378,18 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                 return
             try:
                 context_id = args[0] if args else kwargs.get("context_id")
+                if not context_id or not text:
+                    return
+                attributes = {"text": text, "metrics.character_count": len(text)}
                 entry = getattr(service, "_tts_spans", {}).get(context_id)
-                if entry and text:
-                    span = entry["span"]
-                    span.set_attribute("text", text)
-                    span.set_attribute("metrics.character_count", len(text))
+                if entry:
+                    for key, value in attributes.items():
+                        entry["span"].set_attribute(key, value)
+                    getattr(service, "_tts_pending_run_tts_attributes", {}).pop(context_id, None)
+                else:
+                    pending = getattr(service, "_tts_pending_run_tts_attributes", None)
+                    if pending is not None:
+                        pending[context_id] = attributes
             except Exception as e:
                 logging.warning(f"Error attaching TTS text to span: {e}")
 
@@ -382,8 +398,9 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
 
             Span lifetime is owned by the audio-context patches. This
             wrapper only attaches the text and character count to the
-            span that was opened by ``create_audio_context`` just
-            before ``run_tts`` was invoked.
+            span that was opened by ``create_audio_context``, or stores
+            them until that span exists for services that open the
+            context from inside ``run_tts``.
             """
             if is_async_generator:
 

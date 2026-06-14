@@ -123,6 +123,7 @@ class QueuedFrameProcessor(FrameProcessor):
 async def run_test(
     processor: FrameProcessor,
     *,
+    enable_tracing: bool = False,
     enable_rtvi: bool = False,
     expected_down_frames: Sequence[type] | None = None,
     expected_up_frames: Sequence[type] | None = None,
@@ -141,6 +142,7 @@ async def run_test(
 
     Args:
         processor: The frame processor to test.
+        enable_tracing: Whether OpenTelemetry tracing should be enabled in this test.
         enable_rtvi: Whether RTVI should be enabled in this test.
         expected_down_frames: Expected frame types flowing downstream (optional).
         expected_up_frames: Expected frame types flowing upstream (optional).
@@ -180,6 +182,7 @@ async def run_test(
     worker = PipelineWorker(
         pipeline,
         cancel_on_idle_timeout=False,
+        enable_tracing=enable_tracing,
         enable_rtvi=enable_rtvi,
         observers=observers,
         params=pipeline_params,
