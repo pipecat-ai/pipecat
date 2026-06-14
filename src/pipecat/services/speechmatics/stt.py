@@ -66,6 +66,12 @@ except ModuleNotFoundError as e:
 load_dotenv()
 
 
+# Speechmatics' server may still be streaming the final tokens of a turn when Pipecat's VAD reports
+# the user stopped speaking. Wait this many seconds for those trailing segments to arrive before
+# sending finalize(), which would otherwise truncate them. See issue #4484.
+TRANSCRIPT_AGGREGATION_DELAY = 0.1
+
+
 class TurnDetectionMode(StrEnum):
     """Endpoint and turn detection handling mode.
 
@@ -506,6 +512,7 @@ class SpeechmaticsSTTService(STTService):
 
         # Build SDK config from settings, set model name before calling super
         self._client: VoiceAgentClient | None = None
+        self._finalize_task: asyncio.Task | None = None
         self._audio_encoding = encoding
         self._config: VoiceAgentConfig = self._build_config(default_settings)
         default_settings.model = self._config.operating_point.value
@@ -680,6 +687,11 @@ class SpeechmaticsSTTService(STTService):
         - Disconnect the client
         - Emit on_disconnected event handler for clients
         """
+        # Cancel a pending finalize task
+        if self._finalize_task:
+            await self.cancel_task(self._finalize_task)
+            self._finalize_task = None
+
         # Cancel the message processing task
         if self._stt_msg_task:
             await self.cancel_task(self._stt_msg_task)
@@ -955,7 +967,24 @@ class SpeechmaticsSTTService(STTService):
                 )
             elif not self._enable_vad and self._client is not None:
                 self.request_finalize()
-                self._client.finalize()
+                # Defer finalize() so trailing tokens still being streamed by the server are
+                # captured instead of truncated. See _finalize_after_delay() and issue #4484.
+                if self._finalize_task is not None:
+                    await self.cancel_task(self._finalize_task)
+                self._finalize_task = self.create_task(
+                    self._finalize_after_delay(), "speechmatics_finalize"
+                )
+
+    async def _finalize_after_delay(self) -> None:
+        """Wait a short aggregation delay, then tell the server to finalize the turn.
+
+        Gives trailing tokens still in flight from the server time to arrive before finalize()
+        truncates them. See issue #4484.
+        """
+        await asyncio.sleep(TRANSCRIPT_AGGREGATION_DELAY)
+        if self._client is not None:
+            self._client.finalize()
+        self._finalize_task = None
 
     async def _send_frames(self, segments: list[dict[str, Any]], finalized: bool = False) -> None:
         """Send frames to the pipeline.
