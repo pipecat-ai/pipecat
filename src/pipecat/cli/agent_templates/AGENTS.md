@@ -94,7 +94,7 @@ You have live sources for current truth — never substitute your memory. Use th
    - **Learn the concept** (before building something unfamiliar): `search_docs` — how a capability works (the Learn guides) and how to use an optional feature (the Fundamentals guides — recording, transcripts, metrics, idle detection, muting, IVR, voicemail, …); `get_doc` — read a page in full. `search_examples` / `get_example` — a working implementation to start from. When asked for a feature, search it rather than guess.
    - **Verify a specific API** (as you write): `check_deprecation` — **run on any symbol you're unsure about** (the stale-training antidote, e.g. `PipelineTask`→`PipelineWorker`); `search_api` / `get_code_snippet` — exact current signatures and usage. Examples can lag the framework — `check_deprecation` any symbol you copy from one.
 
-   The index is **local** — check `get_hub_status` for `last_refresh_at`, and refresh (`uvx pipecat-ai-context-hub refresh`) when it's stale or after a Pipecat version bump.
+   The index is **local** — check `get_hub_status` for `last_refresh_at`, and refresh (`uvx pipecat-ai-context-hub@latest refresh`) when it's stale or after a Pipecat version bump.
 2. **No MCP? Query the same index from your shell** — zero setup beyond `uv`:
    ```bash
    uvx pipecat-ai-context-hub search-docs "turn detection"       # learn a concept
@@ -103,7 +103,7 @@ You have live sources for current truth — never substitute your memory. Use th
    uvx pipecat-ai-context-hub search-examples "twilio bot" --domain backend
    uvx pipecat-ai-context-hub status                             # index health / freshness
    ```
-   Stdout is the tool's JSON. **Exit 2 means the local index isn't built yet** — run `uvx pipecat-ai-context-hub refresh` once (downloads the package + local models and indexes the sources; allow several minutes), then re-run the query. Afterwards, **set up future sessions**: `claude mcp add pipecat-context-hub -- uvx pipecat-ai-context-hub serve`. A newly added MCP server loads at the *next* session start, never mid-session — so keep using the CLI for the current one.
+   Stdout is the tool's JSON. **Exit 2 means the local index isn't built yet** — run `uvx pipecat-ai-context-hub@latest refresh` once (downloads the package + local models and indexes the sources; allow several minutes), then re-run the query. Afterwards, **set up future sessions** with your agent's MCP command — `claude mcp add pipecat-context-hub -- uvx pipecat-ai-context-hub serve` (Codex: same args, `codex mcp add`). A newly added MCP server loads at the *next* session start, never mid-session — so keep using the CLI for the current one.
 3. **Installed package source** — the pinned version is on disk; the code cannot be stale. Read it when the index is ambiguous:
    ```bash
    python -c "import pipecat, os; print(os.path.dirname(pipecat.__file__))"

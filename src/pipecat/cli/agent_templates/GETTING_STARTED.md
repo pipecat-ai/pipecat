@@ -13,12 +13,18 @@ confidently writing outdated APIs from memory. Set up the **Pipecat Context
 Hub**, a local index of Pipecat source, examples, and docs:
 
 ```bash
-uvx pipecat-ai-context-hub refresh    # one-time index build; allow a few minutes
-claude mcp add pipecat-context-hub -- uvx pipecat-ai-context-hub serve
+# One-time index build, using latest package; allow a few minutes
+uvx pipecat-ai-context-hub@latest refresh
+# Add the MCP server (use the line for your agent)
+claude mcp add pipecat-context-hub -- uvx pipecat-ai-context-hub serve   # Claude Code
+codex mcp add pipecat-context-hub -- uvx pipecat-ai-context-hub serve    # Codex
 ```
 
 MCP servers load at session start, so do this *before* opening the coding
 session.
+
+Re-run the refresh command to index newer content — after bumping your Pipecat
+version, or periodically, since Pipecat moves fast.
 
 ## Your first prompt: write a spec, not a wish
 
