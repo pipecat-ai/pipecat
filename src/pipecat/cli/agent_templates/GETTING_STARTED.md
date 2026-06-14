@@ -81,9 +81,9 @@ Why this works:
 - **Let it test.** The project scaffolds with a headless eval harness, and
   the agent verifies its own work by running scripted conversations against
   the bot. After any change, "run the evals" is a fair ask. Some checks use
-  an LLM judge — the agent will either pull a free local model (via
-  [Ollama](https://ollama.com), a few GB) or use a separate API key, and
-  should ask before downloading.
+  an LLM judge — your bot's API key works for it too (simplest), or the
+  agent can run a free local model via [Ollama](https://ollama.com) (it
+  should ask before any multi-GB download).
 - **Building a phone bot? You can still talk to it locally.** No phone or
   telephony setup needed — the agent can wire up a free, peer-to-peer browser
   test transport (SmallWebRTC) alongside it; open the local page and have a
