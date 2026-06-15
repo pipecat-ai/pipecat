@@ -146,11 +146,6 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         ),
     )
 
-    # Direct functions listed in the context are registered with the LLM
-    # automatically — no separate register_function() call needed. get_news is
-    # not advertised initially; its handler is registered automatically when it's
-    # added at runtime via the LLMSetToolsFrame below.
-
     # Create a standard OpenAI LLM context object using the normal messages format. The
     # OpenAIRealtimeLLMService will convert this internally to messages that the
     # openai WebSocket API can understand.
