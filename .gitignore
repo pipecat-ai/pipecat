@@ -62,5 +62,10 @@ docs/api/api
 # uv
 .python-version
 
+# Coverage
+.coverage
+coverage.xml
+htmlcov/
+
 # Pipecat
 whisker_setup.py
