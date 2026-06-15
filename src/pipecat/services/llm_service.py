@@ -1461,17 +1461,18 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         Distinguishes two cases:
 
         - **Developer error:** the tool is advertised to the LLM but no handler
-          was registered (likely a missed ``register_function`` call). Logged
-          at error level since this almost always indicates a bug.
+          was wired up (a ``FunctionSchema`` must've been provided with neither
+          ``handler`` nor accompanying ``register_function`` call). Logged at
+          error level since this almost always indicates a bug.
         - **Hallucination:** the tool is not in the currently advertised tool
           set. Logged at warning level since this is model behavior the
           application can do little about beyond returning a terminal result.
         """
         if function_name in self._advertised_tool_names(context):
             logger.error(
-                f"{self}: tool '{function_name}' is advertised to the LLM "
-                f"but has no registered handler — did you forget to call "
-                f"register_function()?"
+                f"{self}: tool '{function_name}' is advertised to the LLM but has "
+                f"no handler — set FunctionSchema.handler (recommended) or call "
+                f"register_function()."
             )
         else:
             logger.warning(
