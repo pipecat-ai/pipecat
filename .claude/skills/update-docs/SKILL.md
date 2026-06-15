@@ -284,6 +284,7 @@ After all edits are complete, print a summary:
 
 ## Guidelines
 
+- **Write for a future reader, not the diff** — docs describe the API as it currently stands. Never narrate the change itself: no "newly added," "this replaces," "recently changed," or references to prior behavior. A reader landing on the page should see no sign that a PR just edited it. Match the weight of the prose to the feature — a routine new parameter gets a one-line description, not a paragraph.
 - **Be conservative** — only change what the diff warrants. Don't "improve" docs beyond what changed in source.
 - **Read before editing** — always read the full doc page before making changes so you understand the existing structure.
 - **Preserve voice** — match the writing style of the existing doc page, don't impose a different tone.
