@@ -23,7 +23,6 @@ from enum import Enum
 from typing import (
     TYPE_CHECKING,
     Any,
-    Optional,
 )
 
 from loguru import logger

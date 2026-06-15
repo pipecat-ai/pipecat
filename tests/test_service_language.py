@@ -11,7 +11,6 @@ strings are all resolved correctly at both init time and runtime update time.
 """
 
 from collections.abc import AsyncGenerator
-from typing import Optional
 from unittest.mock import patch
 
 import pytest

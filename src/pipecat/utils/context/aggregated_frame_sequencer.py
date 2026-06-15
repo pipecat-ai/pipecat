@@ -6,7 +6,7 @@
 
 """Ordered sequencer for AggregatedTextFrame slots through TTS processing."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from loguru import logger
 

@@ -27,7 +27,6 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.transports.websocket.server import WebsocketServerParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)

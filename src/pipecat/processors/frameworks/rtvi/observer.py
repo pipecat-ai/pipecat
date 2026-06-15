@@ -9,7 +9,7 @@
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from enum import Enum, StrEnum
+from enum import StrEnum
 from typing import (
     TYPE_CHECKING,
     Optional,
