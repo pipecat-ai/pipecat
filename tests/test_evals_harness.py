@@ -16,7 +16,6 @@ Two layers:
   matching, and reset paths without a real bot pipeline.
 """
 
-import asyncio
 import json
 import socket
 import unittest

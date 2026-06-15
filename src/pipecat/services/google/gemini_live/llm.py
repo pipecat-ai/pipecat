@@ -14,7 +14,6 @@ voice transcription, streaming responses, and tool usage.
 import asyncio
 import base64
 import io
-import json
 import time
 import uuid
 from dataclasses import dataclass, field
