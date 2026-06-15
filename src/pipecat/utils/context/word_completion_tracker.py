@@ -53,6 +53,7 @@ class WordCompletionTracker:
         self,
         tts_text: str,
         llm_text: str | None = None,
+        user_facing_text: str | None = None,
     ):
         """Initialize the tracker with the text of the frame being spoken.
 
@@ -66,6 +67,13 @@ class WordCompletionTracker:
                 LLM span via ``get_llm_consumed()``. Both texts normalize to the
                 same alphanumeric sequence, so the same char-count cursor drives
                 position tracking in both.
+            user_facing_text: The original text of the AggregatedTextFrame as shown
+                to the user (e.g. via RTVI). Unlike ``tts_text``, this text has no
+                TTS-specific tags or transformations. The tracker maintains a cursor
+                into it so callers can retrieve the spoken and unspoken portions in
+                terms of user-visible text via ``get_accumulated_user_facing_text()``
+                and ``get_remaining_user_facing_text()``. Defaults to ``tts_text``
+                when not provided.
         """
         self._tts_normalized = self._normalize(tts_text)
         self._received = ""
@@ -76,6 +84,13 @@ class WordCompletionTracker:
         # unspoken text as a TTSTextFrame instead of silently dropping it.
         self._tts_text = tts_text
         self._tts_pos = 0
+
+        # _user_facing_text is the original text returned to the user (e.g. via RTVI).
+        # Falls back to tts_text when not provided so this cursor is always valid.
+        # _user_facing_pos is a cursor into it, advanced by the same alnum count as
+        # _tts_pos so callers can expose progress in user-visible terms.
+        self._user_facing_text: str = user_facing_text if user_facing_text is not None else tts_text
+        self._user_facing_pos = 0
 
         # _llm_text is the original LLM-produced text (with pattern delimiters like
         # <card>...</card>). We track _llm_pos as a cursor into it, advancing
@@ -252,6 +267,7 @@ class WordCompletionTracker:
         # entire incoming word as overflow for the next slot.
         if not self.word_belongs_here(word):
             self._frame_word = self._tts_text[self._tts_pos :]
+            self._user_facing_pos = len(self._user_facing_text)
             if self._llm_text is not None:
                 self._llm_consumed = self._llm_text[self._llm_pos :]
                 self._llm_pos = len(self._llm_text)
@@ -294,6 +310,10 @@ class WordCompletionTracker:
         # Advance the TTS cursor by the same alnum count so the force-complete
         # path knows where in _tts_text to start from.
         self._tts_pos = self._advance_by_alnums(self._tts_text, self._tts_pos, chars_for_frame)
+
+        self._user_facing_pos = self._advance_by_alnums(
+            self._user_facing_text, self._user_facing_pos, chars_for_frame
+        )
 
         if self._llm_text is not None:
             if self.is_complete:
@@ -434,6 +454,22 @@ class WordCompletionTracker:
         """
         return self._llm_consumed.strip() if self._llm_consumed else self._llm_consumed
 
+    def get_accumulated_user_facing_text(self) -> str:
+        """Return all consumed text from user_facing_text up to the current cursor position."""
+        return self._user_facing_text[: self._user_facing_pos]
+
+    def get_remaining_user_facing_text(self, strip: bool = True) -> str:
+        """Return the unspoken portion of user_facing_text.
+
+        Args:
+            strip: When True (default), leading/trailing whitespace is removed.
+                Set to False to preserve leading whitespace so that
+                ``get_accumulated_user_facing_text() + get_remaining_user_facing_text(strip=False)``
+                reconstructs the original text exactly.
+        """
+        remaining = self._user_facing_text[self._user_facing_pos :]
+        return remaining.strip() if strip else remaining
+
     def get_accumulated_tts_text(self) -> str:
         """Return all consumed text from tts_text up to the current cursor position.
 
@@ -453,14 +489,17 @@ class WordCompletionTracker:
             return None
         return self._llm_text[: self._llm_pos]
 
-    def get_remaining_tts_text(self) -> str:
-        """Return the unspoken portion of tts_text, stripped of leading/trailing whitespace.
+    def get_remaining_tts_text(self, strip: bool = True) -> str:
+        """Return the unspoken portion of tts_text.
 
-        This is the text that the TTS provider has not yet confirmed via word-timestamp
-        events. Useful for force-completing a slot when the audio context ends before all
-        word-timestamp events have arrived.
+        Args:
+            strip: When True (default), leading/trailing whitespace is removed.
+                Set to False to preserve leading whitespace so that
+                ``get_accumulated_tts_text() + get_remaining_tts_text(strip=False)``
+                reconstructs the original text exactly.
         """
-        return self._tts_text[self._tts_pos :].strip()
+        remaining = self._tts_text[self._tts_pos :]
+        return remaining.strip() if strip else remaining
 
     def get_remaining_llm_text(self) -> str | None:
         """Return the unspoken portion of llm_text, stripped of leading/trailing whitespace.
@@ -483,6 +522,7 @@ class WordCompletionTracker:
         """Reset received word accumulation without changing the expected text."""
         self._received = ""
         self._tts_pos = 0
+        self._user_facing_pos = 0
         self._llm_pos = 0
         self._overflow_word = None
         self._llm_consumed = None
