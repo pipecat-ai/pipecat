@@ -56,21 +56,12 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.moq import MOQParams
 
 load_dotenv(override=True)
 
 # Transport-specific parameters using lambdas for deferred creation
 transport_params = {
-    "daily": lambda: DailyParams(
-        audio_in_enabled=True,
-        audio_out_enabled=True,
-    ),
-    "webrtc": lambda: TransportParams(
-        audio_in_enabled=True,
-        audio_out_enabled=True,
-    ),
     "moq": lambda: MOQParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -129,49 +120,29 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
-    # For MOQ, we need to handle connection and events differently.
-    # create_transport() already wires the runner's ready_event +
-    # cert_fingerprints back-channel for us, so we don't need to do that here.
-    if isinstance(runner_args, MOQRunnerArguments):
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport):
+        logger.info("Client subscribed — starting conversation")
+        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        await task.queue_frames([LLMRunFrame()])
 
-        @transport.event_handler("on_client_connected")
-        async def on_client_connected(transport):
-            logger.info("Client subscribed — starting conversation")
-            messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-            await task.queue_frames([LLMRunFrame()])
+    @transport.event_handler("on_disconnected")
+    async def on_disconnected(transport):
+        logger.info("Disconnected from MOQ relay")
+        await task.cancel()
 
-        @transport.event_handler("on_disconnected")
-        async def on_disconnected(transport):
-            logger.info("Disconnected from MOQ relay")
-            await task.cancel()
+    @transport.event_handler("on_error")
+    async def on_error(transport, message, exception):
+        logger.error(f"MOQ error: {message}")
 
-        @transport.event_handler("on_error")
-        async def on_error(transport, message, exception):
-            logger.error(f"MOQ error: {message}")
+    # MOQInputTransport.start() auto-connects to the relay when the
+    # pipeline starts, so we don't dial transport.connect() here.
+    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
-        # MOQInputTransport.start() auto-connects to the relay when the
-        # pipeline starts, so we don't dial transport.connect() here.
-        runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
-
-        try:
-            await runner.run(task)
-        finally:
-            await transport.disconnect()
-    else:
-        # Daily and WebRTC use on_client_connected/on_client_disconnected
-        @transport.event_handler("on_client_connected")
-        async def on_client_connected(transport, client):
-            logger.info("Client connected")
-            messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-            await task.queue_frames([LLMRunFrame()])
-
-        @transport.event_handler("on_client_disconnected")
-        async def on_client_disconnected(transport, client):
-            logger.info("Client disconnected")
-            await task.cancel()
-
-        runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+    try:
         await runner.run(task)
+    finally:
+        await transport.disconnect()
 
 
 async def bot(runner_args: RunnerArguments):
