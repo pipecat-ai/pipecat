@@ -12,7 +12,6 @@
     "src/pipecat/audio/turn/smart_turn/local_smart_turn_v3.py",
     "src/pipecat/audio/vad/silero.py",
     "src/pipecat/processors/aggregators/llm_response_universal.py",
-    "src/pipecat/processors/frame_processor.py",
     "src/pipecat/processors/frameworks/rtvi/observer.py",
     "src/pipecat/services/anthropic/llm.py",
     "src/pipecat/services/aws/llm.py",

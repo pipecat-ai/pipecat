@@ -133,7 +133,7 @@ class FrameProcessorQueue(asyncio.PriorityQueue):
         self.__high_counter = 0
         self.__low_counter = 0
 
-    async def put(self, item: tuple[Frame, FrameDirection, FrameCallback]):
+    async def put(self, item: tuple[Frame, FrameDirection, FrameCallback | None]):
         """Put an item into the priority queue.
 
         System frames (`SystemFrame`) have higher priority than any other
