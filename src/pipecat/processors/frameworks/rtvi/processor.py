@@ -382,13 +382,13 @@ class RTVIProcessor(FrameProcessor):
                     raise ValueError
                 self._client_version = parts
                 server_major = int(RTVI.PROTOCOL_VERSION.split(".")[0])
-                client_major, client_minor = self._client_version[0], self._client_version[1]
-                legacy_major, legacy_minor = RTVI.LEGACY_SUPPORTED_VERSION
+                client_major = self._client_version[0]
                 if client_major == server_major:
                     pass  # fully compatible
-                elif client_major == legacy_major and client_minor == legacy_minor:
+                elif client_major == RTVI.LEGACY_SUPPORTED_MAJOR:
+                    # Any 1.x client is deprecated but still served with the v1 bot-output format.
                     # TODO: enable this once RTVI 2.0.0 is supported by all our client SDKs.
-                    # 1.4.x is deprecated but still served with the v1 bot-output format.
+                    # 1.x.x is deprecated but still served with the v1 bot-output format.
                     # legacy_warning = (
                     #     f"RTVI client version {version} is deprecated. "
                     #     f"Please upgrade to protocol {RTVI.PROTOCOL_VERSION}. "

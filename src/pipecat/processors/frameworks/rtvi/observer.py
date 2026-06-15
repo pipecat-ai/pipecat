@@ -247,12 +247,10 @@ class RTVIObserver(BaseObserver):
 
     @property
     def _is_legacy_client(self) -> bool:
-        """Return True when the connected client uses the deprecated 1.4.x protocol."""
+        """Return True when the connected client uses a deprecated 1.x protocol."""
         if not self._rtvi:
             return False
-        v = self._rtvi.client_version
-        legacy_major, legacy_minor = RTVI.LEGACY_SUPPORTED_VERSION
-        return v[0] == legacy_major and v[1] == legacy_minor
+        return self._rtvi.client_version[0] == RTVI.LEGACY_SUPPORTED_MAJOR
 
     def add_bot_output_transformer(
         self,

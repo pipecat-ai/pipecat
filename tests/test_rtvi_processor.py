@@ -74,29 +74,27 @@ class TestRTVIClientReadyVersionHandling(unittest.IsolatedAsyncioTestCase):
         await self._call_handle_client_ready(data)
         self.processor.set_client_ready.assert_called_once()
 
-    # -- Incompatible versions ------------------------------------------------
-
-    async def test_incompatible_version_1_0_0_sends_error(self):
+    async def test_legacy_version_1_0_0_sets_client_ready(self):
+        """Any 1.x client is accepted as legacy."""
         data = RTVI.ClientReadyData(
             version="1.0.0",
             about=RTVI.AboutClientData(library="test-client"),
         )
         await self._call_handle_client_ready(data)
-        self.processor._send_error_response.assert_called_once()
-        error_msg = self.processor._send_error_response.call_args[0][1]
-        self.assertIn("1.0.0", error_msg)
-        self.assertIn("not compatible", error_msg)
+        self.processor._send_error_response.assert_not_called()
+        self.processor.set_client_ready.assert_called_once()
 
-    async def test_incompatible_version_1_2_0_sends_error(self):
+    async def test_legacy_version_1_2_0_sets_client_ready(self):
+        """Any 1.x client is accepted as legacy."""
         data = RTVI.ClientReadyData(
             version="1.2.0",
             about=RTVI.AboutClientData(library="test-client"),
         )
         await self._call_handle_client_ready(data)
-        self.processor._send_error_response.assert_called_once()
-        error_msg = self.processor._send_error_response.call_args[0][1]
-        self.assertIn("1.2.0", error_msg)
-        self.assertIn("not compatible", error_msg)
+        self.processor._send_error_response.assert_not_called()
+        self.processor.set_client_ready.assert_called_once()
+
+    # -- Incompatible versions ------------------------------------------------
 
     async def test_version_below_1_0_0_sends_error(self):
         data = RTVI.ClientReadyData(
@@ -132,7 +130,7 @@ class TestRTVIClientReadyVersionHandling(unittest.IsolatedAsyncioTestCase):
 
     async def test_error_message_includes_compatibility_warning(self):
         """Incompatible version errors should append the compatibility warning."""
-        for version in ["0.9.9", "1.0.0", "1.2.0"]:
+        for version in ["0.9.9", "3.0.0"]:
             with self.subTest(version=version):
                 data = RTVI.ClientReadyData(
                     version=version,

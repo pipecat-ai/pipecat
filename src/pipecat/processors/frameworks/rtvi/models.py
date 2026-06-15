@@ -31,8 +31,8 @@ from pipecat.utils.deprecation import deprecated
 PROTOCOL_VERSION = "2.0.0"
 
 # -- Version compatibility --
-# 1.4.x clients are deprecated but still supported with the old bot-output format.
-LEGACY_SUPPORTED_VERSION = (1, 4)
+# Any 1.x client is deprecated but still supported with the old bot-output format.
+LEGACY_SUPPORTED_MAJOR = 1
 
 MESSAGE_LABEL = "rtvi-ai"
 MessageLiteral = Literal["rtvi-ai"]
