@@ -1,3 +1,21 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""MoQ runner helpers.
+
+Configuration helpers used by the development runner to construct the
+MoQ relay config sent to the browser at ``/start``.
+"""
+
+import argparse
+from typing import Any
+
+from loguru import logger
+
+
 def _cert_hash_from_pem(path: str) -> str | None:
     """Compute the base64 SHA-256 of a PEM-encoded cert on disk.
 
@@ -56,7 +74,6 @@ def _build_moq_client_config(
     rate, channel count, track name). Lets us add tracks (video,
     screen-share) without a server-side config update.
     """
-
     # note this must be set ONLY if a self-signed certificate is used.
     # It purposely doesn't work with valid TLS certficates.
     cert_hash: str | None = None
