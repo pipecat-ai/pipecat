@@ -145,7 +145,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # )
     # from pipecat.turns.user_stop import BaseUserTurnStopStrategy
 
-    # Direct functions listed in the context are registered with the LLM automatically
     context = LLMContext(tools=[get_current_weather])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,

@@ -97,7 +97,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    # Direct functions listed in the context are registered with the LLM automatically
     context = LLMContext(tools=[check_flight_status, book_taxi])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,

@@ -160,7 +160,6 @@ indicate you should use the get_image tool are:
         for item in function_calls:
             logger.info(f"Function call cancelled: {item.function_name} [{item.tool_call_id}]")
 
-    # Direct functions listed in the context are registered with the LLM automatically
     # cancel_on_interruption=False (set via @tool_options) makes this an async
     # function call..
     context = LLMContext(tools=[get_current_weather, get_image, get_restaurant_recommendation])

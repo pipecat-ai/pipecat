@@ -211,7 +211,6 @@ Your response will be turned into speech so use only simple words and punctuatio
         ),
     )
 
-    # Direct functions listed in the context are registered with the LLM automatically
     context = LLMContext(tools=[query_knowledge_base])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,

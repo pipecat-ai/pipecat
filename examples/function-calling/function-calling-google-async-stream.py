@@ -147,7 +147,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         for item in function_calls:
             logger.info(f"Function call cancelled: {item.function_name} [{item.tool_call_id}]")
 
-    # Direct functions listed in the context are registered with the LLM automatically
     # cancel_on_interruption=False (set via @tool_options) makes this an async
     # function call: the LLM continues the conversation immediately and receives
     # updates/result later.

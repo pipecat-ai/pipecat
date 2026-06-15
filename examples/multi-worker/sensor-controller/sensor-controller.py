@@ -166,7 +166,6 @@ def build_sensor_controller() -> PipelineWorker:
             ),
         ),
     )
-    # Direct functions listed in the context are registered with the LLM automatically
     context = LLMContext(
         tools=[
             get_current_reading,
