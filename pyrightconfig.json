@@ -35,7 +35,6 @@
     "src/pipecat/services/nvidia/tts.py",
     "src/pipecat/services/openai/base_llm.py",
     "src/pipecat/services/openai/realtime/llm.py",
-    "src/pipecat/services/rime/tts.py",
     "src/pipecat/services/sambanova/llm.py",
     "src/pipecat/services/sarvam/stt.py",
     "src/pipecat/services/simli/video.py",
