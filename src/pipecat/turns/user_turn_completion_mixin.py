@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMRunFrame,
     LLMTextFrame,
+    UserStartedSpeakingFrame,
     UserTurnInferenceCompletedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -232,6 +233,18 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         # both occur in the same turn.
         self._turn_completion_broadcasted = False
 
+        # True once a ✓ (COMPLETE) response has produced spoken text for the
+        # CURRENT user turn. Unlike the per-response flags above, this is NOT
+        # cleared by ``_turn_reset`` (which runs at every
+        # ``LLMFullResponseEndFrame``); it is cleared only when a new user turn
+        # begins (``UserStartedSpeakingFrame`` / ``InterruptionFrame``). Within
+        # a single user turn the turn-completion gating can run several
+        # independent inferences (e.g. a Smart Turn COMPLETE flicker plus an
+        # incomplete-timeout re-prompt), each emitting its own ✓; without this
+        # latch ``_push_turn_text`` would speak every one and repeat the
+        # response. See ``_push_turn_text``.
+        self._user_turn_response_spoken = False
+
         # Timeout handling
         self._user_turn_completion_config = UserTurnCompletionConfig()
         self._incomplete_timeout_task: asyncio.Task | None = None
@@ -368,6 +381,13 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             await self._cancel_incomplete_timeout()
             await self._turn_reset()
 
+        # A new user turn clears the per-user-turn "already spoke a completion"
+        # latch (see ``__init__``) so the next turn's first ✓ is spoken. Kept
+        # out of ``_turn_reset`` (which runs every response) so the latch
+        # survives the multiple inferences that can occur within one user turn.
+        if isinstance(frame, (UserStartedSpeakingFrame, InterruptionFrame)):
+            self._user_turn_response_spoken = False
+
         # Pass frame to parent
         await super().process_frame(frame, direction)
 
@@ -457,6 +477,22 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
 
         # Check for ✓ (COMPLETE) marker - user's turn was complete, respond normally
         if USER_TURN_COMPLETE_MARKER in self._turn_text_buffer:
+            # Enforce a single spoken completion per user turn. The
+            # turn-completion gating can run several inferences within one user
+            # turn (see ``_user_turn_response_spoken``), and ``_turn_reset``
+            # clears ``_turn_complete_found`` between responses, so without this
+            # latch each ✓ would be spoken again, repeating the same response.
+            # Drop any ✓ after the first until a new user turn starts.
+            if self._user_turn_response_spoken:
+                logger.debug(
+                    f"COMPLETE ({USER_TURN_COMPLETE_MARKER}) detected but a response was "
+                    "already spoken this user turn; suppressing duplicate"
+                )
+                self._turn_suppressed = True
+                self._turn_text_buffer = ""
+                return
+            self._user_turn_response_spoken = True
+
             logger.debug(f"COMPLETE ({USER_TURN_COMPLETE_MARKER}) detected, pushing buffered text")
 
             # Broadcast that the user turn is complete so a stop strategy
