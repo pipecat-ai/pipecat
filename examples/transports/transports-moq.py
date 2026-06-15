@@ -43,20 +43,20 @@ from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.runner.types import MOQRunnerArguments, RunnerArguments
+from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.base_transport import BaseTransport
 from pipecat.transports.moq import MOQParams
+from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
@@ -77,23 +77,26 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        settings=OpenAILLMService.Settings(
+            model="gpt-4o",
+            system_instruction=(
+                "You are a helpful assistant in a real-time voice call. "
+                "Your goal is to demonstrate your capabilities in a succinct way. "
+                "Your output will be spoken aloud, so avoid special characters that can't easily "
+                "be spoken, such as emojis or bullet points. Respond to what the user said in a "
+                "creative and helpful way."
+            ),
+        ),
+    )
 
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a helpful assistant in a real-time voice call. "
-            "Your goal is to demonstrate your capabilities in a succinct way. "
-            "Your output will be spoken aloud, so avoid special characters that can't easily be "
-            "spoken, such as emojis or bullet points. Respond to what the user said in a creative "
-            "and helpful way.",
-        },
-    ]
-
-    context = LLMContext(messages)
+    context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -111,7 +114,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ]
     )
 
-    task = PipelineTask(
+    worker = PipelineWorker(
         pipeline,
         params=PipelineParams(
             enable_metrics=True,
@@ -123,13 +126,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport):
         logger.info("Client subscribed — starting conversation")
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-        await task.queue_frames([LLMRunFrame()])
+        context.add_message(
+            {"role": "developer", "content": "Please introduce yourself to the user."}
+        )
+        await worker.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_disconnected")
     async def on_disconnected(transport):
         logger.info("Disconnected from MOQ relay")
-        await task.cancel()
+        await worker.cancel()
 
     @transport.event_handler("on_error")
     async def on_error(transport, message, exception):
@@ -137,10 +142,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # MOQInputTransport.start() auto-connects to the relay when the
     # pipeline starts, so we don't dial transport.connect() here.
-    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     try:
-        await runner.run(task)
+        await runner.add_workers(worker)
+        await runner.run()
     finally:
         await transport.disconnect()
 

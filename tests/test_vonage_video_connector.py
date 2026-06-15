@@ -1064,12 +1064,8 @@ class TestVonageVideoConnectorTransport:
 
         # Queue should still be full (no new item added)
         assert client._video_queue.qsize() == client._video_queue.maxsize
-        # Verify the coroutine was closed and dropped. close() on an unstarted
-        # coroutine marks it as already-awaited internally but does not flip
-        # inspect.getcoroutinestate() out of CORO_CREATED, so we probe via
-        # send() instead.
-        with pytest.raises(RuntimeError, match="cannot reuse already awaited coroutine"):
-            async_task.send(None)
+        # check the coroutine was closed and hence dropped
+        assert inspect.getcoroutinestate(async_task) == "CORO_CLOSED"
 
         # Clean up the coroutine
         task = await client._video_queue.get()
