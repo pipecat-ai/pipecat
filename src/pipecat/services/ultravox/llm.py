@@ -233,6 +233,7 @@ class UltravoxRealtimeLLMService(LLMService):
             **kwargs,
         )
         self._params = params
+        self._selected_tools: ToolsSchema | None = None
         if one_shot_selected_tools:
             if not isinstance(self._params, OneShotInputParams):
                 logger.warning(
@@ -420,6 +421,14 @@ class UltravoxRealtimeLLMService(LLMService):
     # frame processing
     # StartFrame, StopFrame, CancelFrame implemented in base class
     #
+
+    def _init_time_tools(self) -> "ToolsSchema | None":
+        """Return the ``one_shot_selected_tools`` passed at construction, if any.
+
+        Ultravox advertises these and doesn't read tools from the context, so
+        their handlers auto-register the same way a context-advertised one would.
+        """
+        return self._selected_tools
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames for the Ultravox Realtime service.

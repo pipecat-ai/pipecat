@@ -164,6 +164,7 @@ There is also a secret menu that changes daily. If the user asks about it, use t
             },
         },
         required=[],
+        handler=get_secret_menu,
     )
 
     llm = UltravoxRealtimeLLMService(
@@ -176,8 +177,6 @@ There is also a secret menu that changes daily. If the user asks about it, use t
         ),
         one_shot_selected_tools=ToolsSchema(standard_tools=[secret_menu_function]),
     )
-
-    llm.register_function("get_secret_menu", get_secret_menu)
 
     tts = InworldTTSService(
         api_key=os.getenv("INWORLD_API_KEY", ""),
