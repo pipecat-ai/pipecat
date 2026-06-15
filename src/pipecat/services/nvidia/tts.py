@@ -55,9 +55,7 @@ try:
     from riva.client.proto.riva_audio_pb2 import AudioEncoding
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error(
-        'In order to use NVIDIA TTS, you need to `uv add "pipecat-ai[nvidia]"`.'
-    )
+    logger.error('In order to use NVIDIA TTS, you need to `uv add "pipecat-ai[nvidia]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 
@@ -356,7 +354,10 @@ class NvidiaTTSService(TTSService):
 
     def _load_zero_shot_audio_prompt(self):
         """Load and cache zero-shot prompt audio bytes, if configured."""
-        if self._zero_shot_audio_prompt_file is None or self._zero_shot_audio_prompt_data is not None:
+        if (
+            self._zero_shot_audio_prompt_file is None
+            or self._zero_shot_audio_prompt_data is not None
+        ):
             return
 
         try:
@@ -544,9 +545,7 @@ class NvidiaTTSService(TTSService):
         """Wrap ``_stitched_synthesis_handler`` as an asyncio-managed task."""
         await asyncio.to_thread(self._stitched_synthesis_handler, state)
 
-    def _per_sentence_synthesis_handler(
-        self, texts: list[str], state: _PerSentenceSynthesisState
-    ):
+    def _per_sentence_synthesis_handler(self, texts: list[str], state: _PerSentenceSynthesisState):
         """Run one blocking ``SynthesizeOnline`` call for a per-sentence request."""
         self._run_synthesis_call(
             self._request_generator_from_texts(texts, state.stop_event),
