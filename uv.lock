@@ -668,7 +668,7 @@ wheels = [
 
 [[package]]
 name = "camb-sdk"
-version = "1.5.13"
+version = "1.5.14"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -679,9 +679,9 @@ dependencies = [
     { name = "websocket-client" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bd/3e/b5ab4bb3b9c76c0cbad9f2a4696c504e80ecb9b44a09c811c6923c48dcbc/camb_sdk-1.5.13.tar.gz", hash = "sha256:a2e16d338419681f25973082386b6cdc5c1ae6b804c082d3a210fba9c446ef01", size = 101920, upload-time = "2026-05-27T08:52:55.931Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/75/a8/dd6313338445b74f0d7469dca9e73c975b10a6f711ff4abed4872ff524d0/camb_sdk-1.5.14.tar.gz", hash = "sha256:a930cc6a4b450ac1842d7dbf90a5c546bb76dc8df114b9e0bd0c1e3bd9ca7b9a", size = 103105, upload-time = "2026-06-07T01:04:50.517Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d6/79/758eb34167b174884ae100301cdb2cd06b9a129892b487af3e8de26eaf0d/camb_sdk-1.5.13-py3-none-any.whl", hash = "sha256:98954cc999584f16bd1726780cb21213996561329cd9f25c81423a8edc10fc0d", size = 174906, upload-time = "2026-05-27T08:52:53.529Z" },
+    { url = "https://files.pythonhosted.org/packages/8b/3a/45fdf49060382b3525a75fbb05cd5aa55dea7141097578750dcf5b393796/camb_sdk-1.5.14-py3-none-any.whl", hash = "sha256:7c8ea44fe152910bbbfb13366a901c7f9916063c53ae6d5c3c8d95c60075f42c", size = 175730, upload-time = "2026-06-07T01:04:48.228Z" },
 ]
 
 [[package]]
@@ -4588,7 +4588,7 @@ requires-dist = [
     { name = "aws-sdk-bedrock-runtime", marker = "python_full_version >= '3.12' and extra == 'aws-nova-sonic'", specifier = "~=0.4.0" },
     { name = "aws-sdk-sagemaker-runtime-http2", marker = "python_full_version >= '3.12' and extra == 'sagemaker'" },
     { name = "azure-cognitiveservices-speech", marker = "extra == 'azure'", specifier = ">=1.47.0,<2" },
-    { name = "camb-sdk", marker = "extra == 'camb'", specifier = ">=1.5.4,<2" },
+    { name = "camb-sdk", marker = "extra == 'camb'", specifier = ">=1.5.14,<2" },
     { name = "coremltools", marker = "extra == 'local-smart-turn'", specifier = ">=8.0" },
     { name = "daily-python", marker = "extra == 'daily'", specifier = ">=0.29.1,<1" },
     { name = "deepgram-sdk", marker = "extra == 'deepgram'", specifier = ">=6.1.1,<8" },
