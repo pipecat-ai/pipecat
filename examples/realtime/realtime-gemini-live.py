@@ -101,6 +101,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             },
         },
         required=["location", "format"],
+        handler=fetch_weather_from_api,
     )
     restaurant_function = FunctionSchema(
         name="get_restaurant_recommendation",
@@ -112,6 +113,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             },
         },
         required=["location"],
+        handler=fetch_restaurant_recommendation,
     )
     search_tool = {"google_search": {}}
     # KNOWN ISSUE: If using GeminiVertexLiveLLMService, it appears
@@ -130,9 +132,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
         tools=tools,
     )
-
-    llm.register_function("get_current_weather", fetch_weather_from_api)
-    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
     context = LLMContext()
     # Gemini Live drives the conversation server-side.

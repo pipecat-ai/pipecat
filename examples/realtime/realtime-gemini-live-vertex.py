@@ -98,6 +98,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             },
         },
         required=["location", "format"],
+        handler=fetch_weather_from_api,
     )
     restaurant_function = FunctionSchema(
         name="get_restaurant_recommendation",
@@ -109,6 +110,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             },
         },
         required=["location"],
+        handler=fetch_restaurant_recommendation,
     )
     # KNOWN ISSUE: If using GeminiVertexLiveLLMService, it appears
     # you cannot use the "google_search" tool alongside other tools.
@@ -125,9 +127,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
         tools=tools,
     )
-
-    llm.register_function("get_current_weather", fetch_weather_from_api)
-    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
     context = LLMContext([{"role": "developer", "content": "Say hello."}])
     # Gemini Live doesn't emit user-turn frames. Server-side VAD is

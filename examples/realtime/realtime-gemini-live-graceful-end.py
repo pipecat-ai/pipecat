@@ -114,6 +114,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             },
         },
         required=["location", "format"],
+        handler=fetch_weather_from_api,
     )
     restaurant_function = FunctionSchema(
         name="get_restaurant_recommendation",
@@ -125,12 +126,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             },
         },
         required=["location"],
+        handler=fetch_restaurant_recommendation,
     )
     end_conversation_function = FunctionSchema(
         name="end_conversation",
         description="Gracefully end the conversation",
         properties={},
         required=[],
+        handler=end_conversation,
     )
     search_tool = {"google_search": {}}
     tools = ToolsSchema(
@@ -145,10 +148,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
         tools=tools,
     )
-
-    llm.register_function("get_current_weather", fetch_weather_from_api)
-    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
-    llm.register_function("end_conversation", end_conversation)
 
     context = LLMContext(
         [{"role": "developer", "content": "Say hello."}],

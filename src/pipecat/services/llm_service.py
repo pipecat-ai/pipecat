@@ -30,6 +30,7 @@ from websockets.protocol import State
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.direct_function import DirectFunction, DirectFunctionWrapper
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.frames.frames import (
     CancelFrame,
@@ -1069,6 +1070,32 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             "step is unnecessary when the handler is on the FunctionSchema."
         )
 
+    def _init_time_tools(self) -> ToolsSchema | None:
+        """Return tools advertised at construction time, if any.
+
+        Most services receive their tools through the ``LLMContext`` on each
+        inference. Some realtime services instead accept tools as a constructor
+        argument and run with an empty context. They override this so a handler
+        bundled on such an init-time ``FunctionSchema`` (or a direct function)
+        auto-registers, just as a context-advertised one would:
+        :meth:`_sync_registered_tool_handlers` falls back to it when the context
+        advertises no tools.
+
+        Note:
+            A realtime service that overrides this **must advertise
+            context-provided tools in preference to its init-time tools** (falling
+            back to init-time tools only when the context provides none). This
+            fallback registers init-time handlers only when the context has no
+            tools, so a service that preferred init-time tools would advertise one
+            set to the provider while registering handlers for another.
+
+        Returns:
+            The init-time tools as a ``ToolsSchema``, or ``None`` when the service
+            takes no init-time tools (the default). Overrides must not return raw
+            provider tool dicts, which carry no handler to register.
+        """
+        return None
+
     def _sync_registered_tool_handlers(self, tools: Any) -> None:
         """Sync the registered handlers with the handlers advertised in ``tools``.
 
@@ -1082,6 +1109,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         carries the current tool set on each inference). Realtime services that
         support runtime tool changes also call it from their own ``LLMSetToolsFrame``
         handling, since they run continuously and don't get a context frame per turn.
+        When the context advertises no tools, handlers fall back to
+        :meth:`_init_time_tools` (tools the service was given at construction time).
 
         Explicit registrations (``register_function`` / ``register_direct_function``),
         the catch-all handler, and built-in tools are never pruned.
@@ -1096,6 +1125,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         normalized = (
             LLMContext._normalize_and_validate_tools(tools) if tools is not None else NOT_GIVEN
         )
+        # No context tools? Fall back to any provided at construction time, so
+        # init-time tool handlers register (and aren't pruned) the same way.
+        if not is_given(normalized):
+            init_time_tools = self._init_time_tools()
+            if init_time_tools is not None:
+                normalized = LLMContext._normalize_and_validate_tools(init_time_tools)
         self._register_advertised_tool_handlers(normalized)
         advertised: set[str | None] = set()
         if is_given(normalized):
