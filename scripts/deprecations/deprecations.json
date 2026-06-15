@@ -77,7 +77,7 @@
       "relation": "use_existing",
       "replacement": "CancelWorkerFrame",
       "message": "`CancelTaskFrame` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `CancelWorkerFrame` instead.",
-      "location": "pipecat/frames/frames.py:1677"
+      "location": "pipecat/frames/frames.py:1702"
     },
     {
       "subject": "EndTaskFrame",
@@ -88,7 +88,7 @@
       "relation": "use_existing",
       "replacement": "EndWorkerFrame",
       "message": "`EndTaskFrame` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `EndWorkerFrame` instead.",
-      "location": "pipecat/frames/frames.py:1649"
+      "location": "pipecat/frames/frames.py:1674"
     },
     {
       "subject": "InterruptionTaskFrame",
@@ -99,7 +99,7 @@
       "relation": "use_existing",
       "replacement": "InterruptionWorkerFrame",
       "message": "`InterruptionTaskFrame` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `InterruptionWorkerFrame` instead.",
-      "location": "pipecat/frames/frames.py:1691"
+      "location": "pipecat/frames/frames.py:1716"
     },
     {
       "subject": "ServiceUpdateSettingsFrame.settings",
@@ -121,7 +121,7 @@
       "relation": "use_existing",
       "replacement": "StopWorkerFrame",
       "message": "`StopTaskFrame` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `StopWorkerFrame` instead.",
-      "location": "pipecat/frames/frames.py:1663"
+      "location": "pipecat/frames/frames.py:1688"
     },
     {
       "subject": "TaskFrame",
@@ -132,7 +132,7 @@
       "relation": "use_existing",
       "replacement": "WorkerFrame",
       "message": "`TaskFrame` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `WorkerFrame` instead.",
-      "location": "pipecat/frames/frames.py:1613"
+      "location": "pipecat/frames/frames.py:1638"
     },
     {
       "subject": "TaskSystemFrame",
@@ -143,7 +143,7 @@
       "relation": "use_existing",
       "replacement": "WorkerSystemFrame",
       "message": "`TaskSystemFrame` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `WorkerSystemFrame` instead.",
-      "location": "pipecat/frames/frames.py:1628"
+      "location": "pipecat/frames/frames.py:1653"
     },
     {
       "subject": "SmartTurnMetricsData",
@@ -330,7 +330,7 @@
       "relation": "use_existing",
       "replacement": "LLMFunctionCallInProgressMessage",
       "message": "`LLMFunctionCallMessage` is deprecated since 0.0.102 and will be removed in 2.0.0. Use `LLMFunctionCallInProgressMessage` instead.",
-      "location": "pipecat/processors/frameworks/rtvi/models.py:204"
+      "location": "pipecat/processors/frameworks/rtvi/models.py:208"
     },
     {
       "subject": "LLMFunctionCallMessageData",
@@ -341,7 +341,7 @@
       "relation": "use_existing",
       "replacement": "LLMFunctionCallInProgressMessageData",
       "message": "`LLMFunctionCallMessageData` is deprecated since 0.0.102 and will be removed in 2.0.0. Use `LLMFunctionCallInProgressMessageData` instead.",
-      "location": "pipecat/processors/frameworks/rtvi/models.py:186"
+      "location": "pipecat/processors/frameworks/rtvi/models.py:190"
     },
     {
       "subject": "RTVIProcessor.handle_function_call",
@@ -3234,7 +3234,7 @@
       "relation": "use_existing",
       "replacement": "WebsocketTTSService",
       "message": "`AudioContextTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `WebsocketTTSService` instead.",
-      "location": "pipecat/services/tts_service.py:1733"
+      "location": "pipecat/services/tts_service.py:1738"
     },
     {
       "subject": "AudioContextWordTTSService",
@@ -3245,7 +3245,7 @@
       "relation": "use_existing",
       "replacement": "WebsocketTTSService",
       "message": "`AudioContextWordTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `WebsocketTTSService` instead.",
-      "location": "pipecat/services/tts_service.py:1771"
+      "location": "pipecat/services/tts_service.py:1776"
     },
     {
       "subject": "InterruptibleWordTTSService",
@@ -3256,7 +3256,7 @@
       "relation": "use_existing",
       "replacement": "InterruptibleTTSService",
       "message": "`InterruptibleWordTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `InterruptibleTTSService` instead.",
-      "location": "pipecat/services/tts_service.py:1712"
+      "location": "pipecat/services/tts_service.py:1717"
     },
     {
       "subject": "TTSService.aggregate_sentences",
@@ -3300,7 +3300,7 @@
       "relation": "use_existing",
       "replacement": "WebsocketTTSService",
       "message": "`WebsocketWordTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `WebsocketTTSService` instead.",
-      "location": "pipecat/services/tts_service.py:1690"
+      "location": "pipecat/services/tts_service.py:1695"
     },
     {
       "subject": "WordTTSService",
@@ -3311,7 +3311,7 @@
       "relation": "use_existing",
       "replacement": "TTSService",
       "message": "`WordTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `TTSService` instead.",
-      "location": "pipecat/services/tts_service.py:1583"
+      "location": "pipecat/services/tts_service.py:1588"
     },
     {
       "subject": "BaseWhisperSTTService.language",
