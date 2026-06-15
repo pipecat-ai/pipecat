@@ -40,7 +40,7 @@ except ModuleNotFoundError as e:
 # WhisperSTTServiceMLX imports it lazily when actually used.
 if platform.system() == "Darwin" and platform.machine() == "arm64":
     try:
-        import mlx_whisper
+        import mlx_whisper  # noqa: F401
     except ModuleNotFoundError as e:
         logger.error(f"Exception: {e}")
         logger.error('In order to use Whisper, you need to `uv add "pipecat-ai[mlx-whisper]"`.')
