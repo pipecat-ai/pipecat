@@ -14,6 +14,7 @@ Refer to the NVIDIA NIM LLM API documentation for available models and usage:
 https://docs.api.nvidia.com/nim/reference/llm-apis
 """
 
+import inspect
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from enum import StrEnum
@@ -215,18 +216,25 @@ class NvidiaLLMService(OpenAILLMService):
                     self._think_tag_buffer = self._think_tag_buffer[safe_end:]
         return None
 
-    async def _flush_reasoning_state(self):
-        """Flush buffered reasoning state at normal stream completion.
+    async def _finalize_reasoning_state(self, *, flush_buffered_text: bool):
+        """Finalize buffered reasoning state at stream end.
 
-        Emits any buffered trailing thought text, closes open thought frames,
-        and forwards any buffered pre-content text that was held while deciding
-        whether the stream began with ``<think>``.
+        Args:
+            flush_buffered_text: Whether to forward buffered text that was held
+                while deciding whether the stream started with ``<think>``.
+                This should be ``True`` on normal completion and ``False``
+                when the stream ends early due to interruption or
+                cancellation.
         """
         if self._think_tag_state == _ThinkTagState.IN_THOUGHT:
-            if self._think_tag_buffer:
+            if self._think_tag_buffer and flush_buffered_text:
                 await self.push_frame(LLMThoughtTextFrame(text=self._think_tag_buffer))
             await self.push_frame(LLMThoughtEndFrame())
-        elif self._think_tag_state == _ThinkTagState.DETECTING and self._think_tag_buffer:
+        elif (
+            self._think_tag_state == _ThinkTagState.DETECTING
+            and self._think_tag_buffer
+            and flush_buffered_text
+        ):
             await super()._push_llm_text(self._think_tag_buffer)
 
         self._think_tag_buffer = ""
@@ -271,9 +279,12 @@ class NvidiaLLMService(OpenAILLMService):
         model name, tool calls, and audio transcripts.
 
         Notes:
-            Stream cleanup is owned by the base OpenAI processing loop
-            (``BaseOpenAILLMService._process_context``), which wraps the stream
-            in its own closing context manager.
+            ``BaseOpenAILLMService._process_context()`` closes the wrapper
+            iterator returned from ``get_chat_completions()``, but it does not
+            close the inner OpenAI stream directly. This wrapper closes that
+            inner stream in a ``finally`` block so it is released promptly,
+            including if the response is cancelled very early, for example due
+            to an interruption right after the request starts.
 
         Args:
             stream: The original chat completion stream.
@@ -282,24 +293,54 @@ class NvidiaLLMService(OpenAILLMService):
             Chat completion chunks with any leading ``<think>`` content removed
             from ``delta.content`` before they reach the base OpenAI loop.
         """
-        async for chunk in stream:
-            if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta:
-                delta = chunk.choices[0].delta
-                rc = getattr(delta, "reasoning_content", None)
-                if rc:
-                    if not self._has_reasoning_field:
-                        self._has_reasoning_field = True
-                        await self.push_frame(LLMThoughtStartFrame())
-                    await self.push_frame(LLMThoughtTextFrame(text=rc))
-                elif self._has_reasoning_field and delta.content:
-                    await self.push_frame(LLMThoughtEndFrame())
-                    self._has_reasoning_field = False
+        completed = False
+        try:
+            async for chunk in stream:
+                if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta:
+                    delta = chunk.choices[0].delta
+                    rc = getattr(delta, "reasoning_content", None) or getattr(
+                        delta, "reasoning", None
+                    )
+                    if rc:
+                        if not self._has_reasoning_field:
+                            self._has_reasoning_field = True
+                            await self.push_frame(LLMThoughtStartFrame())
+                        await self.push_frame(LLMThoughtTextFrame(text=rc))
+                    elif self._has_reasoning_field and delta.content:
+                        await self.push_frame(LLMThoughtEndFrame())
+                        self._has_reasoning_field = False
 
-                if delta.content:
-                    delta.content = await self._filter_thinking_content(delta.content)
-            yield chunk
+                    if delta.content:
+                        delta.content = await self._filter_thinking_content(delta.content)
+                yield chunk
+            completed = True
+        finally:
+            try:
+                await self._finalize_reasoning_state(
+                    flush_buffered_text=completed,
+                )
+            finally:
+                await self._close_inner_stream(stream)
 
-        await self._flush_reasoning_state()
+    async def _close_inner_stream(self, stream: AsyncIterator[ChatCompletionChunk]) -> None:
+        """Eagerly close the underlying OpenAI streaming response.
+
+        The OpenAI Python SDK exposes ``close()`` on this stream object.
+        Closing here complements the base OpenAI cleanup path and keeps
+        teardown local to this adapter, including early interruption or
+        cancellation cases.
+        """
+        close = getattr(stream, "close", None)
+        if close is None:
+            return
+        try:
+            result = close()
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            logger.exception(
+                "NvidiaLLMService: error while closing underlying chat completion stream"
+            )
 
     async def _process_context(self, context: LLMContext):
         """Process a context through the LLM and accumulate token usage metrics.
