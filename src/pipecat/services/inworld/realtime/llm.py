@@ -534,6 +534,19 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     # Frame processing
     #
 
+    def _init_time_tools(self) -> "ToolsSchema | None":
+        """Return tools set on ``session_properties`` at construction, if any.
+
+        Inworld Realtime advertises session-properties tools when the context
+        carries none, so their handlers auto-register the same way a
+        context-advertised one would. Provider-native tool objects carry no
+        handler, so only a ``ToolsSchema`` qualifies.
+        """
+        sp = self._settings.session_properties
+        if is_given(sp) and isinstance(sp.tools, ToolsSchema):
+            return sp.tools
+        return None
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames from the pipeline."""
         await super().process_frame(frame, direction)
@@ -712,6 +725,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
                 system_instruction=assert_given(self._settings.system_instruction),
             )
 
+            # tools given in the context override the tools in the session properties
             if llm_invocation_params["tools"]:
                 settings.tools = llm_invocation_params["tools"]
 
