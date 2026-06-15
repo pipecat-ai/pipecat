@@ -29,23 +29,74 @@ class TestRTVIClientReadyVersionHandling(unittest.IsolatedAsyncioTestCase):
         self.processor.set_client_ready = AsyncMock()
         await self.processor._handle_client_ready("req-1", data)
 
-    async def test_valid_version_1_0_0_sends_no_error(self):
+    # -- Fully compatible versions (protocol major 2) -------------------------
+
+    async def test_valid_version_2_0_0_sends_no_error(self):
+        data = RTVI.ClientReadyData(
+            version="2.0.0",
+            about=RTVI.AboutClientData(library="test-client"),
+        )
+        await self._call_handle_client_ready(data)
+        self.processor._send_error_response.assert_not_called()
+        self.assertEqual(self.processor._client_version, [2, 0, 0])
+
+    async def test_valid_version_2_3_1_sends_no_error(self):
+        data = RTVI.ClientReadyData(
+            version="2.3.1",
+            about=RTVI.AboutClientData(library="test-client"),
+        )
+        await self._call_handle_client_ready(data)
+        self.processor._send_error_response.assert_not_called()
+        self.assertEqual(self.processor._client_version, [2, 3, 1])
+
+    # -- Deprecated legacy version (1.4.x) ------------------------------------
+
+    # TODO: enable this once RTVI 2.0.0 is supported by all our client SDKs, and we start to emit the warnings again.
+    # async def test_legacy_version_1_4_0_sends_deprecation_warning(self):
+    #     """1.4.x clients receive a deprecation warning but the connection is allowed."""
+    #     data = RTVI.ClientReadyData(
+    #         version="1.4.0",
+    #         about=RTVI.AboutClientData(library="test-client"),
+    #     )
+    #     await self._call_handle_client_ready(data)
+    #     self.processor._send_error_response.assert_called_once()
+    #     warning_msg = self.processor._send_error_response.call_args[0][1]
+    #     self.assertIn("deprecated", warning_msg)
+    #     self.assertIn("1.4.0", warning_msg)
+    #     self.assertEqual(self.processor._client_version, [1, 4, 0])
+
+    async def test_legacy_version_sets_client_ready(self):
+        """1.4.x clients still become client-ready despite the warning."""
+        data = RTVI.ClientReadyData(
+            version="1.4.0",
+            about=RTVI.AboutClientData(library="test-client"),
+        )
+        await self._call_handle_client_ready(data)
+        self.processor.set_client_ready.assert_called_once()
+
+    # -- Incompatible versions ------------------------------------------------
+
+    async def test_incompatible_version_1_0_0_sends_error(self):
         data = RTVI.ClientReadyData(
             version="1.0.0",
             about=RTVI.AboutClientData(library="test-client"),
         )
         await self._call_handle_client_ready(data)
-        self.processor._send_error_response.assert_not_called()
-        self.assertEqual(self.processor._client_version, [1, 0, 0])
+        self.processor._send_error_response.assert_called_once()
+        error_msg = self.processor._send_error_response.call_args[0][1]
+        self.assertIn("1.0.0", error_msg)
+        self.assertIn("not compatible", error_msg)
 
-    async def test_valid_version_1_2_0_sends_no_error(self):
+    async def test_incompatible_version_1_2_0_sends_error(self):
         data = RTVI.ClientReadyData(
             version="1.2.0",
             about=RTVI.AboutClientData(library="test-client"),
         )
         await self._call_handle_client_ready(data)
-        self.processor._send_error_response.assert_not_called()
-        self.assertEqual(self.processor._client_version, [1, 2, 0])
+        self.processor._send_error_response.assert_called_once()
+        error_msg = self.processor._send_error_response.call_args[0][1]
+        self.assertIn("1.2.0", error_msg)
+        self.assertIn("not compatible", error_msg)
 
     async def test_version_below_1_0_0_sends_error(self):
         data = RTVI.ClientReadyData(
@@ -56,17 +107,6 @@ class TestRTVIClientReadyVersionHandling(unittest.IsolatedAsyncioTestCase):
         self.processor._send_error_response.assert_called_once()
         error_msg = self.processor._send_error_response.call_args[0][1]
         self.assertIn("0.3.0", error_msg)
-        self.assertIn("not compatible", error_msg)
-
-    async def test_version_above_protocol_major_sends_error(self):
-        data = RTVI.ClientReadyData(
-            version="2.3.1",
-            about=RTVI.AboutClientData(library="test-client"),
-        )
-        await self._call_handle_client_ready(data)
-        self.processor._send_error_response.assert_called_once()
-        error_msg = self.processor._send_error_response.call_args[0][1]
-        self.assertIn("2.3.1", error_msg)
         self.assertIn("not compatible", error_msg)
 
     async def test_no_version_sends_error(self):
@@ -91,8 +131,8 @@ class TestRTVIClientReadyVersionHandling(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(version, error_msg)
 
     async def test_error_message_includes_compatibility_warning(self):
-        """All version errors should append the compatibility warning."""
-        for version in ["0.9.9", "2.0.0"]:
+        """Incompatible version errors should append the compatibility warning."""
+        for version in ["0.9.9", "1.0.0", "1.2.0"]:
             with self.subTest(version=version):
                 data = RTVI.ClientReadyData(
                     version=version,
