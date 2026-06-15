@@ -15,18 +15,19 @@ Requirements:
         --extra openai --extra runner
 
 Usage:
-    # Local dev — bot is its own MOQ server, mints a self-signed cert,
-    # browser pins the fingerprint via /api/config. No separate relay
-    # needed:
-    uv run python examples/transports/transports-moq.py -t moq --moq-serve
+    # Local dev — bot is its own MOQ server, mints a self-signed cert
+    # for `localhost`, browser pins the fingerprint via /api/config.
+    # No separate relay needed:
+    uv run python examples/transports/transports-moq.py \\
+        -t moq --moq-serve --moq-tls-generate localhost
 
     # Connect to a remote relay (CA-signed cert, no pinning needed):
     uv run python examples/transports/transports-moq.py \\
-        -t moq --moq-host moq.example.com
+        -t moq --moq-connect https://moq.example.com:4080/moq
 
     # With a custom namespace (different "room"):
     uv run python examples/transports/transports-moq.py \\
-        -t moq --moq-serve --moq-namespace my-room
+        -t moq --moq-serve --moq-tls-generate localhost --moq-namespace my-room
 
     # Then open http://localhost:7860 and click Connect.
 
@@ -55,7 +56,7 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport
-from pipecat.transports.moq import MOQParams
+from pipecat.transports.moq.transport import MOQParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
