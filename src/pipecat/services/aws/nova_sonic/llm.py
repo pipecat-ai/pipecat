@@ -547,6 +547,15 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
     # frame processing
     #
 
+    def _init_time_tools(self) -> "ToolsSchema | None":
+        """Return the tools passed via ``tools=`` at construction, if any.
+
+        Nova Sonic advertises these whenever the context carries no tools (context
+        tools otherwise take priority), so their handlers auto-register the same
+        way a context-advertised one would.
+        """
+        return self._tools
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and handle service-specific logic.
 
