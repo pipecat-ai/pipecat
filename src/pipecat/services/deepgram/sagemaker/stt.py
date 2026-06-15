@@ -211,7 +211,7 @@ class DeepgramSageMakerSTTService(STTService):
         return True
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
-        """Apply a settings delta and warn about unhandled changes."""
+        """Apply a settings delta and reconnect to apply updated settings."""
         changed = await super()._update_settings(delta)
 
         if not changed:
@@ -221,12 +221,7 @@ class DeepgramSageMakerSTTService(STTService):
         if isinstance(self._settings, self.Settings):
             self._settings._sync_extra_to_fields()
 
-        # TODO: someday we could reconnect here to apply updated settings.
-        # Code might look something like the below:
-        # await self._disconnect()
-        # await self._connect()
-
-        self._warn_unhandled_updated_settings(changed)
+        await self._request_reconnect()
 
         return changed
 
@@ -375,6 +370,10 @@ class DeepgramSageMakerSTTService(STTService):
 
             logger.debug("Disconnected from Deepgram on SageMaker")
             await self._call_event_handler("on_disconnected")
+
+    async def _do_reconnect(self):
+        await self._disconnect()
+        await self._connect()
 
     async def _send_keepalive(self):
         """Send periodic KeepAlive messages to maintain the connection.
