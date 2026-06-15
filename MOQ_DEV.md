@@ -22,7 +22,9 @@ uv sync --extra moq --extra daily --extra silero --extra deepgram \
         --extra cartesia --extra openai --extra runner
 ( cd ../pipecat-client-web-transports && npm install --ignore-scripts )
 ( cd ../pipecat-prebuilt/client       && npm install )
-( cd ../voice-ui-kit                  && pnpm install )
+( cd ../voice-ui-kit \
+    && npm pkg set "pnpm.overrides[@pipecat-ai/moq-transport]=link:../pipecat-client-web-transports/transports/moq-transport" \
+    && pnpm install )
 ./scripts/moq-dev-setup.sh
 ```
 
@@ -84,7 +86,12 @@ uv sync --extra moq --extra daily --extra silero --extra deepgram \
         --extra cartesia --extra openai --extra runner
 ( cd ../pipecat-client-web-transports && npm install --ignore-scripts )
 ( cd ../pipecat-prebuilt/client       && npm install )
-( cd ../voice-ui-kit                  && pnpm install )
+# voice-ui-kit declares @pipecat-ai/moq-transport as a regular dep, but
+# it isn't on npm yet — register a pnpm override pointing at the local
+# checkout BEFORE pnpm install, otherwise the install 404s.
+( cd ../voice-ui-kit \
+    && npm pkg set "pnpm.overrides[@pipecat-ai/moq-transport]=link:../pipecat-client-web-transports/transports/moq-transport" \
+    && pnpm install )
 ```
 
 The Python extras come from `transports-moq.py`'s pipeline: `silero` for
@@ -114,9 +121,12 @@ build, which §3's script handles directly.
 A couple of things to know:
 
 - `voice-ui-kit/package/package.json` declares `@pipecat-ai/moq-transport`
-  as a `link:` reference to its sibling repo. `pnpm install` resolves
-  that automatically — no extra step. (This will change once
-  moq-transport ships to npm.)
+  as a regular versioned dep (peer + dev), but the package isn't on npm
+  yet. The `npm pkg set` command above injects a `pnpm.overrides` entry
+  in `voice-ui-kit/package.json` pointing the spec at the sibling
+  `pipecat-client-web-transports/transports/moq-transport` checkout, so
+  `pnpm install` resolves it locally instead of 404-ing on the registry.
+  Drop the override once moq-transport ships to npm.
 
 ## 3. Run the dev setup script
 
@@ -159,17 +169,24 @@ reference. Two terminals.
 From this `pipecat/` repo:
 
 ```bash
-uv run python examples/transports/transports-moq.py -t moq --moq-serve
+uv run python examples/transports/transports-moq.py \
+    -t moq --moq-serve --moq-tls-generate localhost
 ```
 
-`--moq-serve` makes the bot bind its own UDP socket (default `[::]:4080`)
-and mint a self-signed cert in-process. The fingerprint goes back to the
-browser via `/start`, which pins it via WebTransport's
-`serverCertificateHashes`. No separate relay process needed.
+`--moq-serve` makes the bot bind its own UDP socket (default `[::]:4080`);
+`--moq-tls-generate localhost` tells it to mint a self-signed cert
+in-process for that hostname. The fingerprint goes back to the browser via
+`/start`, which pins it via WebTransport's `serverCertificateHashes`. No
+separate relay process needed.
 
-For production-style setups (CA-signed cert, real hostname) you'd pass
-`--moq-cert /path/to/cert.pem --moq-key /path/to/key.pem` and skip
-`--moq-serve` (point at an external relay via `--moq-host`).
+Server mode now refuses to start without explicit TLS config — pass
+either `--moq-tls-generate <hostname>` (dev) or
+`--moq-tls-cert /path/to/cert.pem --moq-tls-key /path/to/key.pem` (prod).
+This is intentional, to avoid silently shipping a self-signed cert into a
+production deploy.
+
+For client mode (point the bot at an external relay), drop `--moq-serve`
+and pass `--moq-connect https://relay.example.com:4080/moq` instead.
 
 ### Terminal 2 — prebuilt client dev server
 
@@ -224,6 +241,7 @@ transcript, mic device picker, SessionInfo showing "MoQ".
 | Browser: "MoqTransport requires `relayUrl`" | `/start` didn't return the `moq` block. Bot probably isn't running with `-t moq`. |
 | WebTransport handshake fails with `net::ERR_QUIC_PROTOCOL_ERROR` | The fingerprint pinned in the browser doesn't match the cert the bot is presenting. Bot probably restarted (in-process certs are minted fresh each start). Reload the browser tab — `/start` will return the new fingerprint. |
 | `pnpm install` errors with corepack signing-key complaint | Install pnpm globally: `npm install -g --force pnpm@10.14.0`. |
+| `pnpm install` in voice-ui-kit fails with `ERR_PNPM_FETCH_404 ... @pipecat-ai/moq-transport: Not Found` | The `pnpm.overrides` entry in `voice-ui-kit/package.json` is missing. Run the `npm pkg set "pnpm.overrides[@pipecat-ai/moq-transport]=..."` command from §2 inside `voice-ui-kit/` before retrying `pnpm install`. |
 | Bot crashes with `ModuleNotFoundError: No module named 'websockets'` (or similar) at import time | The Python extras in §2 were incomplete. `uv sync --extra moq` alone isn't enough — the example uses Silero VAD, Deepgram STT, Cartesia TTS, and OpenAI LLM; each of those has its own extra. Re-run the full `uv sync` command from §2. |
 | Stale voice-ui-kit code after editing | `pnpm -F @pipecat-ai/voice-ui-kit build` was skipped or failed. |
 
