@@ -207,7 +207,7 @@ class FastAPIWebsocketClient:
             self._close_task.add_done_callback(self._on_close_done)
             done, _ = await asyncio.wait({self._close_task}, timeout=self._ws_close_timeout)
             if not done:
-                logger.warning(
+                logger.debug(
                     f"{self} WebSocket close exceeded {self._ws_close_timeout}s; "
                     "proceeding with shutdown"
                 )

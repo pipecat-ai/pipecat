@@ -253,7 +253,7 @@ class TestDisconnectCloseTimeout(unittest.IsolatedAsyncioTestCase):
         client, _ = self._make_client(mock_ws, ws_close_timeout=0.1)
 
         start = time.monotonic()
-        with self._capture_logs("WARNING") as logs:
+        with self._capture_logs("DEBUG") as logs:
             # wait_for is the regression guard: against the old unbounded code
             # disconnect() never returns, so this fails fast with TimeoutError
             # instead of hanging CI on the ~10s ASGI close-handshake timeout.
