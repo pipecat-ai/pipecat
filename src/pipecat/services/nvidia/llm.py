@@ -279,11 +279,12 @@ class NvidiaLLMService(OpenAILLMService):
         model name, tool calls, and audio transcripts.
 
         Notes:
-            ``BaseOpenAILLMService._process_context()`` already closes the
-            returned iterator and stream. This wrapper also closes the inner
-            OpenAI ``Stream`` in a ``finally`` block so the wrapped stream is
-            released promptly if the response is cancelled very early, for
-            example due to an interruption right after the request starts.
+            ``BaseOpenAILLMService._process_context()`` closes the wrapper
+            iterator returned from ``get_chat_completions()``, but it does not
+            close the inner OpenAI stream directly. This wrapper closes that
+            inner stream in a ``finally`` block so it is released promptly,
+            including if the response is cancelled very early, for example due
+            to an interruption right after the request starts.
 
         Args:
             stream: The original chat completion stream.
@@ -314,20 +315,22 @@ class NvidiaLLMService(OpenAILLMService):
                 yield chunk
             completed = True
         finally:
-            await self._finalize_reasoning_state(
-                flush_buffered_text=completed,
-            )
-            await self._close_inner_stream(stream)
+            try:
+                await self._finalize_reasoning_state(
+                    flush_buffered_text=completed,
+                )
+            finally:
+                await self._close_inner_stream(stream)
 
     async def _close_inner_stream(self, stream: AsyncIterator[ChatCompletionChunk]) -> None:
         """Eagerly close the underlying OpenAI streaming response.
 
-        The OpenAI Python SDK exposes ``aclose`` on ``AsyncStream`` and
-        ``close`` on the sync ``Stream``. Closing here complements the base
-        OpenAI cleanup path and keeps teardown local to this adapter,
-        including early interruption or cancellation cases.
+        The OpenAI Python SDK exposes ``close()`` on this stream object.
+        Closing here complements the base OpenAI cleanup path and keeps
+        teardown local to this adapter, including early interruption or
+        cancellation cases.
         """
-        close = getattr(stream, "aclose", None) or getattr(stream, "close", None)
+        close = getattr(stream, "close", None)
         if close is None:
             return
         try:
