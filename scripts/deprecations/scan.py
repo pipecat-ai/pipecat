@@ -375,7 +375,9 @@ def build_records(scan: Scan) -> list[dict]:
                 "relation": relation_for(body, replacement),
                 "replacement": replacement,
                 "message": sym.decorator_message,
-                "location": f"{relpath}:{sym.lineno}",
+                # File only — no line number, which would churn the registry on
+                # any edit that shifts the symbol. The symbol is locatable by name.
+                "location": relpath,
             }
         )
 
@@ -409,7 +411,9 @@ def build_records(scan: Scan) -> list[dict]:
                 "relation": relation_for(directive.body, replacement),
                 "replacement": replacement,
                 "message": directive.body,
-                "location": directive.location,
+                # File only — consistent with the decorator branch above; the
+                # directive's owner is already captured in ``subject``.
+                "location": directive.relpath,
             }
         )
 

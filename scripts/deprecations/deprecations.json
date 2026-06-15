@@ -11,7 +11,7 @@
       "relation": "use_existing",
       "replacement": "AICQuailVADAnalyzer",
       "message": "`AICFilter.create_vad_analyzer` is deprecated since 1.4.0 and will be removed in 1.6.0. Use `AICQuailVADAnalyzer` instead.",
-      "location": "pipecat/audio/filters/aic_filter.py:308"
+      "location": "pipecat/audio/filters/aic_filter.py"
     },
     {
       "subject": "ResampyResampler",
@@ -22,7 +22,7 @@
       "relation": "use_existing",
       "replacement": "SOXRAudioResampler",
       "message": "`ResampyResampler` is deprecated since 1.2.0 and will be removed in 2.0.0. Use `SOXRAudioResampler`, `create_file_resampler()`, or `create_stream_resampler()` instead.",
-      "location": "pipecat/audio/resamplers/resampy_resampler.py:24"
+      "location": "pipecat/audio/resamplers/resampy_resampler.py"
     },
     {
       "subject": "LocalCoreMLSmartTurnAnalyzer",
@@ -33,7 +33,7 @@
       "relation": "use_existing",
       "replacement": "LocalSmartTurnAnalyzerV3",
       "message": "`LocalCoreMLSmartTurnAnalyzer` is deprecated since 0.0.106 and will be removed in 2.0.0. Use `LocalSmartTurnAnalyzerV3` instead.",
-      "location": "pipecat/audio/turn/smart_turn/local_coreml_smart_turn.py:37"
+      "location": "pipecat/audio/turn/smart_turn/local_coreml_smart_turn.py"
     },
     {
       "subject": "LocalSmartTurnAnalyzerV2",
@@ -44,7 +44,7 @@
       "relation": "use_existing",
       "replacement": "LocalSmartTurnAnalyzerV3",
       "message": "`LocalSmartTurnAnalyzerV2` is deprecated since 0.0.106 and will be removed in 2.0.0. Use `LocalSmartTurnAnalyzerV3` instead.",
-      "location": "pipecat/audio/turn/smart_turn/local_smart_turn_v2.py:43"
+      "location": "pipecat/audio/turn/smart_turn/local_smart_turn_v2.py"
     },
     {
       "subject": "AICVADAnalyzer",
@@ -55,7 +55,7 @@
       "relation": "use_existing",
       "replacement": "AICQuailVADAnalyzer",
       "message": "`AICVADAnalyzer` is deprecated since 1.4.0 and will be removed in 1.6.0. Use `AICQuailVADAnalyzer` instead.",
-      "location": "pipecat/audio/vad/aic_vad.py:27"
+      "location": "pipecat/audio/vad/aic_vad.py"
     },
     {
       "subject": "pipecat.audio.vad.aic_vad",
@@ -66,7 +66,7 @@
       "relation": "use_existing",
       "replacement": "AICQuailVADAnalyzer",
       "message": "Use :class:`AICQuailVADAnalyzer` instead. Will be removed in 1.6.0.",
-      "location": "pipecat/audio/vad/aic_vad.py (<module>)"
+      "location": "pipecat/audio/vad/aic_vad.py"
     },
     {
       "subject": "CancelTaskFrame",
@@ -77,7 +77,7 @@
       "relation": "use_existing",
       "replacement": "CancelWorkerFrame",
       "message": "`CancelTaskFrame` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `CancelWorkerFrame` instead.",
-      "location": "pipecat/frames/frames.py:1677"
+      "location": "pipecat/frames/frames.py"
     },
     {
       "subject": "EndTaskFrame",
@@ -88,7 +88,7 @@
       "relation": "use_existing",
       "replacement": "EndWorkerFrame",
       "message": "`EndTaskFrame` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `EndWorkerFrame` instead.",
-      "location": "pipecat/frames/frames.py:1649"
+      "location": "pipecat/frames/frames.py"
     },
     {
       "subject": "InterruptionTaskFrame",
@@ -99,7 +99,7 @@
       "relation": "use_existing",
       "replacement": "InterruptionWorkerFrame",
       "message": "`InterruptionTaskFrame` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `InterruptionWorkerFrame` instead.",
-      "location": "pipecat/frames/frames.py:1691"
+      "location": "pipecat/frames/frames.py"
     },
     {
       "subject": "ServiceUpdateSettingsFrame.settings",
@@ -110,7 +110,7 @@
       "relation": "use_existing",
       "replacement": "delta",
       "message": "Use ``delta`` with a typed settings object instead. Will be removed in 2.0.0.",
-      "location": "pipecat/frames/frames.py (ServiceUpdateSettingsFrame.settings)"
+      "location": "pipecat/frames/frames.py"
     },
     {
       "subject": "StopTaskFrame",
@@ -121,7 +121,7 @@
       "relation": "use_existing",
       "replacement": "StopWorkerFrame",
       "message": "`StopTaskFrame` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `StopWorkerFrame` instead.",
-      "location": "pipecat/frames/frames.py:1663"
+      "location": "pipecat/frames/frames.py"
     },
     {
       "subject": "TaskFrame",
@@ -132,7 +132,7 @@
       "relation": "use_existing",
       "replacement": "WorkerFrame",
       "message": "`TaskFrame` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `WorkerFrame` instead.",
-      "location": "pipecat/frames/frames.py:1613"
+      "location": "pipecat/frames/frames.py"
     },
     {
       "subject": "TaskSystemFrame",
@@ -143,7 +143,7 @@
       "relation": "use_existing",
       "replacement": "WorkerSystemFrame",
       "message": "`TaskSystemFrame` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `WorkerSystemFrame` instead.",
-      "location": "pipecat/frames/frames.py:1628"
+      "location": "pipecat/frames/frames.py"
     },
     {
       "subject": "SmartTurnMetricsData",
@@ -154,7 +154,7 @@
       "relation": "use_existing",
       "replacement": "TurnMetricsData",
       "message": "`SmartTurnMetricsData` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `TurnMetricsData` instead.",
-      "location": "pipecat/metrics/metrics.py:122"
+      "location": "pipecat/metrics/metrics.py"
     },
     {
       "subject": "LLMSwitcher.register_direct_function",
@@ -165,7 +165,7 @@
       "relation": "use_existing",
       "replacement": "LLMContext(tools=[...])",
       "message": "`LLMSwitcher.register_direct_function` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `LLMContext(tools=[...])` instead.",
-      "location": "pipecat/pipeline/llm_switcher.py:140"
+      "location": "pipecat/pipeline/llm_switcher.py"
     },
     {
       "subject": "PipelineRunner",
@@ -176,7 +176,7 @@
       "relation": "use_existing",
       "replacement": "WorkerRunner",
       "message": "`PipelineRunner` is deprecated since 1.3.0 and will be removed in 2.0.0. Use `WorkerRunner` instead.",
-      "location": "pipecat/pipeline/runner.py:27"
+      "location": "pipecat/pipeline/runner.py"
     },
     {
       "subject": "pipecat.pipeline.task",
@@ -187,7 +187,7 @@
       "relation": "move",
       "replacement": "pipecat.pipeline.worker",
       "message": "Import from :mod:`pipecat.pipeline.worker` instead. Constructing :class:`PipelineTask` directly is also deprecated; use :class:`PipelineWorker`. Will be removed in 2.0.0.",
-      "location": "pipecat/pipeline/task.py (<module>)"
+      "location": "pipecat/pipeline/task.py"
     },
     {
       "subject": "PipelineTask",
@@ -198,7 +198,7 @@
       "relation": "use_existing",
       "replacement": "PipelineWorker",
       "message": "`PipelineTask` is deprecated since 1.3.0 and will be removed in 2.0.0. Use `PipelineWorker` instead.",
-      "location": "pipecat/pipeline/worker.py:1322"
+      "location": "pipecat/pipeline/worker.py"
     },
     {
       "subject": "PipelineTaskParams",
@@ -209,7 +209,7 @@
       "relation": "use_existing",
       "replacement": "WorkerParams",
       "message": "`PipelineTaskParams` is deprecated since 1.3.0 and will be removed in 2.0.0. Use `WorkerParams` instead.",
-      "location": "pipecat/pipeline/worker.py:1338"
+      "location": "pipecat/pipeline/worker.py"
     },
     {
       "subject": "PipelineWorker.tool_resources",
@@ -220,7 +220,7 @@
       "relation": "use_existing",
       "replacement": "app_resources",
       "message": "Use ``app_resources`` instead. ``tool_resources`` will be removed in 2.0.0.",
-      "location": "pipecat/pipeline/worker.py (PipelineWorker.__init__.tool_resources)"
+      "location": "pipecat/pipeline/worker.py"
     },
     {
       "subject": "LLMAssistantAggregatorParams.context_summarization_config",
@@ -231,7 +231,7 @@
       "relation": "use_existing",
       "replacement": "auto_context_summarization_config",
       "message": "Use :attr:`auto_context_summarization_config` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/processors/aggregators/llm_response_universal.py (LLMAssistantAggregatorParams.context_summarization_config)"
+      "location": "pipecat/processors/aggregators/llm_response_universal.py"
     },
     {
       "subject": "LLMAssistantAggregatorParams.enable_context_summarization",
@@ -242,7 +242,7 @@
       "relation": "use_existing",
       "replacement": "enable_auto_context_summarization",
       "message": "Use :attr:`enable_auto_context_summarization` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/processors/aggregators/llm_response_universal.py (LLMAssistantAggregatorParams.enable_context_summarization)"
+      "location": "pipecat/processors/aggregators/llm_response_universal.py"
     },
     {
       "subject": "LLMUserAggregatorParams.filter_incomplete_user_turns",
@@ -253,7 +253,7 @@
       "relation": "use_existing",
       "replacement": "user_turn_strategies=FilterIncompleteUserTurnStrategies()",
       "message": "Use ``user_turn_strategies=FilterIncompleteUserTurnStrategies()`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/processors/aggregators/llm_response_universal.py (LLMUserAggregatorParams.filter_incomplete_user_turns)"
+      "location": "pipecat/processors/aggregators/llm_response_universal.py"
     },
     {
       "subject": "LLMUserAggregatorParams.user_turn_completion_config",
@@ -264,7 +264,7 @@
       "relation": "use_existing",
       "replacement": "FilterIncompleteUserTurnStrategies(config=...)",
       "message": "Pass the config directly to ``FilterIncompleteUserTurnStrategies(config=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/processors/aggregators/llm_response_universal.py (LLMUserAggregatorParams.user_turn_completion_config)"
+      "location": "pipecat/processors/aggregators/llm_response_universal.py"
     },
     {
       "subject": "WakeCheckFilter",
@@ -275,7 +275,7 @@
       "relation": "use_existing",
       "replacement": "WakePhraseUserTurnStartStrategy",
       "message": "`WakeCheckFilter` is deprecated since 0.0.106 and will be removed in 2.0.0. Use `WakePhraseUserTurnStartStrategy` instead.",
-      "location": "pipecat/processors/filters/wake_check_filter.py:33"
+      "location": "pipecat/processors/filters/wake_check_filter.py"
     },
     {
       "subject": "pipecat.processors.filters.wake_check_filter",
@@ -286,7 +286,7 @@
       "relation": "use_existing",
       "replacement": "pipecat.turns.user_start.WakePhraseUserTurnStartStrategy",
       "message": "Use :class:`~pipecat.turns.user_start.WakePhraseUserTurnStartStrategy` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/processors/filters/wake_check_filter.py (<module>)"
+      "location": "pipecat/processors/filters/wake_check_filter.py"
     },
     {
       "subject": "FrameProcessor.pipeline_task",
@@ -297,7 +297,7 @@
       "relation": "use_existing",
       "replacement": "pipeline_worker",
       "message": "`FrameProcessor.pipeline_task` is deprecated since 1.3.0 and will be removed in 2.0.0. Use `pipeline_worker` instead.",
-      "location": "pipecat/processors/frame_processor.py:389"
+      "location": "pipecat/processors/frame_processor.py"
     },
     {
       "subject": "FrameProcessor.push_interruption_task_frame_and_wait",
@@ -308,7 +308,7 @@
       "relation": "use_existing",
       "replacement": "broadcast_interruption",
       "message": "`FrameProcessor.push_interruption_task_frame_and_wait` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `broadcast_interruption` instead.",
-      "location": "pipecat/processors/frame_processor.py:728"
+      "location": "pipecat/processors/frame_processor.py"
     },
     {
       "subject": "FrameProcessorSetup.tool_resources",
@@ -319,7 +319,7 @@
       "relation": "use_existing",
       "replacement": "setup.pipeline_worker.app_resources",
       "message": "Read ``setup.pipeline_worker.app_resources`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/processors/frame_processor.py (FrameProcessorSetup.tool_resources)"
+      "location": "pipecat/processors/frame_processor.py"
     },
     {
       "subject": "LLMFunctionCallMessage",
@@ -330,7 +330,7 @@
       "relation": "use_existing",
       "replacement": "LLMFunctionCallInProgressMessage",
       "message": "`LLMFunctionCallMessage` is deprecated since 0.0.102 and will be removed in 2.0.0. Use `LLMFunctionCallInProgressMessage` instead.",
-      "location": "pipecat/processors/frameworks/rtvi/models.py:204"
+      "location": "pipecat/processors/frameworks/rtvi/models.py"
     },
     {
       "subject": "LLMFunctionCallMessageData",
@@ -341,7 +341,7 @@
       "relation": "use_existing",
       "replacement": "LLMFunctionCallInProgressMessageData",
       "message": "`LLMFunctionCallMessageData` is deprecated since 0.0.102 and will be removed in 2.0.0. Use `LLMFunctionCallInProgressMessageData` instead.",
-      "location": "pipecat/processors/frameworks/rtvi/models.py:186"
+      "location": "pipecat/processors/frameworks/rtvi/models.py"
     },
     {
       "subject": "RTVIProcessor.handle_function_call",
@@ -352,7 +352,7 @@
       "relation": "use_existing",
       "replacement": "RTVIObserver",
       "message": "This method is deprecated. Function call events are now automatically sent by :class:`RTVIObserver` using the ``llm-function-call-in-progress`` event. Configure reporting level via ``RTVIObserverParams.function_call_report_level``. Will be removed in 2.0.0.",
-      "location": "pipecat/processors/frameworks/rtvi/processor.py (RTVIProcessor.handle_function_call)"
+      "location": "pipecat/processors/frameworks/rtvi/processor.py"
     },
     {
       "subject": "RTVIProcessor.transport",
@@ -363,7 +363,7 @@
       "relation": "use_existing",
       "replacement": "InputAudioRawFrame",
       "message": "No replacement; the parameter is ignored. Will be removed in 2.0.0. The processor no longer needs a transport reference — audio input and audio-streaming start are driven by frames (:class:`InputAudioRawFrame` and :class:`InputTransportStartAudioStreamingFrame`) pushed downstream. For client-ready audio gating, set ``audio_in_stream_on_start=False`` on the transport params.",
-      "location": "pipecat/processors/frameworks/rtvi/processor.py (RTVIProcessor.__init__.transport)"
+      "location": "pipecat/processors/frameworks/rtvi/processor.py"
     },
     {
       "subject": "AnthropicLLMService.InputParams",
@@ -374,7 +374,7 @@
       "relation": "use_existing",
       "replacement": "AnthropicLLMService.Settings",
       "message": "`AnthropicLLMService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `AnthropicLLMService.Settings` instead.",
-      "location": "pipecat/services/anthropic/llm.py:130"
+      "location": "pipecat/services/anthropic/llm.py"
     },
     {
       "subject": "AnthropicLLMService.model",
@@ -385,7 +385,7 @@
       "relation": "use_existing",
       "replacement": "settings=AnthropicLLMService.Settings(model=...)",
       "message": "Use ``settings=AnthropicLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/anthropic/llm.py (AnthropicLLMService.__init__.model)"
+      "location": "pipecat/services/anthropic/llm.py"
     },
     {
       "subject": "AnthropicLLMService.params",
@@ -396,7 +396,7 @@
       "relation": "use_existing",
       "replacement": "settings=AnthropicLLMService.Settings(...)",
       "message": "Use ``settings=AnthropicLLMService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/anthropic/llm.py (AnthropicLLMService.__init__.params)"
+      "location": "pipecat/services/anthropic/llm.py"
     },
     {
       "subject": "AssemblyAIConnectionParams",
@@ -407,7 +407,7 @@
       "relation": "use_existing",
       "replacement": "AssemblyAISTTService.Settings",
       "message": "`AssemblyAIConnectionParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `AssemblyAISTTService.Settings` instead.",
-      "location": "pipecat/services/assemblyai/models.py:130"
+      "location": "pipecat/services/assemblyai/models.py"
     },
     {
       "subject": "AssemblyAISTTService.connection_params",
@@ -418,7 +418,7 @@
       "relation": "use_existing",
       "replacement": "settings=AssemblyAISTTService.Settings(...)",
       "message": "Use ``settings=AssemblyAISTTService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/assemblyai/stt.py (AssemblyAISTTService.__init__.connection_params)"
+      "location": "pipecat/services/assemblyai/stt.py"
     },
     {
       "subject": "AssemblyAISTTService.language",
@@ -429,7 +429,7 @@
       "relation": "use_existing",
       "replacement": "settings=AssemblyAISTTService.Settings(language=...)",
       "message": "Use ``settings=AssemblyAISTTService.Settings(language=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/assemblyai/stt.py (AssemblyAISTTService.__init__.language)"
+      "location": "pipecat/services/assemblyai/stt.py"
     },
     {
       "subject": "AsyncAIHttpTTSService.InputParams",
@@ -440,7 +440,7 @@
       "relation": "use_existing",
       "replacement": "AsyncAIHttpTTSService.Settings",
       "message": "`AsyncAIHttpTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `AsyncAIHttpTTSService.Settings` instead.",
-      "location": "pipecat/services/asyncai/tts.py:503"
+      "location": "pipecat/services/asyncai/tts.py"
     },
     {
       "subject": "AsyncAIHttpTTSService.model",
@@ -451,7 +451,7 @@
       "relation": "use_existing",
       "replacement": "settings=AsyncAIHttpTTSService.Settings(model=...)",
       "message": "Use ``settings=AsyncAIHttpTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/asyncai/tts.py (AsyncAIHttpTTSService.__init__.model)"
+      "location": "pipecat/services/asyncai/tts.py"
     },
     {
       "subject": "AsyncAIHttpTTSService.params",
@@ -462,7 +462,7 @@
       "relation": "use_existing",
       "replacement": "settings=AsyncAIHttpTTSService.Settings(...)",
       "message": "Use ``settings=AsyncAIHttpTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/asyncai/tts.py (AsyncAIHttpTTSService.__init__.params)"
+      "location": "pipecat/services/asyncai/tts.py"
     },
     {
       "subject": "AsyncAIHttpTTSService.voice_id",
@@ -473,7 +473,7 @@
       "relation": "use_existing",
       "replacement": "settings=AsyncAIHttpTTSService.Settings(voice=...)",
       "message": "Use ``settings=AsyncAIHttpTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/asyncai/tts.py (AsyncAIHttpTTSService.__init__.voice_id)"
+      "location": "pipecat/services/asyncai/tts.py"
     },
     {
       "subject": "AsyncAITTSService.InputParams",
@@ -484,7 +484,7 @@
       "relation": "use_existing",
       "replacement": "AsyncAITTSService.Settings",
       "message": "`AsyncAITTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `AsyncAITTSService.Settings` instead.",
-      "location": "pipecat/services/asyncai/tts.py:94"
+      "location": "pipecat/services/asyncai/tts.py"
     },
     {
       "subject": "AsyncAITTSService.aggregate_sentences",
@@ -495,7 +495,7 @@
       "relation": "use_existing",
       "replacement": "text_aggregation_mode",
       "message": "Use ``text_aggregation_mode`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/asyncai/tts.py (AsyncAITTSService.__init__.aggregate_sentences)"
+      "location": "pipecat/services/asyncai/tts.py"
     },
     {
       "subject": "AsyncAITTSService.model",
@@ -506,7 +506,7 @@
       "relation": "use_existing",
       "replacement": "settings=AsyncAITTSService.Settings(model=...)",
       "message": "Use ``settings=AsyncAITTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/asyncai/tts.py (AsyncAITTSService.__init__.model)"
+      "location": "pipecat/services/asyncai/tts.py"
     },
     {
       "subject": "AsyncAITTSService.params",
@@ -517,7 +517,7 @@
       "relation": "use_existing",
       "replacement": "settings=AsyncAITTSService.Settings(...)",
       "message": "Use ``settings=AsyncAITTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/asyncai/tts.py (AsyncAITTSService.__init__.params)"
+      "location": "pipecat/services/asyncai/tts.py"
     },
     {
       "subject": "AsyncAITTSService.voice_id",
@@ -528,7 +528,7 @@
       "relation": "use_existing",
       "replacement": "settings=AsyncAITTSService.Settings(voice=...)",
       "message": "Use ``settings=AsyncAITTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/asyncai/tts.py (AsyncAITTSService.__init__.voice_id)"
+      "location": "pipecat/services/asyncai/tts.py"
     },
     {
       "subject": "AWSBedrockLLMService.InputParams",
@@ -539,7 +539,7 @@
       "relation": "use_existing",
       "replacement": "AWSBedrockLLMService.Settings",
       "message": "`AWSBedrockLLMService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `AWSBedrockLLMService.Settings` instead.",
-      "location": "pipecat/services/aws/llm.py:96"
+      "location": "pipecat/services/aws/llm.py"
     },
     {
       "subject": "AWSBedrockLLMService.model",
@@ -550,7 +550,7 @@
       "relation": "use_existing",
       "replacement": "settings=AWSBedrockLLMService.Settings(model=...)",
       "message": "Use ``settings=AWSBedrockLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/aws/llm.py (AWSBedrockLLMService.__init__.model)"
+      "location": "pipecat/services/aws/llm.py"
     },
     {
       "subject": "AWSBedrockLLMService.params",
@@ -561,7 +561,7 @@
       "relation": "use_existing",
       "replacement": "settings=AWSBedrockLLMService.Settings(...)",
       "message": "Use ``settings=AWSBedrockLLMService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/aws/llm.py (AWSBedrockLLMService.__init__.params)"
+      "location": "pipecat/services/aws/llm.py"
     },
     {
       "subject": "AWSBedrockLLMService.stop_sequences",
@@ -572,7 +572,7 @@
       "relation": "use_existing",
       "replacement": "settings=AWSBedrockLLMService.Settings(stop_sequences=...)",
       "message": "Use ``settings=AWSBedrockLLMService.Settings(stop_sequences=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/aws/llm.py (AWSBedrockLLMService.__init__.stop_sequences)"
+      "location": "pipecat/services/aws/llm.py"
     },
     {
       "subject": "AWSNovaSonicLLMService.model",
@@ -583,7 +583,7 @@
       "relation": "use_existing",
       "replacement": "settings=AWSNovaSonicLLMService.Settings(model=...)",
       "message": "Use ``settings=AWSNovaSonicLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/aws/nova_sonic/llm.py (AWSNovaSonicLLMService.__init__.model)"
+      "location": "pipecat/services/aws/nova_sonic/llm.py"
     },
     {
       "subject": "AWSNovaSonicLLMService.params",
@@ -594,7 +594,7 @@
       "relation": "use_existing",
       "replacement": "settings=AWSNovaSonicLLMService.Settings(...)",
       "message": "Use ``settings=AWSNovaSonicLLMService.Settings(...)`` for inference settings and ``audio_config=AudioConfig(...)`` for audio configuration. Will be removed in 2.0.0.",
-      "location": "pipecat/services/aws/nova_sonic/llm.py (AWSNovaSonicLLMService.__init__.params)"
+      "location": "pipecat/services/aws/nova_sonic/llm.py"
     },
     {
       "subject": "AWSNovaSonicLLMService.system_instruction",
@@ -605,7 +605,7 @@
       "relation": "use_existing",
       "replacement": "settings=AWSNovaSonicLLMService.Settings(system_instruction=...)",
       "message": "Use ``settings=AWSNovaSonicLLMService.Settings(system_instruction=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/aws/nova_sonic/llm.py (AWSNovaSonicLLMService.__init__.system_instruction)"
+      "location": "pipecat/services/aws/nova_sonic/llm.py"
     },
     {
       "subject": "AWSNovaSonicLLMService.voice_id",
@@ -616,7 +616,7 @@
       "relation": "use_existing",
       "replacement": "settings=AWSNovaSonicLLMService.Settings(voice=...)",
       "message": "Use ``settings=AWSNovaSonicLLMService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/aws/nova_sonic/llm.py (AWSNovaSonicLLMService.__init__.voice_id)"
+      "location": "pipecat/services/aws/nova_sonic/llm.py"
     },
     {
       "subject": "Params",
@@ -627,7 +627,7 @@
       "relation": "use_existing",
       "replacement": "AWSNovaSonicLLMService.Settings",
       "message": "`Params` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `AWSNovaSonicLLMService.Settings` instead.",
-      "location": "pipecat/services/aws/nova_sonic/llm.py:149"
+      "location": "pipecat/services/aws/nova_sonic/llm.py"
     },
     {
       "subject": "AWSTranscribeSTTService.language",
@@ -638,7 +638,7 @@
       "relation": "use_existing",
       "replacement": "settings=AWSTranscribeSTTService.Settings(language=...)",
       "message": "Use ``settings=AWSTranscribeSTTService.Settings(language=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/aws/stt.py (AWSTranscribeSTTService.__init__.language)"
+      "location": "pipecat/services/aws/stt.py"
     },
     {
       "subject": "AWSPollyTTSService.InputParams",
@@ -649,7 +649,7 @@
       "relation": "use_existing",
       "replacement": "AWSPollyTTSService.Settings",
       "message": "`AWSPollyTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `AWSPollyTTSService.Settings` instead.",
-      "location": "pipecat/services/aws/tts.py:161"
+      "location": "pipecat/services/aws/tts.py"
     },
     {
       "subject": "AWSPollyTTSService.params",
@@ -660,7 +660,7 @@
       "relation": "use_existing",
       "replacement": "settings=AWSPollyTTSService.Settings(...)",
       "message": "Use ``settings=AWSPollyTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/aws/tts.py (AWSPollyTTSService.__init__.params)"
+      "location": "pipecat/services/aws/tts.py"
     },
     {
       "subject": "AWSPollyTTSService.voice_id",
@@ -671,7 +671,7 @@
       "relation": "use_existing",
       "replacement": "settings=AWSPollyTTSService.Settings(voice=...)",
       "message": "Use ``settings=AWSPollyTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/aws/tts.py (AWSPollyTTSService.__init__.voice_id)"
+      "location": "pipecat/services/aws/tts.py"
     },
     {
       "subject": "AzureImageGenServiceREST.image_size",
@@ -682,7 +682,7 @@
       "relation": "use_existing",
       "replacement": "settings=AzureImageGenServiceREST.Settings(image_size=...)",
       "message": "Use ``settings=AzureImageGenServiceREST.Settings(image_size=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/azure/image.py (AzureImageGenServiceREST.__init__.image_size)"
+      "location": "pipecat/services/azure/image.py"
     },
     {
       "subject": "AzureImageGenServiceREST.model",
@@ -693,7 +693,7 @@
       "relation": "use_existing",
       "replacement": "settings=AzureImageGenServiceREST.Settings(model=...)",
       "message": "Use ``settings=AzureImageGenServiceREST.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/azure/image.py (AzureImageGenServiceREST.__init__.model)"
+      "location": "pipecat/services/azure/image.py"
     },
     {
       "subject": "AzureLLMService.model",
@@ -704,7 +704,7 @@
       "relation": "use_existing",
       "replacement": "settings=AzureLLMService.Settings(model=...)",
       "message": "Use ``settings=AzureLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/azure/llm.py (AzureLLMService.__init__.model)"
+      "location": "pipecat/services/azure/llm.py"
     },
     {
       "subject": "AzureSTTService.language",
@@ -715,7 +715,7 @@
       "relation": "use_existing",
       "replacement": "settings=AzureSTTService.Settings(language=...)",
       "message": "Use ``settings=AzureSTTService.Settings(language=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/azure/stt.py (AzureSTTService.__init__.language)"
+      "location": "pipecat/services/azure/stt.py"
     },
     {
       "subject": "AzureBaseTTSService.InputParams",
@@ -726,7 +726,7 @@
       "relation": "use_existing",
       "replacement": "AzureBaseTTSService.Settings",
       "message": "`AzureBaseTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `AzureBaseTTSService.Settings` instead.",
-      "location": "pipecat/services/azure/tts.py:118"
+      "location": "pipecat/services/azure/tts.py"
     },
     {
       "subject": "AzureHttpTTSService.params",
@@ -737,7 +737,7 @@
       "relation": "use_existing",
       "replacement": "settings=AzureHttpTTSService.Settings(...)",
       "message": "Use ``settings=AzureHttpTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/azure/tts.py (AzureHttpTTSService.__init__.params)"
+      "location": "pipecat/services/azure/tts.py"
     },
     {
       "subject": "AzureHttpTTSService.voice",
@@ -748,7 +748,7 @@
       "relation": "use_existing",
       "replacement": "settings=AzureHttpTTSService.Settings(voice=...)",
       "message": "Use ``settings=AzureHttpTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/azure/tts.py (AzureHttpTTSService.__init__.voice)"
+      "location": "pipecat/services/azure/tts.py"
     },
     {
       "subject": "AzureTTSService.aggregate_sentences",
@@ -759,7 +759,7 @@
       "relation": "use_existing",
       "replacement": "text_aggregation_mode",
       "message": "Use ``text_aggregation_mode`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/azure/tts.py (AzureTTSService.__init__.aggregate_sentences)"
+      "location": "pipecat/services/azure/tts.py"
     },
     {
       "subject": "AzureTTSService.params",
@@ -770,7 +770,7 @@
       "relation": "use_existing",
       "replacement": "settings=AzureTTSService.Settings(...)",
       "message": "Use ``settings=AzureTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/azure/tts.py (AzureTTSService.__init__.params)"
+      "location": "pipecat/services/azure/tts.py"
     },
     {
       "subject": "AzureTTSService.voice",
@@ -781,7 +781,7 @@
       "relation": "use_existing",
       "replacement": "settings=AzureTTSService.Settings(voice=...)",
       "message": "Use ``settings=AzureTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/azure/tts.py (AzureTTSService.__init__.voice)"
+      "location": "pipecat/services/azure/tts.py"
     },
     {
       "subject": "CambTTSService.InputParams",
@@ -792,7 +792,7 @@
       "relation": "use_existing",
       "replacement": "CambTTSService.Settings",
       "message": "`CambTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `CambTTSService.Settings` instead.",
-      "location": "pipecat/services/camb/tts.py:193"
+      "location": "pipecat/services/camb/tts.py"
     },
     {
       "subject": "CambTTSService.model",
@@ -803,7 +803,7 @@
       "relation": "use_existing",
       "replacement": "settings=CambTTSService.Settings(model=...)",
       "message": "Use ``settings=CambTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/camb/tts.py (CambTTSService.__init__.model)"
+      "location": "pipecat/services/camb/tts.py"
     },
     {
       "subject": "CambTTSService.params",
@@ -814,7 +814,7 @@
       "relation": "use_existing",
       "replacement": "settings=CambTTSService.Settings(...)",
       "message": "Use ``settings=CambTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/camb/tts.py (CambTTSService.__init__.params)"
+      "location": "pipecat/services/camb/tts.py"
     },
     {
       "subject": "CambTTSService.voice_id",
@@ -825,7 +825,7 @@
       "relation": "use_existing",
       "replacement": "settings=CambTTSService.Settings(voice=...)",
       "message": "Use ``settings=CambTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/camb/tts.py (CambTTSService.__init__.voice_id)"
+      "location": "pipecat/services/camb/tts.py"
     },
     {
       "subject": "CartesiaLiveOptions",
@@ -836,7 +836,7 @@
       "relation": "use_existing",
       "replacement": "CartesiaSTTService.Settings",
       "message": "`CartesiaLiveOptions` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `CartesiaSTTService.Settings` instead.",
-      "location": "pipecat/services/cartesia/stt.py:54"
+      "location": "pipecat/services/cartesia/stt.py"
     },
     {
       "subject": "CartesiaSTTService.live_options",
@@ -847,7 +847,7 @@
       "relation": "use_existing",
       "replacement": "settings=CartesiaSTTService.Settings(...)",
       "message": "Use ``settings=CartesiaSTTService.Settings(...)`` for model/language and direct init parameters for encoding/sample_rate instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/cartesia/stt.py (CartesiaSTTService.__init__.live_options)"
+      "location": "pipecat/services/cartesia/stt.py"
     },
     {
       "subject": "CartesiaHttpTTSService.model",
@@ -858,7 +858,7 @@
       "relation": "use_existing",
       "replacement": "settings=CartesiaHttpTTSService.Settings(model=...)",
       "message": "Use ``settings=CartesiaHttpTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/cartesia/tts.py (CartesiaHttpTTSService.__init__.model)"
+      "location": "pipecat/services/cartesia/tts.py"
     },
     {
       "subject": "CartesiaHttpTTSService.params",
@@ -869,7 +869,7 @@
       "relation": "use_existing",
       "replacement": "settings=CartesiaHttpTTSService.Settings(...)",
       "message": "Use ``settings=CartesiaHttpTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/cartesia/tts.py (CartesiaHttpTTSService.__init__.params)"
+      "location": "pipecat/services/cartesia/tts.py"
     },
     {
       "subject": "CartesiaHttpTTSService.voice_id",
@@ -880,7 +880,7 @@
       "relation": "use_existing",
       "replacement": "settings=CartesiaHttpTTSService.Settings(voice=...)",
       "message": "Use ``settings=CartesiaHttpTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/cartesia/tts.py (CartesiaHttpTTSService.__init__.voice_id)"
+      "location": "pipecat/services/cartesia/tts.py"
     },
     {
       "subject": "CartesiaTTSService.aggregate_sentences",
@@ -891,7 +891,7 @@
       "relation": "use_existing",
       "replacement": "text_aggregation_mode",
       "message": "Use ``text_aggregation_mode`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/cartesia/tts.py (CartesiaTTSService.__init__.aggregate_sentences)"
+      "location": "pipecat/services/cartesia/tts.py"
     },
     {
       "subject": "CartesiaTTSService.model",
@@ -902,7 +902,7 @@
       "relation": "use_existing",
       "replacement": "settings=CartesiaTTSService.Settings(model=...)",
       "message": "Use ``settings=CartesiaTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/cartesia/tts.py (CartesiaTTSService.__init__.model)"
+      "location": "pipecat/services/cartesia/tts.py"
     },
     {
       "subject": "CartesiaTTSService.params",
@@ -913,7 +913,7 @@
       "relation": "use_existing",
       "replacement": "settings=CartesiaTTSService.Settings(...)",
       "message": "Use ``settings=CartesiaTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/cartesia/tts.py (CartesiaTTSService.__init__.params)"
+      "location": "pipecat/services/cartesia/tts.py"
     },
     {
       "subject": "CartesiaTTSService.voice_id",
@@ -924,7 +924,7 @@
       "relation": "use_existing",
       "replacement": "settings=CartesiaTTSService.Settings(voice=...)",
       "message": "Use ``settings=CartesiaTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/cartesia/tts.py (CartesiaTTSService.__init__.voice_id)"
+      "location": "pipecat/services/cartesia/tts.py"
     },
     {
       "subject": "CerebrasLLMService.model",
@@ -935,7 +935,7 @@
       "relation": "use_existing",
       "replacement": "settings=CerebrasLLMService.Settings(model=...)",
       "message": "Use ``settings=CerebrasLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/cerebras/llm.py (CerebrasLLMService.__init__.model)"
+      "location": "pipecat/services/cerebras/llm.py"
     },
     {
       "subject": "DeepgramFluxSTTService.InputParams",
@@ -946,7 +946,7 @@
       "relation": "use_existing",
       "replacement": "DeepgramFluxSTTService.Settings",
       "message": "`DeepgramFluxSTTService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `DeepgramFluxSTTService.Settings` instead.",
-      "location": "pipecat/services/deepgram/flux/stt.py:74"
+      "location": "pipecat/services/deepgram/flux/stt.py"
     },
     {
       "subject": "DeepgramFluxSTTService.model",
@@ -957,7 +957,7 @@
       "relation": "use_existing",
       "replacement": "settings=DeepgramFluxSTTService.Settings(model=...)",
       "message": "Use ``settings=DeepgramFluxSTTService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/deepgram/flux/stt.py (DeepgramFluxSTTService.__init__.model)"
+      "location": "pipecat/services/deepgram/flux/stt.py"
     },
     {
       "subject": "DeepgramFluxSTTService.params",
@@ -968,7 +968,7 @@
       "relation": "use_existing",
       "replacement": "settings=DeepgramFluxSTTService.Settings(...)",
       "message": "Use ``settings=DeepgramFluxSTTService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/deepgram/flux/stt.py (DeepgramFluxSTTService.__init__.params)"
+      "location": "pipecat/services/deepgram/flux/stt.py"
     },
     {
       "subject": "DeepgramSageMakerSTTService.live_options",
@@ -979,7 +979,7 @@
       "relation": "use_existing",
       "replacement": "settings=DeepgramSageMakerSTTService.Settings(...)",
       "message": "Use ``settings=DeepgramSageMakerSTTService.Settings(...)`` for runtime-updatable fields and direct init parameters for connection-level config. Will be removed in 2.0.0.",
-      "location": "pipecat/services/deepgram/sagemaker/stt.py (DeepgramSageMakerSTTService.__init__.live_options)"
+      "location": "pipecat/services/deepgram/sagemaker/stt.py"
     },
     {
       "subject": "DeepgramSageMakerTTSService.voice",
@@ -990,7 +990,7 @@
       "relation": "use_existing",
       "replacement": "settings=DeepgramSageMakerTTSService.Settings(voice=...)",
       "message": "Use ``settings=DeepgramSageMakerTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/deepgram/sagemaker/tts.py (DeepgramSageMakerTTSService.__init__.voice)"
+      "location": "pipecat/services/deepgram/sagemaker/tts.py"
     },
     {
       "subject": "DeepgramSTTService.live_options",
@@ -1001,7 +1001,7 @@
       "relation": "use_existing",
       "replacement": "settings=DeepgramSTTService.Settings(...)",
       "message": "Use ``settings=DeepgramSTTService.Settings(...)`` for runtime-updatable fields and direct init parameters for connection-level config. Will be removed in 2.0.0.",
-      "location": "pipecat/services/deepgram/stt.py (DeepgramSTTService.__init__.live_options)"
+      "location": "pipecat/services/deepgram/stt.py"
     },
     {
       "subject": "LiveOptions",
@@ -1012,7 +1012,7 @@
       "relation": "use_existing",
       "replacement": "DeepgramSTTService.Settings",
       "message": "`LiveOptions` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `DeepgramSTTService.Settings` instead.",
-      "location": "pipecat/services/deepgram/stt.py:60"
+      "location": "pipecat/services/deepgram/stt.py"
     },
     {
       "subject": "DeepgramHttpTTSService.voice",
@@ -1023,7 +1023,7 @@
       "relation": "use_existing",
       "replacement": "settings=DeepgramHttpTTSService.Settings(voice=...)",
       "message": "Use ``settings=DeepgramHttpTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/deepgram/tts.py (DeepgramHttpTTSService.__init__.voice)"
+      "location": "pipecat/services/deepgram/tts.py"
     },
     {
       "subject": "DeepgramTTSService.voice",
@@ -1034,7 +1034,7 @@
       "relation": "use_existing",
       "replacement": "settings=DeepgramTTSService.Settings(voice=...)",
       "message": "Use ``settings=DeepgramTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/deepgram/tts.py (DeepgramTTSService.__init__.voice)"
+      "location": "pipecat/services/deepgram/tts.py"
     },
     {
       "subject": "DeepSeekLLMService.model",
@@ -1045,7 +1045,7 @@
       "relation": "use_existing",
       "replacement": "settings=DeepSeekLLMService.Settings(model=...)",
       "message": "Use ``settings=DeepSeekLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/deepseek/llm.py (DeepSeekLLMService.__init__.model)"
+      "location": "pipecat/services/deepseek/llm.py"
     },
     {
       "subject": "ElevenLabsRealtimeSTTService.InputParams",
@@ -1056,7 +1056,7 @@
       "relation": "use_existing",
       "replacement": "ElevenLabsRealtimeSTTService.Settings",
       "message": "`ElevenLabsRealtimeSTTService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `ElevenLabsRealtimeSTTService.Settings` instead.",
-      "location": "pipecat/services/elevenlabs/stt.py:473"
+      "location": "pipecat/services/elevenlabs/stt.py"
     },
     {
       "subject": "ElevenLabsRealtimeSTTService.model",
@@ -1067,7 +1067,7 @@
       "relation": "use_existing",
       "replacement": "settings=ElevenLabsRealtimeSTTService.Settings(model=...)",
       "message": "Use ``settings=ElevenLabsRealtimeSTTService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/elevenlabs/stt.py (ElevenLabsRealtimeSTTService.__init__.model)"
+      "location": "pipecat/services/elevenlabs/stt.py"
     },
     {
       "subject": "ElevenLabsRealtimeSTTService.params",
@@ -1078,7 +1078,7 @@
       "relation": "use_existing",
       "replacement": "settings=ElevenLabsRealtimeSTTService.Settings(...)",
       "message": "Use ``settings=ElevenLabsRealtimeSTTService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/elevenlabs/stt.py (ElevenLabsRealtimeSTTService.__init__.params)"
+      "location": "pipecat/services/elevenlabs/stt.py"
     },
     {
       "subject": "ElevenLabsSTTService.InputParams",
@@ -1089,7 +1089,7 @@
       "relation": "use_existing",
       "replacement": "ElevenLabsSTTService.Settings",
       "message": "`ElevenLabsSTTService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `ElevenLabsSTTService.Settings` instead.",
-      "location": "pipecat/services/elevenlabs/stt.py:227"
+      "location": "pipecat/services/elevenlabs/stt.py"
     },
     {
       "subject": "ElevenLabsSTTService.model",
@@ -1100,7 +1100,7 @@
       "relation": "use_existing",
       "replacement": "settings=ElevenLabsSTTService.Settings(model=...)",
       "message": "Use ``settings=ElevenLabsSTTService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/elevenlabs/stt.py (ElevenLabsSTTService.__init__.model)"
+      "location": "pipecat/services/elevenlabs/stt.py"
     },
     {
       "subject": "ElevenLabsSTTService.params",
@@ -1111,7 +1111,7 @@
       "relation": "use_existing",
       "replacement": "settings=ElevenLabsSTTService.Settings(...)",
       "message": "Use ``settings=ElevenLabsSTTService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/elevenlabs/stt.py (ElevenLabsSTTService.__init__.params)"
+      "location": "pipecat/services/elevenlabs/stt.py"
     },
     {
       "subject": "ElevenLabsHttpTTSService.InputParams",
@@ -1122,7 +1122,7 @@
       "relation": "use_existing",
       "replacement": "ElevenLabsHttpTTSService.Settings",
       "message": "`ElevenLabsHttpTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `ElevenLabsHttpTTSService.Settings` instead.",
-      "location": "pipecat/services/elevenlabs/tts.py:1054"
+      "location": "pipecat/services/elevenlabs/tts.py"
     },
     {
       "subject": "ElevenLabsHttpTTSService.aggregate_sentences",
@@ -1133,7 +1133,7 @@
       "relation": "use_existing",
       "replacement": "text_aggregation_mode",
       "message": "Use ``text_aggregation_mode`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/elevenlabs/tts.py (ElevenLabsHttpTTSService.__init__.aggregate_sentences)"
+      "location": "pipecat/services/elevenlabs/tts.py"
     },
     {
       "subject": "ElevenLabsHttpTTSService.model",
@@ -1144,7 +1144,7 @@
       "relation": "use_existing",
       "replacement": "settings=ElevenLabsHttpTTSService.Settings(model=...)",
       "message": "Use ``settings=ElevenLabsHttpTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/elevenlabs/tts.py (ElevenLabsHttpTTSService.__init__.model)"
+      "location": "pipecat/services/elevenlabs/tts.py"
     },
     {
       "subject": "ElevenLabsHttpTTSService.params",
@@ -1155,7 +1155,7 @@
       "relation": "use_existing",
       "replacement": "settings=ElevenLabsHttpTTSService.Settings(...)",
       "message": "Use ``settings=ElevenLabsHttpTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/elevenlabs/tts.py (ElevenLabsHttpTTSService.__init__.params)"
+      "location": "pipecat/services/elevenlabs/tts.py"
     },
     {
       "subject": "ElevenLabsHttpTTSService.voice_id",
@@ -1166,7 +1166,7 @@
       "relation": "use_existing",
       "replacement": "settings=ElevenLabsHttpTTSService.Settings(voice=...)",
       "message": "Use ``settings=ElevenLabsHttpTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/elevenlabs/tts.py (ElevenLabsHttpTTSService.__init__.voice_id)"
+      "location": "pipecat/services/elevenlabs/tts.py"
     },
     {
       "subject": "ElevenLabsTTSService.InputParams",
@@ -1177,7 +1177,7 @@
       "relation": "use_existing",
       "replacement": "ElevenLabsTTSService.Settings",
       "message": "`ElevenLabsTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `ElevenLabsTTSService.Settings` instead.",
-      "location": "pipecat/services/elevenlabs/tts.py:404"
+      "location": "pipecat/services/elevenlabs/tts.py"
     },
     {
       "subject": "ElevenLabsTTSService.aggregate_sentences",
@@ -1188,7 +1188,7 @@
       "relation": "use_existing",
       "replacement": "text_aggregation_mode",
       "message": "Use ``text_aggregation_mode`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/elevenlabs/tts.py (ElevenLabsTTSService.__init__.aggregate_sentences)"
+      "location": "pipecat/services/elevenlabs/tts.py"
     },
     {
       "subject": "ElevenLabsTTSService.model",
@@ -1199,7 +1199,7 @@
       "relation": "use_existing",
       "replacement": "settings=ElevenLabsTTSService.Settings(model=...)",
       "message": "Use ``settings=ElevenLabsTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/elevenlabs/tts.py (ElevenLabsTTSService.__init__.model)"
+      "location": "pipecat/services/elevenlabs/tts.py"
     },
     {
       "subject": "ElevenLabsTTSService.params",
@@ -1210,7 +1210,7 @@
       "relation": "use_existing",
       "replacement": "settings=ElevenLabsTTSService.Settings(...)",
       "message": "Use ``settings=ElevenLabsTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/elevenlabs/tts.py (ElevenLabsTTSService.__init__.params)"
+      "location": "pipecat/services/elevenlabs/tts.py"
     },
     {
       "subject": "ElevenLabsTTSService.voice_id",
@@ -1221,7 +1221,7 @@
       "relation": "use_existing",
       "replacement": "settings=ElevenLabsTTSService.Settings(voice=...)",
       "message": "Use ``settings=ElevenLabsTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/elevenlabs/tts.py (ElevenLabsTTSService.__init__.voice_id)"
+      "location": "pipecat/services/elevenlabs/tts.py"
     },
     {
       "subject": "FalImageGenService.InputParams",
@@ -1232,7 +1232,7 @@
       "relation": "use_existing",
       "replacement": "FalImageGenService.Settings",
       "message": "`FalImageGenService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `FalImageGenService.Settings` instead.",
-      "location": "pipecat/services/fal/image.py:82"
+      "location": "pipecat/services/fal/image.py"
     },
     {
       "subject": "FalImageGenService.model",
@@ -1243,7 +1243,7 @@
       "relation": "use_existing",
       "replacement": "settings=FalImageGenService.Settings(model=...)",
       "message": "Use ``settings=FalImageGenService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/fal/image.py (FalImageGenService.__init__.model)"
+      "location": "pipecat/services/fal/image.py"
     },
     {
       "subject": "FalImageGenService.params",
@@ -1254,7 +1254,7 @@
       "relation": "use_existing",
       "replacement": "settings=FalImageGenService.Settings(...)",
       "message": "Use ``settings=FalImageGenService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/fal/image.py (FalImageGenService.__init__.params)"
+      "location": "pipecat/services/fal/image.py"
     },
     {
       "subject": "FalSTTService.InputParams",
@@ -1265,7 +1265,7 @@
       "relation": "use_existing",
       "replacement": "FalSTTService.Settings",
       "message": "`FalSTTService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `FalSTTService.Settings` instead.",
-      "location": "pipecat/services/fal/stt.py:169"
+      "location": "pipecat/services/fal/stt.py"
     },
     {
       "subject": "FalSTTService.params",
@@ -1276,7 +1276,7 @@
       "relation": "use_existing",
       "replacement": "settings=FalSTTService.Settings(...)",
       "message": "Use ``settings=FalSTTService.Settings(...)`` for model/language and direct init parameters for task/chunk_level/version instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/fal/stt.py (FalSTTService.__init__.params)"
+      "location": "pipecat/services/fal/stt.py"
     },
     {
       "subject": "FireworksLLMService.model",
@@ -1287,7 +1287,7 @@
       "relation": "use_existing",
       "replacement": "settings=FireworksLLMService.Settings(model=...)",
       "message": "Use ``settings=FireworksLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/fireworks/llm.py (FireworksLLMService.__init__.model)"
+      "location": "pipecat/services/fireworks/llm.py"
     },
     {
       "subject": "FishAudioTTSService.InputParams",
@@ -1298,7 +1298,7 @@
       "relation": "use_existing",
       "replacement": "FishAudioTTSService.Settings",
       "message": "`FishAudioTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `FishAudioTTSService.Settings` instead.",
-      "location": "pipecat/services/fish/tts.py:94"
+      "location": "pipecat/services/fish/tts.py"
     },
     {
       "subject": "FishAudioTTSService.model_id",
@@ -1309,7 +1309,7 @@
       "relation": "use_existing",
       "replacement": "settings=FishAudioTTSService.Settings(model=...)",
       "message": "Use ``settings=FishAudioTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/fish/tts.py (FishAudioTTSService.__init__.model_id)"
+      "location": "pipecat/services/fish/tts.py"
     },
     {
       "subject": "FishAudioTTSService.params",
@@ -1320,7 +1320,7 @@
       "relation": "use_existing",
       "replacement": "settings=FishAudioTTSService.Settings(...)",
       "message": "Use ``settings=FishAudioTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/fish/tts.py (FishAudioTTSService.__init__.params)"
+      "location": "pipecat/services/fish/tts.py"
     },
     {
       "subject": "FishAudioTTSService.reference_id",
@@ -1331,7 +1331,7 @@
       "relation": "use_existing",
       "replacement": "settings=FishAudioTTSService.Settings(voice=...)",
       "message": "Use ``settings=FishAudioTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/fish/tts.py (FishAudioTTSService.__init__.reference_id)"
+      "location": "pipecat/services/fish/tts.py"
     },
     {
       "subject": "GladiaInputParams",
@@ -1342,7 +1342,7 @@
       "relation": "use_existing",
       "replacement": "GladiaSTTService.Settings",
       "message": "`GladiaInputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `GladiaSTTService.Settings` instead.",
-      "location": "pipecat/services/gladia/config.py:156"
+      "location": "pipecat/services/gladia/config.py"
     },
     {
       "subject": "GladiaSTTService.model",
@@ -1353,7 +1353,7 @@
       "relation": "use_existing",
       "replacement": "settings=GladiaSTTService.Settings(model=...)",
       "message": "Use ``settings=GladiaSTTService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/gladia/stt.py (GladiaSTTService.__init__.model)"
+      "location": "pipecat/services/gladia/stt.py"
     },
     {
       "subject": "GladiaSTTService.params",
@@ -1364,7 +1364,7 @@
       "relation": "use_existing",
       "replacement": "settings=GladiaSTTService.Settings(...)",
       "message": "Use ``settings=GladiaSTTService.Settings(...)`` for runtime-updatable fields and direct init parameters for encoding/bit_depth/channels. Will be removed in 2.0.0.",
-      "location": "pipecat/services/gladia/stt.py (GladiaSTTService.__init__.params)"
+      "location": "pipecat/services/gladia/stt.py"
     },
     {
       "subject": "GeminiLiveLLMService.model",
@@ -1375,7 +1375,7 @@
       "relation": "use_existing",
       "replacement": "settings=GeminiLiveLLMService.Settings(model=...)",
       "message": "Use ``settings=GeminiLiveLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/gemini_live/llm.py (GeminiLiveLLMService.__init__.model)"
+      "location": "pipecat/services/google/gemini_live/llm.py"
     },
     {
       "subject": "GeminiLiveLLMService.params",
@@ -1386,7 +1386,7 @@
       "relation": "use_existing",
       "replacement": "settings=GeminiLiveLLMService.Settings(...)",
       "message": "Use ``settings=GeminiLiveLLMService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/gemini_live/llm.py (GeminiLiveLLMService.__init__.params)"
+      "location": "pipecat/services/google/gemini_live/llm.py"
     },
     {
       "subject": "GeminiLiveLLMService.voice_id",
@@ -1397,7 +1397,7 @@
       "relation": "use_existing",
       "replacement": "settings=GeminiLiveLLMService.Settings(voice=...)",
       "message": "Use ``settings=GeminiLiveLLMService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/gemini_live/llm.py (GeminiLiveLLMService.__init__.voice_id)"
+      "location": "pipecat/services/google/gemini_live/llm.py"
     },
     {
       "subject": "InputParams",
@@ -1408,7 +1408,7 @@
       "relation": "use_existing",
       "replacement": "GeminiLiveLLMService.Settings",
       "message": "`InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `GeminiLiveLLMService.Settings` instead.",
-      "location": "pipecat/services/google/gemini_live/llm.py:288"
+      "location": "pipecat/services/google/gemini_live/llm.py"
     },
     {
       "subject": "GeminiLiveVertexLLMService.model",
@@ -1419,7 +1419,7 @@
       "relation": "use_existing",
       "replacement": "settings=GeminiLiveVertexLLMService.Settings(model=...)",
       "message": "Use ``settings=GeminiLiveVertexLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/gemini_live/vertex/llm.py (GeminiLiveVertexLLMService.__init__.model)"
+      "location": "pipecat/services/google/gemini_live/vertex/llm.py"
     },
     {
       "subject": "GeminiLiveVertexLLMService.params",
@@ -1430,7 +1430,7 @@
       "relation": "use_existing",
       "replacement": "settings=GeminiLiveVertexLLMService.Settings(...)",
       "message": "Use ``settings=GeminiLiveVertexLLMService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/gemini_live/vertex/llm.py (GeminiLiveVertexLLMService.__init__.params)"
+      "location": "pipecat/services/google/gemini_live/vertex/llm.py"
     },
     {
       "subject": "GeminiLiveVertexLLMService.voice_id",
@@ -1441,7 +1441,7 @@
       "relation": "use_existing",
       "replacement": "settings=GeminiLiveVertexLLMService.Settings(voice=...)",
       "message": "Use ``settings=GeminiLiveVertexLLMService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/gemini_live/vertex/llm.py (GeminiLiveVertexLLMService.__init__.voice_id)"
+      "location": "pipecat/services/google/gemini_live/vertex/llm.py"
     },
     {
       "subject": "GoogleImageGenService.InputParams",
@@ -1452,7 +1452,7 @@
       "relation": "use_existing",
       "replacement": "GoogleImageGenService.Settings",
       "message": "`GoogleImageGenService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `GoogleImageGenService.Settings` instead.",
-      "location": "pipecat/services/google/image.py:71"
+      "location": "pipecat/services/google/image.py"
     },
     {
       "subject": "GoogleImageGenService.params",
@@ -1463,7 +1463,7 @@
       "relation": "use_existing",
       "replacement": "settings=GoogleImageGenService.Settings(...)",
       "message": "Use ``settings=GoogleImageGenService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/image.py (GoogleImageGenService.__init__.params)"
+      "location": "pipecat/services/google/image.py"
     },
     {
       "subject": "GoogleLLMService.InputParams",
@@ -1474,7 +1474,7 @@
       "relation": "use_existing",
       "replacement": "GoogleLLMService.Settings",
       "message": "`GoogleLLMService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `GoogleLLMService.Settings` instead.",
-      "location": "pipecat/services/google/llm.py:148"
+      "location": "pipecat/services/google/llm.py"
     },
     {
       "subject": "GoogleLLMService.model",
@@ -1485,7 +1485,7 @@
       "relation": "use_existing",
       "replacement": "settings=GoogleLLMService.Settings(model=...)",
       "message": "Use ``settings=GoogleLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/llm.py (GoogleLLMService.__init__.model)"
+      "location": "pipecat/services/google/llm.py"
     },
     {
       "subject": "GoogleLLMService.params",
@@ -1496,7 +1496,7 @@
       "relation": "use_existing",
       "replacement": "settings=GoogleLLMService.Settings(...)",
       "message": "Use ``settings=GoogleLLMService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/llm.py (GoogleLLMService.__init__.params)"
+      "location": "pipecat/services/google/llm.py"
     },
     {
       "subject": "GoogleLLMService.system_instruction",
@@ -1507,7 +1507,7 @@
       "relation": "use_existing",
       "replacement": "settings=GoogleLLMService.Settings(system_instruction=...)",
       "message": "Use ``settings=GoogleLLMService.Settings(system_instruction=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/llm.py (GoogleLLMService.__init__.system_instruction)"
+      "location": "pipecat/services/google/llm.py"
     },
     {
       "subject": "GoogleSTTService.InputParams",
@@ -1518,7 +1518,7 @@
       "relation": "use_existing",
       "replacement": "GoogleSTTService.Settings",
       "message": "`GoogleSTTService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `GoogleSTTService.Settings` instead.",
-      "location": "pipecat/services/google/stt.py:437"
+      "location": "pipecat/services/google/stt.py"
     },
     {
       "subject": "GoogleSTTService.params",
@@ -1529,7 +1529,7 @@
       "relation": "use_existing",
       "replacement": "settings=GoogleSTTService.Settings(...)",
       "message": "Use ``settings=GoogleSTTService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/stt.py (GoogleSTTService.__init__.params)"
+      "location": "pipecat/services/google/stt.py"
     },
     {
       "subject": "GoogleSTTService.set_languages",
@@ -1540,7 +1540,7 @@
       "relation": "use_existing",
       "replacement": "STTUpdateSettingsFrame",
       "message": "`GoogleSTTService.set_languages` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `STTUpdateSettingsFrame` instead.",
-      "location": "pipecat/services/google/stt.py:676"
+      "location": "pipecat/services/google/stt.py"
     },
     {
       "subject": "GoogleSTTService.update_options",
@@ -1551,7 +1551,7 @@
       "relation": "use_existing",
       "replacement": "STTUpdateSettingsFrame",
       "message": "`GoogleSTTService.update_options` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `STTUpdateSettingsFrame` instead.",
-      "location": "pipecat/services/google/stt.py:760"
+      "location": "pipecat/services/google/stt.py"
     },
     {
       "subject": "GoogleSTTSettings.language_codes",
@@ -1562,7 +1562,7 @@
       "relation": "use_existing",
       "replacement": "languages",
       "message": "Use ``languages`` instead. If both are provided, ``languages`` takes precedence. This field is here just for backward compatibility with dict-based settings updates. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/stt.py (GoogleSTTSettings.language_codes)"
+      "location": "pipecat/services/google/stt.py"
     },
     {
       "subject": "GeminiTTSService.InputParams",
@@ -1573,7 +1573,7 @@
       "relation": "use_existing",
       "replacement": "GeminiTTSService.Settings",
       "message": "`GeminiTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `GeminiTTSService.Settings` instead.",
-      "location": "pipecat/services/google/tts.py:1265"
+      "location": "pipecat/services/google/tts.py"
     },
     {
       "subject": "GeminiTTSService.model",
@@ -1584,7 +1584,7 @@
       "relation": "use_existing",
       "replacement": "settings=GeminiTTSService.Settings(model=...)",
       "message": "Use ``settings=GeminiTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/tts.py (GeminiTTSService.__init__.model)"
+      "location": "pipecat/services/google/tts.py"
     },
     {
       "subject": "GeminiTTSService.params",
@@ -1595,7 +1595,7 @@
       "relation": "use_existing",
       "replacement": "settings=GeminiTTSService.Settings(...)",
       "message": "Use ``settings=GeminiTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/tts.py (GeminiTTSService.__init__.params)"
+      "location": "pipecat/services/google/tts.py"
     },
     {
       "subject": "GeminiTTSService.voice_id",
@@ -1606,7 +1606,7 @@
       "relation": "use_existing",
       "replacement": "settings=GeminiTTSService.Settings(voice=...)",
       "message": "Use ``settings=GeminiTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/tts.py (GeminiTTSService.__init__.voice_id)"
+      "location": "pipecat/services/google/tts.py"
     },
     {
       "subject": "GoogleHttpTTSService.InputParams",
@@ -1617,7 +1617,7 @@
       "relation": "use_existing",
       "replacement": "GoogleHttpTTSService.Settings",
       "message": "`GoogleHttpTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `GoogleHttpTTSService.Settings` instead.",
-      "location": "pipecat/services/google/tts.py:572"
+      "location": "pipecat/services/google/tts.py"
     },
     {
       "subject": "GoogleHttpTTSService.params",
@@ -1628,7 +1628,7 @@
       "relation": "use_existing",
       "replacement": "settings=GoogleHttpTTSService.Settings(...)",
       "message": "Use ``settings=GoogleHttpTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/tts.py (GoogleHttpTTSService.__init__.params)"
+      "location": "pipecat/services/google/tts.py"
     },
     {
       "subject": "GoogleHttpTTSService.voice_id",
@@ -1639,7 +1639,7 @@
       "relation": "use_existing",
       "replacement": "settings=GoogleHttpTTSService.Settings(voice=...)",
       "message": "Use ``settings=GoogleHttpTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/tts.py (GoogleHttpTTSService.__init__.voice_id)"
+      "location": "pipecat/services/google/tts.py"
     },
     {
       "subject": "GoogleTTSService.InputParams",
@@ -1650,7 +1650,7 @@
       "relation": "use_existing",
       "replacement": "GoogleTTSService.Settings",
       "message": "`GoogleTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `GoogleTTSService.Settings` instead.",
-      "location": "pipecat/services/google/tts.py:1043"
+      "location": "pipecat/services/google/tts.py"
     },
     {
       "subject": "GoogleTTSService.params",
@@ -1661,7 +1661,7 @@
       "relation": "use_existing",
       "replacement": "settings=GoogleTTSService.Settings(...)",
       "message": "Use ``settings=GoogleTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/tts.py (GoogleTTSService.__init__.params)"
+      "location": "pipecat/services/google/tts.py"
     },
     {
       "subject": "GoogleTTSService.voice_id",
@@ -1672,7 +1672,7 @@
       "relation": "use_existing",
       "replacement": "settings=GoogleTTSService.Settings(voice=...)",
       "message": "Use ``settings=GoogleTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/tts.py (GoogleTTSService.__init__.voice_id)"
+      "location": "pipecat/services/google/tts.py"
     },
     {
       "subject": "GoogleVertexLLMService.model",
@@ -1683,7 +1683,7 @@
       "relation": "use_existing",
       "replacement": "settings=GoogleVertexLLMService.Settings(model=...)",
       "message": "Use ``settings=GoogleVertexLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/vertex/llm.py (GoogleVertexLLMService.__init__.model)"
+      "location": "pipecat/services/google/vertex/llm.py"
     },
     {
       "subject": "GoogleVertexLLMService.params",
@@ -1694,7 +1694,7 @@
       "relation": "use_existing",
       "replacement": "settings=GoogleVertexLLMService.Settings(...)",
       "message": "Use ``settings=GoogleVertexLLMService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/vertex/llm.py (GoogleVertexLLMService.__init__.params)"
+      "location": "pipecat/services/google/vertex/llm.py"
     },
     {
       "subject": "GoogleVertexLLMService.system_instruction",
@@ -1705,7 +1705,7 @@
       "relation": "use_existing",
       "replacement": "settings=GoogleVertexLLMService.Settings(system_instruction=...)",
       "message": "Use ``settings=GoogleVertexLLMService.Settings(system_instruction=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/google/vertex/llm.py (GoogleVertexLLMService.__init__.system_instruction)"
+      "location": "pipecat/services/google/vertex/llm.py"
     },
     {
       "subject": "GradiumSTTService.InputParams",
@@ -1716,7 +1716,7 @@
       "relation": "use_existing",
       "replacement": "GradiumSTTService.Settings",
       "message": "`GradiumSTTService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `GradiumSTTService.Settings` instead.",
-      "location": "pipecat/services/gradium/stt.py:129"
+      "location": "pipecat/services/gradium/stt.py"
     },
     {
       "subject": "GradiumSTTService.json_config",
@@ -1727,7 +1727,7 @@
       "relation": "use_existing",
       "replacement": "params",
       "message": "Use `params` instead for type-safe configuration. Will be removed in 2.0.0.",
-      "location": "pipecat/services/gradium/stt.py (GradiumSTTService.__init__.json_config)"
+      "location": "pipecat/services/gradium/stt.py"
     },
     {
       "subject": "GradiumSTTService.params",
@@ -1738,7 +1738,7 @@
       "relation": "use_existing",
       "replacement": "settings=GradiumSTTService.Settings(...)",
       "message": "Use ``settings=GradiumSTTService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/gradium/stt.py (GradiumSTTService.__init__.params)"
+      "location": "pipecat/services/gradium/stt.py"
     },
     {
       "subject": "GradiumTTSService.InputParams",
@@ -1749,7 +1749,7 @@
       "relation": "use_existing",
       "replacement": "GradiumTTSService.Settings",
       "message": "`GradiumTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `GradiumTTSService.Settings` instead.",
-      "location": "pipecat/services/gradium/tts.py:53"
+      "location": "pipecat/services/gradium/tts.py"
     },
     {
       "subject": "GradiumTTSService.model",
@@ -1760,7 +1760,7 @@
       "relation": "use_existing",
       "replacement": "settings=GradiumTTSService.Settings(model=...)",
       "message": "Use ``settings=GradiumTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/gradium/tts.py (GradiumTTSService.__init__.model)"
+      "location": "pipecat/services/gradium/tts.py"
     },
     {
       "subject": "GradiumTTSService.params",
@@ -1771,7 +1771,7 @@
       "relation": "use_existing",
       "replacement": "settings=GradiumTTSService.Settings(...)",
       "message": "Use ``settings=GradiumTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/gradium/tts.py (GradiumTTSService.__init__.params)"
+      "location": "pipecat/services/gradium/tts.py"
     },
     {
       "subject": "GradiumTTSService.voice_id",
@@ -1782,7 +1782,7 @@
       "relation": "use_existing",
       "replacement": "settings=GradiumTTSService.Settings(voice=...)",
       "message": "Use ``settings=GradiumTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/gradium/tts.py (GradiumTTSService.__init__.voice_id)"
+      "location": "pipecat/services/gradium/tts.py"
     },
     {
       "subject": "pipecat.services.grok.llm",
@@ -1793,7 +1793,7 @@
       "relation": "move",
       "replacement": "pipecat.services.xai.llm",
       "message": "Use :mod:`pipecat.services.xai.llm` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/grok/llm.py (<module>)"
+      "location": "pipecat/services/grok/llm.py"
     },
     {
       "subject": "pipecat.services.grok.realtime.events",
@@ -1804,7 +1804,7 @@
       "relation": "move",
       "replacement": "pipecat.services.xai.realtime.events",
       "message": "Use :mod:`pipecat.services.xai.realtime.events` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/grok/realtime/events.py (<module>)"
+      "location": "pipecat/services/grok/realtime/events.py"
     },
     {
       "subject": "pipecat.services.grok.realtime.llm",
@@ -1815,7 +1815,7 @@
       "relation": "move",
       "replacement": "pipecat.services.xai.realtime.llm",
       "message": "Use :mod:`pipecat.services.xai.realtime.llm` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/grok/realtime/llm.py (<module>)"
+      "location": "pipecat/services/grok/realtime/llm.py"
     },
     {
       "subject": "GroqLLMService.model",
@@ -1826,7 +1826,7 @@
       "relation": "use_existing",
       "replacement": "settings=GroqLLMService.Settings(model=...)",
       "message": "Use ``settings=GroqLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/groq/llm.py (GroqLLMService.__init__.model)"
+      "location": "pipecat/services/groq/llm.py"
     },
     {
       "subject": "GroqSTTService.language",
@@ -1837,7 +1837,7 @@
       "relation": "use_existing",
       "replacement": "settings=GroqSTTService.Settings(language=...)",
       "message": "Use ``settings=GroqSTTService.Settings(language=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/groq/stt.py (GroqSTTService.__init__.language)"
+      "location": "pipecat/services/groq/stt.py"
     },
     {
       "subject": "GroqSTTService.model",
@@ -1848,7 +1848,7 @@
       "relation": "use_existing",
       "replacement": "settings=GroqSTTService.Settings(model=...)",
       "message": "Use ``settings=GroqSTTService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/groq/stt.py (GroqSTTService.__init__.model)"
+      "location": "pipecat/services/groq/stt.py"
     },
     {
       "subject": "GroqSTTService.prompt",
@@ -1859,7 +1859,7 @@
       "relation": "use_existing",
       "replacement": "settings=GroqSTTService.Settings(prompt=...)",
       "message": "Use ``settings=GroqSTTService.Settings(prompt=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/groq/stt.py (GroqSTTService.__init__.prompt)"
+      "location": "pipecat/services/groq/stt.py"
     },
     {
       "subject": "GroqSTTService.temperature",
@@ -1870,7 +1870,7 @@
       "relation": "use_existing",
       "replacement": "settings=GroqSTTService.Settings(temperature=...)",
       "message": "Use ``settings=GroqSTTService.Settings(temperature=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/groq/stt.py (GroqSTTService.__init__.temperature)"
+      "location": "pipecat/services/groq/stt.py"
     },
     {
       "subject": "GroqTTSService.InputParams",
@@ -1881,7 +1881,7 @@
       "relation": "use_existing",
       "replacement": "GroqTTSService.Settings",
       "message": "`GroqTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `GroqTTSService.Settings` instead.",
-      "location": "pipecat/services/groq/tts.py:76"
+      "location": "pipecat/services/groq/tts.py"
     },
     {
       "subject": "GroqTTSService.model_name",
@@ -1892,7 +1892,7 @@
       "relation": "use_existing",
       "replacement": "settings=GroqTTSService.Settings(model=...)",
       "message": "Use ``settings=GroqTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/groq/tts.py (GroqTTSService.__init__.model_name)"
+      "location": "pipecat/services/groq/tts.py"
     },
     {
       "subject": "GroqTTSService.params",
@@ -1903,7 +1903,7 @@
       "relation": "use_existing",
       "replacement": "settings=GroqTTSService.Settings(...)",
       "message": "Use ``settings=GroqTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/groq/tts.py (GroqTTSService.__init__.params)"
+      "location": "pipecat/services/groq/tts.py"
     },
     {
       "subject": "GroqTTSService.voice_id",
@@ -1914,7 +1914,7 @@
       "relation": "use_existing",
       "replacement": "settings=GroqTTSService.Settings(voice=...)",
       "message": "Use ``settings=GroqTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/groq/tts.py (GroqTTSService.__init__.voice_id)"
+      "location": "pipecat/services/groq/tts.py"
     },
     {
       "subject": "HumeTTSService.InputParams",
@@ -1925,7 +1925,7 @@
       "relation": "use_existing",
       "replacement": "HumeTTSService.Settings",
       "message": "`HumeTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `HumeTTSService.Settings` instead.",
-      "location": "pipecat/services/hume/tts.py:90"
+      "location": "pipecat/services/hume/tts.py"
     },
     {
       "subject": "HumeTTSService.params",
@@ -1936,7 +1936,7 @@
       "relation": "use_existing",
       "replacement": "settings=HumeTTSService.Settings(...)",
       "message": "Use ``settings=HumeTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/hume/tts.py (HumeTTSService.__init__.params)"
+      "location": "pipecat/services/hume/tts.py"
     },
     {
       "subject": "HumeTTSService.update_setting",
@@ -1947,7 +1947,7 @@
       "relation": "use_existing",
       "replacement": "TTSUpdateSettingsFrame",
       "message": "`HumeTTSService.update_setting` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `TTSUpdateSettingsFrame` instead.",
-      "location": "pipecat/services/hume/tts.py:251"
+      "location": "pipecat/services/hume/tts.py"
     },
     {
       "subject": "HumeTTSService.voice_id",
@@ -1958,7 +1958,7 @@
       "relation": "use_existing",
       "replacement": "settings=HumeTTSService.Settings(voice=...)",
       "message": "Use ``settings=HumeTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/hume/tts.py (HumeTTSService.__init__.voice_id)"
+      "location": "pipecat/services/hume/tts.py"
     },
     {
       "subject": "InworldHttpTTSService.InputParams",
@@ -1969,7 +1969,7 @@
       "relation": "use_existing",
       "replacement": "InworldHttpTTSService.Settings",
       "message": "`InworldHttpTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `InworldHttpTTSService.Settings` instead.",
-      "location": "pipecat/services/inworld/tts.py:140"
+      "location": "pipecat/services/inworld/tts.py"
     },
     {
       "subject": "InworldHttpTTSService.model",
@@ -1980,7 +1980,7 @@
       "relation": "use_existing",
       "replacement": "settings=InworldHttpTTSService.Settings(model=...)",
       "message": "Use ``settings=InworldHttpTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/inworld/tts.py (InworldHttpTTSService.__init__.model)"
+      "location": "pipecat/services/inworld/tts.py"
     },
     {
       "subject": "InworldHttpTTSService.params",
@@ -1991,7 +1991,7 @@
       "relation": "use_existing",
       "replacement": "settings=InworldHttpTTSService.Settings(...)",
       "message": "Use ``settings=InworldHttpTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/inworld/tts.py (InworldHttpTTSService.__init__.params)"
+      "location": "pipecat/services/inworld/tts.py"
     },
     {
       "subject": "InworldHttpTTSService.voice_id",
@@ -2002,7 +2002,7 @@
       "relation": "use_existing",
       "replacement": "settings=InworldHttpTTSService.Settings(voice=...)",
       "message": "Use ``settings=InworldHttpTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/inworld/tts.py (InworldHttpTTSService.__init__.voice_id)"
+      "location": "pipecat/services/inworld/tts.py"
     },
     {
       "subject": "InworldTTSService.InputParams",
@@ -2013,7 +2013,7 @@
       "relation": "use_existing",
       "replacement": "InworldTTSService.Settings",
       "message": "`InworldTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `InworldTTSService.Settings` instead.",
-      "location": "pipecat/services/inworld/tts.py:574"
+      "location": "pipecat/services/inworld/tts.py"
     },
     {
       "subject": "InworldTTSService.aggregate_sentences",
@@ -2024,7 +2024,7 @@
       "relation": "use_existing",
       "replacement": "text_aggregation_mode",
       "message": "Use ``text_aggregation_mode`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/inworld/tts.py (InworldTTSService.__init__.aggregate_sentences)"
+      "location": "pipecat/services/inworld/tts.py"
     },
     {
       "subject": "InworldTTSService.model",
@@ -2035,7 +2035,7 @@
       "relation": "use_existing",
       "replacement": "settings=InworldTTSService.Settings(model=...)",
       "message": "Use ``settings=InworldTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/inworld/tts.py (InworldTTSService.__init__.model)"
+      "location": "pipecat/services/inworld/tts.py"
     },
     {
       "subject": "InworldTTSService.params",
@@ -2046,7 +2046,7 @@
       "relation": "use_existing",
       "replacement": "settings=InworldTTSService.Settings(...)",
       "message": "Use ``settings=InworldTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/inworld/tts.py (InworldTTSService.__init__.params)"
+      "location": "pipecat/services/inworld/tts.py"
     },
     {
       "subject": "InworldTTSService.voice_id",
@@ -2057,7 +2057,7 @@
       "relation": "use_existing",
       "replacement": "settings=InworldTTSService.Settings(voice=...)",
       "message": "Use ``settings=InworldTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/inworld/tts.py (InworldTTSService.__init__.voice_id)"
+      "location": "pipecat/services/inworld/tts.py"
     },
     {
       "subject": "KokoroTTSService.InputParams",
@@ -2068,7 +2068,7 @@
       "relation": "use_existing",
       "replacement": "KokoroTTSService.Settings",
       "message": "`KokoroTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `KokoroTTSService.Settings` instead.",
-      "location": "pipecat/services/kokoro/tts.py:112"
+      "location": "pipecat/services/kokoro/tts.py"
     },
     {
       "subject": "KokoroTTSService.params",
@@ -2079,7 +2079,7 @@
       "relation": "use_existing",
       "replacement": "settings=KokoroTTSService.Settings(...)",
       "message": "Use ``settings=KokoroTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/kokoro/tts.py (KokoroTTSService.__init__.params)"
+      "location": "pipecat/services/kokoro/tts.py"
     },
     {
       "subject": "KokoroTTSService.voice_id",
@@ -2090,7 +2090,7 @@
       "relation": "use_existing",
       "replacement": "settings=KokoroTTSService.Settings(voice=...)",
       "message": "Use ``settings=KokoroTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/kokoro/tts.py (KokoroTTSService.__init__.voice_id)"
+      "location": "pipecat/services/kokoro/tts.py"
     },
     {
       "subject": "FunctionCallParams.tool_resources",
@@ -2101,7 +2101,7 @@
       "relation": "use_existing",
       "replacement": "app_resources",
       "message": "`FunctionCallParams.tool_resources` is deprecated since 1.2.0 and will be removed in 2.0.0. Use `app_resources` instead.",
-      "location": "pipecat/services/llm_service.py:177"
+      "location": "pipecat/services/llm_service.py"
     },
     {
       "subject": "LLMService.register_direct_function",
@@ -2112,7 +2112,7 @@
       "relation": "use_existing",
       "replacement": "LLMContext(tools=[...])",
       "message": "`LLMService.register_direct_function` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `LLMContext(tools=[...])` instead.",
-      "location": "pipecat/services/llm_service.py:850"
+      "location": "pipecat/services/llm_service.py"
     },
     {
       "subject": "LLMService.unregister_direct_function",
@@ -2123,7 +2123,7 @@
       "relation": "use_existing",
       "replacement": "LLMSetToolsFrame",
       "message": "`LLMService.unregister_direct_function` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `LLMSetToolsFrame` instead.",
-      "location": "pipecat/services/llm_service.py:1153"
+      "location": "pipecat/services/llm_service.py"
     },
     {
       "subject": "LmntTTSService.language",
@@ -2134,7 +2134,7 @@
       "relation": "use_existing",
       "replacement": "settings=LmntTTSService.Settings(language=...)",
       "message": "Use ``settings=LmntTTSService.Settings(language=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/lmnt/tts.py (LmntTTSService.__init__.language)"
+      "location": "pipecat/services/lmnt/tts.py"
     },
     {
       "subject": "LmntTTSService.model",
@@ -2145,7 +2145,7 @@
       "relation": "use_existing",
       "replacement": "settings=LmntTTSService.Settings(model=...)",
       "message": "Use ``settings=LmntTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/lmnt/tts.py (LmntTTSService.__init__.model)"
+      "location": "pipecat/services/lmnt/tts.py"
     },
     {
       "subject": "LmntTTSService.voice_id",
@@ -2156,7 +2156,7 @@
       "relation": "use_existing",
       "replacement": "settings=LmntTTSService.Settings(voice=...)",
       "message": "Use ``settings=LmntTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/lmnt/tts.py (LmntTTSService.__init__.voice_id)"
+      "location": "pipecat/services/lmnt/tts.py"
     },
     {
       "subject": "Mem0MemoryService.InputParams.api_version",
@@ -2167,7 +2167,7 @@
       "relation": "use_existing",
       "replacement": "api_version",
       "message": "No longer used. Mem0 2.0.0 removed the ``api_version`` / ``output_format`` parameters from the client. Will be removed in 2.0.0.",
-      "location": "pipecat/services/mem0/memory.py (Mem0MemoryService.InputParams.api_version)"
+      "location": "pipecat/services/mem0/memory.py"
     },
     {
       "subject": "MiniMaxHttpTTSService.InputParams",
@@ -2178,7 +2178,7 @@
       "relation": "use_existing",
       "replacement": "MiniMaxHttpTTSService.Settings",
       "message": "`MiniMaxHttpTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `MiniMaxHttpTTSService.Settings` instead.",
-      "location": "pipecat/services/minimax/tts.py:154"
+      "location": "pipecat/services/minimax/tts.py"
     },
     {
       "subject": "MiniMaxHttpTTSService.model",
@@ -2189,7 +2189,7 @@
       "relation": "use_existing",
       "replacement": "settings=MiniMaxHttpTTSService.Settings(model=...)",
       "message": "Use ``settings=MiniMaxHttpTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/minimax/tts.py (MiniMaxHttpTTSService.__init__.model)"
+      "location": "pipecat/services/minimax/tts.py"
     },
     {
       "subject": "MiniMaxHttpTTSService.params",
@@ -2200,7 +2200,7 @@
       "relation": "use_existing",
       "replacement": "settings=MiniMaxHttpTTSService.Settings(...)",
       "message": "Use ``settings=MiniMaxHttpTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/minimax/tts.py (MiniMaxHttpTTSService.__init__.params)"
+      "location": "pipecat/services/minimax/tts.py"
     },
     {
       "subject": "MiniMaxHttpTTSService.voice_id",
@@ -2211,7 +2211,7 @@
       "relation": "use_existing",
       "replacement": "settings=MiniMaxHttpTTSService.Settings(voice=...)",
       "message": "Use ``settings=MiniMaxHttpTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/minimax/tts.py (MiniMaxHttpTTSService.__init__.voice_id)"
+      "location": "pipecat/services/minimax/tts.py"
     },
     {
       "subject": "MistralLLMService.model",
@@ -2222,7 +2222,7 @@
       "relation": "use_existing",
       "replacement": "settings=MistralLLMService.Settings(model=...)",
       "message": "Use ``settings=MistralLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/mistral/llm.py (MistralLLMService.__init__.model)"
+      "location": "pipecat/services/mistral/llm.py"
     },
     {
       "subject": "MoondreamService.model",
@@ -2233,7 +2233,7 @@
       "relation": "use_existing",
       "replacement": "settings=MoondreamService.Settings(model=...)",
       "message": "Use ``settings=MoondreamService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/moondream/vision.py (MoondreamService.__init__.model)"
+      "location": "pipecat/services/moondream/vision.py"
     },
     {
       "subject": "NeuphonicHttpTTSService.InputParams",
@@ -2244,7 +2244,7 @@
       "relation": "use_existing",
       "replacement": "NeuphonicHttpTTSService.Settings",
       "message": "`NeuphonicHttpTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `NeuphonicHttpTTSService.Settings` instead.",
-      "location": "pipecat/services/neuphonic/tts.py:423"
+      "location": "pipecat/services/neuphonic/tts.py"
     },
     {
       "subject": "NeuphonicHttpTTSService.params",
@@ -2255,7 +2255,7 @@
       "relation": "use_existing",
       "replacement": "settings=NeuphonicHttpTTSService.Settings(...)",
       "message": "Use ``settings=NeuphonicHttpTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/neuphonic/tts.py (NeuphonicHttpTTSService.__init__.params)"
+      "location": "pipecat/services/neuphonic/tts.py"
     },
     {
       "subject": "NeuphonicHttpTTSService.voice_id",
@@ -2266,7 +2266,7 @@
       "relation": "use_existing",
       "replacement": "settings=NeuphonicHttpTTSService.Settings(voice=...)",
       "message": "Use ``settings=NeuphonicHttpTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/neuphonic/tts.py (NeuphonicHttpTTSService.__init__.voice_id)"
+      "location": "pipecat/services/neuphonic/tts.py"
     },
     {
       "subject": "NeuphonicTTSService.InputParams",
@@ -2277,7 +2277,7 @@
       "relation": "use_existing",
       "replacement": "NeuphonicTTSService.Settings",
       "message": "`NeuphonicTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `NeuphonicTTSService.Settings` instead.",
-      "location": "pipecat/services/neuphonic/tts.py:96"
+      "location": "pipecat/services/neuphonic/tts.py"
     },
     {
       "subject": "NeuphonicTTSService.aggregate_sentences",
@@ -2288,7 +2288,7 @@
       "relation": "use_existing",
       "replacement": "text_aggregation_mode",
       "message": "Use ``text_aggregation_mode`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/neuphonic/tts.py (NeuphonicTTSService.__init__.aggregate_sentences)"
+      "location": "pipecat/services/neuphonic/tts.py"
     },
     {
       "subject": "NeuphonicTTSService.params",
@@ -2299,7 +2299,7 @@
       "relation": "use_existing",
       "replacement": "settings=NeuphonicTTSService.Settings(...)",
       "message": "Use ``settings=NeuphonicTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/neuphonic/tts.py (NeuphonicTTSService.__init__.params)"
+      "location": "pipecat/services/neuphonic/tts.py"
     },
     {
       "subject": "NeuphonicTTSService.voice_id",
@@ -2310,7 +2310,7 @@
       "relation": "use_existing",
       "replacement": "settings=NeuphonicTTSService.Settings(voice=...)",
       "message": "Use ``settings=NeuphonicTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/neuphonic/tts.py (NeuphonicTTSService.__init__.voice_id)"
+      "location": "pipecat/services/neuphonic/tts.py"
     },
     {
       "subject": "NvidiaLLMService.model",
@@ -2321,7 +2321,7 @@
       "relation": "use_existing",
       "replacement": "settings=NvidiaLLMService.Settings(model=...)",
       "message": "Use ``settings=NvidiaLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/nvidia/llm.py (NvidiaLLMService.__init__.model)"
+      "location": "pipecat/services/nvidia/llm.py"
     },
     {
       "subject": "NvidiaSTTService.InputParams",
@@ -2332,7 +2332,7 @@
       "relation": "use_existing",
       "replacement": "NvidiaSTTService.Settings",
       "message": "`NvidiaSTTService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `NvidiaSTTService.Settings` instead.",
-      "location": "pipecat/services/nvidia/stt.py:240"
+      "location": "pipecat/services/nvidia/stt.py"
     },
     {
       "subject": "NvidiaSTTService.params",
@@ -2343,7 +2343,7 @@
       "relation": "use_existing",
       "replacement": "settings=NvidiaSTTService.Settings(...)",
       "message": "Use ``settings=NvidiaSTTService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/nvidia/stt.py (NvidiaSTTService.__init__.params)"
+      "location": "pipecat/services/nvidia/stt.py"
     },
     {
       "subject": "NvidiaSTTService.set_model",
@@ -2354,7 +2354,7 @@
       "relation": "none",
       "replacement": null,
       "message": "`NvidiaSTTService.set_model` is deprecated since 0.0.104 and will be removed in 2.0.0. No replacement.",
-      "location": "pipecat/services/nvidia/stt.py:447"
+      "location": "pipecat/services/nvidia/stt.py"
     },
     {
       "subject": "NvidiaSegmentedSTTService.InputParams",
@@ -2365,7 +2365,7 @@
       "relation": "use_existing",
       "replacement": "NvidiaSegmentedSTTService.Settings",
       "message": "`NvidiaSegmentedSTTService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `NvidiaSegmentedSTTService.Settings` instead.",
-      "location": "pipecat/services/nvidia/stt.py:648"
+      "location": "pipecat/services/nvidia/stt.py"
     },
     {
       "subject": "NvidiaSegmentedSTTService.params",
@@ -2376,7 +2376,7 @@
       "relation": "use_existing",
       "replacement": "settings=NvidiaSegmentedSTTService.Settings(...)",
       "message": "Use ``settings=NvidiaSegmentedSTTService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/nvidia/stt.py (NvidiaSegmentedSTTService.__init__.params)"
+      "location": "pipecat/services/nvidia/stt.py"
     },
     {
       "subject": "NvidiaTTSService.InputParams",
@@ -2387,7 +2387,7 @@
       "relation": "use_existing",
       "replacement": "NvidiaTTSService.Settings",
       "message": "`NvidiaTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `NvidiaTTSService.Settings` instead.",
-      "location": "pipecat/services/nvidia/tts.py:102"
+      "location": "pipecat/services/nvidia/tts.py"
     },
     {
       "subject": "NvidiaTTSService.params",
@@ -2398,7 +2398,7 @@
       "relation": "use_existing",
       "replacement": "settings=NvidiaTTSService.Settings(...)",
       "message": "Use ``settings=NvidiaTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/nvidia/tts.py (NvidiaTTSService.__init__.params)"
+      "location": "pipecat/services/nvidia/tts.py"
     },
     {
       "subject": "NvidiaTTSService.set_model",
@@ -2409,7 +2409,7 @@
       "relation": "none",
       "replacement": null,
       "message": "`NvidiaTTSService.set_model` is deprecated since 0.0.104 and will be removed in 2.0.0. No replacement.",
-      "location": "pipecat/services/nvidia/tts.py:231"
+      "location": "pipecat/services/nvidia/tts.py"
     },
     {
       "subject": "NvidiaTTSService.voice_id",
@@ -2420,7 +2420,7 @@
       "relation": "use_existing",
       "replacement": "settings=NvidiaTTSService.Settings(voice=...)",
       "message": "Use ``settings=NvidiaTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/nvidia/tts.py (NvidiaTTSService.__init__.voice_id)"
+      "location": "pipecat/services/nvidia/tts.py"
     },
     {
       "subject": "OLLamaLLMService.model",
@@ -2431,7 +2431,7 @@
       "relation": "use_existing",
       "replacement": "settings=OLLamaLLMService.Settings(model=...)",
       "message": "Use ``settings=OLLamaLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/ollama/llm.py (OLLamaLLMService.__init__.model)"
+      "location": "pipecat/services/ollama/llm.py"
     },
     {
       "subject": "BaseOpenAILLMService.InputParams",
@@ -2442,7 +2442,7 @@
       "relation": "use_existing",
       "replacement": "BaseOpenAILLMService.Settings",
       "message": "`BaseOpenAILLMService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `BaseOpenAILLMService.Settings` instead.",
-      "location": "pipecat/services/openai/base_llm.py:100"
+      "location": "pipecat/services/openai/base_llm.py"
     },
     {
       "subject": "BaseOpenAILLMService.model",
@@ -2453,7 +2453,7 @@
       "relation": "use_existing",
       "replacement": "settings=BaseOpenAILLMService.Settings(model=...)",
       "message": "Use ``settings=BaseOpenAILLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/base_llm.py (BaseOpenAILLMService.__init__.model)"
+      "location": "pipecat/services/openai/base_llm.py"
     },
     {
       "subject": "BaseOpenAILLMService.params",
@@ -2464,7 +2464,7 @@
       "relation": "use_existing",
       "replacement": "settings=BaseOpenAILLMService.Settings(...)",
       "message": "Use ``settings=BaseOpenAILLMService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/base_llm.py (BaseOpenAILLMService.__init__.params)"
+      "location": "pipecat/services/openai/base_llm.py"
     },
     {
       "subject": "OpenAIImageGenService.image_size",
@@ -2475,7 +2475,7 @@
       "relation": "use_existing",
       "replacement": "settings=OpenAIImageGenService.Settings(image_size=...)",
       "message": "Use ``settings=OpenAIImageGenService.Settings(image_size=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/image.py (OpenAIImageGenService.__init__.image_size)"
+      "location": "pipecat/services/openai/image.py"
     },
     {
       "subject": "OpenAIImageGenService.model",
@@ -2486,7 +2486,7 @@
       "relation": "use_existing",
       "replacement": "settings=OpenAIImageGenService.Settings(model=...)",
       "message": "Use ``settings=OpenAIImageGenService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/image.py (OpenAIImageGenService.__init__.model)"
+      "location": "pipecat/services/openai/image.py"
     },
     {
       "subject": "OpenAILLMService.model",
@@ -2497,7 +2497,7 @@
       "relation": "use_existing",
       "replacement": "settings=OpenAILLMService.Settings(model=...)",
       "message": "Use ``settings=OpenAILLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/llm.py (OpenAILLMService.__init__.model)"
+      "location": "pipecat/services/openai/llm.py"
     },
     {
       "subject": "OpenAILLMService.params",
@@ -2508,7 +2508,7 @@
       "relation": "use_existing",
       "replacement": "settings=OpenAILLMService.Settings(...)",
       "message": "Use ``settings=OpenAILLMService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/llm.py (OpenAILLMService.__init__.params)"
+      "location": "pipecat/services/openai/llm.py"
     },
     {
       "subject": "OpenAIRealtimeLLMService.model",
@@ -2519,7 +2519,7 @@
       "relation": "use_existing",
       "replacement": "settings=OpenAIRealtimeLLMService.Settings(model=...)",
       "message": "Use ``settings=OpenAIRealtimeLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/realtime/llm.py (OpenAIRealtimeLLMService.__init__.model)"
+      "location": "pipecat/services/openai/realtime/llm.py"
     },
     {
       "subject": "OpenAIRealtimeLLMService.session_properties",
@@ -2530,7 +2530,7 @@
       "relation": "use_existing",
       "replacement": "settings=OpenAIRealtimeLLMService.Settings(session_properties=...)",
       "message": "Use ``settings=OpenAIRealtimeLLMService.Settings(session_properties=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/realtime/llm.py (OpenAIRealtimeLLMService.__init__.session_properties)"
+      "location": "pipecat/services/openai/realtime/llm.py"
     },
     {
       "subject": "OpenAIRealtimeSTTService.language",
@@ -2541,7 +2541,7 @@
       "relation": "use_existing",
       "replacement": "settings=OpenAIRealtimeSTTService.Settings(language=...)",
       "message": "Use ``settings=OpenAIRealtimeSTTService.Settings(language=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/stt.py (OpenAIRealtimeSTTService.__init__.language)"
+      "location": "pipecat/services/openai/stt.py"
     },
     {
       "subject": "OpenAIRealtimeSTTService.model",
@@ -2552,7 +2552,7 @@
       "relation": "use_existing",
       "replacement": "settings=OpenAIRealtimeSTTService.Settings(model=...)",
       "message": "Use ``settings=OpenAIRealtimeSTTService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/stt.py (OpenAIRealtimeSTTService.__init__.model)"
+      "location": "pipecat/services/openai/stt.py"
     },
     {
       "subject": "OpenAIRealtimeSTTService.noise_reduction",
@@ -2563,7 +2563,7 @@
       "relation": "use_existing",
       "replacement": "settings=OpenAIRealtimeSTTService.Settings(noise_reduction=...)",
       "message": "Use ``settings=OpenAIRealtimeSTTService.Settings(noise_reduction=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/stt.py (OpenAIRealtimeSTTService.__init__.noise_reduction)"
+      "location": "pipecat/services/openai/stt.py"
     },
     {
       "subject": "OpenAIRealtimeSTTService.prompt",
@@ -2574,7 +2574,7 @@
       "relation": "use_existing",
       "replacement": "settings=OpenAIRealtimeSTTService.Settings(prompt=...)",
       "message": "Use ``settings=OpenAIRealtimeSTTService.Settings(prompt=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/stt.py (OpenAIRealtimeSTTService.__init__.prompt)"
+      "location": "pipecat/services/openai/stt.py"
     },
     {
       "subject": "OpenAISTTService.language",
@@ -2585,7 +2585,7 @@
       "relation": "use_existing",
       "replacement": "settings=OpenAISTTService.Settings(language=...)",
       "message": "Use ``settings=OpenAISTTService.Settings(language=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/stt.py (OpenAISTTService.__init__.language)"
+      "location": "pipecat/services/openai/stt.py"
     },
     {
       "subject": "OpenAISTTService.model",
@@ -2596,7 +2596,7 @@
       "relation": "use_existing",
       "replacement": "settings=OpenAISTTService.Settings(model=...)",
       "message": "Use ``settings=OpenAISTTService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/stt.py (OpenAISTTService.__init__.model)"
+      "location": "pipecat/services/openai/stt.py"
     },
     {
       "subject": "OpenAISTTService.prompt",
@@ -2607,7 +2607,7 @@
       "relation": "use_existing",
       "replacement": "settings=OpenAISTTService.Settings(prompt=...)",
       "message": "Use ``settings=OpenAISTTService.Settings(prompt=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/stt.py (OpenAISTTService.__init__.prompt)"
+      "location": "pipecat/services/openai/stt.py"
     },
     {
       "subject": "OpenAISTTService.temperature",
@@ -2618,7 +2618,7 @@
       "relation": "use_existing",
       "replacement": "settings=OpenAISTTService.Settings(temperature=...)",
       "message": "Use ``settings=OpenAISTTService.Settings(temperature=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/stt.py (OpenAISTTService.__init__.temperature)"
+      "location": "pipecat/services/openai/stt.py"
     },
     {
       "subject": "OpenAITTSService.InputParams",
@@ -2629,7 +2629,7 @@
       "relation": "use_existing",
       "replacement": "OpenAITTSService.Settings",
       "message": "`OpenAITTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `OpenAITTSService.Settings` instead.",
-      "location": "pipecat/services/openai/tts.py:94"
+      "location": "pipecat/services/openai/tts.py"
     },
     {
       "subject": "OpenAITTSService.instructions",
@@ -2640,7 +2640,7 @@
       "relation": "use_existing",
       "replacement": "settings=OpenAITTSService.Settings(instructions=...)",
       "message": "Use ``settings=OpenAITTSService.Settings(instructions=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/tts.py (OpenAITTSService.__init__.instructions)"
+      "location": "pipecat/services/openai/tts.py"
     },
     {
       "subject": "OpenAITTSService.model",
@@ -2651,7 +2651,7 @@
       "relation": "use_existing",
       "replacement": "settings=OpenAITTSService.Settings(model=...)",
       "message": "Use ``settings=OpenAITTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/tts.py (OpenAITTSService.__init__.model)"
+      "location": "pipecat/services/openai/tts.py"
     },
     {
       "subject": "OpenAITTSService.params",
@@ -2662,7 +2662,7 @@
       "relation": "use_existing",
       "replacement": "settings=OpenAITTSService.Settings(...)",
       "message": "Use ``settings=OpenAITTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/tts.py (OpenAITTSService.__init__.params)"
+      "location": "pipecat/services/openai/tts.py"
     },
     {
       "subject": "OpenAITTSService.speed",
@@ -2673,7 +2673,7 @@
       "relation": "use_existing",
       "replacement": "settings=OpenAITTSService.Settings(speed=...)",
       "message": "Use ``settings=OpenAITTSService.Settings(speed=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/tts.py (OpenAITTSService.__init__.speed)"
+      "location": "pipecat/services/openai/tts.py"
     },
     {
       "subject": "OpenAITTSService.voice",
@@ -2684,7 +2684,7 @@
       "relation": "use_existing",
       "replacement": "settings=OpenAITTSService.Settings(voice=...)",
       "message": "Use ``settings=OpenAITTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openai/tts.py (OpenAITTSService.__init__.voice)"
+      "location": "pipecat/services/openai/tts.py"
     },
     {
       "subject": "OpenRouterLLMService.model",
@@ -2695,7 +2695,7 @@
       "relation": "use_existing",
       "replacement": "settings=OpenRouterLLMService.Settings(model=...)",
       "message": "Use ``settings=OpenRouterLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/openrouter/llm.py (OpenRouterLLMService.__init__.model)"
+      "location": "pipecat/services/openrouter/llm.py"
     },
     {
       "subject": "PerplexityLLMService.model",
@@ -2706,7 +2706,7 @@
       "relation": "use_existing",
       "replacement": "settings=PerplexityLLMService.Settings(model=...)",
       "message": "Use ``settings=PerplexityLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/perplexity/llm.py (PerplexityLLMService.__init__.model)"
+      "location": "pipecat/services/perplexity/llm.py"
     },
     {
       "subject": "PiperHttpTTSService.voice_id",
@@ -2717,7 +2717,7 @@
       "relation": "use_existing",
       "replacement": "settings=PiperHttpTTSService.Settings(voice=...)",
       "message": "Use ``settings=PiperHttpTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/piper/tts.py (PiperHttpTTSService.__init__.voice_id)"
+      "location": "pipecat/services/piper/tts.py"
     },
     {
       "subject": "PiperTTSService.voice_id",
@@ -2728,7 +2728,7 @@
       "relation": "use_existing",
       "replacement": "settings=PiperTTSService.Settings(voice=...)",
       "message": "Use ``settings=PiperTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/piper/tts.py (PiperTTSService.__init__.voice_id)"
+      "location": "pipecat/services/piper/tts.py"
     },
     {
       "subject": "QwenLLMService.model",
@@ -2739,7 +2739,7 @@
       "relation": "use_existing",
       "replacement": "settings=QwenLLMService.Settings(model=...)",
       "message": "Use ``settings=QwenLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/qwen/llm.py (QwenLLMService.__init__.model)"
+      "location": "pipecat/services/qwen/llm.py"
     },
     {
       "subject": "ResembleAITTSService.voice_id",
@@ -2750,7 +2750,7 @@
       "relation": "use_existing",
       "replacement": "settings=ResembleAITTSService.Settings(voice=...)",
       "message": "Use ``settings=ResembleAITTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/resembleai/tts.py (ResembleAITTSService.__init__.voice_id)"
+      "location": "pipecat/services/resembleai/tts.py"
     },
     {
       "subject": "RimeHttpTTSService.InputParams",
@@ -2761,7 +2761,7 @@
       "relation": "use_existing",
       "replacement": "RimeHttpTTSService.Settings",
       "message": "`RimeHttpTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `RimeHttpTTSService.Settings` instead.",
-      "location": "pipecat/services/rime/tts.py:670"
+      "location": "pipecat/services/rime/tts.py"
     },
     {
       "subject": "RimeHttpTTSService.model",
@@ -2772,7 +2772,7 @@
       "relation": "use_existing",
       "replacement": "settings=RimeHttpTTSService.Settings(model=...)",
       "message": "Use ``settings=RimeHttpTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/rime/tts.py (RimeHttpTTSService.__init__.model)"
+      "location": "pipecat/services/rime/tts.py"
     },
     {
       "subject": "RimeHttpTTSService.params",
@@ -2783,7 +2783,7 @@
       "relation": "use_existing",
       "replacement": "settings=RimeHttpTTSService.Settings(...)",
       "message": "Use ``settings=RimeHttpTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/rime/tts.py (RimeHttpTTSService.__init__.params)"
+      "location": "pipecat/services/rime/tts.py"
     },
     {
       "subject": "RimeHttpTTSService.voice_id",
@@ -2794,7 +2794,7 @@
       "relation": "use_existing",
       "replacement": "settings=RimeHttpTTSService.Settings(voice=...)",
       "message": "Use ``settings=RimeHttpTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/rime/tts.py (RimeHttpTTSService.__init__.voice_id)"
+      "location": "pipecat/services/rime/tts.py"
     },
     {
       "subject": "RimeNonJsonTTSService",
@@ -2805,7 +2805,7 @@
       "relation": "use_existing",
       "replacement": "RimeTTSService",
       "message": "`RimeNonJsonTTSService` is deprecated since 0.0.102 and will be removed in 2.0.0. Use `RimeTTSService` instead.",
-      "location": "pipecat/services/rime/tts.py:901"
+      "location": "pipecat/services/rime/tts.py"
     },
     {
       "subject": "RimeNonJsonTTSService.InputParams",
@@ -2816,7 +2816,7 @@
       "relation": "use_existing",
       "replacement": "RimeNonJsonTTSService.Settings",
       "message": "`RimeNonJsonTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `RimeNonJsonTTSService.Settings` instead.",
-      "location": "pipecat/services/rime/tts.py:923"
+      "location": "pipecat/services/rime/tts.py"
     },
     {
       "subject": "RimeNonJsonTTSService.aggregate_sentences",
@@ -2827,7 +2827,7 @@
       "relation": "use_existing",
       "replacement": "text_aggregation_mode",
       "message": "Use ``text_aggregation_mode`` instead. Set to ``TextAggregationMode.SENTENCE`` to aggregate text into sentences before synthesis, or ``TextAggregationMode.TOKEN`` to stream tokens directly for lower latency. Will be removed in 2.0.0.",
-      "location": "pipecat/services/rime/tts.py (RimeNonJsonTTSService.__init__.aggregate_sentences)"
+      "location": "pipecat/services/rime/tts.py"
     },
     {
       "subject": "RimeNonJsonTTSService.model",
@@ -2838,7 +2838,7 @@
       "relation": "use_existing",
       "replacement": "settings=RimeNonJsonTTSService.Settings(model=...)",
       "message": "Use ``settings=RimeNonJsonTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/rime/tts.py (RimeNonJsonTTSService.__init__.model)"
+      "location": "pipecat/services/rime/tts.py"
     },
     {
       "subject": "RimeNonJsonTTSService.params",
@@ -2849,7 +2849,7 @@
       "relation": "use_existing",
       "replacement": "settings=RimeNonJsonTTSService.Settings(...)",
       "message": "Use ``settings=RimeNonJsonTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/rime/tts.py (RimeNonJsonTTSService.__init__.params)"
+      "location": "pipecat/services/rime/tts.py"
     },
     {
       "subject": "RimeNonJsonTTSService.voice_id",
@@ -2860,7 +2860,7 @@
       "relation": "use_existing",
       "replacement": "settings=RimeNonJsonTTSService.Settings(voice=...)",
       "message": "Use ``settings=RimeNonJsonTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/rime/tts.py (RimeNonJsonTTSService.__init__.voice_id)"
+      "location": "pipecat/services/rime/tts.py"
     },
     {
       "subject": "RimeTTSService.InputParams",
@@ -2871,7 +2871,7 @@
       "relation": "use_existing",
       "replacement": "RimeTTSService.Settings",
       "message": "`RimeTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `RimeTTSService.Settings` instead.",
-      "location": "pipecat/services/rime/tts.py:137"
+      "location": "pipecat/services/rime/tts.py"
     },
     {
       "subject": "RimeTTSService.aggregate_sentences",
@@ -2882,7 +2882,7 @@
       "relation": "use_existing",
       "replacement": "text_aggregation_mode",
       "message": "Use ``text_aggregation_mode`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/rime/tts.py (RimeTTSService.__init__.aggregate_sentences)"
+      "location": "pipecat/services/rime/tts.py"
     },
     {
       "subject": "RimeTTSService.model",
@@ -2893,7 +2893,7 @@
       "relation": "use_existing",
       "replacement": "settings=RimeTTSService.Settings(model=...)",
       "message": "Use ``settings=RimeTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/rime/tts.py (RimeTTSService.__init__.model)"
+      "location": "pipecat/services/rime/tts.py"
     },
     {
       "subject": "RimeTTSService.params",
@@ -2904,7 +2904,7 @@
       "relation": "use_existing",
       "replacement": "settings=RimeTTSService.Settings(...)",
       "message": "Use ``settings=RimeTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/rime/tts.py (RimeTTSService.__init__.params)"
+      "location": "pipecat/services/rime/tts.py"
     },
     {
       "subject": "RimeTTSService.voice_id",
@@ -2915,7 +2915,7 @@
       "relation": "use_existing",
       "replacement": "settings=RimeTTSService.Settings(voice=...)",
       "message": "Use ``settings=RimeTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/rime/tts.py (RimeTTSService.__init__.voice_id)"
+      "location": "pipecat/services/rime/tts.py"
     },
     {
       "subject": "SambaNovaLLMService.model",
@@ -2926,7 +2926,7 @@
       "relation": "use_existing",
       "replacement": "settings=SambaNovaLLMService.Settings(model=...)",
       "message": "Use ``settings=SambaNovaLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/sambanova/llm.py (SambaNovaLLMService.__init__.model)"
+      "location": "pipecat/services/sambanova/llm.py"
     },
     {
       "subject": "SarvamSTTService.InputParams",
@@ -2937,7 +2937,7 @@
       "relation": "use_existing",
       "replacement": "SarvamSTTService.Settings",
       "message": "`SarvamSTTService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `SarvamSTTService.Settings` instead.",
-      "location": "pipecat/services/sarvam/stt.py:220"
+      "location": "pipecat/services/sarvam/stt.py"
     },
     {
       "subject": "SarvamSTTService.model",
@@ -2948,7 +2948,7 @@
       "relation": "use_existing",
       "replacement": "settings=SarvamSTTService.Settings(model=...)",
       "message": "Use ``settings=SarvamSTTService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/sarvam/stt.py (SarvamSTTService.__init__.model)"
+      "location": "pipecat/services/sarvam/stt.py"
     },
     {
       "subject": "SarvamSTTService.params",
@@ -2959,7 +2959,7 @@
       "relation": "use_existing",
       "replacement": "settings=SarvamSTTService.Settings(...)",
       "message": "Use ``settings=SarvamSTTService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/sarvam/stt.py (SarvamSTTService.__init__.params)"
+      "location": "pipecat/services/sarvam/stt.py"
     },
     {
       "subject": "SarvamSTTService.set_prompt",
@@ -2970,7 +2970,7 @@
       "relation": "use_existing",
       "replacement": "STTUpdateSettingsFrame(SarvamSTTService.Settings(prompt=...))",
       "message": "`SarvamSTTService.set_prompt` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `STTUpdateSettingsFrame(SarvamSTTService.Settings(prompt=...))` instead.",
-      "location": "pipecat/services/sarvam/stt.py:525"
+      "location": "pipecat/services/sarvam/stt.py"
     },
     {
       "subject": "SarvamHttpTTSService.InputParams",
@@ -2981,7 +2981,7 @@
       "relation": "use_existing",
       "replacement": "SarvamHttpTTSService.Settings",
       "message": "`SarvamHttpTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `SarvamHttpTTSService.Settings` instead.",
-      "location": "pipecat/services/sarvam/tts.py:357"
+      "location": "pipecat/services/sarvam/tts.py"
     },
     {
       "subject": "SarvamHttpTTSService.model",
@@ -2992,7 +2992,7 @@
       "relation": "use_existing",
       "replacement": "settings=SarvamHttpTTSService.Settings(model=...)",
       "message": "Use ``settings=SarvamHttpTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/sarvam/tts.py (SarvamHttpTTSService.__init__.model)"
+      "location": "pipecat/services/sarvam/tts.py"
     },
     {
       "subject": "SarvamHttpTTSService.params",
@@ -3003,7 +3003,7 @@
       "relation": "use_existing",
       "replacement": "settings=SarvamHttpTTSService.Settings(...)",
       "message": "Use ``settings=SarvamHttpTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/sarvam/tts.py (SarvamHttpTTSService.__init__.params)"
+      "location": "pipecat/services/sarvam/tts.py"
     },
     {
       "subject": "SarvamHttpTTSService.voice_id",
@@ -3014,7 +3014,7 @@
       "relation": "use_existing",
       "replacement": "settings=SarvamHttpTTSService.Settings(voice=...)",
       "message": "Use ``settings=SarvamHttpTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/sarvam/tts.py (SarvamHttpTTSService.__init__.voice_id)"
+      "location": "pipecat/services/sarvam/tts.py"
     },
     {
       "subject": "SarvamTTSService.InputParams",
@@ -3025,7 +3025,7 @@
       "relation": "use_existing",
       "replacement": "SarvamTTSService.Settings",
       "message": "`SarvamTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `SarvamTTSService.Settings` instead.",
-      "location": "pipecat/services/sarvam/tts.py:726"
+      "location": "pipecat/services/sarvam/tts.py"
     },
     {
       "subject": "SarvamTTSService.aggregate_sentences",
@@ -3036,7 +3036,7 @@
       "relation": "use_existing",
       "replacement": "text_aggregation_mode",
       "message": "Use ``text_aggregation_mode`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/sarvam/tts.py (SarvamTTSService.__init__.aggregate_sentences)"
+      "location": "pipecat/services/sarvam/tts.py"
     },
     {
       "subject": "SarvamTTSService.model",
@@ -3047,7 +3047,7 @@
       "relation": "use_existing",
       "replacement": "settings=SarvamTTSService.Settings(model=...)",
       "message": "Use ``settings=SarvamTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/sarvam/tts.py (SarvamTTSService.__init__.model)"
+      "location": "pipecat/services/sarvam/tts.py"
     },
     {
       "subject": "SarvamTTSService.params",
@@ -3058,7 +3058,7 @@
       "relation": "use_existing",
       "replacement": "settings=SarvamTTSService.Settings(...)",
       "message": "Use ``settings=SarvamTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/sarvam/tts.py (SarvamTTSService.__init__.params)"
+      "location": "pipecat/services/sarvam/tts.py"
     },
     {
       "subject": "SarvamTTSService.voice_id",
@@ -3069,7 +3069,7 @@
       "relation": "use_existing",
       "replacement": "settings=SarvamTTSService.Settings(voice=...)",
       "message": "Use ``settings=SarvamTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/sarvam/tts.py (SarvamTTSService.__init__.voice_id)"
+      "location": "pipecat/services/sarvam/tts.py"
     },
     {
       "subject": "SimliVideoService.InputParams",
@@ -3080,7 +3080,7 @@
       "relation": "use_existing",
       "replacement": "SimliVideoService.Settings",
       "message": "`SimliVideoService.InputParams` is deprecated since 0.0.106 and will be removed in 2.0.0. Use `SimliVideoService.Settings` instead.",
-      "location": "pipecat/services/simli/video.py:64"
+      "location": "pipecat/services/simli/video.py"
     },
     {
       "subject": "SimliVideoService.params",
@@ -3091,7 +3091,7 @@
       "relation": "use_existing",
       "replacement": "settings=SimliVideoService.Settings(...)",
       "message": "Use ``settings=SimliVideoService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/simli/video.py (SimliVideoService.__init__.params)"
+      "location": "pipecat/services/simli/video.py"
     },
     {
       "subject": "SonioxInputParams",
@@ -3102,7 +3102,7 @@
       "relation": "use_existing",
       "replacement": "SonioxSTTService.Settings",
       "message": "`SonioxInputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `SonioxSTTService.Settings` instead.",
-      "location": "pipecat/services/soniox/stt.py:79"
+      "location": "pipecat/services/soniox/stt.py"
     },
     {
       "subject": "SonioxSTTService.model",
@@ -3113,7 +3113,7 @@
       "relation": "use_existing",
       "replacement": "settings=SonioxSTTService.Settings(model=...)",
       "message": "Use ``settings=SonioxSTTService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/soniox/stt.py (SonioxSTTService.__init__.model)"
+      "location": "pipecat/services/soniox/stt.py"
     },
     {
       "subject": "SonioxSTTService.params",
@@ -3124,7 +3124,7 @@
       "relation": "use_existing",
       "replacement": "settings=SonioxSTTService.Settings(...)",
       "message": "Use ``settings=SonioxSTTService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/soniox/stt.py (SonioxSTTService.__init__.params)"
+      "location": "pipecat/services/soniox/stt.py"
     },
     {
       "subject": "SpeechmaticsSTTService.UpdateParams",
@@ -3135,7 +3135,7 @@
       "relation": "use_existing",
       "replacement": "SpeechmaticsSTTService.Settings",
       "message": "`SpeechmaticsSTTService.UpdateParams` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `SpeechmaticsSTTService.Settings` instead.",
-      "location": "pipecat/services/speechmatics/stt.py:350"
+      "location": "pipecat/services/speechmatics/stt.py"
     },
     {
       "subject": "SpeechmaticsSTTService.params",
@@ -3146,7 +3146,7 @@
       "relation": "use_existing",
       "replacement": "settings=SpeechmaticsSTTService.Settings(...)",
       "message": "Use ``settings=SpeechmaticsSTTService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/speechmatics/stt.py (SpeechmaticsSTTService.__init__.params)"
+      "location": "pipecat/services/speechmatics/stt.py"
     },
     {
       "subject": "SpeechmaticsSTTService.update_params",
@@ -3157,7 +3157,7 @@
       "relation": "use_existing",
       "replacement": "STTUpdateSettingsFrame",
       "message": "`SpeechmaticsSTTService.update_params` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `STTUpdateSettingsFrame` instead.",
-      "location": "pipecat/services/speechmatics/stt.py:792"
+      "location": "pipecat/services/speechmatics/stt.py"
     },
     {
       "subject": "SpeechmaticsTTSService.InputParams",
@@ -3168,7 +3168,7 @@
       "relation": "use_existing",
       "replacement": "SpeechmaticsTTSService.Settings",
       "message": "`SpeechmaticsTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `SpeechmaticsTTSService.Settings` instead.",
-      "location": "pipecat/services/speechmatics/tts.py:67"
+      "location": "pipecat/services/speechmatics/tts.py"
     },
     {
       "subject": "SpeechmaticsTTSService.params",
@@ -3179,7 +3179,7 @@
       "relation": "use_existing",
       "replacement": "settings=SpeechmaticsTTSService.Settings(...)",
       "message": "Use ``settings=SpeechmaticsTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/speechmatics/tts.py (SpeechmaticsTTSService.__init__.params)"
+      "location": "pipecat/services/speechmatics/tts.py"
     },
     {
       "subject": "SpeechmaticsTTSService.voice_id",
@@ -3190,7 +3190,7 @@
       "relation": "use_existing",
       "replacement": "settings=SpeechmaticsTTSService.Settings(voice=...)",
       "message": "Use ``settings=SpeechmaticsTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/speechmatics/tts.py (SpeechmaticsTTSService.__init__.voice_id)"
+      "location": "pipecat/services/speechmatics/tts.py"
     },
     {
       "subject": "STTService.set_language",
@@ -3201,7 +3201,7 @@
       "relation": "use_existing",
       "replacement": "STTUpdateSettingsFrame(language=...)",
       "message": "`STTService.set_language` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `STTUpdateSettingsFrame(language=...)` instead.",
-      "location": "pipecat/services/stt_service.py:250"
+      "location": "pipecat/services/stt_service.py"
     },
     {
       "subject": "STTService.set_model",
@@ -3212,7 +3212,7 @@
       "relation": "use_existing",
       "replacement": "STTUpdateSettingsFrame(model=...)",
       "message": "`STTService.set_model` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `STTUpdateSettingsFrame(model=...)` instead.",
-      "location": "pipecat/services/stt_service.py:232"
+      "location": "pipecat/services/stt_service.py"
     },
     {
       "subject": "TogetherLLMService.model",
@@ -3223,7 +3223,7 @@
       "relation": "use_existing",
       "replacement": "settings=TogetherLLMService.Settings(model=...)",
       "message": "Use ``settings=TogetherLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/together/llm.py (TogetherLLMService.__init__.model)"
+      "location": "pipecat/services/together/llm.py"
     },
     {
       "subject": "AudioContextTTSService",
@@ -3234,7 +3234,7 @@
       "relation": "use_existing",
       "replacement": "WebsocketTTSService",
       "message": "`AudioContextTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `WebsocketTTSService` instead.",
-      "location": "pipecat/services/tts_service.py:1733"
+      "location": "pipecat/services/tts_service.py"
     },
     {
       "subject": "AudioContextWordTTSService",
@@ -3245,7 +3245,7 @@
       "relation": "use_existing",
       "replacement": "WebsocketTTSService",
       "message": "`AudioContextWordTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `WebsocketTTSService` instead.",
-      "location": "pipecat/services/tts_service.py:1771"
+      "location": "pipecat/services/tts_service.py"
     },
     {
       "subject": "InterruptibleWordTTSService",
@@ -3256,7 +3256,7 @@
       "relation": "use_existing",
       "replacement": "InterruptibleTTSService",
       "message": "`InterruptibleWordTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `InterruptibleTTSService` instead.",
-      "location": "pipecat/services/tts_service.py:1712"
+      "location": "pipecat/services/tts_service.py"
     },
     {
       "subject": "TTSService.aggregate_sentences",
@@ -3267,7 +3267,7 @@
       "relation": "use_existing",
       "replacement": "text_aggregation_mode",
       "message": "Use ``text_aggregation_mode`` instead. Set to ``TextAggregationMode.SENTENCE`` to aggregate text into sentences before synthesis, or ``TextAggregationMode.TOKEN`` to stream tokens directly for lower latency. Will be removed in 2.0.0.",
-      "location": "pipecat/services/tts_service.py (TTSService.__init__.aggregate_sentences)"
+      "location": "pipecat/services/tts_service.py"
     },
     {
       "subject": "TTSService.set_model",
@@ -3278,7 +3278,7 @@
       "relation": "use_existing",
       "replacement": "TTSUpdateSettingsFrame(model=...)",
       "message": "`TTSService.set_model` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `TTSUpdateSettingsFrame(model=...)` instead.",
-      "location": "pipecat/services/tts_service.py:437"
+      "location": "pipecat/services/tts_service.py"
     },
     {
       "subject": "TTSService.set_voice",
@@ -3289,7 +3289,7 @@
       "relation": "use_existing",
       "replacement": "TTSUpdateSettingsFrame(voice=...)",
       "message": "`TTSService.set_voice` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `TTSUpdateSettingsFrame(voice=...)` instead.",
-      "location": "pipecat/services/tts_service.py:455"
+      "location": "pipecat/services/tts_service.py"
     },
     {
       "subject": "WebsocketWordTTSService",
@@ -3300,7 +3300,7 @@
       "relation": "use_existing",
       "replacement": "WebsocketTTSService",
       "message": "`WebsocketWordTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `WebsocketTTSService` instead.",
-      "location": "pipecat/services/tts_service.py:1690"
+      "location": "pipecat/services/tts_service.py"
     },
     {
       "subject": "WordTTSService",
@@ -3311,7 +3311,7 @@
       "relation": "use_existing",
       "replacement": "TTSService",
       "message": "`WordTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `TTSService` instead.",
-      "location": "pipecat/services/tts_service.py:1583"
+      "location": "pipecat/services/tts_service.py"
     },
     {
       "subject": "BaseWhisperSTTService.language",
@@ -3322,7 +3322,7 @@
       "relation": "use_existing",
       "replacement": "settings=BaseWhisperSTTService.Settings(language=...)",
       "message": "Use ``settings=BaseWhisperSTTService.Settings(language=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/whisper/base_stt.py (BaseWhisperSTTService.__init__.language)"
+      "location": "pipecat/services/whisper/base_stt.py"
     },
     {
       "subject": "BaseWhisperSTTService.model",
@@ -3333,7 +3333,7 @@
       "relation": "use_existing",
       "replacement": "settings=BaseWhisperSTTService.Settings(model=...)",
       "message": "Use ``settings=BaseWhisperSTTService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/whisper/base_stt.py (BaseWhisperSTTService.__init__.model)"
+      "location": "pipecat/services/whisper/base_stt.py"
     },
     {
       "subject": "BaseWhisperSTTService.prompt",
@@ -3344,7 +3344,7 @@
       "relation": "use_existing",
       "replacement": "settings=BaseWhisperSTTService.Settings(prompt=...)",
       "message": "Use ``settings=BaseWhisperSTTService.Settings(prompt=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/whisper/base_stt.py (BaseWhisperSTTService.__init__.prompt)"
+      "location": "pipecat/services/whisper/base_stt.py"
     },
     {
       "subject": "BaseWhisperSTTService.temperature",
@@ -3355,7 +3355,7 @@
       "relation": "use_existing",
       "replacement": "settings=BaseWhisperSTTService.Settings(temperature=...)",
       "message": "Use ``settings=BaseWhisperSTTService.Settings(temperature=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/whisper/base_stt.py (BaseWhisperSTTService.__init__.temperature)"
+      "location": "pipecat/services/whisper/base_stt.py"
     },
     {
       "subject": "WhisperSTTService.language",
@@ -3366,7 +3366,7 @@
       "relation": "use_existing",
       "replacement": "settings=WhisperSTTService.Settings(language=...)",
       "message": "Use ``settings=WhisperSTTService.Settings(language=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/whisper/stt.py (WhisperSTTService.__init__.language)"
+      "location": "pipecat/services/whisper/stt.py"
     },
     {
       "subject": "WhisperSTTService.model",
@@ -3377,7 +3377,7 @@
       "relation": "use_existing",
       "replacement": "settings=WhisperSTTService.Settings(model=...)",
       "message": "Use ``settings=WhisperSTTService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/whisper/stt.py (WhisperSTTService.__init__.model)"
+      "location": "pipecat/services/whisper/stt.py"
     },
     {
       "subject": "WhisperSTTService.no_speech_prob",
@@ -3388,7 +3388,7 @@
       "relation": "use_existing",
       "replacement": "settings=WhisperSTTService.Settings(no_speech_prob=...)",
       "message": "Use ``settings=WhisperSTTService.Settings(no_speech_prob=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/whisper/stt.py (WhisperSTTService.__init__.no_speech_prob)"
+      "location": "pipecat/services/whisper/stt.py"
     },
     {
       "subject": "WhisperSTTServiceMLX.language",
@@ -3399,7 +3399,7 @@
       "relation": "use_existing",
       "replacement": "settings=WhisperSTTServiceMLX.Settings(language=...)",
       "message": "Use ``settings=WhisperSTTServiceMLX.Settings(language=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/whisper/stt.py (WhisperSTTServiceMLX.__init__.language)"
+      "location": "pipecat/services/whisper/stt.py"
     },
     {
       "subject": "WhisperSTTServiceMLX.model",
@@ -3410,7 +3410,7 @@
       "relation": "use_existing",
       "replacement": "settings=WhisperSTTServiceMLX.Settings(model=...)",
       "message": "Use ``settings=WhisperSTTServiceMLX.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/whisper/stt.py (WhisperSTTServiceMLX.__init__.model)"
+      "location": "pipecat/services/whisper/stt.py"
     },
     {
       "subject": "WhisperSTTServiceMLX.no_speech_prob",
@@ -3421,7 +3421,7 @@
       "relation": "use_existing",
       "replacement": "settings=WhisperSTTServiceMLX.Settings(no_speech_prob=...)",
       "message": "Use ``settings=WhisperSTTServiceMLX.Settings(no_speech_prob=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/whisper/stt.py (WhisperSTTServiceMLX.__init__.no_speech_prob)"
+      "location": "pipecat/services/whisper/stt.py"
     },
     {
       "subject": "WhisperSTTServiceMLX.temperature",
@@ -3432,7 +3432,7 @@
       "relation": "use_existing",
       "replacement": "settings=WhisperSTTServiceMLX.Settings(temperature=...)",
       "message": "Use ``settings=WhisperSTTServiceMLX.Settings(temperature=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/whisper/stt.py (WhisperSTTServiceMLX.__init__.temperature)"
+      "location": "pipecat/services/whisper/stt.py"
     },
     {
       "subject": "GrokLLMService.model",
@@ -3443,7 +3443,7 @@
       "relation": "use_existing",
       "replacement": "settings=GrokLLMService.Settings(model=...)",
       "message": "Use ``settings=GrokLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/xai/llm.py (GrokLLMService.__init__.model)"
+      "location": "pipecat/services/xai/llm.py"
     },
     {
       "subject": "GrokRealtimeLLMService.session_properties",
@@ -3454,7 +3454,7 @@
       "relation": "use_existing",
       "replacement": "settings=GrokRealtimeLLMService.Settings(session_properties=...)",
       "message": "Use ``settings=GrokRealtimeLLMService.Settings(session_properties=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/xai/realtime/llm.py (GrokRealtimeLLMService.__init__.session_properties)"
+      "location": "pipecat/services/xai/realtime/llm.py"
     },
     {
       "subject": "XTTSService.language",
@@ -3465,7 +3465,7 @@
       "relation": "use_existing",
       "replacement": "settings=XTTSService.Settings(language=...)",
       "message": "Use ``settings=XTTSService.Settings(language=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/xtts/tts.py (XTTSService.__init__.language)"
+      "location": "pipecat/services/xtts/tts.py"
     },
     {
       "subject": "XTTSService.voice_id",
@@ -3476,7 +3476,7 @@
       "relation": "use_existing",
       "replacement": "settings=XTTSService.Settings(voice=...)",
       "message": "Use ``settings=XTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/xtts/tts.py (XTTSService.__init__.voice_id)"
+      "location": "pipecat/services/xtts/tts.py"
     },
     {
       "subject": "BaseInputTransport.start_audio_in_streaming",
@@ -3487,7 +3487,7 @@
       "relation": "use_existing",
       "replacement": "InputTransportStartAudioStreamingFrame",
       "message": "`BaseInputTransport.start_audio_in_streaming` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `InputTransportStartAudioStreamingFrame` instead.",
-      "location": "pipecat/transports/base_input.py:91"
+      "location": "pipecat/transports/base_input.py"
     },
     {
       "subject": "TransportParams.video_out_bitrate",
@@ -3498,7 +3498,7 @@
       "relation": "use_existing",
       "replacement": "DailyParams.camera_out_send_settings",
       "message": "Use provider-specific settings instead (e.g., ``DailyParams.camera_out_send_settings``). Will be removed in 2.0.0.",
-      "location": "pipecat/transports/base_transport.py (TransportParams.video_out_bitrate)"
+      "location": "pipecat/transports/base_transport.py"
     },
     {
       "subject": "WhatsAppClient.handle_webhook_request.connection_callback",
@@ -3509,7 +3509,7 @@
       "relation": "use_existing",
       "replacement": "(connection,)",
       "message": "The single-argument ``(connection,)`` signature is deprecated. Use ``(connection, call: WhatsAppConnectCall)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/transports/whatsapp/client.py (WhatsAppClient.handle_webhook_request.connection_callback)"
+      "location": "pipecat/transports/whatsapp/client.py"
     },
     {
       "subject": "LLMContextSummarizationConfig",
@@ -3520,7 +3520,7 @@
       "relation": "use_existing",
       "replacement": "LLMAutoContextSummarizationConfig",
       "message": "`LLMContextSummarizationConfig` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `LLMAutoContextSummarizationConfig` instead.",
-      "location": "pipecat/utils/context/llm_context_summarization.py:175"
+      "location": "pipecat/utils/context/llm_context_summarization.py"
     },
     {
       "subject": "tool.timeout",
@@ -3531,7 +3531,7 @@
       "relation": "use_existing",
       "replacement": "timeout_secs",
       "message": "Use ``timeout_secs`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/workers/llm/tool_decorator.py (tool.timeout)"
+      "location": "pipecat/workers/llm/tool_decorator.py"
     },
     {
       "subject": "WorkerRunner.run.worker",
@@ -3542,7 +3542,7 @@
       "relation": "use_existing",
       "replacement": "add_workers",
       "message": "Register the worker with :meth:`add_workers` before calling ``run()`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/workers/runner.py (WorkerRunner.run.worker)"
+      "location": "pipecat/workers/runner.py"
     }
   ]
 }
