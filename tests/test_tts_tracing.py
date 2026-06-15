@@ -20,8 +20,16 @@ except ImportError:
     HAS_OPENTELEMETRY = False
 
 import pipecat.utils.tracing.service_decorators as tracing_decorators
-from pipecat.frames.frames import Frame, TTSAudioRawFrame, TTSSpeakFrame, TTSStartedFrame
-from pipecat.services.tts_service import TTSService
+from pipecat.frames.frames import (
+    Frame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    TextFrame,
+    TTSAudioRawFrame,
+    TTSSpeakFrame,
+    TTSStartedFrame,
+)
+from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.tests.utils import run_test
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -105,3 +113,35 @@ async def test_traced_tts_attaches_text_when_context_created_in_run_tts(monkeypa
     assert len(tts_spans) == 1
     assert tts_spans[0].attributes["text"] == text
     assert tts_spans[0].attributes["metrics.character_count"] == len(text)
+
+
+@pytest.mark.skipif(not HAS_OPENTELEMETRY, reason="opentelemetry not installed")
+@pytest.mark.asyncio
+async def test_traced_tts_accumulates_text_for_reused_context(monkeypatch):
+    """TTS spans include every synthesized chunk in a reused turn context."""
+    exporter = _InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(tracing_decorators.trace, "get_tracer", provider.get_tracer)
+
+    expected_text = "First sentence. Second sentence."
+    try:
+        await run_test(
+            _SelfStartTracedTTSService(text_aggregation_mode=TextAggregationMode.TOKEN),
+            enable_tracing=True,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                TextFrame("First"),
+                TextFrame("sentence."),
+                TextFrame("Second"),
+                TextFrame("sentence."),
+                LLMFullResponseEndFrame(),
+            ],
+        )
+    finally:
+        provider.shutdown()
+
+    tts_spans = [span for span in exporter.get_finished_spans() if span.name == "tts"]
+    assert len(tts_spans) == 1
+    assert tts_spans[0].attributes["text"] == expected_text
+    assert tts_spans[0].attributes["metrics.character_count"] == len(expected_text)

@@ -258,6 +258,10 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                 return
             service.__tts_tracing_patches_installed__ = True
             service._tts_spans = {}
+            # Holds one accumulated payload per context so text can be
+            # attached even if run_tts fires before the span is visible,
+            # and so later chunk writes don't collapse the span back to
+            # only the latest sentence.
             service._tts_pending_run_tts_attributes = {}
 
             orig_create = service.create_audio_context
@@ -284,7 +288,7 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                             settings=settings,
                             operation_name="tts",
                         )
-                        pending_attributes = service._tts_pending_run_tts_attributes.pop(
+                        pending_attributes = service._tts_pending_run_tts_attributes.get(
                             context_id, None
                         )
                         if pending_attributes:
@@ -373,23 +377,44 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
             owner.setup = patched_setup
 
         def attach_run_tts_attributes(service, text, args, kwargs):
-            """Attach text-specific attributes to the in-flight TTS span."""
+            """Attach accumulated text attributes to the in-flight TTS span."""
             if not getattr(service, "_tracing_enabled", False):
                 return
             try:
                 context_id = args[0] if args else kwargs.get("context_id")
-                if not context_id or not text:
+                if not context_id:
                     return
-                attributes = {"text": text, "metrics.character_count": len(text)}
+
+                pending = getattr(service, "_tts_pending_run_tts_attributes", None)
+                if pending is None:
+                    return
+
+                existing_payload = pending.get(context_id, {})
+                existing_text = str(existing_payload.get("text") or "")
+                if text and existing_text:
+                    separator = (
+                        " " if not existing_text[-1].isspace() and not text[0].isspace() else ""
+                    )
+                    combined_text = f"{existing_text}{separator}{text}"
+                elif text:
+                    combined_text = text
+                else:
+                    combined_text = existing_text
+
+                # Empty text means "re-apply what we already accumulated".
+                if not combined_text:
+                    return
+
+                attributes = {
+                    "text": combined_text,
+                    "metrics.character_count": len(combined_text),
+                }
+                pending[context_id] = attributes
+
                 entry = getattr(service, "_tts_spans", {}).get(context_id)
                 if entry:
                     for key, value in attributes.items():
                         entry["span"].set_attribute(key, value)
-                    getattr(service, "_tts_pending_run_tts_attributes", {}).pop(context_id, None)
-                else:
-                    pending = getattr(service, "_tts_pending_run_tts_attributes", None)
-                    if pending is not None:
-                        pending[context_id] = attributes
             except Exception as e:
                 logging.warning(f"Error attaching TTS text to span: {e}")
 
@@ -407,15 +432,23 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                 @functools.wraps(f)
                 async def gen_wrapper(self, text, *args, **kwargs):
                     attach_run_tts_attributes(self, text, args, kwargs)
-                    async for item in f(self, text, *args, **kwargs):
-                        yield item
+                    try:
+                        async for item in f(self, text, *args, **kwargs):
+                            yield item
+                    finally:
+                        # Re-apply the accumulated payload for services that
+                        # open the span while run_tts is in progress.
+                        attach_run_tts_attributes(self, "", args, kwargs)
 
                 return gen_wrapper
 
             @functools.wraps(f)
             async def coro_wrapper(self, text, *args, **kwargs):
                 attach_run_tts_attributes(self, text, args, kwargs)
-                return await f(self, text, *args, **kwargs)
+                try:
+                    return await f(self, text, *args, **kwargs)
+                finally:
+                    attach_run_tts_attributes(self, "", args, kwargs)
 
             return coro_wrapper
 
