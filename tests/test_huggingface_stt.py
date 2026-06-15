@@ -64,8 +64,7 @@ async def test_huggingface_stt_sends_router_payload():
 
     assert result["text"] == "hello"
     assert session.url == (
-        "https://router.huggingface.co/hf-inference/models/"
-        "openai/whisper-large-v3-turbo"
+        "https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3-turbo"
     )
     assert session.headers["Authorization"] == "Bearer hf_test"
     assert session.headers["X-HF-Bill-To"] == "demo-org"
