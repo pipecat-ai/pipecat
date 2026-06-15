@@ -618,6 +618,19 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     # StartFrame, StopFrame, CancelFrame implemented in base class
     #
 
+    def _init_time_tools(self) -> "ToolsSchema | None":
+        """Return tools set on ``session_properties`` at construction, if any.
+
+        OpenAI Realtime advertises session-properties tools when the context
+        carries none, so their handlers auto-register the same way a
+        context-advertised one would. Provider-native tool objects carry no
+        handler, so only a ``ToolsSchema`` qualifies.
+        """
+        sp = self._settings.session_properties
+        if is_given(sp) and isinstance(sp.tools, ToolsSchema):
+            return sp.tools
+        return None
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames from the pipeline.
 
