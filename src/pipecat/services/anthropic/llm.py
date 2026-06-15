@@ -41,6 +41,7 @@ from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
 from pipecat.services.settings import LLMSettings, _NotGiven, assert_given, is_given
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.string import summarize_messages_for_logging
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -364,7 +365,10 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
 
             adapter = self.get_llm_adapter()
             messages_for_logging = adapter.get_messages_for_logging(context)
-            logger.debug(f"{self}: Generating chat from context {messages_for_logging}")
+            logger.debug(
+                f"{self}: Generating chat from context "
+                f"{summarize_messages_for_logging(messages_for_logging)}"
+            )
 
             await self.start_ttfb_metrics()
 

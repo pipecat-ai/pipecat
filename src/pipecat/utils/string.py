@@ -20,6 +20,7 @@ Dependencies:
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import nltk
 from loguru import logger
@@ -301,3 +302,24 @@ def concatenate_aggregated_text(text_parts: list[TextPartForConcatenation]) -> s
     result = result.strip()
 
     return result
+
+
+def summarize_messages_for_logging(messages: Sequence[Any], tail: int = 1) -> str:
+    """Summarize a list of LLM context messages for debug logging.
+
+    Logging an entire LLM context on every inference call is extremely
+    verbose for long-running sessions. This returns a short summary
+    consisting of the total message count plus the last ``tail``
+    message(s), which is usually enough to debug what's being sent
+    without dumping the full conversation history.
+
+    Args:
+        messages: The list of messages (e.g. from
+            :meth:`~pipecat.adapters.base_llm_adapter.BaseLLMAdapter.get_messages_for_logging`).
+        tail: The number of trailing messages to include in full.
+
+    Returns:
+        A string of the form ``"<N> messages, last <tail>: [...]"``.
+    """
+    last = list(messages[-tail:]) if tail > 0 else []
+    return f"{len(messages)} messages, last {len(last)}: {last}"

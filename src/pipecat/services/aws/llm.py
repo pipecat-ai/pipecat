@@ -39,6 +39,7 @@ from pipecat.services.aws.utils import resolve_credentials
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.string import summarize_messages_for_logging
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -489,7 +490,10 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             # Log request params with messages redacted for logging
             adapter = self.get_llm_adapter()
             messages_for_logging = adapter.get_messages_for_logging(context)
-            logger.debug(f"{self}: Generating chat from context {messages_for_logging}")
+            logger.debug(
+                f"{self}: Generating chat from context "
+                f"{summarize_messages_for_logging(messages_for_logging)}"
+            )
 
             async with self._aws_session.create_client(
                 service_name="bedrock-runtime", **self._aws_params
