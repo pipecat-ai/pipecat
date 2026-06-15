@@ -12,14 +12,124 @@ MoQ relay config sent to the browser at ``/start``.
 
 import argparse
 from typing import Any
+from urllib.parse import urlparse
 
 from loguru import logger
+
+DEFAULT_MOQ_CONNECT = "https://localhost:4080/moq"
+DEFAULT_MOQ_SERVE_BIND = "[::]:4080"
+DEFAULT_MOQ_PATH = "/moq"
+
+
+def _parse_bind_port(bind: str) -> int:
+    """Parse the port from a bind address like ``[::]:4080`` or ``0.0.0.0:4080``."""
+    _, sep, port_str = bind.rpartition(":")
+    if not sep:
+        raise ValueError(f"--moq-bind must include a port (got {bind!r})")
+    try:
+        return int(port_str)
+    except ValueError as e:
+        raise ValueError(f"--moq-bind has a non-numeric port: {bind!r}") from e
+
+
+def _validate_moq_args(args: argparse.Namespace) -> bool:
+    """Validate MoQ CLI args, warn on conflicts, and stash derived host/port/path on ``args``.
+
+    Returns ``True`` if the args are usable, ``False`` if validation failed.
+
+    Populates: ``args.moq_host``, ``args.moq_port``, ``args.moq_path``,
+    ``args.moq_bind`` (defaulted in serve mode), ``args.moq_tls_host`` (the
+    hostname presented to the browser).
+    """
+    # Client-mode URL parse (also used to advertise the browser URL in
+    # serve mode when no --moq-tls-generate hostname is supplied).
+    connect = args.moq_connect or DEFAULT_MOQ_CONNECT
+    parsed = urlparse(connect)
+    if not parsed.hostname or not parsed.port:
+        logger.error(
+            f"--moq-connect must be a full URL with host and port "
+            f"(e.g. https://localhost:4080/moq); got {connect!r}"
+        )
+        return False
+    client_host = parsed.hostname
+    client_port = parsed.port
+    client_path = parsed.path or DEFAULT_MOQ_PATH
+
+    has_cert = bool(args.moq_tls_cert)
+    has_key = bool(args.moq_tls_key)
+    has_generate = bool(args.moq_tls_generate)
+
+    if args.moq_serve:
+        # Server mode.
+        if args.moq_connect is not None:
+            logger.warning(
+                "--moq-connect is ignored in server mode (use --moq-bind to set the listen address)"
+            )
+        if args.moq_tls_insecure:
+            logger.warning(
+                "--moq-tls-insecure is ignored in server mode "
+                "(server-side TLS is set via --moq-tls-cert or --moq-tls-generate)"
+            )
+        if has_cert != has_key:
+            logger.error(
+                "server mode requires both --moq-tls-cert AND --moq-tls-key "
+                "(or use --moq-tls-generate <hostname> for a self-signed dev cert)"
+            )
+            return False
+        if (has_cert and has_key) and has_generate:
+            logger.warning(
+                "--moq-tls-generate is ignored — using --moq-tls-cert/--moq-tls-key instead"
+            )
+        if not (has_cert and has_key) and not has_generate:
+            logger.error(
+                "server mode (--moq-serve) requires TLS configuration: "
+                "pass --moq-tls-cert and --moq-tls-key for a CA-signed cert, "
+                "or --moq-tls-generate <hostname> for a self-signed dev cert"
+            )
+            return False
+
+        bind = args.moq_bind or DEFAULT_MOQ_SERVE_BIND
+        try:
+            bind_port = _parse_bind_port(bind)
+        except ValueError as e:
+            logger.error(str(e))
+            return False
+
+        # Hostname the browser uses to reach the bot. In dev with
+        # --moq-tls-generate, that's the cert hostname. With a CA-signed
+        # cert, fall back to localhost (operator can patch via env / code).
+        tls_host = args.moq_tls_generate or "localhost"
+
+        args.moq_bind = bind
+        args.moq_host = tls_host
+        args.moq_port = bind_port
+        args.moq_path = DEFAULT_MOQ_PATH
+        args.moq_tls_host = tls_host
+    else:
+        # Client mode.
+        if has_generate:
+            logger.warning("--moq-tls-generate is ignored — only used in server mode")
+        if has_key and not has_cert:
+            logger.error("--moq-tls-key requires --moq-tls-cert")
+            return False
+        if has_key and has_cert:
+            logger.warning(
+                "--moq-tls-key is ignored in client mode (--moq-tls-cert is used for "
+                "self-signed cert fingerprint pinning only)"
+            )
+
+        args.moq_host = client_host
+        args.moq_port = client_port
+        args.moq_path = client_path
+        args.moq_tls_host = client_host
+
+    return True
 
 
 def _cert_hash_from_pem(path: str) -> str | None:
     """Compute the base64 SHA-256 of a PEM-encoded cert on disk.
 
-    Used in client mode when ``--moq-cert`` is set and we need the
+    Used in client mode when ``--moq-tls-cert`` is set and we need the
     fingerprint to send to the browser for WebTransport pinning.
     """
     try:
@@ -67,20 +177,20 @@ def _build_moq_client_config(
 
     In serve mode the bot just minted (or loaded) its own cert; we use
     the fingerprint it reported (passed via ``cert_fingerprints``).
-    Otherwise we fall back to the PEM file at ``--moq-cert``.
+    Otherwise we fall back to the PEM file at ``--moq-tls-cert``.
 
     Track names aren't pinned here — the bot publishes a catalog at
     runtime and the browser reads whatever it advertises (codec, sample
     rate, channel count, track name). Lets us add tracks (video,
     screen-share) without a server-side config update.
     """
-    # note this must be set ONLY if a self-signed certificate is used.
-    # It purposely doesn't work with valid TLS certficates.
+    # certHash must be set ONLY for self-signed certs. It purposely
+    # doesn't work with valid CA-signed TLS certificates.
     cert_hash: str | None = None
     if args.moq_serve and cert_fingerprints:
         cert_hash = _hex_to_b64(cert_fingerprints[0])
-    elif getattr(args, "moq_cert", None):
-        cert_hash = _cert_hash_from_pem(args.moq_cert)
+    elif getattr(args, "moq_tls_cert", None):
+        cert_hash = _cert_hash_from_pem(args.moq_tls_cert)
 
     # WebTransport always uses HTTPS — even for self-signed dev relays,
     # the cert is pinned via `certHash` below.

@@ -84,7 +84,8 @@ To run locally:
 - Daily (direct, testing only): ``python bot.py -d``
 - ESP32: ``python bot.py -t webrtc --esp32 --host 192.168.1.100``
 - Exotel: ``python bot.py -t exotel`` (no proxy needed, but ngrok connection to HTTP 7860 is required)
-- MOQ: `python bot.py -t moq --moq-host relay.example.com --moq-insecure`
+- MOQ (dial a relay): ``python bot.py -t moq --moq-connect https://relay.example.com:4080/moq``
+- MOQ (bot is the server, local dev): ``python bot.py -t moq --moq-serve --moq-tls-generate localhost``
 - Telephony: ``python bot.py -t twilio -x your_username.ngrok.io``
 - WebRTC only: ``python bot.py -t webrtc``
 - WhatsApp: ``python bot.py --whatsapp``
@@ -112,7 +113,12 @@ import aiohttp
 from fastapi.responses import FileResponse, Response
 from loguru import logger
 
-from pipecat.runner.moq import _build_moq_client_config, _cert_hash_from_pem, _hex_to_b64
+from pipecat.runner.moq import (
+    DEFAULT_MOQ_CONNECT,
+    DEFAULT_MOQ_SERVE_BIND,
+    _build_moq_client_config,
+    _validate_moq_args,
+)
 from pipecat.runner.types import (
     DailyRunnerArguments,
     EvalRunnerArguments,
@@ -393,10 +399,9 @@ def _print_startup_message(args: argparse.Namespace):
         else:
             print(f"   → Open: {_runner_url(args)}")
             if args.moq_serve:
-                bind = args.moq_serve_bind or f"[::]:{args.moq_port}"
-                print(f"   → MoQ server: bot serving on {bind} (no separate relay needed)")
+                print(f"   → MoQ server: bot serving on {args.moq_bind} (no separate relay needed)")
             else:
-                print(f"   → Relay: {args.moq_host}:{args.moq_port}")
+                print(f"   → Relay: {args.moq_host}:{args.moq_port}{args.moq_path}")
             print(f"   → Namespace: {args.moq_namespace}")
     print()
 
@@ -760,12 +765,12 @@ def _setup_unified_start_route(
                 namespace=namespace,
                 participant_id=args.moq_bot_id,
                 peer_id=args.moq_client_id,
-                verify_ssl=not args.moq_insecure,
+                verify_ssl=not args.moq_tls_insecure,
                 serve=args.moq_serve,
-                serve_bind=args.moq_serve_bind,
-                serve_tls_host=args.moq_host,
-                serve_tls_cert=args.moq_cert,
-                serve_tls_key=getattr(args, "moq_key", None),
+                serve_bind=args.moq_bind,
+                serve_tls_host=args.moq_tls_host,
+                serve_tls_cert=args.moq_tls_cert,
+                serve_tls_key=args.moq_tls_key,
                 body=body,
                 session_id=session_id,
                 ready_event=ready_event,
@@ -1578,24 +1583,43 @@ def main(parser: argparse.ArgumentParser | None = None):
         ),
     )
 
-    # MOQ-specific arguments
+    # MOQ-specific arguments.
+    #
+    # Mode is selected by --moq-serve:
+    #   client (default): bot dials a relay at --moq-connect
+    #   server (--moq-serve): bot binds its own UDP socket at --moq-bind and
+    #                         needs --moq-tls-cert/--moq-tls-key (prod) or
+    #                         --moq-tls-generate <hostname> (dev).
     parser.add_argument(
-        "--moq-host",
+        "--moq-connect",
         type=str,
-        default="localhost",
-        help="MOQ relay host address (default: localhost)",
+        default=None,
+        metavar="URL",
+        help=(
+            f"Client mode: relay URL the bot dials (default: {DEFAULT_MOQ_CONNECT}). "
+            "Format: <scheme>://<host>:<port><path>. Ignored when --moq-serve is set."
+        ),
     )
     parser.add_argument(
-        "--moq-port",
-        type=int,
-        default=4080,
-        help="MOQ relay port (default: 4080)",
+        "--moq-bind",
+        type=str,
+        default=None,
+        metavar="ADDR:PORT",
+        help=(
+            f"Local socket bind address. Server mode default: {DEFAULT_MOQ_SERVE_BIND}. "
+            "Client mode: ephemeral if omitted."
+        ),
     )
     parser.add_argument(
-        "--moq-path",
-        type=str,
-        default="/moq",
-        help="MOQ endpoint path (default: /moq)",
+        "--moq-serve",
+        action="store_true",
+        default=False,
+        help=(
+            "Run the bot as a MOQ server — the bot binds its own UDP socket and "
+            "accepts the browser's direct connection (no separate moq-relay needed). "
+            "Requires --moq-tls-cert/--moq-tls-key (production) or "
+            "--moq-tls-generate <hostname> (self-signed dev cert)."
+        ),
     )
     parser.add_argument(
         "--moq-namespace",
@@ -1616,50 +1640,41 @@ def main(parser: argparse.ArgumentParser | None = None):
         help="Peer client's participant id the bot subscribes to (default: client0)",
     )
     parser.add_argument(
-        "--moq-insecure",
-        action="store_true",
-        default=False,
-        help="Disable SSL certificate verification for MOQ relay",
-    )
-    parser.add_argument(
-        "--moq-cert",
+        "--moq-tls-cert",
         type=str,
         default=None,
+        metavar="PEM",
         help=(
             "Path to a PEM-encoded TLS certificate chain. In client mode, the "
             "fingerprint is sent to the browser for WebTransport cert pinning. "
-            "In serve mode (--moq-serve), used as the server's TLS cert "
-            "(requires --moq-key)."
+            "In server mode, used as the listening server's cert (pair with --moq-tls-key)."
         ),
     )
     parser.add_argument(
-        "--moq-key",
+        "--moq-tls-key",
         type=str,
         default=None,
-        help="Path to the PEM-encoded private key matching --moq-cert (serve mode).",
+        metavar="PEM",
+        help=("Path to the PEM-encoded private key matching --moq-tls-cert (server mode)."),
     )
     parser.add_argument(
-        "--moq-serve",
+        "--moq-tls-insecure",
         action="store_true",
         default=False,
         help=(
-            "Run the bot as a MOQ server — the bot binds its own UDP socket "
-            "and accepts the browser's direct connection. Removes the need "
-            "for a separate moq-relay process. If --moq-cert/--moq-key are "
-            "not provided, a self-signed cert is generated on startup."
+            "Dev only: disable TLS certificate verification when dialing the relay "
+            "(client mode). Ignored in server mode."
         ),
     )
     parser.add_argument(
-        "--moq-serve-bind",
+        "--moq-tls-generate",
         type=str,
         default=None,
-        help=("Address the MOQ server binds to (serve mode). Defaults to `[::]:<--moq-port>`."),
-    )
-    parser.add_argument(
-        "--moq-web-port",
-        type=int,
-        default=None,
-        help="MOQ relay WebTransport port for browser clients (defaults to --moq-port)",
+        metavar="HOSTNAME",
+        help=(
+            "Server mode, dev only: generate a self-signed TLS cert for HOSTNAME "
+            "(e.g. localhost). Mutually exclusive with --moq-tls-cert/--moq-tls-key."
+        ),
     )
 
     args = parser.parse_args()
@@ -1675,6 +1690,11 @@ def main(parser: argparse.ArgumentParser | None = None):
         else:
             logger.error("--direct flag only works with Daily transport (-t daily)")
             return
+
+    # Resolve MoQ args (parses --moq-connect, applies serve-mode defaults,
+    # warns on conflicting flags). Stashes derived host/port/path/bind on `args`.
+    if args.transport == "moq" and not _validate_moq_args(args):
+        return
 
     # Validate ESP32 requirements
     if args.esp32 and args.host == "localhost":
