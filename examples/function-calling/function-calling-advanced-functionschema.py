@@ -4,25 +4,21 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Demonstration of bundling a handler on a ``FunctionSchema``.
+"""Advanced: defining a tool with an explicit ``FunctionSchema``.
 
-A ``FunctionSchema`` can carry the ``handler`` that runs when the LLM calls it.
-When it does, the LLM service registers that handler automatically wherever the
-schema is advertised (in an ``LLMContext`` or via an ``LLMSetToolsFrame``), so
-there's no separate ``llm.register_function(...)`` call to keep in sync.
+Direct functions (see ``function-calling-direct.py``) are the preferred way to
+define a tool: one async function is both the handler and the schema, which
+Pipecat derives from its signature and docstring. Reach for an explicit
+``FunctionSchema`` only when you need control the direct-function generator
+can't give you — for example a strict ``enum`` constraint (used below), some
+other JSON-schema detail it doesn't emit, or a handler that isn't shaped like a
+direct function.
 
-This sits between the two other ways to define a tool:
-
-- A **direct function** (see ``function-calling-direct.py``) derives its whole
-  schema from the function's signature and docstring — least boilerplate, but
-  the schema is implicit.
-- ``register_function`` pairs a hand-written ``FunctionSchema`` with a handler in
-  a separate call — full control over the schema, but the wiring lives apart
-  from the schema and is easy to forget (see ``function-calling-missing-handler.py``).
-
-Bundling the handler on the ``FunctionSchema`` gives you the explicit schema
-(handy when you want precise control, e.g. an ``enum``) while keeping the
-handler attached to it — the function and its advertisement travel together.
+A ``FunctionSchema`` spells out the tool's name, description, and parameters by
+hand. Bundle the ``handler`` that runs when the LLM calls it on the schema, then
+list the schema in ``LLMContext(tools=[...])`` exactly as you would a direct
+function: Pipecat auto-registers the handler wherever the schema is advertised
+(an ``LLMContext`` or an ``LLMSetToolsFrame``).
 
 Uses the OpenAI LLM service with defaults. Swap to another provider to validate
 this behavior elsewhere.
@@ -69,10 +65,8 @@ async def fetch_current_weather(params: FunctionCallParams):
     await params.result_callback({"conditions": "nice", "temperature": "75"})
 
 
-# The schema carries its own handler, so listing it in the context is all the
-# wiring needed — no separate llm.register_function() call. Because the schema is
-# written out explicitly, we get precise control over the parameters (here, a
-# `format` enum) that a direct function would have to infer.
+# Writing the schema out explicitly gives precise control over the parameters
+# (here, a `format` enum) that a direct function would have to infer.
 weather_function = FunctionSchema(
     name="get_current_weather",
     description="Get the current weather",
@@ -143,8 +137,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_function_calls_started(service, function_calls):
         await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
 
-    # The schema carries its handler, so advertising it here registers the
-    # handler automatically — no llm.register_function() call needed.
     context = LLMContext(tools=[weather_function])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
