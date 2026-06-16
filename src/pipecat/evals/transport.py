@@ -6,7 +6,7 @@
 
 """WebSocket server transport for the eval harness.
 
-A subclass of :class:`~pipecat.transports.websocket.server.WebsocketServerTransport`
+A subclass of :class:`~pipecat.transports.websocket.server.SingleClientWebsocketServerTransport`
 that adds eval-only behavior driven by per-connection query flags the harness
 sets:
 
@@ -65,8 +65,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transports.websocket.server import (
-    WebsocketServerInputTransport,
-    WebsocketServerTransport,
+    SingleClientWebsocketServerInputTransport,
+    SingleClientWebsocketServerTransport,
 )
 
 SKIP_TTS_QUERY_PARAM = "skip_tts"
@@ -205,7 +205,7 @@ class EvalMicrophone:
             # utterance gap-free after a late wake-up.
 
 
-class EvalWebsocketServerInputTransport(WebsocketServerInputTransport):
+class EvalWebsocketServerInputTransport(SingleClientWebsocketServerInputTransport):
     """Input transport that plays a virtual mic and serves the harness's images.
 
     Audio: the harness sends each user utterance as a few large ``raw-audio``
@@ -315,7 +315,7 @@ class EvalWebsocketServerInputTransport(WebsocketServerInputTransport):
         )
 
 
-class EvalWebsocketServerTransport(WebsocketServerTransport):
+class EvalWebsocketServerTransport(SingleClientWebsocketServerTransport):
     """WebSocket server transport used by the eval harness (see the module docstring)."""
 
     def __init__(self, *args, **kwargs):
@@ -325,7 +325,7 @@ class EvalWebsocketServerTransport(WebsocketServerTransport):
         self._record_output = None
         self._record_path: str | None = None
 
-    def input(self) -> WebsocketServerInputTransport:
+    def input(self) -> SingleClientWebsocketServerInputTransport:
         """Return an input transport that can serve harness-provided images."""
         if not self._input:
             self._input = EvalWebsocketServerInputTransport(
@@ -343,9 +343,13 @@ class EvalWebsocketServerTransport(WebsocketServerTransport):
         if self._record_output is None:
             from pipecat.pipeline.pipeline import Pipeline
             from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
-            from pipecat.transports.websocket.server import WebsocketServerOutputTransport
+            from pipecat.transports.websocket.server import (
+                SingleClientWebsocketServerOutputTransport,
+            )
 
-            real = WebsocketServerOutputTransport(self, self._params, name=self._output_name)
+            real = SingleClientWebsocketServerOutputTransport(
+                self, self._params, name=self._output_name
+            )
             self._output = real
             self._audio_buffer = AudioBufferProcessor()
             self._record_output = Pipeline([real, self._audio_buffer])

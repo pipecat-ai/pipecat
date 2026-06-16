@@ -28,7 +28,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.transports.websocket.server import WebsocketServerParams
+from pipecat.transports.websocket.server import SingleClientWebsocketServerParams
 from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
@@ -55,7 +55,7 @@ smart_turn_model_path = os.environ["LOCAL_SMART_TURN_MODEL_PATH"]
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
-    "eval": lambda: WebsocketServerParams(
+    "eval": lambda: SingleClientWebsocketServerParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),

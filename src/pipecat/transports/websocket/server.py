@@ -41,11 +41,12 @@ from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.security.allowed_origins import default_allowed_origins
 
 
-class WebsocketServerParams(TransportParams):
-    """Configuration parameters for WebSocket server transport.
+class SingleClientWebsocketServerParams(TransportParams):
+    """Configuration parameters for :class:`SingleClientWebsocketServerTransport`.
 
     Parameters:
         add_wav_header: Whether to add WAV headers to audio frames.
@@ -63,7 +64,7 @@ class WebsocketServerParams(TransportParams):
     allowed_origins: list[str] = Field(default_factory=default_allowed_origins)
 
 
-class WebsocketServerCallbacks(BaseModel):
+class SingleClientWebsocketServerCallbacks(BaseModel):
     """Callback functions for WebSocket server events.
 
     Parameters:
@@ -79,7 +80,7 @@ class WebsocketServerCallbacks(BaseModel):
     on_websocket_ready: Callable[[], Awaitable[None]]
 
 
-class WebsocketServerInputTransport(BaseInputTransport):
+class SingleClientWebsocketServerInputTransport(BaseInputTransport):
     """WebSocket server input transport for receiving client data.
 
     Handles incoming WebSocket connections, message processing, and client
@@ -91,8 +92,8 @@ class WebsocketServerInputTransport(BaseInputTransport):
         transport: BaseTransport,
         host: str,
         port: int,
-        params: WebsocketServerParams,
-        callbacks: WebsocketServerCallbacks,
+        params: SingleClientWebsocketServerParams,
+        callbacks: SingleClientWebsocketServerCallbacks,
         **kwargs,
     ):
         """Initialize the WebSocket server input transport.
@@ -191,9 +192,17 @@ class WebsocketServerInputTransport(BaseInputTransport):
     async def _client_handler(self, websocket: websockets.WebSocketServerProtocol):
         """Handle individual client connections and message processing."""
         logger.info(f"New client connection from {websocket.remote_address}")
-        if self._websocket:
-            await self._websocket.close()
-            logger.warning("Only one client connected, using new connection")
+
+        # This transport only serves a single client at a time. If we already
+        # have a live connection, reject the new one and keep the existing
+        # client. The current connection's reference is cleared when it
+        # disconnects (or something goes wrong), so the next client can connect.
+        if self._websocket and self._websocket.state is State.OPEN:
+            logger.warning(
+                f"Rejecting client {websocket.remote_address}: a client is already connected"
+            )
+            await websocket.close(code=1013, reason="Server already has a connected client")
+            return
 
         self._websocket = websocket
 
@@ -251,14 +260,16 @@ class WebsocketServerInputTransport(BaseInputTransport):
             raise
 
 
-class WebsocketServerOutputTransport(BaseOutputTransport):
+class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
     """WebSocket server output transport for sending data to clients.
 
     Handles outgoing frame serialization, audio streaming with timing control,
     and client connection management for WebSocket communication.
     """
 
-    def __init__(self, transport: BaseTransport, params: WebsocketServerParams, **kwargs):
+    def __init__(
+        self, transport: BaseTransport, params: SingleClientWebsocketServerParams, **kwargs
+    ):
         """Initialize the WebSocket server output transport.
 
         Args:
@@ -290,9 +301,10 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
         Args:
             websocket: The WebSocket connection to set as active, or None to clear.
         """
-        if self._websocket:
-            if websocket:
-                logger.warning("Only one client allowed, using new connection")
+        # The input transport gates new connections, so by the time we set a new
+        # client here the previous one (if any) is already gone. Close any stale
+        # reference just in case before tracking the new connection.
+        if self._websocket and self._websocket is not websocket:
             await self._websocket.close()
         self._websocket = websocket
 
@@ -423,12 +435,18 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
             self._next_send_time += self._send_interval
 
 
-class WebsocketServerTransport(BaseTransport):
-    """WebSocket server transport for bidirectional real-time communication.
+class SingleClientWebsocketServerTransport(BaseTransport):
+    """WebSocket server transport that serves a single client at a time.
 
     Provides a complete WebSocket server implementation with separate input and
     output transports, client connection management, and event handling for
     real-time audio and data streaming applications.
+
+    Only one client can be connected at a time. While a client is connected, new
+    connection attempts are rejected and the existing client is kept; once that
+    client disconnects, the server accepts a new one. This makes it well suited
+    for local development and single-session bots, but not for serving multiple
+    concurrent clients.
 
     Event handlers available:
 
@@ -446,7 +464,7 @@ class WebsocketServerTransport(BaseTransport):
 
     def __init__(
         self,
-        params: WebsocketServerParams,
+        params: SingleClientWebsocketServerParams,
         host: str = "localhost",
         port: int = 8765,
         input_name: str | None = None,
@@ -466,14 +484,14 @@ class WebsocketServerTransport(BaseTransport):
         self._port = port
         self._params = params
 
-        self._callbacks = WebsocketServerCallbacks(
+        self._callbacks = SingleClientWebsocketServerCallbacks(
             on_client_connected=self._on_client_connected,
             on_client_disconnected=self._on_client_disconnected,
             on_session_timeout=self._on_session_timeout,
             on_websocket_ready=self._on_websocket_ready,
         )
-        self._input: WebsocketServerInputTransport | None = None
-        self._output: WebsocketServerOutputTransport | None = None
+        self._input: SingleClientWebsocketServerInputTransport | None = None
+        self._output: SingleClientWebsocketServerOutputTransport | None = None
         self._websocket: websockets.WebSocketServerProtocol | None = None
 
         # Register supported handlers. The user will only be able to register
@@ -483,26 +501,26 @@ class WebsocketServerTransport(BaseTransport):
         self._register_event_handler("on_session_timeout")
         self._register_event_handler("on_websocket_ready")
 
-    def input(self) -> WebsocketServerInputTransport:
+    def input(self) -> SingleClientWebsocketServerInputTransport:
         """Get the input transport for receiving client data.
 
         Returns:
             The WebSocket server input transport instance.
         """
         if not self._input:
-            self._input = WebsocketServerInputTransport(
+            self._input = SingleClientWebsocketServerInputTransport(
                 self, self._host, self._port, self._params, self._callbacks, name=self._input_name
             )
         return self._input
 
-    def output(self) -> WebsocketServerOutputTransport:
+    def output(self) -> SingleClientWebsocketServerOutputTransport:
         """Get the output transport for sending data to clients.
 
         Returns:
             The WebSocket server output transport instance.
         """
         if not self._output:
-            self._output = WebsocketServerOutputTransport(
+            self._output = SingleClientWebsocketServerOutputTransport(
                 self, self._params, name=self._output_name
             )
         return self._output
@@ -515,7 +533,7 @@ class WebsocketServerTransport(BaseTransport):
             if self._input:
                 await self._input.push_frame(ClientConnectedFrame())
         else:
-            logger.error("A WebsocketServerTransport output is missing in the pipeline")
+            logger.error("A SingleClientWebsocketServerTransport output is missing in the pipeline")
 
     async def _on_client_disconnected(self, websocket):
         """Handle client disconnection events."""
@@ -523,7 +541,7 @@ class WebsocketServerTransport(BaseTransport):
             await self._output.set_client_connection(None)
             await self._call_event_handler("on_client_disconnected", websocket)
         else:
-            logger.error("A WebsocketServerTransport output is missing in the pipeline")
+            logger.error("A SingleClientWebsocketServerTransport output is missing in the pipeline")
 
     async def _on_session_timeout(self, websocket):
         """Handle client session timeout events."""
@@ -532,3 +550,79 @@ class WebsocketServerTransport(BaseTransport):
     async def _on_websocket_ready(self):
         """Handle WebSocket server ready events."""
         await self._call_event_handler("on_websocket_ready")
+
+
+@deprecated(
+    "`WebsocketServerParams` is deprecated since 1.4.0 and will be removed in 2.0.0. "
+    "Use `SingleClientWebsocketServerParams` instead."
+)
+class WebsocketServerParams(SingleClientWebsocketServerParams):
+    """Deprecated alias for :class:`SingleClientWebsocketServerParams`.
+
+    .. deprecated:: 1.4.0
+        Use :class:`SingleClientWebsocketServerParams` instead. Will be removed
+        in 2.0.0.
+    """
+
+    pass
+
+
+@deprecated(
+    "`WebsocketServerCallbacks` is deprecated since 1.4.0 and will be removed in 2.0.0. "
+    "Use `SingleClientWebsocketServerCallbacks` instead."
+)
+class WebsocketServerCallbacks(SingleClientWebsocketServerCallbacks):
+    """Deprecated alias for :class:`SingleClientWebsocketServerCallbacks`.
+
+    .. deprecated:: 1.4.0
+        Use :class:`SingleClientWebsocketServerCallbacks` instead. Will be
+        removed in 2.0.0.
+    """
+
+    pass
+
+
+@deprecated(
+    "`WebsocketServerInputTransport` is deprecated since 1.4.0 and will be removed in 2.0.0. "
+    "Use `SingleClientWebsocketServerInputTransport` instead."
+)
+class WebsocketServerInputTransport(SingleClientWebsocketServerInputTransport):
+    """Deprecated alias for :class:`SingleClientWebsocketServerInputTransport`.
+
+    .. deprecated:: 1.4.0
+        Use :class:`SingleClientWebsocketServerInputTransport` instead. Will be
+        removed in 2.0.0.
+    """
+
+    pass
+
+
+@deprecated(
+    "`WebsocketServerOutputTransport` is deprecated since 1.4.0 and will be removed in 2.0.0. "
+    "Use `SingleClientWebsocketServerOutputTransport` instead."
+)
+class WebsocketServerOutputTransport(SingleClientWebsocketServerOutputTransport):
+    """Deprecated alias for :class:`SingleClientWebsocketServerOutputTransport`.
+
+    .. deprecated:: 1.4.0
+        Use :class:`SingleClientWebsocketServerOutputTransport` instead. Will be
+        removed in 2.0.0.
+    """
+
+    pass
+
+
+@deprecated(
+    "`WebsocketServerTransport` is deprecated since 1.4.0 and will be removed in 2.0.0. "
+    "Use `SingleClientWebsocketServerTransport` instead."
+)
+class WebsocketServerTransport(SingleClientWebsocketServerTransport):
+    """Deprecated alias for :class:`SingleClientWebsocketServerTransport`.
+
+    .. deprecated:: 1.4.0
+        Use :class:`SingleClientWebsocketServerTransport` instead. The renamed
+        class makes it explicit that the server handles a single client at a
+        time. Will be removed in 2.0.0.
+    """
+
+    pass

@@ -1315,7 +1315,7 @@ async def _run_daily_direct(args: argparse.Namespace):
 async def _run_eval(args: argparse.Namespace):
     """Run a bot with the eval transport (no FastAPI server).
 
-    The eval transport is a ``WebsocketServerTransport`` speaking RTVI that
+    The eval transport is a ``SingleClientWebsocketServerTransport`` speaking RTVI that
     hosts its own local WebSocket server for the harness to connect to. The
     dev runner here just constructs ``EvalRunnerArguments`` and invokes the bot
     function directly — no FastAPI routes are needed.

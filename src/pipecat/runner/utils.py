@@ -718,14 +718,14 @@ async def create_transport(
         # audio input.
         from pipecat.evals.serializer import RTVIEvalSerializer
         from pipecat.evals.transport import EvalWebsocketServerTransport
-        from pipecat.transports.websocket.server import WebsocketServerParams
+        from pipecat.transports.websocket.server import SingleClientWebsocketServerParams
 
         params = _get_transport_params("eval", transport_params)
-        if not isinstance(params, WebsocketServerParams):
+        if not isinstance(params, SingleClientWebsocketServerParams):
             raise ValueError(
-                "Eval transport params must be a WebsocketServerParams instance. "
+                "Eval transport params must be a SingleClientWebsocketServerParams instance. "
                 "Set transport_params['eval'] to a lambda returning "
-                "WebsocketServerParams(audio_in_enabled=True)."
+                "SingleClientWebsocketServerParams(audio_in_enabled=True)."
             )
         if params.serializer is None:
             params.serializer = RTVIEvalSerializer()

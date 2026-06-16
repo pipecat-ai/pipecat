@@ -807,15 +807,18 @@ def test_eval_transport_opt_in(temp_output_dir):
         ).generate(output_dir=temp_output_dir)
         return (path / "server" / "bot.py").read_text()
 
-    # Off by default: no eval entry, no WebsocketServerParams import.
+    # Off by default: no eval entry, no SingleClientWebsocketServerParams import.
     without = gen("eval-off", enable_eval=False)
     assert '"eval":' not in without
-    assert "WebsocketServerParams" not in without
+    assert "SingleClientWebsocketServerParams" not in without
 
     # Opted in: the eval entry and its import are generated, and the bot is valid.
     with_eval = gen("eval-on", enable_eval=True)
-    assert '"eval": lambda: WebsocketServerParams(' in with_eval
-    assert "from pipecat.transports.websocket.server import WebsocketServerParams" in with_eval
+    assert '"eval": lambda: SingleClientWebsocketServerParams(' in with_eval
+    assert (
+        "from pipecat.transports.websocket.server import SingleClientWebsocketServerParams"
+        in with_eval
+    )
     ast.parse(with_eval)  # raises if the generated bot has a syntax error
 
 
@@ -1026,7 +1029,7 @@ def test_bespoke_scenarios_local_fallback(temp_output_dir):
         # Local fallback: create_transport with the webrtc and eval entries.
         assert "transport_params = {" in bot
         assert '"webrtc": lambda: TransportParams(' in bot
-        assert '"eval": lambda: WebsocketServerParams(' in bot
+        assert '"eval": lambda: SingleClientWebsocketServerParams(' in bot
         assert "transport = await create_transport(runner_args, transport_params)" in bot
         assert "from pipecat.runner.utils import create_transport" in bot
 
@@ -1088,7 +1091,7 @@ def test_bespoke_eval_only_fallback(temp_output_dir):
     )
 
     assert _BODY_DISCRIMINATOR in bot
-    assert '"eval": lambda: WebsocketServerParams(' in bot
+    assert '"eval": lambda: SingleClientWebsocketServerParams(' in bot
     assert '"webrtc":' not in bot
     assert "transport = await create_transport(runner_args, transport_params)" in bot
 
@@ -1124,7 +1127,7 @@ def test_bespoke_local_fallback_realtime(temp_output_dir):
 
     assert _BODY_DISCRIMINATOR in bot
     assert '"webrtc": lambda: TransportParams(' in bot
-    assert '"eval": lambda: WebsocketServerParams(' in bot
+    assert '"eval": lambda: SingleClientWebsocketServerParams(' in bot
     assert "dialout_settings = None" in bot
     assert "if dialout_settings:" in bot
 

@@ -50,7 +50,7 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.transports.websocket.server import WebsocketServerParams
+from pipecat.transports.websocket.server import SingleClientWebsocketServerParams
 from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
 from pipecat.workers.runner import WorkerRunner
 
@@ -60,7 +60,7 @@ MAIN_NAME = "acme"
 
 
 transport_params = {
-    "eval": lambda: WebsocketServerParams(
+    "eval": lambda: SingleClientWebsocketServerParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),

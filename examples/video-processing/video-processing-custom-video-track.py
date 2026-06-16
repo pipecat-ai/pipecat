@@ -36,7 +36,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.transports.daily.transport import DailyCustomVideoTrackParams, DailyParams
-from pipecat.transports.websocket.server import WebsocketServerParams
+from pipecat.transports.websocket.server import SingleClientWebsocketServerParams
 from pipecat.workers.runner import WorkerRunner
 
 WIDTH = 320
@@ -44,7 +44,7 @@ HEIGHT = 240
 FPS = 30
 
 transport_params = {
-    "eval": lambda: WebsocketServerParams(
+    "eval": lambda: SingleClientWebsocketServerParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
