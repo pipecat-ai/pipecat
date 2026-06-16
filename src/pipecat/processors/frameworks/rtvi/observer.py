@@ -465,7 +465,7 @@ class RTVIObserver(BaseObserver):
         elif isinstance(frame, AggregatedTextFrame) and (
             self._params.bot_output_enabled or self._params.bot_tts_enabled
         ):
-            if isinstance(frame, TTSTextFrame) and not isinstance(src, BaseOutputTransport):
+            if not isinstance(src, BaseOutputTransport):
                 # This check is to make sure we handle the frame when it has gone
                 # through the transport and has correct timing.
                 mark_as_seen = False
