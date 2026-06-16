@@ -276,7 +276,7 @@ class STTService(AIService):
         """
         return Language(language)
 
-    async def process_assistant_turn(self, text: str, interrupted: bool) -> None:
+    async def process_assistant_turn(self, text: str) -> None:
         """Called when the assistant's turn completes with the aggregated reply text.
 
         Override in subclasses to react to each completed bot reply — for
@@ -285,7 +285,6 @@ class STTService(AIService):
 
         Args:
             text: The assistant's aggregated spoken text for this turn.
-            interrupted: Whether the turn was cut short by an interruption.
         """
         pass
 
@@ -450,7 +449,7 @@ class STTService(AIService):
             await self._reset_stt_ttfb_state()
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMContextAssistantTurnFrame):
-            await self.process_assistant_turn(frame.text, frame.interrupted)
+            await self.process_assistant_turn(frame.text)
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)

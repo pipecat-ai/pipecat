@@ -2031,7 +2031,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 LLMContextAssistantTurnFrame,
                 text=aggregation,
                 timestamp=self._assistant_turn_start_timestamp,
-                interrupted=interrupted,
             )
 
         self._assistant_turn_start_timestamp = ""

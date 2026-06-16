@@ -511,12 +511,10 @@ class LLMContextAssistantTurnFrame(DataFrame):
     Parameters:
         text: The assistant's aggregated spoken text for this turn.
         timestamp: ISO-8601 timestamp of when the assistant turn started.
-        interrupted: Whether the turn was cut short by an interruption.
     """
 
     text: str
     timestamp: str
-    interrupted: bool = False
 
 
 @dataclass
