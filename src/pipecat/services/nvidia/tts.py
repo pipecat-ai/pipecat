@@ -20,11 +20,11 @@ import os
 import queue
 import textwrap
 import threading
-from collections.abc import AsyncGenerator, Iterable, Mapping
+from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, TypeAlias
+from typing import Any
 
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -98,10 +98,11 @@ class NvidiaTTSSettings(TTSSettings):
 
 
 @dataclass
-class _StitchedSynthesisState:
-    """Runtime state for one active stitched synthesis stream."""
+class _SynthesisState:
+    """Runtime state for the active synthesis manager."""
 
     context_id: str
+    mode: NvidiaTTSSynthesisMode
     text_queue: queue.Queue
     response_queue: asyncio.Queue
     stop_event: threading.Event
@@ -110,27 +111,16 @@ class _StitchedSynthesisState:
     response_task: asyncio.Task | None = None
 
 
-@dataclass
-class _PerSentenceSynthesisState:
-    """Runtime state for one per-sentence synthesis request."""
-
-    context_id: str
-    response_queue: asyncio.Queue
-    stop_event: threading.Event
-    rpc_call: Any = None
-    synth_task: asyncio.Task | None = None
-
-
-_SynthesisCallState: TypeAlias = _StitchedSynthesisState | _PerSentenceSynthesisState
+_RECONNECT = object()
+_CLOSE_STREAM = object()
+_REQUEST_DONE = object()
 
 
 class NvidiaTTSService(TTSService):
     """NVIDIA TTS service.
 
-    Provides high-quality text-to-speech synthesis using NVIDIA TTS
-    cloud-based models. Supports multiple voices, languages, and configurable
+    Provides high-quality text-to-speech synthesis using both locally deployed and cloud-based NVIDIA TTS models. Supports multiple voices, languages, and configurable
     quality settings.
-
     """
 
     Settings = NvidiaTTSSettings
@@ -272,9 +262,8 @@ class NvidiaTTSService(TTSService):
         self._service = None
         self._config = None
 
-        # Runtime state for the active streaming turn.
-        self._stitched_stream_state: _StitchedSynthesisState | None = None
-        self._per_sentence_state: _PerSentenceSynthesisState | None = None
+        # Runtime state for the active synthesis manager.
+        self._synthesis_state: _SynthesisState | None = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate metrics.
@@ -411,50 +400,44 @@ class NvidiaTTSService(TTSService):
 
     def _active_context_ids(self) -> tuple[str, ...]:
         """Return the active audio context IDs owned by in-flight synthesis."""
-        context_ids: list[str] = []
-        if self._stitched_stream_state is not None:
-            context_ids.append(self._stitched_stream_state.context_id)
-        if self._per_sentence_state is not None:
-            context_ids.append(self._per_sentence_state.context_id)
-        return tuple(dict.fromkeys(context_ids))
+        if self._synthesis_state is None:
+            return ()
+        return (self._synthesis_state.context_id,)
 
-    def _start_synthesis_stream(self, context_id: str):
-        """Start a persistent gRPC synthesis stream for the current turn.
-
-        Creates a queue-backed generator that feeds text to
-        ``synthesize_online``. The gRPC stream stays open until a ``None``
-        sentinel is pushed into the queue.
-        """
-        state = _StitchedSynthesisState(
+    def _start_synthesis_state(self, context_id: str, mode: NvidiaTTSSynthesisMode):
+        """Start the active synthesis manager for the requested mode."""
+        state = _SynthesisState(
             context_id=context_id,
+            mode=mode,
             text_queue=queue.Queue(),
             response_queue=asyncio.Queue(),
             stop_event=threading.Event(),
         )
-        self._stitched_stream_state = state
-        logger.debug(f"{self}: starting synthesis stream")
+        self._synthesis_state = state
+        logger.debug(f"{self}: starting {mode} synthesis state")
 
         state.synth_task = self.create_task(
-            self._stitched_synth_task_handler(state), name="nvidia-tts-synth"
+            asyncio.to_thread(self._synthesis_handler, state),
+            name="nvidia-tts-synth",
         )
-        state.response_task = self.create_task(
-            self._process_stitched_responses(state), name="nvidia-tts-response"
-        )
+        if mode == NvidiaTTSSynthesisMode.STITCHED:
+            state.response_task = self.create_task(
+                self._process_stitched_responses(state), name="nvidia-tts-response"
+            )
 
-    def _request_generator_from_texts(
-        self, texts: Iterable[str], stop_event: threading.Event
-    ) -> Any:
-        """Create a blocking generator of synthesis requests for gRPC threads."""
-        base_req = self._build_base_request()
+    async def _ensure_synthesis_state(
+        self, context_id: str, mode: NvidiaTTSSynthesisMode
+    ) -> _SynthesisState:
+        """Return an active synthesis manager for the given context and mode."""
+        state = self._synthesis_state
+        if state is not None and state.context_id == context_id and state.mode == mode:
+            return state
 
-        def request_generator():
-            for text in texts:
-                if stop_event.is_set():
-                    break
-                base_req.text = text
-                yield base_req
+        await self._abort_all_synthesis()
+        self._start_synthesis_state(context_id, mode)
 
-        return request_generator()
+        assert self._synthesis_state is not None
+        return self._synthesis_state
 
     def _build_base_request(self) -> rtts.SynthesizeSpeechRequest:
         """Build a reusable ``SynthesizeSpeechRequest`` with current settings."""
@@ -480,20 +463,18 @@ class NvidiaTTSService(TTSService):
     def _run_synthesis_call(
         self,
         requests: Any,
-        state: _SynthesisCallState,
-        mode: NvidiaTTSSynthesisMode,
+        state: _SynthesisState,
     ):
         """Run one blocking ``SynthesizeOnline`` gRPC call.
 
         Args:
             requests: Blocking iterator of ``SynthesizeSpeechRequest`` objects.
             state: Runtime state owning the active RPC call and response queue.
-            mode: Whether this call belongs to stitched or per-sentence synthesis.
         """
         event_loop = self.get_event_loop()
         error_label = (
             "gRPC stitched synthesis stream error"
-            if mode == NvidiaTTSSynthesisMode.STITCHED
+            if state.mode == NvidiaTTSSynthesisMode.STITCHED
             else "gRPC per-sentence synthesis request error"
         )
         try:
@@ -513,52 +494,51 @@ class NvidiaTTSService(TTSService):
                 asyncio.run_coroutine_threadsafe(state.response_queue.put(e), event_loop)
         finally:
             state.rpc_call = None
+            asyncio.run_coroutine_threadsafe(state.response_queue.put(_REQUEST_DONE), event_loop)
+
+    def _synthesis_handler(self, state: _SynthesisState):
+        """Process queued synthesis requests for stitched or per-sentence mode."""
+        try:
+            while not state.stop_event.is_set():
+                first_item = state.text_queue.get()
+                if first_item is _CLOSE_STREAM or state.stop_event.is_set():
+                    break
+                if first_item is _RECONNECT:
+                    continue
+
+                base_req = self._build_base_request()
+                close_reason = {"value": _RECONNECT}
+
+                def request_generator():
+                    current_item: str | object = first_item
+                    while True:
+                        if state.stop_event.is_set():
+                            close_reason["value"] = _CLOSE_STREAM
+                            return
+                        if current_item is _RECONNECT:
+                            close_reason["value"] = _RECONNECT
+                            return
+                        if current_item is _CLOSE_STREAM:
+                            close_reason["value"] = _CLOSE_STREAM
+                            return
+
+                        base_req.text = current_item
+                        yield base_req
+                        current_item = state.text_queue.get()
+
+                self._run_synthesis_call(request_generator(), state)
+                if close_reason["value"] is _CLOSE_STREAM:
+                    break
+        finally:
+            event_loop = self.get_event_loop()
             asyncio.run_coroutine_threadsafe(state.response_queue.put(None), event_loop)
 
-    def _stitched_synthesis_handler(self, state: _StitchedSynthesisState):
-        """Run the stitched ``SynthesizeOnline`` gRPC stream in a blocking call.
-
-        Uses a queue-backed generator to feed text chunks into a single
-        ``SynthesizeOnline`` call, enabling Magpie's cross-sentence stitching.
-        The explicit ``state`` argument keeps the handler bound to the stream
-        instance that spawned it, even if service-level state changes later.
-        """
-        base_req = self._build_base_request()
-
-        def request_generator():
-            while True:
-                if state.stop_event.is_set():
-                    break
-                text = state.text_queue.get()
-                if text is None or state.stop_event.is_set():
-                    break
-                base_req.text = text
-                yield base_req
-
-        self._run_synthesis_call(
-            request_generator(),
-            state,
-            mode=NvidiaTTSSynthesisMode.STITCHED,
-        )
-
-    async def _stitched_synth_task_handler(self, state: _StitchedSynthesisState):
-        """Wrap ``_stitched_synthesis_handler`` as an asyncio-managed task."""
-        await asyncio.to_thread(self._stitched_synthesis_handler, state)
-
-    def _per_sentence_synthesis_handler(self, texts: list[str], state: _PerSentenceSynthesisState):
-        """Run one blocking ``SynthesizeOnline`` call for a per-sentence request."""
-        self._run_synthesis_call(
-            self._request_generator_from_texts(texts, state.stop_event),
-            state,
-            mode=NvidiaTTSSynthesisMode.PER_SENTENCE,
-        )
-
-    def _cancel_rpc_call(self, state: _SynthesisCallState, mode: NvidiaTTSSynthesisMode):
+    def _cancel_rpc_call(self, state: _SynthesisState):
         """Best-effort cancellation of an in-flight gRPC call."""
         call = state.rpc_call
         cancel_label = (
             "stitched gRPC call"
-            if mode == NvidiaTTSSynthesisMode.STITCHED
+            if state.mode == NvidiaTTSSynthesisMode.STITCHED
             else "per-sentence gRPC call"
         )
         if call is not None and hasattr(call, "cancel"):
@@ -580,10 +560,12 @@ class NvidiaTTSService(TTSService):
         self._service = None
         self._config = None
 
-    async def _process_stitched_responses(self, state: _StitchedSynthesisState):
+    async def _process_stitched_responses(self, state: _SynthesisState):
         """Consume gRPC responses and append audio to the active audio context."""
         while True:
             item = await state.response_queue.get()
+            if item is _REQUEST_DONE:
+                continue
             if item is None:
                 if self.audio_context_available(state.context_id):
                     await self.remove_audio_context(state.context_id)
@@ -593,15 +575,15 @@ class NvidiaTTSService(TTSService):
                 # SynthesizeOnline raises, no further reliable audio is expected.
                 # Ignore stale or interruption-driven exceptions to avoid noisy
                 # errors during handoff to a new stream.
-                if self._stitched_stream_state is state and not state.stop_event.is_set():
+                if self._synthesis_state is state and not state.stop_event.is_set():
                     await self.push_error(f"{self} synthesis error: {item}")
                     if self.audio_context_available(state.context_id):
                         await self.remove_audio_context(state.context_id)
-                    self._stitched_stream_state = None
+                    self._synthesis_state = None
                 break
 
             # Stale stream responses must never leak into a newer stream context.
-            if self._stitched_stream_state is not state:
+            if self._synthesis_state is not state:
                 continue
 
             await self.stop_ttfb_metrics()
@@ -614,50 +596,36 @@ class NvidiaTTSService(TTSService):
             await self.append_to_audio_context(state.context_id, frame)
 
         # Finalize ownership once the stream drains naturally.
-        if self._stitched_stream_state is state and not state.stop_event.is_set():
-            self._stitched_stream_state = None
-
-    def _signal_stitched_synthesis_close(self, state: _StitchedSynthesisState):
-        """Signal the active synthesis request generator to close."""
-        state.text_queue.put(None)
+        if self._synthesis_state is state and not state.stop_event.is_set():
+            self._synthesis_state = None
 
     async def _abort_all_synthesis(self):
-        """Abort any active stitched or per-sentence synthesis work."""
-        stitched_state = self._stitched_stream_state
-        if stitched_state is not None:
-            stitched_state.stop_event.set()
+        """Abort any active synthesis work."""
+        state = self._synthesis_state
+        if state is None:
+            return
 
-            if stitched_state.response_task is not None:
-                await self.cancel_task(stitched_state.response_task)
-                stitched_state.response_task = None
+        state.stop_event.set()
 
-            while not stitched_state.text_queue.empty():
-                try:
-                    stitched_state.text_queue.get_nowait()
-                except queue.Empty:
-                    break
-            self._signal_stitched_synthesis_close(stitched_state)
+        if state.response_task is not None:
+            await self.cancel_task(state.response_task)
+            state.response_task = None
 
-            self._cancel_rpc_call(stitched_state, NvidiaTTSSynthesisMode.STITCHED)
+        while not state.text_queue.empty():
+            try:
+                state.text_queue.get_nowait()
+            except queue.Empty:
+                break
+        state.text_queue.put(_CLOSE_STREAM)
 
-            if stitched_state.synth_task is not None:
-                await self.cancel_task(stitched_state.synth_task)
-                stitched_state.synth_task = None
+        self._cancel_rpc_call(state)
 
-            if self._stitched_stream_state is stitched_state:
-                self._stitched_stream_state = None
+        if state.synth_task is not None:
+            await self.cancel_task(state.synth_task)
+            state.synth_task = None
 
-        per_sentence_state = self._per_sentence_state
-        if per_sentence_state is not None:
-            per_sentence_state.stop_event.set()
-            self._cancel_rpc_call(per_sentence_state, NvidiaTTSSynthesisMode.PER_SENTENCE)
-
-            if per_sentence_state.synth_task is not None:
-                await self.cancel_task(per_sentence_state.synth_task)
-                per_sentence_state.synth_task = None
-
-            if self._per_sentence_state is per_sentence_state:
-                self._per_sentence_state = None
+        if self._synthesis_state is state:
+            self._synthesis_state = None
 
     async def _ensure_audio_context_started(self, context_id: str) -> TTSStartedFrame | None:
         """Create the audio context if needed and start TTFB metrics once."""
@@ -675,9 +643,9 @@ class NvidiaTTSService(TTSService):
             context_id: The specific context to flush. If None, falls back to the
                 currently active context.
         """
-        state = self._stitched_stream_state
+        state = self._synthesis_state
         if state is not None:
-            self._signal_stitched_synthesis_close(state)
+            state.text_queue.put(_CLOSE_STREAM)
         await super().flush_audio(context_id)
 
     async def on_audio_context_interrupted(self, context_id: str):
@@ -754,15 +722,8 @@ class NvidiaTTSService(TTSService):
         if start_frame := await self._ensure_audio_context_started(context_id):
             yield start_frame
 
-        if self._stitched_stream_state is None:
-            self._start_synthesis_stream(context_id)
-            logger.trace(f"{self}: Started synthesis stream for context {context_id}")
-
         logger.debug(f"{self}: Generating TTS [{text}]")
-
-        state = self._stitched_stream_state
-        if state is None:
-            raise RuntimeError("Synthesis stream not started")
+        state = await self._ensure_synthesis_state(context_id, NvidiaTTSSynthesisMode.STITCHED)
 
         for chunk in self._split_text_into_chunks(text):
             if any(c.isalnum() for c in chunk):
@@ -774,7 +735,7 @@ class NvidiaTTSService(TTSService):
     async def _run_tts_per_sentence(
         self, text: str, context_id: str
     ) -> AsyncGenerator[Frame | None, None]:
-        """Open one synthesis request per ``run_tts`` call and yield audio directly."""
+        """Open one synthesis request per queued chunk and yield audio directly."""
         if start_frame := await self._ensure_audio_context_started(context_id):
             yield start_frame
 
@@ -786,22 +747,28 @@ class NvidiaTTSService(TTSService):
         if not chunks:
             return
 
-        state = _PerSentenceSynthesisState(
-            context_id=context_id,
-            response_queue=asyncio.Queue(),
-            stop_event=threading.Event(),
+        state = await self._ensure_synthesis_state(
+            context_id, NvidiaTTSSynthesisMode.PER_SENTENCE
         )
-        state.synth_task = self.create_task(
-            asyncio.to_thread(self._per_sentence_synthesis_handler, chunks, state),
-            name="nvidia-tts-single-synth",
-        )
-        self._per_sentence_state = state
+        request_count = 0
+        for chunk in chunks:
+            state.text_queue.put(chunk)
+            state.text_queue.put(_RECONNECT)
+            request_count += 1
 
         try:
             await self.start_tts_usage_metrics(text)
-            while True:
+            completed_requests = 0
+            while completed_requests < request_count:
                 item = await state.response_queue.get()
+                if item is _REQUEST_DONE:
+                    completed_requests += 1
+                    continue
                 if item is None:
+                    if state.stop_event.is_set():
+                        break
+                    raise RuntimeError("Synthesis stream closed unexpectedly")
+                if self._synthesis_state is not state:
                     break
                 if isinstance(item, Exception):
                     raise item
@@ -814,10 +781,5 @@ class NvidiaTTSService(TTSService):
                     context_id=context_id,
                 )
         finally:
-            state.stop_event.set()
-            self._cancel_rpc_call(state, NvidiaTTSSynthesisMode.PER_SENTENCE)
-            if state.synth_task is not None:
-                await state.synth_task
-                state.synth_task = None
-            if self._per_sentence_state is state:
-                self._per_sentence_state = None
+            if self._synthesis_state is state and state.mode == NvidiaTTSSynthesisMode.PER_SENTENCE:
+                await self._abort_all_synthesis()
