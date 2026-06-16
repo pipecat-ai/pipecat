@@ -13,12 +13,18 @@ confidently writing outdated APIs from memory. Set up the **Pipecat Context
 Hub**, a local index of Pipecat source, examples, and docs:
 
 ```bash
-uvx pipecat-ai-context-hub refresh    # one-time index build; allow a few minutes
-claude mcp add pipecat-context-hub -- uvx pipecat-ai-context-hub serve
+# One-time index build, using latest package; allow a few minutes
+uvx pipecat-ai-context-hub@latest refresh
+# Add the MCP server (use the line for your agent)
+claude mcp add pipecat-context-hub -- uvx pipecat-ai-context-hub serve   # Claude Code
+codex mcp add pipecat-context-hub -- uvx pipecat-ai-context-hub serve    # Codex
 ```
 
 MCP servers load at session start, so do this *before* opening the coding
 session.
+
+Re-run the refresh command to index newer content — after bumping your Pipecat
+version, or periodically, since Pipecat moves fast.
 
 ## Your first prompt: write a spec, not a wish
 
@@ -72,11 +78,24 @@ Why this works:
   and deployment before scaffolding — a quick answer beats a wrong guess.
 - **Have your API keys ready.** It will stop and ask rather than invent them;
   the generated `.env.example` lists everything the bot needs.
-- **Let it test.** The project scaffolds with a headless eval harness, and
-  the agent verifies its own work by running scripted conversations against
-  the bot. After any change, "run the evals" is a fair ask.
 - **Iterate one feature at a time** once the first version works — small asks
   keep the verification loop fast.
+
+## Testing your bot
+
+A voice bot can't be eyeballed, but you don't need a live call to test it. The
+project scaffolds with a **headless eval harness** — the agent verifies its own
+work by running scripted conversations against the bot, so after any change
+"run the evals" is a fair ask.
+
+- **LLM judge (optional).** Some eval checks use an LLM judge. If you already
+  have a local model (via [Ollama](https://ollama.com)) the agent uses it for
+  free; otherwise it'll ask whether to download one (~a few GB) or reuse your
+  bot's API key.
+- **Talk to it yourself.** Building a phone bot? You don't need a phone — the
+  agent can wire up a free, peer-to-peer browser test transport (SmallWebRTC);
+  open the local page and have a voice conversation while you iterate (ask for
+  it if you don't see it).
 
 ## Learn more
 

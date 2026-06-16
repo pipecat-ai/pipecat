@@ -8,7 +8,6 @@
 
 import asyncio
 import os
-import warnings
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import StrEnum

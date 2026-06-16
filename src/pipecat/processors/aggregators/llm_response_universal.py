@@ -41,6 +41,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     LLMAssistantPushAggregationFrame,
     LLMContextAssistantTimestampFrame,
+    LLMContextAssistantTurnFrame,
     LLMContextFrame,
     LLMContextSummaryRequestFrame,
     LLMFullResponseEndFrame,
@@ -2025,6 +2026,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
             timestamp=self._assistant_turn_start_timestamp,
         )
         await self._call_event_handler("on_assistant_turn_stopped", message)
+        if aggregation:
+            await self.broadcast_frame(
+                LLMContextAssistantTurnFrame,
+                text=aggregation,
+                timestamp=self._assistant_turn_start_timestamp,
+            )
 
         self._assistant_turn_start_timestamp = ""
 

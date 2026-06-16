@@ -49,7 +49,7 @@ from pipecat.services.websocket_service import WebsocketService
 def _default_cache_dir() -> Path:
     root = os.environ.get("XDG_CACHE_HOME")
     base = Path(root) if root else Path.home() / ".cache"
-    return base / "pipecat" / "tts"
+    return base / "pipecat" / "evals" / "tts"
 
 
 DEFAULT_CACHE_DIR = _default_cache_dir()

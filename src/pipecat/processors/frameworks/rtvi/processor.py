@@ -104,6 +104,14 @@ class RTVIProcessor(FrameProcessor):
         self._register_event_handler("on_client_message")
         self._register_event_handler("on_ui_message")
 
+    @property
+    def client_version(self) -> list[int]:
+        """The negotiated client protocol version as [major, minor, patch].
+
+        Defaults to [0, 0, 0] until the client sends a ``client-ready`` message.
+        """
+        return self._client_version
+
     def create_rtvi_observer(self, *, params: RTVIObserverParams | None = None, **kwargs):
         """Creates a new RTVI Observer.
 
@@ -373,8 +381,24 @@ class RTVIProcessor(FrameProcessor):
                 if len(parts) != 3:
                     raise ValueError
                 self._client_version = parts
-                protocol_major = int(RTVI.PROTOCOL_VERSION.split(".")[0])
-                if self._client_version[0] != protocol_major:
+                server_major = int(RTVI.PROTOCOL_VERSION.split(".")[0])
+                client_major = self._client_version[0]
+                if client_major == server_major:
+                    pass  # fully compatible
+                elif client_major == RTVI.LEGACY_SUPPORTED_MAJOR:
+                    # Any 1.x client is deprecated but still served with the v1 bot-output format.
+                    # TODO: enable this once RTVI 2.0.0 is supported by all our client SDKs.
+                    # 1.x.x is deprecated but still served with the v1 bot-output format.
+                    # legacy_warning = (
+                    #     f"RTVI client version {version} is deprecated. "
+                    #     f"Please upgrade to protocol {RTVI.PROTOCOL_VERSION}. "
+                    #     "The bot-output event format has changed in 2.0.0."
+                    # )
+                    # logger.warning(legacy_warning)
+                    # await self._send_error_response(request_id, legacy_warning)
+                    # version_error intentionally left as None — connection proceeds.
+                    pass
+                else:
                     version_error = f"RTVI version {version} is not compatible with server protocol {RTVI.PROTOCOL_VERSION}."
             except ValueError:
                 version_error = f"Invalid client version format ({version})."

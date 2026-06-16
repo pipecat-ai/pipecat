@@ -372,10 +372,12 @@ class RimeTTSService(WebsocketTTSService):
         return params
 
     # A set of Rime-specific helpers for text transformations
+    @staticmethod
     def SPELL(text: str) -> str:
         """Wrap text in Rime spell function."""
         return f"spell({text})"
 
+    @staticmethod
     def PAUSE_TAG(seconds: float) -> str:
         """Convenience method to create a pause tag."""
         return f"<{seconds * 1000}>"

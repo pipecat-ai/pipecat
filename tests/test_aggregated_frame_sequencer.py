@@ -22,7 +22,12 @@ Test groups:
 
 import unittest
 
-from pipecat.frames.frames import AggregatedTextFrame, AggregationType, TTSTextFrame
+from pipecat.frames.frames import (
+    AggregatedTextFrame,
+    AggregatedTextProgressFrame,
+    AggregationType,
+    TTSTextFrame,
+)
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
@@ -194,8 +199,9 @@ class TestProcessWordBasic(unittest.TestCase):
     def test_returns_tts_text_frame(self):
         seq = self._seq_with_spoken("hello")
         result = seq.process_word("hello", pts=100, context_id="ctx1")
-        self.assertEqual(len(result), 1)
+        self.assertEqual(len(result), 2)
         self.assertIsInstance(result[0], TTSTextFrame)
+        self.assertIsInstance(result[1], AggregatedTextProgressFrame)
 
     def test_frame_text_and_pts(self):
         seq = self._seq_with_spoken("hello")
@@ -222,17 +228,19 @@ class TestProcessWordBasic(unittest.TestCase):
         seq = self._seq_with_spoken("hello world")
         seq.register_skipped(_skipped_frame("code"), "ctx2", None)
         result = seq.process_word("hello", pts=10, context_id="ctx1")
-        self.assertEqual(len(result), 1)
+        self.assertEqual(len(result), 2)
         self.assertIsInstance(result[0], TTSTextFrame)
+        self.assertIsInstance(result[1], AggregatedTextProgressFrame)
 
     def test_completing_word_flushes_blocked_skipped_frame(self):
         seq = self._seq_with_spoken("hello")
         skipped = _skipped_frame("code")
         seq.register_skipped(skipped, "ctx2", None)
         result = seq.process_word("hello", pts=50, context_id="ctx1")
-        self.assertEqual(len(result), 2)
+        self.assertEqual(len(result), 3)
         self.assertIsInstance(result[0], TTSTextFrame)
-        self.assertIs(result[1], skipped)
+        self.assertIsInstance(result[1], AggregatedTextProgressFrame)
+        self.assertIs(result[2], skipped)
 
     def test_last_of_multiple_words_flushes_skipped(self):
         seq = self._seq_with_spoken("hello world")
@@ -744,6 +752,105 @@ class TestCJKContextAssembly(unittest.TestCase):
             tts_frames[0].includes_inter_frame_spaces,
             "force_complete must propagate includes_inter_frame_spaces for CJK slots",
         )
+
+
+# ---------------------------------------------------------------------------
+# AggregatedTextProgressFrame emission
+# ---------------------------------------------------------------------------
+
+
+class TestAggregatedTextProgressFrame(unittest.TestCase):
+    def _seq_with_spoken(self, text: str, ctx: str = "ctx1") -> AggregatedFrameSequencer:
+        seq = _seq()
+        frame = _spoken_frame(text)
+        seq.register_spoken(frame, ctx, _tracker(text), append_to_context=True)
+        return seq, frame
+
+    def test_progress_frame_emitted_alongside_word_frame(self):
+        seq, source = self._seq_with_spoken("hello")
+        result = seq.process_word("hello", pts=100, context_id="ctx1")
+        progress = [f for f in result if isinstance(f, AggregatedTextProgressFrame)]
+        self.assertEqual(len(progress), 1)
+        p = progress[0]
+        self.assertEqual(p.text, "hello")
+        self.assertEqual(p.aggregated_by, AggregationType.SENTENCE)
+        self.assertEqual(p.accumulated_text, "hello")
+        self.assertEqual(p.remaining_text, "")
+        self.assertEqual(p.context_id, "ctx1")
+        self.assertEqual(p.segment_id, source.id)
+        self.assertEqual(p.pts, 100)
+
+    def test_progress_accumulated_and_remaining_mid_slot(self):
+        seq, _ = self._seq_with_spoken("hello world")
+        result = seq.process_word("hello", pts=10, context_id="ctx1")
+        progress = [f for f in result if isinstance(f, AggregatedTextProgressFrame)]
+        self.assertEqual(len(progress), 1)
+        self.assertEqual(progress[0].accumulated_text, "hello")
+        self.assertEqual(progress[0].remaining_text, " world")
+
+    def test_no_progress_frame_for_passthrough(self):
+        seq = _seq()
+        result = seq.process_word("hello", pts=1, context_id="ctx-unknown")
+        progress = [f for f in result if isinstance(f, AggregatedTextProgressFrame)]
+        self.assertEqual(progress, [])
+
+    def test_progress_frame_context_id_matches_slot_not_caller(self):
+        seq = _seq()
+        frame1 = _spoken_frame("hello")
+        seq.register_spoken(frame1, "ctx1", _tracker("hello"), append_to_context=True)
+        seq.register_spoken(
+            _spoken_frame("world"), "ctx2", _tracker("world"), append_to_context=True
+        )
+        # Pass a different context_id — progress must still carry the slot's id
+        result = seq.process_word("hello", pts=5, context_id="ctx-wrong")
+        progress = [f for f in result if isinstance(f, AggregatedTextProgressFrame)]
+        self.assertEqual(len(progress), 1)
+        self.assertEqual(progress[0].context_id, "ctx1")
+        self.assertEqual(progress[0].segment_id, frame1.id)
+
+    def test_progress_uses_user_facing_text_not_tts_text(self):
+        """accumulated/remaining in the progress frame come from user_facing_text, not tts_text."""
+        seq = _seq()
+        frame = _spoken_frame("4111 1111 1111 1111")
+        tracker = WordCompletionTracker(
+            "<spell>4111 1111 1111 1111</spell>",
+            llm_text="<card>4111 1111 1111 1111</card>",
+            user_facing_text="4111 1111 1111 1111",
+        )
+        seq.register_spoken(frame, "ctx1", tracker, append_to_context=True)
+        result = seq.process_word("4111", pts=10, context_id="ctx1")
+        progress = [f for f in result if isinstance(f, AggregatedTextProgressFrame)]
+        self.assertEqual(len(progress), 1)
+        p = progress[0]
+        # user_facing_text has no SSML tags
+        self.assertEqual(p.accumulated_text, "4111")
+        self.assertEqual(p.remaining_text, " 1111 1111 1111")
+        # Sanity: tts accumulated includes the opening tag and would be different
+        self.assertNotEqual(p.accumulated_text, tracker.get_accumulated_tts_text())
+
+    def test_card_scenario_word_by_word(self):
+        """Progress accumulated/remaining track user_facing_text through all four digit groups."""
+        seq = _seq()
+        frame = _spoken_frame("4111 1111 1111 1111")
+        tracker = WordCompletionTracker(
+            "<spell>4111 1111 1111 1111</spell>",
+            llm_text="<card>4111 1111 1111 1111</card>",
+            user_facing_text="4111 1111 1111 1111",
+        )
+        seq.register_spoken(frame, "ctx1", tracker, append_to_context=True)
+
+        steps = [
+            ("4111", "4111", " 1111 1111 1111"),
+            ("1111", "4111 1111", " 1111 1111"),
+            ("1111", "4111 1111 1111", " 1111"),
+            ("1111", "4111 1111 1111 1111", ""),
+        ]
+        for word, exp_acc, exp_rem in steps:
+            result = seq.process_word(word, pts=10, context_id="ctx1")
+            progress = [f for f in result if isinstance(f, AggregatedTextProgressFrame)]
+            self.assertEqual(len(progress), 1, f"expected 1 progress frame after '{word}'")
+            self.assertEqual(progress[0].accumulated_text, exp_acc)
+            self.assertEqual(progress[0].remaining_text, exp_rem)
 
 
 # ---------------------------------------------------------------------------

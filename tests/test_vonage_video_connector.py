@@ -8,7 +8,7 @@ import asyncio
 import inspect
 import sys
 import threading
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta

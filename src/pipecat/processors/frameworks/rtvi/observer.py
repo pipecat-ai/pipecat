@@ -6,10 +6,12 @@
 
 """RTVI observer for converting pipeline frames to outgoing RTVI messages."""
 
+import inspect
 import time
+import warnings
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from enum import Enum, StrEnum
+from enum import StrEnum
 from typing import (
     TYPE_CHECKING,
     Optional,
@@ -22,6 +24,7 @@ import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.utils import calculate_audio_volume
 from pipecat.frames.frames import (
     AggregatedTextFrame,
+    AggregatedTextProgressFrame,
     AggregationType,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -63,6 +66,7 @@ from pipecat.processors.frameworks.rtvi.frames import (
     RTVIUICommandFrame,
     RTVIUIJobGroupFrame,
 )
+from pipecat.processors.frameworks.rtvi.models import BotOutputTransformResult
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.utils.string import match_endofsentence
 
@@ -112,10 +116,25 @@ class RTVIObserverParams:
         skip_aggregator_types: List of aggregation types to skip sending as tts/output messages.
             Note: if using this to avoid sending secure information, be sure to also disable
             bot_llm_enabled to avoid leaking through LLM messages.
-        bot_output_transforms: A list of callables to transform text before just before sending it
-            to TTS. Each callable takes the aggregated text and its type, and returns the
-            transformed text. To register, provide a list of tuples of
-            (aggregation_type | '*', transform_function).
+        bot_output_transforms: A list of callables to transform text before sending it to the
+            client. Each callable should use the 4-parameter signature::
+
+                async def my_transform(
+                    text: str,
+                    agg_type: AggregationType | str,
+                    accumulated_text: str | None = None,
+                    remaining_text: str | None = None,
+                ) -> BotOutputTransformResult: ...
+
+            When ``accumulated_text`` and ``remaining_text`` are ``None`` the transform is being
+            called for the full segment text (from ``bot-output``). When they are provided the
+            transform is being called for a progress event and must return a
+            ``BotOutputTransformResult`` with ``accumulated_text`` and ``remaining_text`` set.
+
+            The 2-parameter signature ``(text, agg_type) -> str`` is deprecated. Transforms using
+            it will still work but will emit a ``DeprecationWarning`` at registration time.
+
+            To register, provide a list of tuples of (aggregation_type | '*', transform_function).
         audio_level_period_secs: How often audio levels should be sent if enabled.
         function_call_report_level: Controls what information is exposed in function call
             events for security. A dict mapping function names to levels, where ``"*"``
@@ -150,7 +169,12 @@ class RTVIObserverParams:
     ignored_sources: list[FrameProcessor] = field(default_factory=list)
     skip_aggregator_types: list[AggregationType | str] | None = None
     bot_output_transforms: (
-        list[tuple[AggregationType | str, Callable[[str, AggregationType | str], Awaitable[str]]]]
+        list[
+            tuple[
+                AggregationType | str,
+                Callable[..., Awaitable[BotOutputTransformResult | str]],
+            ]
+        ]
         | None
     ) = None
     audio_level_period_secs: float = 0.15
@@ -204,28 +228,78 @@ class RTVIObserver(BaseObserver):
             self._system_logger_id = logger.add(self._logger_sink)
 
         self._aggregation_transforms: list[
-            tuple[AggregationType | str, Callable[[str, AggregationType | str], Awaitable[str]]]
-        ] = self._params.bot_output_transforms or []
+            tuple[
+                AggregationType | str,
+                Callable[..., Awaitable[BotOutputTransformResult | str]],
+                bool,
+            ]
+        ] = []
+        for agg_type, fn in self._params.bot_output_transforms or []:
+            self.add_bot_output_transformer(fn, agg_type)
+
+    @staticmethod
+    def _check_progress_aware(fn: Callable) -> bool:
+        """Return True if ``fn`` declares 4 parameters (the progress-aware signature)."""
+        try:
+            return len(inspect.signature(fn).parameters) >= 4
+        except (ValueError, TypeError):
+            return False
+
+    @property
+    def _is_legacy_client(self) -> bool:
+        """Return True when the connected client uses a deprecated 1.x protocol."""
+        if not self._rtvi:
+            return False
+        return self._rtvi.client_version[0] == RTVI.LEGACY_SUPPORTED_MAJOR
 
     def add_bot_output_transformer(
         self,
-        transform_function: Callable[[str, AggregationType | str], Awaitable[str]],
+        transform_function: Callable[..., Awaitable[BotOutputTransformResult | str]],
         aggregation_type: AggregationType | str = "*",
     ):
-        """Transform text for a specific aggregation type before sending as Bot Output or TTS.
+        """Register a text transformer for a specific aggregation type.
+
+        The preferred transform signature is::
+
+            async def my_transform(
+                text: str,
+                agg_type: AggregationType | str,
+                accumulated_text: str | None = None,
+                remaining_text: str | None = None,
+            ) -> BotOutputTransformResult: ...
+
+        When ``accumulated_text`` and ``remaining_text`` are ``None`` the transform is being
+        called for the full segment text (``bot-output`` message). When they are provided it is
+        being called for a progress event; return a ``BotOutputTransformResult`` with
+        ``accumulated_text`` and ``remaining_text`` populated so the client can display
+        word-level progress on the transformed text.
+
+        The legacy 2-parameter signature ``(text, agg_type) -> str`` is still accepted but
+        deprecated. Progress events will fall back to applying the transform independently to
+        each partial string, which may produce inconsistent results for context-dependent
+        transforms.
 
         Args:
-            transform_function: The function to apply for transformation. This function should take
-                the text and aggregation type as input and return the transformed text.
-                Ex.: async def my_transform(text: str, aggregation_type: str) -> str:
-            aggregation_type: The type of aggregation to transform. This value defaults to "*" to
-                handle all text before sending to the client.
+            transform_function: The transform callable.
+            aggregation_type: Aggregation type to match, or ``"*"`` for all types.
         """
-        self._aggregation_transforms.append((aggregation_type, transform_function))
+        is_progress_aware = self._check_progress_aware(transform_function)
+        if not is_progress_aware:
+            warnings.warn(
+                f"Bot output transform '{transform_function.__name__}' uses the deprecated "
+                "2-parameter signature '(text, agg_type) -> str'. Update to the 4-parameter "
+                "signature '(text, agg_type, accumulated_text, remaining_text) -> "
+                "BotOutputTransformResult' to support word-level progress transforms.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        self._aggregation_transforms.append(
+            (aggregation_type, transform_function, is_progress_aware)
+        )
 
     def remove_bot_output_transformer(
         self,
-        transform_function: Callable[[str, AggregationType | str], Awaitable[str]],
+        transform_function: Callable[..., Awaitable[BotOutputTransformResult | str]],
         aggregation_type: AggregationType | str = "*",
     ):
         """Remove a text transformer for a specific aggregation type.
@@ -235,8 +309,8 @@ class RTVIObserver(BaseObserver):
             aggregation_type: The type of aggregation to remove the transformer for.
         """
         self._aggregation_transforms = [
-            (agg_type, func)
-            for agg_type, func in self._aggregation_transforms
+            (agg_type, func, aware)
+            for agg_type, func, aware in self._aggregation_transforms
             if not (agg_type == aggregation_type and func == transform_function)
         ]
 
@@ -381,10 +455,17 @@ class RTVIObserver(BaseObserver):
             await self.send_rtvi_message(RTVI.BotTTSStartedMessage())
         elif isinstance(frame, TTSStoppedFrame) and self._params.bot_tts_enabled:
             await self.send_rtvi_message(RTVI.BotTTSStoppedMessage())
+        elif isinstance(frame, AggregatedTextProgressFrame):
+            if not isinstance(src, BaseOutputTransport):
+                # This check is to make sure we handle the frame when it has gone
+                # through the transport and has correct timing.
+                mark_as_seen = False
+            else:
+                await self._handle_aggregated_progress(frame)
         elif isinstance(frame, AggregatedTextFrame) and (
             self._params.bot_output_enabled or self._params.bot_tts_enabled
         ):
-            if isinstance(frame, TTSTextFrame) and not isinstance(src, BaseOutputTransport):
+            if not isinstance(src, BaseOutputTransport):
                 # This check is to make sure we handle the frame when it has gone
                 # through the transport and has correct timing.
                 mark_as_seen = False
@@ -533,6 +614,55 @@ class RTVIObserver(BaseObserver):
             # Bot hasn't started speaking yet, queue the frame
             self._queued_aggregated_text_frames.append(frame)
 
+    async def _handle_aggregated_progress(self, frame: AggregatedTextProgressFrame):
+        """Handle progress frames."""
+        # 1.4.x clients use the old separate bot-output-progress event which was never
+        # released, so progress events are simply not sent to legacy clients.
+        if self._is_legacy_client:
+            return
+
+        logger.trace(
+            f"{self} TTS progress: context_id={frame.context_id} "
+            f"source_segment_id={frame.segment_id} "
+            f"accumulated={repr(frame.accumulated_text)} "
+            f"remaining={repr(frame.remaining_text)}"
+        )
+
+        accumulated = frame.accumulated_text
+        remaining = frame.remaining_text
+        text = frame.text
+        agg_type = frame.aggregated_by
+
+        for aggregation_type, transform, is_progress_aware in self._aggregation_transforms:
+            if aggregation_type == agg_type or aggregation_type == "*":
+                if is_progress_aware:
+                    result = await transform(text, agg_type, accumulated, remaining)
+                    if isinstance(result, BotOutputTransformResult):
+                        accumulated = result.accumulated_text or accumulated
+                        remaining = result.remaining_text or remaining
+                        text = result.text or text
+                else:
+                    accumulated = await transform(accumulated, agg_type)
+                    remaining = await transform(remaining, agg_type)
+                    text = await transform(text, agg_type)
+
+        if self._params.bot_output_enabled:
+            spoken_status: RTVI.SpokenStatus = "completed" if remaining == "" else "in-progress"
+            message = RTVI.BotOutputMessage(
+                data=RTVI.BotOutputMessageData(
+                    text=text,
+                    will_be_spoken=True,
+                    aggregated_by=agg_type,
+                    segment_id=frame.segment_id,
+                    spoken_status=spoken_status,
+                    spoken_progress=RTVI.SpokenProgressData(
+                        accumulated_text=accumulated,
+                        remaining_text=remaining,
+                    ),
+                )
+            )
+            await self.send_rtvi_message(message)
+
     async def _send_aggregated_llm_text(self, frame: AggregatedTextFrame):
         """Send aggregated LLM text messages."""
         # Skip certain aggregator types if configured to do so.
@@ -542,20 +672,53 @@ class RTVIObserver(BaseObserver):
         ):
             return
 
-        text = frame.text
         agg_type = frame.aggregated_by
-        for aggregation_type, transform in self._aggregation_transforms:
+
+        # For 2.0.0+ clients, word and token types are not emitted as bot-output events;
+        # word-level progress is covered by the spoken_status/spoken_progress fields.
+        # bot-tts-text is a separate channel and is NOT suppressed here.
+        suppress_bot_output = not self._is_legacy_client and agg_type in (
+            AggregationType.WORD,
+            AggregationType.TOKEN,
+        )
+
+        text = frame.text
+        for aggregation_type, transform, is_progress_aware in self._aggregation_transforms:
             if aggregation_type == agg_type or aggregation_type == "*":
-                text = await transform(text, agg_type)
+                if is_progress_aware:
+                    result = await transform(text, agg_type, None, None)
+                else:
+                    result = await transform(text, agg_type)
+                text = result.text if isinstance(result, BotOutputTransformResult) else result
 
         isTTS = isinstance(frame, TTSTextFrame)
-        if agg_type is not AggregationType.WORD:
-            logger.trace(f"{self} Aggregated LLM text: {text}, {agg_type} spoken:{isTTS}")
+        will_be_spoken = frame.will_be_spoken
+        if self._params.bot_output_enabled and not suppress_bot_output:
+            if will_be_spoken:
+                if isTTS:
+                    # push_text_frames path: TTSTextFrame arrives after synthesis completes
+                    spoken_status: RTVI.SpokenStatus = "completed"
+                    progress: RTVI.SpokenProgressData | None = RTVI.SpokenProgressData(
+                        accumulated_text=text, remaining_text=""
+                    )
+                else:
+                    # word-timestamp path: AggregatedTextFrame arrives before synthesis starts
+                    spoken_status = "new"
+                    progress = RTVI.SpokenProgressData(accumulated_text="", remaining_text=text)
+            else:
+                spoken_status = None
+                progress = None
 
-        if self._params.bot_output_enabled:
-            message = RTVI.BotOutputMessage(
-                data=RTVI.BotOutputMessageData(text=text, spoken=isTTS, aggregated_by=agg_type)
+            data = RTVI.BotOutputMessageData(
+                text=text,
+                spoken=isTTS,
+                will_be_spoken=will_be_spoken,
+                aggregated_by=agg_type,
+                segment_id=frame.id,
+                spoken_status=spoken_status,
+                spoken_progress=progress,
             )
+            message = RTVI.BotOutputMessage(data=data)
             await self.send_rtvi_message(message)
 
         if isTTS and self._params.bot_tts_enabled:
