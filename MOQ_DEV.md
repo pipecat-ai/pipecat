@@ -7,10 +7,10 @@ talking to it through the locally-built `voice-ui-kit` +
 
 The pipecat MoQ transport uses the [`moq-rs`](https://pypi.org/project/moq-rs/)
 Python library, so the bot can bind its own UDP socket via `--moq-serve`
-and mint a self-signed cert in-process. No separate `moq-relay` process,
-no `openssl` cert dance. The only friction left is the `npm link` chain
-for the still-unpublished MoQ packages, which `./scripts/moq-dev-setup.sh`
-handles.
+and (with `--moq-tls-generate <hostname>`) mint a self-signed cert
+in-process. No separate `moq-relay` process, no `openssl` cert dance.
+The only friction left is the `npm link` chain for the still-unpublished
+MoQ packages, which `./scripts/moq-dev-setup.sh` handles.
 
 ## The short, short version
 ```bash
