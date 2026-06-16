@@ -651,21 +651,20 @@ class DailyTransportClient(EventHandler):
             return None
 
     async def register_audio_destination(self, destination: str, auto_silence: bool | None = True):
-        """Register a custom audio destination for multi-track output.
+        """Register an audio destination for multi-track output.
+
+        Built-in destination ("microphone") is configured at join time so it's
+        skipped here.
 
         Args:
             destination: The destination identifier to register.
             auto_silence: If True, the audio source inserts silence when no audio is available.
                 If False, the source waits for audio data. Defaults to True.
         """
-        params = (self._params.custom_audio_track_params or {}).get(destination)
-        self._custom_audio_tracks[destination] = await self.add_custom_audio_track(
-            destination, params=params, auto_silence=auto_silence
-        )
-        publishing: dict[str, Any] = {"customAudio": {destination: True}}
-        if params and params.send_settings:
-            publishing["customAudio"][destination] = {"sendSettings": params.send_settings}
-        self._client.update_publishing(publishing)
+        if destination == "screenAudio":
+            await self._register_screen_audio_destination(auto_silence=auto_silence)
+        else:
+            await self._register_custom_audio_destination(destination, auto_silence=auto_silence)
 
     async def register_video_destination(self, destination: str):
         """Register a video destination for multi-track output.
@@ -1273,23 +1272,16 @@ class DailyTransportClient(EventHandler):
         """
         future = self._get_event_loop().create_future()
 
-        sample_rate = params.sample_rate if params and params.sample_rate else self._out_sample_rate
-        channels = params.channels if params else 1
-
-        audio_source = CustomAudioSource(sample_rate, channels, auto_silence)
-
-        audio_track = CustomAudioTrack(audio_source)
+        track = await self._create_audio_track(params, auto_silence)
 
         self._client.add_custom_audio_track(
             track_name=track_name,
-            audio_track=audio_track,
+            audio_track=track.track,
             ignore_audio_level=True,
             completion=completion_callback(future),
         )
 
         await future
-
-        track = DailyAudioTrack(source=audio_source, track=audio_track)
 
         return track
 
@@ -1302,6 +1294,8 @@ class DailyTransportClient(EventHandler):
         Returns:
             error: An error description or None.
         """
+        if track_name == "screenAudio":
+            return
         future = self._get_event_loop().create_future()
         self._client.remove_custom_audio_track(
             track_name=track_name,
@@ -1428,6 +1422,20 @@ class DailyTransportClient(EventHandler):
         )
         return await future
 
+    async def _create_audio_track(
+        self,
+        params: DailyCustomAudioTrackParams | None = None,
+        auto_silence: bool | None = True,
+    ) -> DailyAudioTrack:
+        """Create an audio track for the given parameters."""
+        sample_rate = params.sample_rate if params and params.sample_rate else self._out_sample_rate
+        channels = params.channels if params else 1
+
+        audio_source = CustomAudioSource(sample_rate, channels, auto_silence)
+        audio_track = CustomAudioTrack(audio_source)
+
+        return DailyAudioTrack(source=audio_source, track=audio_track)
+
     async def _create_video_track(
         self,
         params: DailyCustomVideoTrackParams | None = None,
@@ -1444,6 +1452,41 @@ class DailyTransportClient(EventHandler):
         video_track = CustomVideoTrack(video_source)
 
         return DailyVideoTrack(source=video_source, track=video_track)
+
+    async def _register_custom_audio_destination(
+        self, destination: str, auto_silence: bool | None = True
+    ):
+        """Register a custom audio destination for multi-track output."""
+        params = (self._params.custom_audio_track_params or {}).get(destination)
+        self._custom_audio_tracks[destination] = await self.add_custom_audio_track(
+            destination, params=params, auto_silence=auto_silence
+        )
+        publishing: dict[str, Any] = {"customAudio": {destination: True}}
+        if params and params.send_settings:
+            publishing["customAudio"][destination] = {"sendSettings": params.send_settings}
+        self._client.update_publishing(publishing)
+
+    async def _register_screen_audio_destination(self, auto_silence: bool | None = True):
+        """Register screen audio destination track."""
+        params = (self._params.custom_audio_track_params or {}).get("screenAudio")
+
+        audio_track = await self._create_audio_track(params, auto_silence)
+        self._custom_audio_tracks["screenAudio"] = audio_track
+
+        # screenAudio input settings.
+        inputs: dict[str, Any] = {
+            "screenAudio": {
+                "isEnabled": True,
+                "settings": {"customTrack": {"id": audio_track.track.id}},
+            }
+        }
+        self._client.update_inputs(inputs)
+
+        # screenAudio publishing settings.
+        publishing: dict[str, Any] = {"screenAudio": True}
+        if params and params.send_settings:
+            publishing["screenAudio"] = {"sendSettings": params.send_settings}
+        self._client.update_publishing(publishing)
 
     async def _register_screen_video_destination(self):
         """Register screen video destination track."""
