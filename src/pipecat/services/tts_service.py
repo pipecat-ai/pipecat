@@ -1055,6 +1055,8 @@ class TTSService(AIService):
         # is spoken, so we set append_to_context to False.
         src_frame.append_to_context = False
         src_frame.context_id = context_id
+        src_frame.will_be_spoken = True
+
         # Route AggregatedTextFrame through the serialization queue so it is emitted
         # immediately before the TTSStartedFrame of the audio context it describes,
         # rather than racing ahead of audio frames from a previous context.
@@ -1102,7 +1104,9 @@ class TTSService(AIService):
             src_frame,
             context_id,
             tracker=WordCompletionTracker(
-                prepared_text, llm_text=src_frame.raw_text or src_frame.text
+                prepared_text,
+                llm_text=src_frame.raw_text or src_frame.text,
+                user_facing_text=src_frame.text,
             )
             if not self._push_text_frames
             else None,
@@ -1123,6 +1127,7 @@ class TTSService(AIService):
             # context and the context that IS added does not include TTS-specific tags
             # or transformations.
             frame = TTSTextFrame(text, aggregated_by=type)
+            frame.will_be_spoken = True
             frame.includes_inter_frame_spaces = includes_inter_frame_spaces
             frame.context_id = context_id
             frame.append_to_context = append_tts_text_to_context

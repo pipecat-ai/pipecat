@@ -1403,6 +1403,92 @@ class TestWordCompletionTrackerAccumulatedText(unittest.TestCase):
         self.assertEqual(tracker.get_accumulated_llm_text(), "")
 
 
+class TestUserFacingText(unittest.TestCase):
+    """Tests for get_accumulated_user_facing_text() and get_remaining_user_facing_text().
+
+    Uses a credit-card number scenario where tts_text has SSML tags, llm_text has
+    pattern delimiters, and user_facing_text is the plain user-visible string.
+    """
+
+    TTS_TEXT = "<spell>4111 1111 1111 1111</spell>"
+    LLM_TEXT = "<card>4111 1111 1111 1111</card>"
+    USER_FACING_TEXT = "4111 1111 1111 1111"
+    WORDS = ["4111", "1111", "1111", "1111"]
+
+    def _tracker(self) -> WordCompletionTracker:
+        return WordCompletionTracker(
+            self.TTS_TEXT,
+            llm_text=self.LLM_TEXT,
+            user_facing_text=self.USER_FACING_TEXT,
+        )
+
+    def test_defaults_to_tts_text_when_not_provided(self):
+        """When user_facing_text is omitted, the cursor tracks tts_text instead."""
+        tracker = WordCompletionTracker("hello world")
+        tracker.add_word_and_check_complete("hello")
+        self.assertEqual(
+            tracker.get_accumulated_user_facing_text(),
+            tracker.get_accumulated_tts_text(),
+        )
+
+    def test_before_any_words_accumulated_is_empty(self):
+        tracker = self._tracker()
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "")
+
+    def test_before_any_words_remaining_is_full_text(self):
+        tracker = self._tracker()
+        self.assertEqual(tracker.get_remaining_user_facing_text(), self.USER_FACING_TEXT)
+
+    def test_user_facing_differs_from_tts_after_first_word(self):
+        """The SSML opening tag means tts_text accumulated != user_facing accumulated."""
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("4111")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "4111")
+        self.assertEqual(tracker.get_accumulated_tts_text(), "<spell>4111")
+
+    def test_word_by_word_accumulated_and_remaining(self):
+        """Check accumulated and remaining at each step through the card number."""
+        tracker = self._tracker()
+        expected = [
+            ("4111", " 1111 1111 1111"),
+            ("4111 1111", " 1111 1111"),
+            ("4111 1111 1111", " 1111"),
+            ("4111 1111 1111 1111", ""),
+        ]
+        for word, (exp_acc, exp_rem) in zip(self.WORDS, expected):
+            tracker.add_word_and_check_complete(word)
+            self.assertEqual(tracker.get_accumulated_user_facing_text(), exp_acc)
+            self.assertEqual(tracker.get_remaining_user_facing_text(strip=False), exp_rem)
+
+    def test_accumulated_plus_remaining_reconstructs_user_facing_text(self):
+        """accumulated + remaining(strip=False) == user_facing_text at every step."""
+        tracker = self._tracker()
+        for word in self.WORDS:
+            tracker.add_word_and_check_complete(word)
+            acc = tracker.get_accumulated_user_facing_text()
+            rem = tracker.get_remaining_user_facing_text(strip=False)
+            self.assertEqual(acc + rem, self.USER_FACING_TEXT)
+
+    def test_force_complete_sets_accumulated_to_full_text(self):
+        """Force-completing the slot (mismatched word) sweeps user_facing fully accumulated."""
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("4111")
+        tracker.add_word_and_check_complete("WRONG")  # force-complete
+        self.assertTrue(tracker.is_complete)
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), self.USER_FACING_TEXT)
+        self.assertEqual(tracker.get_remaining_user_facing_text(), "")
+
+    def test_reset_clears_user_facing_pos(self):
+        """reset() resets the user_facing cursor; accumulated returns empty string again."""
+        tracker = self._tracker()
+        for word in self.WORDS:
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), self.USER_FACING_TEXT)
+        tracker.reset()
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "")
+        self.assertEqual(tracker.get_remaining_user_facing_text(), self.USER_FACING_TEXT)
+
+
 class TestWordCompletionTrackerUnicodeSymbolSubstitution(unittest.TestCase):
     """Guards against the regression where ElevenLabs maps Unicode symbols such
     as '→' to ASCII punctuation like '-' in word-timestamp events.
