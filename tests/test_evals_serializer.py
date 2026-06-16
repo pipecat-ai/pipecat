@@ -13,8 +13,8 @@ import unittest
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.serializer import (
     EVAL_CONFIGURE_MESSAGE_TYPE,
+    EVAL_CONTEXT_MESSAGE_TYPE,
     EVAL_IMAGE_MESSAGE_TYPE,
-    EVAL_RESET_MESSAGE_TYPE,
     RTVIEvalSerializer,
 )
 from pipecat.frames.frames import (
@@ -60,13 +60,13 @@ class TestRTVIEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
         frame = await self.serializer.deserialize(json.dumps(msg))
         self.assertIsInstance(frame, InputTransportMessageFrame)
 
-    async def test_eval_reset_short_circuits_to_messages_update(self):
+    async def test_eval_context_short_circuits_to_messages_update(self):
         msg = {
             "label": RTVI.MESSAGE_LABEL,
             "type": "client-message",
             "id": "4",
             "data": {
-                "t": EVAL_RESET_MESSAGE_TYPE,
+                "t": EVAL_CONTEXT_MESSAGE_TYPE,
                 "d": {"messages": [{"role": "system", "content": "be terse"}]},
             },
         }
@@ -104,7 +104,7 @@ class TestRTVIEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await self.serializer.deserialize(json.dumps(msg)))
         self.assertEqual(self.serializer.get_user_image(), (img, "image/png"))
 
-    async def test_non_reset_client_message_is_forwarded(self):
+    async def test_non_context_client_message_is_forwarded(self):
         msg = {
             "label": RTVI.MESSAGE_LABEL,
             "type": "client-message",

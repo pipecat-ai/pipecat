@@ -86,8 +86,8 @@ from pipecat.evals.serializer import (
     EVAL_BOT_AUDIO_TYPE,
     EVAL_CANCEL_MESSAGE_TYPE,
     EVAL_CONFIGURE_MESSAGE_TYPE,
+    EVAL_CONTEXT_MESSAGE_TYPE,
     EVAL_IMAGE_MESSAGE_TYPE,
-    EVAL_RESET_MESSAGE_TYPE,
 )
 from pipecat.evals.speech import EvalSpeech
 from pipecat.evals.transcribe import EvalTranscriber
@@ -616,16 +616,17 @@ class EvalSession:
             )
             await self._send(configure)
 
-        # Only send a reset when the scenario actually asked for one. An implicit
-        # empty reset would race with bot startup flows (e.g. a greeting added in
-        # on_client_connected), wiping the bot's context right after it set it up.
-        if self._scenario.reset:
-            reset = RTVI.Message(
+        # Only send the eval-context when the scenario provides starting context.
+        # An implicit empty one would race with bot startup flows (e.g. a greeting
+        # added in on_client_connected), wiping the bot's context right after it
+        # set it up.
+        if self._scenario.context:
+            context_message = RTVI.Message(
                 type="client-message",
                 id=self._message_id(),
-                data={"t": EVAL_RESET_MESSAGE_TYPE, "d": {"messages": self._scenario.reset}},
+                data={"t": EVAL_CONTEXT_MESSAGE_TYPE, "d": {"messages": self._scenario.context}},
             )
-            await self._send(reset)
+            await self._send(context_message)
 
     async def _send(self, message: RTVI.Message) -> None:
         """Serialize and send an RTVI message over the WebSocket."""

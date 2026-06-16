@@ -61,8 +61,9 @@ relative to the scenario file) to register an image for the turn — when a
 function-calling-video bot requests a user image, the eval transport serves it.
 
 Top-level optional fields:
-    reset:  list of LLM messages the harness sends as a reset before driving
-            turns (default empty list, which clears the bot's context).
+    context: LLM messages the bot's context should start from. When given, the
+            harness sends them before driving turns (replacing the bot's
+            context); omit to leave the bot's own context untouched.
     user:   how user turns are delivered::
 
                 user:
@@ -216,12 +217,13 @@ class EvalScenario:
     Parameters:
         name: The eval name (from ``name:``).
         turns: Ordered list of turns.
-        reset: Messages to seed the bot's LLM context with before this eval
-            runs. Sent by the harness as an ``eval-reset`` client message right
-            after the bot-ready handshake (the eval serializer turns it into an
-            ``LLMMessagesUpdateFrame``). Empty list (the default) clears the
-            context entirely; bots without an LLM context aggregator ignore the
-            resulting frame.
+        context: LLM messages the bot's context should start from for this eval.
+            When non-empty, the harness sends them as an ``eval-context`` client
+            message right after the bot-ready handshake (the eval serializer
+            turns it into an ``LLMMessagesUpdateFrame``, which replaces the
+            context); bots without an LLM context aggregator ignore the frame.
+            Omitted or empty (the default): the harness sends nothing and the
+            bot keeps the context it set up itself.
         judge: Judge LLM configuration dict with keys ``service``, ``model``,
             and optional ``endpoint``. Defaults to
             ``{"service": "ollama", "model": "gemma2:9b"}``.
@@ -244,7 +246,7 @@ class EvalScenario:
 
     name: str
     turns: list[EvalTurn]
-    reset: list[dict] = field(default_factory=list)
+    context: list[dict] = field(default_factory=list)
     judge: dict = field(default_factory=lambda: {"service": "ollama", "model": "gemma2:9b"})
     bot_audio: bool = False
     transcriber: dict | None = None
@@ -292,13 +294,13 @@ class EvalScenario:
 
         turns = [_parse_turn(t, path, idx) for idx, t in enumerate(raw_turns)]
 
-        raw_reset = data.get("reset")
-        if raw_reset is None:
-            reset: list[dict] = []
-        elif isinstance(raw_reset, list):
-            reset = raw_reset
+        raw_context = data.get("context")
+        if raw_context is None:
+            context: list[dict] = []
+        elif isinstance(raw_context, list):
+            context = raw_context
         else:
-            raise ValueError(f"{path}: 'reset:' must be a list of message dicts")
+            raise ValueError(f"{path}: 'context:' must be a list of message dicts")
 
         # user: { modality: audio|text, speech: {...} }. Audio synthesizes each user
         # turn via TTS (exercising the bot's STT); text sends it as text. Stored
@@ -318,7 +320,7 @@ class EvalScenario:
         return cls(
             name=name,
             turns=turns,
-            reset=reset,
+            context=context,
             judge=judge,
             bot_audio=bot_audio,
             transcriber=transcriber,
