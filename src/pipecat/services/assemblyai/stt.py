@@ -727,7 +727,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         self._settings.agent_context = text
         await self._send_update_configuration(agent_context=text)
 
-    async def process_assistant_turn(self, text: str) -> None:
+    async def _process_assistant_turn(self, text: str) -> None:
         """Feed the assistant's completed reply to AssemblyAI as carryover context.
 
         Called automatically when the assistant's turn ends.

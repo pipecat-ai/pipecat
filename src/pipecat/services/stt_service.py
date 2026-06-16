@@ -276,7 +276,7 @@ class STTService(AIService):
         """
         return Language(language)
 
-    async def process_assistant_turn(self, text: str) -> None:
+    async def _process_assistant_turn(self, text: str) -> None:
         """Called when the assistant's turn completes with the aggregated reply text.
 
         Override in subclasses to react to each completed bot reply — for
@@ -449,7 +449,7 @@ class STTService(AIService):
             await self._reset_stt_ttfb_state()
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMContextAssistantTurnFrame):
-            await self.process_assistant_turn(frame.text)
+            await self._process_assistant_turn(frame.text)
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)

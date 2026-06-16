@@ -463,10 +463,10 @@ def test_update_settings_mixed_delta_reconnects_without_update_configuration():
     assert "agent_context" in service._build_ws_url()
 
 
-# --- process_assistant_turn ---
+# --- _process_assistant_turn ---
 
 
-def test_process_assistant_turn_delegates_to_update_agent_context():
+def test__process_assistant_turn_delegates_to_update_agent_context():
     service = AssemblyAISTTService(api_key="test-key")
     sent = []
 
@@ -474,13 +474,13 @@ def test_process_assistant_turn_delegates_to_update_agent_context():
         sent.append(fields)
 
     service._send_update_configuration = fake_send
-    asyncio.run(service.process_assistant_turn("Hello there."))
+    asyncio.run(service._process_assistant_turn("Hello there."))
 
     assert sent == [{"agent_context": "Hello there."}]
     assert service._settings.agent_context == "Hello there."
 
 
-def test_process_assistant_turn_noop_for_non_u3():
+def test__process_assistant_turn_noop_for_non_u3():
     service = AssemblyAISTTService(
         api_key="test-key",
         settings=AssemblyAISTTService.Settings(model="universal-streaming-english"),
@@ -491,12 +491,12 @@ def test_process_assistant_turn_noop_for_non_u3():
         sent.append(fields)
 
     service._send_update_configuration = fake_send
-    asyncio.run(service.process_assistant_turn("Hello."))
+    asyncio.run(service._process_assistant_turn("Hello."))
 
     assert sent == []
 
 
-def test_process_assistant_turn_noop_when_carryover_disabled():
+def test__process_assistant_turn_noop_when_carryover_disabled():
     service = AssemblyAISTTService(
         api_key="test-key",
         settings=AssemblyAISTTService.Settings(previous_context_n_turns=0),
@@ -507,6 +507,10 @@ def test_process_assistant_turn_noop_when_carryover_disabled():
         sent.append(fields)
 
     service._send_update_configuration = fake_send
-    asyncio.run(service.process_assistant_turn("Hello."))
+    asyncio.run(service._process_assistant_turn("Hello."))
 
     assert sent == []
+
+
+if __name__ == "__main__":
+    unittest.main()
