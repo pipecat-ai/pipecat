@@ -139,9 +139,8 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
                         noise_reduction=InputAudioNoiseReduction(type="near_field"),
                     )
                 ),
-                # In this example we provide tools through the context, but you could
-                # alternatively provide them here.
-                # tools=ToolsSchema(standard_tools=[get_current_weather, get_restaurant_recommendation]),
+                # you could choose to pass tools here rather than via context
+                # tools=[get_current_weather, get_restaurant_recommendation],
             ),
         ),
     )

@@ -620,18 +620,9 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     #
 
     @override
-    def _service_tools(self) -> "ToolsSchema | None":
-        """Return the tools configured on ``session_properties``, if any.
-
-        OpenAI Realtime advertises session-properties tools when the context
-        carries none, so their handlers auto-register the same way a
-        context-advertised one would. Provider-native tool objects carry no
-        handler, so only a ``ToolsSchema`` qualifies.
-        """
-        sp = assert_given(self._settings.session_properties)
-        if isinstance(sp.tools, ToolsSchema):
-            return sp.tools
-        return None
+    def _service_tools(self) -> "ToolsSchema | list[Any] | None":
+        """Return the tools configured on ``session_properties``, if any."""
+        return assert_given(self._settings.session_properties).tools
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames from the pipeline.

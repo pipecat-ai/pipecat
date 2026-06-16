@@ -14,9 +14,12 @@ import json
 import uuid
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from pipecat.adapters.schemas.direct_function import DirectFunction
+from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.processors.aggregators.llm_context import LLMContext
 
 #
 # Audio format configuration
@@ -221,8 +224,22 @@ class SessionProperties(BaseModel):
         default_factory=lambda: TurnDetection(type="server_vad")
     )
     audio: AudioConfiguration | None = None
-    # Tools can be ToolsSchema when provided by user, or list of dicts for API
-    tools: ToolsSchema | list[GrokTool] | None = None
+    # Tools provided by the user may be a ToolsSchema or a plain list of standard
+    # tools (the validator below normalizes that to a ToolsSchema); a list of
+    # provider-native GrokTool objects passes through.
+    tools: ToolsSchema | list[FunctionSchema | DirectFunction] | list[GrokTool] | None = None
+
+    @field_validator("tools", mode="before")
+    @classmethod
+    def _normalize_tools(cls, v):
+        """Wrap a plain list of standard tools in a ``ToolsSchema``.
+
+        Provider-native tool lists pass through unchanged.
+        """
+        if isinstance(v, list):
+            normalized = LLMContext._normalize_and_validate_tools(v, allow_provider_tools=True)
+            return normalized if isinstance(normalized, (ToolsSchema, list)) else None
+        return v
 
 
 #

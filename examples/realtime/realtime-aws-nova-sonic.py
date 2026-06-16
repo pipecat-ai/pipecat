@@ -119,9 +119,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             # Lower this (e.g. 20) to see a handoff happen quickly during testing.
             transition_threshold_seconds=360,
         ),
-        # you could choose to pass tools here rather than via context (init-time
-        # tool params take a ToolsSchema, not a plain list)
-        # tools=ToolsSchema(standard_tools=[get_current_weather])
+        # you could choose to pass tools here rather than via context
+        # tools=[get_current_weather]
     )
 
     # AWS Nova Sonic drives the conversation server-side.

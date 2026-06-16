@@ -26,7 +26,6 @@ from loguru import logger
 
 from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -126,7 +125,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             temperature=0.3,
             max_duration=datetime.timedelta(minutes=3),
         ),
-        one_shot_selected_tools=ToolsSchema(standard_tools=[weather_function]),
+        one_shot_selected_tools=[weather_function],
     )
 
     context = LLMContext([])

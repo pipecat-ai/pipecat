@@ -26,6 +26,8 @@ from loguru import logger
 from pydantic import BaseModel, Field
 from typing_extensions import override
 
+from pipecat.adapters.schemas.direct_function import DirectFunction
+from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter, Role
 from pipecat.frames.frames import (
@@ -282,7 +284,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         audio_config: AudioConfig | None = None,
         settings: Settings | None = None,
         system_instruction: str | None = None,
-        tools: ToolsSchema | None = None,
+        tools: ToolsSchema | list[FunctionSchema | DirectFunction] | None = None,
         session_continuation: SessionContinuationParams | None = None,
         **kwargs,
     ):
@@ -331,7 +333,9 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
                     Use ``settings=AWSNovaSonicLLMService.Settings(system_instruction=...)`` instead.
                     Will be removed in 2.0.0.
 
-            tools: Available tools/functions for the model to use.
+            tools: Available tools for the model: a ``ToolsSchema`` or a plain list
+                of direct functions and/or ``FunctionSchema`` objects (handlers
+                auto-register).
             session_continuation: Configuration for automatic session continuation.
                 When enabled (the default), sessions are seamlessly rotated before
                 the AWS time limit (~8 minutes) with no user-perceptible interruption.
@@ -405,6 +409,11 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         self._audio_config = audio_config or (
             params.audio_config if params is not None else AudioConfig()
         )
+        # Accept a plain list of standard tools as a convenience; normalize it to a
+        # ToolsSchema so the rest of the service has a single form to handle.
+        if isinstance(tools, list):
+            normalized = LLMContext._normalize_and_validate_tools(tools)
+            tools = normalized if isinstance(normalized, ToolsSchema) else None
         self._tools = tools
 
         # Validate endpointing_sensitivity parameter
@@ -550,12 +559,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
 
     @override
     def _service_tools(self) -> "ToolsSchema | None":
-        """Return the tools passed via ``tools=`` at construction, if any.
-
-        Nova Sonic advertises these whenever the context carries no tools (context
-        tools otherwise take priority), so their handlers auto-register the same
-        way a context-advertised one would.
-        """
+        """Return the tools configured via ``tools=`` at construction, if any."""
         return self._tools
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

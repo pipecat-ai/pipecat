@@ -129,7 +129,8 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
                     )
                 ),
                 output_modalities=["text"],
-                # tools=ToolsSchema(standard_tools=[get_current_weather, get_restaurant_recommendation]),
+                # you could choose to pass tools here rather than via context
+                # tools=[get_current_weather, get_restaurant_recommendation],
             ),
         ),
     )

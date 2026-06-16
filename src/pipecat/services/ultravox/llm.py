@@ -25,6 +25,8 @@ from typing_extensions import override
 from websockets.asyncio import client as websocket_client
 from websockets.exceptions import ConnectionClosed
 
+from pipecat.adapters.schemas.direct_function import DirectFunction
+from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
@@ -194,7 +196,7 @@ class UltravoxRealtimeLLMService(LLMService):
         *,
         params: AgentInputParams | OneShotInputParams | JoinUrlInputParams,
         settings: Settings | None = None,
-        one_shot_selected_tools: ToolsSchema | None = None,
+        one_shot_selected_tools: ToolsSchema | list[FunctionSchema | DirectFunction] | None = None,
         **kwargs,
     ):
         """Initialize the Ultravox Realtime LLM service.
@@ -203,7 +205,9 @@ class UltravoxRealtimeLLMService(LLMService):
             params: Configuration parameters for the model.
             settings: Ultravox Realtime LLM settings. If provided, the ``settings``
                 values take precedence over default values.
-            one_shot_selected_tools: ToolsSchema for tools to use with this call.
+            one_shot_selected_tools: Tools to use with this call: a ``ToolsSchema``
+                or a plain list of direct functions and/or ``FunctionSchema``
+                objects (handlers auto-register).
                 May only be set with OneShotInputParams.
             **kwargs: Additional arguments passed to parent LLMService.
         """
@@ -234,6 +238,11 @@ class UltravoxRealtimeLLMService(LLMService):
             **kwargs,
         )
         self._params = params
+        # Accept a plain list of standard tools as a convenience; normalize it to a
+        # ToolsSchema so the rest of the service has a single form to handle.
+        if isinstance(one_shot_selected_tools, list):
+            normalized = LLMContext._normalize_and_validate_tools(one_shot_selected_tools)
+            one_shot_selected_tools = normalized if isinstance(normalized, ToolsSchema) else None
         self._selected_tools: ToolsSchema | None = None
         if one_shot_selected_tools:
             if not isinstance(self._params, OneShotInputParams):
@@ -425,11 +434,7 @@ class UltravoxRealtimeLLMService(LLMService):
 
     @override
     def _service_tools(self) -> "ToolsSchema | None":
-        """Return the ``one_shot_selected_tools`` passed at construction, if any.
-
-        Ultravox advertises these and doesn't read tools from the context, so
-        their handlers auto-register the same way a context-advertised one would.
-        """
+        """Return the ``one_shot_selected_tools`` configured at construction, if any."""
         return self._selected_tools
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

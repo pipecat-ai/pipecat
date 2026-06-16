@@ -12,7 +12,6 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -115,7 +114,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # KNOWN ISSUE: If using GeminiVertexLiveLLMService, it appears
     # you cannot use the "google_search" tool alongside other tools.
     # See https://github.com/googleapis/python-genai/issues/941.
-    tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
+    tools = [weather_function, restaurant_function]
 
     llm = GeminiLiveVertexLLMService(
         credentials=os.getenv("GOOGLE_VERTEX_TEST_CREDENTIALS"),

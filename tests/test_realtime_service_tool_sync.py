@@ -44,27 +44,27 @@ async def sample_async_handler(params: FunctionCallParams):
     await params.result_callback({})
 
 
-def _tools(handler) -> ToolsSchema:
-    return ToolsSchema(
-        standard_tools=[
-            FunctionSchema(
-                name="sample",
-                description="A sample tool.",
-                properties={},
-                required=[],
-                handler=handler,
-            )
-        ]
+def _sample_schema(handler) -> FunctionSchema:
+    return FunctionSchema(
+        name="sample",
+        description="A sample tool.",
+        properties={},
+        required=[],
+        handler=handler,
     )
+
+
+def _tools(handler) -> ToolsSchema:
+    return ToolsSchema(standard_tools=[_sample_schema(handler)])
 
 
 class _ServiceToolSyncTests:
     """Shared cases for services that auto-register their service-configured tools.
 
     Subclasses provide ``_service(tools)``, building the service with the given
-    ``ToolsSchema`` (or ``None``) wired into its tool parameter. They use
-    ``pytest.importorskip`` so a service whose optional dependencies aren't
-    installed is skipped rather than erroring.
+    tools (a ``ToolsSchema``, a plain list of standard tools, or ``None``) wired
+    into its tool parameter. They use ``pytest.importorskip`` so a service whose
+    optional dependencies aren't installed is skipped rather than erroring.
     """
 
     def _service(self, tools):
@@ -73,6 +73,13 @@ class _ServiceToolSyncTests:
     async def test_service_schema_handler_registers(self):
         service = self._service(_tools(sample_handler))
         # An empty context (NOT_GIVEN tools) falls back to the service tools.
+        service._sync_registered_tool_handlers(NOT_GIVEN)
+        self.assertTrue(service.has_function("sample"))
+
+    async def test_service_tool_list_registers(self):
+        # The tool parameter accepts a plain list of standard tools, not just a
+        # ToolsSchema; the handler still auto-registers.
+        service = self._service([_sample_schema(sample_handler)])
         service._sync_registered_tool_handlers(NOT_GIVEN)
         self.assertTrue(service.has_function("sample"))
 
@@ -109,6 +116,12 @@ class _SessionUpdateToolPreservationTests:
         self.assertIsInstance(service._settings.session_properties.tools, ToolsSchema)
         service._sync_registered_tool_handlers(NOT_GIVEN)
         self.assertTrue(service.has_function("sample"))
+
+    async def test_session_properties_normalizes_tool_list(self):
+        # A plain list passed to SessionProperties.tools is normalized to a
+        # ToolsSchema by the field validator.
+        service = self._service([_sample_schema(sample_handler)])
+        self.assertIsInstance(service._settings.session_properties.tools, ToolsSchema)
 
 
 class TestGeminiLiveServiceToolSync(_ServiceToolSyncTests, unittest.IsolatedAsyncioTestCase):

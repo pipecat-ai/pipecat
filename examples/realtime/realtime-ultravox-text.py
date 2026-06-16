@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -175,7 +174,7 @@ There is also a secret menu that changes daily. If the user asks about it, use t
             max_duration=datetime.timedelta(minutes=3),
             output_medium="text",
         ),
-        one_shot_selected_tools=ToolsSchema(standard_tools=[secret_menu_function]),
+        one_shot_selected_tools=[secret_menu_function],
     )
 
     tts = InworldTTSService(
