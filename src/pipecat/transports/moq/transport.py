@@ -70,6 +70,17 @@ DEFAULT_PEER_ID = "client0"
 DEFAULT_AUDIO_OUT_TRACK = "bot-audio"
 DEFAULT_TRANSCRIPT_TRACK = "transcript"
 
+# Pin the Opus wire rate to its highest supported internal rate (Opus
+# supports {8, 12, 16, 24, 48} kHz). Chrome's WebCodecs Opus decoder
+# always emits AudioData at 48kHz regardless of the
+# AudioDecoderConfig.sampleRate hint, so encoding at anything else
+# creates a wire/playback rate mismatch on the browser side:
+# @moq/watch's ring buffer is sized off the catalog rate, and if that
+# disagrees with the AudioData rate the bot voice plays back
+# octave-low at half speed. moq-rs handles the resampling from the
+# pipeline rate up to this for us.
+OPUS_SAMPLE_RATE = 48000
+
 
 def _downmix_s16_to_mono(pcm: bytes, channels: int) -> bytes:
     """Downmix interleaved S16 PCM to mono by averaging channels.
@@ -475,7 +486,7 @@ class MOQTransport(BaseTransport):
             ),
             moq.AudioEncoderOutput(
                 codec=moq.AudioCodec.OPUS,
-                sample_rate=None,  # let the library pick an Opus-supported rate
+                sample_rate=OPUS_SAMPLE_RATE,
                 channels=None,
                 bitrate=None,
                 frame_duration_ms=self._params.audio_out_frame_ms,
@@ -483,7 +494,8 @@ class MOQTransport(BaseTransport):
         )
         logger.info(
             f"MOQ: publishing audio as Opus "
-            f"(pipeline rate={sample_rate}Hz, frame={self._params.audio_out_frame_ms}ms, "
+            f"(pipeline rate={sample_rate}Hz, opus rate={OPUS_SAMPLE_RATE}Hz, "
+            f"frame={self._params.audio_out_frame_ms}ms, "
             f"track={self._params.audio_out_track!r})"
         )
 

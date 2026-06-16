@@ -7,10 +7,10 @@ talking to it through the locally-built `voice-ui-kit` +
 
 The pipecat MoQ transport uses the [`moq-rs`](https://pypi.org/project/moq-rs/)
 Python library, so the bot can bind its own UDP socket via `--moq-serve`
-and mint a self-signed cert in-process. No separate `moq-relay` process,
-no `openssl` cert dance. The only friction left is the `npm link` chain
-for the still-unpublished MoQ packages, which `./scripts/moq-dev-setup.sh`
-handles.
+and (with `--moq-tls-generate <hostname>`) mint a self-signed cert
+in-process. No separate `moq-relay` process, no `openssl` cert dance.
+The only friction left is the `npm link` chain for the still-unpublished
+MoQ packages, which `./scripts/moq-dev-setup.sh` handles.
 
 ## The short, short version
 ```bash
@@ -244,6 +244,7 @@ transcript, mic device picker, SessionInfo showing "MoQ".
 | `pnpm install` in voice-ui-kit fails with `ERR_PNPM_FETCH_404 ... @pipecat-ai/moq-transport: Not Found` | The `pnpm.overrides` entry in `voice-ui-kit/package.json` is missing. Run the `npm pkg set "pnpm.overrides[@pipecat-ai/moq-transport]=..."` command from §2 inside `voice-ui-kit/` before retrying `pnpm install`. |
 | Bot crashes with `ModuleNotFoundError: No module named 'websockets'` (or similar) at import time | The Python extras in §2 were incomplete. `uv sync --extra moq` alone isn't enough — the example uses Silero VAD, Deepgram STT, Cartesia TTS, and OpenAI LLM; each of those has its own extra. Re-run the full `uv sync` command from §2. |
 | Stale voice-ui-kit code after editing | `pnpm -F @pipecat-ai/voice-ui-kit build` was skipped or failed. |
+| Safari console: `WebSocket connection to 'wss://localhost:4080/moq' failed` and no audio | Use Chrome/Chromium for local `--moq-serve` dev. Two compounding issues: (a) Safari <18 has no WebTransport at all; (b) Safari 18+ has WebTransport but doesn't support `serverCertificateHashes`, so the in-process self-signed cert can't be pinned. `@moq/net` then falls back to WebSocket, but `--moq-serve` only binds a UDP/QUIC socket — there's no `wss://` listener on :4080 — so the fallback fails too. Safari works against an external relay with a CA-signed cert. |
 
 ## 7. What the link chain actually does
 
