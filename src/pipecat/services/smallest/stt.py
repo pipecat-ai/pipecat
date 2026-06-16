@@ -318,7 +318,7 @@ class SmallestSTTService(WebsocketSTTService):
         await self._disconnect_websocket()
 
     async def _connect_websocket(self):
-        """Establish WebSocket connection to the Smallest Pulse STT API (v4)."""
+        """Establish WebSocket connection to the Smallest Pulse STT API."""
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
