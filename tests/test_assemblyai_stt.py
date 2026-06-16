@@ -511,5 +511,6 @@ def test__process_assistant_turn_noop_when_carryover_disabled():
 
     assert sent == []
 
+
 if __name__ == "__main__":
     unittest.main()
