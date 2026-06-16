@@ -6,10 +6,13 @@
 
 """Smallest AI speech-to-text service implementation.
 
-This module provides a STT service using Smallest AI's Waves API:
+This module provides a STT service using Smallest AI's Waves v4 API:
 
-- ``SmallestSTTService``: WebSocket-based real-time STT. Streams audio
-  continuously and receives interim/final transcripts with low latency.
+- ``SmallestSTTService``: WebSocket-based real-time STT using the Pulse model.
+  Streams audio continuously and receives interim/final transcripts with low
+  latency. Each utterance opens a session; sending ``close_stream`` flushes the
+  final transcript and the server closes the session. The service reconnects
+  automatically for the next utterance.
 """
 
 import asyncio
@@ -129,7 +132,11 @@ class SmallestSTTService(WebsocketSTTService):
     for real-time voice applications where immediate feedback is needed.
 
     Uses Pipecat's VAD to detect when the user stops speaking and sends
-    a finalize message to flush the final transcript.
+    a ``close_stream`` message to flush the final transcript. The server
+    closes the session after the final response; the service reconnects
+    automatically for the next utterance.
+
+    Connects to ``wss://api.smallest.ai/waves/v1/stt/live?model=pulse``.
 
     Example::
 
@@ -237,9 +244,18 @@ class SmallestSTTService(WebsocketSTTService):
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             if self._websocket and self._websocket.state is State.OPEN:
                 try:
-                    await self._websocket.send(json.dumps({"type": "finalize"}))
+                    # Mark as intentionally disconnecting before sending close_stream.
+                    # The v4 API closes the session after the final transcript, which
+                    # would look like a quick-failure to WebsocketService's reconnect
+                    # guard (_MIN_STABLE_CONNECTION_DURATION). Setting _disconnecting=True
+                    # makes _maybe_try_reconnect treat it as a clean exit rather than an
+                    # error, breaking the receive loop instead of incrementing the failure
+                    # counter. _connect() resets _disconnecting=False on reconnect.
+                    self._disconnecting = True
+                    await self._websocket.send(json.dumps({"type": "close_stream"}))
                 except Exception as e:
-                    logger.warning(f"{self} failed to send finalize: {e}")
+                    self._disconnecting = False
+                    logger.warning(f"{self} failed to send close_stream: {e}")
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Send audio to the Smallest Pulse WebSocket for transcription.
@@ -280,6 +296,11 @@ class SmallestSTTService(WebsocketSTTService):
             await self._connect_websocket()
             await super()._connect()
 
+            # After close_stream the server closes the session; the receive task
+            # exits naturally. Clear it so we can create a fresh one on reconnect.
+            if self._receive_task is not None and self._receive_task.done():
+                self._receive_task = None
+
             if self._websocket and not self._receive_task:
                 self._receive_task = self.create_task(
                     self._receive_task_handler(self._report_error)
@@ -297,7 +318,7 @@ class SmallestSTTService(WebsocketSTTService):
         await self._disconnect_websocket()
 
     async def _connect_websocket(self):
-        """Establish WebSocket connection to the Smallest Pulse STT API."""
+        """Establish WebSocket connection to the Smallest Pulse STT API (v4)."""
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
@@ -305,6 +326,7 @@ class SmallestSTTService(WebsocketSTTService):
             logger.debug("Connecting to Smallest STT")
 
             query_params = {
+                "model": self._settings.model,
                 "language": self._settings.language,
                 "encoding": self._encoding,
                 "sample_rate": str(self.sample_rate),
@@ -317,7 +339,7 @@ class SmallestSTTService(WebsocketSTTService):
                 "diarize": str(self._settings.diarize).lower(),
             }
 
-            ws_url = f"{self._base_url}/waves/v1/pulse/get_text?{urlencode(query_params)}"
+            ws_url = f"{self._base_url}/waves/v1/stt/live?{urlencode(query_params)}"
 
             self._websocket = await websocket_connect(
                 ws_url,
@@ -363,13 +385,26 @@ class SmallestSTTService(WebsocketSTTService):
                 logger.error(f"{self} error processing message: {e}")
 
     async def _process_response(self, data: dict):
-        """Process a transcription response from the Pulse API.
+        """Process a transcription response from the Pulse API (v4).
 
         Args:
             data: Parsed JSON response containing transcript data.
+
+        The response contains:
+            - ``transcript``: The recognized text.
+            - ``is_final``: Whether this is a final (vs. interim) result.
+            - ``is_last``: Whether this is the final message of the session.
+              When ``True`` the server closes the WebSocket; the service
+              reconnects automatically for the next utterance.
+            - ``language``: The detected or specified language.
+            - ``session_id``: Unique identifier for the WebSocket session.
         """
         is_final = data.get("is_final", False)
+        is_last = data.get("is_last", False)
         text = data.get("transcript", "").strip()
+
+        if is_last:
+            logger.debug(f"{self} received is_last; server will close session")
 
         if not text:
             return
