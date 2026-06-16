@@ -75,9 +75,10 @@ def validate_and_build_config(
     if not name:
         errors.append("--name is required")
 
-    if not bot_type:
-        errors.append("--bot-type is required (web or telephony)")
-    elif bot_type not in ("web", "telephony"):
+    # --bot-type is optional in non-interactive mode: when omitted it is inferred
+    # from the transports below (a forking question for the interactive wizard, but
+    # the transports already determine it headless). Only validate it when given.
+    if bot_type and bot_type not in ("web", "telephony"):
         errors.append(f"--bot-type must be 'web' or 'telephony', got '{bot_type}'")
 
     if not transport:
@@ -134,6 +135,12 @@ def validate_and_build_config(
             else:
                 all_valid = sorted(set(valid_transport_values) | generic_transport_names)
                 errors.append(f"Unknown transport '{t}'. Valid transports: {', '.join(all_valid)}")
+
+    # Infer bot_type from the transports when it wasn't given: telephony if any
+    # transport is a telephony transport, otherwise web. (Explicit values are
+    # validated against the transports by the cross-check below.)
+    if not bot_type and resolved_transports:
+        bot_type = "telephony" if any(t in telephony_values for t in resolved_transports) else "web"
 
     # Cross-check transport vs bot_type
     if bot_type and resolved_transports:
