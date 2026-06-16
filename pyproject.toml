@@ -137,6 +137,7 @@ ultravox = []
 vonage-video-connector = [ "vonage-video-connector~=1.0.2; python_version=='3.13' and platform_system=='Linux'" ]
 webrtc = [ "aiortc>=1.14.0,<2", "opencv-python>=4.11.0.86,<5" ]
 websocket = [ "fastapi>=0.115.6,<1" ]
+funasr = [ "funasr>=1.1.0", "soundfile~=0.13.1" ]
 whisper = [ "faster-whisper~=1.2.1" ]
 xai = []
 
