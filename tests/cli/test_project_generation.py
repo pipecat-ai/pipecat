@@ -861,11 +861,10 @@ def test_eval_starter_scenarios(temp_output_dir):
     assert audio.name == "starter_audio"
     assert audio.user_audio is not None  # audio starter drives real speech in
 
-    # The project env carries what the harness needs: the `pipecat eval` command
-    # (cli) and the local speech stack for audio mode (kokoro + moonshine).
+    # The project env carries what the harness needs via the `evals` extra: the
+    # `pipecat eval` command (cli) and the local speech stack (kokoro + moonshine).
     pyproject = (server / "pyproject.toml").read_text()
-    for extra in ("cli", "kokoro", "moonshine"):
-        assert extra in pyproject
+    assert "evals" in pyproject
 
     # The README documents the eval loop.
     readme = (server.parent / "README.md").read_text()

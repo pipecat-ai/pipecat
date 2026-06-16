@@ -350,12 +350,10 @@ class ProjectGenerator:
         # Extract all required extras
         extras = ServiceLoader.extract_extras_for_services(services)
 
-        # Evals run from this project's environment, so it needs the `pipecat eval`
-        # command itself (cli) plus the harness's local speech stack — Kokoro
-        # synthesizes the user's turns and Moonshine transcribes the bot's audio —
-        # so the starter audio scenario runs with no extra setup and no API keys.
+        # The `evals` extra bundles the `pipecat eval` command and the harness's
+        # local speech stack (Kokoro + Moonshine) to run the starter scenarios.
         if self.config.enable_eval:
-            extras.update({"cli", "kokoro", "moonshine"})
+            extras.add("evals")
 
         # Build the pipecat-ai dependency string. Floor at 1.4.0: generated bots use
         # create_transport + the typed CallData/runner-args API, which land in 1.4.0.
