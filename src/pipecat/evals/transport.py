@@ -75,6 +75,7 @@ SKIP_TTS_QUERY_PARAM = "skip_tts"
 USER_AUDIO_QUERY_PARAM = "user_audio"
 CAPTURE_AUDIO_QUERY_PARAM = "capture_bot_audio"
 RECORD_QUERY_PARAM = "record"
+TRIGGER_DISCONNECT_QUERY_PARAM = "trigger_disconnect"
 
 # One virtual-mic frame per tick — the granularity a live transport delivers and
 # what VAD/turn models consume.
@@ -416,3 +417,16 @@ class EvalTransport(SingleClientWebsocketServerTransport):
             self._record_path = None
 
         await super()._on_client_disconnected(websocket)
+
+    async def _emit_client_disconnected(self, websocket):
+        """Fire ``on_client_disconnected`` only when the harness asks for it.
+
+        Bots often cancel their pipeline in ``on_client_disconnected``, so the
+        event is suppressed by default to avoid that between eval scenarios. The
+        harness sets ``?trigger_disconnect=true`` (via a scenario's
+        ``trigger_disconnect`` field or ``pipecat eval run --trigger-disconnect``)
+        to exercise the bot's disconnect path. Independent of ``--stop-bot``,
+        which tears the bot down reliably via ``eval-cancel``.
+        """
+        if _query_flag(websocket, TRIGGER_DISCONNECT_QUERY_PARAM):
+            await super()._emit_client_disconnected(websocket)

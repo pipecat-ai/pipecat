@@ -241,6 +241,12 @@ class EvalScenario:
             to the bot, exercising its STT for real. Mapping with ``service``,
             ``voice``, and optional ``model`` / ``sample_rate`` /
             ``api_key``. Omit for text-only evals (default).
+        trigger_disconnect: Whether the harness fires the bot's
+            ``on_client_disconnected`` handler when this scenario's connection
+            ends. Bots often cancel their pipeline there, so this is False by
+            default to avoid that between scenarios; set True to exercise the
+            bot's disconnect path. Independent of ``--stop-bot``, which tears the
+            bot down via ``eval-cancel`` regardless of the handler.
         source_path: Path the scenario was loaded from, for error messages.
     """
 
@@ -251,6 +257,7 @@ class EvalScenario:
     bot_audio: bool = False
     transcriber: dict | None = None
     user_audio: dict | None = None
+    trigger_disconnect: bool = False
     source_path: Path | None = None
 
     @classmethod
@@ -325,6 +332,7 @@ class EvalScenario:
             bot_audio=bot_audio,
             transcriber=transcriber,
             user_audio=user_audio,
+            trigger_disconnect=bool(data.get("trigger_disconnect", False)),
             source_path=path,
         )
 

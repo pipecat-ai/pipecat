@@ -169,6 +169,7 @@ async def _execute_scenario(
     logs_dir: str,
     debug: bool,
     stop_bot: bool,
+    trigger_disconnect: bool,
     on_progress,
 ) -> None:
     """Run one scenario against its ``bot_url``, updating ``run`` in place.
@@ -194,6 +195,7 @@ async def _execute_scenario(
                 cache_dir=cache_dir,
                 use_cache=use_cache,
                 stop_bot=stop_bot,
+                trigger_disconnect=trigger_disconnect,
             ).run()
         if run.result.debug_log:
             Path(logs_dir).mkdir(parents=True, exist_ok=True)
@@ -227,6 +229,7 @@ async def _run_scenarios_all(
     verbose: bool,
     debug: bool,
     stop_bot: bool,
+    trigger_disconnect: bool,
     started: float,
 ) -> None:
     """Run scenarios sequentially against a fixed bot, with the suite's display.
@@ -246,6 +249,7 @@ async def _run_scenarios_all(
             logs_dir=logs_dir,
             debug=debug,
             stop_bot=stop_bot,
+            trigger_disconnect=trigger_disconnect,
             on_progress=on_progress,
         )
 
@@ -320,6 +324,13 @@ def run(
         help="Cancel the bot's pipeline (exit it) after the run. By default the "
         "bot is left running so it can serve more scenarios.",
     ),
+    trigger_disconnect: bool = typer.Option(
+        False,
+        "--trigger-disconnect",
+        help="Fire the bot's on_client_disconnected handler when the eval client "
+        "disconnects. Bots often cancel their pipeline there, so it's off by "
+        "default. A scenario's 'trigger_disconnect:' field opts in on its own.",
+    ),
 ) -> None:
     """Run one or more evals against an already-running bot.
 
@@ -348,6 +359,7 @@ def run(
             verbose=verbose,
             debug=debug,
             stop_bot=stop_bot,
+            trigger_disconnect=trigger_disconnect,
             started=started,
         )
     )

@@ -539,9 +539,17 @@ class SingleClientWebsocketServerTransport(BaseTransport):
         """Handle client disconnection events."""
         if self._output:
             await self._output.set_client_connection(None)
-            await self._call_event_handler("on_client_disconnected", websocket)
+            await self._emit_client_disconnected(websocket)
         else:
             logger.error("A SingleClientWebsocketServerTransport output is missing in the pipeline")
+
+    async def _emit_client_disconnected(self, websocket):
+        """Fire the ``on_client_disconnected`` event.
+
+        Split from the connection teardown above so subclasses can suppress the
+        event without skipping that teardown.
+        """
+        await self._call_event_handler("on_client_disconnected", websocket)
 
     async def _on_session_timeout(self, websocket):
         """Handle client session timeout events."""

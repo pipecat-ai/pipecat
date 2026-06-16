@@ -212,7 +212,7 @@ The dev runner wraps this in the eval transport + serializer when you pass `-t e
 - **Logs** — the bot logs to stdout (loguru). However you run it, keep the output durable and greppable — e.g. `uv run bot.py -t eval 2>&1 | tee /tmp/pipecat-output.txt` — so when a scenario fails you can grep the file for the traceback instead of re-running. If your harness captures background-process output natively, that works too.
 - **Clean boot** — `uv run bot.py -t eval` boots the bot as a headless eval WebSocket server (default `ws://localhost:7860`). No exceptions + pipeline assembled is your fastest "did I wire it right" signal.
 
-**The eval loop (where you live).** Boot the bot (`uv run bot.py -t eval`), then drive a scenario against it from a second terminal. The bot serves that one eval session and exits when the run finishes, so boot it fresh for each run as you iterate (or use `pipecat eval suite` to spawn a fresh bot per scenario from a manifest). Start in **text mode** (the default), the fast inner loop. A minimal scenario:
+**The eval loop (where you live).** Boot the bot (`uv run bot.py -t eval`), then drive a scenario against it from a second terminal. The eval transport keeps the bot alive between runs, so boot it once and drive scenario after scenario as you iterate — no re-boot per run. Start in **text mode** (the default), the fast inner loop. A minimal scenario:
 ```yaml
 name: capital_of_germany
 turns:
@@ -230,6 +230,8 @@ turns:
 uv run pipecat eval run my_scenario.yaml -v
 ```
 Text mode **bypasses STT, VAD, and TTS** (the `user:` turn is sent as text), so assert on what the bot *produced* (`response`, `function_call`), not on `user_*_speaking` events. Prefer the modality-agnostic `response` event — it resolves to the LLM text in text mode and to the bot's transcribed audio in audio mode. Exit code is non-zero if any non-skipped scenario fails. When a run fails in a confusing way, re-run with `-d` to also write `<scenario>.debug.log` — the harness's full logs for the eval STT, TTS, and LLM judge. Route run output to `eval-runs/` with `--logs-dir eval-runs` (and `--record-dir eval-runs` for `-a` recordings); `pipecat eval suite` writes runs to a timestamped `eval-runs/<timestamp>/`.
+
+**One bot serves many runs.** Because the bot stays up between runs, its context carries over — give a scenario a top-level `context:` (a list of LLM messages) to start that run from a known context, or boot fresh / use `pipecat eval suite` (a fresh bot per scenario from a manifest) when you want each run fully isolated. Its `on_client_disconnected` handler (which usually cancels the pipeline) also won't fire during a normal eval; to exercise that path — cleanup, or a goodbye on hang-up — pass `--trigger-disconnect` to `pipecat eval run`, or set `trigger_disconnect: true` on a single scenario. If the handler cancels the pipeline the bot exits, so treat that as a terminal run.
 
 **Escalate to audio mode** for the full round trip. Set `user: {modality: audio, speech: {service: kokoro, voice: af_heart}}` and the harness synthesizes the user's speech, so the bot's **real VAD + STT** run; set `judge: {modality: audio}` (with a `transcription:` block) so the bot **speaks** and the harness transcribes that audio into the `response` event. Kokoro (user TTS) and Moonshine (bot transcription) run **locally with no API key** — audio mode is slower but free. Add `-a` to save the conversation to `<record-dir>/<scenario>.wav` for a human to listen back and confirm it sounds right.
 
