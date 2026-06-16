@@ -100,7 +100,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    # Direct functions listed in the context are registered with the LLM automatically
     context = LLMContext(tools=[summarize_conversation])
 
     # Automatic summarization is NOT enabled here (enable_auto_context_summarization

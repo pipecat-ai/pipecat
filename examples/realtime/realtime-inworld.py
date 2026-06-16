@@ -130,7 +130,6 @@ Always be helpful and proactive in offering assistance.""",
     # function-calling-capable model
 
     # Create context with initial message + tools
-    # Direct functions listed in the context are registered with the LLM automatically
     context = LLMContext(
         [{"role": "developer", "content": "Say hello and introduce yourself!"}],
         [get_current_weather],

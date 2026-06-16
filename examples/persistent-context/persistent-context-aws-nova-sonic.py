@@ -194,7 +194,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # tools=tools
     )
 
-    # Direct functions listed in the context are registered with the LLM automatically
     context = LLMContext(
         tools=[
             get_current_weather,

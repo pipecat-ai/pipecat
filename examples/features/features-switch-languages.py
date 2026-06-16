@@ -125,7 +125,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way. You can speak the following languages: 'English' and 'Spanish'.",
         ),
     )
-    # Direct functions listed in the context are registered with the LLM automatically
     context = LLMContext(tools=[tts.switch_language])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,

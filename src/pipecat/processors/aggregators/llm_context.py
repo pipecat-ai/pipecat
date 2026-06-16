@@ -21,7 +21,7 @@ import io
 import wave
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, TypeAlias, TypeGuard, TypeVar, cast
+from typing import Any, TypeAlias, TypeGuard, TypeVar, cast, overload
 
 from loguru import logger
 from openai._types import NOT_GIVEN as OPEN_AI_NOT_GIVEN
@@ -468,19 +468,51 @@ class LLMContext:
         message = await LLMContext.create_audio_message(audio_frames=audio_frames, text=text)
         self.add_message(message)
 
+    @overload
     @staticmethod
     def _normalize_and_validate_tools(
         tools: ToolsSchema | list[FunctionSchema | DirectFunction] | NotGiven,
-    ) -> ToolsSchema | NotGiven:
+    ) -> ToolsSchema | NotGiven: ...
+
+    @overload
+    @staticmethod
+    def _normalize_and_validate_tools(
+        tools: ToolsSchema | list[Any] | NotGiven,
+        *,
+        allow_provider_tools: bool,
+    ) -> ToolsSchema | list[Any] | NotGiven: ...
+
+    @staticmethod
+    def _normalize_and_validate_tools(
+        tools: ToolsSchema | list[Any] | NotGiven,
+        *,
+        allow_provider_tools: bool = False,
+    ) -> ToolsSchema | list[Any] | NotGiven:
         """Normalize and validate the given tools.
 
         A plain list of direct functions and/or ``FunctionSchema`` objects is
         wrapped in a ``ToolsSchema``.
 
+        Args:
+            tools: The tools to normalize: a ``ToolsSchema``, a list of direct
+                functions and/or ``FunctionSchema`` objects, or ``NOT_GIVEN``.
+            allow_provider_tools: If True, a list that isn't entirely standard
+                tools (direct functions / ``FunctionSchema`` objects) is taken to
+                be already-formatted, provider-native tools and returned
+                unchanged rather than raising. For callers whose tools parameter
+                accepts provider-native tools alongside standard ones.
+
         Raises:
-            TypeError: If tools are not a ToolsSchema, list, or NotGiven.
+            TypeError: If tools aren't a ``ToolsSchema``, list, or ``NOT_GIVEN`` —
+                or, unless ``allow_provider_tools`` is set, if a list contains
+                anything other than standard tools.
         """
         if isinstance(tools, list):
+            if allow_provider_tools and not all(
+                isinstance(t, FunctionSchema) or callable(t) for t in tools
+            ):
+                # Already-formatted, provider-native tools; pass through unchanged.
+                return tools
             tools = ToolsSchema(standard_tools=tools)
         if isinstance(tools, ToolsSchema):
             if not tools.standard_tools and not tools.custom_tools:

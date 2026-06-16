@@ -237,7 +237,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # matching, forcing a full context resend.
         await tts.queue_frame(TTSSpeakFrame("Let me check on that.", append_to_context=False))
 
-    # Direct functions listed in the context are registered with the LLM automatically
     context = LLMContext(tools=[get_current_weather, get_restaurant_recommendation])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,

@@ -17,8 +17,6 @@ import random
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
@@ -43,10 +41,15 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
-async def fetch_item_price(params: FunctionCallParams):
+async def get_item_price(params: FunctionCallParams, item: str):
+    """Get the price of an item in the shop.
+
+    Args:
+        item: The name of the item, e.g. "coffee mug".
+    """
     # This is just a demo, so we make up a price for whatever item is asked about.
     price = random.randint(5, 100)
-    await params.result_callback({"item": params.arguments["item"], "price": f"${price}"})
+    await params.result_callback({"item": item, "price": f"${price}"})
 
 
 # We use lambdas to defer transport parameter creation until the transport
@@ -90,28 +93,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    # You can also register a function_name of None to get all functions
-    # sent to the same callback with an additional function_name parameter.
-    llm.register_function("get_item_price", fetch_item_price)
-
     @llm.event_handler("on_function_calls_started")
     async def on_function_calls_started(service, function_calls):
         await tts.queue_frame(TTSSpeakFrame("Let me check the price."))
 
-    price_function = FunctionSchema(
-        name="get_item_price",
-        description="Get the price of an item in the shop",
-        properties={
-            "item": {
-                "type": "string",
-                "description": "The name of the item, e.g. coffee mug",
-            },
-        },
-        required=["item"],
-    )
-    tools = ToolsSchema(standard_tools=[price_function])
-
-    context = LLMContext(tools=tools)
+    context = LLMContext(tools=[get_item_price])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

@@ -129,6 +129,7 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
                     )
                 ),
                 output_modalities=["text"],
+                # you could choose to pass tools here rather than via context
                 # tools=[get_current_weather, get_restaurant_recommendation],
             ),
         ),

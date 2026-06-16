@@ -100,7 +100,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # You can aslo register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
 
-    # Direct functions listed in the context are registered with the LLM automatically
     context = LLMContext(tools=[store_user_emails])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
