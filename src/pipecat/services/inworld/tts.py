@@ -54,6 +54,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
@@ -132,11 +133,16 @@ class InworldHttpTTSService(TTSService):
     Settings = InworldTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`InworldHttpTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `InworldHttpTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Inworld TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``InworldHttpTTSService.Settings`` directly via the ``settings`` parameter instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             temperature: Temperature for speech synthesis.
@@ -172,11 +178,13 @@ class InworldHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=InworldHttpTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             model: ID of the model to use for synthesis.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=InworldHttpTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             streaming: Whether to use streaming mode.
             sample_rate: Audio sample rate in Hz.
@@ -186,7 +194,8 @@ class InworldHttpTTSService(TTSService):
             params: Input parameters for Inworld TTS configuration.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=InworldHttpTTSService.Settings(...)`` instead.
+                    Use ``settings=InworldHttpTTSService.Settings(...)`` instead. Will
+                    be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -558,11 +567,16 @@ class InworldTTSService(WebsocketTTSService):
     Settings = InworldTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`InworldTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `InworldTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Inworld WebSocket TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``InworldTTSService.Settings`` directly via the ``settings`` parameter instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             temperature: Temperature for speech synthesis.
@@ -613,11 +627,13 @@ class InworldTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=InworldTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             model: ID of the model to use for synthesis.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=InworldTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             url: URL of the Inworld WebSocket API.
             sample_rate: Audio sample rate in Hz.
@@ -632,6 +648,7 @@ class InworldTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=InworldTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -639,6 +656,7 @@ class InworldTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.104
                     Use ``text_aggregation_mode`` instead.
+                    Will be removed in 2.0.0.
 
             text_aggregation_mode: How to aggregate text before synthesis.
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.

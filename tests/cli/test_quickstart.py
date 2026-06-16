@@ -17,7 +17,7 @@ class TestQuickstart:
     """Tests for the quickstart subcommand."""
 
     def test_quickstart_generates_project(self, tmp_path):
-        result = runner.invoke(app, ["init", "quickstart", "-o", str(tmp_path)])
+        result = runner.invoke(app, ["create", "quickstart", "-o", str(tmp_path)])
         assert result.exit_code == 0, result.output
 
         project_dir = tmp_path / "pipecat-quickstart"
@@ -29,12 +29,12 @@ class TestQuickstart:
 
     def test_quickstart_fails_if_directory_exists(self, tmp_path):
         (tmp_path / "pipecat-quickstart").mkdir()
-        result = runner.invoke(app, ["init", "quickstart", "-o", str(tmp_path)])
+        result = runner.invoke(app, ["create", "quickstart", "-o", str(tmp_path)])
         assert result.exit_code == 1
         assert "already exists" in result.output
 
     def test_quickstart_output_contains_defaults(self, tmp_path):
-        result = runner.invoke(app, ["init", "quickstart", "-o", str(tmp_path)])
+        result = runner.invoke(app, ["create", "quickstart", "-o", str(tmp_path)])
         assert result.exit_code == 0, result.output
         assert "SmallWebRTC" in result.output
         assert "Daily" in result.output

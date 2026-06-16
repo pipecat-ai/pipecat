@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame, TTSTextFrame
 from pipecat.observers.loggers.debug_log_observer import DebugLogObserver, FrameEndpoint
 from pipecat.pipeline.pipeline import Pipeline
@@ -29,13 +30,12 @@ from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.transports.websocket.server import WebsocketServerParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
 transport_params = {
-    "eval": lambda: WebsocketServerParams(
+    "eval": lambda: EvalTransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),

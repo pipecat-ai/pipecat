@@ -68,6 +68,7 @@ class PiperTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=PiperTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             download_dir: Directory for storing voice model files. Defaults to
                 the current working directory.
@@ -225,6 +226,7 @@ class PiperHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=PiperHttpTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

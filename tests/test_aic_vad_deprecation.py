@@ -29,9 +29,9 @@ class TestAICVADAnalyzerDeprecation(unittest.TestCase):
         deprecations = [w for w in caught if issubclass(w.category, DeprecationWarning)]
         self.assertEqual(len(deprecations), 1)
         message = str(deprecations[0].message)
-        self.assertIn("AICVADAnalyzer is deprecated", message)
+        self.assertIn("`AICVADAnalyzer` is deprecated", message)
         self.assertIn("AICQuailVADAnalyzer", message)
-        self.assertIn("Pipecat 1.6.0", message)
+        self.assertIn("1.6.0", message)
 
 
 if __name__ == "__main__":

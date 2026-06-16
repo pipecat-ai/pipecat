@@ -52,6 +52,7 @@ from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.frame_queue import FrameQueue
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.pattern_pair_aggregator import PatternMatch
@@ -195,6 +196,7 @@ class TTSService(AIService):
                     Use ``text_aggregation_mode`` instead. Set to ``TextAggregationMode.SENTENCE``
                     to aggregate text into sentences before synthesis, or
                     ``TextAggregationMode.TOKEN`` to stream tokens directly for lower latency.
+                    Will be removed in 2.0.0.
 
             push_text_frames: Whether to push TextFrames and LLMFullResponseEndFrames.
             push_stop_frames: Whether to automatically push TTSStoppedFrames.
@@ -428,42 +430,38 @@ class TTSService(AIService):
         CHUNK_SECONDS = 0.5
         return int(self.sample_rate * CHUNK_SECONDS * 2)  # 2 bytes/sample
 
+    @deprecated(
+        "`TTSService.set_model` is deprecated since 0.0.104 and will be removed in 2.0.0. "
+        "Use `TTSUpdateSettingsFrame(model=...)` instead."
+    )
     async def set_model(self, model: str):
         """Set the TTS model to use.
 
         .. deprecated:: 0.0.104
             Use ``TTSUpdateSettingsFrame(model=...)`` instead.
+            Will be removed in 2.0.0.
 
         Args:
             model: The name of the TTS model.
         """
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "'set_model' is deprecated, use 'TTSUpdateSettingsFrame(model=...)' instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
         logger.info(f"Switching TTS model to: [{model}]")
         settings_cls = type(self._settings)
         await self._update_settings(settings_cls(model=model))
 
+    @deprecated(
+        "`TTSService.set_voice` is deprecated since 0.0.104 and will be removed in 2.0.0. "
+        "Use `TTSUpdateSettingsFrame(voice=...)` instead."
+    )
     async def set_voice(self, voice: str):
         """Set the voice for speech synthesis.
 
         .. deprecated:: 0.0.104
             Use ``TTSUpdateSettingsFrame(voice=...)`` instead.
+            Will be removed in 2.0.0.
 
         Args:
             voice: The voice identifier or name.
         """
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "'set_voice' is deprecated, use 'TTSUpdateSettingsFrame(voice=...)' instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
         logger.info(f"Switching TTS voice to: [{voice}]")
         settings_cls = type(self._settings)
         await self._update_settings(settings_cls(voice=voice))
@@ -1057,6 +1055,8 @@ class TTSService(AIService):
         # is spoken, so we set append_to_context to False.
         src_frame.append_to_context = False
         src_frame.context_id = context_id
+        src_frame.will_be_spoken = True
+
         # Route AggregatedTextFrame through the serialization queue so it is emitted
         # immediately before the TTSStartedFrame of the audio context it describes,
         # rather than racing ahead of audio frames from a previous context.
@@ -1104,7 +1104,9 @@ class TTSService(AIService):
             src_frame,
             context_id,
             tracker=WordCompletionTracker(
-                prepared_text, llm_text=src_frame.raw_text or src_frame.text
+                prepared_text,
+                llm_text=src_frame.raw_text or src_frame.text,
+                user_facing_text=src_frame.text,
             )
             if not self._push_text_frames
             else None,
@@ -1125,6 +1127,7 @@ class TTSService(AIService):
             # context and the context that IS added does not include TTS-specific tags
             # or transformations.
             frame = TTSTextFrame(text, aggregated_by=type)
+            frame.will_be_spoken = True
             frame.includes_inter_frame_spaces = includes_inter_frame_spaces
             frame.context_id = context_id
             frame.append_to_context = append_tts_text_to_context
@@ -1578,11 +1581,16 @@ class TTSService(AIService):
         pass
 
 
+@deprecated(
+    "`WordTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. Use "
+    "`TTSService` instead."
+)
 class WordTTSService(TTSService):
     """Deprecated. Use TTSService directly instead.
 
     .. deprecated:: 0.0.105
         Word timestamp functionality is now always active in TTSService.
+        Will be removed in 2.0.0.
     """
 
     def __init__(self, **kwargs):
@@ -1680,11 +1688,16 @@ class InterruptibleTTSService(WebsocketTTSService):
             self._bot_speaking = False
 
 
+@deprecated(
+    "`WebsocketWordTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+    "Use `WebsocketTTSService` instead."
+)
 class WebsocketWordTTSService(WebsocketTTSService):
     """Deprecated. Use WebsocketTTSService directly instead.
 
     .. deprecated:: 0.0.105
         Word timestamp functionality is now always active in TTSService.
+        Will be removed in 2.0.0.
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
@@ -1697,11 +1710,16 @@ class WebsocketWordTTSService(WebsocketTTSService):
         super().__init__(reconnect_on_error=reconnect_on_error, **kwargs)
 
 
+@deprecated(
+    "`InterruptibleWordTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+    "Use `InterruptibleTTSService` instead."
+)
 class InterruptibleWordTTSService(InterruptibleTTSService):
     """Deprecated. Use InterruptibleTTSService directly instead.
 
     .. deprecated:: 0.0.105
         Word timestamp functionality is now always active in TTSService.
+        Will be removed in 2.0.0.
     """
 
     def __init__(self, **kwargs):
@@ -1713,6 +1731,10 @@ class InterruptibleWordTTSService(InterruptibleTTSService):
         super().__init__(**kwargs)
 
 
+@deprecated(
+    "`AudioContextTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+    "Use `WebsocketTTSService` instead."
+)
 class AudioContextTTSService(WebsocketTTSService):
     """Deprecated. Inherit from WebsocketTTSService directly instead.
 
@@ -1723,6 +1745,7 @@ class AudioContextTTSService(WebsocketTTSService):
         Subclass :class:`WebsocketTTSService` directly and pass
         ``reuse_context_id_within_turn`` as
         keyword arguments to its ``__init__``.
+        Will be removed in 2.0.0.
     """
 
     def __init__(
@@ -1739,14 +1762,6 @@ class AudioContextTTSService(WebsocketTTSService):
             reconnect_on_error: Whether to automatically reconnect on websocket errors.
             **kwargs: Additional arguments passed to the parent WebsocketTTSService.
         """
-        import warnings
-
-        warnings.warn(
-            "AudioContextTTSService is deprecated. Inherit from WebsocketTTSService directly "
-            "and pass reuse_context_id_within_turn as kwargs.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         super().__init__(
             reuse_context_id_within_turn=reuse_context_id_within_turn,
             reconnect_on_error=reconnect_on_error,
@@ -1754,11 +1769,16 @@ class AudioContextTTSService(WebsocketTTSService):
         )
 
 
+@deprecated(
+    "`AudioContextWordTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+    "Use `WebsocketTTSService` instead."
+)
 class AudioContextWordTTSService(AudioContextTTSService):
     """Deprecated. Use WebsocketTTSService directly instead.
 
     .. deprecated:: 0.0.105
         Subclass :class:`WebsocketTTSService` directly.
+        Will be removed in 2.0.0.
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
@@ -1768,11 +1788,4 @@ class AudioContextWordTTSService(AudioContextTTSService):
             reconnect_on_error: Whether to automatically reconnect on websocket errors.
             **kwargs: Additional arguments passed to parent classes.
         """
-        import warnings
-
-        warnings.warn(
-            "AudioContextWordTTSService is deprecated. Inherit from WebsocketTTSService directly.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         super().__init__(reconnect_on_error=reconnect_on_error, **kwargs)

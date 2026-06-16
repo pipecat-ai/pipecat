@@ -215,8 +215,9 @@ class WorkerRunner(BaseObject, BusSubscriber):
 
                 .. deprecated:: 1.3.0
                     Register the worker with :meth:`add_workers` before
-                    calling ``run()`` instead. Passing ``worker`` here
-                    will be removed in a future release.
+                    calling ``run()`` instead.
+                    Will be removed in 2.0.0.
+
             auto_end: When ``True`` (the default), the runner ends once
                 every root worker has finished. When ``False``, the
                 runner blocks until :meth:`end` or :meth:`cancel` is

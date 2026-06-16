@@ -22,7 +22,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallParams, LLMService
+from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
 

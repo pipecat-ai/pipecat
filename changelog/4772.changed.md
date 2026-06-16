@@ -1,0 +1,1 @@
+- Updated `SonioxSTTService` default model from `stt-rt-v4` to `stt-rt-v5`.

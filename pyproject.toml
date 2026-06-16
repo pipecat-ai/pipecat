@@ -35,6 +35,7 @@ dependencies = [
     "resampy~=0.4.3",
     "soxr~=1.0.0",
     "openai>=1.74.0,<3",
+    "typing_extensions>=4.9",
     # Pinning numba to resolve package dependencies
     "numba>=0.61.2,<1",
     "wait_for2>=0.4.1,<1; python_version<'3.12'",
@@ -71,10 +72,11 @@ azure = [ "azure-cognitiveservices-speech>=1.47.0,<2"]
 cartesia = []
 camb = [ "camb-sdk>=1.5.4,<2" ]
 cerebras = []
-daily = [ "daily-python>=0.29.1,<1" ]
+daily = [ "daily-python>=0.29.0,<1" ]
 deepgram = [ "deepgram-sdk>=6.1.1,<8" ]
 deepseek = []
 elevenlabs = []
+evals = [ "pipecat-ai[cli]", "pipecat-ai[kokoro]", "pipecat-ai[moonshine]" ]
 fal = []
 fireworks = []
 fish = [ "ormsgpack>=1.7.0,<2" ]
@@ -201,6 +203,8 @@ where = ["src"]
 "pipecat.cli" = [
     "templates/**/*",
     "templates/**/.gitignore",
+    # Agent-readiness files written by `pipecat init` (AGENTS.md + CLAUDE.md).
+    "agent_templates/**/*",
 ]
 
 [tool.pytest.ini_options]

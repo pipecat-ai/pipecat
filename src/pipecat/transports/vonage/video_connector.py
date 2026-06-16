@@ -5,8 +5,6 @@
 #
 """Vonage Video Connector transport."""
 
-from typing import Optional
-
 from loguru import logger
 
 from pipecat.frames.frames import (

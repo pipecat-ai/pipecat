@@ -6,16 +6,12 @@
 
 """Tests for the Azure STT service init parameters and recognized handler."""
 
-import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
-
 from pipecat.frames.frames import TranscriptionFrame
 from pipecat.services.azure.stt import AzureSTTService
-from pipecat.transcriptions.language import Language
 
 
 class TestAzureSTTProfanitySetting(unittest.TestCase):

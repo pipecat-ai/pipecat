@@ -44,6 +44,7 @@ from pipecat.frames.frames import (
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.deprecation import deprecated
 
 try:
     import grpc
@@ -94,11 +95,16 @@ class NvidiaTTSService(TTSService):
     _settings: Settings
     _MAX_CHUNK_LEN = 200
 
+    @deprecated(
+        "`NvidiaTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `NvidiaTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Nemotron Speech TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``NvidiaTTSService.Settings`` directly via the ``settings`` parameter instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language code for synthesis. Defaults to US English.
@@ -137,6 +143,7 @@ class NvidiaTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=NvidiaTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate. If None, uses service default.
             model_function_map: Dictionary containing function_id and model_name for the TTS model.
@@ -144,6 +151,7 @@ class NvidiaTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=NvidiaTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -216,12 +224,17 @@ class NvidiaTTSService(TTSService):
         """
         return True
 
+    @deprecated(
+        "`NvidiaTTSService.set_model` is deprecated since 0.0.104 and will be removed in 2.0.0. "
+        "No replacement."
+    )
     async def set_model(self, model: str):
         """Set the TTS model.
 
         .. deprecated:: 0.0.104
-            Model cannot be changed after initialization for NVIDIA Nemotron Speech TTS.
-            Set model and function id in the constructor instead.
+            No replacement. Model cannot be changed after initialization for NVIDIA Nemotron
+            Speech TTS; set model and function id in the constructor instead.
+            Will be removed in 2.0.0.
 
             Example::
 
@@ -233,18 +246,6 @@ class NvidiaTTSService(TTSService):
         Args:
             model: The model name to set.
         """
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "'set_model' is deprecated. Model cannot be changed after initialization"
-                " for NVIDIA Nemotron Speech TTS. Set model and function id in the constructor"
-                " instead, e.g.: NvidiaTTSService(api_key=..., model_function_map="
-                "{'function_id': '<UUID>', 'model_name': '<model_name>'})",
-                DeprecationWarning,
-                stacklevel=2,
-            )
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply a settings delta.

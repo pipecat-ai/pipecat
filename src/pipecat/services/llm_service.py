@@ -74,6 +74,7 @@ from pipecat.utils.context.llm_context_summarization import (
     DEFAULT_SUMMARIZATION_TIMEOUT,
     LLMContextSummarizationUtil,
 )
+from pipecat.utils.deprecation import deprecated
 
 if TYPE_CHECKING:
     from pipecat.pipeline.worker import PipelineWorker
@@ -169,21 +170,17 @@ class FunctionCallParams:
     app_resources: Any = None
 
     @property
+    @deprecated(
+        "`FunctionCallParams.tool_resources` is deprecated since 1.2.0 and will be removed in "
+        "2.0.0. Use `app_resources` instead."
+    )
     def tool_resources(self) -> Any:
         """Deprecated alias for :attr:`app_resources`.
 
         .. deprecated:: 1.2.0
-            Use :attr:`app_resources` instead. ``tool_resources`` will be
-            removed in a future version.
+            Use :attr:`app_resources` instead. ``tool_resources``.
+            Will be removed in 2.0.0.
         """
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "`FunctionCallParams.tool_resources` is deprecated since 1.2.0, "
-                "use `app_resources` instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
         return self.app_resources
 
 
@@ -846,6 +843,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             ),
         )
 
+    @deprecated(
+        "`LLMService.register_direct_function` is deprecated since 1.4.0 and will be removed in "
+        "2.0.0. Use `LLMContext(tools=[...])` instead."
+    )
     def register_direct_function(
         self,
         handler: DirectFunction,
@@ -858,8 +859,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         .. deprecated:: 1.4.0
             Direct functions are now registered automatically. List them in
             ``LLMContext(tools=[...])`` for tools available at session start, or
-            push an ``LLMSetToolsFrame`` to change tools mid-session. This method
-            will be removed in a future version.
+            push an :class:`LLMSetToolsFrame` to change tools mid-session.
+            Will be removed in 2.0.0.
 
         Direct functions have their metadata automatically extracted from their
         signature and docstring, eliminating the need for accompanying
@@ -888,16 +889,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 back to the ``@tool_options`` decorator value, then to the global
                 timeout).
         """
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "`register_direct_function()` is deprecated since 1.4.0. List direct "
-                "functions in `LLMContext(tools=[...])` for tools available at session "
-                "start, or push an `LLMSetToolsFrame` to change tools mid-session; "
-                "handlers are then registered automatically.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
         self._register_direct_function(
             handler,
             cancel_on_interruption=cancel_on_interruption,
@@ -1155,14 +1146,18 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         if self._async_tool_cancellation_enabled and not self._has_async_tools():
             self._teardown_async_tool_cancellation()
 
+    @deprecated(
+        "`LLMService.unregister_direct_function` is deprecated since 1.4.0 and will be removed in "
+        "2.0.0. Use `LLMSetToolsFrame` instead."
+    )
     def unregister_direct_function(self, handler: Any):
         """Remove a registered direct function handler.
 
         .. deprecated:: 1.4.0
             Direct-function handlers are now managed automatically. To stop
-            advertising a tool, push an ``LLMSetToolsFrame`` with the updated tool
+            advertising a tool, push an :class:`LLMSetToolsFrame` with the updated tool
             set — the service unregisters the handler for any direct function no
-            longer listed. This method will be removed in a future version.
+            longer listed. Will be removed in 2.0.0.
 
         Note:
             This removes the handler but does not stop advertising the tool to
@@ -1173,15 +1168,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         Args:
             handler: The direct function handler to remove.
         """
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "`unregister_direct_function()` is deprecated since 1.4.0. Push an "
-                "`LLMSetToolsFrame` with the updated tool set instead; the service "
-                "unregisters the handler for any direct function no longer listed.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
         self._unregister_direct_function(handler)
 
     def _unregister_direct_function(self, handler: Any):

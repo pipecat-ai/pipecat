@@ -43,7 +43,7 @@ def tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None, timeout=Non
         timeout: Deprecated alias for ``timeout_secs``.
 
             .. deprecated:: 1.4.0
-                Use ``timeout_secs`` instead. Will be removed in a future version.
+                Use ``timeout_secs`` instead. Will be removed in 2.0.0.
     """
     if timeout is not None:
         with warnings.catch_warnings():

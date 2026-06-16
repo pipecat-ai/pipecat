@@ -40,6 +40,7 @@ from pipecat.services.tts_service import (
     WebsocketTTSService,
 )
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -129,11 +130,16 @@ class RimeTTSService(WebsocketTTSService):
     Settings = RimeTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`RimeTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `RimeTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Configuration parameters for Rime TTS service.
 
         .. deprecated:: 0.0.105
             Use ``settings=RimeTTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language for synthesis. Defaults to English.
@@ -185,18 +191,21 @@ class RimeTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=RimeTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             url: Rime websocket API endpoint.
             model: Model ID to use for synthesis.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=RimeTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate in Hz.
             params: Additional configuration parameters.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=RimeTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -205,6 +214,7 @@ class RimeTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.104
                     Use ``text_aggregation_mode`` instead.
+                    Will be removed in 2.0.0.
 
             **kwargs: Additional arguments passed to parent class.
         """
@@ -362,10 +372,12 @@ class RimeTTSService(WebsocketTTSService):
         return params
 
     # A set of Rime-specific helpers for text transformations
+    @staticmethod
     def SPELL(text: str) -> str:
         """Wrap text in Rime spell function."""
         return f"spell({text})"
 
+    @staticmethod
     def PAUSE_TAG(seconds: float) -> str:
         """Convenience method to create a pause tag."""
         return f"<{seconds * 1000}>"
@@ -653,11 +665,16 @@ class RimeHttpTTSService(TTSService):
     Settings = RimeTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`RimeHttpTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `RimeHttpTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Configuration parameters for Rime HTTP TTS service.
 
         .. deprecated:: 0.0.105
             Use ``settings=RimeHttpTTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language for synthesis. Defaults to English.
@@ -695,18 +712,21 @@ class RimeHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=RimeHttpTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             aiohttp_session: Shared aiohttp session for HTTP requests.
             model: Model ID to use for synthesis.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=RimeHttpTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate in Hz.
             params: Additional configuration parameters.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=RimeHttpTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -876,13 +896,15 @@ class RimeHttpTTSService(TTSService):
             await self.stop_ttfb_metrics()
 
 
+@deprecated(
+    "`RimeNonJsonTTSService` is deprecated since 0.0.102 and will be removed in 2.0.0. "
+    "Use `RimeTTSService` instead."
+)
 class RimeNonJsonTTSService(InterruptibleTTSService):
     """Pipecat TTS service for Rime's non-JSON WebSocket API.
 
     .. deprecated:: 0.0.102
-        Arcana now supports JSON WebSocket with word-level timestamps via the
-        ``wss://users-ws.rime.ai/ws3`` endpoint. Use :class:`RimeTTSService`
-        with ``model="arcana"`` instead.
+        Use :class:`RimeTTSService` instead. Will be removed in 2.0.0.
 
     This service enables Text-to-Speech synthesis over WebSocket endpoints
     that require plain text (not JSON) messages and return raw audio bytes.
@@ -896,11 +918,16 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
     Settings = RimeNonJsonTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`RimeNonJsonTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `RimeNonJsonTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Configuration parameters for Rime Non-JSON WebSocket TTS service.
 
         .. deprecated:: 0.0.105
             Use ``settings=RimeNonJsonTTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Args:
             language: Language for synthesis. Defaults to English.
@@ -941,12 +968,14 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=RimeNonJsonTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             url: Rime websocket API endpoint.
             model: Model ID to use for synthesis.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=RimeNonJsonTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             audio_format: Audio format to use.
             sample_rate: Audio sample rate in Hz.
@@ -954,6 +983,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=RimeNonJsonTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -963,6 +993,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
                     Use ``text_aggregation_mode`` instead. Set to ``TextAggregationMode.SENTENCE``
                     to aggregate text into sentences before synthesis, or
                     ``TextAggregationMode.TOKEN`` to stream tokens directly for lower latency.
+                    Will be removed in 2.0.0.
 
             text_aggregation_mode: How to aggregate text before synthesis.
             **kwargs: Additional arguments passed to parent class.

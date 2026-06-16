@@ -6,12 +6,13 @@
 
 """Ordered sequencer for AggregatedTextFrame slots through TTS processing."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from loguru import logger
 
 from pipecat.frames.frames import (
     AggregatedTextFrame,
+    AggregatedTextProgressFrame,
     AggregationType,
     Frame,
     TTSTextFrame,
@@ -216,12 +217,15 @@ class AggregatedFrameSequencer:
             )
         ]
 
+        if active and active.tracker:
+            frames.append(self._build_progress_frame(active, pts))
+
         if is_complete and active:
             active.complete = True
             frames.extend(self.flush(last_word_pts=pts))
             if raw_overflow_word:
                 logger.debug(f"{self._name} Emitting overflow word '{raw_overflow_word}'")
-                frames.extend(self._process_overflow(raw_overflow_word, pts))
+                frames.extend(self.process_word(raw_overflow_word, pts, context_id))
 
         return frames
 
@@ -345,6 +349,22 @@ class AggregatedFrameSequencer:
                 return s
         return None
 
+    def _build_progress_frame(
+        self, slot: _AggregatedFrameSlot, pts: int
+    ) -> AggregatedTextProgressFrame:
+        """Build an AggregatedTextProgressFrame reflecting the current spoken/remaining state of a slot."""
+        assert slot.tracker is not None
+        frame = AggregatedTextProgressFrame(
+            segment_id=slot.frame.id,
+            context_id=slot.context_id,
+            text=slot.frame.text,
+            aggregated_by=slot.frame.aggregated_by,
+            accumulated_text=slot.tracker.get_accumulated_user_facing_text(),
+            remaining_text=slot.tracker.get_remaining_user_facing_text(strip=False),
+        )
+        frame.pts = pts
+        return frame
+
     def _build_word_frame(
         self,
         text: str,
@@ -365,24 +385,3 @@ class AggregatedFrameSequencer:
         frame.raw_text = raw_text
         frame.includes_inter_frame_spaces = includes_inter_frame_spaces
         return frame
-
-    def _process_overflow(self, raw_overflow_word: str, pts: int) -> list[Frame]:
-        """Feed an overflow suffix into the next active slot and return resulting frames."""
-        frames: list[Frame] = []
-        next_active = self._get_active_slot()
-        if not next_active or not next_active.tracker:
-            return frames
-        overflow_complete = next_active.tracker.add_word_and_check_complete(raw_overflow_word)
-        frames.append(
-            self._build_word_frame(
-                raw_overflow_word,
-                pts,
-                next_active.context_id,
-                raw_text=next_active.tracker.get_llm_consumed(),
-                includes_inter_frame_spaces=next_active.includes_inter_frame_spaces,
-            )
-        )
-        if overflow_complete:
-            next_active.complete = True
-            frames.extend(self.flush(last_word_pts=pts))
-        return frames

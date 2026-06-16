@@ -51,7 +51,8 @@ class Mem0MemoryService(FrameProcessor):
                 .. deprecated:: 1.4.0
                     No longer used. Mem0 2.0.0 removed the ``api_version`` /
                     ``output_format`` parameters from the client. Will be
-                    removed in a future release.
+                    removed in 2.0.0.
+
             system_prompt: Prefix text for memory context messages.
             add_as_system_message: Whether to add memories as system messages.
             position: Position to insert memory messages in context.

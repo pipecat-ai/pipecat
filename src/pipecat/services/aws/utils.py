@@ -20,7 +20,6 @@ import os
 import struct
 import urllib.parse
 from dataclasses import dataclass
-from typing import Any
 
 from loguru import logger
 

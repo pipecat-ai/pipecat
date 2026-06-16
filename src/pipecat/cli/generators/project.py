@@ -164,6 +164,10 @@ class ProjectGenerator:
         # 3. Generate .env.example (in server/)
         self._generate_env_example(server_path)
 
+        # 3b. Generate starter eval scenarios (in server/evals/) if evals enabled
+        if self.config.enable_eval:
+            self._generate_eval_scenarios(server_path)
+
         # 4. Generate .gitignore (at root)
         self._generate_gitignore(project_path)
 
@@ -346,6 +350,11 @@ class ProjectGenerator:
         # Extract all required extras
         extras = ServiceLoader.extract_extras_for_services(services)
 
+        # The `evals` extra bundles the `pipecat eval` command and the harness's
+        # local speech stack (Kokoro + Moonshine) to run the starter scenarios.
+        if self.config.enable_eval:
+            extras.add("evals")
+
         # Build the pipecat-ai dependency string. Floor at 1.4.0: generated bots use
         # create_transport + the typed CallData/runner-args API, which land in 1.4.0.
         pipecat_extras = ",".join(sorted(extras))
@@ -380,6 +389,31 @@ class ProjectGenerator:
 
         content = template.render(**context)
         (project_path / ".env.example").write_text(content, encoding="utf-8")
+
+    def _generate_eval_scenarios(self, server_path: Path) -> None:
+        """Generate starter eval scenarios in server/evals/.
+
+        Two runnable scenarios that pass against the freshly scaffolded bot and
+        double as local schema references to copy when adding more: a text-mode
+        one (the fast inner loop) and an audio-mode one (the full round trip).
+        A realtime (speech-to-speech) bot has no separate text LLM step, so it
+        gets only the audio scenario.
+        """
+        evals_path = server_path / "evals"
+        evals_path.mkdir(exist_ok=True)
+
+        scenarios = ["starter_audio.yaml"]
+        if self.config.mode == "cascade":
+            scenarios.insert(0, "starter_text.yaml")
+
+        context = {
+            "project_name": self.config.project_name,
+            "mode": self.config.mode,
+        }
+        for scenario in scenarios:
+            template = self.env.get_template(f"server/evals/{scenario}.jinja2")
+            content = template.render(**context)
+            (evals_path / scenario).write_text(content, encoding="utf-8")
 
     def _generate_gitignore(self, project_path: Path) -> None:
         """Generate .gitignore file."""
@@ -441,6 +475,7 @@ class ProjectGenerator:
             "transcription": self.config.transcription,
             "enable_krisp": self.config.enable_krisp,
             "enable_observability": self.config.enable_observability,
+            "enable_eval": self.config.enable_eval,
             "deploy_to_cloud": self.config.deploy_to_cloud,
             "generate_client": self.config.generate_client,
             "client_framework": self.config.client_framework,
@@ -551,6 +586,16 @@ class ProjectGenerator:
         has_telephony = any(t in telephony_transports for t in self.config.transports)
 
         console.print("  • Run your bot: [bold cyan]uv run bot.py[/bold cyan]")
+        if self.config.enable_eval:
+            starter = (
+                "evals/starter_text.yaml"
+                if self.config.mode == "cascade"
+                else "evals/starter_audio.yaml"
+            )
+            console.print(
+                "  • Test it headless: [bold cyan]uv run bot.py -t eval[/bold cyan], then in "
+                f"another terminal [bold cyan]uv run pipecat eval run {starter} -v[/bold cyan]"
+            )
         if has_telephony:
             console.print(
                 "  • Expose it for telephony: [bold cyan]ngrok http 7860[/bold cyan], then point "

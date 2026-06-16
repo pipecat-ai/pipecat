@@ -35,7 +35,7 @@ The harness runs the judge, the user's voice, and the bot-speech transcriber
   [Moonshine](https://github.com/moonshine-ai/moonshine) (Whisper is available
   as an alternative via the scenario's `transcription:` block). All run from
   local ONNX/model files that download once on first use (cached under
-  `~/.cache`). No keys, no per-run cost.
+  `~/.cache/pipecat/evals/tts`). No keys, no per-run cost.
 - **Each bot's own credentials.** A bot is a real example, so it needs the same
   service API keys it normally would, in your `.env` (e.g. `$OPENAI_API_KEY`,
   `$CARTESIA_API_KEY`, `$DEEPGRAM_API_KEY`, ...). A bot whose keys are missing

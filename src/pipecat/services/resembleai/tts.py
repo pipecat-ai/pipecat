@@ -68,6 +68,7 @@ class ResembleAITTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ResembleAITTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             url: WebSocket URL for Resemble AI TTS API.
             precision: PCM bit depth (PCM_32, PCM_24, PCM_16, or MULAW).

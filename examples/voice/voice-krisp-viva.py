@@ -34,6 +34,7 @@ from loguru import logger
 from pipecat.audio.filters.krisp_viva_filter import KrispVivaFilter
 from pipecat.audio.turn.krisp_viva_turn import KrispVivaTurn
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.metrics.metrics import TurnMetricsData
 from pipecat.observers.loggers.metrics_log_observer import MetricsLogObserver
@@ -52,7 +53,6 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.transports.websocket.server import WebsocketServerParams
 from pipecat.turns.user_start import (
     KrispVivaIPUserTurnStartStrategy,
     TranscriptionUserTurnStartStrategy,
@@ -64,7 +64,7 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 transport_params = {
-    "eval": lambda: WebsocketServerParams(
+    "eval": lambda: EvalTransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         audio_in_filter=KrispVivaFilter(),

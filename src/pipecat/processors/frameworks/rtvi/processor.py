@@ -66,12 +66,14 @@ class RTVIProcessor(FrameProcessor):
             transport: Deprecated and ignored.
 
                 .. deprecated:: 1.4.0
-                    The processor no longer needs a transport reference. Audio
-                    input and audio-streaming start are now driven by frames
-                    (``InputAudioRawFrame`` and
-                    ``InputTransportStartAudioStreamingFrame``) pushed
+                    No replacement; the parameter is ignored. Will be removed in 2.0.0.
+                    The processor no longer needs a transport reference — audio input and
+                    audio-streaming start are driven by frames
+                    (:class:`InputAudioRawFrame` and
+                    :class:`InputTransportStartAudioStreamingFrame`) pushed
                     downstream. For client-ready audio gating, set
                     ``audio_in_stream_on_start=False`` on the transport params.
+
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
@@ -101,6 +103,14 @@ class RTVIProcessor(FrameProcessor):
         self._register_event_handler("on_client_ready")
         self._register_event_handler("on_client_message")
         self._register_event_handler("on_ui_message")
+
+    @property
+    def client_version(self) -> list[int]:
+        """The negotiated client protocol version as [major, minor, patch].
+
+        Defaults to [0, 0, 0] until the client sends a ``client-ready`` message.
+        """
+        return self._client_version
 
     def create_rtvi_observer(self, *, params: RTVIObserverParams | None = None, **kwargs):
         """Creates a new RTVI Observer.
@@ -180,8 +190,9 @@ class RTVIProcessor(FrameProcessor):
 
         .. deprecated:: 0.0.102
             This method is deprecated. Function call events are now automatically
-            sent by ``RTVIObserver`` using the ``llm-function-call-in-progress`` event.
+            sent by :class:`RTVIObserver` using the ``llm-function-call-in-progress`` event.
             Configure reporting level via ``RTVIObserverParams.function_call_report_level``.
+            Will be removed in 2.0.0.
         """
         import warnings
 
@@ -370,8 +381,24 @@ class RTVIProcessor(FrameProcessor):
                 if len(parts) != 3:
                     raise ValueError
                 self._client_version = parts
-                protocol_major = int(RTVI.PROTOCOL_VERSION.split(".")[0])
-                if self._client_version[0] != protocol_major:
+                server_major = int(RTVI.PROTOCOL_VERSION.split(".")[0])
+                client_major = self._client_version[0]
+                if client_major == server_major:
+                    pass  # fully compatible
+                elif client_major == RTVI.LEGACY_SUPPORTED_MAJOR:
+                    # Any 1.x client is deprecated but still served with the v1 bot-output format.
+                    # TODO: enable this once RTVI 2.0.0 is supported by all our client SDKs.
+                    # 1.x.x is deprecated but still served with the v1 bot-output format.
+                    # legacy_warning = (
+                    #     f"RTVI client version {version} is deprecated. "
+                    #     f"Please upgrade to protocol {RTVI.PROTOCOL_VERSION}. "
+                    #     "The bot-output event format has changed in 2.0.0."
+                    # )
+                    # logger.warning(legacy_warning)
+                    # await self._send_error_response(request_id, legacy_warning)
+                    # version_error intentionally left as None — connection proceeds.
+                    pass
+                else:
                     version_error = f"RTVI version {version} is not compatible with server protocol {RTVI.PROTOCOL_VERSION}."
             except ValueError:
                 version_error = f"Invalid client version format ({version})."

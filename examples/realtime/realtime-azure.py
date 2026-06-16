@@ -11,6 +11,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -34,7 +35,6 @@ from pipecat.services.openai.realtime.events import (
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.transports.websocket.server import WebsocketServerParams
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy
 from pipecat.workers.runner import WorkerRunner
 
@@ -71,7 +71,7 @@ async def get_restaurant_recommendation(params: FunctionCallParams, location: st
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
-    "eval": lambda: WebsocketServerParams(
+    "eval": lambda: EvalTransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
