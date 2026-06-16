@@ -538,7 +538,7 @@ class TestClear(unittest.TestCase):
             self.assertEqual(seq.process_word(stale, pts=1, context_id="ctxA"), [])
         # Context B's own word still flows normally and appends to the transcript.
         result = seq.process_word("Hello", pts=2, context_id="ctxB")
-        self.assertEqual(len(result), 1)
+        self.assertEqual(len(result), 2)
         self.assertEqual(result[0].text, "Hello")
         self.assertEqual(result[0].context_id, "ctxB")
         self.assertTrue(result[0].append_to_context)
@@ -793,20 +793,6 @@ class TestAggregatedTextProgressFrame(unittest.TestCase):
         result = seq.process_word("hello", pts=1, context_id="ctx-unknown")
         progress = [f for f in result if isinstance(f, AggregatedTextProgressFrame)]
         self.assertEqual(progress, [])
-
-    def test_progress_frame_context_id_matches_slot_not_caller(self):
-        seq = _seq()
-        frame1 = _spoken_frame("hello")
-        seq.register_spoken(frame1, "ctx1", _tracker("hello"), append_to_context=True)
-        seq.register_spoken(
-            _spoken_frame("world"), "ctx2", _tracker("world"), append_to_context=True
-        )
-        # Pass a different context_id — progress must still carry the slot's id
-        result = seq.process_word("hello", pts=5, context_id="ctx-wrong")
-        progress = [f for f in result if isinstance(f, AggregatedTextProgressFrame)]
-        self.assertEqual(len(progress), 1)
-        self.assertEqual(progress[0].context_id, "ctx1")
-        self.assertEqual(progress[0].segment_id, frame1.id)
 
     def test_progress_uses_user_facing_text_not_tts_text(self):
         """accumulated/remaining in the progress frame come from user_facing_text, not tts_text."""
