@@ -97,6 +97,7 @@ def test_interruption_delay_out_of_range_raises(value):
     [
         ("u3-rt-pro", True),
         ("u3-rt-pro-beta-1", True),
+        ("universal-3-5-pro", True),
         ("universal-streaming-english", False),
         ("universal-streaming-multilingual", False),
         (None, False),
@@ -139,6 +140,54 @@ def test_update_agent_context_works_for_beta_variant():
     service = AssemblyAISTTService(
         api_key="test-key",
         settings=AssemblyAISTTService.Settings(model="u3-rt-pro-beta-1"),
+    )
+    sent = []
+
+    async def fake_send(**fields):
+        sent.append(fields)
+
+    service._send_update_configuration = fake_send
+    asyncio.run(service.update_agent_context("hello"))
+
+    assert sent == [{"agent_context": "hello"}]
+
+
+# --- universal-3-5-pro (U3 Pro family) ---
+
+
+def test_u3_pro_features_sent_for_universal_3_5_pro():
+    # universal-3-5-pro supports every u3-rt-pro param.
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(
+            model="universal-3-5-pro",
+            agent_context="May I take your order?",
+            previous_context_n_turns=5,
+            interruption_delay=300,
+        ),
+    )
+    q = _query(service)
+    assert q["speech_model"] == ["universal-3-5-pro"]
+    assert q["agent_context"] == ["May I take your order?"]
+    assert q["previous_context_n_turns"] == ["5"]
+    assert q["interruption_delay"] == ["300"]
+    assert q["continuous_partials"] == ["true"]
+
+
+def test_universal_3_5_pro_allows_assemblyai_turn_detection_mode():
+    # vad_force_turn_endpoint=False requires a U3 Pro family model; u3.5 qualifies.
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(model="universal-3-5-pro"),
+        vad_force_turn_endpoint=False,
+    )
+    assert is_u3_pro_model(service._settings.model)
+
+
+def test_update_agent_context_works_for_universal_3_5_pro():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(model="universal-3-5-pro"),
     )
     sent = []
 
@@ -239,6 +288,71 @@ def test_previous_context_n_turns_out_of_range_raises(value):
         AssemblyAISTTService(
             api_key="test-key",
             settings=AssemblyAISTTService.Settings(previous_context_n_turns=value),
+        )
+
+
+# --- voice_focus / voice_focus_threshold ---
+
+
+def test_voice_focus_omitted_by_default():
+    service = AssemblyAISTTService(api_key="test-key")
+    q = _query(service)
+    assert "voice_focus" not in q
+    assert "voice_focus_threshold" not in q
+
+
+def test_voice_focus_sent_for_u3_rt_pro():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(voice_focus="near-field", voice_focus_threshold=0.5),
+    )
+    q = _query(service)
+    assert q["voice_focus"] == ["near-field"]
+    assert q["voice_focus_threshold"] == ["0.5"]
+
+
+def test_voice_focus_sent_for_universal_3_5_pro():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(model="universal-3-5-pro", voice_focus="far-field"),
+    )
+    assert _query(service)["voice_focus"] == ["far-field"]
+
+
+def test_voice_focus_omitted_for_universal_streaming():
+    # voice_focus is a U3 Pro-only parameter.
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(
+            model="universal-streaming-english",
+            voice_focus="far-field",
+            voice_focus_threshold=0.5,
+        ),
+    )
+    q = _query(service)
+    assert "voice_focus" not in q
+    assert "voice_focus_threshold" not in q
+
+
+@pytest.mark.parametrize("value", [0.0, 1.0])
+def test_voice_focus_threshold_boundaries_allowed(value):
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(
+            voice_focus="near-field", voice_focus_threshold=value
+        ),
+    )
+    assert _query(service)["voice_focus_threshold"] == [str(value)]
+
+
+@pytest.mark.parametrize("value", [-0.1, 1.1])
+def test_voice_focus_threshold_out_of_range_raises(value):
+    with pytest.raises(ValueError):
+        AssemblyAISTTService(
+            api_key="test-key",
+            settings=AssemblyAISTTService.Settings(
+                voice_focus="near-field", voice_focus_threshold=value
+            ),
         )
 
 

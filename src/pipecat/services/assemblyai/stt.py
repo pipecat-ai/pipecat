@@ -14,7 +14,7 @@ import asyncio
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlencode
 
 from loguru import logger
@@ -56,19 +56,22 @@ from .models import (
 # are clipped before sending — a single value can never exceed the whole budget.
 MAX_AGENT_CONTEXT_CHARS = 1500
 
-# Model-name prefix shared by every Universal-3 Pro streaming variant
-# (``u3-rt-pro``, ``u3-rt-pro-beta-1``, future ``u3-rt-pro-*`` releases). U3 Pro
-# features — built-in turn detection, prompting, continuous partials,
-# interruption_delay, and context carryover — apply to the whole family.
-U3_PRO_MODEL_PREFIX = "u3-rt-pro"
+# Model-name prefixes shared by every Universal-3 Pro streaming variant. The
+# ``u3-rt-pro`` family (``u3-rt-pro``, ``u3-rt-pro-beta-1``, future
+# ``u3-rt-pro-*`` releases) and ``universal-3-5-pro`` (and any
+# ``universal-3-5-pro-*`` release) both expose the full U3 Pro feature set:
+# built-in turn detection, prompting, continuous partials, interruption_delay,
+# context carryover, and voice focus.
+U3_PRO_MODEL_PREFIXES = ("u3-rt-pro", "universal-3-5-pro")
 
 
 def is_u3_pro_model(model: str | None | _NotGiven) -> bool:
     """Return whether a model name is a Universal-3 Pro streaming variant.
 
-    Matches ``u3-rt-pro`` and any ``u3-rt-pro-*`` variant (e.g.
-    ``u3-rt-pro-beta-1``) so U3 Pro-only features are gated on the whole family
-    rather than a single exact string.
+    Matches the ``u3-rt-pro`` family (``u3-rt-pro``, ``u3-rt-pro-beta-1``, and
+    any ``u3-rt-pro-*`` variant) and ``universal-3-5-pro`` (and any
+    ``universal-3-5-pro-*`` variant) so U3 Pro-only features are gated on the
+    whole family rather than a single exact string.
 
     Args:
         model: The model identifier. Accepts the ``Settings.model`` union
@@ -76,9 +79,9 @@ def is_u3_pro_model(model: str | None | _NotGiven) -> bool:
             string returns False.
 
     Returns:
-        True if ``model`` is a u3-rt-pro family model.
+        True if ``model`` is a U3 Pro family model.
     """
-    return isinstance(model, str) and model.startswith(U3_PRO_MODEL_PREFIX)
+    return isinstance(model, str) and model.startswith(U3_PRO_MODEL_PREFIXES)
 
 
 def map_language_from_assemblyai(language_code: str) -> Language:
@@ -148,6 +151,14 @@ class AssemblyAISTTSettings(STTSettings):
             automatic context carryover entirely. Only applicable to u3-rt-pro. Most
             integrations should leave this at the default. Defaults to None (use the
             server default, which is 3).
+        voice_focus: Isolate the primary voice and suppress background noise.
+            Set to "near-field" for close-talking mics (headsets, handsets) or
+            "far-field" for distant capture (conference rooms, laptop mics).
+            Only applicable to U3 Pro models. Defaults to None (not sent).
+        voice_focus_threshold: How aggressively background audio is suppressed.
+            Float in [0.0, 1.0]; higher values suppress more. Only takes effect
+            when ``voice_focus`` is set. Only applicable to U3 Pro models.
+            Defaults to None (use the server default).
     """
 
     formatted_finals: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -170,6 +181,10 @@ class AssemblyAISTTSettings(STTSettings):
     interruption_delay: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     agent_context: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     previous_context_n_turns: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    voice_focus: Literal["near-field", "far-field"] | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    voice_focus_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AssemblyAISTTService(WebsocketSTTService):
@@ -271,6 +286,8 @@ class AssemblyAISTTService(WebsocketSTTService):
             interruption_delay=None,
             agent_context=None,
             previous_context_n_turns=None,
+            voice_focus=None,
+            voice_focus_threshold=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -357,6 +374,29 @@ class AssemblyAISTTService(WebsocketSTTService):
             logger.warning(
                 "previous_context_n_turns is only supported by u3-rt-pro and will be ignored "
                 f"for model '{default_settings.model}'."
+            )
+
+        # voice_focus / voice_focus_threshold are U3 Pro-only. The threshold is
+        # a float in [0, 1]; isinstance narrows away None/NOT_GIVEN. bool is a
+        # subclass of int and is intentionally excluded.
+        voice_focus = default_settings.voice_focus
+        voice_focus_threshold = default_settings.voice_focus_threshold
+        if isinstance(voice_focus_threshold, (int, float)) and not isinstance(
+            voice_focus_threshold, bool
+        ):
+            if not (0.0 <= voice_focus_threshold <= 1.0):
+                raise ValueError("voice_focus_threshold must be between 0.0 and 1.0")
+
+        if not is_u3_pro and (voice_focus is not None or voice_focus_threshold is not None):
+            logger.warning(
+                "voice_focus and voice_focus_threshold are only supported by U3 Pro models "
+                f"and will be ignored for model '{default_settings.model}'."
+            )
+
+        if voice_focus_threshold is not None and voice_focus is None:
+            logger.warning(
+                "voice_focus_threshold has no effect unless voice_focus is set "
+                "(to 'near-field' or 'far-field')."
             )
 
         # 6. Configure pipecat turn mode (mutates default_settings)
@@ -587,12 +627,15 @@ class AssemblyAISTTService(WebsocketSTTService):
             "domain": s.domain,
         }
 
-        # continuous_partials, interruption_delay, agent_context, and
-        # previous_context_n_turns only apply to the u3-rt-pro family.
+        # continuous_partials, interruption_delay, agent_context,
+        # previous_context_n_turns, and voice_focus(_threshold) only apply to
+        # the U3 Pro family.
         if is_u3_pro_model(s.model):
             optional_fields["continuous_partials"] = s.continuous_partials
             optional_fields["interruption_delay"] = s.interruption_delay
             optional_fields["previous_context_n_turns"] = s.previous_context_n_turns
+            optional_fields["voice_focus"] = s.voice_focus
+            optional_fields["voice_focus_threshold"] = s.voice_focus_threshold
             # isinstance narrows away None/NOT_GIVEN for the typed clip call.
             if isinstance(s.agent_context, str):
                 optional_fields["agent_context"] = self._clip_agent_context(s.agent_context)

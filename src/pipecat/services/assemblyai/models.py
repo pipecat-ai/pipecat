@@ -169,6 +169,7 @@ class AssemblyAIConnectionParams(BaseModel):
         "universal-streaming-multilingual",
         "u3-rt-pro",
         "u3-rt-pro-beta-1",
+        "universal-3-5-pro",
     ] = "u3-rt-pro"
     language_detection: bool | None = None
     format_turns: bool = True
