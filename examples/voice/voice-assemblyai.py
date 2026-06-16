@@ -61,6 +61,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = AssemblyAISTTService(
         api_key=os.environ["ASSEMBLYAI_API_KEY"],
+        settings=AssemblyAISTTService.Settings(
+            model="universal-3-5-pro",
+            prompt="Transcribe this.",
+        ),
     )
 
     tts = CartesiaTTSService(
@@ -98,7 +102,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ]
     )
 
-    # Feed each bot reply back to AssemblyAI as context carryover (u3-rt-pro),
+    # Feed each bot reply back to AssemblyAI as context carryover (U3 Pro),
     # improving transcription of the user's next turn.
     context_observer = AssemblyAIContextObserver(stt)
 
@@ -123,7 +127,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client connected")
         # Kick off the conversation.
         context.add_message(
-            {"role": "developer", "content": "Please introduce yourself to the user."}
+            {
+                "role": "developer",
+                "content": "Contact center flow. Ask a question where they need to answer A, B, or C.",
+            }
         )
         await worker.queue_frames([LLMRunFrame()])
 
