@@ -717,22 +717,21 @@ async def create_transport(
         # serializer to RTVIEvalSerializer so examples only need to opt into
         # audio input.
         from pipecat.evals.serializer import RTVIEvalSerializer
-        from pipecat.evals.transport import EvalWebsocketServerTransport
-        from pipecat.transports.websocket.server import WebsocketServerParams
+        from pipecat.evals.transport import EvalTransport, EvalTransportParams
 
         params = _get_transport_params("eval", transport_params)
-        if not isinstance(params, WebsocketServerParams):
+        if not isinstance(params, EvalTransportParams):
             raise ValueError(
-                "Eval transport params must be a WebsocketServerParams instance. "
+                "Eval transport params must be an EvalTransportParams instance. "
                 "Set transport_params['eval'] to a lambda returning "
-                "WebsocketServerParams(audio_in_enabled=True)."
+                "EvalTransportParams(audio_in_enabled=True)."
             )
         if params.serializer is None:
             params.serializer = RTVIEvalSerializer()
 
-        # EvalWebsocketServerTransport handles the eval-only behavior: the virtual
-        # mic, skip-TTS before an on-connect greeting, and audio capture/recording.
-        return EvalWebsocketServerTransport(
+        # EvalTransport handles the eval-only behavior: the virtual mic, skip-TTS
+        # before an on-connect greeting, and audio capture/recording.
+        return EvalTransport(
             params=params,
             host=runner_args.host,
             port=runner_args.port,

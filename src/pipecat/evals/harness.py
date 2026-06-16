@@ -7,7 +7,7 @@
 """Eval session: drives a bot over RTVI and asserts on the events it emits.
 
 An :class:`EvalSession` connects to a running bot's eval transport (a
-``WebsocketServerTransport`` speaking RTVI via
+``SingleClientWebsocketServerTransport`` speaking RTVI via
 :class:`~pipecat.evals.serializer.RTVIEvalSerializer`), walks through a parsed
 :class:`~pipecat.evals.scenario.EvalScenario`, and verifies that the expected
 semantic events arrive in order, with the right payloads, within their latency

@@ -7,7 +7,7 @@
 """Frame serializer that bridges the eval harness to a bot over RTVI.
 
 The eval harness (:mod:`pipecat.evals.harness`) talks to a bot using the RTVI
-protocol over a plain WebSocket (``WebsocketServerTransport``). This serializer
+protocol over a plain WebSocket (``SingleClientWebsocketServerTransport``). This serializer
 is the only glue needed:
 
 - **Inbound** (harness → bot): JSON RTVI messages are wrapped in an
@@ -87,7 +87,7 @@ EVAL_BOT_AUDIO_TYPE = "eval-bot-audio"
 class RTVIEvalSerializer(FrameSerializer):
     """Bridges JSON RTVI messages and pipeline frames for the eval harness.
 
-    Use as the serializer of a ``WebsocketServerTransport`` when running a bot
+    Use as the serializer of a ``SingleClientWebsocketServerTransport`` when running a bot
     under the eval harness. The bot pipeline must include an ``RTVIProcessor``
     and pass an ``RTVIObserver`` to the task.
     """
