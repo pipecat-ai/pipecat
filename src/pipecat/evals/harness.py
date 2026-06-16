@@ -198,6 +198,7 @@ class EvalSession:
         on_progress: Callable[[EvalTurnProgress], None] | None = None,
         record_path: str | None = None,
         stop_bot: bool = False,
+        trigger_disconnect: bool = False,
         judge: EvalJudge | None = None,
         speech: EvalSpeech | None = None,
         transcriber: EvalTranscriber | None = None,
@@ -224,6 +225,11 @@ class EvalSession:
             stop_bot: When True, ask the bot to cancel its pipeline (and exit) on
                 teardown via ``eval-cancel``. The suite enables it to clean up
                 each spawned bot.
+            trigger_disconnect: When True (or when the scenario sets
+                ``trigger_disconnect``), ask the eval transport to fire the bot's
+                ``on_client_disconnected`` handler when this connection ends.
+                Bots often cancel their pipeline there, so it is off by default
+                to avoid that between scenarios.
             judge: The :class:`~pipecat.evals.judge.EvalJudge` for ``eval:``
                 assertions, or ``None`` if the scenario has none.
             speech: The :class:`~pipecat.evals.speech.EvalSpeech` for synthesizing
@@ -240,6 +246,8 @@ class EvalSession:
         self._on_progress = on_progress
         self._record_path = record_path
         self._stop_bot = stop_bot
+        # Either the run-wide CLI flag or the scenario's own field opts in.
+        self._trigger_disconnect = trigger_disconnect or scenario.trigger_disconnect
 
         self._ws: ClientConnection | None = None
         self._queue: asyncio.Queue = asyncio.Queue()
@@ -300,6 +308,7 @@ class EvalSession:
         cache_dir: str | None = None,
         use_cache: bool = True,
         stop_bot: bool = False,
+        trigger_disconnect: bool = False,
         judge: EvalJudge | None = None,
         speech: EvalSpeech | None = None,
         transcriber: EvalTranscriber | None = None,
@@ -329,6 +338,9 @@ class EvalSession:
                 (no cache reads or writes). Defaults to True.
             stop_bot: When True, ask the bot to cancel its pipeline (and exit) on
                 teardown. Leave False to keep it running for more scenarios.
+            trigger_disconnect: When True, fire the bot's ``on_client_disconnected``
+                handler when the connection ends (the scenario's own
+                ``trigger_disconnect`` field also opts in). Off by default.
             judge: Override the judge (default: built from ``scenario.judge`` when the
                 scenario has ``eval:`` assertions).
             speech: Override the user-audio generator (default: built from
@@ -363,6 +375,7 @@ class EvalSession:
             on_progress=on_progress,
             record_path=record_path,
             stop_bot=stop_bot,
+            trigger_disconnect=trigger_disconnect,
             judge=judge,
             speech=speech,
             transcriber=transcriber,
@@ -535,7 +548,9 @@ class EvalSession:
         mic at all, so a text-mode scenario never feeds silence into the bot's
         STT. ``capture_bot_audio`` makes the bot forward its synthesized audio for
         ``tts_response`` transcription. ``record`` asks the eval transport to
-        record the conversation audio (audio mode only).
+        record the conversation audio (audio mode only). ``trigger_disconnect``
+        asks the transport to fire the bot's ``on_client_disconnected`` handler
+        when the connection ends (off by default, since bots often cancel there).
         """
         from urllib.parse import quote
 
@@ -548,6 +563,8 @@ class EvalSession:
             flags.append("capture_bot_audio=true")
         if self._record_path and self._scenario.bot_audio:
             flags.append(f"record={quote(self._record_path, safe='')}")
+        if self._trigger_disconnect:
+            flags.append("trigger_disconnect=true")
         if not flags:
             return self._bot_url
         sep = "&" if "?" in self._bot_url else "?"
