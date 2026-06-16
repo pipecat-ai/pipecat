@@ -4,14 +4,15 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Realtime services auto-register handlers from their init-time tools.
+"""Realtime services auto-register handlers from their service-configured tools.
 
-Some realtime services advertise the tools passed at construction — flat
-(Gemini Live ``tools=``, AWS Nova Sonic ``tools=``, Ultravox
+Some realtime services also accept tools configured directly on the service —
+flat (Gemini Live ``tools=``, AWS Nova Sonic ``tools=``, Ultravox
 ``one_shot_selected_tools=``) or nested (the OpenAI/Grok/Inworld realtime
-``session_properties.tools``) — and run with an empty context. The base service
-falls back to ``LLMService._init_time_tools()`` when the context advertises no
-tools, so a handler bundled on an init-time ``FunctionSchema`` (or a direct
+``session_properties.tools``) — as an alternative to advertising them through
+the ``LLMContext``. The base service falls back to
+``LLMService._service_tools()`` when the context advertises no tools, so a
+handler bundled on a service-configured ``FunctionSchema`` (or a direct
 function) registers without a separate ``register_function`` call, mirroring how
 the base service syncs from the context's tools on every ``LLMContextFrame``.
 
@@ -57,30 +58,30 @@ def _tools(handler) -> ToolsSchema:
     )
 
 
-class _InitTimeToolSyncTests:
-    """Shared cases for services that auto-register their init-time tools.
+class _ServiceToolSyncTests:
+    """Shared cases for services that auto-register their service-configured tools.
 
     Subclasses provide ``_service(tools)``, building the service with the given
-    ``ToolsSchema`` (or ``None``) wired into its init-time tool parameter. They
-    use ``pytest.importorskip`` so a service whose optional dependencies aren't
+    ``ToolsSchema`` (or ``None``) wired into its tool parameter. They use
+    ``pytest.importorskip`` so a service whose optional dependencies aren't
     installed is skipped rather than erroring.
     """
 
     def _service(self, tools):
         raise NotImplementedError
 
-    async def test_init_time_schema_handler_registers(self):
+    async def test_service_schema_handler_registers(self):
         service = self._service(_tools(sample_handler))
-        # An empty context (NOT_GIVEN tools) falls back to the init-time tools.
+        # An empty context (NOT_GIVEN tools) falls back to the service tools.
         service._sync_registered_tool_handlers(NOT_GIVEN)
         self.assertTrue(service.has_function("sample"))
 
-    async def test_init_time_async_tool_option_honored(self):
+    async def test_service_async_tool_option_honored(self):
         service = self._service(_tools(sample_async_handler))
         service._sync_registered_tool_handlers(NOT_GIVEN)
         self.assertFalse(service._functions["sample"].cancel_on_interruption)
 
-    async def test_no_init_time_tools_is_safe(self):
+    async def test_no_service_tools_is_safe(self):
         service = self._service(None)
         service._sync_registered_tool_handlers(NOT_GIVEN)
         self.assertEqual(list(service._functions), [])
@@ -93,11 +94,11 @@ class _SessionUpdateToolPreservationTests:
     ``session_properties.tools`` from a ``ToolsSchema`` to the provider's list
     form when building a ``session.update``. That conversion must happen on a
     copy: mutating the stored ``session_properties`` would leave ``tools`` a
-    list, so the next ``_init_time_tools()`` fallback no longer recognizes it
+    list, so the next ``_service_tools()`` fallback no longer recognizes it
     and the bundled handler silently stops registering.
     """
 
-    async def test_send_session_update_preserves_init_time_tools(self):
+    async def test_send_session_update_preserves_service_tools(self):
         service = self._service(_tools(sample_handler))
         service.send_client_event = AsyncMock()
         # Mirrors reality: session.created triggers a session.update before the
@@ -110,12 +111,12 @@ class _SessionUpdateToolPreservationTests:
         self.assertTrue(service.has_function("sample"))
 
 
-class TestGeminiLiveInitTimeToolSync(_InitTimeToolSyncTests, unittest.IsolatedAsyncioTestCase):
+class TestGeminiLiveServiceToolSync(_ServiceToolSyncTests, unittest.IsolatedAsyncioTestCase):
     def _service(self, tools):
         mod = pytest.importorskip("pipecat.services.google.gemini_live.llm")
         return mod.GeminiLiveLLMService(api_key="test-key", tools=tools)
 
-    async def test_raw_dict_init_tools_register_nothing(self):
+    async def test_raw_dict_service_tools_register_nothing(self):
         # Gemini accepts provider-native dict tools, which carry no handler.
         service = self._service([{"function_declarations": []}])
         service._sync_registered_tool_handlers(NOT_GIVEN)
@@ -127,7 +128,7 @@ class TestGeminiLiveInitTimeToolSync(_InitTimeToolSyncTests, unittest.IsolatedAs
                 standard_tools=[FunctionSchema("from_init", "d", {}, [], handler=sample_handler)]
             )
         )
-        # When the context advertises tools, the init-time tools aren't used.
+        # When the context advertises tools, the service tools aren't used.
         service._sync_registered_tool_handlers(
             ToolsSchema(
                 standard_tools=[FunctionSchema("from_context", "d", {}, [], handler=sample_handler)]
@@ -137,7 +138,7 @@ class TestGeminiLiveInitTimeToolSync(_InitTimeToolSyncTests, unittest.IsolatedAs
         self.assertFalse(service.has_function("from_init"))
 
 
-class TestAWSNovaSonicInitTimeToolSync(_InitTimeToolSyncTests, unittest.IsolatedAsyncioTestCase):
+class TestAWSNovaSonicServiceToolSync(_ServiceToolSyncTests, unittest.IsolatedAsyncioTestCase):
     def _service(self, tools):
         mod = pytest.importorskip("pipecat.services.aws.nova_sonic.llm")
         return mod.AWSNovaSonicLLMService(
@@ -145,7 +146,7 @@ class TestAWSNovaSonicInitTimeToolSync(_InitTimeToolSyncTests, unittest.Isolated
         )
 
 
-class TestUltravoxInitTimeToolSync(_InitTimeToolSyncTests, unittest.IsolatedAsyncioTestCase):
+class TestUltravoxServiceToolSync(_ServiceToolSyncTests, unittest.IsolatedAsyncioTestCase):
     def _service(self, tools):
         mod = pytest.importorskip("pipecat.services.ultravox.llm")
         return mod.UltravoxRealtimeLLMService(
@@ -154,8 +155,8 @@ class TestUltravoxInitTimeToolSync(_InitTimeToolSyncTests, unittest.IsolatedAsyn
         )
 
 
-class TestOpenAIRealtimeInitTimeToolSync(
-    _InitTimeToolSyncTests, _SessionUpdateToolPreservationTests, unittest.IsolatedAsyncioTestCase
+class TestOpenAIRealtimeServiceToolSync(
+    _ServiceToolSyncTests, _SessionUpdateToolPreservationTests, unittest.IsolatedAsyncioTestCase
 ):
     def _service(self, tools):
         mod = pytest.importorskip("pipecat.services.openai.realtime.llm")
@@ -167,8 +168,8 @@ class TestOpenAIRealtimeInitTimeToolSync(
         )
 
 
-class TestGrokRealtimeInitTimeToolSync(
-    _InitTimeToolSyncTests, _SessionUpdateToolPreservationTests, unittest.IsolatedAsyncioTestCase
+class TestGrokRealtimeServiceToolSync(
+    _ServiceToolSyncTests, _SessionUpdateToolPreservationTests, unittest.IsolatedAsyncioTestCase
 ):
     def _service(self, tools):
         mod = pytest.importorskip("pipecat.services.xai.realtime.llm")
@@ -180,8 +181,8 @@ class TestGrokRealtimeInitTimeToolSync(
         )
 
 
-class TestInworldRealtimeInitTimeToolSync(
-    _InitTimeToolSyncTests, _SessionUpdateToolPreservationTests, unittest.IsolatedAsyncioTestCase
+class TestInworldRealtimeServiceToolSync(
+    _ServiceToolSyncTests, _SessionUpdateToolPreservationTests, unittest.IsolatedAsyncioTestCase
 ):
     def _service(self, tools):
         mod = pytest.importorskip("pipecat.services.inworld.realtime.llm")

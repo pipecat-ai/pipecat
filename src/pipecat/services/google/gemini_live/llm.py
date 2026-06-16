@@ -23,6 +23,7 @@ from typing import Any
 from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
+from typing_extensions import override
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
@@ -848,7 +849,8 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
         else:
             await self.push_frame(frame, direction)
 
-    def _init_time_tools(self) -> "ToolsSchema | None":
+    @override
+    def _service_tools(self) -> "ToolsSchema | None":
         """Return the tools passed via ``tools=`` at construction, if any.
 
         Gemini Live advertises these whenever the context carries no tools (see
@@ -1196,7 +1198,7 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
                 tools = params["tools"]
             else:
                 system_instruction = self._system_instruction_from_init
-            # Context-provided tools take precedence; fall back to the init-time tools.
+            # Context-provided tools take precedence; fall back to the service's own tools.
             if not tools:
                 tools = adapter.from_standard_tools(self._tools_from_init)
             if system_instruction:

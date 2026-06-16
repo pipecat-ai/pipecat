@@ -20,6 +20,7 @@ from dataclasses import fields as dataclass_fields
 from typing import Any, Literal
 
 from loguru import logger
+from typing_extensions import override
 from websockets.asyncio.client import connect as websocket_connect
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -534,8 +535,9 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     # Frame processing
     #
 
-    def _init_time_tools(self) -> "ToolsSchema | None":
-        """Return tools set on ``session_properties`` at construction, if any.
+    @override
+    def _service_tools(self) -> "ToolsSchema | None":
+        """Return the tools configured on ``session_properties``, if any.
 
         Inworld Realtime advertises session-properties tools when the context
         carries none, so their handlers auto-register the same way a
@@ -717,7 +719,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     async def _send_session_update(self):
         """Update session settings on the server."""
         # Mutate a copy: the stored session_properties is read elsewhere (e.g.
-        # _init_time_tools) and must stay intact.
+        # _service_tools) and must stay intact.
         settings = assert_given(self._settings.session_properties).model_copy()
         adapter = self.get_llm_adapter()
 

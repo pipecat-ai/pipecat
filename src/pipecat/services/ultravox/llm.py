@@ -21,6 +21,7 @@ from typing import Any, Literal
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel, Field
+from typing_extensions import override
 from websockets.asyncio import client as websocket_client
 from websockets.exceptions import ConnectionClosed
 
@@ -422,7 +423,8 @@ class UltravoxRealtimeLLMService(LLMService):
     # StartFrame, StopFrame, CancelFrame implemented in base class
     #
 
-    def _init_time_tools(self) -> "ToolsSchema | None":
+    @override
+    def _service_tools(self) -> "ToolsSchema | None":
         """Return the ``one_shot_selected_tools`` passed at construction, if any.
 
         Ultravox advertises these and doesn't read tools from the context, so

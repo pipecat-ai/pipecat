@@ -24,6 +24,7 @@ from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel, Field
+from typing_extensions import override
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter, Role
@@ -547,7 +548,8 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
     # frame processing
     #
 
-    def _init_time_tools(self) -> "ToolsSchema | None":
+    @override
+    def _service_tools(self) -> "ToolsSchema | None":
         """Return the tools passed via ``tools=`` at construction, if any.
 
         Nova Sonic advertises these whenever the context carries no tools (context

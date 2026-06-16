@@ -17,6 +17,7 @@ from typing import Any
 
 from loguru import logger
 from PIL import Image
+from typing_extensions import override
 from websockets.asyncio.client import connect as websocket_connect
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -618,8 +619,9 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     # StartFrame, StopFrame, CancelFrame implemented in base class
     #
 
-    def _init_time_tools(self) -> "ToolsSchema | None":
-        """Return tools set on ``session_properties`` at construction, if any.
+    @override
+    def _service_tools(self) -> "ToolsSchema | None":
+        """Return the tools configured on ``session_properties``, if any.
 
         OpenAI Realtime advertises session-properties tools when the context
         carries none, so their handlers auto-register the same way a
@@ -793,7 +795,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
     async def _send_session_update(self):
         # Mutate a copy: the stored session_properties is read elsewhere (e.g.
-        # _init_time_tools) and must stay intact.
+        # _service_tools) and must stay intact.
         settings = assert_given(self._settings.session_properties).model_copy()
         adapter = self.get_llm_adapter()
 

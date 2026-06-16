@@ -1070,29 +1070,24 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             "step is unnecessary when the handler is on the FunctionSchema."
         )
 
-    def _init_time_tools(self) -> ToolsSchema | None:
-        """Return tools advertised at construction time, if any.
+    def _service_tools(self) -> ToolsSchema | None:
+        """Return the service's own configured tools, if any.
 
-        Most services receive their tools through the ``LLMContext`` on each
-        inference. Some realtime services instead accept tools as a constructor
-        argument and run with an empty context. They override this so a handler
-        bundled on such an init-time ``FunctionSchema`` (or a direct function)
-        auto-registers, just as a context-advertised one would:
-        :meth:`_sync_registered_tool_handlers` falls back to it when the context
-        advertises no tools.
+        Used by the auto-registration mechanism. Tools normally reach a service
+        through the ``LLMContext`` on each inference. Some services (the realtime
+        services) also accept tools configured directly on the service (e.g. via
+        a constructor argument) as an alternative; they override this method to
+        return those tools. The auto-registration mechanism registers these tools
+        if there are no tools in the context.
 
         Note:
-            A realtime service that overrides this **must advertise
-            context-provided tools in preference to its init-time tools** (falling
-            back to init-time tools only when the context provides none). This
-            fallback registers init-time handlers only when the context has no
-            tools, so a service that preferred init-time tools would advertise one
-            set to the provider while registering handlers for another.
+            A service that overrides this **must follow the auto-registration
+            mechanism's preference rules: context tools, then service-configured
+            tools**.
 
         Returns:
-            The init-time tools as a ``ToolsSchema``, or ``None`` when the service
-            takes no init-time tools (the default). Overrides must not return raw
-            provider tool dicts, which carry no handler to register.
+            The service-configured tools as a ``ToolsSchema``, or ``None`` when the
+            service has none (the default).
         """
         return None
 
@@ -1110,7 +1105,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         support runtime tool changes also call it from their own ``LLMSetToolsFrame``
         handling, since they run continuously and don't get a context frame per turn.
         When the context advertises no tools, handlers fall back to
-        :meth:`_init_time_tools` (tools the service was given at construction time).
+        :meth:`_service_tools` (the service's own configured tools).
 
         Explicit registrations (``register_function`` / ``register_direct_function``),
         the catch-all handler, and built-in tools are never pruned.
@@ -1125,12 +1120,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         normalized = (
             LLMContext._normalize_and_validate_tools(tools) if tools is not None else NOT_GIVEN
         )
-        # No context tools? Fall back to any provided at construction time, so
-        # init-time tool handlers register (and aren't pruned) the same way.
+        # No context tools? Fall back to the service's own configured tools.
         if not is_given(normalized):
-            init_time_tools = self._init_time_tools()
-            if init_time_tools is not None:
-                normalized = LLMContext._normalize_and_validate_tools(init_time_tools)
+            service_tools = self._service_tools()
+            if service_tools is not None:
+                normalized = LLMContext._normalize_and_validate_tools(service_tools)
         self._register_advertised_tool_handlers(normalized)
         advertised: set[str | None] = set()
         if is_given(normalized):
