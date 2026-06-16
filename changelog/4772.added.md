@@ -1,0 +1,1 @@
+- Added `endpoint_sensitivity` to `SonioxSTTService.Settings`, a float in `[-1.0, 1.0]` that controls how aggressively Soniox emits speech endpoints. Higher values finalize turns sooner; lower values delay them. Introduced in the Soniox v5 model; earlier models reject it.
