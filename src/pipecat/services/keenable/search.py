@@ -34,12 +34,16 @@ from loguru import logger
 if TYPE_CHECKING:
     from pipecat.adapters.schemas.tools_schema import ToolsSchema
     from pipecat.pipeline.llm_switcher import LLMSwitcher
-    from pipecat.services.llm_service import LLMService
+    from pipecat.services.llm_service import FunctionCallParams, LLMService
 
 _MCP_URL = "https://api.keenable.ai/mcp"
 API_KEY_ENV_VAR = "KEENABLE_API_KEY"
 SEARCH_MODE_ENV_VAR = "KEENABLE_SEARCH_MODE"
 VALID_SEARCH_MODES = ("pro", "realtime")
+
+# Tools that accept a search ``mode`` argument. The server selects pro/realtime
+# per call, so the configured mode is injected into these calls' arguments.
+MODE_AWARE_TOOLS = ("search_web_pages",)
 
 
 def _pipecat_version() -> str:
@@ -133,11 +137,9 @@ class KeenableWebSearch:
 
         MCPClient, StreamableHttpParameters = _import_mcp_deps()
 
-        url = f"{_MCP_URL}?force={self._mode}"
-
         self._mcp = MCPClient(
             server_params=StreamableHttpParameters(
-                url=url,
+                url=_MCP_URL,
                 headers=self._build_headers(),
             ),
         )
@@ -160,6 +162,10 @@ class KeenableWebSearch:
     async def register_tools(self, llm: LLMService | LLMSwitcher) -> ToolsSchema:
         """Discover tools from the MCP server and register them on the LLM.
 
+        Search tools are wrapped so the configured search ``mode`` is sent as a
+        call argument — the server picks ``pro``/``realtime`` per call, not per
+        connection.
+
         Args:
             llm: The pipecat LLM service to register tools with.
 
@@ -167,7 +173,18 @@ class KeenableWebSearch:
             A ToolsSchema containing the registered tools.
         """
         self._ensure_connected()
-        return await self._mcp.register_tools(llm)
+        tools_schema = await self._mcp.get_tools_schema()
+        for function_schema in tools_schema.standard_tools:
+            if function_schema.name in MODE_AWARE_TOOLS:
+                llm.register_function(function_schema.name, self._mode_injecting_handler)
+            else:
+                llm.register_function(function_schema.name, self._mcp._tool_wrapper)
+        return tools_schema
+
+    async def _mode_injecting_handler(self, params: FunctionCallParams) -> None:
+        """Inject the configured search mode into the call, then delegate to MCP."""
+        params.arguments = {**(params.arguments or {}), "mode": self._mode}
+        await self._mcp._tool_wrapper(params)
 
     async def get_tools_schema(self) -> ToolsSchema:
         """Get tool schemas from the MCP server without registering them.
