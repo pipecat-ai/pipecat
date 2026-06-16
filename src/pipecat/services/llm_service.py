@@ -1070,15 +1070,18 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             "step is unnecessary when the handler is on the FunctionSchema."
         )
 
-    def _service_tools(self) -> ToolsSchema | None:
+    def _service_tools(self) -> ToolsSchema | list[Any] | None:
         """Return the service's own configured tools, if any.
 
         Used by the auto-registration mechanism. Tools normally reach a service
         through the ``LLMContext`` on each inference. Some services (the realtime
-        services) also accept tools configured directly on the service (e.g. via
-        a constructor argument) as an alternative; they override this method to
-        return those tools. The auto-registration mechanism registers these tools
-        if there are no tools in the context.
+        services) also accept tools configured directly on the service (e.g. via a
+        constructor argument) as an alternative; they override this to return those
+        tools verbatim, in whatever form they hold them — a ``ToolsSchema`` or a
+        provider-native tool list. When the context advertises no tools,
+        :meth:`_sync_registered_tool_handlers` normalizes the result and registers
+        handlers for any standard tools it contains; provider-native tools carry no
+        handlers, so they contribute nothing to register.
 
         Note:
             A service that overrides this **must follow the auto-registration
@@ -1086,8 +1089,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             tools**.
 
         Returns:
-            The service-configured tools as a ``ToolsSchema``, or ``None`` when the
-            service has none (the default).
+            The service's configured tools verbatim (e.g. a ``ToolsSchema`` or a
+            provider-native tool list), or ``None`` when there are none (the
+            default).
         """
         return None
 
@@ -1121,10 +1125,16 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             LLMContext._normalize_and_validate_tools(tools) if tools is not None else NOT_GIVEN
         )
         # No context tools? Fall back to the service's own configured tools.
+        # Those may be provider-native (already formatted, carrying no handlers);
+        # only standard tools (gathered into a ToolsSchema) contribute handlers.
         if not is_given(normalized):
             service_tools = self._service_tools()
             if service_tools is not None:
-                normalized = LLMContext._normalize_and_validate_tools(service_tools)
+                service_tools = LLMContext._normalize_and_validate_tools(
+                    service_tools, allow_provider_tools=True
+                )
+                if isinstance(service_tools, ToolsSchema):
+                    normalized = service_tools
         self._register_advertised_tool_handlers(normalized)
         advertised: set[str | None] = set()
         if is_given(normalized):
