@@ -66,6 +66,13 @@ class AggregatedFrameSequencer:
         self._name = name
         self._slots: list[_AggregatedFrameSlot] = []
         self._context_append_to_context: dict[str, bool] = {}
+        # Context IDs that are currently live (registered and not yet retired). A
+        # context is live from register_spoken() until it is retired by either
+        # clear() (interruption) or retire_context() (normal turn completion). Words
+        # arriving for a context that is not in this set are stale and are dropped.
+        self._live_context_ids: set[str] = set()
+        # Count of stale word-timestamps dropped, for prod observability.
+        self._dropped_stale_words: int = 0
 
     def register_spoken(
         self,
@@ -93,6 +100,7 @@ class AggregatedFrameSequencer:
                 do not inject extra spaces between consecutive frames.
         """
         self._context_append_to_context[context_id] = append_to_context
+        self._live_context_ids.add(context_id)
         self._slots.append(
             _AggregatedFrameSlot(
                 frame=frame,
@@ -146,6 +154,9 @@ class AggregatedFrameSequencer:
         Locates the active (first incomplete spoken) slot with a tracker, advances it
         by the incoming word, and builds a :class:`TTSTextFrame`. Handles:
 
+        - Words from a context that is no longer live (retired by :meth:`clear` on
+          interruption or by :meth:`retire_context` on normal turn completion):
+          dropped as stale (returns an empty list).
         - Normal words that fit entirely within the active slot.
         - Overflow words straddling two slot boundaries.
         - Force-complete when the TTS drops an event (word belongs to the next slot).
@@ -162,6 +173,24 @@ class AggregatedFrameSequencer:
         Returns:
             Ordered list of frames (TTSTextFrame and/or AggregatedTextFrame) to push.
         """
+        # Drop words from a context that is no longer live. A context is retired on
+        # interruption (clear) and on normal turn completion (retire_context). Such a
+        # word is stale (e.g. delayed word-timestamps the TTS server delivers seconds
+        # after the context ended); emitting it would interleave it into the current
+        # turn's transcript and pollute the LLM context. A None context_id is left
+        # untouched: services without audio contexts legitimately use the passthrough
+        # path below.
+        if context_id is not None and context_id not in self._live_context_ids:
+            self._dropped_stale_words += 1
+            # Debug, not warning: providers that stream stragglers (Inworld,
+            # ElevenLabs) emit many of these per turn, so a per-word warning would
+            # flood prod logs. The running total stays in the message for triage.
+            logger.debug(
+                f"{self._name} Dropping stale word '{word}' from retired/unknown "
+                f"context {context_id} (total dropped: {self._dropped_stale_words})"
+            )
+            return []
+
         active = self._get_active_slot()
         is_complete = False
         raw_overflow_word = None
@@ -318,10 +347,35 @@ class AggregatedFrameSequencer:
         frames.extend(self.flush(last_word_pts=last_word_pts))
         return frames
 
+    def retire_context(self, context_id: str | None) -> None:
+        """Retire a context that has completed normally (end of turn).
+
+        Called from the TTS service when an audio context finishes playing all of
+        its audio and is torn down. After this point any further word-timestamps the
+        provider streams for ``context_id`` are stale and :meth:`process_word` drops
+        them, so they cannot leak into the next turn's transcript.
+
+        Drops all per-context metadata for ``context_id``: the liveness marker and
+        the ``append_to_context`` value. This keeps both maps from growing without
+        bound over a long-running service (context IDs are per-turn). It is safe
+        because the TTS service force-completes the context's slots (stamping
+        ``append_to_context`` onto every frame) before retiring it, so no later
+        ``_build_word_frame`` needs the value. Unlike :meth:`clear`, this does not
+        touch slots or other contexts.
+
+        Args:
+            context_id: The context that just completed. ``None`` is a no-op.
+        """
+        if context_id is None:
+            return
+        self._live_context_ids.discard(context_id)
+        self._context_append_to_context.pop(context_id, None)
+
     def clear(self) -> None:
         """Clear all slots and context metadata (called on interruption/reset)."""
         self._slots.clear()
         self._context_append_to_context.clear()
+        self._live_context_ids.clear()
 
     # -------------------------------------------------------------------------
     # Internal helpers
@@ -357,8 +411,12 @@ class AggregatedFrameSequencer:
         frame = TTSTextFrame(text, aggregated_by=AggregationType.WORD)
         frame.pts = pts
         frame.context_id = context_id
+        # For an unknown context, default to False: such a frame must not be appended
+        # to the assistant transcript. process_word already drops stale words before
+        # reaching here, so this is defense-in-depth. A None context_id (services
+        # without audio contexts) still appends by default.
         frame.append_to_context = (
-            self._context_append_to_context.get(context_id, True)
+            self._context_append_to_context.get(context_id, False)
             if context_id is not None
             else True
         )

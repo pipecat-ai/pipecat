@@ -242,18 +242,27 @@ class TestProcessWordBasic(unittest.TestCase):
         result = seq.process_word("world", pts=20, context_id="ctx1")
         self.assertTrue(any(f is skipped for f in result))
 
-    def test_no_active_slot_emits_passthrough(self):
+    def test_none_context_emits_passthrough(self):
+        # Services without audio contexts pass context_id=None and rely on the
+        # passthrough path even when no slot is registered.
         seq = _seq()
-        result = seq.process_word("hello", pts=1, context_id="ctx-unknown")
+        result = seq.process_word("hello", pts=1, context_id=None)
         self.assertEqual(len(result), 1)
         self.assertIsInstance(result[0], TTSTextFrame)
         self.assertEqual(result[0].text, "hello")
-        self.assertEqual(result[0].context_id, "ctx-unknown")
+        self.assertIsNone(result[0].context_id)
 
-    def test_passthrough_uses_default_append_to_context_true(self):
+    def test_none_context_passthrough_appends_to_context(self):
+        seq = _seq()
+        result = seq.process_word("hello", pts=1, context_id=None)
+        self.assertTrue(result[0].append_to_context)
+
+    def test_unknown_context_is_dropped(self):
+        # A real (non-None) context_id that was never registered is not live, so it
+        # is stale and must be dropped rather than emitted into the transcript.
         seq = _seq()
         result = seq.process_word("hello", pts=1, context_id="ctx-unknown")
-        self.assertTrue(result[0].append_to_context)
+        self.assertEqual(result, [])
 
     def test_unrecognised_word_emits_passthrough(self):
         seq = _seq()
@@ -496,14 +505,102 @@ class TestClear(unittest.TestCase):
         result = seq.register_skipped(frame, "ctx2", None)
         self.assertEqual(len(result), 1)
 
-    def test_after_clear_process_word_uses_passthrough(self):
+    def test_clears_live_contexts(self):
+        seq = _seq()
+        seq.register_spoken(_spoken_frame("hello"), "ctx1", _tracker("hello"), True)
+        self.assertIn("ctx1", seq._live_context_ids)
+        seq.clear()
+        self.assertEqual(seq._live_context_ids, set())
+
+    def test_after_clear_process_word_drops_stale_word(self):
         seq = _seq()
         seq.register_spoken(_spoken_frame("hello"), "ctx1", _tracker("hello"), True)
         seq.clear()
+        # ctx1 was retired by clear(); a delayed word for it is stale and dropped.
         result = seq.process_word("hello", pts=1, context_id="ctx1")
-        # No active slot after clear → passthrough
+        self.assertEqual(result, [])
+
+    def test_stale_words_do_not_corrupt_next_turn_after_interrupt(self):
+        # Regression for #4750 (interrupt path): after an interruption clears context
+        # A and a new context B is registered, delayed word-timestamps for A must not
+        # interleave into B's transcript.
+        seq = _seq()
+        # Turn A starts, then is interrupted (clear wipes its slot + liveness).
+        seq.register_spoken(
+            _spoken_frame("I just wanted to follow up"), "ctxA", _tracker("I"), True
+        )
+        seq.clear()
+        # Turn B (the next message) is registered.
+        seq.register_spoken(_spoken_frame("Hello"), "ctxB", _tracker("Hello"), True)
+        # Delayed words for the dead context A arrive — every one must be dropped.
+        for stale in ("I", "just", "wanted", "to", "follow", "up"):
+            self.assertEqual(seq.process_word(stale, pts=1, context_id="ctxA"), [])
+        # Context B's own word still flows normally and appends to the transcript.
+        result = seq.process_word("Hello", pts=2, context_id="ctxB")
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0].text, "hello")
+        self.assertEqual(result[0].text, "Hello")
+        self.assertEqual(result[0].context_id, "ctxB")
+        self.assertTrue(result[0].append_to_context)
+
+
+# ---------------------------------------------------------------------------
+# retire_context — normal turn completion (no interruption)
+# ---------------------------------------------------------------------------
+
+
+class TestRetireContext(unittest.TestCase):
+    def test_retire_cleans_up_per_context_metadata(self):
+        seq = _seq()
+        seq.register_spoken(_spoken_frame("hello"), "ctx1", _tracker("hello"), True)
+        seq.retire_context("ctx1")
+        # Both per-context maps are cleaned up so they don't grow without bound
+        # over a long-running service (context IDs are per-turn). The TTS service
+        # force-completes the slot before retiring, so no later frame build needs
+        # the append_to_context value.
+        self.assertNotIn("ctx1", seq._live_context_ids)
+        self.assertNotIn("ctx1", seq._context_append_to_context)
+
+    def test_retire_none_is_noop(self):
+        seq = _seq()
+        # Should not raise.
+        seq.retire_context(None)
+        self.assertEqual(seq._live_context_ids, set())
+
+    def test_word_after_retire_is_dropped(self):
+        seq = _seq()
+        seq.register_spoken(_spoken_frame("hello"), "ctx1", _tracker("hello"), True)
+        seq.retire_context("ctx1")
+        result = seq.process_word("hello", pts=1, context_id="ctx1")
+        self.assertEqual(result, [])
+
+    def test_stale_words_do_not_corrupt_next_turn_normal_boundary(self):
+        # Regression for the normal-turn-boundary gap that #4751 does NOT cover:
+        # turn A completes normally (retire_context, NO clear), then a delayed
+        # word-timestamp for A arrives during turn B and must not leak.
+        seq = _seq()
+        # Turn A: register, speak its word to completion, then retire normally.
+        seq.register_spoken(_spoken_frame("Goodbye"), "ctxA", _tracker("Goodbye"), True)
+        out_a = seq.process_word("Goodbye", pts=1, context_id="ctxA")
+        self.assertTrue(any(isinstance(f, TTSTextFrame) for f in out_a))
+        seq.retire_context("ctxA")
+        # Turn B starts.
+        seq.register_spoken(_spoken_frame("Hello there"), "ctxB", _tracker("Hello there"), True)
+        # A late straggler word-timestamp for the completed ctxA arrives.
+        leaked = seq.process_word("Goodbye", pts=2, context_id="ctxA")
+        self.assertEqual(leaked, [])
+        # ctxB's own words still flow and append to the transcript.
+        result = seq.process_word("Hello", pts=3, context_id="ctxB")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].context_id, "ctxB")
+        self.assertTrue(result[0].append_to_context)
+
+    def test_other_live_context_unaffected_by_retire(self):
+        # Retiring ctxA must not affect a still-live ctxB.
+        seq = _seq()
+        seq.register_spoken(_spoken_frame("Hi"), "ctxA", _tracker("Hi"), True)
+        seq.register_spoken(_spoken_frame("there friend"), "ctxB", _tracker("there friend"), True)
+        seq.retire_context("ctxA")
+        self.assertIn("ctxB", seq._live_context_ids)
 
 
 # ---------------------------------------------------------------------------

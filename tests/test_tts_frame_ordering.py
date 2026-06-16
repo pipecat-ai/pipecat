@@ -40,8 +40,10 @@ import pytest
 
 from pipecat.frames.frames import (
     AggregatedTextFrame,
+    CancelFrame,
     ControlFrame,
     DataFrame,
+    EndFrame,
     Frame,
     InterruptionFrame,
     LLMAssistantPushAggregationFrame,
@@ -534,6 +536,44 @@ async def test_websocket_tts_with_pause_frame_ordering():
     tts = MockWebSocketPauseTTSService()
     frames_received = await run_test(tts, frames_to_send=_make_frames_no_sleep())
     _assert_group_ordering(frames_received[0], _GROUPS)
+
+
+@pytest.mark.asyncio
+async def test_cancel_clears_sequencer_liveness():
+    """cancel() must clear the sequencer so no stale context_id survives.
+
+    Cancelling tears down the audio-context task without running the per-context
+    retire_context branch, so an in-flight context would otherwise keep its
+    liveness entry and a later straggler word would not be dropped as stale.
+    """
+    tts = MockWebSocketTTSService()
+    seq = tts._aggregated_frame_sequencer
+    seq.register_spoken(AggregatedTextFrame("hi", "sentence"), "ctx1", None, True)
+    assert "ctx1" in seq._live_context_ids
+
+    await tts.cancel(CancelFrame())
+
+    assert seq._live_context_ids == set()
+    assert seq._context_append_to_context == {}
+
+
+@pytest.mark.asyncio
+async def test_stop_clears_sequencer_liveness():
+    """stop() must clear the sequencer so no stale context_id survives.
+
+    The None sentinel exits the drain loop without running retire_context for a
+    context still queued at stop(), so clear it to avoid stale liveness if the
+    instance is reused (e.g. after a StopFrame that keeps processors alive).
+    """
+    tts = MockWebSocketTTSService()
+    seq = tts._aggregated_frame_sequencer
+    seq.register_spoken(AggregatedTextFrame("hi", "sentence"), "ctx1", None, True)
+    assert "ctx1" in seq._live_context_ids
+
+    await tts.stop(EndFrame())
+
+    assert seq._live_context_ids == set()
+    assert seq._context_append_to_context == {}
 
 
 @pytest.mark.asyncio

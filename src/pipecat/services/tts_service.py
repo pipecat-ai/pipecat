@@ -552,6 +552,11 @@ class TTSService(AIService):
             await self._serialization_queue.put(None)
             await self._audio_context_task
             self._audio_context_task = None
+        # The None sentinel exits the drain loop without running the per-context
+        # retire_context branch, so any context still queued at stop() keeps its
+        # liveness entry. Clear the sequencer so no stale context_id survives if
+        # this instance is reused (e.g. StopFrame keeps processors alive).
+        self._aggregated_frame_sequencer.clear()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the TTS service.
@@ -561,6 +566,9 @@ class TTSService(AIService):
         """
         await super().cancel(frame)
         await self._stop_audio_context_task()
+        # Cancelling the task skips retire_context for any in-flight context, so
+        # clear the sequencer to avoid leaving stale liveness behind.
+        self._aggregated_frame_sequencer.clear()
 
     def add_text_transformer(
         self,
@@ -1432,7 +1440,13 @@ class TTSService(AIService):
                 await self._handle_audio_context(context_id)
 
                 # We just finished processing the context, so we can safely remove it.
+                # _handle_audio_context() above has already drained every queued word
+                # for this context (and force-completed its slots), so retiring it now
+                # cannot drop in-flight words. Any word-timestamp the provider streams
+                # after this point is a stale straggler for a completed turn, and the
+                # sequencer drops it instead of leaking it into the next turn.
                 del self._audio_contexts[context_id]
+                self._aggregated_frame_sequencer.retire_context(context_id)
                 await self.on_audio_context_completed(context_id=context_id)
                 self.reset_active_audio_context()
             else:
