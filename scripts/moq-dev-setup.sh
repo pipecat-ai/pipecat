@@ -3,10 +3,12 @@
 # Wire the unpublished MoQ-related packages into pipecat-prebuilt/client
 # for local dev, then build them.
 #
-# The pipecat MoQ transport now self-serves via `--moq-serve` (the bot
-# binds its own UDP socket and mints a self-signed cert in-process), so
-# you no longer need a separate moq-relay process or an `openssl` cert
-# dance. This script's only job is the link chain that lets the React
+# The pipecat MoQ transport now self-serves via `--moq-serve` + a TLS
+# arg (`--moq-tls-generate <hostname>` for a dev self-signed cert, or
+# `--moq-tls-cert/--moq-tls-key` for a CA-signed one). The bot binds its
+# own UDP socket and (in dev) mints the cert in-process, so you no
+# longer need a separate moq-relay process or an `openssl` cert dance.
+# This script's only job is the link chain that lets the React
 # prebuilt client pick up the local source of:
 #
 #   * @pipecat-ai/moq-transport (unpublished)
@@ -143,11 +145,13 @@ echo "==========================================="
 echo " Next: run these in separate terminals"
 echo "==========================================="
 echo
-echo "# 1. Start the bot (self-serves as the MOQ server; mints a self-"
-echo "#    signed cert in-process and threads the fingerprint to the"
-echo "#    browser via /start. No separate moq-relay process needed.)"
+echo "# 1. Start the bot (self-serves as the MOQ server: --moq-serve binds"
+echo "#    the UDP socket; --moq-tls-generate localhost mints a self-signed"
+echo "#    cert in-process for that hostname and threads the fingerprint to"
+echo "#    the browser via /start. No separate moq-relay process needed.)"
 echo "cd $PIPECAT_DIR"
-echo "uv run python examples/transports/transports-moq.py -t moq --moq-serve"
+echo "uv run python examples/transports/transports-moq.py \\"
+echo "    -t moq --moq-serve --moq-tls-generate localhost"
 echo
 echo "# 2. Start the prebuilt client dev server (Vite — usually port 5173)"
 echo "cd $PIPECAT_DIR/../pipecat-prebuilt/client"
