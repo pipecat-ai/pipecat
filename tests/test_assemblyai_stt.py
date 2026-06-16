@@ -11,10 +11,6 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from pipecat.frames.frames import BotStoppedSpeakingFrame, TTSTextFrame
-from pipecat.observers.base_observer import FramePushed
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.assemblyai.observer import AssemblyAIContextObserver
 from pipecat.services.assemblyai.stt import AssemblyAISTTService, is_u3_pro_model
 
 
@@ -467,73 +463,50 @@ def test_update_settings_mixed_delta_reconnects_without_update_configuration():
     assert "agent_context" in service._build_ws_url()
 
 
-# --- AssemblyAIContextObserver ---
+# --- process_assistant_turn ---
 
 
-class _StubSTT:
-    """Records agent_context values fed by the observer."""
+def test_process_assistant_turn_delegates_to_update_agent_context():
+    service = AssemblyAISTTService(api_key="test-key")
+    sent = []
 
-    def __init__(self):
-        self.contexts = []
+    async def fake_send(**fields):
+        sent.append(fields)
 
-    async def update_agent_context(self, text):
-        self.contexts.append(text)
+    service._send_update_configuration = fake_send
+    asyncio.run(service.process_assistant_turn("Hello there."))
+
+    assert sent == [{"agent_context": "Hello there."}]
+    assert service._settings.agent_context == "Hello there."
 
 
-def _pushed(frame):
-    return FramePushed(
-        source=None,
-        destination=None,
-        frame=frame,
-        direction=FrameDirection.DOWNSTREAM,
-        timestamp=0,
+def test_process_assistant_turn_noop_for_non_u3():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(model="universal-streaming-english"),
     )
+    sent = []
+
+    async def fake_send(**fields):
+        sent.append(fields)
+
+    service._send_update_configuration = fake_send
+    asyncio.run(service.process_assistant_turn("Hello."))
+
+    assert sent == []
 
 
-def test_observer_flushes_concatenated_reply_on_bot_stopped():
-    stt = _StubSTT()
-    observer = AssemblyAIContextObserver(stt)
+def test_process_assistant_turn_noop_when_carryover_disabled():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(previous_context_n_turns=0),
+    )
+    sent = []
 
-    async def run():
-        await observer.on_push_frame(_pushed(TTSTextFrame(text="Welcome", aggregated_by="word")))
-        await observer.on_push_frame(_pushed(TTSTextFrame(text="back.", aggregated_by="word")))
-        await observer.on_push_frame(_pushed(BotStoppedSpeakingFrame()))
+    async def fake_send(**fields):
+        sent.append(fields)
 
-    asyncio.run(run())
-    assert stt.contexts == ["Welcome back."]
+    service._send_update_configuration = fake_send
+    asyncio.run(service.process_assistant_turn("Hello."))
 
-
-def test_observer_fires_on_agent_context_event():
-    stt = _StubSTT()
-    observer = AssemblyAIContextObserver(stt)
-    received = []
-
-    @observer.event_handler("on_agent_context")
-    async def _on_agent_context(obs, text):
-        received.append(text)
-
-    async def run():
-        await observer.on_push_frame(_pushed(TTSTextFrame(text="Hello", aggregated_by="word")))
-        await observer.on_push_frame(_pushed(BotStoppedSpeakingFrame()))
-        # Event handlers run as background tasks; let them complete.
-        await asyncio.sleep(0.05)
-
-    asyncio.run(run())
-    assert received == ["Hello"]
-
-
-def test_observer_dedupes_repeated_frame_and_ignores_empty_flush():
-    stt = _StubSTT()
-    observer = AssemblyAIContextObserver(stt)
-    # The same frame object is seen on multiple hops (same id) and must count once.
-    tts = TTSTextFrame(text="Hi", aggregated_by="word")
-
-    async def run():
-        await observer.on_push_frame(_pushed(tts))
-        await observer.on_push_frame(_pushed(tts))
-        await observer.on_push_frame(_pushed(BotStoppedSpeakingFrame()))
-        # A second bot-stopped sibling with an empty buffer is a no-op.
-        await observer.on_push_frame(_pushed(BotStoppedSpeakingFrame()))
-
-    asyncio.run(run())
-    assert stt.contexts == ["Hi"]
+    assert sent == []

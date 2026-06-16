@@ -705,8 +705,6 @@ class AssemblyAISTTService(WebsocketSTTService):
         Context carryover (u3-rt-pro only) gives the model a short memory of what
         the agent just said so it can better transcribe the user's reply — short
         answers, spelled-out entities (emails, IDs), and similar-sounding words.
-        Call this after each agent reply (e.g. via
-        :class:`~pipecat.services.assemblyai.observer.AssemblyAIContextObserver`).
         No-op for non-u3-rt-pro models.
 
         Args:
@@ -728,6 +726,26 @@ class AssemblyAISTTService(WebsocketSTTService):
         # Store it so a later reconnect re-seeds the context via the WS URL.
         self._settings.agent_context = text
         await self._send_update_configuration(agent_context=text)
+
+    async def process_assistant_turn(self, text: str) -> None:
+        """Feed the assistant's completed reply to AssemblyAI as carryover context.
+
+        Called automatically when the assistant's turn ends.
+        Delegates to :meth:`update_agent_context`.
+
+        No-op for non-U3-Pro models or when ``previous_context_n_turns`` is ``0``
+        (carryover explicitly disabled).
+
+        Args:
+            text: The assistant's aggregated spoken text for this turn.
+        """
+        # Context carryover is a U3 Pro-only feature.
+        if not is_u3_pro_model(self._settings.model):
+            return
+        # previous_context_n_turns=0 means the user explicitly disabled carryover.
+        if self._settings.previous_context_n_turns == 0:
+            return
+        await self.update_agent_context(text)
 
     async def _connect(self):
         """Connect to the AssemblyAI service.
