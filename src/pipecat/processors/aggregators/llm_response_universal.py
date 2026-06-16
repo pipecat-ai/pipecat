@@ -41,6 +41,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     LLMAssistantPushAggregationFrame,
     LLMContextAssistantTimestampFrame,
+    LLMContextAssistantTurnFrame,
     LLMContextFrame,
     LLMContextSummaryRequestFrame,
     LLMFullResponseEndFrame,
@@ -148,7 +149,7 @@ class LLMUserAggregatorParams:
 
             .. deprecated:: 1.2.0
                 Use ``user_turn_strategies=FilterIncompleteUserTurnStrategies()``
-                instead. Will be removed in version 2.0.0.
+                instead. Will be removed in 2.0.0.
 
         user_turn_completion_config: Configuration for turn
             completion behavior including custom instructions, timeouts, and
@@ -159,7 +160,7 @@ class LLMUserAggregatorParams:
             .. deprecated:: 1.2.0
                 Pass the config directly to
                 ``FilterIncompleteUserTurnStrategies(config=...)`` instead.
-                Will be removed in version 2.0.0.
+                Will be removed in 2.0.0.
     """
 
     add_tool_change_messages: bool = False
@@ -223,21 +224,25 @@ class LLMAssistantAggregatorParams:
             (LLM-specific) tools are ignored. When using
             ``LLMContextAggregatorPair``, prefer setting this via its
             ``add_tool_change_messages`` argument instead. Defaults to False.
+        enable_context_summarization: Legacy field name.
+
+            .. deprecated:: 1.2.0
+                Use :attr:`enable_auto_context_summarization` instead. Will be
+                removed in 2.0.0.
+
+        context_summarization_config: Legacy field name.
+
+            .. deprecated:: 1.2.0
+                Use :attr:`auto_context_summarization_config` instead. Will be
+                removed in 2.0.0.
     """
 
     enable_auto_context_summarization: bool = False
     auto_context_summarization_config: LLMAutoContextSummarizationConfig | None = None
     add_tool_change_messages: bool = False
 
-    # ---------------------------------------------------------------------------
-    # Deprecated field names — kept for backward compatibility.
-    # Use enable_auto_context_summarization and auto_context_summarization_config instead.
-    #
-    # .. deprecated:: 1.2.0
-    #     Use ``enable_auto_context_summarization`` and
-    #     ``auto_context_summarization_config`` instead. Will be removed in
-    #     version 2.0.0.
-    # ---------------------------------------------------------------------------
+    # Deprecated field names — kept for backward compatibility. See the
+    # ``.. deprecated::`` directives in the class docstring above.
     enable_context_summarization: bool | None = None
     context_summarization_config: LLMContextSummarizationConfig | None = None
 
@@ -2021,6 +2026,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
             timestamp=self._assistant_turn_start_timestamp,
         )
         await self._call_event_handler("on_assistant_turn_stopped", message)
+        if aggregation:
+            await self.broadcast_frame(
+                LLMContextAssistantTurnFrame,
+                text=aggregation,
+                timestamp=self._assistant_turn_start_timestamp,
+            )
 
         self._assistant_turn_start_timestamp = ""
 

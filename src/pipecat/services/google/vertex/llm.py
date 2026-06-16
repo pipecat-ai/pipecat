@@ -85,6 +85,7 @@ class GoogleVertexLLMService(GoogleLLMService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GoogleVertexLLMService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             location: GCP region for Vertex AI endpoint. Defaults to "us-east4".
             project_id: Google Cloud project ID.
@@ -92,6 +93,7 @@ class GoogleVertexLLMService(GoogleLLMService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GoogleVertexLLMService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings for this service.  When both
                 deprecated parameters and *settings* are provided, *settings*
@@ -100,6 +102,8 @@ class GoogleVertexLLMService(GoogleLLMService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GoogleVertexLLMService.Settings(system_instruction=...)`` instead.
+                    Will be removed in 2.0.0.
+
             tools: List of available tools/functions.
             tool_config: Configuration for tool usage.
             http_options: HTTP options for the client.

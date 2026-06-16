@@ -28,6 +28,7 @@ from pipecat.services.azure.common import language_to_azure_language
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
 from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -110,11 +111,16 @@ class AzureBaseTTSService:
         "'": "&apos;",
     }
 
+    @deprecated(
+        "`AzureBaseTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `AzureBaseTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Azure TTS voice configuration.
 
         .. deprecated:: 0.0.105
             Use ``settings=AzureBaseTTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             emphasis: Emphasis level for speech ("strong", "moderate", "reduced").
@@ -283,12 +289,14 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AzureTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             params: Voice and synthesis parameters configuration.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AzureTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -296,6 +304,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
 
                 .. deprecated:: 0.0.104
                     Use ``text_aggregation_mode`` instead.
+                    Will be removed in 2.0.0.
 
             text_aggregation_mode: How to aggregate text before synthesis.
             **kwargs: Additional arguments passed to parent WordTTSService.
@@ -825,12 +834,14 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AzureHttpTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             params: Voice and synthesis parameters configuration.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AzureHttpTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

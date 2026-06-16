@@ -96,8 +96,8 @@ class BaseOutputTransport(FrameProcessor):
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
-                    "Transport parameter `video_out_bitrate` is deprecated and will be removed in a future "
-                    "version. Use provider specific settings instead.",
+                    "Transport parameter `video_out_bitrate` is deprecated and will be removed in "
+                    "2.0.0. Use provider specific settings instead.",
                     DeprecationWarning,
                     stacklevel=2,
                 )
@@ -545,9 +545,13 @@ class BaseOutputTransport(FrameProcessor):
             await self._cancel_clock_task()
             await self._cancel_video_task()
 
-            if self._audio_queue.has_uninterruptible:
+            if self._audio_queue.has_uninterruptible or self._mixer:
                 # Keep the audio task running but drain all interruptible frames
-                # so the pending UninterruptibleFrames are still delivered.
+                # so the pending UninterruptibleFrames are still delivered. With
+                # a mixer, cancelling the task would also stop mixer-only output
+                # during the restart, causing an audible gap in the background
+                # audio (made worse by telephony serializers that clear the
+                # playout buffer on interruptions).
                 self._audio_queue.reset()
             else:
                 await self._cancel_audio_task()

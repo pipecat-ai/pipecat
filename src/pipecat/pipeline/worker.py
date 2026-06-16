@@ -79,6 +79,7 @@ from pipecat.processors.frameworks.rtvi.models import (
     UISnapshotMessage,
 )
 from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.startup import run_setup_hook
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.tracing_context import TracingContext
@@ -309,7 +310,7 @@ class PipelineWorker(BaseWorker):
 
                 .. deprecated:: 1.2.0
                     Use ``app_resources`` instead. ``tool_resources`` will be
-                    removed in a future version.
+                    removed in 2.0.0.
         """
         super().__init__(name=name, active=active)
         self._bridged = bridged
@@ -1314,37 +1315,32 @@ class PipelineWorker(BaseWorker):
         return None
 
 
+@deprecated(
+    "`PipelineTask` is deprecated since 1.3.0 and will be removed in 2.0.0. "
+    "Use `PipelineWorker` instead."
+)
 class PipelineTask(PipelineWorker):
     """Deprecated alias for :class:`PipelineWorker`.
 
     .. deprecated:: 1.3.0
-        Use :class:`PipelineWorker` instead. ``PipelineTask`` will be removed
-        in a future release.
+        Use :class:`PipelineWorker` instead. :class:`PipelineTask` will be removed
+        in 2.0.0.
     """
 
-    def __init__(self, *args, **kwargs):
-        """Initialize the pipeline worker (deprecated)."""
-        warnings.warn(
-            "PipelineTask is deprecated, use PipelineWorker instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
+    pass
 
 
+@deprecated(
+    "`PipelineTaskParams` is deprecated since 1.3.0 and will be removed in 2.0.0. "
+    "Use `WorkerParams` instead."
+)
 @dataclass
 class PipelineTaskParams(WorkerParams):
     """Deprecated alias for :class:`~pipecat.workers.base_worker.WorkerParams`.
 
     .. deprecated:: 1.3.0
         Use :class:`~pipecat.workers.base_worker.WorkerParams` instead.
-        ``PipelineTaskParams`` will be removed in a future release.
+        Will be removed in 2.0.0.
     """
 
-    def __post_init__(self):
-        """Warn on construction."""
-        warnings.warn(
-            "PipelineTaskParams is deprecated, use WorkerParams instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+    pass

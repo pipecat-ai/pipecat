@@ -131,7 +131,7 @@ Runnable examples live in `examples/multi-worker/` (local handoff, distributed h
 ## Code Style
 
 - **Docstrings**: Google-style. Classes describe purpose; `__init__` has `Args:` section; dataclasses use `Parameters:` section.
-- **Deprecations**: Use the `.. deprecated:: <version>` Sphinx directive in docstrings (never inline tags like `[DEPRECATED]`), and pair it with a runtime `warnings.warn(..., DeprecationWarning)` at the call site. See `CONTRIBUTING.md` for full conventions.
+- **Deprecations**: Every deprecation needs a `.. deprecated:: <version>` directive in the docstring (never inline `[DEPRECATED]` tags) — it's the registry's source of truth. Its body must **lead with the replacement as the first reference** — `Use :class:`X` instead.` / `Moved to :mod:`X`.` / `Merged into :class:`X`.` — or state `No replacement.` explicitly; **never lead with a contextual reference** (the deprecated thing itself, a `DeprecationWarning`, or a related-but-not-replacement API), and don't rely on incidental words like "no longer" to signal no-replacement. Prefer Sphinx roles (`:class:`/`:meth:`/`:func:`/`:attr:`/`:mod:`) over plain backticks, but use a backtick when a role wouldn't resolve (aliases like `Service.Settings`, usage idioms, parameters). For the runtime warning: **classes, functions, methods, and properties** use the PEP 702 `@deprecated` decorator from `pipecat.utils.deprecation` with a string-literal message matching the canonical template — `` `Subject` is deprecated since X.Y.Z and will be removed in A.B.C. Use `Replacement` instead. `` — where the removal is a concrete version (e.g. `2.0.0`, never "a future release") and the tail is `No replacement.` when nothing replaces it. Parameters, module moves, and behavior/value changes can't use the decorator — call `warnings.warn(..., DeprecationWarning)` by hand. Enforced by `tests/test_deprecation_markers.py`; full conventions in `CONTRIBUTING.md`.
 - **Linting**: Ruff (line length 100). Pre-commit hooks enforce formatting.
 - **Type hints**: Required for complex async code.
 - **Dataclass vs Pydantic**: Use `@dataclass` for frames and internal pipeline data (high-frequency, no validation needed). Use Pydantic `BaseModel` for configuration, parameters, metrics, and external API data (benefits from validation and serialization). Specifically:
@@ -182,6 +182,13 @@ class MyParams(BaseModel):
     new_setting: str = "default"
     old_setting: str | None = None
 ```
+
+## Writing for Future Readers
+
+This applies to everything that documents the code — comments, docstrings, commit messages, changelog entries, PR descriptions. Write for a future reader of the codebase, NOT for whoever is reviewing and collaborating on the work right now.
+
+- **Leave the current moment out of it.** Detail that feels important while making a change — alternatives considered and not taken, what the code used to do, shorthand that only made sense while the work was in progress — usually isn't worth a future reader's time, and may not even make sense to them. Include it only when they genuinely need it to understand the code as it stands.
+- **Match the weight of the prose to the code.** Keep it general, high-level, and concise. Reserve long comments for architecturally salient pieces, genuinely tricky sections, or decisions non-obvious enough that a reader would otherwise be puzzled. Routine code needs a short note or none at all.
 
 ## Service Implementation
 

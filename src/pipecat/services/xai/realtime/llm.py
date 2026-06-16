@@ -233,6 +233,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
                 .. deprecated:: 0.0.105
                     Use ``settings=GrokRealtimeLLMService.Settings(session_properties=...)``
                     instead.
+                    Will be removed in 2.0.0.
 
                 To set a different voice, configure it in session_properties:
 
@@ -513,9 +514,9 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             await self._handle_messages_append(frame)
         elif isinstance(frame, LLMSetToolsFrame):
             # Continuous session: no fresh context frame per turn, so sync the
-            # registered direct-function handlers to the new tool set here (the
-            # base service only does this on LLMContextFrame).
-            self._sync_registered_direct_functions(frame.tools)
+            # registered tool handlers to the new tool set here (the base service
+            # only does this on LLMContextFrame).
+            self._sync_registered_tool_handlers(frame.tools)
             await self._send_session_update()
 
         await self.push_frame(frame, direction)

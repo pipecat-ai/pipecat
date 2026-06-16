@@ -19,7 +19,7 @@ except ImportError:
     aic_sdk = None
     HAS_AIC_SDK = False
 
-from tests.aic_mocks import MockModel, MockProcessorSync, MockVadContext  # noqa: E402
+from tests.aic_mocks import MockModel, MockProcessorSync  # noqa: E402
 
 # Module path for patching
 AIC_QUAIL_VAD_MODULE = "pipecat.audio.vad.aic_quail_vad"

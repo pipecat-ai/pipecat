@@ -38,6 +38,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.utils import resolve_credentials
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -88,12 +89,17 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
     # Overriding the default adapter to use the Anthropic one.
     adapter_class = AWSBedrockLLMAdapter
 
+    @deprecated(
+        "`AWSBedrockLLMService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `AWSBedrockLLMService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for AWS Bedrock LLM service.
 
         .. deprecated:: 0.0.105
             Use ``AWSBedrockLLMService.Settings`` instead. Pass settings directly via the
             ``settings`` parameter of :class:`AWSBedrockLLMService`.
+            Will be removed in 2.0.0.
 
         Parameters:
             max_tokens: Maximum number of tokens to generate.
@@ -134,6 +140,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSBedrockLLMService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             aws_access_key: AWS access key ID. If None, falls back to
                 environment variables and the default botocore credential chain
@@ -146,6 +153,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSBedrockLLMService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings for this service.  When both
                 deprecated parameters and *settings* are provided, *settings*
@@ -154,6 +162,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSBedrockLLMService.Settings(stop_sequences=...)`` instead.
+                    Will be removed in 2.0.0.
 
             client_config: Custom botocore client configuration.
             retry_timeout_secs: Request timeout in seconds for retry logic.

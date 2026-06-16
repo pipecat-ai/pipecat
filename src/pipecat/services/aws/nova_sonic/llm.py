@@ -58,6 +58,7 @@ from pipecat.services.aws.nova_sonic.session_continuation import (
 )
 from pipecat.services.llm_service import LLMService, RealtimeServiceInfo
 from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -141,12 +142,17 @@ class CurrentContent:
         )
 
 
+@deprecated(
+    "`Params` is deprecated since 0.0.105 and will be removed in 2.0.0. Use "
+    "`AWSNovaSonicLLMService.Settings` instead."
+)
 class Params(BaseModel):
     """Configuration parameters for AWS Nova Sonic.
 
     .. deprecated:: 0.0.105
         Use ``settings=AWSNovaSonicLLMService.Settings(...)`` for inference settings
         and ``audio_config=AudioConfig(...)`` for audio configuration.
+        Will be removed in 2.0.0.
 
     Parameters:
         input_sample_rate: Audio input sample rate in Hz.
@@ -293,6 +299,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSNovaSonicLLMService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             voice_id: Voice ID for speech synthesis.
                 Note that some voices are designed for use with a specific language.
@@ -302,6 +309,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSNovaSonicLLMService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             params: Model parameters for audio configuration and inference.
 
@@ -309,6 +317,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
                     Use ``settings=AWSNovaSonicLLMService.Settings(...)`` for inference
                     settings and ``audio_config=AudioConfig(...)`` for audio
                     configuration.
+                    Will be removed in 2.0.0.
 
             audio_config: Audio configuration (sample rates, sample sizes,
                 channel counts). If not provided, defaults are used.
@@ -319,6 +328,8 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSNovaSonicLLMService.Settings(system_instruction=...)`` instead.
+                    Will be removed in 2.0.0.
+
             tools: Available tools/functions for the model to use.
             session_continuation: Configuration for automatic session continuation.
                 When enabled (the default), sessions are seamlessly rotated before

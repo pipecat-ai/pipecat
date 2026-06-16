@@ -244,12 +244,14 @@ class GladiaSTTService(WebsocketSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GladiaSTTService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             params: Additional configuration parameters for Gladia service.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GladiaSTTService.Settings(...)`` for runtime-updatable
                     fields and direct init parameters for encoding/bit_depth/channels.
+                    Will be removed in 2.0.0.
 
             max_buffer_size: Maximum size of audio buffer in bytes. Defaults to 20MB.
             should_interrupt: Determine whether the bot should be interrupted when

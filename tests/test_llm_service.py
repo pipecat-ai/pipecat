@@ -22,7 +22,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallParams, LLMService
+from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
 
@@ -401,16 +401,16 @@ class TestProcessFrameToolWiring(unittest.IsolatedAsyncioTestCase):
 
     async def test_context_frame_syncs_registered_direct_functions(self):
         service = MockLLMService()
-        service._sync_registered_direct_functions = Mock()
+        service._sync_registered_tool_handlers = Mock()
         ctx = LLMContext(tools=NOT_GIVEN)
         await service.process_frame(LLMContextFrame(context=ctx), FrameDirection.DOWNSTREAM)
-        service._sync_registered_direct_functions.assert_called_once_with(ctx.tools)
+        service._sync_registered_tool_handlers.assert_called_once_with(ctx.tools)
 
     async def test_base_service_does_not_handle_set_tools_frame(self):
         # The base service syncs handlers only from the context frame. An
         # LLMSetToolsFrame is a pure aggregator concern here; only realtime
         # services that run continuously handle it for handler sync.
         service = MockLLMService()
-        service._sync_registered_direct_functions = Mock()
+        service._sync_registered_tool_handlers = Mock()
         await service.process_frame(LLMSetToolsFrame(tools=NOT_GIVEN), FrameDirection.DOWNSTREAM)
-        service._sync_registered_direct_functions.assert_not_called()
+        service._sync_registered_tool_handlers.assert_not_called()

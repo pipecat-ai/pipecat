@@ -46,10 +46,10 @@ from pipecat.frames.frames import AudioRawFrame
 # and we want to continue supporting them). In the meantime, code at the
 # LLMContext/OpenAI boundary should use explicit casts rather than rely on
 # the aliasing.
-LLMStandardMessage = ChatCompletionMessageParam
-LLMContextToolChoice = ChatCompletionToolChoiceOptionParam
+LLMStandardMessage: TypeAlias = ChatCompletionMessageParam
+LLMContextToolChoice: TypeAlias = ChatCompletionToolChoiceOptionParam
 NOT_GIVEN = OPEN_AI_NOT_GIVEN
-NotGiven = OpenAINotGiven
+NotGiven: TypeAlias = OpenAINotGiven
 
 
 _T = TypeVar("_T")
@@ -112,10 +112,11 @@ class LLMContext:
             messages: Initial list of conversation messages.
             tools: Available tools for the LLM to use. May be a ``ToolsSchema``
                 or a plain list of direct functions and/or ``FunctionSchema``
-                objects (normalized to a ``ToolsSchema`` internally). Direct
-                functions in the list are registered with the LLM service
-                automatically — no separate ``register_direct_function`` call is
-                needed.
+                objects (normalized to a ``ToolsSchema`` internally). Any tool
+                that carries a handler — a direct function, or a
+                ``FunctionSchema`` with its ``handler`` set — is registered with
+                the LLM service automatically, so no separate
+                ``register_function`` call is needed.
             tool_choice: Tool selection strategy for the LLM.
         """
         self._messages: list[LLMContextMessage] = messages if messages else []

@@ -74,6 +74,42 @@ class TestValidCascadeConfigs:
         )
         assert config.transports == ["telnyx", "smallwebrtc"]
 
+    def test_bot_type_inferred_telephony(self):
+        """Omitting --bot-type infers telephony from a telephony transport."""
+        config = validate_and_build_config(
+            name="call-bot",
+            transport=["twilio"],
+            mode="cascade",
+            stt="deepgram_stt",
+            llm="openai_llm",
+            tts="cartesia_tts",
+        )
+        assert config.bot_type == "telephony"
+
+    def test_bot_type_inferred_web(self):
+        """Omitting --bot-type infers web when all transports are WebRTC."""
+        config = validate_and_build_config(
+            name="web-bot",
+            transport=["smallwebrtc"],
+            mode="cascade",
+            stt="deepgram_stt",
+            llm="openai_llm",
+            tts="cartesia_tts",
+        )
+        assert config.bot_type == "web"
+
+    def test_bot_type_inferred_telephony_wins_over_webrtc(self):
+        """A telephony transport wins: twilio + smallwebrtc infers telephony."""
+        config = validate_and_build_config(
+            name="call-bot",
+            transport=["twilio", "smallwebrtc"],
+            mode="cascade",
+            stt="deepgram_stt",
+            llm="openai_llm",
+            tts="cartesia_tts",
+        )
+        assert config.bot_type == "telephony"
+
 
 class TestValidRealtimeConfigs:
     """Test valid realtime mode configurations."""
@@ -190,9 +226,10 @@ class TestMissingFields:
             validate_and_build_config()
         errors = exc_info.value.errors
         assert any("--name" in e for e in errors)
-        assert any("--bot-type" in e for e in errors)
         assert any("--transport" in e for e in errors)
         assert any("--mode" in e for e in errors)
+        # --bot-type is no longer required: it's inferred from the transports.
+        assert not any("--bot-type is required" in e for e in errors)
 
     def test_missing_cascade_services(self):
         with pytest.raises(ConfigValidationError) as exc_info:
@@ -587,7 +624,7 @@ class TestConfigFile:
 
 
 def _parse_config_dict(file_data: dict) -> ProjectConfig:
-    """Simulate the merging logic from init_command: map config dict keys to
+    """Simulate the merging logic from create_command: map config dict keys to
     validate_and_build_config kwargs, exactly as the CLI does after loading JSON."""
     return validate_and_build_config(
         name=file_data.get("name") or file_data.get("project_name"),

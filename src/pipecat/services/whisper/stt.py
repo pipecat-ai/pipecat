@@ -40,7 +40,7 @@ except ModuleNotFoundError as e:
 # WhisperSTTServiceMLX imports it lazily when actually used.
 if platform.system() == "Darwin" and platform.machine() == "arm64":
     try:
-        import mlx_whisper
+        import mlx_whisper  # noqa: F401
     except ModuleNotFoundError as e:
         logger.error(f"Exception: {e}")
         logger.error('In order to use Whisper, you need to `uv add "pipecat-ai[mlx-whisper]"`.')
@@ -236,6 +236,7 @@ class WhisperSTTService(SegmentedSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=WhisperSTTService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             device: The device to run inference on ('cpu', 'cuda', or 'auto').
                 Defaults to ``"auto"``.
@@ -245,11 +246,13 @@ class WhisperSTTService(SegmentedSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=WhisperSTTService.Settings(no_speech_prob=...)`` instead.
+                    Will be removed in 2.0.0.
 
             language: The default language for transcription.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=WhisperSTTService.Settings(language=...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -408,21 +411,25 @@ class WhisperSTTServiceMLX(WhisperSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=WhisperSTTServiceMLX.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             no_speech_prob: Probability threshold for filtering out non-speech segments.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=WhisperSTTServiceMLX.Settings(no_speech_prob=...)`` instead.
+                    Will be removed in 2.0.0.
 
             language: The default language for transcription.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=WhisperSTTServiceMLX.Settings(language=...)`` instead.
+                    Will be removed in 2.0.0.
 
             temperature: Temperature for sampling. Can be a float or tuple of floats.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=WhisperSTTServiceMLX.Settings(temperature=...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

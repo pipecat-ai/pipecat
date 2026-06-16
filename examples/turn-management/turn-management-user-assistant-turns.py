@@ -5,7 +5,6 @@
 #
 
 import os
-from typing import Optional
 
 from dotenv import load_dotenv
 from loguru import logger

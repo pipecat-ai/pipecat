@@ -38,12 +38,14 @@ class OpenAILLMService(BaseOpenAILLMService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAILLMService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             service_tier: Service tier to use (e.g., "auto", "flex", "priority").
             params: Input parameters for model configuration.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAILLMService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

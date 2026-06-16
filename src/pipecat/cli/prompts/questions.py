@@ -332,12 +332,7 @@ def ask_project_questions(default_name: str | None = None) -> ProjectConfig:
                     )
                     replace_question_with_answer("Additional transport:", backup_label)
 
-    elif bot_type == "telephony" and primary_transport not in [
-        "daily_pstn_dialin",
-        "daily_pstn_dialout",
-        "twilio_daily_sip_dialin",
-        "twilio_daily_sip_dialout",
-    ]:
+    elif bot_type == "telephony":
         # For telephony bots: offer to add WebRTC for local testing
         add_webrtc = questionary.confirm(
             "Add a WebRTC transport for local testing?",

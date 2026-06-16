@@ -32,6 +32,7 @@ from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_
 from pipecat.services.stt_latency import SONIOX_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -71,11 +72,16 @@ class SonioxContextObject(BaseModel):
     translation_terms: list[SonioxContextTranslationTerm] | None = None
 
 
+@deprecated(
+    "`SonioxInputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use "
+    "`SonioxSTTService.Settings` instead."
+)
 class SonioxInputParams(BaseModel):
     """Real-time transcription settings.
 
     .. deprecated:: 0.0.105
         Use ``settings=SonioxSTTService.Settings(...)`` instead.
+        Will be removed in 2.0.0.
 
     See Soniox WebSocket API documentation for more details:
     https://soniox.com/docs/speech-to-text/api-reference/websocket-api#configuration-parameters
@@ -92,7 +98,7 @@ class SonioxInputParams(BaseModel):
         client_reference_id: Client reference ID to use for transcription.
     """
 
-    model: str = "stt-rt-v4"
+    model: str = "stt-rt-v5"
 
     audio_format: str | None = "pcm_s16le"
     num_channels: int | None = 1
@@ -225,6 +231,7 @@ class SonioxSTTSettings(STTSettings):
         enable_speaker_diarization: Whether to enable speaker diarization.
         enable_language_identification: Whether to enable language identification.
         max_endpoint_delay_ms: Max ms before endpoint detection finalizes the turn (500-3000).
+        endpoint_sensitivity: Endpoint detection sensitivity (-1.0 to 1.0); higher finalizes sooner.
         client_reference_id: Client reference ID to use for transcription.
     """
 
@@ -236,6 +243,7 @@ class SonioxSTTSettings(STTSettings):
         default_factory=lambda: NOT_GIVEN
     )
     max_endpoint_delay_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpoint_sensitivity: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     client_reference_id: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -277,6 +285,7 @@ class SonioxSTTService(WebsocketSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SonioxSTTService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             audio_format: Audio format for transcription. Defaults to ``"pcm_s16le"``.
             num_channels: Number of audio channels. Defaults to 1.
@@ -285,6 +294,7 @@ class SonioxSTTService(WebsocketSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SonioxSTTService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             vad_force_turn_endpoint: Listen to `VADUserStoppedSpeakingFrame` to send finalize message to Soniox.
                 If disabled, Soniox will detect the end of the speech. Defaults to True.
@@ -296,7 +306,7 @@ class SonioxSTTService(WebsocketSTTService):
         """
         # --- 1. Hardcoded defaults ---
         default_settings = self.Settings(
-            model="stt-rt-v4",
+            model="stt-rt-v5",
             language=None,
             language_hints=None,
             language_hints_strict=None,
@@ -304,6 +314,7 @@ class SonioxSTTService(WebsocketSTTService):
             enable_speaker_diarization=False,
             enable_language_identification=False,
             max_endpoint_delay_ms=None,
+            endpoint_sensitivity=None,
             client_reference_id=None,
         )
 
@@ -517,6 +528,7 @@ class SonioxSTTService(WebsocketSTTService):
                 "num_channels": self._num_channels,
                 "enable_endpoint_detection": enable_endpoint_detection,
                 "max_endpoint_delay_ms": s.max_endpoint_delay_ms,
+                "endpoint_sensitivity": s.endpoint_sensitivity,
                 "sample_rate": self.sample_rate,
                 "language_hints": _prepare_language_hints(assert_given(s.language_hints)),
                 "language_hints_strict": s.language_hints_strict,

@@ -98,6 +98,28 @@ A Pipecat AI voice agent built with {% if mode == 'cascade' %}a cascade pipeline
    ```
 {% endif %}
 {% endif %}
+{% if enable_eval %}
+
+## Testing with evals
+
+This project includes behavioral evals: scripted conversations that drive the bot headless — no live call needed. Starter scenarios live in `server/evals/`; edit them as your bot takes shape and copy them to add more.
+
+From `server/`, run the bot with the eval transport, then drive scenarios against it from a second terminal (the bot stays up across runs):
+
+```bash
+uv run bot.py -t eval
+{% if mode == 'cascade' %}
+# In another terminal:
+uv run pipecat eval run evals/starter_text.yaml -v    # fast text-mode check
+uv run pipecat eval run evals/starter_audio.yaml -v   # full audio round trip (local models, no API keys)
+{% else %}
+# In another terminal:
+uv run pipecat eval run evals/starter_audio.yaml -v   # full audio round trip (local models, no API keys)
+{% endif %}
+```
+
+`eval:` criteria are scored by a judge LLM — a local Ollama by default (`ollama pull gemma2:9b`). The comments in the scenario files cover the schema and how to use an OpenAI judge instead.
+{% endif %}
 {% if generate_client %}
 
 ### Client
@@ -151,6 +173,9 @@ A Pipecat AI voice agent built with {% if mode == 'cascade' %}a cascade pipeline
 {{ project_name }}/
 {% if generate_client %}├── server/              # Python bot server
 │   ├── bot.py           # Main bot implementation
+{% if enable_eval %}
+│   ├── evals/           # Behavioral eval scenarios
+{% endif %}
 │   ├── pyproject.toml   # Python dependencies
 │   ├── env.example      # Environment variables template
 │   ├── .env             # Your API keys (git-ignored)
@@ -163,6 +188,9 @@ A Pipecat AI voice agent built with {% if mode == 'cascade' %}a cascade pipeline
 │   └── ...
 {% else %}├── server/              # Python bot server
 │   ├── bot.py           # Main bot implementation
+{% if enable_eval %}
+│   ├── evals/           # Behavioral eval scenarios
+{% endif %}
 │   ├── pyproject.toml   # Python dependencies
 │   ├── .env.example     # Environment variables template
 │   ├── .env             # Your API keys (git-ignored)

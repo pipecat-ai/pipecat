@@ -128,6 +128,14 @@ jobs:
         run: |
           uv run towncrier build --version "${{ inputs.version }}" --date "${{ steps.set_date.outputs.release_date }}" --yes
 
+      # Record symbols removed in this release. Diffs the previous release tag's
+      # deprecations.json against the working tree and appends to removals.json,
+      # which rides along in this same release PR. Needs the fetch-depth: 0
+      # checkout above (tags + history). No-op on releases that remove nothing.
+      - name: Update removals registry
+        run: |
+          uv run python scripts/deprecations/generate_removals.py --version "${{ inputs.version }}"
+
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v7
         with:
@@ -147,6 +155,7 @@ jobs:
             ### What this PR does
             - ✅ Adds new release section to CHANGELOG.md
             - ✅ Removes processed changelog fragments
+            - ✅ Updates removals.json with any symbols removed in this release
             - ✅ Ready to merge for release
 
             ### Next Steps

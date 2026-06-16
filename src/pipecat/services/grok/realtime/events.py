@@ -7,7 +7,8 @@
 """Grok Realtime event models.
 
 .. deprecated:: 0.0.108
-    This module is deprecated. Please use pipecat.services.xai.realtime.events instead.
+    Use :mod:`pipecat.services.xai.realtime.events` instead.
+    Will be removed in 2.0.0.
 """
 
 import warnings

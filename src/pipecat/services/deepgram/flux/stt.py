@@ -26,6 +26,7 @@ from pipecat.services.deepgram.flux.base import (
     FluxMessageType,
 )
 from pipecat.services.websocket_service import WebsocketService
+from pipecat.utils.deprecation import deprecated
 
 # Re-export for backward compatibility
 __all__ = [
@@ -66,11 +67,16 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
     Settings = DeepgramFluxSTTSettings
     _settings: Settings
 
+    @deprecated(
+        "`DeepgramFluxSTTService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `DeepgramFluxSTTService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Configuration parameters for Deepgram Flux API.
 
         .. deprecated:: 0.0.105
             Use ``settings=DeepgramFluxSTTService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             eager_eot_threshold: Optional. EagerEndOfTurn/TurnResumed are off by default.
@@ -125,6 +131,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=DeepgramFluxSTTService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             flux_encoding: Audio encoding format required by Flux API. Must be "linear16".
                 Raw signed little-endian 16-bit PCM encoding.
@@ -133,6 +140,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=DeepgramFluxSTTService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             should_interrupt: Determine whether the bot should be interrupted when Flux detects that the user is speaking.
             watchdog_min_timeout: Minimum silence duration in seconds before the watchdog

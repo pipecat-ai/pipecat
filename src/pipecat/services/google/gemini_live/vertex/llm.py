@@ -88,11 +88,14 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GeminiLiveVertexLLMService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             voice_id: TTS voice identifier. Defaults to "Charon".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GeminiLiveVertexLLMService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
+
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             start_video_paused: Whether to start with video input paused. Defaults to False.
             system_instruction: System prompt for the model. Defaults to None.
@@ -102,6 +105,7 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GeminiLiveVertexLLMService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Gemini Live LLM settings. If provided together with deprecated
                 top-level parameters, the ``settings`` values take precedence.
