@@ -494,8 +494,8 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         context-advertised one would. Provider-native tool objects carry no
         handler, so only a ``ToolsSchema`` qualifies.
         """
-        sp = self._settings.session_properties
-        if is_given(sp) and isinstance(sp.tools, ToolsSchema):
+        sp = assert_given(self._settings.session_properties)
+        if isinstance(sp.tools, ToolsSchema):
             return sp.tools
         return None
 
@@ -633,7 +633,9 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
 
     async def _send_session_update(self):
         """Update session settings on the server."""
-        settings = assert_given(self._settings.session_properties)
+        # Mutate a copy: the stored session_properties is read elsewhere (e.g.
+        # _init_time_tools) and must stay intact.
+        settings = assert_given(self._settings.session_properties).model_copy()
         adapter = self.get_llm_adapter()
 
         if self._context:

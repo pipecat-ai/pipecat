@@ -140,8 +140,7 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
                     )
                 ),
                 # In this example we provide tools through the context, but you could
-                # alternatively provide them here as a ToolsSchema (init-time tool
-                # params take a ToolsSchema, not a plain list).
+                # alternatively provide them here.
                 # tools=ToolsSchema(standard_tools=[get_current_weather, get_restaurant_recommendation]),
             ),
         ),

@@ -21,6 +21,7 @@ skipped rather than failing collection for the whole module.
 """
 
 import unittest
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -85,6 +86,30 @@ class _InitTimeToolSyncTests:
         self.assertEqual(list(service._functions), [])
 
 
+class _SessionUpdateToolPreservationTests:
+    """Regression cases for services with a ``_send_session_update``.
+
+    These services (OpenAI/Grok/Inworld realtime) convert their
+    ``session_properties.tools`` from a ``ToolsSchema`` to the provider's list
+    form when building a ``session.update``. That conversion must happen on a
+    copy: mutating the stored ``session_properties`` would leave ``tools`` a
+    list, so the next ``_init_time_tools()`` fallback no longer recognizes it
+    and the bundled handler silently stops registering.
+    """
+
+    async def test_send_session_update_preserves_init_time_tools(self):
+        service = self._service(_tools(sample_handler))
+        service.send_client_event = AsyncMock()
+        # Mirrors reality: session.created triggers a session.update before the
+        # first (empty) context frame arrives.
+        await service._send_session_update()
+        # The stored ToolsSchema survives, so the empty-context fallback still
+        # finds and registers the handler.
+        self.assertIsInstance(service._settings.session_properties.tools, ToolsSchema)
+        service._sync_registered_tool_handlers(NOT_GIVEN)
+        self.assertTrue(service.has_function("sample"))
+
+
 class TestGeminiLiveInitTimeToolSync(_InitTimeToolSyncTests, unittest.IsolatedAsyncioTestCase):
     def _service(self, tools):
         mod = pytest.importorskip("pipecat.services.google.gemini_live.llm")
@@ -129,7 +154,9 @@ class TestUltravoxInitTimeToolSync(_InitTimeToolSyncTests, unittest.IsolatedAsyn
         )
 
 
-class TestOpenAIRealtimeInitTimeToolSync(_InitTimeToolSyncTests, unittest.IsolatedAsyncioTestCase):
+class TestOpenAIRealtimeInitTimeToolSync(
+    _InitTimeToolSyncTests, _SessionUpdateToolPreservationTests, unittest.IsolatedAsyncioTestCase
+):
     def _service(self, tools):
         mod = pytest.importorskip("pipecat.services.openai.realtime.llm")
         events = pytest.importorskip("pipecat.services.openai.realtime.events")
@@ -140,7 +167,9 @@ class TestOpenAIRealtimeInitTimeToolSync(_InitTimeToolSyncTests, unittest.Isolat
         )
 
 
-class TestGrokRealtimeInitTimeToolSync(_InitTimeToolSyncTests, unittest.IsolatedAsyncioTestCase):
+class TestGrokRealtimeInitTimeToolSync(
+    _InitTimeToolSyncTests, _SessionUpdateToolPreservationTests, unittest.IsolatedAsyncioTestCase
+):
     def _service(self, tools):
         mod = pytest.importorskip("pipecat.services.xai.realtime.llm")
         events = pytest.importorskip("pipecat.services.xai.realtime.events")
@@ -151,7 +180,9 @@ class TestGrokRealtimeInitTimeToolSync(_InitTimeToolSyncTests, unittest.Isolated
         )
 
 
-class TestInworldRealtimeInitTimeToolSync(_InitTimeToolSyncTests, unittest.IsolatedAsyncioTestCase):
+class TestInworldRealtimeInitTimeToolSync(
+    _InitTimeToolSyncTests, _SessionUpdateToolPreservationTests, unittest.IsolatedAsyncioTestCase
+):
     def _service(self, tools):
         mod = pytest.importorskip("pipecat.services.inworld.realtime.llm")
         events = pytest.importorskip("pipecat.services.inworld.realtime.events")
