@@ -385,7 +385,7 @@ class SmallestSTTService(WebsocketSTTService):
                 logger.error(f"{self} error processing message: {e}")
 
     async def _process_response(self, data: dict):
-        """Process a transcription response from the Pulse API (v4).
+        """Process a transcription response from the Pulse API.
 
         Args:
             data: Parsed JSON response containing transcript data.
