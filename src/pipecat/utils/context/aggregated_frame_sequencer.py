@@ -392,12 +392,8 @@ class AggregatedFrameSequencer:
         frame = TTSTextFrame(text, aggregated_by=AggregationType.WORD)
         frame.pts = pts
         frame.context_id = context_id
-        # For an unknown/cleared context, default to False: such a frame must not be
-        # appended to the assistant transcript. process_word already drops stale words
-        # before reaching here, so this is defense-in-depth. A None context_id (services
-        # without audio contexts) still appends by default.
         frame.append_to_context = (
-            self._context_append_to_context.get(context_id, False)
+            self._context_append_to_context.get(context_id, True)
             if context_id is not None
             else True
         )
