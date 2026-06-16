@@ -100,7 +100,7 @@ You have live sources for current truth — never substitute your memory. Use th
    ```bash
    uvx pipecat-ai-context-hub search-docs "turn detection"       # learn a concept
    uvx pipecat-ai-context-hub check-deprecation PipelineTask     # the reflex check; <1s
-   uvx pipecat-ai-context-hub search-api "SingleClientWebsocketServerParams"
+   uvx pipecat-ai-context-hub search-api "EvalTransportParams"
    uvx pipecat-ai-context-hub search-examples "twilio bot" --domain backend
    uvx pipecat-ai-context-hub status                             # index health / freshness
    ```
@@ -199,10 +199,10 @@ A voice app can't be eyeballed like a web page — but you don't need a live cal
 
 **Make your bot eval-able.** Scaffold with `pipecat create --eval` (headless) — pass it whenever you scaffold a bot you intend to test. The generated bot has the `eval` transport entry, eval dependencies in its env, and **runnable starter scenarios in `server/evals/`**: `starter_text.yaml` (the fast inner loop; cascade only) and `starter_audio.yaml` (the full round trip). They pass against the freshly scaffolded bot, so run them *first* to prove the loop, then edit them to match the bot you're building and copy them to grow the suite. For an **existing** bot, add the transport entry by hand (a one-time change; RTVI is already on by default for `PipelineWorker`, so that's the only edit):
 ```python
-from pipecat.transports.websocket.server import SingleClientWebsocketServerParams
+from pipecat.evals.transport import EvalTransportParams
 
 transport_params = {
-    "eval": lambda: SingleClientWebsocketServerParams(audio_in_enabled=True, audio_out_enabled=True),
+    "eval": lambda: EvalTransportParams(audio_in_enabled=True, audio_out_enabled=True),
     # ... your real transports (smallwebrtc, daily, …) stay as-is
 }
 ```

@@ -66,6 +66,8 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transports.websocket.server import (
     SingleClientWebsocketServerInputTransport,
+    SingleClientWebsocketServerOutputTransport,
+    SingleClientWebsocketServerParams,
     SingleClientWebsocketServerTransport,
 )
 
@@ -205,7 +207,20 @@ class EvalMicrophone:
             # utterance gap-free after a late wake-up.
 
 
-class EvalWebsocketServerInputTransport(SingleClientWebsocketServerInputTransport):
+class EvalTransportParams(SingleClientWebsocketServerParams):
+    """Transport parameters for the eval harness.
+
+    A thin subclass of :class:`~pipecat.transports.websocket.server.SingleClientWebsocketServerParams`
+    that gives the eval transport its own parameter type. Bots configure the
+    ``"eval"`` entry of ``transport_params`` with this class so the eval setup
+    reads as eval-specific rather than leaking the underlying WebSocket server
+    transport.
+    """
+
+    pass
+
+
+class EvalInputTransport(SingleClientWebsocketServerInputTransport):
     """Input transport that plays a virtual mic and serves the harness's images.
 
     Audio: the harness sends each user utterance as a few large ``raw-audio``
@@ -315,7 +330,20 @@ class EvalWebsocketServerInputTransport(SingleClientWebsocketServerInputTranspor
         )
 
 
-class EvalWebsocketServerTransport(SingleClientWebsocketServerTransport):
+class EvalOutputTransport(SingleClientWebsocketServerOutputTransport):
+    """Output transport used by the eval harness.
+
+    The eval harness sends the bot's output over the same WebSocket connection
+    as any client, so this currently adds no behavior beyond
+    :class:`~pipecat.transports.websocket.server.SingleClientWebsocketServerOutputTransport`.
+    It exists for naming symmetry with :class:`EvalInputTransport` and as a hook
+    for any future eval-specific output behavior.
+    """
+
+    pass
+
+
+class EvalTransport(SingleClientWebsocketServerTransport):
     """WebSocket server transport used by the eval harness (see the module docstring)."""
 
     def __init__(self, *args, **kwargs):
@@ -328,7 +356,7 @@ class EvalWebsocketServerTransport(SingleClientWebsocketServerTransport):
     def input(self) -> SingleClientWebsocketServerInputTransport:
         """Return an input transport that can serve harness-provided images."""
         if not self._input:
-            self._input = EvalWebsocketServerInputTransport(
+            self._input = EvalInputTransport(
                 self, self._host, self._port, self._params, self._callbacks, name=self._input_name
             )
         return self._input
@@ -343,13 +371,8 @@ class EvalWebsocketServerTransport(SingleClientWebsocketServerTransport):
         if self._record_output is None:
             from pipecat.pipeline.pipeline import Pipeline
             from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
-            from pipecat.transports.websocket.server import (
-                SingleClientWebsocketServerOutputTransport,
-            )
 
-            real = SingleClientWebsocketServerOutputTransport(
-                self, self._params, name=self._output_name
-            )
+            real = EvalOutputTransport(self, self._params, name=self._output_name)
             self._output = real
             self._audio_buffer = AudioBufferProcessor()
             self._record_output = Pipeline([real, self._audio_buffer])
@@ -364,7 +387,7 @@ class EvalWebsocketServerTransport(SingleClientWebsocketServerTransport):
         # A new eval client starts a fresh conversation: drop any utterance audio
         # a previous client left queued, and enable the virtual mic only for
         # audio-mode scenarios (?user_audio=true).
-        if isinstance(self._input, EvalWebsocketServerInputTransport):
+        if isinstance(self._input, EvalInputTransport):
             await self._input.configure_mic(_query_flag(websocket, USER_AUDIO_QUERY_PARAM))
 
         # Start recording as soon as the client connects so the bot's first audio

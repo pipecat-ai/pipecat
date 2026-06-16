@@ -67,6 +67,7 @@ from loguru import logger
 from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus.messages import BusJobRequestMessage, BusJobResponseMessage
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.job_context import JobError, JobStatus
 from pipecat.pipeline.pipeline import Pipeline
@@ -84,7 +85,6 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.transports.websocket.server import SingleClientWebsocketServerParams
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm import tool
 from pipecat.workers.runner import WorkerRunner
@@ -95,7 +95,7 @@ load_dotenv(override=True)
 MAIN_NAME = "main"
 
 transport_params = {
-    "eval": lambda: SingleClientWebsocketServerParams(
+    "eval": lambda: EvalTransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
