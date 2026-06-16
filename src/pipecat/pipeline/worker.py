@@ -181,6 +181,7 @@ class PipelineWorker(BaseWorker):
 
     - on_frame_reached_upstream: Called when upstream frames reach the source
     - on_frame_reached_downstream: Called when downstream frames reach the sink
+    - on_heartbeat_timeout: Called when a heartbeat frame is not received within the monitor timeout
     - on_idle_timeout: Called when pipeline is idle beyond timeout threshold
     - on_pipeline_started: Called when pipeline starts with StartFrame
     - on_pipeline_finished: Called after the pipeline has reached any terminal state.
@@ -199,6 +200,10 @@ class PipelineWorker(BaseWorker):
 
         @worker.event_handler("on_frame_reached_upstream")
         async def on_frame_reached_upstream(worker, frame):
+            ...
+
+        @worker.event_handler("on_heartbeat_timeout")
+        async def on_heartbeat_timeout(worker):
             ...
 
         @worker.event_handler("on_idle_timeout")
@@ -486,6 +491,7 @@ class PipelineWorker(BaseWorker):
         self._reached_downstream_types: set[type[Frame]] = set()
         self._register_event_handler("on_frame_reached_upstream")
         self._register_event_handler("on_frame_reached_downstream")
+        self._register_event_handler("on_heartbeat_timeout")
         self._register_event_handler("on_idle_timeout")
         self._register_event_handler("on_pipeline_started")
         self._register_event_handler("on_pipeline_finished")
@@ -1231,6 +1237,7 @@ class PipelineWorker(BaseWorker):
                 logger.warning(
                     f"{self}: heartbeat frame not received for more than {wait_time} seconds"
                 )
+                await self._call_event_handler("on_heartbeat_timeout")
 
     async def _idle_monitor_handler(self):
         """Monitor pipeline activity and detect idle conditions.
