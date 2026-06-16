@@ -65,7 +65,7 @@ class NvidiaTTSSynthesisMode(StrEnum):
     Parameters:
         PER_SENTENCE: Open a separate ``SynthesizeOnline`` call for each
             ``run_tts`` invocation. This is the default mode and can be used
-            with all supported NVIDIA TTS models, including Chatterbox,
+            with all supported NVIDIA TTS NIMs, including Chatterbox,
             Magpie multilingual, and Magpie zero-shot. Text may still be
             chunked within that call to satisfy model request length limits.
         STITCHED: Reuse one ``SynthesizeOnline`` stream across multiple
