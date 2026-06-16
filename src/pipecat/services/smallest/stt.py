@@ -6,7 +6,7 @@
 
 """Smallest AI speech-to-text service implementation.
 
-This module provides a STT service using Smallest AI's Waves v4 API:
+This module provides a STT service using Smallest AI's Waves API:
 
 - ``SmallestSTTService``: WebSocket-based real-time STT using the Pulse model.
   Streams audio continuously and receives interim/final transcripts with low
