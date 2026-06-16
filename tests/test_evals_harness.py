@@ -13,7 +13,7 @@ Two layers:
 - :class:`TestEvalsHarnessIntegration` runs scenarios via :meth:`EvalSession.from_scenario` against a fake
   RTVI WebSocket server that replies to ``client-ready``/``send-text`` with
   scripted RTVI server messages — exercising the handshake, send/receive, event
-  matching, and reset paths without a real bot pipeline.
+  matching, and context paths without a real bot pipeline.
 """
 
 import json
@@ -654,42 +654,43 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("kokoro boom" in line for line in result.debug_log))
         self.assertTrue(any("Traceback" in line for line in result.debug_log))
 
-    async def test_reset_sends_eval_reset_message(self):
+    async def test_context_sends_eval_context_message(self):
         self.server.on_text("hi", _rtvi("bot-llm-started"), _rtvi("bot-llm-stopped"))
         scenario = EvalScenario(
-            name="reset",
+            name="context",
             turns=[
                 EvalTurn(user="hi", expect=[EvalExpectation(event="llm_started", within_ms=2000)])
             ],
-            reset=[{"role": "system", "content": "be terse"}],
+            context=[{"role": "system", "content": "be terse"}],
         )
         result = await EvalSession.from_scenario(scenario, self.server.url).run()
         self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
-        resets = [
+        context_messages = [
             m
             for m in self.server.received
-            if m.get("type") == "client-message" and m["data"].get("t") == "eval-reset"
+            if m.get("type") == "client-message" and m["data"].get("t") == "eval-context"
         ]
-        self.assertEqual(len(resets), 1)
+        self.assertEqual(len(context_messages), 1)
         self.assertEqual(
-            resets[0]["data"]["d"]["messages"], [{"role": "system", "content": "be terse"}]
+            context_messages[0]["data"]["d"]["messages"],
+            [{"role": "system", "content": "be terse"}],
         )
 
-    async def test_no_reset_when_not_requested(self):
+    async def test_no_eval_context_message_when_empty(self):
         self.server.on_text("hi", _rtvi("bot-llm-started"), _rtvi("bot-llm-stopped"))
         scenario = EvalScenario(
-            name="noreset",
+            name="nocontext",
             turns=[
                 EvalTurn(user="hi", expect=[EvalExpectation(event="llm_started", within_ms=2000)])
             ],
         )
         await EvalSession.from_scenario(scenario, self.server.url).run()
-        resets = [
+        context_messages = [
             m
             for m in self.server.received
-            if m.get("type") == "client-message" and m["data"].get("t") == "eval-reset"
+            if m.get("type") == "client-message" and m["data"].get("t") == "eval-context"
         ]
-        self.assertEqual(resets, [])
+        self.assertEqual(context_messages, [])
 
 
 if __name__ == "__main__":

@@ -361,18 +361,18 @@ class TestEvalsScenarioParser(unittest.TestCase):
             )
         self.assertIn("image", str(cm.exception))
 
-    def test_reset_defaults_to_empty(self):
+    def test_context_defaults_to_empty(self):
         s = EvalScenario.load(
             _write("name: e\nturns: [{user: hi, expect: [{event: user_stopped_speaking}]}]\n")
         )
-        self.assertEqual(s.reset, [])
+        self.assertEqual(s.context, [])
 
-    def test_reset_parsed_as_list(self):
+    def test_context_parsed_as_list(self):
         s = EvalScenario.load(
             _write(
                 """
-                name: with_reset
-                reset:
+                name: with_context
+                context:
                   - role: system
                     content: "You are a helpful assistant."
                 turns:
@@ -381,16 +381,18 @@ class TestEvalsScenarioParser(unittest.TestCase):
                 """
             )
         )
-        self.assertEqual(len(s.reset), 1)
-        self.assertEqual(s.reset[0]["role"], "system")
-        self.assertEqual(s.reset[0]["content"], "You are a helpful assistant.")
+        self.assertEqual(len(s.context), 1)
+        self.assertEqual(s.context[0]["role"], "system")
+        self.assertEqual(s.context[0]["content"], "You are a helpful assistant.")
 
-    def test_reset_non_list_rejected(self):
+    def test_context_non_list_rejected(self):
         with self.assertRaises(ValueError) as cm:
             EvalScenario.load(
-                _write("name: bad\nreset: not_a_list\nturns: [{user: hi, expect: [{event: x}]}]\n")
+                _write(
+                    "name: bad\ncontext: not_a_list\nturns: [{user: hi, expect: [{event: x}]}]\n"
+                )
             )
-        self.assertIn("'reset:'", str(cm.exception))
+        self.assertIn("'context:'", str(cm.exception))
 
     def test_include_resolves_judge_and_user_blocks(self):
         # `judge: !include ...` / `user: !include ...` let scenarios share config.
