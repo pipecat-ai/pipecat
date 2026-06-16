@@ -14,7 +14,7 @@ import asyncio
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlencode
 
 from loguru import logger
@@ -50,6 +50,38 @@ from .models import (
     TerminationMessage,
     TurnMessage,
 )
+
+# Maximum length of an ``agent_context`` value (context carryover). AssemblyAI
+# keeps a rolling ~1500-character budget of carryover context, so longer values
+# are clipped before sending — a single value can never exceed the whole budget.
+MAX_AGENT_CONTEXT_CHARS = 1500
+
+# Model-name prefixes shared by every Universal-3 Pro streaming variant. The
+# ``u3-rt-pro`` family (``u3-rt-pro``, ``u3-rt-pro-beta-1``, future
+# ``u3-rt-pro-*`` releases) and ``universal-3-5-pro`` (and any
+# ``universal-3-5-pro-*`` release) both expose the full U3 Pro feature set:
+# built-in turn detection, prompting, continuous partials, interruption_delay,
+# context carryover, and voice focus.
+U3_PRO_MODEL_PREFIXES = ("u3-rt-pro", "universal-3-5-pro")
+
+
+def is_u3_pro_model(model: str | None | _NotGiven) -> bool:
+    """Return whether a model name is a Universal-3 Pro streaming variant.
+
+    Matches the ``u3-rt-pro`` family (``u3-rt-pro``, ``u3-rt-pro-beta-1``, and
+    any ``u3-rt-pro-*`` variant) and ``universal-3-5-pro`` (and any
+    ``universal-3-5-pro-*`` variant) so U3 Pro-only features are gated on the
+    whole family rather than a single exact string.
+
+    Args:
+        model: The model identifier. Accepts the ``Settings.model`` union
+            (``str | None | _NotGiven``); anything that is not a matching
+            string returns False.
+
+    Returns:
+        True if ``model`` is a U3 Pro family model.
+    """
+    return isinstance(model, str) and model.startswith(U3_PRO_MODEL_PREFIXES)
 
 
 def map_language_from_assemblyai(language_code: str) -> Language:
@@ -106,6 +138,27 @@ class AssemblyAISTTSettings(STTSettings):
             first partial is emitted. The server adds 256ms (MIN_TURN_DURATION_MS)
             on top, so 0 → 256ms effective. Only applicable to u3-rt-pro. Defaults
             to None (use the server default).
+        agent_context: Context carryover seed — the agent's most recent spoken
+            reply, used to improve transcription of the user's next turn (short
+            answers, spelled-out entities, disambiguation). Only applicable to
+            u3-rt-pro; clipped to ~1500 characters and reset on reconnect. Set this
+            for a known opening line, or call
+            :meth:`AssemblyAISTTService.update_agent_context` to update it
+            mid-session. Defaults to None (not sent).
+        previous_context_n_turns: Maximum number of prior conversation entries
+            (user transcripts and any ``agent_context`` values) carried forward as
+            context for each transcription. Integer in [0, 100]; set to 0 to disable
+            automatic context carryover entirely. Only applicable to u3-rt-pro. Most
+            integrations should leave this at the default. Defaults to None (use the
+            server default, which is 3).
+        voice_focus: Isolate the primary voice and suppress background noise.
+            Set to "near-field" for close-talking mics (headsets, handsets) or
+            "far-field" for distant capture (conference rooms, laptop mics).
+            Only applicable to U3 Pro models. Defaults to None (not sent).
+        voice_focus_threshold: How aggressively background audio is suppressed.
+            Float in [0.0, 1.0]; higher values suppress more. Only takes effect
+            when ``voice_focus`` is set. Only applicable to U3 Pro models.
+            Defaults to None (use the server default).
     """
 
     formatted_finals: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -126,6 +179,12 @@ class AssemblyAISTTSettings(STTSettings):
     domain: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     continuous_partials: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     interruption_delay: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    agent_context: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    previous_context_n_turns: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    voice_focus: Literal["near-field", "far-field"] | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    voice_focus_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AssemblyAISTTService(WebsocketSTTService):
@@ -227,6 +286,10 @@ class AssemblyAISTTService(WebsocketSTTService):
             domain=None,
             continuous_partials=True,
             interruption_delay=None,
+            agent_context=None,
+            previous_context_n_turns=None,
+            voice_focus=None,
+            voice_focus_threshold=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -263,7 +326,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             default_settings.apply_update(settings)
 
         # 5. Validate final settings
-        is_u3_pro = default_settings.model == "u3-rt-pro"
+        is_u3_pro = is_u3_pro_model(default_settings.model)
         if not vad_force_turn_endpoint and not is_u3_pro:
             raise ValueError(
                 f"AssemblyAI turn detection mode (vad_force_turn_endpoint=False) requires "
@@ -303,6 +366,41 @@ class AssemblyAISTTService(WebsocketSTTService):
                 f"for model '{default_settings.model}'."
             )
 
+        # previous_context_n_turns is u3-rt-pro-only (context carryover). Valid
+        # range is [0, 100] (0 disables carryover entirely), matching the server.
+        previous_context_n_turns = default_settings.previous_context_n_turns
+        if isinstance(previous_context_n_turns, int) and not (0 <= previous_context_n_turns <= 100):
+            raise ValueError("previous_context_n_turns must be between 0 and 100")
+
+        if not is_u3_pro and isinstance(previous_context_n_turns, int):
+            logger.warning(
+                "previous_context_n_turns is only supported by u3-rt-pro and will be ignored "
+                f"for model '{default_settings.model}'."
+            )
+
+        # voice_focus / voice_focus_threshold are U3 Pro-only. The threshold is
+        # a float in [0, 1]; isinstance narrows away None/NOT_GIVEN. bool is a
+        # subclass of int and is intentionally excluded.
+        voice_focus = default_settings.voice_focus
+        voice_focus_threshold = default_settings.voice_focus_threshold
+        if isinstance(voice_focus_threshold, (int, float)) and not isinstance(
+            voice_focus_threshold, bool
+        ):
+            if not (0.0 <= voice_focus_threshold <= 1.0):
+                raise ValueError("voice_focus_threshold must be between 0.0 and 1.0")
+
+        if not is_u3_pro and (voice_focus is not None or voice_focus_threshold is not None):
+            logger.warning(
+                "voice_focus and voice_focus_threshold are only supported by U3 Pro models "
+                f"and will be ignored for model '{default_settings.model}'."
+            )
+
+        if voice_focus_threshold is not None and voice_focus is None:
+            logger.warning(
+                "voice_focus_threshold has no effect unless voice_focus is set "
+                "(to 'near-field' or 'far-field')."
+            )
+
         # 6. Configure pipecat turn mode (mutates default_settings)
         if vad_force_turn_endpoint:
             self._configure_pipecat_turn_mode(default_settings, is_u3_pro)
@@ -334,6 +432,10 @@ class AssemblyAISTTService(WebsocketSTTService):
         self._chunk_size_bytes = 0
 
         self._user_speaking = False
+
+        # Warn only once if update_agent_context is called on a non-u3-rt-pro
+        # model (the observer would otherwise warn on every bot turn).
+        self._agent_context_warned = False
 
         self._register_event_handler("on_end_of_turn")
 
@@ -392,7 +494,12 @@ class AssemblyAISTTService(WebsocketSTTService):
         return True
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
-        """Apply a settings delta and reconnect to apply changes.
+        """Apply a settings delta and apply the changes to the live session.
+
+        Most settings are connection-time WebSocket query parameters, so changing
+        them reconnects. ``agent_context`` (context carryover) is the exception: it
+        is applied live via an ``UpdateConfiguration`` message and does not require
+        a reconnect.
 
         Args:
             delta: A settings delta with updated values.
@@ -405,9 +512,16 @@ class AssemblyAISTTService(WebsocketSTTService):
         if not changed:
             return changed
 
-        # Reconnect to apply updated settings (they become WS query params)
-        await self._disconnect()
-        await self._connect()
+        if set(changed) - {"agent_context"}:
+            # A connect-time-only field changed (they become WS query params,
+            # which can only be set when the connection is opened). Reconnect;
+            # the new connection's URL re-seeds any changed agent_context too.
+            await self._disconnect()
+            await self._connect()
+        elif isinstance(self._settings.agent_context, str):
+            # agent_context alone is hot-updatable mid-stream; no reconnect
+            # needed. update_agent_context() guards on model and clips.
+            await self.update_agent_context(self._settings.agent_context)
 
         return changed
 
@@ -515,10 +629,18 @@ class AssemblyAISTTService(WebsocketSTTService):
             "domain": s.domain,
         }
 
-        # continuous_partials and interruption_delay only apply to u3-rt-pro.
-        if s.model == "u3-rt-pro":
+        # continuous_partials, interruption_delay, agent_context,
+        # previous_context_n_turns, and voice_focus(_threshold) only apply to
+        # the U3 Pro family.
+        if is_u3_pro_model(s.model):
             optional_fields["continuous_partials"] = s.continuous_partials
             optional_fields["interruption_delay"] = s.interruption_delay
+            optional_fields["previous_context_n_turns"] = s.previous_context_n_turns
+            optional_fields["voice_focus"] = s.voice_focus
+            optional_fields["voice_focus_threshold"] = s.voice_focus_threshold
+            # isinstance narrows away None/NOT_GIVEN for the typed clip call.
+            if isinstance(s.agent_context, str):
+                optional_fields["agent_context"] = self._clip_agent_context(s.agent_context)
 
         for k, v in optional_fields.items():
             if v is not None:
@@ -535,6 +657,95 @@ class AssemblyAISTTService(WebsocketSTTService):
             query_string = urlencode(params)
             return f"{self._api_endpoint_base_url}?{query_string}"
         return self._api_endpoint_base_url
+
+    def _clip_agent_context(self, text: str) -> str:
+        """Clip an agent_context value to the server-side character limit.
+
+        Keeps the tail of the text (the part nearest the user's next turn) when
+        the value is too long.
+
+        Args:
+            text: The agent context text to clip.
+
+        Returns:
+            The text, truncated to ``MAX_AGENT_CONTEXT_CHARS`` if necessary.
+        """
+        if len(text) > MAX_AGENT_CONTEXT_CHARS:
+            logger.warning(
+                f"{self} agent_context is {len(text)} chars; clipping to the last "
+                f"{MAX_AGENT_CONTEXT_CHARS}."
+            )
+            return text[-MAX_AGENT_CONTEXT_CHARS:]
+        return text
+
+    async def _send_update_configuration(self, **fields: Any):
+        """Send an UpdateConfiguration message with the given fields.
+
+        Fields whose value is None are omitted. No-op if the websocket is not
+        currently open.
+
+        Args:
+            **fields: Configuration fields to update (e.g. ``agent_context``).
+        """
+        if not (self._websocket and self._websocket.state is State.OPEN):
+            return
+
+        payload = {k: v for k, v in fields.items() if v is not None}
+        if not payload:
+            return
+
+        try:
+            await self._websocket.send(json.dumps({"type": "UpdateConfiguration", **payload}))
+        except Exception as e:
+            logger.warning(f"{self}: failed to send UpdateConfiguration: {e}")
+
+    async def update_agent_context(self, text: str):
+        """Send the agent's latest spoken reply to AssemblyAI as carryover context.
+
+        Context carryover (u3-rt-pro only) gives the model a short memory of what
+        the agent just said so it can better transcribe the user's reply — short
+        answers, spelled-out entities (emails, IDs), and similar-sounding words.
+        No-op for non-u3-rt-pro models.
+
+        Args:
+            text: The agent's spoken reply text. Clipped to ~1500 characters.
+        """
+        if not is_u3_pro_model(self._settings.model):
+            if not self._agent_context_warned:
+                self._agent_context_warned = True
+                logger.warning(
+                    f"{self} update_agent_context is only supported by u3-rt-pro; "
+                    f"ignoring for model '{self._settings.model}'."
+                )
+            return
+
+        if not text:
+            return
+
+        text = self._clip_agent_context(text)
+        # Store it so a later reconnect re-seeds the context via the WS URL.
+        self._settings.agent_context = text
+        await self._send_update_configuration(agent_context=text)
+
+    async def process_assistant_turn(self, text: str) -> None:
+        """Feed the assistant's completed reply to AssemblyAI as carryover context.
+
+        Called automatically when the assistant's turn ends.
+        Delegates to :meth:`update_agent_context`.
+
+        No-op for non-U3-Pro models or when ``previous_context_n_turns`` is ``0``
+        (carryover explicitly disabled).
+
+        Args:
+            text: The assistant's aggregated spoken text for this turn.
+        """
+        # Context carryover is a U3 Pro-only feature.
+        if not is_u3_pro_model(self._settings.model):
+            return
+        # previous_context_n_turns=0 means the user explicitly disabled carryover.
+        if self._settings.previous_context_n_turns == 0:
+            return
+        await self.update_agent_context(text)
 
     async def _connect(self):
         """Connect to the AssemblyAI service.

@@ -171,7 +171,11 @@ class AssemblyAIConnectionParams(BaseModel):
     keyterms_prompt: list[str] | None = None
     prompt: str | None = None
     speech_model: Literal[
-        "universal-streaming-english", "universal-streaming-multilingual", "u3-rt-pro"
+        "universal-streaming-english",
+        "universal-streaming-multilingual",
+        "u3-rt-pro",
+        "u3-rt-pro-beta-1",
+        "universal-3-5-pro",
     ] = "u3-rt-pro"
     language_detection: bool | None = None
     format_turns: bool = True
