@@ -29,6 +29,7 @@ from loguru import logger
 from redis.asyncio import Redis
 
 from pipecat.bus.network.redis import RedisBus
+from pipecat.frames.frames import FunctionCallResultProperties
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
@@ -103,11 +104,11 @@ class AcmeLLMTask(LLMWorker):
             reason (str): Why the user is being transferred.
         """
         logger.info(f"Task '{self.name}': transferring to '{agent}' ({reason})")
+        await params.result_callback(None, properties=FunctionCallResultProperties(run_llm=False))
         await self.activate_worker(
             agent,
             args=LLMWorkerActivationArgs(messages=[{"role": "developer", "content": reason}]),
             deactivate_self=True,
-            result_callback=params.result_callback,
         )
 
     @tool
@@ -118,11 +119,8 @@ class AcmeLLMTask(LLMWorker):
             reason (str): Why the conversation is ending.
         """
         logger.info(f"Task '{self.name}': ending conversation ({reason})")
-        await self.end(
-            reason=reason,
-            messages=[{"role": "developer", "content": reason}],
-            result_callback=params.result_callback,
-        )
+        await params.result_callback(reason)
+        await self.end(reason=reason)
 
 
 async def main_async() -> None:

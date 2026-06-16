@@ -96,6 +96,11 @@ CANCEL_TIMEOUT_SECS = 20.0
 
 T = TypeVar("T")
 
+# Timeout for the pre-end pipeline flush. The flush may span a full LLM
+# completion and TTS synthesis (e.g. a final turn triggered by a function
+# call result), so it needs to be generous.
+END_FLUSH_TIMEOUT_SECS = 30.0
+
 
 class IdleFrameObserver(BaseObserver):
     """Idle timeout observer.
@@ -769,6 +774,20 @@ class PipelineWorker(BaseWorker):
         except TimeoutError:
             logger.warning(f"{self}: pipeline flush timed out after {timeout}s")
             return False
+
+    async def end(self, *, reason: str | None = None) -> None:
+        """Request a graceful end of the session.
+
+        Flushes the pipeline first so in-flight frames (e.g. a final LLM
+        response triggered by a function call result) are fully processed
+        before the end is requested.
+
+        Args:
+            reason: Optional human-readable reason for ending.
+        """
+        if not self._pipeline_end_event.is_set():
+            await self.flush_pipeline(timeout=END_FLUSH_TIMEOUT_SECS)
+        await super().end(reason=reason)
 
     async def on_bus_message(self, message: BusMessage) -> None:
         """Handle outbound bus messages: TTS playback and RTVI UI translation.
