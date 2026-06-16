@@ -500,6 +500,24 @@ class LLMContextAssistantTimestampFrame(DataFrame):
 
 
 @dataclass
+class LLMContextAssistantTurnFrame(DataFrame):
+    """The aggregated text of a completed assistant turn.
+
+    Broadcast by the LLM assistant aggregator when a turn ends, carrying the
+    same text that is stored in the LLM context. Processors upstream and
+    downstream (e.g. STT services) can handle this frame to react to each
+    completed bot reply without needing a separate observer.
+
+    Parameters:
+        text: The assistant's aggregated spoken text for this turn.
+        timestamp: ISO-8601 timestamp of when the assistant turn started.
+    """
+
+    text: str
+    timestamp: str
+
+
+@dataclass
 class LLMContextFrame(Frame):
     """Frame containing a universal LLM context.
 

@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterruptionFrame,
+    LLMContextAssistantTurnFrame,
     ServiceSwitcherRequestMetadataFrame,
     StartFrame,
     STTMetadataFrame,
@@ -275,6 +276,18 @@ class STTService(AIService):
         """
         return Language(language)
 
+    async def process_assistant_turn(self, text: str) -> None:
+        """Called when the assistant's turn completes with the aggregated reply text.
+
+        Override in subclasses to react to each completed bot reply — for
+        example, to feed the text to a provider-side context carryover API.
+        The default implementation is a no-op.
+
+        Args:
+            text: The assistant's aggregated spoken text for this turn.
+        """
+        pass
+
     @abstractmethod
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Run speech-to-text on the provided audio data.
@@ -434,6 +447,9 @@ class STTService(AIService):
             logger.debug(f"STT service {'muted' if frame.mute else 'unmuted'}")
         elif isinstance(frame, InterruptionFrame):
             await self._reset_stt_ttfb_state()
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, LLMContextAssistantTurnFrame):
+            await self.process_assistant_turn(frame.text)
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)

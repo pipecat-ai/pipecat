@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     LLMAssistantPushAggregationFrame,
     LLMContextAssistantTimestampFrame,
+    LLMContextAssistantTurnFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -830,7 +831,11 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             LLMTextFrame("Hello from Pipecat!"),
             LLMFullResponseEndFrame(),
         ]
-        expected_down_frames = [LLMContextFrame, LLMContextAssistantTimestampFrame]
+        expected_down_frames = [
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+        ]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -868,7 +873,11 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             LLMTextFrame("Pipecat!"),
             LLMFullResponseEndFrame(),
         ]
-        expected_down_frames = [LLMContextFrame, LLMContextAssistantTimestampFrame]
+        expected_down_frames = [
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+        ]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -896,7 +905,11 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             make_text_frame("you?"),
             LLMFullResponseEndFrame(),
         ]
-        expected_down_frames = [LLMContextFrame, LLMContextAssistantTimestampFrame]
+        expected_down_frames = [
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+        ]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -915,7 +928,11 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             TextFrame(text="you?"),
             LLMFullResponseEndFrame(),
         ]
-        expected_down_frames = [LLMContextFrame, LLMContextAssistantTimestampFrame]
+        expected_down_frames = [
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+        ]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -954,7 +971,11 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             make_text_frame("helps!", includes_spaces=True),
             LLMFullResponseEndFrame(),
         ]
-        expected_down_frames = [LLMContextFrame, LLMContextAssistantTimestampFrame]
+        expected_down_frames = [
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+        ]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -991,8 +1012,10 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         expected_down_frames = [
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
         ]
         await run_test(
             aggregator,
@@ -1026,9 +1049,11 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         expected_down_frames = [
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
             InterruptionFrame,
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
         ]
         await run_test(
             aggregator,
@@ -1071,9 +1096,11 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         expected_down_frames = [
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
             InterruptionFrame,
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
         ]
         await run_test(
             aggregator,
@@ -1229,6 +1256,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             TTSStartedFrame,
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
         ]
         await run_test(
             aggregator,
@@ -1279,6 +1307,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             TTSStartedFrame,
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
             InterruptionFrame,
         ]
         await run_test(
