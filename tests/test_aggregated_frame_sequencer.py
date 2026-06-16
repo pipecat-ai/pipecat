@@ -250,18 +250,27 @@ class TestProcessWordBasic(unittest.TestCase):
         result = seq.process_word("world", pts=20, context_id="ctx1")
         self.assertTrue(any(f is skipped for f in result))
 
-    def test_no_active_slot_emits_passthrough(self):
+    def test_none_context_emits_passthrough(self):
+        # Services without audio contexts pass context_id=None and rely on the
+        # passthrough path even when no slot is registered.
         seq = _seq()
-        result = seq.process_word("hello", pts=1, context_id="ctx-unknown")
+        result = seq.process_word("hello", pts=1, context_id=None)
         self.assertEqual(len(result), 1)
         self.assertIsInstance(result[0], TTSTextFrame)
         self.assertEqual(result[0].text, "hello")
-        self.assertEqual(result[0].context_id, "ctx-unknown")
+        self.assertIsNone(result[0].context_id)
 
-    def test_passthrough_uses_default_append_to_context_true(self):
+    def test_none_context_passthrough_appends_to_context(self):
+        seq = _seq()
+        result = seq.process_word("hello", pts=1, context_id=None)
+        self.assertTrue(result[0].append_to_context)
+
+    def test_unknown_context_is_dropped(self):
+        # A real (non-None) context_id that was never registered is stale and must
+        # be dropped rather than emitted into the current turn's transcript.
         seq = _seq()
         result = seq.process_word("hello", pts=1, context_id="ctx-unknown")
-        self.assertTrue(result[0].append_to_context)
+        self.assertEqual(result, [])
 
     def test_unrecognised_word_emits_passthrough(self):
         seq = _seq()
@@ -504,14 +513,35 @@ class TestClear(unittest.TestCase):
         result = seq.register_skipped(frame, "ctx2", None)
         self.assertEqual(len(result), 1)
 
-    def test_after_clear_process_word_uses_passthrough(self):
+    def test_after_clear_process_word_drops_stale_word(self):
         seq = _seq()
         seq.register_spoken(_spoken_frame("hello"), "ctx1", _tracker("hello"), True)
         seq.clear()
+        # ctx1 was wiped by clear(); a delayed word for it is stale and dropped.
         result = seq.process_word("hello", pts=1, context_id="ctx1")
-        # No active slot after clear → passthrough
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0].text, "hello")
+        self.assertEqual(result, [])
+
+    def test_stale_words_do_not_corrupt_next_turn_transcript(self):
+        # Regression for #4750: after an interruption clears context A and a new
+        # context B is registered, delayed word-timestamps for A must not interleave
+        # into B's transcript.
+        seq = _seq()
+        # Turn A starts, then is interrupted (clear wipes its slot + context map).
+        seq.register_spoken(
+            _spoken_frame("I just wanted to follow up"), "ctxA", _tracker("I"), True
+        )
+        seq.clear()
+        # Turn B (the voicemail message) is registered.
+        seq.register_spoken(_spoken_frame("Hello"), "ctxB", _tracker("Hello"), True)
+        # Delayed words for the dead context A arrive — every one must be dropped.
+        for stale in ("I", "just", "wanted", "to", "follow", "up"):
+            self.assertEqual(seq.process_word(stale, pts=1, context_id="ctxA"), [])
+        # Context B's own word still flows normally and appends to the transcript.
+        result = seq.process_word("Hello", pts=2, context_id="ctxB")
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0].text, "Hello")
+        self.assertEqual(result[0].context_id, "ctxB")
+        self.assertTrue(result[0].append_to_context)
 
 
 # ---------------------------------------------------------------------------
@@ -763,20 +793,6 @@ class TestAggregatedTextProgressFrame(unittest.TestCase):
         result = seq.process_word("hello", pts=1, context_id="ctx-unknown")
         progress = [f for f in result if isinstance(f, AggregatedTextProgressFrame)]
         self.assertEqual(progress, [])
-
-    def test_progress_frame_context_id_matches_slot_not_caller(self):
-        seq = _seq()
-        frame1 = _spoken_frame("hello")
-        seq.register_spoken(frame1, "ctx1", _tracker("hello"), append_to_context=True)
-        seq.register_spoken(
-            _spoken_frame("world"), "ctx2", _tracker("world"), append_to_context=True
-        )
-        # Pass a different context_id — progress must still carry the slot's id
-        result = seq.process_word("hello", pts=5, context_id="ctx-wrong")
-        progress = [f for f in result if isinstance(f, AggregatedTextProgressFrame)]
-        self.assertEqual(len(progress), 1)
-        self.assertEqual(progress[0].context_id, "ctx1")
-        self.assertEqual(progress[0].segment_id, frame1.id)
 
     def test_progress_uses_user_facing_text_not_tts_text(self):
         """accumulated/remaining in the progress frame come from user_facing_text, not tts_text."""

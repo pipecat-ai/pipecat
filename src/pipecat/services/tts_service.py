@@ -1240,6 +1240,8 @@ class TTSService(AIService):
                         includes_inter_frame_spaces=ifs,
                     ),
                 )
+        elif context_id is not None:
+            logger.trace(f"Dropping stale words for context {context_id}; word times: {word_times}")
         else:
             await self._add_word_timestamps(
                 word_times=word_times, context_id=context_id, includes_inter_frame_spaces=ifs
