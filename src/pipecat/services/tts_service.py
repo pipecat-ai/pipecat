@@ -1512,6 +1512,7 @@ class TTSService(AIService):
                         await self.stop_ttfb_metrics()
                         await self.start_word_timestamps()
                         timestamps_started = True
+                    await self.process_ttfa_metrics(frame)
 
                 if frame:
                     if isinstance(frame, TTSStartedFrame):
