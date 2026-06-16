@@ -1177,10 +1177,11 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         await self.push_frame(LLMFullResponseStartFrame())
         await self.start_processing_metrics()
         await self.start_ttfb_metrics()
-        await self.send_client_event(
-            events.ResponseCreateEvent(
-                response=events.ResponseProperties(output_modalities=self._get_enabled_modalities())
-            )
+        await self.send_client_event(self._build_response_create_event())
+
+    def _build_response_create_event(self) -> events.ResponseCreateEvent:
+        return events.ResponseCreateEvent(
+            response=events.ResponseProperties(output_modalities=self._get_enabled_modalities())
         )
 
     async def _process_completed_function_calls(self, send_new_results: bool):
