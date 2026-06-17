@@ -96,8 +96,9 @@ Just respond with short sentences when you are carrying out tool calls.
         ),
     )
 
-    # Keyless by default. Set KEENABLE_API_KEY for higher rate limits, or
-    # KEENABLE_SEARCH_MODE=realtime for the lowest latency (best fit for voice).
+    # Keyless by default (uses the "pro" search mode). Set KEENABLE_API_KEY for
+    # higher rate limits and the lower-latency "realtime" mode (best fit for
+    # voice; requires an enabled account). Override with KEENABLE_SEARCH_MODE.
     async with KeenableWebSearch() as search:
         tools = await search.register_tools(llm)
 
