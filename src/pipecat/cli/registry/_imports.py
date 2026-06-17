@@ -90,6 +90,7 @@ IMPORTS = {
     "azure_llm": ["from pipecat.services.azure.llm import AzureLLMService"],
     "cerebras_llm": ["from pipecat.services.cerebras.llm import CerebrasLLMService"],
     "deepseek_llm": ["from pipecat.services.deepseek.llm import DeepSeekLLMService"],
+    "evolink_llm": ["from pipecat.services.evolink.llm import EvoLinkLLMService"],
     "fireworks_llm": ["from pipecat.services.fireworks.llm import FireworksLLMService"],
     "google_gemini_llm": ["from pipecat.services.google.llm import GoogleLLMService"],
     "google_vertex_llm": ["from pipecat.services.google.vertex.llm import GoogleVertexLLMService"],

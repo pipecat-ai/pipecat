@@ -150,6 +150,15 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "evolink_llm": (
+        "EvoLinkLLMService(\n"
+        '        api_key=os.getenv("EVOLINK_API_KEY"),\n'
+        "        settings=EvoLinkLLMService.Settings(\n"
+        '            model=os.getenv("EVOLINK_MODEL", "gpt-5.2"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "fireworks_llm": (
         "FireworksLLMService(\n"
         '        api_key=os.getenv("FIREWORKS_API_KEY"),\n'
