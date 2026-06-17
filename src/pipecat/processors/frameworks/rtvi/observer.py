@@ -373,6 +373,11 @@ class RTVIObserver(BaseObserver):
             logger.debug(
                 f"{self}: function_call_report_level set to {frame.function_call_report_level}"
             )
+        if frame.vad_user_speaking_enabled is not None:
+            self._params.vad_user_speaking_enabled = frame.vad_user_speaking_enabled
+            logger.debug(
+                f"{self}: vad_user_speaking_enabled set to {frame.vad_user_speaking_enabled}"
+            )
 
     async def _logger_sink(self, message):
         """Logger sink so we can send system logs to RTVI clients."""

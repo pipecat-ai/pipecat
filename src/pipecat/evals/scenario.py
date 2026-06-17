@@ -22,9 +22,11 @@ the bot's eval transport over RTVI, drives each turn, collects the RTVI events
 the bot emits, and asserts on them in order.
 
 Event names are the friendly names the harness maps RTVI server messages onto:
-``user_started_speaking``, ``user_stopped_speaking``, ``user_transcription``,
-``llm_started``, ``response``, ``llm_response``, ``tts_response``,
-``function_call``.
+``user_started_speaking``, ``user_stopped_speaking``, ``vad_user_started_speaking``,
+``vad_user_stopped_speaking``, ``user_transcription``, ``llm_started``, ``response``,
+``llm_response``, ``tts_response``, ``function_call``. The ``vad_*`` events are the raw
+VAD signal, useful as a timing anchor when a turn-detection strategy gates or defers the
+turn-level ``user_stopped_speaking`` (e.g. filtering incomplete turns).
 
 The bot's reply can be asserted three ways:
     response       the transcription of the bot's *actual synthesized audio* (a

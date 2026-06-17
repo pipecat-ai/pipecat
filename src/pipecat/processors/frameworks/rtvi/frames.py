@@ -84,13 +84,19 @@ class RTVIConfigureObserverFrame(SystemFrame):
         function_call_report_level: Per-function report-level map to apply to the
             observer (e.g. ``{"*": RTVIFunctionCallReportLevel.FULL}``), or
             ``None`` to leave it unchanged.
+        vad_user_speaking_enabled: Whether the observer should emit raw VAD user
+            started/stopped speaking messages, or ``None`` to leave it unchanged.
     """
 
     function_call_report_level: dict[str, RTVIFunctionCallReportLevel] | None = None
+    vad_user_speaking_enabled: bool | None = None
 
     def __str__(self):
         """String representation of the observer-config frame."""
-        return f"{self.name}(function_call_report_level: {self.function_call_report_level})"
+        return (
+            f"{self.name}(function_call_report_level: {self.function_call_report_level}, "
+            f"vad_user_speaking_enabled: {self.vad_user_speaking_enabled})"
+        )
 
 
 @dataclass

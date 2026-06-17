@@ -239,9 +239,16 @@ class RTVIEvalSerializer(FrameSerializer):
         if not isinstance(data, dict) or data.get("t") != EVAL_CONFIGURE_MESSAGE_TYPE:
             return None
         payload = data.get("d") or {}
-        levels = payload.get("function_call_report_level") if isinstance(payload, dict) else None
+        if not isinstance(payload, dict):
+            payload = {}
+        levels = payload.get("function_call_report_level")
         report_level = None
         if isinstance(levels, dict):
             # Values arrive as strings ("none"/"name"/"full"); coerce to the enum.
             report_level = {k: RTVIFunctionCallReportLevel(v) for k, v in levels.items()}
-        return RTVIConfigureObserverFrame(function_call_report_level=report_level)
+        vad = payload.get("vad_user_speaking")
+        vad_user_speaking_enabled = bool(vad) if vad is not None else None
+        return RTVIConfigureObserverFrame(
+            function_call_report_level=report_level,
+            vad_user_speaking_enabled=vad_user_speaking_enabled,
+        )

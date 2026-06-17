@@ -89,6 +89,22 @@ class TestRTVIEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(frame, RTVIConfigureObserverFrame)
         self.assertEqual(frame.function_call_report_level, {"*": RTVIFunctionCallReportLevel.FULL})
 
+    async def test_eval_configure_enables_vad_user_speaking(self):
+        msg = {
+            "label": RTVI.MESSAGE_LABEL,
+            "type": "client-message",
+            "id": "8",
+            "data": {
+                "t": EVAL_CONFIGURE_MESSAGE_TYPE,
+                "d": {"vad_user_speaking": True},
+            },
+        }
+        frame = await self.serializer.deserialize(json.dumps(msg))
+        self.assertIsInstance(frame, RTVIConfigureObserverFrame)
+        self.assertTrue(frame.vad_user_speaking_enabled)
+        # Unset report level stays None, so it isn't disturbed.
+        self.assertIsNone(frame.function_call_report_level)
+
     async def test_eval_image_stored_and_not_forwarded(self):
         img = b"\x89PNG-fake-bytes"
         msg = {
