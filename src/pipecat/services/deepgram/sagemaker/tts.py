@@ -217,10 +217,16 @@ class DeepgramSageMakerTTSService(TTSService):
             await self._call_event_handler("on_disconnected")
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
-        """Apply a settings delta and reconnect if necessary.
+        """Apply a settings delta and reconnect so the new query string takes effect.
 
-        Since all settings are part of the SageMaker session query string,
-        any setting change requires reconnecting to apply the new values.
+        All TTS settings (voice, model, sample rate) are baked into the query
+        string at connection time, so any change requires a fresh connection.
+
+        Args:
+            delta: Settings delta to apply.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
         """
         changed = await super()._update_settings(delta)
 
@@ -232,12 +238,8 @@ class DeepgramSageMakerTTSService(TTSService):
             self._settings.model = self._settings.voice
             self._sync_model_name_to_metrics()
 
-        # TODO: someday we could reconnect here to apply updated settings.
-        # Code might look something like the below:
-        # await self._disconnect()
-        # await self._connect()
-
-        self._warn_unhandled_updated_settings(changed)
+        await self._disconnect()
+        await self._connect()
 
         return changed
 
