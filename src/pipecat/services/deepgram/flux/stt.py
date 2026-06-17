@@ -362,6 +362,9 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
                 self._last_stt_time = None
 
             self._connection_established_event.clear()
+            # Unblock any pending Configure ack waiter so a teardown mid-update
+            # doesn't leave _send_configure hanging until its timeout.
+            self._cancel_configure_ack()
             await self.stop_all_metrics()
 
             if self._websocket:

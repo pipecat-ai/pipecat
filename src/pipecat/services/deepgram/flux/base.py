@@ -154,6 +154,11 @@ class DeepgramFluxSTTBase(STTService):
         "language_hints",
     }
     _MULTILINGUAL_MODEL = "flux-general-multi"
+    # Max time to wait for a ConfigureSuccess/ConfigureFailure ack before giving
+    # up on the current Configure and allowing the next one through. Flux caps the
+    # number of un-acked Configure messages, so we serialize sends; this guard
+    # keeps a missing ack from deadlocking the pipeline.
+    _CONFIGURE_ACK_TIMEOUT = 5.0
 
     def __init__(
         self,
@@ -191,6 +196,14 @@ class DeepgramFluxSTTBase(STTService):
 
         # Connection readiness: Flux sends a "Connected" message when ready
         self._connection_established_event = asyncio.Event()
+
+        # Configure serialization: Flux caps the number of un-acked Configure
+        # messages, so we only allow one in flight at a time. `_configure_lock`
+        # serializes send+wait; `_configure_ack` is the Future that
+        # `_handle_message` resolves when a ConfigureSuccess/ConfigureFailure
+        # arrives. `_configure_ack` is None whenever no Configure is in flight.
+        self._configure_lock = asyncio.Lock()
+        self._configure_ack: asyncio.Future | None = None
 
         # Watchdog state — see _watchdog_task_handler for details
         self._last_stt_time: float | None = None
@@ -334,6 +347,13 @@ class DeepgramFluxSTTBase(STTService):
         Builds a Configure JSON message containing only the fields that changed
         and sends it over the existing connection.
 
+        Sends are serialized: this waits for the current Configure to be acked
+        (ConfigureSuccess/ConfigureFailure) before returning, so only one
+        Configure is ever in flight. Flux caps the number of un-acked Configure
+        messages, so a burst of updates would otherwise be rejected. The wait is
+        bounded by ``_CONFIGURE_ACK_TIMEOUT`` so a missing ack never deadlocks
+        the pipeline.
+
         Args:
             fields: Set of changed field names to include in the message.
         """
@@ -367,8 +387,43 @@ class DeepgramFluxSTTBase(STTService):
                 else:
                     message["language_hints"] = _prepare_language_hints(hints)
 
-        logger.debug(f"{self}: sending Configure message: {message}")
-        await self._transport_send_json(message)
+        # Serialize sends so only one Configure is awaiting an ack at a time.
+        async with self._configure_lock:
+            self._configure_ack = asyncio.get_running_loop().create_future()
+            try:
+                logger.debug(f"{self}: sending Configure message: {message}")
+                await self._transport_send_json(message)
+                try:
+                    await asyncio.wait_for(self._configure_ack, self._CONFIGURE_ACK_TIMEOUT)
+                except TimeoutError:
+                    logger.warning(
+                        f"{self}: timed out after {self._CONFIGURE_ACK_TIMEOUT}s waiting for "
+                        "Configure ack; proceeding without it"
+                    )
+            finally:
+                self._configure_ack = None
+
+    def _signal_configure_ack(self):
+        """Resolve the pending Configure ack waiter, if any.
+
+        Called when a ConfigureSuccess/ConfigureFailure arrives. Guards against
+        an ack with no Configure in flight (e.g. a stray/duplicate message),
+        ignoring it gracefully.
+        """
+        ack = self._configure_ack
+        if ack is not None and not ack.done():
+            ack.set_result(None)
+
+    def _cancel_configure_ack(self):
+        """Unblock any pending Configure ack waiter during teardown/reconnect.
+
+        Resolves (rather than cancels) the waiter so an in-progress
+        ``_send_configure`` returns cleanly instead of raising into the caller.
+        Safe to call when nothing is in flight.
+        """
+        ack = self._configure_ack
+        if ack is not None and not ack.done():
+            ack.set_result(None)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -501,11 +556,13 @@ class DeepgramFluxSTTBase(STTService):
                 await self._handle_turn_info(data)
             case FluxMessageType.CONFIGURE_SUCCESS:
                 logger.info(f"{self}: Configure accepted: {data}")
+                self._signal_configure_ack()
             case FluxMessageType.CONFIGURE_FAILURE:
                 error_code = data.get("error_code", "unknown")
                 description = data.get("description", "no description")
                 error_msg = f"Configure rejected: [{error_code}] {description}"
                 logger.warning(f"{self}: {error_msg}")
+                self._signal_configure_ack()
                 await self.push_error(error_msg=error_msg)
 
     async def _handle_connection_established(self):
@@ -515,6 +572,9 @@ class DeepgramFluxSTTBase(STTService):
         established and ready to receive audio data for transcription processing.
         """
         logger.info("Connected to Flux - ready to stream audio")
+        # Drop any stale Configure waiter left over from a prior connection so a
+        # reconnect starts clean (the lock guarantees at most one waiter exists).
+        self._cancel_configure_ack()
         # Notify connection is established
         self._connection_established_event.set()
 
