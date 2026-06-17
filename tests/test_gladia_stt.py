@@ -28,18 +28,10 @@ async def test_update_settings_triggers_reconnect():
     service._settings = GladiaSTTService.Settings(model="solaria-1")
     service._session_url = "wss://fake-session.gladia.io/live/abc123"
     service._session_id = "abc123"
+    service._request_reconnect = AsyncMock()
 
-    reconnect_called = False
-
-    async def fake_request_reconnect():
-        nonlocal reconnect_called
-        reconnect_called = True
-
-    service._request_reconnect = fake_request_reconnect
-
-    with patch.object(
-        GladiaSTTService.__bases__[0],
-        "_update_settings",
+    with patch(
+        "pipecat.services.stt_service.STTService._update_settings",
         new_callable=AsyncMock,
         return_value={"model": "old-model"},
     ):
@@ -47,7 +39,7 @@ async def test_update_settings_triggers_reconnect():
 
     assert service._session_url is None, "session_url should be cleared on settings change"
     assert service._session_id is None, "session_id should be cleared on settings change"
-    assert reconnect_called, "_request_reconnect() should be called on settings change"
+    service._request_reconnect.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -58,18 +50,10 @@ async def test_update_settings_no_reconnect_when_nothing_changed():
     service._settings = GladiaSTTService.Settings(model="solaria-1")
     service._session_url = "wss://fake-session.gladia.io/live/abc123"
     service._session_id = "abc123"
+    service._request_reconnect = AsyncMock()
 
-    reconnect_called = False
-
-    async def fake_request_reconnect():
-        nonlocal reconnect_called
-        reconnect_called = True
-
-    service._request_reconnect = fake_request_reconnect
-
-    with patch.object(
-        GladiaSTTService.__bases__[0],
-        "_update_settings",
+    with patch(
+        "pipecat.services.stt_service.STTService._update_settings",
         new_callable=AsyncMock,
         return_value={},  # empty dict → nothing changed
     ):
@@ -77,4 +61,4 @@ async def test_update_settings_no_reconnect_when_nothing_changed():
 
     assert service._session_url == "wss://fake-session.gladia.io/live/abc123"
     assert service._session_id == "abc123"
-    assert not reconnect_called, "_request_reconnect() should NOT be called when nothing changed"
+    service._request_reconnect.assert_not_awaited()
