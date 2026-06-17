@@ -268,6 +268,37 @@ class TestRequiredReportLevel(unittest.TestCase):
         )
 
 
+class TestNeedsVadEvents(unittest.TestCase):
+    """The harness enables raw VAD events only when a scenario references them."""
+
+    def _needs(self, turn: EvalTurn) -> bool:
+        scenario = EvalScenario(name="t", turns=[turn])
+        return EvalSession(scenario, "ws://localhost:0")._needs_vad_events()
+
+    def test_false_without_vad_events(self):
+        self.assertFalse(
+            self._needs(EvalTurn(user="x", expect=[EvalExpectation(event="response")]))
+        )
+
+    def test_true_when_expected(self):
+        self.assertTrue(
+            self._needs(
+                EvalTurn(user="x", expect=[EvalExpectation(event="vad_user_started_speaking")])
+            )
+        )
+
+    def test_true_when_used_as_send_after_anchor(self):
+        self.assertTrue(
+            self._needs(
+                EvalTurn(
+                    user="x",
+                    expect=[EvalExpectation(event="response")],
+                    send_after=EvalSendAfter(event="vad_user_stopped_speaking", delay_ms=2000),
+                )
+            )
+        )
+
+
 class TestConnectURL(unittest.TestCase):
     """The harness signals skip-TTS via the connect URL in text mode."""
 

@@ -18,20 +18,22 @@ models (:mod:`pipecat.processors.frameworks.rtvi.models`) and translates the
 RTVI server messages it receives back into a small set of friendly event names
 the scenario files assert on:
 
-==========================  ==============================================
-scenario ``event:``         RTVI server message(s)
-==========================  ==============================================
-``user_started_speaking``   ``user-started-speaking``
-``user_stopped_speaking``   ``user-stopped-speaking``
-``user_transcription``      ``user-transcription`` (final only)
-``llm_started``             ``bot-llm-started``
-``llm_response``            the LLM text: ``bot-llm-text`` joined at ``bot-llm-stopped``
-``tts_response``            the TTS's spoken text: one segment per ``bot-tts-text``
-                            (audio modality only)
-``response``                local-STT transcription of the bot's actual audio
-                            (audio modality only); ``llm_response`` in text modality
-``function_call``           ``llm-function-call-in-progress``
-==========================  ==============================================
+==========================      ==============================================
+scenario ``event:``             RTVI server message(s)
+==========================      ==============================================
+``user_started_speaking``       ``user-started-speaking``
+``user_stopped_speaking``       ``user-stopped-speaking``
+``vad_user_started_speaking``   ``vad-user-started-speaking`` (raw VAD, ungated by turn detection)
+``vad_user_stopped_speaking``   ``vad-user-stopped-speaking`` (raw VAD, ungated by turn detection)
+``user_transcription``          ``user-transcription`` (final only)
+``llm_started``                 ``bot-llm-started``
+``llm_response``                the LLM text: ``bot-llm-text`` joined at ``bot-llm-stopped``
+``tts_response``                the TTS's spoken text: one segment per ``bot-tts-text``
+                                (audio modality only)
+``response``                    local-STT transcription of the bot's actual audio
+                                (audio modality only); ``llm_response`` in text modality
+``function_call``               ``llm-function-call-in-progress``
+==========================      ==============================================
 
 Matching semantics: expected events must appear in the specified order, but
 unmatched events may appear between them (so a scenario doesn't have to
@@ -595,6 +597,21 @@ class EvalSession:
                         needs_name = True
         return "name" if needs_name else None
 
+    def _needs_vad_events(self) -> bool:
+        """Whether the scenario references raw VAD speaking events.
+
+        These (``vad_user_started_speaking`` / ``vad_user_stopped_speaking``) are
+        off by default; the harness asks the bot's RTVIObserver to emit them only
+        when a scenario asserts on or schedules from them.
+        """
+        vad_events = {"vad_user_started_speaking", "vad_user_stopped_speaking"}
+        for turn in self._scenario.turns:
+            if turn.send_after is not None and turn.send_after.event in vad_events:
+                return True
+            if any(exp.event in vad_events for exp in turn.expect):
+                return True
+        return False
+
     async def _handshake(self) -> None:
         """Send client-ready, wait for bot-ready, then optionally seed context.
 
@@ -618,18 +635,23 @@ class EvalSession:
         # Hard gate — raises TimeoutError if the bot never announces readiness.
         await self._wait_for_event("bot_ready", BOT_READY_TIMEOUT_S)
 
-        # If the scenario asserts on function-call name/args, ask the bot's
-        # RTVIObserver to report them for the duration of this eval. Bots keep
-        # the secure NONE default; only the eval transport understands this.
+        # Ask the bot's RTVIObserver to expose what this scenario needs, for the
+        # duration of this eval only (bots keep their defaults; only the eval
+        # transport understands this): raise the function-call report level if it
+        # asserts on call name/args, and enable raw VAD speaking events if it uses
+        # them.
         level = self._required_report_level()
-        if level is not None:
+        vad = self._needs_vad_events()
+        if level is not None or vad:
+            config: dict = {}
+            if level is not None:
+                config["function_call_report_level"] = {"*": level}
+            if vad:
+                config["vad_user_speaking"] = True
             configure = RTVI.Message(
                 type="client-message",
                 id=self._message_id(),
-                data={
-                    "t": EVAL_CONFIGURE_MESSAGE_TYPE,
-                    "d": {"function_call_report_level": {"*": level}},
-                },
+                data={"t": EVAL_CONFIGURE_MESSAGE_TYPE, "d": config},
             )
             await self._send(configure)
 
@@ -781,6 +803,10 @@ class EvalSession:
                 return [{"type": "bot_interrupted"}]
             case "user-stopped-speaking":
                 return [{"type": "user_stopped_speaking"}]
+            case "vad-user-started-speaking":
+                return [{"type": "vad_user_started_speaking"}]
+            case "vad-user-stopped-speaking":
+                return [{"type": "vad_user_stopped_speaking"}]
             case "user-transcription":
                 if data.get("final"):
                     return [{"type": "user_transcription", "transcript": data.get("text", "")}]

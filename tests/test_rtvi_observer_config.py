@@ -46,6 +46,16 @@ class TestRTVIConfigureObserver(unittest.TestCase):
             RTVIFunctionCallReportLevel.NAME,
         )
 
+    def test_enables_vad_user_speaking_at_runtime(self):
+        # Off by default; a config frame enables raw VAD speaking events live.
+        observer = RTVIObserver(params=RTVIObserverParams())
+        self.assertFalse(observer._params.vad_user_speaking_enabled)
+        observer._apply_config(RTVIConfigureObserverFrame(vad_user_speaking_enabled=True))
+        self.assertTrue(observer._params.vad_user_speaking_enabled)
+        # A None field leaves it unchanged.
+        observer._apply_config(RTVIConfigureObserverFrame(vad_user_speaking_enabled=None))
+        self.assertTrue(observer._params.vad_user_speaking_enabled)
+
 
 if __name__ == "__main__":
     unittest.main()
