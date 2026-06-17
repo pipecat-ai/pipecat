@@ -180,22 +180,17 @@ class MOQParams(TransportParams):
         audio_out_frame_ms: Opus frame duration for the bot's audio
             output. Must be 2, 5, 10, 20, 40, or 60. 20 ms is the
             real-time default.
-        audio_out_max_buffer_ms: Upper bound on how much audio we let
-            the moq library hold in flight at once. The transport
-            paces ``publish_audio`` writes against wall-clock so the
-            unwritten + encoder + wire backlog never grows past this
-            many milliseconds. Lower = faster response to interrupts,
-            but more sensitive to scheduler jitter. Higher = smoother
-            audio under load, but a user interrupt won't actually
-            stop playback until this much already-buffered audio has
-            drained on the browser side.
-
-            WORKAROUND: moq-rs (>=0.2.17) doesn't expose a flush /
-            cancel primitive on :class:`moq.AudioProducer`, so the
-            only way to bound interruption latency is to keep the
-            in-flight buffer small. Once an upstream flush API lands,
-            this pacing can go away and the parameter can be removed.
-            See https://github.com/moq-dev/moq/issues/1614.
+        audio_out_max_buffer_ms: How far ahead of real-time the bot is
+            allowed to write audio. The bot writes TTS faster than
+            real-time with future-dated timestamps so the browser player
+            (``@moq/watch``) can buffer and play at the encoded pace; this
+            paces ``publish_audio`` so the in-flight buffer never grows
+            past this many milliseconds. Keep it a little under the
+            player's buffer ceiling (``MoqTransportOptions.audioBufferMaxMs``,
+            30s) so the producer self-limits below the player's drop
+            ceiling and the player never has to drop. On interruption the
+            pacing clock is re-anchored (see :meth:`reset_audio_pacing`) so
+            the next utterance isn't delayed by the previous buffer.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -217,7 +212,7 @@ class MOQParams(TransportParams):
     audio_in_sample_rate: int = 16000
     audio_in_max_latency_ms: int = 500
     audio_out_frame_ms: int = 20
-    audio_out_max_buffer_ms: int = 20
+    audio_out_max_buffer_ms: int = 25000
 
 
 class MOQInputTransport(BaseInputTransport):
@@ -431,6 +426,12 @@ class MOQTransport(BaseTransport):
         # Wall-clock target for the next publish_audio write. ``None``
         # means "reset" — the next write anchors to ``time.monotonic()``.
         self._publish_audio_clock: float | None = None
+        # Monotonic presentation timestamp (microseconds) for the next
+        # audio chunk, advanced by each chunk's duration. The browser
+        # player uses these future-dated timestamps to buffer and pace
+        # playback. Not reset on interruption — the player re-anchors on
+        # its own (reset() on user-started-speaking).
+        self._publish_pts_us: int = 0
 
         # Track consumers we created so disconnect() can cancel them.
         # Each entry has a sync .cancel() method that terminates any
@@ -514,28 +515,24 @@ class MOQTransport(BaseTransport):
         self._publish_audio_clock = None
 
     async def publish_audio(self, audio: bytes):
-        """Push a PCM chunk to the bot's audio track, paced at audio rate.
+        """Push a PCM chunk to the bot's audio track with real PTS, paced to a cap.
 
         The library does the Opus encode + resample inside the FFI, so we
         just write S16 PCM bytes.
 
-        WORKAROUND for moq-rs (>=0.2.17): ``AudioProducer`` is fire-and-
-        forget. ``write()`` accepts bytes as fast as the caller produces
-        them and queues everything through the encoder, the WebTransport
-        send window, the wire, and the browser-side jitter buffer. The
-        sum of those buffers is what defeats user interruption — pipecat
-        drains its own audio queue on InterruptionFrame, but the bytes
-        that have already been ``write()``-en keep playing.
-
-        Until ``AudioProducer`` exposes a flush / cancel primitive
-        (tracking issue: https://github.com/moq-dev/moq/issues/1614),
-        we bound the in-flight buffer by pacing the writes
-        against a virtual clock: each call advances the clock by the
-        chunk's audio duration, and we sleep until wall-clock is within
-        ``audio_out_max_buffer_ms`` of it. moq then holds at most that
-        many ms in flight at the moment of an interrupt, so the bot's
-        voice cuts within roughly that latency plus the browser jitter
-        buffer (``MoqTransportOptions.audioLatencyMs``).
+        Each chunk is stamped with a monotonic presentation timestamp so
+        the browser player (``@moq/watch``) can buffer the future-dated
+        frames and play them at the encoded pace. ``AudioProducer.write()``
+        is fire-and-forget, so to bound how far ahead the bot runs we pace
+        the writes against a virtual clock: each call advances the clock by
+        the chunk's audio duration, and we sleep until wall-clock is within
+        ``audio_out_max_buffer_ms`` (25s) of it. That keeps the in-flight
+        buffer a little under the player's drop ceiling
+        (``MoqTransportOptions.audioBufferMaxMs``, 30s), so the producer
+        self-limits below the consumer's cap. Interruptions are flushed on
+        the browser side (``reset()`` on ``user-started-speaking``); the
+        pacing clock is re-anchored here (see :meth:`reset_audio_pacing`)
+        so the next utterance isn't delayed by the previous buffer.
         """
         if self._audio_out is None or not self._audio_out_sample_rate:
             return
@@ -552,15 +549,13 @@ class MOQTransport(BaseTransport):
         if wait > 0:
             await asyncio.sleep(wait)
 
-        # Advance the virtual clock by the duration of this chunk.
-        # S16 = 2 bytes/sample, mono.
+        # Advance the virtual clock and the presentation timestamp by the
+        # duration of this chunk. S16 = 2 bytes/sample, mono.
         duration_s = len(audio) / (self._audio_out_sample_rate * 2)
         self._publish_audio_clock += duration_s
 
-        # Timestamp is informational for downstream A/V sync; the encoder
-        # paces frames itself. Use 0 since we only carry audio and the
-        # browser plays it as soon as it arrives.
-        self._audio_out.write(moq.AudioFrame(timestamp_us=0, data=audio))
+        self._audio_out.write(moq.AudioFrame(timestamp_us=self._publish_pts_us, data=audio))
+        self._publish_pts_us += int(duration_s * 1_000_000)
 
     def publish_transcript(self, payload: bytes):
         """Write a transcript payload (RTVI JSON) to the transcript track."""
