@@ -25,7 +25,20 @@ class _FakeFluxService(DeepgramFluxSTTBase):
         # Bypass STTService.__init__ (needs a pipeline); wire up only the state
         # _send_configure / _handle_message touch.
         self._name = "FakeFlux"
-        self._settings = DeepgramFluxSTTSettings(model="flux-general-en")
+        # Build a complete store-mode settings object (every field a real value,
+        # never NOT_GIVEN), matching what the concrete service constructs. This
+        # also satisfies the auto-discovered store-completeness check in
+        # test_service_init.py, which instantiates every AIService subclass.
+        self._settings = DeepgramFluxSTTSettings(
+            model="flux-general-en",
+            language=None,
+            eager_eot_threshold=None,
+            eot_threshold=None,
+            eot_timeout_ms=None,
+            keyterm=[],
+            min_confidence=None,
+            language_hints=None,
+        )
         self._configure_lock = asyncio.Lock()
         self._configure_ack = None
         self.sent_messages = []
