@@ -232,6 +232,10 @@ class SingleClientWebsocketServerInputTransport(BaseInputTransport):
                     await self.broadcast_frame(InputTransportMessageFrame, message=frame.message)
                 else:
                     await self.push_frame(frame)
+        except websockets.ConnectionClosed:
+            # The client closed the connection (clean or abrupt). Normal end of a
+            # session, not an error.
+            logger.debug(f"{self}: client disconnected while receiving")
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
@@ -420,6 +424,10 @@ class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
             payload = await self._params.serializer.serialize(frame)
             if payload and self._websocket:
                 await self._websocket.send(payload)
+        except websockets.ConnectionClosed:
+            # The client went away mid-send (a normal race on disconnect, e.g.
+            # while still streaming TTS audio). Not an error.
+            logger.debug(f"{self}: client disconnected while sending")
         except Exception as e:
             logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
 
