@@ -1418,6 +1418,65 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
 
         self.assertEqual(params["messages"][2]["role"], "user")
 
+    def test_image_before_text_does_not_raise_unbound_local_error(self):
+        """Regression test for issue #4724: image placed before text must not raise UnboundLocalError.
+
+        When a user message's content list places the image *before* the text (e.g. a
+        UserImageRawFrame followed by a prompt), _from_standard_message previously
+        raised ``UnboundLocalError: cannot access local variable 'image_item'``
+        because the ``new_content.insert(...)`` call was outside the
+        ``if img_idx > first_txt_idx:`` guard that assigns ``image_item``.
+        """
+        # Image appears FIRST (before text) — this is the failing shape from the issue.
+        message: LLMStandardMessage = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/jpeg;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+                    },
+                },
+                {"type": "text", "text": "What do you see?"},
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        # Must not raise — previously threw UnboundLocalError.
+        params = self.adapter.get_llm_invocation_params(context)
+
+        user_msg = params["messages"][0]
+        self.assertEqual(user_msg["role"], "user")
+        content = user_msg["content"]
+        self.assertEqual(len(content), 2)
+        # Image was already first, so the adapter should leave it in place.
+        self.assertIn("image", content[0])
+        self.assertEqual(content[1]["text"], "What do you see?")
+
+    def test_image_after_text_reordered_to_first(self):
+        """Image placed after text is reordered to come before text (existing behaviour)."""
+        message: LLMStandardMessage = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What do you see?"},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/jpeg;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        user_msg = params["messages"][0]
+        content = user_msg["content"]
+        self.assertEqual(len(content), 2)
+        # Adapter should have moved the image before the text.
+        self.assertIn("image", content[0])
+        self.assertEqual(content[1]["text"], "What do you see?")
+
 
 class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
     # Perplexity doesn't support the "developer" role, so PerplexityLLMService
