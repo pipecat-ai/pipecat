@@ -26,7 +26,11 @@ from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType
 # rate/prosody, which is heard as "the voice changing rate" + jumps + ticks at
 # every join. We still insert a space after the merged boundary punctuation so the
 # TTS pauses naturally at the internal "., ! ?" (no rushed run-on).
-_MIN_CHUNK_CHARS: int = 40
+_MIN_CHUNK_CHARS: int = 0  # was 40. Lowered to 0 so TTS fires on the FIRST real
+# sentence boundary immediately (fastest time-to-first-audio) instead of merging
+# short sentences up to 40 chars. Trade-off: a reply made of several very short
+# sentences may sound slightly choppier (per-clip prosody jumps); raise toward
+# ~15-20 if the voice quality regresses while keeping most of the latency win.
 
 # Mid-sentence splitting is DISABLED for fluency. The user wants joins to happen
 # ONLY at real sentence boundaries (". ! ?") so the voice never appears to cut in
@@ -51,6 +55,12 @@ _ALL_ENDERS = (
     "։", "՜", "՞",                     # Armenian
 )
 _ALL_ENDERS_SET: frozenset[str] = frozenset(_ALL_ENDERS)
+
+# Strong, UNAMBIGUOUS sentence enders ("!" / "?" and their non-Latin forms): a
+# sentence always ends here — unlike "." (decimals, abbreviations) which needs
+# lookahead disambiguation. Used by the fast-opener path to emit the FIRST chunk of
+# a turn immediately, without waiting for the next token to confirm the boundary.
+_STRONG_ENDERS: frozenset[str] = frozenset(("!", "?", "！", "？", "؟", "՜", "՞"))
 
 # Regex: insert a space after a sentence-ending character that is immediately
 # followed by a regular (letter) character, e.g. Hebrew "!מ" → "! מ", ".ל" → ". ל".
@@ -158,6 +168,25 @@ class SimpleTextAggregator(BaseTextAggregator):
                 self._emitted_since_reset = True
                 yield result
                 continue
+
+            # First-clause fast start: emit the OPENING clause at the first
+            # comma/clause break (once we have a little text), so TTS starts
+            # speaking ~one clause sooner. Gated to the FIRST emission of a turn
+            # (_emitted_since_reset) so ONLY the opener is comma-split — the rest of
+            # the reply still aggregates at full sentence boundaries (avoids choppy
+            # comma-splitting through the whole answer).
+            if (
+                not self._emitted_since_reset
+                and not self._needs_lookahead
+                and char in (",", "،", "؛", ";", "—", "–")
+                and len(self._text) >= 12
+            ):
+                phrase = _clean_sentence(self._text)
+                if phrase and any(c.isalpha() or c.isdigit() for c in phrase):
+                    self._text = ""
+                    self._emitted_since_reset = True
+                    yield Aggregation(text=phrase, type=AggregationType.SENTENCE)
+                    continue
 
             # Long sentence handling: past _MAX_PHRASE_CHARS with no sentence
             # boundary, split at a COMMA so the long sentence becomes natural
@@ -295,6 +324,27 @@ class SimpleTextAggregator(BaseTextAggregator):
                     logger.debug(f"aggregator: skipped punct-only fragment: {result!r}")
 
             return None
+
+        # Fast opener: "!" and "?" are UNAMBIGUOUS sentence ends (never decimals or
+        # abbreviations), so for the FIRST chunk of a turn emit IMMEDIATELY without
+        # waiting for the lookahead char. That lookahead otherwise stalls the opening
+        # clause until the NEXT token streams in — pure time-to-first-audio cost.
+        # Subsequent sentences keep the careful lookahead path (handles "?!" and
+        # run-on punctuation); their latency hides behind the prior chunk's synthesis.
+        if (
+            not self._emitted_since_reset
+            and not self._needs_lookahead
+            and self._text
+            and self._text[-1] in _STRONG_ENDERS
+        ):
+            candidate = self._text.strip()
+            if len(candidate) >= _MIN_CHUNK_CHARS and any(
+                c.isalpha() or c.isdigit() for c in candidate
+            ):
+                result = _clean_sentence(candidate)
+                if result and any(c.isalpha() or c.isdigit() for c in result):
+                    self._text = ""
+                    return Aggregation(text=result, type=AggregationType.SENTENCE)
 
         # Check if we just added sentence-ending punctuation
         if self._text and self._text[-1] in _ALL_ENDERS_SET:
