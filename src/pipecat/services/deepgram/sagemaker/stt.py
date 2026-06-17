@@ -144,7 +144,6 @@ class DeepgramSageMakerSTTService(STTService):
             search=None,
             smart_format=False,
             utterance_end_ms=None,
-            vad_events=False,
         )
 
         # 2. Apply live_options overrides — only if settings not provided
