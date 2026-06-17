@@ -11,8 +11,9 @@ connects to a hosted MCP server powered by `Keenable AI <https://keenable.ai>`_.
 Tool schemas and implementations live server-side, so updates ship instantly
 without a pipecat release.
 
-No API key is required — the server works keyless by default. Set
-``KEENABLE_API_KEY`` (or pass ``api_key=``) to unlock higher rate limits.
+No API key is required — keyless requests use ``pro`` mode. Set
+``KEENABLE_API_KEY`` (or pass ``api_key=``) for higher rate limits and the
+lower-latency ``realtime`` mode (which requires an enabled account).
 
 Example::
 
@@ -92,19 +93,28 @@ class KeenableWebSearch:
         self,
         *,
         api_key: str | None = None,
-        mode: str = "pro",
+        mode: str | None = None,
     ) -> None:
         """Initialize the web search wrapper.
 
         Args:
-            api_key: API key for higher rate limits. Falls back to
-                ``KEENABLE_API_KEY`` env var. When unset, the free tier is used.
-            mode: Search mode — ``"pro"`` (default, higher quality) or
-                ``"realtime"`` (fastest). Overridden by the
-                ``KEENABLE_SEARCH_MODE`` env var if set.
+            api_key: API key for higher rate limits and ``realtime`` access.
+                Falls back to the ``KEENABLE_API_KEY`` env var. When unset, the
+                keyless free tier is used.
+            mode: Search mode — ``"pro"`` (higher quality) or ``"realtime"``
+                (lower latency, good for voice; requires an enabled account).
+                When unset, defaults to ``"realtime"`` if an API key is present,
+                else ``"pro"``. The ``KEENABLE_SEARCH_MODE`` env var overrides
+                this.
         """
         if api_key is None:
             api_key = (os.environ.get(API_KEY_ENV_VAR) or "").strip() or None
+        self._api_key = api_key
+
+        # realtime requires an enabled key, so default to it only when keyed;
+        # keyless falls back to pro.
+        if mode is None:
+            mode = "realtime" if api_key else "pro"
 
         env_mode = (os.environ.get(SEARCH_MODE_ENV_VAR) or "").strip().lower()
         if env_mode:
@@ -116,7 +126,6 @@ class KeenableWebSearch:
             else:
                 mode = env_mode
 
-        self._api_key = api_key
         self._mode = mode
         self._mcp: Any = None  # MCPClient instance (lazy import)
 

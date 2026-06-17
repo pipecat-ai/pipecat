@@ -65,8 +65,17 @@ class TestKeenableWebSearchConfig(unittest.TestCase):
     """Construction-time config: mode resolution and header building."""
 
     @patch.dict(os.environ, {}, clear=True)
-    def test_default_mode_is_pro(self):
+    def test_default_mode_pro_when_keyless(self):
         self.assertEqual(KeenableWebSearch()._mode, "pro")
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_default_mode_realtime_when_keyed(self):
+        self.assertEqual(KeenableWebSearch(api_key="k")._mode, "realtime")
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_explicit_mode_overrides_keyed_default(self):
+        # An explicit mode wins over the key-based default.
+        self.assertEqual(KeenableWebSearch(api_key="k", mode="pro")._mode, "pro")
 
     @patch.dict(os.environ, {}, clear=True)
     def test_explicit_mode_honored(self):
