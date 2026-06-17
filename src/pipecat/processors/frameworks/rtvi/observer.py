@@ -50,6 +50,8 @@ from pipecat.frames.frames import (
     UserMuteStoppedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import (
     LLMUsageMetricsData,
@@ -104,6 +106,10 @@ class RTVIObserverParams:
         bot_audio_level_enabled: Indicates if bot's audio level messages should be sent.
         user_llm_enabled: Indicates if the user's LLM input messages should be sent.
         user_speaking_enabled: Indicates if the user's started/stopped speaking messages should be sent.
+        vad_user_speaking_enabled: Indicates if raw VAD user started/stopped speaking messages
+            should be sent. These reflect the VAD signal directly, independent of turn
+            finalization (unlike ``user_speaking_enabled``, which a turn strategy may gate or
+            defer). Off by default. Defaults to False.
         user_transcription_enabled: Indicates if user's transcription messages should be sent.
         user_audio_level_enabled: Indicates if user's audio level messages should be sent.
         metrics_enabled: Indicates if metrics messages should be sent.
@@ -161,6 +167,7 @@ class RTVIObserverParams:
     bot_audio_level_enabled: bool = False
     user_llm_enabled: bool = True
     user_speaking_enabled: bool = True
+    vad_user_speaking_enabled: bool = False
     user_mute_enabled: bool = True
     user_transcription_enabled: bool = True
     user_audio_level_enabled: bool = False
@@ -425,6 +432,11 @@ class RTVIObserver(BaseObserver):
         ):
             await self._handle_interruptions(frame)
         elif (
+            isinstance(frame, (VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame))
+            and self._params.vad_user_speaking_enabled
+        ):
+            await self._handle_vad_speaking(frame)
+        elif (
             isinstance(frame, (UserMuteStartedFrame, UserMuteStoppedFrame))
             and self._params.user_mute_enabled
         ):
@@ -575,6 +587,17 @@ class RTVIObserver(BaseObserver):
             message = RTVI.UserStartedSpeakingMessage()
         elif isinstance(frame, UserStoppedSpeakingFrame):
             message = RTVI.UserStoppedSpeakingMessage()
+
+        if message:
+            await self.send_rtvi_message(message)
+
+    async def _handle_vad_speaking(self, frame: Frame):
+        """Emit raw VAD user started/stopped speaking messages."""
+        message = None
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            message = RTVI.VADUserStartedSpeakingMessage()
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            message = RTVI.VADUserStoppedSpeakingMessage()
 
         if message:
             await self.send_rtvi_message(message)

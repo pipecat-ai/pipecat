@@ -537,6 +537,28 @@ class UserStoppedSpeakingMessage(BaseModel):
     type: Literal["user-stopped-speaking"] = "user-stopped-speaking"
 
 
+class VADUserStartedSpeakingMessage(BaseModel):
+    """Message indicating VAD detected the user started speaking.
+
+    Raw VAD signal, emitted independently of turn finalization (unlike
+    ``user-started-speaking``, which a turn strategy may gate or defer).
+    """
+
+    label: MessageLiteral = MESSAGE_LABEL
+    type: Literal["vad-user-started-speaking"] = "vad-user-started-speaking"
+
+
+class VADUserStoppedSpeakingMessage(BaseModel):
+    """Message indicating VAD detected the user stopped speaking.
+
+    Raw VAD signal, emitted independently of turn finalization (unlike
+    ``user-stopped-speaking``, which a turn strategy may gate or defer).
+    """
+
+    label: MessageLiteral = MESSAGE_LABEL
+    type: Literal["vad-user-stopped-speaking"] = "vad-user-stopped-speaking"
+
+
 class UserMuteStartedMessage(BaseModel):
     """Message indicating user has been muted."""
 
