@@ -243,3 +243,11 @@ suite:
   - bot: vision/vision-moondream.py
     runner_body: scenarios/vision-cat.json
     scenarios: [vision_describe]
+
+  #
+  # Turn management: the user trails off mid-thought, then completes it after a
+  # pause. The bot's incomplete-turn detection must hold the turn open and
+  # respond only to the finished thought (anchored on the raw VAD stop signal).
+  #
+  - bot: turn-management/turn-management-filter-incomplete-turns.py
+    scenarios: [filter_incomplete_turns]
