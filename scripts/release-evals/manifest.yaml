@@ -251,3 +251,7 @@ suite:
   #
   - bot: turn-management/turn-management-filter-incomplete-turns.py
     scenarios: [filter_incomplete_turns]
+  - bot: turn-management/turn-management-filter-incomplete-turns-function-calling.py
+    scenarios: [filter_incomplete_turns_function_calling]
+  - bot: turn-management/turn-management-filter-incomplete-turns-function-calling.py
+    scenarios: [filter_incomplete_turns]
