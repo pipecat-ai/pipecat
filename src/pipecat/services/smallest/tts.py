@@ -47,8 +47,14 @@ except ModuleNotFoundError as e:
 class SmallestTTSModel(StrEnum):
     """Available Smallest AI TTS models."""
 
-    LIGHTNING_V2 = "lightning-v2"
-    LIGHTNING_V3_1 = "lightning-v3.1"
+    LIGHTNING_V3_1 = "lightning_v3.1"
+    LIGHTNING_V3_1_PRO = "lightning_v3.1_pro"
+
+
+_MODEL_DEFAULT_VOICES: dict[SmallestTTSModel, str] = {
+    SmallestTTSModel.LIGHTNING_V3_1: "sophia",
+    SmallestTTSModel.LIGHTNING_V3_1_PRO: "meher",
+}
 
 
 def language_to_smallest_tts_language(language: Language) -> str:
@@ -90,16 +96,10 @@ class SmallestTTSSettings(TTSSettings):
     """Settings for SmallestTTSService.
 
     Parameters:
-        speed: Speech speed multiplier.
-        consistency: Consistency level for voice generation (0-1).
-        similarity: Similarity level for voice generation (0-1).
-        enhancement: Enhancement level for voice generation (0-2).
+        speed: Speech speed multiplier (0.5-2.0).
     """
 
     speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    consistency: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    similarity: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enhancement: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SmallestTTSService(InterruptibleTTSService):
@@ -130,6 +130,8 @@ class SmallestTTSService(InterruptibleTTSService):
         api_key: str,
         base_url: str = "wss://api.smallest.ai",
         sample_rate: int | None = None,
+        output_format: str = "pcm",
+        word_timestamps: bool = True,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -139,17 +141,32 @@ class SmallestTTSService(InterruptibleTTSService):
             api_key: Smallest AI API key for authentication.
             base_url: Base WebSocket URL for the Smallest API.
             sample_rate: Audio sample rate in Hz. If None, uses default.
+            output_format: Audio format returned by the API. One of ``pcm``,
+                ``mp3``, ``wav``, ``ulaw``, ``alaw``. Defaults to ``pcm``,
+                which is what Pipecat expects internally. Fixed at init time.
+            word_timestamps: Whether to request per-word timing events, enabled by
+                default. When ``True``, the server interleaves ``word_timestamp``
+                messages and the service emits aligned per-word ``TTSTextFrame``s.
+                Supported on base-queue English + Hindi voices (``meher``,
+                ``devansh``, ``kartik``, ``maithili``, ``liam``, ``avery``); other
+                voices silently emit no word events, so leaving this on is safe
+                regardless of voice. Fixed at init time because it determines
+                whether text frames are produced from word timing or pushed whole.
             settings: Runtime-updatable settings for the TTS service.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService.
         """
+        model = SmallestTTSModel.LIGHTNING_V3_1_PRO
+        if settings is not None and settings.model not in (None, NOT_GIVEN):
+            try:
+                model = SmallestTTSModel(settings.model)
+            except ValueError:
+                pass
+
         default_settings = self.Settings(
-            model=SmallestTTSModel.LIGHTNING_V3_1.value,
-            voice="sophia",
+            model=model.value,
+            voice=_MODEL_DEFAULT_VOICES[model],
             language=Language.EN,
             speed=None,
-            consistency=None,
-            similarity=None,
-            enhancement=None,
         )
 
         if settings is not None:
@@ -160,14 +177,20 @@ class SmallestTTSService(InterruptibleTTSService):
             push_start_frame=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
+            push_text_frames=not word_timestamps,
             settings=default_settings,
             **kwargs,
         )
 
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
+        self._output_format = output_format
+        self._word_timestamps = word_timestamps
         self._receive_task = None
         self._keepalive_task = None
+        self._cumulative_time: float = 0.0
+        self._request_end_time: float = 0.0
+        self._wt_request_id: str | None = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -204,6 +227,7 @@ class SmallestTTSService(InterruptibleTTSService):
         msg = {
             "text": text,
             "voice_id": self._settings.voice,
+            "model": self._settings.model,
             "language": self._settings.language,
             "sample_rate": self.sample_rate,
         }
@@ -211,20 +235,16 @@ class SmallestTTSService(InterruptibleTTSService):
         if self._settings.speed is not None:
             msg["speed"] = self._settings.speed
 
-        # consistency, similarity, enhancement are only supported by lightning-v2
-        if self._settings.model == SmallestTTSModel.LIGHTNING_V2.value:
-            if self._settings.consistency is not None:
-                msg["consistency"] = self._settings.consistency
-            if self._settings.similarity is not None:
-                msg["similarity"] = self._settings.similarity
-            if self._settings.enhancement is not None:
-                msg["enhancement"] = self._settings.enhancement
+        if self._word_timestamps:
+            msg["word_timestamps"] = True
+
+        msg["output_format"] = self._output_format
 
         return msg
 
     def _build_websocket_url(self) -> str:
-        """Build the WebSocket URL from base URL and model."""
-        return f"{self._base_url}/waves/v1/{self._settings.model}/get_speech/stream"
+        """Build the WebSocket URL."""
+        return f"{self._base_url}/waves/v1/tts/live"
 
     async def start(self, frame: StartFrame):
         """Start the Smallest TTS service.
@@ -254,22 +274,12 @@ class SmallestTTSService(InterruptibleTTSService):
         await self._disconnect()
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
-        """Apply a settings delta, reconnecting if model changed.
+        """Apply a settings delta.
 
-        Per-message fields (speed, consistency, similarity, enhancement, voice,
-        language) apply automatically on the next ``_build_msg`` call. A model
-        change requires reconnecting because the model is part of the WebSocket URL.
+        All fields (model, speed, voice, language) take effect on the next
+        ``_build_msg`` call without reconnecting.
         """
-        changed = await super()._update_settings(delta)
-
-        if not changed:
-            return changed
-
-        if "model" in changed:
-            await self._disconnect()
-            await self._connect()
-
-        return changed
+        return await super()._update_settings(delta)
 
     async def _connect(self):
         """Connect to Smallest WebSocket and start receive task."""
@@ -362,9 +372,25 @@ class SmallestTTSService(InterruptibleTTSService):
             msg = {
                 "text": " ",
                 "voice_id": self._settings.voice,
+                "model": self._settings.model,
                 "language": self._settings.language,
             }
             await self._websocket.send(json.dumps(msg))
+
+    def _advance_word_timestamp_request(self, request_id: str | None):
+        """Roll the turn offset forward when word timestamps enter a new request."""
+        if request_id == self._wt_request_id:
+            return
+        if self._wt_request_id is not None:
+            self._cumulative_time += self._request_end_time
+            self._request_end_time = 0.0
+        self._wt_request_id = request_id
+
+    async def on_turn_context_created(self, context_id: str):
+        """Reset word-timestamp offsets at the start of each turn."""
+        self._cumulative_time = 0.0
+        self._request_end_time = 0.0
+        self._wt_request_id = None
 
     async def _receive_messages(self):
         """Receive and process messages from the Smallest WebSocket API."""
@@ -384,6 +410,19 @@ class SmallestTTSService(InterruptibleTTSService):
                     context_id=context_id,
                 )
                 await self.append_to_audio_context(context_id, frame)
+            elif status == "word_timestamp":
+                self._advance_word_timestamp_request(msg.get("request_id"))
+                data = msg.get("data", {})
+                word = data.get("word")
+                start = data.get("start")
+                end = data.get("end")
+                if word is not None and start is not None:
+                    context_id = self.get_active_audio_context_id()
+                    await self.add_word_timestamps(
+                        [(word, start + self._cumulative_time)], context_id
+                    )
+                    if end is not None:
+                        self._request_end_time = max(self._request_end_time, end)
             elif status == "error":
                 context_id = self.get_active_audio_context_id()
                 await self.push_frame(TTSStoppedFrame(context_id=context_id))
