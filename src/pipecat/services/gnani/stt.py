@@ -4,18 +4,25 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Gnani Speech-to-Text service implementation.
+"""Gnani Vachana Speech-to-Text service implementations.
 
-This module provides integration with Gnani's multilingual STT API for speech-to-text
-transcription using segmented audio processing.
+Services:
+- GnaniHttpSTTService: REST-based file transcription (requires VAD in pipeline)
+- GnaniSTTService: WebSocket streaming transcription with real-time VAD
 
-For complete API documentation, see: https://docs.inya.ai/vachana/introduction/introduction
+Supported languages: as-IN, bn-IN, en-IN, gu-IN, hi-IN, kn-IN,
+ml-IN, mr-IN, or-IN, pa-IN, ta-IN, te-IN.
+
+For API docs see: https://docs.inya.ai/vachana/introduction/introduction
 """
 
-from typing import AsyncGenerator, Optional
+import asyncio
+import json
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field
 
+import aiohttp
 from loguru import logger
-from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -25,295 +32,327 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
-from pipecat.services.stt_service import SegmentedSTTService
-from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.services.gnani._common import (
+    GNANI_STT_REST_URL,
+    GNANI_STT_WS_URL,
+    get_language_string,
+    stt_language_to_gnani,
+)
+from pipecat.services.gnani._sdk import sdk_headers
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.stt_service import SegmentedSTTService, STTService
+from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
-    import aiohttp
+    from websockets.asyncio.client import connect as websocket_connect
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Gnani STT, you need to `pip install aiohttp`.")
-    raise Exception(f"Missing module: {e}")
+    logger.error(
+        "In order to use Gnani Vachana STT, you need to "
+        "`pip install pipecat-ai[gnani]` or `pip install websockets aiohttp`."
+    )
+    raise ImportError(f"Missing module: {e}") from e
 
 
-def language_to_gnani_language(language: Language) -> Optional[str]:
-    """Convert a Language enum to Gnani's language code format.
-
-    Args:
-        language: The Language enum value to convert.
-
-    Returns:
-        The corresponding Gnani language code (e.g., 'en-IN', 'hi-IN'), or None if not supported.
-    """
-    LANGUAGE_MAP = {
-        # English (India)
-        Language.EN: "en-IN",
-        Language.EN_IN: "en-IN",
-        # Hindi
-        Language.HI: "hi-IN",
-        Language.HI_IN: "hi-IN",
-        # Gujarati
-        Language.GU: "gu-IN",
-        Language.GU_IN: "gu-IN",
-        # Tamil
-        Language.TA: "ta-IN",
-        Language.TA_IN: "ta-IN",
-        # Kannada
-        Language.KN: "kn-IN",
-        Language.KN_IN: "kn-IN",
-        # Telugu
-        Language.TE: "te-IN",
-        Language.TE_IN: "te-IN",
-        # Marathi
-        Language.MR: "mr-IN",
-        Language.MR_IN: "mr-IN",
-        # Bengali
-        Language.BN: "bn-IN",
-        Language.BN_IN: "bn-IN",
-        # Malayalam
-        Language.ML: "ml-IN",
-        Language.ML_IN: "ml-IN",
-        # Punjabi
-        Language.PA: "pa-IN",
-        Language.PA_IN: "pa-IN",
-    }
-
-    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
+# ---------------------------------------------------------------------------
+# REST (HTTP) STT
+# ---------------------------------------------------------------------------
 
 
-class GnaniSTTService(SegmentedSTTService):
-    """Speech-to-text service using Gnani's multilingual STT API.
+@dataclass
+class GnaniHttpSTTSettings(STTSettings):
+    """Settings for GnaniHttpSTTService (REST)."""
 
-    This service uses Gnani's REST API to perform speech-to-text transcription on audio
-    segments. It supports multiple Indian languages and inherits from SegmentedSTTService
-    to handle audio buffering and speech detection.
+    pass
 
-    For complete API documentation, see: https://docs.inya.ai/vachana/introduction/introduction
 
-    Supported languages:
+class GnaniHttpSTTService(SegmentedSTTService):
+    """REST-based speech-to-text service using Gnani Vachana API.
 
-    - English (India) - en-IN
-    - Hindi - hi-IN
-    - Gujarati - gu-IN
-    - Tamil - ta-IN
-    - Kannada - kn-IN
-    - Telugu - te-IN
-    - Marathi - mr-IN
-    - Bengali - bn-IN
-    - Malayalam - ml-IN
-    - Punjabi - pa-IN
+    Transcribes complete audio segments via HTTP POST to /stt/v3. Requires
+    VAD to be enabled in the pipeline so that speech segments are buffered
+    and sent as whole utterances.
+
+    Example::
+
+        stt = GnaniHttpSTTService(
+            api_key="your-api-key",
+            aiohttp_session=session,
+            settings=GnaniHttpSTTService.Settings(
+                language=Language.HI_IN,
+            ),
+        )
     """
 
-    class InputParams(BaseModel):
-        """Configuration parameters for Gnani STT service.
-
-        Parameters:
-            language: Language of the audio input. Defaults to Hindi (hi-IN).
-            api_request_id: Unique request ID for tracking (optional).
-            api_user_id: User/organization identifier.
-        """
-
-        language: Optional[Language] = Language.HI_IN
-        api_request_id: Optional[str] = None
-        api_user_id: str = "pipecat-user"
+    Settings = GnaniHttpSTTSettings
+    _settings: Settings
 
     def __init__(
         self,
         *,
         api_key: str,
-        organization_id: str,
-        base_url: str = "https://api.vachana.ai/stt/v3",
-        sample_rate: Optional[int] = None,
-        params: Optional[InputParams] = None,
+        aiohttp_session: aiohttp.ClientSession,
+        base_url: str = GNANI_STT_REST_URL,
+        settings: Settings | None = None,
         **kwargs,
     ):
-        """Initialize the GnaniSTTService with API credentials and parameters.
+        default_settings = self.Settings(language=Language.EN_IN, model=None)
 
-        Args:
-            api_key: Gnani API key for authentication (X-API-Key-ID).
-            organization_id: Organization identifier (X-Organization-ID).
-            base_url: Base URL for the Gnani STT API. Defaults to production endpoint.
-            sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
-            params: Configuration parameters for the STT service.
-            **kwargs: Additional arguments passed to SegmentedSTTService.
-        """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
-        params = params or GnaniSTTService.InputParams()
+        super().__init__(settings=default_settings, **kwargs)
 
         self._api_key = api_key
-        self._organization_id = organization_id
+        self._session = aiohttp_session
         self._base_url = base_url
-        self._api_user_id = params.api_user_id
-        self._api_request_id = params.api_request_id
-        self._session: Optional[aiohttp.ClientSession] = None
-
-        self._settings = {
-            "language": self.language_to_service_language(params.language)
-            if params.language
-            else "hi-IN",
-        }
 
     def can_generate_metrics(self) -> bool:
-        """Check if the service can generate processing metrics.
-
-        Returns:
-            True, as Gnani STT service supports metrics generation.
-        """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
-        """Convert a Language enum to Gnani's service-specific language code.
-
-        Args:
-            language: The language to convert.
-
-        Returns:
-            The Gnani-specific language code, or None if not supported.
-        """
-        return language_to_gnani_language(language)
-
-    async def start(self, frame: StartFrame):
-        """Start the Gnani STT service and create the HTTP session.
-
-        Args:
-            frame: The start frame containing initialization parameters.
-        """
-        await super().start(frame)
-        self._session = aiohttp.ClientSession()
-
-    async def stop(self, frame: EndFrame):
-        """Stop the Gnani STT service and close the HTTP session.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._close_session()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the Gnani STT service and close the HTTP session.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._close_session()
-
-    async def _close_session(self):
-        """Close the aiohttp session if open."""
-        if self._session:
-            await self._session.close()
-            self._session = None
-
-    async def set_language(self, language: Language):
-        """Set the transcription language.
-
-        Args:
-            language: The language to use for speech-to-text transcription.
-        """
-        logger.info(f"Switching STT language to: [{language}]")
-        gnani_language = self.language_to_service_language(language)
-        if gnani_language:
-            self._settings["language"] = gnani_language
-        else:
-            logger.warning(
-                f"Language {language} not supported by Gnani STT, keeping current language"
-            )
+    def language_to_service_language(self, language: Language) -> str:
+        return stt_language_to_gnani(language)
 
     @traced_stt
-    async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[str] = None
-    ):
-        """Handle a transcription result with tracing."""
-        await self.stop_ttfb_metrics()
-        await self.stop_processing_metrics()
-
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Transcribe an audio segment using Gnani's STT API.
-
-        Args:
-            audio: Raw audio bytes in WAV format (already converted by base class).
-
-        Yields:
-            Frame: TranscriptionFrame containing the transcribed text, or ErrorFrame on failure.
-
-        Note:
-            The audio is already in WAV format from the SegmentedSTTService.
-            Only non-empty transcriptions with successful responses are yielded.
-        """
+        """Transcribe a complete audio segment via Gnani REST API."""
         try:
             await self.start_processing_metrics()
-            await self.start_ttfb_metrics()
 
+            lang = get_language_string(self._settings, stt_language_to_gnani)
+
+            headers = {"X-API-Key-ID": self._api_key, **sdk_headers()}
+
+            form = aiohttp.FormData()
+            form.add_field(
+                "audio_file", audio, filename="audio.wav", content_type="audio/wav"
+            )
+            form.add_field("language_code", lang or "en-IN")
+
+            async with self._session.post(
+                self._base_url, data=form, headers=headers
+            ) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    yield ErrorFrame(error=f"Gnani STT API error: {error_text}")
+                    return
+                result = await response.json()
+
+            await self.stop_processing_metrics()
+
+            text = result.get("transcript", "").strip()
+            if text:
+                yield TranscriptionFrame(
+                    text=text,
+                    user_id=self._user_id if hasattr(self, "_user_id") else "",
+                    timestamp=time_now_iso8601(),
+                    language=lang,
+                )
+
+        except Exception as e:
+            yield ErrorFrame(error=f"Error transcribing audio: {e}", exception=e)
+
+
+# ---------------------------------------------------------------------------
+# WebSocket streaming STT
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class GnaniSTTSettings(STTSettings):
+    """Settings for GnaniSTTService (WebSocket streaming).
+
+    Parameters:
+        sample_rate: Audio sample rate (8000 or 16000 Hz).
+    """
+
+    sample_rate: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+class GnaniSTTService(STTService):
+    """WebSocket streaming speech-to-text using Gnani Vachana.
+
+    Provides real-time speech recognition for Indian languages via a
+    persistent WebSocket connection to wss://api.vachana.ai/stt/v3/stream.
+
+    Event handlers (in addition to STTService events):
+
+    - on_connected(service): Connected to Gnani WebSocket
+    - on_disconnected(service): Disconnected from Gnani WebSocket
+    - on_connection_error(service, error): Connection error occurred
+
+    Example::
+
+        stt = GnaniSTTService(
+            api_key="your-api-key",
+            settings=GnaniSTTService.Settings(
+                language=Language.HI_IN,
+            ),
+        )
+    """
+
+    Settings = GnaniSTTSettings
+    _settings: Settings
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        sample_rate: int | None = None,
+        settings: Settings | None = None,
+        keepalive_timeout: float | None = None,
+        keepalive_interval: float = 5.0,
+        **kwargs,
+    ):
+        default_settings = self.Settings(language=Language.EN_IN, model=None)
+
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            sample_rate=sample_rate or 16000,
+            keepalive_timeout=keepalive_timeout,
+            keepalive_interval=keepalive_interval,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        self._api_key = api_key
+        self._ws = None
+        self._receive_task = None
+
+    def language_to_service_language(self, language: Language) -> str:
+        return stt_language_to_gnani(language)
+
+    def can_generate_metrics(self) -> bool:
+        return True
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        await self._connect()
+
+    async def stop(self, frame: EndFrame):
+        await super().stop(frame)
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
+        await self._disconnect()
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        if not self._ws:
+            await self._connect()
+            if not self._ws:
+                yield None
+                return
+
+        try:
+            await self._ws.send(audio)
+        except Exception as e:
+            logger.warning(f"Gnani STT send failed, reconnecting: {e}")
+            self._ws = None
+            await self._connect()
+            if self._ws:
+                try:
+                    await self._ws.send(audio)
+                except Exception as e2:
+                    yield ErrorFrame(error=f"Error sending audio to Gnani: {e2}", exception=e2)
+
+        yield None
+
+    async def _connect(self):
+        logger.debug("Connecting to Gnani Vachana STT")
+
+        try:
+            lang = get_language_string(self._settings, stt_language_to_gnani)
             headers = {
-                "X-API-Key-ID": self._api_key,
-                "X-Organization-ID": self._organization_id,
-                "X-API-User-ID": self._api_user_id,
+                "x-api-key-id": self._api_key,
+                "lang_code": lang or "en-IN",
+                **sdk_headers(),
             }
 
-            if self._api_request_id:
-                headers["X-API-Request-ID"] = self._api_request_id
-
-            form_data = aiohttp.FormData()
-            form_data.add_field("language_code", self._settings["language"])
-            form_data.add_field(
-                "audio_file",
-                audio,
-                filename="audio.wav",
-                content_type="audio/wav",
+            self._ws = await websocket_connect(
+                GNANI_STT_WS_URL,
+                additional_headers=headers,
+                ping_interval=20,
+                ping_timeout=20,
+                close_timeout=10,
             )
 
-            session = self._session or aiohttp.ClientSession()
-            close_session = self._session is None
+            connected_msg = await asyncio.wait_for(self._ws.recv(), timeout=10)
+            connected_data = json.loads(connected_msg)
+            if connected_data.get("type") == "connected":
+                logger.info(f"Gnani STT connected: {connected_data.get('message', '')}")
+            else:
+                logger.warning(f"Unexpected first message from Gnani STT: {connected_data}")
 
-            try:
-                async with session.post(
-                    self._base_url,
-                    headers=headers,
-                    data=form_data,
-                ) as response:
-                    if response.status == 200:
-                        result = await response.json()
+            self._receive_task = asyncio.create_task(
+                self._receive_messages(), name="gnani-stt-recv"
+            )
 
-                        if result.get("success", False):
-                            transcript = result.get("transcript", "").strip()
+            await self._call_event_handler("on_connected")
 
-                            if transcript:
-                                await self._handle_transcription(
-                                    transcript, True, self._settings["language"]
-                                )
-                                logger.debug(f"Gnani transcription: [{transcript}]")
-
-                                yield TranscriptionFrame(
-                                    transcript,
-                                    self._user_id,
-                                    time_now_iso8601(),
-                                    Language(self._settings["language"]),
-                                    result=result,
-                                )
-                            else:
-                                logger.debug("Gnani returned empty transcript")
-                        else:
-                            error_msg = f"Gnani API returned success=false: {result}"
-                            logger.error(error_msg)
-                            yield ErrorFrame(error=error_msg)
-                    else:
-                        error_text = await response.text()
-                        error_msg = f"Gnani API error (status {response.status}): {error_text}"
-                        logger.error(error_msg)
-                        yield ErrorFrame(error=error_msg)
-            finally:
-                if close_session:
-                    await session.close()
-
-        except aiohttp.ClientError as e:
-            error_msg = f"Network error calling Gnani API: {e}"
-            logger.error(error_msg)
-            yield ErrorFrame(error=error_msg)
         except Exception as e:
-            error_msg = f"Unknown error occurred: {e}"
-            logger.error(error_msg)
-            yield ErrorFrame(error=error_msg)
+            logger.error(f"Failed to connect to Gnani STT: {e}")
+            self._ws = None
+            await self._call_event_handler("on_connection_error", str(e))
+
+    async def _disconnect(self):
+        if self._receive_task:
+            self._receive_task.cancel()
+            try:
+                await self._receive_task
+            except asyncio.CancelledError:
+                pass
+            self._receive_task = None
+
+        if self._ws:
+            try:
+                await self._ws.close()
+            except Exception:
+                pass
+            self._ws = None
+
+        await self._call_event_handler("on_disconnected")
+
+    async def _receive_messages(self):
+        try:
+            async for msg in self._ws:
+                if isinstance(msg, bytes):
+                    continue
+
+                data = json.loads(msg)
+                msg_type = data.get("type", "")
+
+                if msg_type == "transcript":
+                    text = data.get("text", "")
+                    if text:
+                        lang = get_language_string(self._settings, stt_language_to_gnani)
+                        await self.push_frame(
+                            TranscriptionFrame(
+                                text=text,
+                                user_id=self._user_id if hasattr(self, "_user_id") else "",
+                                timestamp=time_now_iso8601(),
+                                language=lang,
+                            )
+                        )
+
+                elif msg_type in (
+                    "processing", "speech_start", "vad_start", "speech_end", "vad_end",
+                ):
+                    pass
+
+                elif msg_type == "error":
+                    error_msg = data.get("message", "Unknown error")
+                    logger.error(f"Gnani STT stream error: {error_msg}")
+                    self._ws = None
+                    await self.push_frame(ErrorFrame(error=f"Gnani STT: {error_msg}"))
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Gnani STT receive error: {e}")
+            self._ws = None
+            await self._call_event_handler("on_connection_error", str(e))

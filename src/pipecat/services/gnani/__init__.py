@@ -4,8 +4,44 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Gnani AI service integrations for Pipecat."""
+"""Gnani Vachana speech AI service integrations for Pipecat.
 
-from pipecat.services.gnani.stt import GnaniSTTService
+STT Services:
+- GnaniHttpSTTService: REST-based file transcription (requires VAD)
+- GnaniSTTService: WebSocket streaming speech-to-text with VAD
 
-__all__ = ["GnaniSTTService"]
+TTS Services:
+- GnaniHttpTTSService: REST-based text-to-speech
+- GnaniSSETTSService: SSE streaming text-to-speech (lower latency)
+- GnaniTTSService: WebSocket streaming text-to-speech with interruption handling
+"""
+
+from pipecat.services.gnani.stt import (
+    GnaniHttpSTTService,
+    GnaniHttpSTTSettings,
+    GnaniSTTService,
+    GnaniSTTSettings,
+)
+from pipecat.services.gnani.tts import (
+    GnaniHttpTTSService,
+    GnaniHttpTTSSettings,
+    GnaniSSETTSService,
+    GnaniSSETTSSettings,
+    GnaniTTSService,
+    GnaniTTSSettings,
+    SUPPORTED_VOICES,
+)
+
+__all__ = [
+    "GnaniHttpSTTService",
+    "GnaniHttpSTTSettings",
+    "GnaniSTTService",
+    "GnaniSTTSettings",
+    "GnaniHttpTTSService",
+    "GnaniHttpTTSSettings",
+    "GnaniSSETTSService",
+    "GnaniSSETTSSettings",
+    "GnaniTTSService",
+    "GnaniTTSSettings",
+    "SUPPORTED_VOICES",
+]
