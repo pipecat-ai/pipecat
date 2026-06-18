@@ -6,9 +6,13 @@
 
 """Vonage Audio Connector WebSocket serializer for Pipecat."""
 
+import base64
 import json
+from enum import StrEnum
+from typing import Any, Literal
 
 from loguru import logger
+from pydantic import Field
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import create_stream_resampler
@@ -23,6 +27,13 @@ from pipecat.frames.frames import (
     StartFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer
+
+
+class VonageAudioTransport(StrEnum):
+    """Audio transport formats supported by Vonage Audio Connector."""
+
+    BINARY = "binary"
+    JSON = "json"
 
 
 class VonageFrameSerializer(FrameSerializer):
@@ -42,11 +53,26 @@ class VonageFrameSerializer(FrameSerializer):
             vonage_sample_rate: Sample rate used by Vonage, defaults to 16000 Hz.
                 Common values: 8000, 16000, 24000 Hz.
             sample_rate: Optional override for pipeline input sample rate.
+            audio_transport: Audio transport selected in the Vonage Audio Connector
+                configuration. ``binary`` sends raw PCM bytes. ``json`` sends JSON
+                text messages with base64-encoded PCM in the configured audio field.
+            encoding: Encoding used by the JSON audio transport. Currently only
+                ``base64`` is supported.
+            audio_field: Outbound JSON field name for base64-encoded audio.
+            receive_audio_field: Optional inbound JSON field name for base64-encoded
+                audio. Defaults to ``audio_field``.
+            static_fields: Additional fields to include in every outbound JSON audio
+                message.
             ignore_rtvi_messages: Inherited from base FrameSerializer, defaults to True.
         """
 
         vonage_sample_rate: int = 16000
         sample_rate: int | None = None
+        audio_transport: VonageAudioTransport = VonageAudioTransport.BINARY
+        encoding: Literal["base64"] = "base64"
+        audio_field: str = "audio"
+        receive_audio_field: str | None = None
+        static_fields: dict[str, Any] = Field(default_factory=dict)
 
     def __init__(self, params: InputParams | None = None):
         """Initialize the VonageFrameSerializer.
@@ -60,6 +86,7 @@ class VonageFrameSerializer(FrameSerializer):
 
         self._vonage_sample_rate = self._params.vonage_sample_rate
         self._sample_rate = 0  # Pipeline input rate
+        self._receive_audio_field = self._params.receive_audio_field or self._params.audio_field
 
         self._input_resampler = create_stream_resampler()
         self._output_resampler = create_stream_resampler()
@@ -81,7 +108,8 @@ class VonageFrameSerializer(FrameSerializer):
             frame: The Pipecat frame to serialize.
 
         Returns:
-            Serialized data as string (JSON commands) or bytes (audio), or None if the frame isn't handled.
+            Serialized data as string (JSON commands) or bytes (audio), or None if the
+            frame isn't handled.
         """
         if isinstance(frame, InterruptionFrame):
             # Clear the audio buffer to stop playback immediately
@@ -98,7 +126,10 @@ class VonageFrameSerializer(FrameSerializer):
                 # Ignoring in case we don't have audio
                 return None
 
-            # Vonage expects raw binary PCM data (not base64 encoded)
+            if self._params.audio_transport == VonageAudioTransport.JSON:
+                return self._serialize_json_audio(serialized_data)
+
+            # By default, Vonage expects raw binary PCM data (not base64 encoded).
             return serialized_data
         elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
             if self.should_ignore_frame(frame):
@@ -124,28 +155,15 @@ class VonageFrameSerializer(FrameSerializer):
         # Check if this is binary audio data
         if isinstance(data, bytes):
             # Binary message = audio data (16-bit linear PCM)
-            payload = data
-
-            # Input: Convert Vonage's PCM audio to pipeline sample rate
-            deserialized_data = await self._input_resampler.resample(
-                payload,
-                self._vonage_sample_rate,
-                self._sample_rate,
-            )
-            if deserialized_data is None or len(deserialized_data) == 0:
-                # Ignoring in case we don't have audio
-                return None
-
-            audio_frame = InputAudioRawFrame(
-                audio=deserialized_data,
-                num_channels=1,  # Vonage uses mono audio
-                sample_rate=self._sample_rate,  # Use the configured pipeline input rate
-            )
-            return audio_frame
+            return await self._deserialize_audio(data)
         else:
             # Text message = JSON event
             try:
                 message = json.loads(data)
+                audio_payload = message.get(self._receive_audio_field)
+                if audio_payload is not None:
+                    return await self._deserialize_json_audio(audio_payload)
+
                 event = message.get("event")
 
                 # Handle different event types
@@ -182,3 +200,44 @@ class VonageFrameSerializer(FrameSerializer):
             except json.JSONDecodeError:
                 logger.warning(f"Failed to parse JSON message from Vonage: {data}")
                 return None
+
+    def _serialize_json_audio(self, data: bytes) -> str:
+        payload = base64.b64encode(data).decode("ascii")
+        message = {
+            **self._params.static_fields,
+            self._params.audio_field: payload,
+        }
+        return json.dumps(message, separators=(",", ":"))
+
+    async def _deserialize_json_audio(self, audio_payload: Any) -> Frame | None:
+        if not isinstance(audio_payload, str):
+            logger.warning(
+                f"Vonage JSON audio field '{self._receive_audio_field}' is not a string"
+            )
+            return None
+
+        try:
+            payload = base64.b64decode(audio_payload)
+        except Exception as e:
+            logger.warning(f"Failed to decode Vonage base64 audio payload: {e}")
+            return None
+
+        return await self._deserialize_audio(payload)
+
+    async def _deserialize_audio(self, payload: bytes) -> Frame | None:
+        # Input: Convert Vonage's PCM audio to pipeline sample rate
+        deserialized_data = await self._input_resampler.resample(
+            payload,
+            self._vonage_sample_rate,
+            self._sample_rate,
+        )
+        if deserialized_data is None or len(deserialized_data) == 0:
+            # Ignoring in case we don't have audio
+            return None
+
+        audio_frame = InputAudioRawFrame(
+            audio=deserialized_data,
+            num_channels=1,  # Vonage uses mono audio
+            sample_rate=self._sample_rate,  # Use the configured pipeline input rate
+        )
+        return audio_frame
