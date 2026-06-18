@@ -906,6 +906,7 @@ class EvalSession:
                         reason=f"send_after never fired: {e}",
                     )
                 )
+                self._debug(f"FAIL: {turn.send_after.event}: {failures[-1].reason}")
                 self._progress(
                     EvalTurnProgress(
                         turn_idx, -1, turn.send_after.event, "timeout", failures[-1].reason
@@ -953,6 +954,7 @@ class EvalSession:
                         reason=reason,
                     )
                 )
+                self._debug(f"FAIL: {expectation.event}: {reason}")
                 self._progress(
                     EvalTurnProgress(turn_idx, exp_idx, expectation.event, "timeout", reason)
                 )
@@ -960,6 +962,7 @@ class EvalSession:
 
             if failure:
                 failures.append(failure)
+                self._debug(f"FAIL: {expectation.event}: {failure.reason}")
                 self._progress(
                     EvalTurnProgress(turn_idx, exp_idx, expectation.event, "failed", failure.reason)
                 )
@@ -1127,7 +1130,7 @@ class EvalSession:
             )
             if val is not None
         )
-        self._debug(f"match: aggregating {expectation.event!r} ({check})")
+        self._debug(f"match: waiting for {expectation.event!r} ({check})")
         aggregate = ""
         last_reason = ""
         seen_any = False
