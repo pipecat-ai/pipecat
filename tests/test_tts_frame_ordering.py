@@ -122,6 +122,38 @@ class MockHttpTTSService(TTSService):
         )
 
 
+class MockSelfStartHttpTTSService(TTSService):
+    """Simulates a service that emits its own TTSStartedFrame (push_start_frame=False).
+
+    Mirrors the websocket TTS services (and NvidiaTTSService) that create the audio
+    context and yield TTSStartedFrame from run_tts rather than letting the base class
+    do it. Used to verify append_to_context is stamped centrally for this path too.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            push_start_frame=False,
+            push_stop_frames=True,
+            push_text_frames=False,
+            sample_rate=_SAMPLE_RATE,
+            **kwargs,
+        )
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        if not self.audio_context_available(context_id):
+            await self.create_audio_context(context_id)
+            yield TTSStartedFrame(context_id=context_id)
+        yield TTSAudioRawFrame(
+            audio=_FAKE_AUDIO,
+            sample_rate=_SAMPLE_RATE,
+            num_channels=1,
+            context_id=context_id,
+        )
+
+
 class MockHttpPushTextTTSService(TTSService):
     """Simulates an HTTP TTS service with push_text_frames=True.
 
@@ -1596,6 +1628,32 @@ async def test_cjk_two_sentences_no_extra_spaces_in_assembled_context():
         f"  Expected: {expected!r}\n"
         f"  Got:      {assembled!r}"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("append_to_context", [True, False])
+@pytest.mark.parametrize(
+    "service_factory",
+    [MockHttpTTSService, MockSelfStartHttpTTSService],
+    ids=["base_class_start_frame", "self_yielded_start_frame"],
+)
+async def test_tts_started_carries_append_to_context(service_factory, append_to_context):
+    """TTSStartedFrame must carry the utterance's append_to_context.
+
+    The assistant aggregator reads TTSStartedFrame.append_to_context to decide whether
+    to open an assistant turn for TTSSpeakFrame utterances. This must hold whether the
+    base class emits the TTSStartedFrame (push_start_frame=True) or the service yields
+    its own (push_start_frame=False), since both are stamped centrally from the TTS
+    context in _handle_audio_context.
+    """
+    tts = service_factory()
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[TTSSpeakFrame(text="hello world", append_to_context=append_to_context)],
+    )
+    started = [f for f in frames_received[0] if isinstance(f, TTSStartedFrame)]
+    assert len(started) == 1, f"Expected exactly one TTSStartedFrame, got {len(started)}"
+    assert started[0].append_to_context is append_to_context
 
 
 if __name__ == "__main__":

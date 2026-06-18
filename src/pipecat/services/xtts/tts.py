@@ -108,6 +108,7 @@ class XTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=XTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             base_url: Base URL of the XTTS streaming server.
             aiohttp_session: HTTP session for making requests to the server.
@@ -115,6 +116,7 @@ class XTTSService(TTSService):
 
                 .. deprecated:: 0.0.106
                     Use ``settings=XTTSService.Settings(language=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate. If None, uses default.
             settings: Runtime-updatable settings. When provided alongside deprecated

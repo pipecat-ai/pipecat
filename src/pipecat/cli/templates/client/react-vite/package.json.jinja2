@@ -1,0 +1,42 @@
+{
+  "name": "{{ project_name }}",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@pipecat-ai/client-js": "^1.11.0",
+    "@pipecat-ai/client-react": "^1.6.0",
+{%- for transport in transports %}
+{%- if transport.value == 'daily' %}
+    "@pipecat-ai/daily-transport": "^1.6.6",
+{%- elif transport.value == 'smallwebrtc' %}
+    "@pipecat-ai/small-webrtc-transport": "^1.10.4",
+{%- elif transport.value == 'websocket' %}
+    "@pipecat-ai/websocket-transport": "^1.6.7",
+{%- endif %}
+{%- endfor %}
+    "@pipecat-ai/voice-ui-kit": "^0.11.0",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10",
+    "@types/node": "^25",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6",
+    "eslint": "^10",
+    "eslint-plugin-react-hooks": "^7",
+    "eslint-plugin-react-refresh": "^0",
+    "globals": "^17",
+    "typescript": "~6",
+    "typescript-eslint": "^8",
+    "vite": "^8.0.16"
+  }
+}

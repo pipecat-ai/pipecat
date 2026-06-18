@@ -10,9 +10,8 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import Frame, LLMRunFrame
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
@@ -29,6 +28,7 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -51,6 +51,7 @@ class SwitchLanguage(ParallelPipeline):
         spanish_tts = CartesiaTTSService(
             api_key=os.environ["CARTESIA_API_KEY"],
             settings=CartesiaTTSService.Settings(
+                language=Language.ES,
                 voice="d4db5fb9-f44b-4bd1-85fa-192e0f0d75f9",  # Spanish-speaking Lady
             ),
         )
@@ -66,8 +67,13 @@ class SwitchLanguage(ParallelPipeline):
     def current_language(self):
         return self._current_language
 
-    async def switch_language(self, params: FunctionCallParams):
-        self._current_language = params.arguments["language"]
+    async def switch_language(self, params: FunctionCallParams, language: str):
+        """Switch to another language when the user asks you to.
+
+        Args:
+            language: The language the user wants you to speak.
+        """
+        self._current_language = language
         await params.result_callback(
             {"voice": f"Your answers from now on should be in {self.current_language}."}
         )
@@ -82,6 +88,10 @@ class SwitchLanguage(ParallelPipeline):
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -115,21 +125,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way. You can speak the following languages: 'English' and 'Spanish'.",
         ),
     )
-    llm.register_function("switch_language", tts.switch_language)
-
-    switch_language_function = FunctionSchema(
-        name="switch_language",
-        description="Switch to another language when the user asks you to",
-        properties={
-            "language": {
-                "type": "string",
-                "description": "The language the user wants you to speak",
-            },
-        },
-        required=["language"],
-    )
-    tools = ToolsSchema(standard_tools=[switch_language_function])
-    context = LLMContext(tools=tools)
+    context = LLMContext(tools=[tts.switch_language])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

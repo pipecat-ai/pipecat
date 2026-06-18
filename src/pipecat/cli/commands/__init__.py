@@ -1,0 +1,11 @@
+#
+# Copyright (c) 2025-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""CLI commands for Pipecat CLI."""
+
+from . import create, init
+
+__all__ = ["create", "init"]

@@ -12,8 +12,8 @@ Speech SDK for real-time audio transcription.
 
 import asyncio
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
-from typing import Any, cast
+from dataclasses import dataclass, field
+from typing import Any, Literal, cast
 
 from loguru import logger
 
@@ -27,7 +27,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.settings import STTSettings, assert_given
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
 from pipecat.services.stt_latency import AZURE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -37,6 +37,7 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 try:
     from azure.cognitiveservices.speech import (
         CancellationReason,
+        ProfanityOption,
         ResultReason,
         SpeechConfig,
         SpeechRecognizer,
@@ -48,15 +49,44 @@ try:
     from azure.cognitiveservices.speech.dialog import AudioConfig
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Azure, you need to `pip install pipecat-ai[azure]`.")
+    logger.error('In order to use Azure, you need to `uv add "pipecat-ai[azure]"`.')
     raise ImportError(f"Missing module: {e}") from e
+
+
+AzureProfanity = Literal["raw", "masked", "removed"]
+"""How Azure handles profanity in transcripts.
+
+* ``"raw"`` — return the text as recognized, no masking.
+* ``"masked"`` — replace profane words with ``****`` (Azure default).
+* ``"removed"`` — drop profane words from the output.
+"""
+
+_PROFANITY_OPTIONS: dict[AzureProfanity, ProfanityOption] = {
+    "raw": ProfanityOption.Raw,
+    "masked": ProfanityOption.Masked,
+    "removed": ProfanityOption.Removed,
+}
 
 
 @dataclass
 class AzureSTTSettings(STTSettings):
-    """Settings for AzureSTTService."""
+    """Settings for AzureSTTService.
 
-    pass
+    ``model`` and ``language`` are inherited from ``STTSettings`` /
+    ``ServiceSettings``.
+
+    Parameters:
+        profanity: How Azure handles profanity in transcripts. One of
+            ``"raw"``, ``"masked"``, or ``"removed"`` (see ``AzureProfanity``).
+            Store-mode default is ``None`` (Azure SDK default = ``"masked"``).
+            Use ``"raw"`` for non-English deployments where Azure's profanity
+            list is over-eager and masks ordinary words (e.g. Italian names
+            containing common substrings), which breaks downstream fuzzy
+            matching and LLM reasoning. See `SpeechConfig.set_profanity
+            <https://learn.microsoft.com/en-us/python/api/azure-cognitiveservices-speech/azure.cognitiveservices.speech.speechconfig#azure-cognitiveservices-speech-speechconfig-set-profanity>`_.
+    """
+
+    profanity: AzureProfanity | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AzureSTTService(STTService):
@@ -93,6 +123,7 @@ class AzureSTTService(STTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AzureSTTService.Settings(language=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             private_endpoint: Private endpoint for STT behind firewall.
@@ -108,6 +139,7 @@ class AzureSTTService(STTService):
         default_settings = self.Settings(
             model=None,
             language=Language.EN_US,
+            profanity=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -155,6 +187,8 @@ class AzureSTTService(STTService):
         if endpoint_id:
             self._speech_config.endpoint_id = endpoint_id
 
+        self._apply_profanity()
+
         self._audio_stream = None
         self._speech_recognizer = None
 
@@ -177,17 +211,36 @@ class AzureSTTService(STTService):
         """
         return language_to_azure_language(language)
 
+    def _apply_profanity(self):
+        """Apply the current ``profanity`` setting to the speech config.
+
+        A no-op when profanity is ``None`` (keeps the Azure SDK default of
+        ``"masked"``).
+        """
+        # Annotate the local so pyright solves ``assert_given``'s TypeVar to the
+        # literal instead of widening it to ``str`` (which wouldn't be a valid
+        # ``_PROFANITY_OPTIONS`` key).
+        profanity: AzureProfanity | None = assert_given(self._settings.profanity)
+        if profanity is not None:
+            self._speech_config.set_profanity(_PROFANITY_OPTIONS[profanity])
+
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
-        """Apply a settings delta and reconnect if language changed."""
+        """Apply a settings delta and reconnect if language or profanity changed."""
         changed = await super()._update_settings(delta)
 
         if "language" in changed:
             self._speech_config.speech_recognition_language = assert_given(
                 self._settings.language
             ) or language_to_azure_language(Language.EN_US)
-            if self._audio_stream:
-                await self._disconnect()
-                await self._connect()
+
+        if "profanity" in changed:
+            self._apply_profanity()
+
+        # Both settings are baked into the recognizer at connect time, so a
+        # live change only takes effect after a reconnect.
+        if ("language" in changed or "profanity" in changed) and self._audio_stream:
+            await self._disconnect()
+            await self._connect()
 
         return changed
 
@@ -286,12 +339,18 @@ class AzureSTTService(STTService):
                 "Language | None",
                 getattr(event.result, "language", None) or assert_given(self._settings.language),
             )
+            # Azure's ``RecognizedSpeech`` event is by definition the final
+            # recognition for an utterance — mark the frame as such so that
+            # downstream turn-stop strategies (``SpeechTimeoutUserTurnStop``
+            # and friends) can take their finalized fast-path instead of
+            # waiting for VAD events that may never arrive on short replies.
             frame = TranscriptionFrame(
                 event.result.text,
                 self._user_id,
                 time_now_iso8601(),
                 language,
                 result=event,
+                finalized=True,
             )
             asyncio.run_coroutine_threadsafe(
                 self._handle_transcription(event.result.text, True, language), self.get_event_loop()

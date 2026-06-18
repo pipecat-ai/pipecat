@@ -24,6 +24,8 @@ from urllib.parse import urlencode
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -41,18 +43,9 @@ from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_give
 from pipecat.services.stt_latency import ELEVENLABS_REALTIME_TTFS_P99, ELEVENLABS_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use ElevenLabs Realtime STT, you need to `pip install pipecat-ai[elevenlabs]`."
-    )
-    raise ImportError(f"Missing module: {e}") from e
 
 
 def language_to_elevenlabs_language(language: Language) -> str:
@@ -227,11 +220,16 @@ class ElevenLabsSTTService(SegmentedSTTService):
     Settings = ElevenLabsSTTSettings
     _settings: Settings
 
+    @deprecated(
+        "`ElevenLabsSTTService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `ElevenLabsSTTService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Configuration parameters for ElevenLabs STT API.
 
         .. deprecated:: 0.0.105
             Use ``settings=ElevenLabsSTTService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Target language for transcription.
@@ -264,12 +262,14 @@ class ElevenLabsSTTService(SegmentedSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsSTTService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
             params: Configuration parameters for the STT service.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsSTTService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -466,11 +466,16 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
     Settings = ElevenLabsRealtimeSTTSettings
     _settings: Settings
 
+    @deprecated(
+        "`ElevenLabsRealtimeSTTService.InputParams` is deprecated since 0.0.105 and will be "
+        "removed in 2.0.0. Use `ElevenLabsRealtimeSTTService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Configuration parameters for ElevenLabs Realtime STT API.
 
         .. deprecated:: 0.0.105
             Use ``settings=ElevenLabsRealtimeSTTService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language_code: ISO-639-1 or ISO-639-3 language code. Leave None for auto-detection.
@@ -526,6 +531,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsRealtimeSTTService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
             include_timestamps: Whether to include word-level timestamps in transcripts.
@@ -535,6 +541,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsRealtimeSTTService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

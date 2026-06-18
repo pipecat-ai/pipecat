@@ -95,11 +95,13 @@ class OpenAIImageGenService(ImageGenService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAIImageGenService.Settings(image_size=...)`` instead.
+                    Will be removed in 2.0.0.
 
             model: DALL-E model to use for generation. Defaults to "dall-e-3".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAIImageGenService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -162,7 +164,7 @@ class OpenAIImageGenService(ImageGenService):
             frame = URLImageRawFrame(
                 image=image.tobytes(),
                 size=image.size,
-                format=image.format,
+                format=image.mode,
                 url=image_url,
             )
             yield frame

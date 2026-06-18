@@ -19,7 +19,7 @@ import wave
 from collections.abc import Awaitable, Callable
 
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -40,6 +40,7 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.utils.enums import EndTaskReason
+from pipecat.utils.security.allowed_origins import default_allowed_origins, is_origin_allowed
 
 try:
     from fastapi import WebSocket
@@ -47,9 +48,14 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use FastAPI websockets, you need to `pip install pipecat-ai[websocket]`."
+        'In order to use FastAPI websockets, you need to `uv add "pipecat-ai[websocket]"`.'
     )
     raise ImportError(f"Missing module: {e}") from e
+
+
+# Default time (in seconds) to wait for the WebSocket close handshake in
+# ``FastAPIWebsocketClient.disconnect()`` before proceeding with shutdown.
+_WS_CLOSE_TIMEOUT_DEFAULT = 0.5
 
 
 class FastAPIWebsocketParams(TransportParams):
@@ -61,12 +67,27 @@ class FastAPIWebsocketParams(TransportParams):
         session_timeout: Session timeout in seconds, None for no timeout.
         fixed_audio_packet_size: Optional fixed-size packetization for raw PCM audio payloads.
             Useful when the remote WebSocket media endpoint requires strict audio framing.
+        allowed_origins: List of allowed origins. Empty list allows all
+            origins. When set, connections with a missing or disallowed Origin header
+            are rejected. Defaults to ``PIPECAT_ALLOWED_ORIGINS`` env var
+            (comma-separated).
+        ws_close_timeout: Maximum time, in seconds, to wait for the WebSocket
+            close handshake during disconnect. The close is initiated in a
+            background task before we start waiting, so the close frame is sent
+            to the peer in the common case; this only bounds how long we wait
+            for the peer to acknowledge it before letting shutdown proceed.
+            Prevents a dead or half-closed peer (e.g. a telephony call already
+            torn down on the provider's side) from stalling pipeline shutdown on
+            the ASGI server's close-handshake timeout. Increase it for
+            high-latency peers that need longer to complete a graceful close.
     """
 
     add_wav_header: bool = False
     serializer: FrameSerializer | None = None
     session_timeout: int | None = None
     fixed_audio_packet_size: int | None = None
+    allowed_origins: list[str] = Field(default_factory=default_allowed_origins)
+    ws_close_timeout: float = _WS_CLOSE_TIMEOUT_DEFAULT
 
 
 class FastAPIWebsocketCallbacks(BaseModel):
@@ -110,18 +131,27 @@ class FastAPIWebsocketClient:
     with support for both binary and text message types.
     """
 
-    def __init__(self, websocket: WebSocket, callbacks: FastAPIWebsocketCallbacks):
+    def __init__(
+        self,
+        websocket: WebSocket,
+        callbacks: FastAPIWebsocketCallbacks,
+        ws_close_timeout: float = _WS_CLOSE_TIMEOUT_DEFAULT,
+    ):
         """Initialize the WebSocket client.
 
         Args:
             websocket: The FastAPI WebSocket connection.
             callbacks: Event callback functions.
+            ws_close_timeout: Maximum time, in seconds, to wait for the close
+                handshake in ``disconnect()`` before proceeding.
         """
         self._websocket = websocket
         self._closing = False
         self._callbacks = callbacks
         self._leave_counter = 0
         self._transfer_in_progress = False
+        self._ws_close_timeout = ws_close_timeout
+        self._close_task: asyncio.Task | None = None
 
     async def setup(self, _: StartFrame):
         """Set up the WebSocket client.
@@ -157,28 +187,45 @@ class FastAPIWebsocketClient:
             )
 
     async def disconnect(self):
-        """Disconnect the WebSocket client."""
+        """Disconnect the WebSocket client.
+
+        The close handshake is bounded by ``ws_close_timeout``. The close is
+        initiated in a background task before we start waiting, so the close
+        frame is sent to the peer in the common case; we then wait at most
+        ``ws_close_timeout`` seconds for the peer to acknowledge it. If the peer
+        never replies (e.g. a half-closed connection after the remote side
+        already hung up), we stop waiting and let shutdown proceed instead of
+        blocking on the ASGI server's close-handshake timeout. The close task is
+        left running and its eventual result is logged, since the underlying
+        ``close()`` may not respond to cancellation.
+        """
         self._leave_counter -= 1
         if self._leave_counter > 0:
             return
 
         if self.is_connected and not self.is_closing:
             self._closing = True
-            try:
-                # Cap the close handshake — some peers (notably telephony
-                # providers torn down via a separate REST call) can take the
-                # full 10s websockets-library default to ACK the close, which
-                # blocks pipeline shutdown. The application-state is already
-                # DISCONNECTED by this point, so abandoning the wait is safe.
-                await asyncio.wait_for(self._websocket.close(), timeout=1.0)
-            except TimeoutError:
-                logger.warning(
-                    f"{self} websocket close handshake timed out — "
-                    f"application_state={self._websocket.application_state} "
-                    f"client_state={self._websocket.client_state}"
+            self._close_task = asyncio.create_task(self._websocket.close(), name="fastapi-ws-close")
+            self._close_task.add_done_callback(self._on_close_done)
+            done, _ = await asyncio.wait({self._close_task}, timeout=self._ws_close_timeout)
+            if not done:
+                logger.debug(
+                    f"{self} WebSocket close exceeded {self._ws_close_timeout}s; "
+                    "proceeding with shutdown"
                 )
-            except Exception as e:
-                logger.error(f"{self} exception while closing the websocket: {e}")
+
+    def _on_close_done(self, task: asyncio.Task):
+        """Log the outcome of the WebSocket close task.
+
+        Runs whether the close completed within ``ws_close_timeout`` or
+        afterwards, so an error raised by a slow close is still surfaced.
+        """
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"{self} exception while closing the websocket: {e}")
 
     async def trigger_client_disconnected(self):
         """Trigger the client disconnected callback."""
@@ -417,8 +464,8 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         """
         await super().stop(frame)
 
-        # Lets mark transfer in progress in client, so that we dont call on_client_disconnected
-        # handler if
+        # Transfer ends the current media WebSocket intentionally; don't report
+        # it as a user hangup through on_client_disconnected.
         if isinstance(frame, EndFrame) and frame.reason == EndTaskReason.TRANSFER_CALL.value:
             self._client._transfer_in_progress = True
 
@@ -576,12 +623,21 @@ class FastAPIWebsocketTransport(BaseTransport):
     ):
         """Initialize the FastAPI WebSocket transport.
 
+        Raises ``ValueError`` if ``params.allowed_origins`` is set and the
+        connection's Origin header is missing or not in the allowed list. The
+        caller is responsible for closing the WebSocket in that case.
+
         Args:
             websocket: The FastAPI WebSocket connection.
             params: Transport configuration parameters.
             input_name: Optional name for the input processor.
             output_name: Optional name for the output processor.
         """
+        if params.allowed_origins:
+            origin = websocket.headers.get("origin", "")
+            if not is_origin_allowed(origin, params.allowed_origins):
+                raise ValueError(f"WebSocket connection rejected: origin '{origin}' not allowed")
+
         super().__init__(input_name=input_name, output_name=output_name)
 
         self._params = params
@@ -592,7 +648,9 @@ class FastAPIWebsocketTransport(BaseTransport):
             on_session_timeout=self._on_session_timeout,
         )
 
-        self._client = FastAPIWebsocketClient(websocket, self._callbacks)
+        self._client = FastAPIWebsocketClient(
+            websocket, self._callbacks, ws_close_timeout=self._params.ws_close_timeout
+        )
 
         self._input = FastAPIWebsocketInputTransport(
             self, self._client, self._params, name=self._input_name

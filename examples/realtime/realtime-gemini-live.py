@@ -13,6 +13,7 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -20,7 +21,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
-    UserTurnStoppedMessage,
+    UserTurnMessageAddedMessage,
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -63,6 +64,10 @@ You have three tools available to you:
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -96,6 +101,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             },
         },
         required=["location", "format"],
+        handler=fetch_weather_from_api,
     )
     restaurant_function = FunctionSchema(
         name="get_restaurant_recommendation",
@@ -107,6 +113,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             },
         },
         required=["location"],
+        handler=fetch_restaurant_recommendation,
     )
     search_tool = {"google_search": {}}
     # KNOWN ISSUE: If using GeminiVertexLiveLLMService, it appears
@@ -126,12 +133,36 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         tools=tools,
     )
 
-    llm.register_function("get_current_weather", fetch_weather_from_api)
-    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
-
     context = LLMContext()
-    # Server-side VAD is enabled by default; no local VAD is added.
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
+    # Gemini Live drives the conversation server-side.
+    #
+    # It does not, however, emit turn frames (UserStartedSpeakingFrame,
+    # UserStoppedSpeakingFrame). realtime_service_mode ensures that context
+    # aggregation will work without those frames, but you can add supplemental
+    # local turn frames for consumption by other pipeline processors that
+    # expect them (like RTVI), or to trigger on_user_turn_* events. WARNING:
+    # you should consider supplemental local turn frames approximate, as they
+    # may not always align with server turns.
+    #
+    # To enable supplemental local turn frames, uncomment the SileroVADAnalyzer
+    # and related imports below and the `user_params=` argument further down.
+    # Doing so enables the on_user_turn_stopped event, which you could then
+    # also uncomment.
+    #
+    # For local turn detection fully driving the conversation (server VAD
+    # disabled), see `realtime-gemini-live-locally-driven-turns.py` instead.
+    #
+    # from pipecat.audio.vad.silero import SileroVADAnalyzer
+    # from pipecat.processors.aggregators.llm_response_universal import (
+    #     LLMUserAggregatorParams,
+    #     UserTurnStoppedMessage,
+    # )
+    # from pipecat.turns.user_stop import BaseUserTurnStopStrategy
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        realtime_service_mode=True,
+        # user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
 
     pipeline = Pipeline(
         [
@@ -166,8 +197,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client disconnected")
         await worker.cancel()
 
-    @user_aggregator.event_handler("on_user_turn_stopped")
-    async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
+    # See comment above the user_aggregator for details on why this is
+    # commented out and instructions for enabling it.
+    # @user_aggregator.event_handler("on_user_turn_stopped")
+    # async def on_user_turn_stopped(
+    #     aggregator,
+    #     strategy: BaseUserTurnStopStrategy,
+    #     message: UserTurnStoppedMessage,
+    # ):
+    #     logger.info(f"User turn stopped at {message.timestamp}")
+
+    @user_aggregator.event_handler("on_user_turn_message_added")
+    async def on_user_turn_message_added(aggregator, message: UserTurnMessageAddedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         line = f"{timestamp}user: {message.content}"
         logger.info(f"Transcript: {line}")

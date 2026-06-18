@@ -18,9 +18,8 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -51,6 +50,10 @@ load_dotenv(override=True)
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -66,9 +69,13 @@ transport_params = {
 }
 
 
-# Tool functions for the LLM
-async def get_current_weather(params: FunctionCallParams):
-    """Get the current time in a readable format."""
+async def get_current_weather(params: FunctionCallParams, location: str, format: str):
+    """Get the current weather.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+        format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
+    """
     logger.info("Tool called: get_current_weather")
     await asyncio.sleep(1)  # Simulate some processing
     await params.result_callback({"conditions": "nice", "temperature": "75"})
@@ -93,28 +100,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    # Register tool functions
-    llm.register_function("get_current_weather", get_current_weather)
-
-    weather_function = FunctionSchema(
-        name="get_current_weather",
-        description="Get the current weather",
-        properties={
-            "location": {
-                "type": "string",
-                "description": "The city and state, e.g. San Francisco, CA",
-            },
-            "format": {
-                "type": "string",
-                "enum": ["celsius", "fahrenheit"],
-                "description": "The temperature unit to use. Infer this from the user's location.",
-            },
-        },
-        required=["location", "format"],
-    )
-    tools = ToolsSchema(standard_tools=[weather_function])
-
-    context = LLMContext(tools=tools)
+    context = LLMContext(tools=[get_current_weather])
 
     # Create aggregators with summarization enabled
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(

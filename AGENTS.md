@@ -57,9 +57,11 @@ All data flows as **Frame** objects through a pipeline of **FrameProcessors**:
 
 - **Transports** (`src/pipecat/transports/`): Transports are frame processors used for external I/O layer (Daily WebRTC, LiveKit WebRTC, WebSocket, Local). Abstract interface via `BaseTransport`, `BaseInputTransport` and `BaseOutputTransport`.
 
-- **Pipeline Task (`src/pipecat/pipeline/task.py`)**: Runs and manages a pipeline. Pipeline tasks send the first frame, `StartFrame`, to the pipeline in order for processors to know they can start processing and pushing frames. Pipeline tasks internally create a pipeline with two additional processors, a source processor before the user-defined pipeline and a sink processor at the end. Those are used for multiple things: error handling, pipeline task level events, heartbeat monitoring, etc.
+- **Workers (`src/pipecat/workers/`)**: A **worker** is the top-level runnable unit (it replaces the old "pipeline task"). `BaseWorker` (`src/pipecat/workers/base_worker.py`) is the abstract base: it owns activation, end/cancel, bus subscription, job RPC, and a default `run()` for bus-only workers. `WorkerParams` configures it. Specialized workers live under `src/pipecat/workers/llm/` (`LLMWorker` adds `@tool` collection; `LLMContextWorker` adds an `LLMContext` plus aggregator pair) and `src/pipecat/workers/ui/` (`UIWorker`).
 
-- **Pipeline Runner (`src/pipecat/pipeline/runner.py`)**: High-level entry point for executing pipeline tasks. Handles signal management (SIGINT/SIGTERM) for graceful shutdown and optional garbage collection. Run a single pipeline task with `await runner.run(task)` or multiple concurrently with `await asyncio.gather(runner.run(task1), runner.run(task2))`.
+- **Pipeline Worker (`src/pipecat/pipeline/worker.py`)**: `PipelineWorker` is the `BaseWorker` subclass that wraps a user-defined pipeline — the common single-bot case. It sends the first frame, `StartFrame`, so processors know they can start processing and pushing frames, and internally wraps the pipeline with a source processor (before the pipeline) and a sink processor (at the end) used for error handling, worker-level events, heartbeat monitoring, etc. Optional `bridged=` adds bus edge processors so the pipeline can exchange frames with other workers. `PipelineTask` is a deprecated (1.3.0) alias — construct `PipelineWorker` instead.
+
+- **Worker Runner (`src/pipecat/workers/runner.py`)**: `WorkerRunner` is the high-level entry point for executing workers. It owns the shared `WorkerBus` and `WorkerRegistry` and handles signal management (SIGINT/SIGTERM) for graceful shutdown. Register workers with `await runner.add_workers(*workers)`, then `await runner.run()`. By default (`auto_end=True`) the runner ends once every root worker finishes — so a single-pipeline bot ends when its pipeline does; pass `auto_end=False` for long-lived hosts (e.g. a FastAPI server) that add/remove workers across sessions. `PipelineRunner`, and passing a worker directly to `run(worker)`, are deprecated (1.3.0).
 
 - **Services** (`src/pipecat/services/`): 60+ AI provider integrations (STT, TTS, LLM, etc.). Extend base classes: `AIService`, `LLMService`, `STTService`, `TTSService`, `VisionService`.
 
@@ -67,18 +69,32 @@ All data flows as **Frame** objects through a pipeline of **FrameProcessors**:
 
 - **RTVI** (`src/pipecat/processors/frameworks/rtvi.py`): Real-Time Voice Interface protocol bridging clients and the pipeline. `RTVIProcessor` handles incoming client messages (text input, audio, function call results). `RTVIObserver` converts pipeline frames to outgoing messages: user/bot speaking events, transcriptions, LLM/TTS lifecycle, function calls, metrics, and audio levels.
 
-- **Observers** (`src/pipecat/observers/`): Monitor frame flow without modifying the pipeline. Passed to `PipelineTask` via the `observers` parameter. Implement `on_process_frame()` and `on_push_frame()` callbacks.
+- **Observers** (`src/pipecat/observers/`): Monitor frame flow without modifying the pipeline. Passed to `PipelineWorker` via the `observers` parameter. Implement `on_process_frame()` and `on_push_frame()` callbacks.
+
+### Workers, Bus, and Jobs
+
+Beyond the single-pipeline case, Pipecat supports multiple cooperating **workers** coordinated by a shared bus (folded in from the former `pipecat-subagents` package). Terminology note: a "worker" is a runnable unit, "task" now refers only to asyncio tasks, and cross-worker RPC uses "jobs" and "job groups".
+
+- **Bus** (`src/pipecat/bus/`): `WorkerBus` is the abstract pub/sub message bus; `AsyncQueueBus` (`bus/local/async_queue.py`) is the default in-process implementation, with `PgmqBus` / `RedisBus` (`bus/network/`) for distributed workers. Typed messages live in `bus/messages.py` (a `BusMessage` hierarchy split into normal-priority data messages and high-priority system messages, covering frame transport, worker lifecycle, and job RPC). `BusBridgeProcessor` (`bus/bridge_processor.py`) bridges a pipeline to the bus; `BusSubscriber` is the receive-side mixin.
+
+- **Registry** (`src/pipecat/registry/`): `WorkerRegistry` tracks local and remote workers. The runner manages registration; code uses `watch(name, handler)` (or the `@worker_ready(name=...)` decorator) to be notified when a named worker becomes ready.
+
+- **Jobs** (`src/pipecat/pipeline/job_context.py`, `job_decorator.py`, `worker_ready_decorator.py`): A worker exposes handlers with `@job(name=..., sequential=...)`. A caller opens `async with self.job(worker_name, ...)` (single worker) or `self.job_group(*worker_names, ...)` (fan-out) to send a request and await `JobStatus` results / streamed updates over the bus.
+
+- **LLM tools** (`src/pipecat/workers/llm/tool_decorator.py`): On an `LLMWorker`, methods marked `@tool` are auto-collected and registered with the LLM service (supports `cancel_on_interruption` and `timeout`).
+
+Runnable examples live in `examples/multi-worker/` (local handoff, distributed handoff via pgmq/redis, parallel debate, remote proxy, UI worker).
 
 ### Important Patterns
 
-- **Context Aggregation**: `LLMContext` accumulates messages for LLM calls; `UserResponse` aggregates user input
+- **Context Aggregation**: `LLMContext` accumulates messages for LLM calls; the aggregators created by `LLMContextAggregatorPair` keep it updated with user and assistant turns
 
 - **Turn Management**: Turn management is done through `LLMUserAggregator` and
   `LLMAssistantAggregator`, created with `LLMContextAggregatorPair`
 
 - **User turn strategies**: Detection of when the user starts and stops speaking is done via user turn start/stop strategies. They push `UserStartedSpeakingFrame` and `UserStoppedSpeakingFrame` respectively.
 
-- **Interruptions**: Interruptions are usually triggered by a user turn start strategy (e.g. `VADUserTurnStartStrategy`) but they can be triggered by other processors as well, in which case the user turn start strategies don't need to. An `InterruptionFrame` carries an optional `asyncio.Event` that is set when the frame reaches the pipeline sink. If a processor stops an `InterruptionFrame` from propagating downstream (i.e., doesn't push it), it **must** call `frame.complete()` to avoid stalling `push_interruption_task_frame_and_wait()` callers.
+- **Interruptions**: Interruptions are usually triggered by a user turn start strategy (e.g. `VADUserTurnStartStrategy`), but any processor can trigger one by calling `await self.broadcast_interruption()`, which broadcasts an `InterruptionFrame` both upstream and downstream. The old `push_interruption_task_frame_and_wait()` is deprecated and delegates to `broadcast_interruption()`.
 
 - **Uninterruptible Frames**: These are frames that will not be removed from internal queues even if there's an interruption. For example, `EndFrame` and `StopFrame`.
 
@@ -88,24 +104,34 @@ All data flows as **Frame** objects through a pipeline of **FrameProcessors**:
 
 - **Error Handling**: Use `await self.push_error(msg, exception, fatal)` to push errors upstream. Services should use `fatal=False` (the default) so application code can handle errors and take action (e.g. switch to another service).
 
+- **Accessing the worker**: Reach the running worker via the `pipeline_worker` property on `FrameProcessor` and the `pipeline_worker` field on `FunctionCallParams`. Both are required once the processor is set up (the property raises if accessed before setup). The old `pipeline_task` accessor is deprecated (1.3.0).
+
 ### Key Directories
 
 | Directory                  | Purpose                                            |
 | -------------------------- | -------------------------------------------------- |
 | `src/pipecat/frames/`      | Frame definitions (100+ types)                     |
 | `src/pipecat/processors/`  | FrameProcessor base + aggregators, filters, audio  |
-| `src/pipecat/pipeline/`    | Pipeline orchestration                             |
+| `src/pipecat/pipeline/`    | Pipeline orchestration; PipelineWorker + job RPC   |
+| `src/pipecat/workers/`     | Worker model: BaseWorker, runner, LLM/UI workers   |
+| `src/pipecat/bus/`         | Inter-worker message bus (local + pgmq/redis)      |
+| `src/pipecat/registry/`    | Worker registry (local + remote tracking)          |
 | `src/pipecat/services/`    | AI service integrations (60+ providers)            |
 | `src/pipecat/transports/`  | Transport layer (Daily, LiveKit, WebSocket, Local) |
 | `src/pipecat/serializers/` | Frame serialization for WebSocket protocols        |
 | `src/pipecat/observers/`   | Pipeline observers for monitoring frame flow       |
 | `src/pipecat/audio/`       | VAD, filters, mixers, turn detection, DTMF         |
 | `src/pipecat/turns/`       | User turn management                               |
+| `src/pipecat/adapters/`    | LLM provider adapters (context/tools conversion)   |
+| `src/pipecat/runner/`      | Development runner (multi-transport bot hosting)   |
+| `src/pipecat/cli/`         | `pipecat` CLI (`init`, `eval`)                     |
+| `src/pipecat/evals/`       | Behavioral eval framework (run via `pipecat eval`) |
+| `src/pipecat/metrics/`     | Metrics data models                                |
 
 ## Code Style
 
 - **Docstrings**: Google-style. Classes describe purpose; `__init__` has `Args:` section; dataclasses use `Parameters:` section.
-- **Deprecations**: Use the `.. deprecated:: <version>` Sphinx directive in docstrings (never inline tags like `[DEPRECATED]`), and pair it with a runtime `warnings.warn(..., DeprecationWarning)` at the call site. See `CONTRIBUTING.md` for full conventions.
+- **Deprecations**: Every deprecation needs a `.. deprecated:: <version>` directive in the docstring (never inline `[DEPRECATED]` tags) — it's the registry's source of truth. Its body must **lead with the replacement as the first reference** — `Use :class:`X` instead.` / `Moved to :mod:`X`.` / `Merged into :class:`X`.` — or state `No replacement.` explicitly; **never lead with a contextual reference** (the deprecated thing itself, a `DeprecationWarning`, or a related-but-not-replacement API), and don't rely on incidental words like "no longer" to signal no-replacement. Prefer Sphinx roles (`:class:`/`:meth:`/`:func:`/`:attr:`/`:mod:`) over plain backticks, but use a backtick when a role wouldn't resolve (aliases like `Service.Settings`, usage idioms, parameters). For the runtime warning: **classes, functions, methods, and properties** use the PEP 702 `@deprecated` decorator from `pipecat.utils.deprecation` with a string-literal message matching the canonical template — `` `Subject` is deprecated since X.Y.Z and will be removed in A.B.C. Use `Replacement` instead. `` — where the removal is a concrete version (e.g. `2.0.0`, never "a future release") and the tail is `No replacement.` when nothing replaces it. Parameters, module moves, and behavior/value changes can't use the decorator — call `warnings.warn(..., DeprecationWarning)` by hand. Enforced by `tests/test_deprecation_markers.py`; full conventions in `CONTRIBUTING.md`.
 - **Linting**: Ruff (line length 100). Pre-commit hooks enforce formatting.
 - **Type hints**: Required for complex async code.
 - **Dataclass vs Pydantic**: Use `@dataclass` for frames and internal pipeline data (high-frequency, no validation needed). Use Pydantic `BaseModel` for configuration, parameters, metrics, and external API data (benefits from validation and serialization). Specifically:
@@ -156,6 +182,13 @@ class MyParams(BaseModel):
     new_setting: str = "default"
     old_setting: str | None = None
 ```
+
+## Writing for Future Readers
+
+This applies to everything that documents the code — comments, docstrings, commit messages, changelog entries, PR descriptions. Write for a future reader of the codebase, NOT for whoever is reviewing and collaborating on the work right now.
+
+- **Leave the current moment out of it.** Detail that feels important while making a change — alternatives considered and not taken, what the code used to do, shorthand that only made sense while the work was in progress — usually isn't worth a future reader's time, and may not even make sense to them. Include it only when they genuinely need it to understand the code as it stands.
+- **Match the weight of the prose to the code.** Keep it general, high-level, and concise. Reserve long comments for architecturally salient pieces, genuinely tricky sections, or decisions non-obvious enough that a reader would otherwise be puzzled. Routine code needs a short note or none at all.
 
 ## Service Implementation
 

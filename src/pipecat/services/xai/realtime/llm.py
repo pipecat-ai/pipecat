@@ -20,6 +20,8 @@ from typing import Any
 from urllib.parse import quote
 
 from loguru import logger
+from typing_extensions import override
+from websockets.asyncio.client import connect as websocket_connect
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
@@ -50,7 +52,7 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, RealtimeServiceInfo
 from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
@@ -61,13 +63,6 @@ from pipecat.services.settings import (
 from pipecat.utils.time import time_now_iso8601
 
 from . import events
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Grok Realtime, you need to `pip install pipecat-ai[grok]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 
 @dataclass
@@ -195,6 +190,16 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         - Built-in tools (web_search, x_search, file_search)
         - Custom function calling
         - Server-side VAD (Voice Activity Detection)
+
+    Emits ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame`` from
+    Grok's server-side VAD events. Pair with
+    ``LLMContextAggregatorPair(..., realtime_service_mode=True)``
+    so context writes are decoupled from those frames. If you wire local
+    VAD (``LLMUserAggregatorParams.vad_analyzer``) on top of this
+    service, disable Grok's server-side turn detection first via
+    ``turn_detection=None`` (manual mode); otherwise both sources
+    broadcast duplicate user-turn frames. See
+    ``examples/realtime/realtime-grok-locally-driven-turns.py``.
     """
 
     Settings = GrokRealtimeLLMSettings
@@ -202,6 +207,10 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
 
     # Use the Grok-specific adapter
     adapter_class = GrokRealtimeLLMAdapter
+
+    # Realtime (speech-to-speech) service. Emits UserStarted/Stopped
+    # speaking frames from server-side VAD events.
+    _realtime_service_info = RealtimeServiceInfo(emits_user_turn_frames=True)
 
     def __init__(
         self,
@@ -225,6 +234,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
                 .. deprecated:: 0.0.105
                     Use ``settings=GrokRealtimeLLMService.Settings(session_properties=...)``
                     instead.
+                    Will be removed in 2.0.0.
 
                 To set a different voice, configure it in session_properties:
 
@@ -364,6 +374,11 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             return session_properties.turn_detection.type == "server_vad"
         return False
 
+    def _emits_user_turn_frames(self) -> bool:
+        # Without server-side VAD the service stays silent on user
+        # turn frames, so the broadcast advertises False.
+        return self._is_turn_detection_enabled()
+
     async def _handle_interruption(self):
         """Handle user interruption of assistant speech."""
         if not self._is_turn_detection_enabled():
@@ -472,6 +487,11 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
     # Frame processing
     #
 
+    @override
+    def _service_tools(self) -> "ToolsSchema | list[Any] | None":
+        """Return the tools configured on ``session_properties``, if any."""
+        return assert_given(self._settings.session_properties).tools
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames from the pipeline.
 
@@ -499,6 +519,10 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         elif isinstance(frame, LLMMessagesAppendFrame):
             await self._handle_messages_append(frame)
         elif isinstance(frame, LLMSetToolsFrame):
+            # Continuous session: no fresh context frame per turn, so sync the
+            # registered tool handlers to the new tool set here (the base service
+            # only does this on LLMContextFrame).
+            self._sync_registered_tool_handlers(frame.tools)
             await self._send_session_update()
 
         await self.push_frame(frame, direction)
@@ -602,7 +626,9 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
 
     async def _send_session_update(self):
         """Update session settings on the server."""
-        settings = assert_given(self._settings.session_properties)
+        # Mutate a copy: the stored session_properties is read elsewhere (e.g.
+        # _service_tools) and must stay intact.
+        settings = assert_given(self._settings.session_properties).model_copy()
         adapter = self.get_llm_adapter()
 
         if self._context:
@@ -611,6 +637,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
                 system_instruction=assert_given(self._settings.system_instruction),
             )
 
+            # tools given in the context override the tools in the session properties
             if llm_invocation_params["tools"]:
                 settings.tools = llm_invocation_params["tools"]
 
@@ -680,9 +707,22 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             elif evt.type == "response.function_call_arguments.done":
                 await self._handle_evt_function_call_arguments_done(evt)
             elif evt.type == "error":
-                if evt.error.code in (
-                    "response_cancel_not_active",
-                    "conversation_already_has_active_response",
+                # Match Grok's actual codes/messages for cancel-not-active
+                # and already-active. Grok's error codes diverge from
+                # OpenAI's here, so fall back to substring matching on the
+                # message text. Without this, an otherwise-benign cancel
+                # race ("Cancellation failed: no active response found")
+                # falls through to `_handle_evt_error` + `return`, which
+                # exits the receive loop and stalls the conversation.
+                msg = (evt.error.message or "").lower()
+                if (
+                    evt.error.code
+                    in (
+                        "response_cancel_not_active",
+                        "conversation_already_has_active_response",
+                    )
+                    or "no active response" in msg
+                    or "already has an active response" in msg
                 ):
                     logger.debug(f"{self} {evt.error.message}")
                 else:
@@ -844,12 +884,20 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
 
     async def _handle_evt_speech_started(self, evt):
         """Handle speech started event from VAD."""
+        if not self._is_turn_detection_enabled():
+            # In local turn detection mode, the client is responsible for broadcasting user turn frames
+            return
+
         await self._truncate_current_audio_response()
         await self.broadcast_frame(UserStartedSpeakingFrame)
         await self.broadcast_interruption()
 
     async def _handle_evt_speech_stopped(self, evt):
         """Handle speech stopped event from VAD."""
+        if not self._is_turn_detection_enabled():
+            # In local turn detection mode, the client is responsible for broadcasting user turn frames
+            return
+
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
         await self.broadcast_frame(UserStoppedSpeakingFrame)

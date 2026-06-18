@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import Frame, TranscriptionFrame, TranslationFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker
@@ -48,6 +49,10 @@ class TranscriptionLogger(FrameProcessor):
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(audio_in_enabled=True),
     "twilio": lambda: FastAPIWebsocketParams(audio_in_enabled=True),
     "webrtc": lambda: TransportParams(audio_in_enabled=True),

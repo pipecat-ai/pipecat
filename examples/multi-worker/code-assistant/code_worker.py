@@ -18,7 +18,7 @@ try:
     from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use CodeWorker, you need to `pip install claude-agent-sdk`.")
+    logger.error("In order to use CodeWorker, you need to `uv add claude-agent-sdk`.")
     raise ImportError(f"Missing module: {e}") from e
 
 

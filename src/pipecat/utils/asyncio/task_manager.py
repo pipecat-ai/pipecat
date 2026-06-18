@@ -12,6 +12,7 @@ comprehensive monitoring and cleanup capabilities.
 """
 
 import asyncio
+import inspect
 import traceback
 from abc import ABC, abstractmethod
 from collections.abc import Coroutine, Sequence
@@ -172,6 +173,20 @@ class TaskManager(BaseTaskManager):
 
         task = self._params.loop.create_task(run_coroutine())
         task.set_name(name)
+
+        def close_unawaited_coroutine(_: asyncio.Task):
+            # If the task is cancelled before run_coroutine() ever runs, the
+            # wrapper never reaches `await coroutine`, leaving the inner
+            # coroutine un-awaited and emitting a spurious "coroutine was never
+            # awaited" RuntimeWarning. Close it explicitly in that case. The
+            # iscoroutine() guard keeps getcoroutinestate() from raising on
+            # non-native awaitables that the type contract technically permits.
+            if inspect.iscoroutine(coroutine) and (
+                inspect.getcoroutinestate(coroutine) == inspect.CORO_CREATED
+            ):
+                coroutine.close()
+
+        task.add_done_callback(close_unawaited_coroutine)
         task.add_done_callback(self._task_done_handler)
         self._add_task(TaskData(task=task))
         logger.trace(f"{name}: task created")

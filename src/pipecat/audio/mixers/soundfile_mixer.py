@@ -26,7 +26,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use the soundfile mixer, you need to `pip install pipecat-ai[soundfile]`."
+        'In order to use the soundfile mixer, you need to `uv add "pipecat-ai[soundfile]"`.'
     )
     raise ImportError(f"Missing module: {e}") from e
 

@@ -1,0 +1,28 @@
+[project]
+name = "{{ project_name }}"
+version = "0.1.0"
+description = "Voice AI bot built with Pipecat"
+requires-python = ">=3.11"
+dependencies = [
+    "{{ pipecat_dependency }}",
+{% if deploy_to_cloud %}
+    "pipecatcloud",
+{% endif %}
+{% if enable_observability %}
+    "pipecat-ai-whisker",
+{% endif %}
+{% if 'twilio_daily_sip_dialin' in transports %}
+    "twilio",
+{% endif %}
+]
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.404,<2",
+    "ruff>=0.12.11,<1",
+]
+
+[tool.ruff]
+line-length = 100
+[tool.ruff.lint]
+select = ["I", "UP"]

@@ -158,6 +158,34 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(worker.active)
         self.assertTrue(activated.is_set())
 
+    async def test_deactivate_self_takes_effect_before_activate_is_sent(self):
+        """activate_worker(deactivate_self=True) deactivates before the bus
+        round-trip, so this worker and the target are never both active."""
+        worker = make_stub_pipeline_task("test", bridged=())
+        worker._active = True
+        worker._pending_activation = False
+        await worker.attach(registry=self.registry, bus=self.bus)
+
+        sent: list[tuple[str, bool]] = []
+        original_send = worker.send_bus_message
+
+        async def record_send(message):
+            sent.append((type(message).__name__, worker.active))
+            await original_send(message)
+
+        worker.send_bus_message = record_send
+
+        await worker.activate_worker("other", deactivate_self=True)
+
+        # Flipped synchronously, without waiting for the bus round-trip.
+        self.assertFalse(worker.active)
+        self.assertEqual(
+            [name for name, _ in sent],
+            ["BusDeactivateWorkerMessage", "BusActivateWorkerMessage"],
+        )
+        # Both messages were published with this worker already inactive.
+        self.assertTrue(all(active is False for _, active in sent))
+
     async def test_activation_args_property_set_and_cleared(self):
         """activation_args returns the latest args while active and is cleared on deactivate."""
         worker = make_stub_pipeline_task("test", bridged=())

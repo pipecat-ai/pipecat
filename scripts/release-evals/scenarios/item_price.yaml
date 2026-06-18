@@ -1,0 +1,18 @@
+name: item_price
+
+# Text, end to end: ask how much an item costs. Perplexity answers from its
+# grounded search rather than invoking the tool, so this asserts only that the
+# bot replies with a price (not that it makes a function call).
+
+judge: !include judge_text.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "How much is a coffee mug?"
+    expect:
+      - event: response
+        eval: "the response states a price for the item, such as a dollar amount"

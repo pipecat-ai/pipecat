@@ -150,6 +150,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=BaseWhisperSTTService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             api_key: Service API key. Defaults to None.
             base_url: Service API base URL. Defaults to None.
@@ -157,16 +158,19 @@ class BaseWhisperSTTService(SegmentedSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=BaseWhisperSTTService.Settings(language=...)`` instead.
+                    Will be removed in 2.0.0.
 
             prompt: Optional text to guide the model's style or continue a previous segment.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=BaseWhisperSTTService.Settings(prompt=...)`` instead.
+                    Will be removed in 2.0.0.
 
             temperature: Sampling temperature between 0 and 1.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=BaseWhisperSTTService.Settings(temperature=...)`` instead.
+                    Will be removed in 2.0.0.
 
             include_prob_metrics: If True, enables probability metrics in API response.
                 Each service implements this differently (see child classes).

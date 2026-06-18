@@ -8,11 +8,10 @@ import asyncio
 import unittest
 from unittest.mock import MagicMock
 
-from pipecat.frames.frames import LLMMessagesAppendFrame
+from pipecat.frames.frames import LLMMessagesAppendFrame, PipelineFlushFrame
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.workers.llm import LLMWorker, tool
-from pipecat.workers.llm.llm_worker import PipelineFlushFrame
 
 
 def _create_task():
@@ -30,12 +29,10 @@ def _create_task():
             await params.result_callback("done")
 
     llm = MagicMock()
-    llm.register_direct_function = MagicMock()
+    llm._register_direct_function = MagicMock()
     task = StubLLMTask("test_task", llm=llm, bridged=())
 
     # Capture frames passed to PipelineWorker.queue_frame (i.e. super().queue_frame).
-    # Auto-set _flush_done when PipelineFlushFrame is queued, simulating the flush
-    # round-trip through the pipeline.
     delivered: list[tuple] = []
     original_pt_queue_frame = PipelineWorker.queue_frame
 
@@ -43,12 +40,18 @@ def _create_task():
         # Only intercept for this specific instance; otherwise fall through.
         if self is task:
             delivered.append((frame, direction))
-            if isinstance(frame, PipelineFlushFrame):
-                task._flush_done.set()
             return
         await original_pt_queue_frame(self, frame, direction)
 
     PipelineWorker.queue_frame = class_replacement
+
+    # flush_pipeline() does a real round-trip through the pipeline source/sink,
+    # which this stubbed task has no running pipeline to service. Complete it
+    # instantly so the deferral logic under test isn't blocked on the probe.
+    async def _instant_flush(timeout: float = 5.0) -> bool:
+        return True
+
+    task.flush_pipeline = _instant_flush
     task._restore_pt_queue_frame = lambda: setattr(
         PipelineWorker, "queue_frame", original_pt_queue_frame
     )

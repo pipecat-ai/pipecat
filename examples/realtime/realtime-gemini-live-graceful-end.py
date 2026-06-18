@@ -12,12 +12,14 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
-from pipecat.frames.frames import EndTaskFrame, LLMRunFrame
+from pipecat.evals.transport import EvalTransportParams
+from pipecat.frames.frames import EndWorkerFrame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
@@ -48,7 +50,7 @@ async def fetch_restaurant_recommendation(params: FunctionCallParams):
 
 async def end_conversation(params: FunctionCallParams):
     await params.result_callback({"success": True})
-    await params.llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+    await params.llm.push_frame(EndWorkerFrame())
 
 
 # NOTE: we can ask the model to say something *after* the call to
@@ -75,6 +77,10 @@ After you've responded to the user three times, do the following:
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -108,6 +114,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             },
         },
         required=["location", "format"],
+        handler=fetch_weather_from_api,
     )
     restaurant_function = FunctionSchema(
         name="get_restaurant_recommendation",
@@ -119,12 +126,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             },
         },
         required=["location"],
+        handler=fetch_restaurant_recommendation,
     )
     end_conversation_function = FunctionSchema(
         name="end_conversation",
         description="Gracefully end the conversation",
         properties={},
         required=[],
+        handler=end_conversation,
     )
     search_tool = {"google_search": {}}
     tools = ToolsSchema(
@@ -140,15 +149,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         tools=tools,
     )
 
-    llm.register_function("get_current_weather", fetch_weather_from_api)
-    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
-    llm.register_function("end_conversation", end_conversation)
-
     context = LLMContext(
         [{"role": "developer", "content": "Say hello."}],
     )
-    # Server-side VAD is enabled by default; no local VAD is added.
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
+    # Gemini Live doesn't emit user-turn frames. Server-side VAD is
+    # enabled by default; to surface turn frames (for RTVI speech
+    # events, turn observers, etc.) uncomment the local-VAD imports +
+    # `user_params=` below. See realtime-gemini-live.py for the full
+    # discussion.
+    #
+    # from pipecat.audio.vad.silero import SileroVADAnalyzer
+    # from pipecat.processors.aggregators.llm_response_universal import (
+    #     LLMUserAggregatorParams,
+    # )
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        realtime_service_mode=True,
+        # user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
 
     pipeline = Pipeline(
         [

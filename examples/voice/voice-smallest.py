@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -33,6 +34,10 @@ load_dotenv(override=True)
 
 
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -61,7 +66,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = SmallestTTSService(
         api_key=os.environ["SMALLEST_API_KEY"],
         settings=SmallestTTSService.Settings(
-            voice="sophia",
+            model="lightning_v3.1_pro",
+            voice="meher",
         ),
     )
 

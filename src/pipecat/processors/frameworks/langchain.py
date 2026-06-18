@@ -21,7 +21,7 @@ try:
     from langchain_core.messages import AIMessageChunk
     from langchain_core.runnables import Runnable
 except ModuleNotFoundError as e:
-    logger.error("In order to use Langchain, you need to `pip install pipecat-ai[langchain]`. ")
+    logger.error('In order to use Langchain, you need to `uv add "pipecat-ai[langchain]"`. ')
     raise ImportError(f"Missing module: {e}") from e
 
 

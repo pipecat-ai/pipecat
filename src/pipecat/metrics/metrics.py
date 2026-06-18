@@ -13,6 +13,8 @@ processing statistics.
 
 from pydantic import BaseModel
 
+from pipecat.utils.deprecation import deprecated
+
 
 class MetricsData(BaseModel):
     """Base class for all metrics data.
@@ -113,11 +115,15 @@ class TurnMetricsData(MetricsData):
     e2e_processing_time_ms: float
 
 
+@deprecated(
+    "`SmartTurnMetricsData` is deprecated since 0.0.104 and will be removed in 2.0.0. "
+    "Use `TurnMetricsData` instead."
+)
 class SmartTurnMetricsData(TurnMetricsData):
     """Metrics data for smart turn predictions.
 
     .. deprecated:: 0.0.104
-        Use :class:`TurnMetricsData` instead. This class will be removed in a future version.
+        Use :class:`TurnMetricsData` instead. Will be removed in 2.0.0.
 
     Parameters:
         inference_time_ms: Time taken for inference in milliseconds.

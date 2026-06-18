@@ -43,18 +43,19 @@ from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
     BotSpeakingFrame,
     CancelFrame,
-    CancelTaskFrame,
+    CancelWorkerFrame,
     EndFrame,
-    EndTaskFrame,
+    EndWorkerFrame,
     ErrorFrame,
     Frame,
     HeartbeatFrame,
     InterruptionFrame,
-    InterruptionTaskFrame,
+    InterruptionWorkerFrame,
     MetricsFrame,
+    PipelineFlushFrame,
     StartFrame,
     StopFrame,
-    StopTaskFrame,
+    StopWorkerFrame,
     TTSSpeakFrame,
     UserSpeakingFrame,
 )
@@ -78,6 +79,7 @@ from pipecat.processors.frameworks.rtvi.models import (
     UISnapshotMessage,
 )
 from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.startup import run_setup_hook
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.tracing_context import TracingContext
@@ -316,7 +318,7 @@ class PipelineWorker(BaseWorker):
 
                 .. deprecated:: 1.2.0
                     Use ``app_resources`` instead. ``tool_resources`` will be
-                    removed in a future version.
+                    removed in 2.0.0.
         """
         super().__init__(name=name, active=active)
         self._bridged = bridged
@@ -763,6 +765,32 @@ class PipelineWorker(BaseWorker):
             for frame in frames:
                 await self.queue_frame(frame, direction)
 
+    async def flush_pipeline(self, timeout: float = 5.0) -> bool:
+        """Flush all in-flight frames from the pipeline and wait for it to drain.
+
+        Pushes a :class:`~pipecat.frames.frames.PipelineFlushFrame` downstream;
+        the sink bounces it back upstream and the source sets its event once it
+        completes the round-trip, signalling that every frame queued ahead of it
+        has been processed. The probe is injected straight into the pipeline so
+        it bypasses any ``queue_frame`` override (e.g. tool-call deferral).
+
+        Args:
+            timeout: Seconds to wait before giving up. On timeout a warning is
+                logged and ``False`` is returned rather than blocking forever
+                (e.g. if a processor swallows the probe).
+
+        Returns:
+            True if the pipeline drained, False if the wait timed out.
+        """
+        event = asyncio.Event()
+        await self._pipeline.queue_frame(PipelineFlushFrame(event=event))
+        try:
+            await asyncio.wait_for(event.wait(), timeout)
+            return True
+        except TimeoutError:
+            logger.warning(f"{self}: pipeline flush timed out after {timeout}s")
+            return False
+
     async def on_bus_message(self, message: BusMessage) -> None:
         """Handle outbound bus messages: TTS playback and RTVI UI translation.
 
@@ -1102,25 +1130,34 @@ class PipelineWorker(BaseWorker):
 
         This is the worker that processes frames coming upstream from the
         pipeline. These frames might indicate, for example, that we want the
-        pipeline to be stopped (e.g. EndTaskFrame) in which case we would send
+        pipeline to be stopped (e.g. EndWorkerFrame) in which case we would send
         an EndFrame down the pipeline.
         """
         if isinstance(frame, tuple(self._reached_upstream_types)):
             await self._call_event_handler("on_frame_reached_upstream", frame)
 
-        if isinstance(frame, EndTaskFrame):
+        if isinstance(frame, PipelineFlushFrame):
+            # The flush probe completed its round-trip (down to the sink, back up
+            # to the source). Everything queued ahead of it has been processed;
+            # release whoever is awaiting it.
+            logger.debug(f"{self}: flush probe reached source — pipeline drained")
+            if frame.event:
+                frame.event.set()
+            return
+
+        if isinstance(frame, EndWorkerFrame):
             # Tell the worker we should end nicely.
             logger.debug(f"{self}: received end worker frame upstream {frame}")
             await self.queue_frame(EndFrame(reason=frame.reason))
-        elif isinstance(frame, CancelTaskFrame):
+        elif isinstance(frame, CancelWorkerFrame):
             # Tell the worker we should end right away.
             logger.debug(f"{self}: received cancel worker frame upstream {frame}")
             await self.queue_frame(CancelFrame(reason=frame.reason))
-        elif isinstance(frame, StopTaskFrame):
+        elif isinstance(frame, StopWorkerFrame):
             # Tell the worker we should stop nicely.
             logger.debug(f"{self}: received stop worker frame upstream {frame}")
             await self.queue_frame(StopFrame())
-        elif isinstance(frame, InterruptionTaskFrame):
+        elif isinstance(frame, InterruptionWorkerFrame):
             # Tell the worker we should interrupt the pipeline. Note that we are
             # bypassing the push queue and directly queue into the
             # pipeline. This is in case the push worker is blocked waiting for a
@@ -1147,6 +1184,14 @@ class PipelineWorker(BaseWorker):
         if isinstance(frame, tuple(self._reached_downstream_types)):
             await self._call_event_handler("on_frame_reached_downstream", frame)
 
+        if isinstance(frame, PipelineFlushFrame):
+            # The flush probe reached the sink. Bounce the same instance back
+            # upstream so it returns to the source (carrying its event) and the
+            # round-trip drains both directions.
+            logger.debug(f"{self}: flush probe reached sink — bouncing upstream")
+            await self._sink.push_frame(frame, FrameDirection.UPSTREAM)
+            return
+
         if isinstance(frame, StartFrame):
             await self._call_event_handler("on_pipeline_started", frame)
             await self._observer.on_pipeline_started()
@@ -1166,18 +1211,18 @@ class PipelineWorker(BaseWorker):
             self._pipeline_end_event.set()
         elif isinstance(frame, HeartbeatFrame):
             await self._heartbeat_queue.put(frame)
-        elif isinstance(frame, EndTaskFrame):
+        elif isinstance(frame, EndWorkerFrame):
             logger.debug(f"{self}: received end worker frame downstream {frame}")
-            await self.queue_frame(EndTaskFrame(reason=frame.reason), FrameDirection.UPSTREAM)
-        elif isinstance(frame, StopTaskFrame):
+            await self.queue_frame(EndWorkerFrame(reason=frame.reason), FrameDirection.UPSTREAM)
+        elif isinstance(frame, StopWorkerFrame):
             logger.debug(f"{self}: received stop worker frame downstream {frame}")
-            await self.queue_frame(StopTaskFrame(), FrameDirection.UPSTREAM)
-        elif isinstance(frame, CancelTaskFrame):
+            await self.queue_frame(StopWorkerFrame(), FrameDirection.UPSTREAM)
+        elif isinstance(frame, CancelWorkerFrame):
             logger.debug(f"{self}: received cancel worker frame downstream {frame}")
-            await self.queue_frame(CancelTaskFrame(reason=frame.reason), FrameDirection.UPSTREAM)
-        elif isinstance(frame, InterruptionTaskFrame):
+            await self.queue_frame(CancelWorkerFrame(reason=frame.reason), FrameDirection.UPSTREAM)
+        elif isinstance(frame, InterruptionWorkerFrame):
             logger.debug(f"{self}: received interruption worker frame downstream {frame}")
-            await self.queue_frame(InterruptionTaskFrame(), FrameDirection.UPSTREAM)
+            await self.queue_frame(InterruptionWorkerFrame(), FrameDirection.UPSTREAM)
 
     async def _heartbeat_push_handler(self):
         """Push heartbeat frames at regular intervals."""
@@ -1291,37 +1336,32 @@ class PipelineWorker(BaseWorker):
         return None
 
 
+@deprecated(
+    "`PipelineTask` is deprecated since 1.3.0 and will be removed in 2.0.0. "
+    "Use `PipelineWorker` instead."
+)
 class PipelineTask(PipelineWorker):
     """Deprecated alias for :class:`PipelineWorker`.
 
     .. deprecated:: 1.3.0
-        Use :class:`PipelineWorker` instead. ``PipelineTask`` will be removed
-        in a future release.
+        Use :class:`PipelineWorker` instead. :class:`PipelineTask` will be removed
+        in 2.0.0.
     """
 
-    def __init__(self, *args, **kwargs):
-        """Initialize the pipeline worker (deprecated)."""
-        warnings.warn(
-            "PipelineTask is deprecated, use PipelineWorker instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
+    pass
 
 
+@deprecated(
+    "`PipelineTaskParams` is deprecated since 1.3.0 and will be removed in 2.0.0. "
+    "Use `WorkerParams` instead."
+)
 @dataclass
 class PipelineTaskParams(WorkerParams):
     """Deprecated alias for :class:`~pipecat.workers.base_worker.WorkerParams`.
 
     .. deprecated:: 1.3.0
         Use :class:`~pipecat.workers.base_worker.WorkerParams` instead.
-        ``PipelineTaskParams`` will be removed in a future release.
+        Will be removed in 2.0.0.
     """
 
-    def __post_init__(self):
-        """Warn on construction."""
-        warnings.warn(
-            "PipelineTaskParams is deprecated, use WorkerParams instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+    pass

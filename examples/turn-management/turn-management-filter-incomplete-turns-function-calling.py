@@ -21,8 +21,8 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -51,6 +51,10 @@ load_dotenv(override=True)
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -66,7 +70,7 @@ transport_params = {
 }
 
 
-async def get_weather(params: FunctionCallParams, location: str):
+async def get_current_weather(params: FunctionCallParams, location: str):
     """Return the current weather for a location.
 
     A stub that always reports the same conditions — replace with a real
@@ -97,12 +101,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 "responses will be spoken aloud, so avoid emojis, bullet "
                 "points, or other formatting that can't be spoken. Respond to "
                 "what the user said in a creative, helpful, and brief way. "
-                "If the user asks about the weather, call the get_weather "
+                "If the user asks about the weather, call the get_current_weather "
                 "tool and speak the result back naturally."
             ),
         ),
     )
-    llm.register_direct_function(get_weather)
 
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
@@ -111,7 +114,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    context = LLMContext(tools=ToolsSchema(standard_tools=[get_weather]))
+    context = LLMContext(tools=[get_current_weather])
     # `FilterIncompleteUserTurnStrategies` pairs the default detector
     # chain with `LLMTurnCompletionUserTurnStopStrategy`: detectors
     # trigger LLM inference but the public `on_user_turn_stopped` event

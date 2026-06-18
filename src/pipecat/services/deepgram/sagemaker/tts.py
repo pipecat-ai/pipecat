@@ -89,6 +89,7 @@ class DeepgramSageMakerTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=DeepgramSageMakerTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate in Hz. If None, uses the value from StartFrame.
             encoding: Audio encoding format. Defaults to "linear16".

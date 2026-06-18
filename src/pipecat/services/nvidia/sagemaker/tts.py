@@ -13,7 +13,7 @@ import os
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
-import aioboto3
+import aiobotocore.session
 from loguru import logger
 
 from pipecat.frames.frames import (
@@ -120,12 +120,13 @@ class NvidiaSageMakerHTTPTTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        session = aioboto3.Session(
+        session = aiobotocore.session.get_session()
+        self._client_ctx = session.create_client(  # pyright: ignore[reportGeneralTypeIssues]
+            "sagemaker-runtime",
+            region_name=self._region,
             aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
             aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
-            region_name=self._region,
         )
-        self._client_ctx = session.client("sagemaker-runtime")
         self._client = await self._client_ctx.__aenter__()
         logger.debug(f"{self}: connected to SageMaker endpoint '{self._endpoint_name}'")
 
@@ -186,7 +187,7 @@ class NvidiaSageMakerHTTPTTSService(TTSService):
                 }
             )
 
-            response = await self._client.invoke_endpoint(
+            response = await self._client.invoke_endpoint(  # pyright: ignore[reportGeneralTypeIssues]
                 EndpointName=self._endpoint_name,
                 ContentType="application/json",
                 Accept="application/octet-stream",

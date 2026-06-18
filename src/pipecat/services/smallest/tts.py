@@ -19,6 +19,8 @@ from enum import StrEnum
 from typing import Any
 
 from loguru import logger
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
@@ -34,14 +36,6 @@ from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Smallest, you need to `pip install pipecat-ai[smallest]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 
 class SmallestTTSModel(StrEnum):
@@ -155,6 +149,7 @@ class SmallestTTSService(InterruptibleTTSService):
             settings: Runtime-updatable settings for the TTS service.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService.
         """
+        # Resolve the model early so we can pick the right default voice.
         model = SmallestTTSModel.LIGHTNING_V3_1_PRO
         if settings is not None and settings.model not in (None, NOT_GIVEN):
             try:
@@ -177,6 +172,8 @@ class SmallestTTSService(InterruptibleTTSService):
             push_start_frame=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
+            # When word timestamps are on, per-word TTSTextFrames are emitted from
+            # the word events; otherwise the base class pushes the whole text.
             push_text_frames=not word_timestamps,
             settings=default_settings,
             **kwargs,
@@ -188,9 +185,19 @@ class SmallestTTSService(InterruptibleTTSService):
         self._word_timestamps = word_timestamps
         self._receive_task = None
         self._keepalive_task = None
-        self._cumulative_time: float = 0.0
-        self._request_end_time: float = 0.0
-        self._wt_request_id: str | None = None
+
+        # Word-timestamp offset tracking. Smallest sends one request per
+        # run_tts() call and reports word timestamps relative to *that request's*
+        # audio (resetting to ~0 each request). All requests in an LLM turn share
+        # one audio context, so we accumulate each request's duration and offset
+        # later requests onto the turn's continuous timeline. Request boundaries
+        # are detected by a change in the message ``request_id`` (Smallest emits a
+        # single ``complete`` for the whole turn, not one per request). Reset per
+        # turn in on_turn_context_created(). This mirrors the cumulative-offset
+        # pattern used by the Rime, Inworld, and Hume TTS services.
+        self._cumulative_time: float = 0.0  # offset from prior requests in the turn
+        self._request_end_time: float = 0.0  # max word end seen in the in-flight request
+        self._wt_request_id: str | None = None  # request_id of the in-flight request
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -378,7 +385,17 @@ class SmallestTTSService(InterruptibleTTSService):
             await self._websocket.send(json.dumps(msg))
 
     def _advance_word_timestamp_request(self, request_id: str | None):
-        """Roll the turn offset forward when word timestamps enter a new request."""
+        """Roll the turn offset forward when word timestamps cross into a new request.
+
+        Smallest reports word timestamps relative to each request's own audio and
+        does not emit a per-request ``complete``, so a change in ``request_id`` is
+        what marks the boundary between requests within a turn. When the boundary
+        is crossed, the just-finished request's span (its last word ``end``) is
+        folded into the running offset applied to subsequent requests.
+
+        Args:
+            request_id: The ``request_id`` of the current message.
+        """
         if request_id == self._wt_request_id:
             return
         if self._wt_request_id is not None:
@@ -387,7 +404,14 @@ class SmallestTTSService(InterruptibleTTSService):
         self._wt_request_id = request_id
 
     async def on_turn_context_created(self, context_id: str):
-        """Reset word-timestamp offsets at the start of each turn."""
+        """Reset the word-timestamp offset at the start of each turn.
+
+        Each LLM turn gets a fresh audio context, so the per-request offset
+        accumulated for the previous turn must not carry over.
+
+        Args:
+            context_id: The newly created turn context ID.
+        """
         self._cumulative_time = 0.0
         self._request_end_time = 0.0
         self._wt_request_id = None
@@ -418,6 +442,9 @@ class SmallestTTSService(InterruptibleTTSService):
                 end = data.get("end")
                 if word is not None and start is not None:
                     context_id = self.get_active_audio_context_id()
+                    # Offset this request's relative start onto the turn timeline.
+                    # The base class consumes only (word, start); `end` is used
+                    # locally to size the offset for the next request.
                     await self.add_word_timestamps(
                         [(word, start + self._cumulative_time)], context_id
                     )

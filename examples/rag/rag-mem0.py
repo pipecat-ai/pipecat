@@ -43,6 +43,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -103,6 +104,10 @@ async def get_initial_greeting(memory_service: Mem0MemoryService) -> str:
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -156,7 +161,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         params=Mem0MemoryService.InputParams(
             search_limit=10,
             search_threshold=0.3,
-            api_version="v2",
             system_prompt="Based on previous conversations, I recall: \n\n",
             add_as_system_message=True,
             position=1,

@@ -116,6 +116,7 @@ class DeepgramSageMakerSTTService(STTService):
                     Use ``settings=DeepgramSageMakerSTTService.Settings(...)`` for
                     runtime-updatable fields and direct init parameters for
                     connection-level config.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside
                 ``live_options``, ``settings`` values take precedence (applied
@@ -143,7 +144,6 @@ class DeepgramSageMakerSTTService(STTService):
             search=None,
             smart_format=False,
             utterance_end_ms=None,
-            vad_events=False,
         )
 
         # 2. Apply live_options overrides — only if settings not provided

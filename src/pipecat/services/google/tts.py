@@ -44,6 +44,7 @@ from pipecat.services.settings import (
 )
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 
 try:
     from google.api_core.client_options import ClientOptions
@@ -55,7 +56,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Google AI, you need to `pip install pipecat-ai[google]`. Also, set `GOOGLE_APPLICATION_CREDENTIALS` environment variable."
+        'In order to use Google AI, you need to `uv add "pipecat-ai[google]"`. Also, set `GOOGLE_APPLICATION_CREDENTIALS` environment variable.'
     )
     raise ImportError(f"Missing module: {e}") from e
 
@@ -564,11 +565,16 @@ class GoogleHttpTTSService(TTSService):
     Settings = GoogleHttpTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`GoogleHttpTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `GoogleHttpTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Google HTTP TTS voice customization.
 
         .. deprecated:: 0.0.105
             Use ``GoogleHttpTTSService.Settings`` directly via the ``settings`` parameter instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             pitch: Voice pitch adjustment (e.g., "+2st", "-50%").
@@ -612,12 +618,14 @@ class GoogleHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GoogleHttpTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate in Hz. If None, uses default.
             params: Voice customization parameters including pitch, rate, volume, etc.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GoogleHttpTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -1028,11 +1036,16 @@ class GoogleTTSService(GoogleBaseTTSService):
     Settings = GoogleTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`GoogleTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `GoogleTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Google streaming TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``GoogleTTSService.Settings`` directly via the ``settings`` parameter instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language for synthesis. Defaults to English.
@@ -1065,6 +1078,7 @@ class GoogleTTSService(GoogleBaseTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GoogleTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             voice_cloning_key: The voice cloning key for Chirp 3 custom voices.
             sample_rate: Audio sample rate in Hz. If None, uses default.
@@ -1072,6 +1086,7 @@ class GoogleTTSService(GoogleBaseTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GoogleTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -1243,11 +1258,16 @@ class GeminiTTSService(GoogleBaseTTSService):
         "Zubenelgenubi",
     ]
 
+    @deprecated(
+        "`GeminiTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `GeminiTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Gemini TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``GeminiTTSService.Settings`` directly via the ``settings`` parameter instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language for synthesis. Defaults to English.
@@ -1282,6 +1302,7 @@ class GeminiTTSService(GoogleBaseTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GeminiTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             credentials: JSON string containing Google Cloud service account credentials.
             credentials_path: Path to Google Cloud service account JSON file.
@@ -1290,12 +1311,14 @@ class GeminiTTSService(GoogleBaseTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GeminiTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate in Hz. If None, uses Google's default 24kHz.
             params: TTS configuration parameters.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GeminiTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

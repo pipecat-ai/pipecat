@@ -1,0 +1,253 @@
+# {{ project_name }}
+
+A Pipecat AI voice agent built with {% if mode == 'cascade' %}a cascade pipeline (STT → LLM → TTS){% else %}a realtime speech-to-speech pipeline{% endif %}.
+
+{% if 'daily_pstn_dialin' in transports or 'daily_pstn_dialout' in transports %}
+{% include '_readme_blocks/how_it_works_daily_pstn.jinja2' %}
+{% elif 'twilio_daily_sip_dialin' in transports or 'twilio_daily_sip_dialout' in transports %}
+{% include '_readme_blocks/how_it_works_twilio_daily_sip.jinja2' %}
+{% endif %}
+## Configuration
+
+- **Bot Type**: {{ bot_type.title() }}
+- **Transport(s)**: {{ transport_labels|join(', ') }}
+{% if mode == 'cascade' %}
+- **Pipeline**: Cascade
+  - **STT**: {{ stt_label }}
+  - **LLM**: {{ llm_label }}
+  - **TTS**: {{ tts_label }}
+{% else %}
+- **Pipeline**: Realtime
+  - **Service**: {{ realtime_label }}
+{% endif %}
+{% if video_input or video_output or recording or transcription or enable_krisp or enable_observability %}
+- **Features**:
+{% if video_input %}
+  - Video Input
+{% endif %}
+{%- if video_output %}
+  - Video Output
+{% endif %}
+{%- if recording %}
+  - Audio Recording
+{% endif %}
+{%- if transcription %}
+  - Transcription
+{% endif %}
+{%- if enable_krisp %}
+  - Krisp Noise Cancellation
+{% endif %}
+{%- if enable_observability %}
+  - Observability (Whisker)
+{% endif %}
+{% endif %}
+
+{% if 'daily_pstn_dialin' in transports or 'daily_pstn_dialout' in transports %}
+{% include '_readme_blocks/setup_daily_pstn.jinja2' %}
+{% elif 'twilio_daily_sip_dialin' in transports or 'twilio_daily_sip_dialout' in transports %}
+{% include '_readme_blocks/setup_twilio_daily_sip.jinja2' %}
+{% else %}
+## Setup
+{% if 'twilio' in transports %}
+
+{% include '_readme_blocks/setup_twilio.jinja2' %}
+{% endif %}
+{% if 'telnyx' in transports %}
+
+{% include '_readme_blocks/setup_telnyx.jinja2' %}
+{% endif %}
+
+### Server
+
+1. **Navigate to server directory**:
+
+   ```bash
+   cd server
+   ```
+
+2. **Install dependencies**:
+
+   ```bash
+   uv sync
+   ```
+
+3. **Configure environment variables**:
+
+   ```bash
+   cp .env.example .env
+   # Edit .env and add your API keys
+   ```
+
+4. **Run the bot**:
+
+   ```bash
+   uv run bot.py
+   ```
+
+   The runner serves every transport; the caller selects which one (a web/mobile
+   client picks its transport when it connects; a telephony provider connects to
+   `/ws`).
+{% if has_telephony %}
+
+   For telephony, expose the bot with a public tunnel and point your provider's
+   webhook at it:
+
+   ```bash
+   ngrok http 7860
+   # then set the provider's webhook to wss://<your-ngrok-host>/ws
+   ```
+{% endif %}
+{% endif %}
+{% if enable_eval %}
+
+## Testing with evals
+
+This project includes behavioral evals: scripted conversations that drive the bot headless — no live call needed. Starter scenarios live in `server/evals/`; edit them as your bot takes shape and copy them to add more.
+
+From `server/`, run the bot with the eval transport, then drive scenarios against it from a second terminal (the bot stays up across runs):
+
+```bash
+uv run bot.py -t eval
+{% if mode == 'cascade' %}
+# In another terminal:
+uv run pipecat eval run evals/starter_text.yaml -v    # fast text-mode check
+uv run pipecat eval run evals/starter_audio.yaml -v   # full audio round trip (local models, no API keys)
+{% else %}
+# In another terminal:
+uv run pipecat eval run evals/starter_audio.yaml -v   # full audio round trip (local models, no API keys)
+{% endif %}
+```
+
+`eval:` criteria are scored by a judge LLM — a local Ollama by default (`ollama pull gemma2:9b`). The comments in the scenario files cover the schema and how to use an OpenAI judge instead.
+{% endif %}
+{% if generate_client %}
+
+### Client
+
+1. **Navigate to client directory**:
+
+   ```bash
+   cd client
+   ```
+
+2. **Install dependencies**:
+
+   ```bash
+   npm install
+   ```
+
+3. **Configure environment variables**:
+
+   ```bash
+   cp env.example .env.local
+   # Edit .env.local if needed (defaults to localhost:7860)
+   ```
+
+   {% if client_server == "vite" %}
+   > **Note:** Environment variables in Vite are bundled into the client and exposed in the browser. For production applications that require secret protection, consider implementing a backend proxy server to handle API requests and manage sensitive credentials securely.
+   {% endif %}
+
+4. **Run development server**:
+
+   ```bash
+   npm run dev
+   ```
+
+5. **Open browser**:
+
+   {% if client_server == "vite" %}
+   http://localhost:5173
+   {% elif client_server == "nextjs" %}
+   http://localhost:3000
+   {% endif %}
+{% endif %}
+
+{% if 'daily_pstn_dialin' in transports or 'daily_pstn_dialout' in transports %}
+{% include '_readme_blocks/project_structure_daily_pstn.jinja2' %}
+{% elif 'twilio_daily_sip_dialin' in transports or 'twilio_daily_sip_dialout' in transports %}
+{% include '_readme_blocks/project_structure_twilio_daily_sip.jinja2' %}
+{% else %}
+## Project Structure
+
+```
+{{ project_name }}/
+{% if generate_client %}├── server/              # Python bot server
+│   ├── bot.py           # Main bot implementation
+{% if enable_eval %}
+│   ├── evals/           # Behavioral eval scenarios
+{% endif %}
+│   ├── pyproject.toml   # Python dependencies
+│   ├── env.example      # Environment variables template
+│   ├── .env             # Your API keys (git-ignored)
+{% if deploy_to_cloud %}│   ├── Dockerfile       # Container image for Pipecat Cloud
+│   └── pcc-deploy.toml  # Pipecat Cloud deployment config
+{% else %}│   └── ...
+{% endif %}├── client/              # {{ client_framework|title if client_framework else 'Client' }} application
+│   ├── src/             # Client source code
+│   ├── package.json     # Node dependencies
+│   └── ...
+{% else %}├── server/              # Python bot server
+│   ├── bot.py           # Main bot implementation
+{% if enable_eval %}
+│   ├── evals/           # Behavioral eval scenarios
+{% endif %}
+│   ├── pyproject.toml   # Python dependencies
+│   ├── .env.example     # Environment variables template
+│   ├── .env             # Your API keys (git-ignored)
+{% if deploy_to_cloud %}│   ├── Dockerfile       # Container image for Pipecat Cloud
+│   └── pcc-deploy.toml  # Pipecat Cloud deployment config
+{% else %}│   └── ...
+{% endif %}{% endif %}├── .gitignore           # Git ignore patterns
+└── README.md            # This file
+```
+{% endif %}
+{% if deploy_to_cloud %}
+
+## Deploying to Pipecat Cloud
+
+This project is configured for deployment to Pipecat Cloud. You can learn how to deploy to Pipecat Cloud in the [Pipecat Quickstart Guide](https://docs.pipecat.ai/getting-started/quickstart#step-2-deploy-to-production).
+
+Refer to the [Pipecat Cloud Documentation](https://docs.pipecat.ai/deployment/pipecat-cloud/introduction) to learn more about configuring, deploying, and managing your agents in Pipecat Cloud.
+
+{% endif %}
+{% if enable_observability %}
+## Observability
+
+This project includes observability tools to help you debug and monitor your bot:
+
+### Whisker - Live Pipeline Debugger
+
+**Whisker** is a live graphical debugger that lets you visualize pipelines and debug frames in real time.
+
+With Whisker you can:
+
+- 🗺️ View a live graph of your pipeline
+- ⚡ Watch frame processors flash in real time as frames pass through them
+- 📌 Select a processor to inspect the frames it has handled
+- 🔍 Filter frames by name to quickly find the ones you care about
+- 🧵 Select a frame to trace its full path through the pipeline
+- 💾 Save and load previous sessions for review and troubleshooting
+
+**To use Whisker:**
+
+1. Run an ngrok tunnel to expose your bot:
+
+   ```bash
+   ngrok http 9090
+   ```
+
+   > Tip: Use `--subdomain` for a repeatable ngrok URL
+
+2. Navigate to [https://whisker.pipecat.ai/](https://whisker.pipecat.ai/) and enter your ngrok URL (e.g., `your-subdomain.ngrok.io`)
+
+3. Once your bot is running, press connect
+{% endif %}
+## Learn More
+
+- [Pipecat Documentation](https://docs.pipecat.ai/)
+{% if generate_client and client_framework == "react" %}
+- [Voice UI Kit Documentation](https://voiceuikit.pipecat.ai/)
+{% endif %}
+- [Pipecat GitHub](https://github.com/pipecat-ai/pipecat)
+- [Pipecat Examples](https://github.com/pipecat-ai/pipecat-examples)
+- [Discord Community](https://discord.gg/pipecat)

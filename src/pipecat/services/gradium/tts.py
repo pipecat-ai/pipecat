@@ -12,6 +12,9 @@ from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel
+from websockets import ConnectionClosedOK
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -24,16 +27,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import WebsocketTTSService
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
-
-try:
-    from websockets import ConnectionClosedOK
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Gradium, you need to `pip install pipecat-ai[gradium]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 SAMPLE_RATE = 48000
 
@@ -51,11 +46,16 @@ class GradiumTTSService(WebsocketTTSService):
     Settings = GradiumTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`GradiumTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `GradiumTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Configuration parameters for Gradium TTS service.
 
         .. deprecated:: 0.0.105
             Use ``GradiumTTSService.Settings`` directly via the ``settings`` parameter instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             temp: Temperature to be used for generation, defaults to 0.6.
@@ -83,18 +83,21 @@ class GradiumTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GradiumTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             url: Gradium websocket API endpoint.
             model: Model ID to use for synthesis.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GradiumTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             json_config: Optional JSON configuration string for additional model settings.
             params: Additional configuration parameters.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GradiumTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

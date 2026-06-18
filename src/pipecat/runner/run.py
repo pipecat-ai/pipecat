@@ -13,7 +13,7 @@ supports multiple transport types with a unified interface.
 
 Install with::
 
-    pip install pipecat-ai[runner]
+    uv add "pipecat-ai[runner]"
 
 All bots must implement a `bot(runner_args)` async function as the entry point.
 The server automatically discovers and executes this function when connections
@@ -90,9 +90,14 @@ To run locally:
 
 import argparse
 import asyncio
+import base64
+import hashlib
+import hmac
 import importlib.util
+import json
 import mimetypes
 import os
+import secrets
 import sys
 import time
 import uuid
@@ -107,24 +112,28 @@ from loguru import logger
 
 from pipecat.runner.types import (
     DailyRunnerArguments,
+    EvalRunnerArguments,
     RunnerArguments,
     SmallWebRTCRunnerArguments,
     VonageRunnerArguments,
     WebSocketRunnerArguments,
 )
 from pipecat.runner.vonage import configure as configure_vonage
+from pipecat.utils.security.allowed_origins import is_origin_allowed
 
 try:
     import uvicorn
     from dotenv import load_dotenv
     from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, WebSocket
+    from fastapi.encoders import jsonable_encoder
+    from fastapi.exceptions import RequestValidationError
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import HTMLResponse, RedirectResponse
+    from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 except ImportError as e:
     logger.error(f"Runner dependencies not available: {e}")
-    logger.error("To use Pipecat runners, install with: pip install pipecat-ai[runner]")
+    logger.error('To use Pipecat runners, install with: uv add "pipecat-ai[runner]"')
     raise ImportError(
-        "Runner dependencies required. Install with: pip install pipecat-ai[runner]"
+        'Runner dependencies required. Install with: uv add "pipecat-ai[runner]"'
     ) from e
 
 
@@ -151,6 +160,10 @@ PIPECAT_ROOM_EXP_HOURS = 4.0
 RUNNER_DOWNLOADS_FOLDER: str | None = None
 RUNNER_HOST: str = "localhost"
 RUNNER_PORT: int = 7860
+
+# Per-process HMAC secret for WebSocket token authentication. Auto-generated so
+# tokens from one runner instance cannot be replayed against another.
+_WS_AUTH_SECRET: bytes = secrets.token_bytes(32)
 
 app: FastAPI = FastAPI()
 """The FastAPI application instance.
@@ -235,6 +248,82 @@ def _format_transport_status(labels: list[str]) -> str:
     return ", ".join(labels) if labels else "none"
 
 
+def _generate_ws_token(ttl: int = 300) -> str:
+    """Return a signed, self-expiring WebSocket session token.
+
+    The token is ``<base64url-payload>.<hmac-sha256-hex>`` where the payload
+    encodes ``{"exp": unix_timestamp, "jti": random_nonce}``. Valid for ``ttl``
+    seconds (default 5 min). The nonce ensures uniqueness within the same second.
+    """
+    payload = (
+        base64.urlsafe_b64encode(
+            json.dumps({"exp": int(time.time()) + ttl, "jti": secrets.token_hex(8)}).encode()
+        )
+        .decode()
+        .rstrip("=")
+    )
+    sig = hmac.new(_WS_AUTH_SECRET, payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{sig}"
+
+
+def _verify_and_consume_ws_token(used: set[str], token: str) -> bool:
+    """Validate a WebSocket session token and mark it as used (one-time use).
+
+    Args:
+        used: Set of already-consumed tokens (mutated on success).
+        token: Token string obtained from :func:`_generate_ws_token`.
+
+    Returns:
+        ``True`` if the token has a valid signature, has not expired, and has
+        not been used before. Adds the token to ``used`` on success so replay
+        attempts are rejected.
+    """
+    try:
+        payload, sig = token.rsplit(".", 1)
+    except ValueError:
+        return False
+    expected = hmac.new(_WS_AUTH_SECRET, payload.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, sig):
+        return False
+    padded = payload + "=" * (-len(payload) % 4)
+    try:
+        data = json.loads(base64.urlsafe_b64decode(padded))
+    except Exception:
+        return False
+    if time.time() > data.get("exp", 0):
+        return False
+    if token in used:
+        return False
+    used.add(token)
+    return True
+
+
+def _extract_ws_token(websocket) -> str | None:
+    """Extract a WebSocket session token from the connection handshake.
+
+    Checks, in order:
+
+    1. ``Authorization: Bearer <token>`` request header.
+    2. ``?token=<token>`` query parameter.
+
+    Returns the token string, or ``None`` if not present.
+    """
+    auth = websocket.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return websocket.query_params.get("token")
+
+
+def _print_security_status(args: argparse.Namespace):
+    """Print security status lines (auth + origin restriction)."""
+    if args.ws_auth == "token":
+        print("   → WebSocket auth:  token (HMAC, call /start to obtain a token)")
+    if args.allowed_origins:
+        print(f"   → Allowed origins: {', '.join(args.allowed_origins)}")
+    else:
+        print("   → Allowed origins: all (no restriction)")
+
+
 def _print_startup_message(args: argparse.Namespace):
     """Print connection information for the development runner."""
     print()
@@ -245,6 +334,7 @@ def _print_startup_message(args: argparse.Namespace):
         print(f"   → Enabled transports: {_format_transport_status(enabled)}")
         if disabled:
             print(f"   → Disabled transports: {_format_transport_status(disabled)}")
+        _print_security_status(args)
     elif args.transport == "webrtc":
         if args.esp32:
             print("🚀 Bot ready! (ESP32 mode)")
@@ -277,6 +367,16 @@ def _print_startup_message(args: argparse.Namespace):
             if args.proxy:
                 print(f"   → XML webhook: http://{args.host}:{args.port}/")
             print(f"   → WebSocket:   ws://{args.host}:{args.port}/ws")
+            _print_security_status(args)
+    elif args.transport == "websocket":
+        print("🚀 Bot ready! (WebSocket)")
+        if not _transport_routes_enabled("websocket"):
+            print(f"   → WebSocket disabled ({TRANSPORT_INSTALL_HINTS['websocket']})")
+        else:
+            print(f"   → Open: {_runner_url(args)}")
+            scheme = "wss" if args.host != "localhost" else "ws"
+            print(f"   → WebSocket:   {scheme}://{args.host}:{args.port}/ws-client")
+            _print_security_status(args)
     elif args.transport == "vonage":
         print()
         print("🚀 Bot ready!")
@@ -352,38 +452,85 @@ async def _run_websocket_bot(websocket: WebSocket, args: argparse.Namespace):
     await bot_module.bot(runner_args)
 
 
-def _setup_websocket_routes(app: FastAPI, args: argparse.Namespace):
-    """Set up the plain WebSocket route at ``/ws-client``."""
+def _setup_websocket_routes(app: FastAPI, args: argparse.Namespace, ws_used_tokens: set[str]):
+    """Set up the plain WebSocket route at ``/ws-client``.
+
+    When ``args.ws_auth == "token"``, connections must present a valid HMAC
+    session token obtained via ``POST /start``. The token may be supplied as:
+
+    - ``Authorization: Bearer <token>`` header
+    - ``?token=<token>`` query parameter
+    - URL path segment: ``/ws-client/<token>``
+
+    Invalid or missing tokens are rejected with WebSocket close code 4003.
+    """
     if not _transport_routes_enabled("websocket"):
         return
+
+    async def _handle_plain_ws(websocket: WebSocket, path_token: str | None = None):
+        if args.ws_auth == "token":
+            token = path_token or _extract_ws_token(websocket)
+            if not token or not _verify_and_consume_ws_token(ws_used_tokens, token):
+                logger.warning("WebSocket connection rejected: invalid or missing token")
+                await websocket.close(code=4003)
+                return
+        origin = websocket.headers.get("origin", "")
+        if not is_origin_allowed(origin, args.allowed_origins):
+            logger.warning(f"WebSocket connection rejected: origin '{origin}' not allowed")
+            await websocket.close(code=4003)
+            return
+        await websocket.accept()
+        logger.debug("Plain WebSocket connection accepted")
+        await _run_websocket_bot(websocket, args)
 
     @app.websocket("/ws-client")
     async def websocket_client_endpoint(websocket: WebSocket):
         """Handle plain WebSocket connections (non-telephony)."""
-        await websocket.accept()
-        logger.debug("Plain WebSocket connection accepted")
-        await _run_websocket_bot(websocket, args)
+        await _handle_plain_ws(websocket)
+
+    @app.websocket("/ws-client/{token}")
+    async def websocket_client_endpoint_with_token(websocket: WebSocket, token: str):
+        """Handle plain WebSocket connections with token in the URL path."""
+        await _handle_plain_ws(websocket, path_token=token)
 
 
 def _configure_server_app(args: argparse.Namespace):
     """Configure the module-level FastAPI app with routes for all transports."""
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=args.allowed_origins or ["*"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
+    # FastAPI returns 422 Unprocessable Entity for Pydantic validation failures by default, but
+    # swallows the raw request body in the error response. This handler overrides that behavior to
+    # log both the validation errors and the raw body, making it much easier to debug malformed
+    # payloads from any transport (WhatsApp, WebRTC, telephony, etc.).
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        body = await request.body()
+        logger.error(f"422 Validation error on {request.url.path}: {exc.errors()}")
+        logger.error(
+            "Raw body: %s",
+            body.decode(errors="replace")[:5000],
+        )
+        return JSONResponse(status_code=422, content=jsonable_encoder({"detail": exc.errors()}))
+
     # Shared session store: session_id -> body data. Used by the WebRTC /start
     # flow and the /sessions/{session_id}/... proxy routes.
     active_sessions: dict[str, dict[str, Any]] = {}
 
+    # Consumed WebSocket tokens (one-time use). Shared across both WebSocket
+    # endpoint families (/ws and /ws-client).
+    ws_used_tokens: set[str] = set()
+
     _setup_frontend_routes(app)
     _setup_webrtc_routes(app, args, active_sessions)
     _setup_daily_routes(app, args)
-    _setup_telephony_routes(app, args)
-    _setup_websocket_routes(app, args)
+    _setup_telephony_routes(app, args, ws_used_tokens)
+    _setup_websocket_routes(app, args, ws_used_tokens)
     _setup_unified_start_route(app, args, active_sessions)
 
     if args.whatsapp:
@@ -557,18 +704,20 @@ def _setup_unified_start_route(
             # Telephony: the bot starts when the provider connects to /ws.
             # Return the WebSocket URL so the caller knows where to point their provider.
             scheme = "wss" if args.host != "localhost" else "ws"
-            return StartBotResult(
-                wsUrl=f"{scheme}://{args.host}:{args.port}/ws",
-            )
+            result = StartBotResult(wsUrl=f"{scheme}://{args.host}:{args.port}/ws")
+            if args.ws_auth == "token":
+                result["token"] = _generate_ws_token()
+            return result
 
         elif transport == "websocket":
             # Plain WebSocket: the bot starts when the client connects to /ws-client.
             scheme = "wss" if args.host != "localhost" else "ws"
             session_id = str(uuid.uuid4())
+            token = _generate_ws_token() if args.ws_auth == "token" else None
             return StartBotResult(
                 wsUrl=f"{scheme}://{args.host}:{args.port}/ws-client",
                 sessionId=session_id,
-                token="mock_token",
+                token=token,
             )
 
         else:
@@ -780,7 +929,7 @@ def _setup_whatsapp_routes(app: FastAPI, args: argparse.Namespace):
 
     try:
         from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
-        from pipecat.transports.whatsapp.api import WhatsAppWebhookRequest
+        from pipecat.transports.whatsapp.api import WhatsAppConnectCall, WhatsAppWebhookRequest
         from pipecat.transports.whatsapp.client import WhatsAppClient
     except ImportError as e:
         logger.error(f"WhatsApp transport dependencies not installed: {e}")
@@ -845,18 +994,22 @@ def _setup_whatsapp_routes(app: FastAPI, args: argparse.Namespace):
 
         logger.debug(f"Processing WhatsApp webhook: {body.model_dump()}")
 
-        async def connection_callback(connection: SmallWebRTCConnection):
+        async def connection_callback(connection: SmallWebRTCConnection, call: WhatsAppConnectCall):
             """Handle new WebRTC connections from WhatsApp calls.
 
             Called when a WebRTC connection is established for a WhatsApp call.
             Spawns a bot instance to handle the conversation.
 
             Args:
-                connection: The established WebRTC connection
+                connection: The established WebRTC connection.
+                call: The WhatsApp call metadata (caller phone number, call ID,
+                    direction, timestamp, etc.), passed as ``runner_args.body``.
             """
             bot_module = _get_bot_module()
             runner_args = SmallWebRTCRunnerArguments(
-                webrtc_connection=connection, session_id=str(uuid.uuid4())
+                webrtc_connection=connection,
+                session_id=str(uuid.uuid4()),
+                body=call,
             )
             runner_args.cli_args = args
             background_tasks.add_task(bot_module.bot, runner_args)
@@ -1043,13 +1196,22 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
             }
 
 
-def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace):
+def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace, ws_used_tokens: set[str]):
     """Set up telephony-specific routes.
 
     The WebSocket endpoint (``/ws``) is always registered so providers can
     connect directly. The XML webhook (``POST /``) is only registered when a
     specific telephony transport is chosen via ``-t`` because the XML template
     is provider-specific and requires a proxy hostname (``--proxy``).
+
+    When ``args.ws_auth == "token"``, connections must present a valid HMAC
+    session token obtained via ``POST /start``. The token may be supplied as:
+
+    - ``Authorization: Bearer <token>`` header
+    - ``?token=<token>`` query parameter
+    - URL path segment: ``/ws/<token>`` (recommended for telephony providers)
+
+    Invalid or missing tokens are rejected with WebSocket close code 4003.
     """
     if not _transport_routes_enabled("telephony"):
         return
@@ -1093,12 +1255,31 @@ def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace):
                 xml_content = XML_TEMPLATES.get(args.transport, "<Response></Response>")
                 return HTMLResponse(content=xml_content, media_type="application/xml")
 
-    @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
-        """Handle WebSocket connections for telephony."""
+    async def _handle_telephony_ws(websocket: WebSocket, path_token: str | None = None):
+        if args.ws_auth == "token":
+            token = path_token or _extract_ws_token(websocket)
+            if not token or not _verify_and_consume_ws_token(ws_used_tokens, token):
+                logger.warning("WebSocket connection rejected: invalid or missing token")
+                await websocket.close(code=4003)
+                return
+        origin = websocket.headers.get("origin", "")
+        if not is_origin_allowed(origin, args.allowed_origins):
+            logger.warning(f"WebSocket connection rejected: origin '{origin}' not allowed")
+            await websocket.close(code=4003)
+            return
         await websocket.accept()
         logger.debug("WebSocket connection accepted")
         await _run_telephony_bot(websocket, args)
+
+    @app.websocket("/ws")
+    async def websocket_endpoint(websocket: WebSocket):
+        """Handle WebSocket connections for telephony."""
+        await _handle_telephony_ws(websocket)
+
+    @app.websocket("/ws/{token}")
+    async def websocket_endpoint_with_token(websocket: WebSocket, token: str):
+        """Handle WebSocket connections for telephony with token in the URL path."""
+        await _handle_telephony_ws(websocket, path_token=token)
 
 
 async def _run_daily_direct(args: argparse.Namespace):
@@ -1129,6 +1310,30 @@ async def _run_daily_direct(args: argparse.Namespace):
         print()
 
         await bot_module.bot(runner_args)
+
+
+async def _run_eval(args: argparse.Namespace):
+    """Run a bot with the eval transport (no FastAPI server).
+
+    The eval transport is a ``SingleClientWebsocketServerTransport`` speaking RTVI that
+    hosts its own local WebSocket server for the harness to connect to. The
+    dev runner here just constructs ``EvalRunnerArguments`` and invokes the bot
+    function directly — no FastAPI routes are needed.
+    """
+    logger.info("Running with eval transport...")
+
+    runner_args = EvalRunnerArguments(host=args.host, port=args.port, session_id=str(uuid.uuid4()))
+    runner_args.handle_sigint = True
+    runner_args.cli_args = args
+
+    # A bot may need session data it would normally receive in the /start request
+    # body (e.g. a vision bot's image path). The eval transport has no such
+    # endpoint, so the body is read from a JSON file passed with --runner-body.
+    if args.runner_body:
+        runner_args.body = json.loads(Path(args.runner_body).read_text())
+
+    bot_module = _get_bot_module()
+    await bot_module.bot(runner_args)
 
 
 async def _run_vonage():
@@ -1203,11 +1408,13 @@ def main(parser: argparse.ArgumentParser | None = None):
        - --host: Server host address (default: localhost)
        - --port: Server port (default: 7860)
        - -t/--transport: Restrict to a single transport and set as default for /start
-         (daily, webrtc, twilio, telnyx, plivo, exotel). Omit to support all transports.
+         (daily, webrtc, websocket, twilio, telnyx, plivo, exotel). Omit to support
+         all transports.
        - -x/--proxy: Public proxy hostname for telephony webhooks
        - -d/--direct: Connect directly to Daily room (automatically sets transport to daily)
        - -f/--folder: Path to downloads folder
-       - --dialin: Enable Daily PSTN dial-in webhook handling
+       - --dialin/--no-dialin: Mount the Daily PSTN dial-in webhook for -t daily
+         (on by default; --no-dialin disables it)
        - --esp32: Enable SDP munging for ESP32 compatibility (requires --host with IP address)
        - --whatsapp: Ensure required WhatsApp environment variables are present
        - -v/--verbose: Increase logging verbosity
@@ -1229,7 +1436,7 @@ def main(parser: argparse.ArgumentParser | None = None):
         "-t",
         "--transport",
         type=str,
-        choices=["daily", "vonage", "webrtc", *TELEPHONY_TRANSPORTS],
+        choices=["daily", "eval", "vonage", "webrtc", "websocket", *TELEPHONY_TRANSPORTS],
         default=None,
         help=(
             "Restrict the server to a single transport and set it as the default for /start. "
@@ -1246,13 +1453,22 @@ def main(parser: argparse.ArgumentParser | None = None):
     )
     parser.add_argument("-f", "--folder", type=str, help="Path to downloads folder")
     parser.add_argument(
+        "--runner-body",
+        type=str,
+        default=None,
+        help="Path to a JSON file with the runner args body (e.g. a vision bot's image path under -t eval)",
+    )
+    parser.add_argument(
         "-v", "--verbose", action="count", default=0, help="Increase logging verbosity"
     )
     parser.add_argument(
         "--dialin",
-        action="store_true",
-        default=False,
-        help="Enable Daily PSTN dial-in webhook handling",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Mount the Daily PSTN dial-in webhook for -t daily. On by default (a local "
+            "stand-in for Pipecat Cloud's dial-in handler); use --no-dialin to disable."
+        ),
     )
     parser.add_argument(
         "--esp32",
@@ -1265,6 +1481,33 @@ def main(parser: argparse.ArgumentParser | None = None):
         action="store_true",
         default=False,
         help="Ensure required WhatsApp environment variables are present",
+    )
+    parser.add_argument(
+        "--ws-auth",
+        dest="ws_auth",
+        choices=["none", "token"],
+        default=os.getenv("PIPECAT_WEBSOCKET_AUTH", "none"),
+        help=(
+            "WebSocket authentication mode. 'token' requires clients to call /start "
+            "and obtain a signed HMAC session token before connecting to /ws or "
+            "/ws-client. Defaults to the PIPECAT_WEBSOCKET_AUTH environment variable "
+            "or 'none'."
+        ),
+    )
+    _env_origins = [
+        o.strip() for o in os.getenv("PIPECAT_ALLOWED_ORIGINS", "").split(",") if o.strip()
+    ]
+    parser.add_argument(
+        "--allowed-origins",
+        dest="allowed_origins",
+        nargs="*",
+        default=_env_origins,
+        help=(
+            "Allowed origins for HTTP and WebSocket connections (e.g. https://example.com). "
+            "Omit or leave empty to allow all origins. "
+            "Defaults to the PIPECAT_ALLOWED_ORIGINS environment variable "
+            "(comma-separated)."
+        ),
     )
 
     args = parser.parse_args()
@@ -1286,10 +1529,8 @@ def main(parser: argparse.ArgumentParser | None = None):
         logger.error("For ESP32, you need to specify `--host IP` so we can do SDP munging.")
         return
 
-    # Validate dial-in requirements
-    if args.dialin and args.transport is not None and args.transport != "daily":
-        logger.error("--dialin flag only works with Daily transport (-t daily)")
-        return
+    # The dial-in webhook is mounted only inside _setup_daily_routes, so --dialin is a
+    # no-op for non-Daily transports; nothing to validate here.
 
     # Log level
     logger.remove()
@@ -1303,6 +1544,15 @@ def main(parser: argparse.ArgumentParser | None = None):
 
         # Run direct Daily connection
         asyncio.run(_run_daily_direct(args))
+        return
+
+    # Handle eval transport (no FastAPI server — the WebSocket server transport
+    # runs its own WS server)
+    if args.transport == "eval":
+        print()
+        print(f"🚀 Bot ready! (eval transport on ws://{args.host}:{args.port})")
+        print()
+        asyncio.run(_run_eval(args))
         return
 
     # Print startup message

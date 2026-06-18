@@ -10,6 +10,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from pipecat.utils.deprecation import deprecated
+
 
 class LanguageConfig(BaseModel):
     """Configuration for language detection and handling.
@@ -147,12 +149,17 @@ class MessagesConfig(BaseModel):
     receive_lifecycle_events: bool | None = None
 
 
+@deprecated(
+    "`GladiaInputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use "
+    "`GladiaSTTService.Settings` instead."
+)
 class GladiaInputParams(BaseModel):
     """Configuration parameters for the Gladia STT service.
 
     .. deprecated:: 0.0.105
         Use ``settings=GladiaSTTService.Settings(...)`` for runtime-updatable
         fields and direct init parameters for encoding/bit_depth/channels.
+        Will be removed in 2.0.0.
 
     Parameters:
         encoding: Audio encoding format

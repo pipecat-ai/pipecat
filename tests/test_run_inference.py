@@ -309,12 +309,12 @@ async def test_aws_bedrock_run_inference_with_llm_context():
     }
     mock_client.converse.return_value = mock_response
 
-    # Patch the _aws_session.client method to be an async context manager
+    # Patch the _aws_session.create_client method to be an async context manager
     mock_context_manager = AsyncMock()
     mock_context_manager.__aenter__ = AsyncMock(return_value=mock_client)
     mock_context_manager.__aexit__ = AsyncMock(return_value=None)
 
-    with patch.object(service._aws_session, "client", return_value=mock_context_manager):
+    with patch.object(service._aws_session, "create_client", return_value=mock_context_manager):
         # Execute
         result = await service.run_inference(mock_context)
 
@@ -355,12 +355,12 @@ async def test_aws_bedrock_run_inference_client_exception():
     mock_client = AsyncMock()
     mock_client.converse.side_effect = Exception("Bedrock API Error")
 
-    # Patch the _aws_session.client method to be an async context manager
+    # Patch the _aws_session.create_client method to be an async context manager
     mock_context_manager = AsyncMock()
     mock_context_manager.__aenter__ = AsyncMock(return_value=mock_client)
     mock_context_manager.__aexit__ = AsyncMock(return_value=None)
 
-    with patch.object(service._aws_session, "client", return_value=mock_context_manager):
+    with patch.object(service._aws_session, "create_client", return_value=mock_context_manager):
         with pytest.raises(Exception, match="Bedrock API Error"):
             await service.run_inference(mock_context)
 
@@ -590,7 +590,7 @@ async def test_aws_bedrock_run_inference_system_instruction_overrides_context():
     mock_context_manager.__aenter__ = AsyncMock(return_value=mock_client)
     mock_context_manager.__aexit__ = AsyncMock(return_value=None)
 
-    with patch.object(service._aws_session, "client", return_value=mock_context_manager):
+    with patch.object(service._aws_session, "create_client", return_value=mock_context_manager):
         result = await service.run_inference(
             mock_context, system_instruction="New system instruction"
         )
@@ -628,7 +628,7 @@ async def test_aws_bedrock_run_inference_system_instruction_none_unchanged():
     mock_context_manager.__aenter__ = AsyncMock(return_value=mock_client)
     mock_context_manager.__aexit__ = AsyncMock(return_value=None)
 
-    with patch.object(service._aws_session, "client", return_value=mock_context_manager):
+    with patch.object(service._aws_session, "create_client", return_value=mock_context_manager):
         result = await service.run_inference(mock_context)
 
         assert result == "Response"

@@ -9,16 +9,16 @@ import os
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
-from google.genai.types import Content, Part
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
-    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMessagesAppendFrame,
     LLMRunFrame,
     TextFrame,
     TranscriptionFrame,
@@ -77,10 +77,8 @@ class MagicDemoTranscriptionFrame(Frame):
 
 
 class UserAudioCollector(FrameProcessor):
-    def __init__(self, context, user_context_aggregator):
+    def __init__(self):
         super().__init__()
-        self._context = context
-        self._user_context_aggregator = user_context_aggregator
         self._audio_frames = []
         self._start_secs = 0.2  # this should match VAD start_secs (hardcoding for now)
         self._user_speaking = False
@@ -96,8 +94,8 @@ class UserAudioCollector(FrameProcessor):
             self._user_speaking = True
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
-            await self._context.add_audio_frames_message(audio_frames=self._audio_frames)
-            await self._user_context_aggregator.push_frame(LLMRunFrame())
+            message = await LLMContext.create_audio_message(audio_frames=self._audio_frames)
+            await self.push_frame(LLMMessagesAppendFrame(messages=[message], run_llm=True))
 
         elif isinstance(frame, InputAudioRawFrame):
             if self._user_speaking:
@@ -116,9 +114,8 @@ class UserAudioCollector(FrameProcessor):
 
 
 class TranscriptExtractor(FrameProcessor):
-    def __init__(self, context):
+    def __init__(self):
         super().__init__()
-        self._context = context
         self._accumulator = ""
         self._processing_llm_response = False
         self._accumulating_transcript = False
@@ -160,34 +157,37 @@ class TranscriptionContextFixup(FrameProcessor):
         self._context = context
         self._transcript = "THIS IS A TRANSCRIPT"
 
+    def is_user_audio_message(self, message):
+        # A universal-context audio message is a user message whose content is a
+        # list ending with an "input_audio" part (see
+        # LLMContext.create_audio_message). Don't assume a Google context.
+        if not isinstance(message, dict):
+            return False
+        content = message.get("content")
+        if not content or not isinstance(content, list):
+            return False
+        return message.get("role") == "user" and content[-1].get("type") == "input_audio"
+
     def swap_user_audio(self):
         if not self._transcript:
             return
-        message = self._context.messages[-2]
-        last_part = message.parts[-1]
-        if (
-            message.role == "user"
-            and last_part.inline_data
-            and last_part.inline_data.mime_type == "audio/wav"
-        ):
-            self._context.messages[-2] = Content(role="user", parts=[Part(text=self._transcript)])
-
-    def add_transcript_back_to_inference_output(self):
-        if not self._transcript:
-            return
-        message = self._context.messages[-1]
-        last_part = message.parts[-1]
-        if message.role == "model" and last_part.text:
-            self._context.messages[-1].parts[-1].text += f"\n\n{marker}\n{self._transcript}\n"
+        # Search backwards for the most recent user message that still holds
+        # audio and replace its content with the transcript text, so the context
+        # keeps only text. Audio is large in tokens and bandwidth.
+        for message in reversed(self._context.messages):
+            if self.is_user_audio_message(message):
+                message["content"] = self._transcript
+                return
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, MagicDemoTranscriptionFrame):
+            # Swap as soon as the transcript arrives: this guarantees
+            # self._transcript is set when we rewrite the context (the audio
+            # message is already in the context from the LLMMessagesAppendFrame).
             self._transcript = frame.text
-        elif isinstance(frame, LLMFullResponseEndFrame) or isinstance(frame, InterruptionFrame):
             self.swap_user_audio()
-            self.add_transcript_back_to_inference_output()
             self._transcript = ""
 
         await self.push_frame(frame, direction)
@@ -196,6 +196,10 @@ class TranscriptionContextFixup(FrameProcessor):
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -229,7 +233,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             voice="en-US-Chirp3-HD-Charon",
             language=Language.EN_US,
         ),
-        params=GoogleTTSService.InputParams(language=Language.EN_US),
         credentials=os.environ["GOOGLE_TEST_CREDENTIALS"],
     )
 
@@ -238,8 +241,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
-    audio_collector = UserAudioCollector(context, user_aggregator)
-    pull_transcript_out_of_llm_output = TranscriptExtractor(context)
+    audio_collector = UserAudioCollector()
+    pull_transcript_out_of_llm_output = TranscriptExtractor()
     fixup_context_messages = TranscriptionContextFixup(context)
 
     pipeline = Pipeline(

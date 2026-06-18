@@ -6,7 +6,6 @@
 
 import base64
 import os
-import warnings
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
@@ -29,6 +28,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
 from pipecat.services.tts_service import TTSService
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -37,7 +37,7 @@ try:
     from hume.tts.types import TimestampMessage
 except ModuleNotFoundError as e:  # pragma: no cover - import-time guidance
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Hume, you need to `pip install pipecat-ai[hume]`.")
+    logger.error('In order to use Hume, you need to `uv add "pipecat-ai[hume]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 
@@ -83,11 +83,16 @@ class HumeTTSService(TTSService):
     Settings = HumeTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`HumeTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `HumeTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Optional synthesis parameters for Hume TTS.
 
         .. deprecated:: 0.0.105
             Use ``settings=HumeTTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             description: Natural-language acting directions (up to 100 characters).
@@ -117,11 +122,13 @@ class HumeTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=HumeTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             params: Optional synthesis controls (acting instructions, speed, trailing silence).
 
                 .. deprecated:: 0.0.105
                     Use ``settings=HumeTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Output sample rate for emitted PCM frames. Defaults to 48_000 (Hume).
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -237,11 +244,16 @@ class HumeTTSService(TTSService):
             # Reset timing on interruption or stop
             self._reset_state()
 
+    @deprecated(
+        "`HumeTTSService.update_setting` is deprecated since 0.0.104 and will be removed in 2.0.0. "
+        "Use `TTSUpdateSettingsFrame` instead."
+    )
     async def update_setting(self, key: str, value: Any) -> None:
         """Runtime updates via key/value pair.
 
         .. deprecated:: 0.0.104
             Use ``TTSUpdateSettingsFrame(delta=HumeTTSService.Settings(...))`` instead.
+            Will be removed in 2.0.0.
 
         Args:
             key: The name of the setting to update. Recognized keys are:
@@ -251,15 +263,6 @@ class HumeTTSService(TTSService):
                 - "trailing_silence"
             value: The new value for the setting.
         """
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "'update_setting' is deprecated, use "
-                "'TTSUpdateSettingsFrame(delta=self.Settings(...))' instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
         key_l = (key or "").lower()
         known_keys = {"voice_id", "voice", "description", "speed", "trailing_silence"}
 

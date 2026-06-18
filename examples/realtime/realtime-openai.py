@@ -12,9 +12,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame, LLMSetToolsFrame
 from pipecat.observers.loggers.transcription_log_observer import TranscriptionLogObserver
 from pipecat.pipeline.pipeline import Pipeline
@@ -23,7 +21,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
+    UserTurnMessageAddedMessage,
     UserTurnStoppedMessage,
 )
 from pipecat.runner.types import RunnerArguments
@@ -41,24 +39,32 @@ from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_stop import BaseUserTurnStopStrategy
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
 
-async def fetch_weather_from_api(params: FunctionCallParams):
-    temperature = 75 if params.arguments["format"] == "fahrenheit" else 24
+async def get_current_weather(params: FunctionCallParams, location: str, format: str):
+    """Get the current weather.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+        format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
+    """
+    temperature = 75 if format == "fahrenheit" else 24
     await params.result_callback(
         {
             "conditions": "nice",
             "temperature": temperature,
-            "format": params.arguments["format"],
+            "format": format,
             "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
         }
     )
 
 
 async def get_news(params: FunctionCallParams):
+    """Get the current news."""
     await params.result_callback(
         {
             "news": [
@@ -70,53 +76,22 @@ async def get_news(params: FunctionCallParams):
     )
 
 
-async def fetch_restaurant_recommendation(params: FunctionCallParams):
+async def get_restaurant_recommendation(params: FunctionCallParams, location: str):
+    """Get a restaurant recommendation.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+    """
     await params.result_callback({"name": "The Golden Dragon"})
-
-
-weather_function = FunctionSchema(
-    name="get_current_weather",
-    description="Get the current weather",
-    properties={
-        "location": {
-            "type": "string",
-            "description": "The city and state, e.g. San Francisco, CA",
-        },
-        "format": {
-            "type": "string",
-            "enum": ["celsius", "fahrenheit"],
-            "description": "The temperature unit to use. Infer this from the users location.",
-        },
-    },
-    required=["location", "format"],
-)
-
-get_news_function = FunctionSchema(
-    name="get_news",
-    description="Get the current news.",
-    properties={},
-    required=[],
-)
-
-restaurant_function = FunctionSchema(
-    name="get_restaurant_recommendation",
-    description="Get a restaurant recommendation",
-    properties={
-        "location": {
-            "type": "string",
-            "description": "The city and state, e.g. San Francisco, CA",
-        },
-    },
-    required=["location"],
-)
-
-# Create tools schema
-tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
 
 
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -164,30 +139,29 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
                         noise_reduction=InputAudioNoiseReduction(type="near_field"),
                     )
                 ),
-                # In this example we provide tools through the context, but you could
-                # alternatively provide them here.
-                # tools=tools,
+                # you could choose to pass tools here rather than via context
+                # tools=[get_current_weather, get_restaurant_recommendation],
             ),
         ),
     )
-
-    # you can either register a single function for all function calls, or specific functions
-    # llm.register_function(None, fetch_weather_from_api)
-    llm.register_function("get_current_weather", fetch_weather_from_api)
-    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
-    llm.register_function("get_news", get_news)
 
     # Create a standard OpenAI LLM context object using the normal messages format. The
     # OpenAIRealtimeLLMService will convert this internally to messages that the
     # openai WebSocket API can understand.
     context = LLMContext(
         [{"role": "developer", "content": "Say hello!"}],
-        tools,
+        [get_current_weather, get_restaurant_recommendation],
     )
 
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        # OpenAI Realtime drives the conversation server-side and emits its
+        # own UserStarted/StoppedSpeakingFrame from server VAD events, so
+        # local VAD on the aggregator is unnecessary. realtime_service_mode
+        # decouples context writes from turn frames and transcript-bound
+        # turn-end. See `realtime-openai-locally-driven-turns.py` for the
+        # variant that disables server VAD and drives turn detection locally.
+        realtime_service_mode=True,
     )
 
     pipeline = Pipeline(
@@ -218,10 +192,10 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
 
         # Add a new tool at runtime after a delay.
         await asyncio.sleep(15)
-        new_tools = ToolsSchema(
-            standard_tools=[weather_function, restaurant_function, get_news_function]
+        logger.info(f"Adding tools")
+        await worker.queue_frames(
+            [LLMSetToolsFrame(tools=[get_current_weather, get_restaurant_recommendation, get_news])]
         )
-        await worker.queue_frames([LLMSetToolsFrame(tools=new_tools)])
         # Alternative pattern, useful if you're changing other session properties, too.
         # (Though note that tools in your LLMContext take precedence over those
         # in session properties, so if you have context-provided tools, prefer
@@ -229,7 +203,19 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         # updating system instructions: send an LLMMessagesUpdateFrame with
         # context messages updated with your new desired system message.)
         # await worker.queue_frames(
-        #     [LLMUpdateSettingsFrame(settings=SessionProperties(tools=new_tools).model_dump())]
+        #     [
+        #         LLMUpdateSettingsFrame(
+        #             settings=SessionProperties(
+        #                 tools=ToolsSchema(
+        #                     standard_tools=[
+        #                         get_current_weather,
+        #                         get_restaurant_recommendation,
+        #                         get_news,
+        #                     ]
+        #                 )
+        #             ).model_dump()
+        #         )
+        #     ]
         # )
 
         # Reasoning effort can be changed at runtime too. Only
@@ -251,9 +237,24 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         logger.info(f"Client disconnected")
         await worker.cancel()
 
-    # Log transcript updates
+    # Subscribe to user turn lifecycle events. OpenAI Realtime emits its
+    # own user-turn frames from server VAD, so on_user_turn_stopped fires
+    # at the turn boundary. In realtime mode UserTurnStoppedMessage.content
+    # is None because the user transcript isn't finalized at turn-stop
+    # time — subscribe to on_user_turn_message_added for the finalized text
+    # (it's written when the assistant response begins). The assistant
+    # message is finalized at turn-stop time in both modes, so
+    # on_assistant_turn_stopped carries the content directly.
     @user_aggregator.event_handler("on_user_turn_stopped")
-    async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
+    async def on_user_turn_stopped(
+        aggregator,
+        strategy: BaseUserTurnStopStrategy,
+        message: UserTurnStoppedMessage,
+    ):
+        logger.info(f"User turn stopped at {message.timestamp}")
+
+    @user_aggregator.event_handler("on_user_turn_message_added")
+    async def on_user_turn_message_added(aggregator, message: UserTurnMessageAddedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         line = f"{timestamp}user: {message.content}"
         logger.info(f"Transcript: {line}")

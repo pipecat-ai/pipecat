@@ -1,6 +1,6 @@
 # redis-handoff
 
-Same two-worker handoff as [`local-handoff`](../../local-handoff/), but each worker runs as a separate process connected via Redis pub/sub. Requires `pip install pipecat-ai[redis]`.
+Same two-worker handoff as [`local-handoff`](../../local-handoff/), but each worker runs as a separate process connected via Redis pub/sub. Requires `uv add "pipecat-ai[redis]"`.
 
 See the [top-level multi-worker README](../../README.md) for shared environment variables.
 

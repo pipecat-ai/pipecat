@@ -23,8 +23,11 @@ from typing import (
 )
 
 import aiohttp
+import websockets
 from loguru import logger
 from pydantic import BaseModel
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -46,17 +49,8 @@ from pipecat.services.tts_service import (
     WebsocketTTSService,
 )
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
-
-# See .env.example for ElevenLabs configuration needed
-try:
-    import websockets
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use ElevenLabs, you need to `pip install pipecat-ai[elevenlabs]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 # Models that support language codes
 # The following models are excluded as they don't support language codes:
@@ -403,11 +397,16 @@ class ElevenLabsTTSService(WebsocketTTSService):
     Settings = ElevenLabsTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`ElevenLabsTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `ElevenLabsTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for ElevenLabs TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``settings=ElevenLabsTTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language to use for synthesis.
@@ -461,11 +460,13 @@ class ElevenLabsTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             model: TTS model to use (e.g., "eleven_turbo_v2_5").
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             url: WebSocket URL for ElevenLabs TTS API.
             sample_rate: Audio sample rate. If None, uses default.
@@ -484,6 +485,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -492,6 +494,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.104
                     Use ``text_aggregation_mode`` instead.
+                    Will be removed in 2.0.0.
 
             **kwargs: Additional arguments passed to the parent service.
         """
@@ -1044,11 +1047,16 @@ class ElevenLabsHttpTTSService(TTSService):
     Settings = ElevenLabsHttpTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`ElevenLabsHttpTTSService.InputParams` is deprecated since 0.0.105 and will be removed "
+        "in 2.0.0. Use `ElevenLabsHttpTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for ElevenLabs HTTP TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``settings=ElevenLabsHttpTTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language to use for synthesis.
@@ -1097,12 +1105,14 @@ class ElevenLabsHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsHttpTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             aiohttp_session: aiohttp ClientSession for HTTP requests.
             model: TTS model to use (e.g., "eleven_turbo_v2_5").
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsHttpTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             base_url: Base URL for ElevenLabs HTTP API.
             sample_rate: Audio sample rate. If None, uses default.
@@ -1114,6 +1124,7 @@ class ElevenLabsHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsHttpTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -1122,6 +1133,7 @@ class ElevenLabsHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.104
                     Use ``text_aggregation_mode`` instead.
+                    Will be removed in 2.0.0.
 
             **kwargs: Additional arguments passed to the parent service.
         """

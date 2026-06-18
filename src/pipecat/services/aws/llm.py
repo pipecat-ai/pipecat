@@ -38,16 +38,17 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.utils import resolve_credentials
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
-    import aioboto3
+    import aiobotocore.session
     from botocore.config import Config
     from botocore.exceptions import ReadTimeoutError
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use AWS services, you need to `pip install pipecat-ai[aws]`. Also, remember to set `AWS_SECRET_ACCESS_KEY`, `AWS_ACCESS_KEY_ID`, and `AWS_REGION` environment variable."
+        'In order to use AWS services, you need to `uv add "pipecat-ai[aws]"`. Also, remember to set `AWS_SECRET_ACCESS_KEY`, `AWS_ACCESS_KEY_ID`, and `AWS_REGION` environment variable.'
     )
     raise ImportError(f"Missing module: {e}") from e
 
@@ -88,12 +89,17 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
     # Overriding the default adapter to use the Anthropic one.
     adapter_class = AWSBedrockLLMAdapter
 
+    @deprecated(
+        "`AWSBedrockLLMService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `AWSBedrockLLMService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for AWS Bedrock LLM service.
 
         .. deprecated:: 0.0.105
             Use ``AWSBedrockLLMService.Settings`` instead. Pass settings directly via the
             ``settings`` parameter of :class:`AWSBedrockLLMService`.
+            Will be removed in 2.0.0.
 
         Parameters:
             max_tokens: Maximum number of tokens to generate.
@@ -134,9 +140,10 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSBedrockLLMService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             aws_access_key: AWS access key ID. If None, falls back to
-                environment variables and the default boto3 credential chain
+                environment variables and the default botocore credential chain
                 (instance profiles, IRSA, ECS task roles, SSO, etc.).
             aws_secret_key: AWS secret access key. Same fallback behaviour as
                 ``aws_access_key``.
@@ -146,6 +153,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSBedrockLLMService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings for this service.  When both
                 deprecated parameters and *settings* are provided, *settings*
@@ -154,8 +162,9 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSBedrockLLMService.Settings(stop_sequences=...)`` instead.
+                    Will be removed in 2.0.0.
 
-            client_config: Custom boto3 client configuration.
+            client_config: Custom botocore client configuration.
             retry_timeout_secs: Request timeout in seconds for retry logic.
             retry_on_timeout: Whether to retry the request once if it times out.
             **kwargs: Additional arguments passed to parent LLMService.
@@ -216,9 +225,9 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                 retries={"max_attempts": 3},
             )
 
-        self._aws_session = aioboto3.Session()
+        self._aws_session = aiobotocore.session.get_session()
 
-        # Resolve credentials using the shared chain (explicit → env → boto3).
+        # Resolve credentials using the shared chain (explicit → env → botocore).
         resolved = resolve_credentials(
             aws_access_key_id=aws_access_key,
             aws_secret_access_key=aws_secret_key,
@@ -311,7 +320,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
         if system:
             request_params["system"] = system
 
-        async with self._aws_session.client(
+        async with self._aws_session.create_client(
             service_name="bedrock-runtime", **self._aws_params
         ) as client:
             # Call Bedrock without streaming
@@ -482,7 +491,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             messages_for_logging = adapter.get_messages_for_logging(context)
             logger.debug(f"{self}: Generating chat from context {messages_for_logging}")
 
-            async with self._aws_session.client(
+            async with self._aws_session.create_client(
                 service_name="bedrock-runtime", **self._aws_params
             ) as client:
                 # Call AWS Bedrock with streaming

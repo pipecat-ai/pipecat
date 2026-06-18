@@ -24,8 +24,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -48,21 +47,26 @@ load_dotenv(override=True)
 BASE_FILENAME = "/tmp/pipecat_grok_conversation_"
 
 
-async def fetch_weather_from_api(params: FunctionCallParams):
-    """Mock weather function for demonstration."""
-    temperature = 75 if params.arguments["format"] == "fahrenheit" else 24
+async def get_current_weather(params: FunctionCallParams, location: str, format: str):
+    """Get the current weather.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+        format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
+    """
+    temperature = 75 if format == "fahrenheit" else 24
     await params.result_callback(
         {
             "conditions": "nice",
             "temperature": temperature,
-            "format": params.arguments["format"],
+            "format": format,
             "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
         }
     )
 
 
 async def get_saved_conversation_filenames(params: FunctionCallParams):
-    """Get a list of saved conversation history files."""
+    """Get a list of saved conversation histories. Returns a list of filenames. Each filename includes a date and timestamp. Each file is conversation history that can be loaded into this session."""
     full_pattern = f"{BASE_FILENAME}*.json"
     matching_files = glob.glob(full_pattern)
     logger.debug(f"matching files: {matching_files}")
@@ -70,7 +74,7 @@ async def get_saved_conversation_filenames(params: FunctionCallParams):
 
 
 async def save_conversation(params: FunctionCallParams):
-    """Save the current conversation to a JSON file."""
+    """Save the current conversation. Use this function to persist the current conversation to external storage."""
     timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
     filename = f"{BASE_FILENAME}{timestamp}.json"
     logger.debug(
@@ -87,11 +91,14 @@ async def save_conversation(params: FunctionCallParams):
         await params.result_callback({"success": False, "error": str(e)})
 
 
-async def load_conversation(params: FunctionCallParams):
-    """Load a conversation history from a JSON file."""
+async def load_conversation(params: FunctionCallParams, filename: str):
+    """Load a conversation history. Use this function to load a conversation history into the current session.
+
+    Args:
+        filename: The filename of the conversation history to load.
+    """
 
     async def _reset():
-        filename = params.arguments["filename"]
         logger.debug(f"loading conversation from {filename}")
         try:
             with open(filename) as file:
@@ -106,53 +113,14 @@ async def load_conversation(params: FunctionCallParams):
 
 
 # Define the tools schema
-tools = ToolsSchema(
-    standard_tools=[
-        FunctionSchema(
-            name="get_current_weather",
-            description="Get the current weather",
-            properties={
-                "location": {
-                    "type": "string",
-                    "description": "The city and state, e.g. San Francisco, CA",
-                },
-                "format": {
-                    "type": "string",
-                    "enum": ["celsius", "fahrenheit"],
-                    "description": "The temperature unit to use. Infer this from the users location.",
-                },
-            },
-            required=["location", "format"],
-        ),
-        FunctionSchema(
-            name="save_conversation",
-            description="Save the current conversation. Use this function to persist the current conversation to external storage.",
-            properties={},
-            required=[],
-        ),
-        FunctionSchema(
-            name="get_saved_conversation_filenames",
-            description="Get a list of saved conversation histories. Returns a list of filenames. Each filename includes a date and timestamp.",
-            properties={},
-            required=[],
-        ),
-        FunctionSchema(
-            name="load_conversation",
-            description="Load a conversation history. Use this function to load a conversation history into the current session.",
-            properties={
-                "filename": {
-                    "type": "string",
-                    "description": "The filename of the conversation history to load.",
-                }
-            },
-            required=["filename"],
-        ),
-    ]
-)
 
 
 # Transport configuration - no local VAD needed since Grok has server-side VAD
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -197,13 +165,20 @@ Remember, your responses should be short - just one or two sentences usually."""
     )
 
     # Register function handlers
-    llm.register_function("get_current_weather", fetch_weather_from_api)
-    llm.register_function("save_conversation", save_conversation)
-    llm.register_function("get_saved_conversation_filenames", get_saved_conversation_filenames)
-    llm.register_function("load_conversation", load_conversation)
 
-    context = LLMContext([{"role": "developer", "content": "Say hello!"}], tools)
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
+    context = LLMContext(
+        [{"role": "developer", "content": "Say hello!"}],
+        [
+            get_current_weather,
+            save_conversation,
+            get_saved_conversation_filenames,
+            load_conversation,
+        ],
+    )
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        realtime_service_mode=True,
+    )
 
     pipeline = Pipeline(
         [

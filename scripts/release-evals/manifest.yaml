@@ -1,0 +1,257 @@
+# Release evals manifest: which scenarios each bot runs.
+# Run with: pipecat eval suite scripts/release-evals/manifest.yaml
+#
+# Scenarios live in scenarios/<name>.yaml and are reusable, so one shared
+# scenario covers many bots.
+
+bots_dir: ../../examples       # bot paths below are relative to this
+scenarios_dir: scenarios         # scenario names resolve to <dir>/<name>.yaml
+concurrency: 4
+runs_dir: test-runs              # logs + recordings -> test-runs/<timestamp>/
+record: true                     # set true (or pass -a) to record conversation audio
+spawn: "{python} {bot} -t eval --port {port}"
+
+suite:
+  #
+  # Voice: exercise voice for all out services. Some examples use a combination
+  # of audio and text modalities.
+  #
+  - bot: voice/voice-aicoustics.py
+    scenarios: [capital_question]
+  - bot: voice/voice-assemblyai.py
+    scenarios: [capital_question]
+  - bot: voice/voice-assemblyai-turn-detection.py
+    scenarios: [capital_question]
+  - bot: voice/voice-asyncai.py
+    scenarios: [capital_question]
+  - bot: voice/voice-asyncai-http.py
+    scenarios: [capital_question]
+  - bot: voice/voice-aws.py
+    scenarios: [capital_question]
+  - bot: voice/voice-aws-strands.py
+    scenarios: [weather]
+  - bot: voice/voice-azure.py
+    scenarios: [capital_question]
+  - bot: voice/voice-azure-http.py
+    scenarios: [capital_question]
+  - bot: voice/voice-camb.py
+    scenarios: [capital_question]
+  - bot: voice/voice-cartesia.py
+    scenarios:
+      - capital_question
+      - multi_turn
+      - interruption_audio
+      - interruption_text
+      - language_switch
+  - bot: voice/voice-cartesia-http.py
+    scenarios: [capital_question]
+  - bot: voice/voice-cartesia-turns.py
+    scenarios: [capital_question]
+  - bot: voice/voice-deepgram.py
+    scenarios: [capital_question]
+  - bot: voice/voice-deepgram-flux.py
+    scenarios: [capital_question]
+  - bot: voice/voice-deepgram-http.py
+    scenarios: [capital_question]
+  - bot: voice/voice-elevenlabs.py
+    scenarios: [capital_question]
+  - bot: voice/voice-elevenlabs-http.py
+    scenarios: [capital_question]
+  - bot: voice/voice-fal.py
+    scenarios: [capital_question]
+  - bot: voice/voice-fish.py
+    scenarios: [capital_question]
+  - bot: voice/voice-gladia.py
+    scenarios: [capital_question]
+  - bot: voice/voice-gladia-vad.py
+    scenarios: [capital_question]
+  - bot: voice/voice-google.py
+    scenarios: [capital_question]
+  - bot: voice/voice-google-audio-in.py
+    scenarios: [capital_question]
+  - bot: voice/voice-google-gemini-tts.py
+    scenarios: [capital_question]
+  - bot: voice/voice-google-http.py
+    scenarios: [capital_question]
+  - bot: voice/voice-gradium.py
+    scenarios: [capital_question]
+  - bot: voice/voice-groq.py
+    scenarios: [capital_question]
+  - bot: voice/voice-hume.py
+    scenarios: [capital_question]
+  - bot: voice/voice-inworld.py
+    scenarios: [capital_question]
+  - bot: voice/voice-inworld-http.py
+    scenarios: [capital_question]
+  - bot: voice/voice-kokoro.py
+    scenarios: [capital_question]
+  - bot: voice/voice-krisp-viva.py
+    scenarios: [capital_question]
+  - bot: voice/voice-langchain.py
+    scenarios: [capital_question]
+  - bot: voice/voice-lmnt.py
+    scenarios: [capital_question]
+  - bot: voice/voice-minimax.py
+    scenarios: [capital_question]
+  - bot: voice/voice-mistral.py
+    scenarios: [capital_question]
+  - bot: voice/voice-neuphonic.py
+    scenarios: [capital_question]
+  - bot: voice/voice-neuphonic-http.py
+    scenarios: [capital_question]
+  - bot: voice/voice-nvidia.py
+    scenarios: [capital_question]
+  - bot: voice/voice-openai.py
+    scenarios: [capital_question]
+  - bot: voice/voice-openai-http.py
+    scenarios: [capital_question]
+  - bot: voice/voice-openai-responses.py
+    scenarios: [capital_question]
+  - bot: voice/voice-openai-responses-http.py
+    scenarios: [capital_question]
+  - bot: voice/voice-piper.py
+    scenarios: [capital_question]
+  - bot: voice/voice-resemble.py
+    scenarios: [capital_question]
+  - bot: voice/voice-rime.py
+    scenarios: [capital_question]
+  - bot: voice/voice-rime-http.py
+    scenarios: [capital_question]
+  - bot: voice/voice-sarvam.py
+    scenarios: [capital_question]
+  - bot: voice/voice-sarvam-http.py
+    scenarios: [capital_question]
+  - bot: voice/voice-smallest.py
+    scenarios: [capital_question]
+  - bot: voice/voice-soniox.py
+    scenarios: [capital_question]
+  - bot: voice/voice-speechmatics.py
+    scenarios: [capital_question]
+  - bot: voice/voice-speechmatics-vad.py
+    scenarios: [capital_question]
+  - bot: voice/voice-xai.py
+    scenarios: [capital_question]
+  - bot: voice/voice-xai-http.py
+    scenarios: [capital_question]
+
+  #
+  # Function calling: exercise one or more function calls.
+  #
+  - bot: getting-started/07-function-calling.py
+    scenarios:
+      - weather_function_call
+      - weather_and_restaurant
+  - bot: function-calling/function-calling-anthropic.py
+    scenarios:
+      - weather_function_call
+      - weather_and_restaurant
+  - bot: function-calling/function-calling-aws.py
+    scenarios:
+      - weather_function_call
+      - weather_and_restaurant
+  - bot: function-calling/function-calling-azure.py
+    scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-cerebras.py
+    scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-deepseek.py
+    scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-fireworks.py
+    scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-google.py
+    scenarios:
+      - weather_function_call
+      - weather_and_restaurant
+  - bot: function-calling/function-calling-google-vertex.py
+    scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-grok.py
+    scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-groq.py
+    scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-inception.py
+    scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-mistral.py
+    scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-nebius.py
+    scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-novita.py
+    scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-nvidia.py
+    scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-openai.py
+    scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-openai-responses.py
+    scenarios:
+      - weather_function_call
+      - weather_and_restaurant
+  - bot: function-calling/function-calling-openai-responses-http.py
+    scenarios:
+      - weather_function_call
+      - weather_and_restaurant
+  - bot: function-calling/function-calling-openrouter.py
+    scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-perplexity.py
+    scenarios: [item_price]
+  - bot: function-calling/function-calling-qwen.py
+    scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-sambanova.py
+    scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-sarvam.py
+    scenarios: [weather_function_call]
+
+  #
+  # Function calling with video: the bot calls a vision function that requests a
+  # user image; the eval transport serves the scenario's `image:` for that turn.
+  #
+  - bot: function-calling/function-calling-openai-video.py
+    scenarios: [describe_image]
+  - bot: function-calling/function-calling-openai-responses-video.py
+    scenarios: [describe_image]
+  - bot: function-calling/function-calling-openai-responses-video-http.py
+    scenarios: [describe_image]
+  - bot: function-calling/function-calling-anthropic-video.py
+    scenarios: [describe_image]
+  - bot: function-calling/function-calling-aws-video.py
+    scenarios: [describe_image]
+  - bot: function-calling/function-calling-google-video.py
+    scenarios: [describe_image]
+  - bot: function-calling/function-calling-moondream-video.py
+    scenarios: [describe_image]
+
+  #
+  # Vision: the bot is handed an image (a cat) on connect via --runner-body and
+  # describes it. `runner_body:` is resolved relative to this manifest; relative
+  # paths inside it (the image) resolve next to the body file.
+  #
+  - bot: vision/vision-openai.py
+    runner_body: scenarios/vision-cat.json
+    scenarios: [vision_describe]
+  - bot: vision/vision-openai-responses.py
+    runner_body: scenarios/vision-cat.json
+    scenarios: [vision_describe]
+  - bot: vision/vision-openai-responses-http.py
+    runner_body: scenarios/vision-cat.json
+    scenarios: [vision_describe]
+  - bot: vision/vision-anthropic.py
+    runner_body: scenarios/vision-cat.json
+    scenarios: [vision_describe]
+  - bot: vision/vision-aws.py
+    runner_body: scenarios/vision-cat.json
+    scenarios: [vision_describe]
+  - bot: vision/vision-gemini-flash.py
+    runner_body: scenarios/vision-cat.json
+    scenarios: [vision_describe]
+  - bot: vision/vision-moondream.py
+    runner_body: scenarios/vision-cat.json
+    scenarios: [vision_describe]
+
+  #
+  # Turn management: the user trails off mid-thought, then completes it after a
+  # pause. The bot's incomplete-turn detection must hold the turn open and
+  # respond only to the finished thought (anchored on the raw VAD stop signal).
+  #
+  - bot: turn-management/turn-management-filter-incomplete-turns.py
+    scenarios: [filter_incomplete_turns]
+  - bot: turn-management/turn-management-filter-incomplete-turns-function-calling.py
+    scenarios: [filter_incomplete_turns_function_calling]
+  - bot: turn-management/turn-management-filter-incomplete-turns-function-calling.py
+    scenarios: [filter_incomplete_turns]

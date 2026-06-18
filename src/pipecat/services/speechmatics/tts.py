@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
 from pipecat.services.tts_service import TTSService
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.network import exponential_backoff_time
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -29,9 +30,7 @@ try:
     from speechmatics.rt import __version__
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use Speechmatics, you need to `pip install pipecat-ai[speechmatics]`."
-    )
+    logger.error('In order to use Speechmatics, you need to `uv add "pipecat-ai[speechmatics]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 
@@ -61,11 +60,16 @@ class SpeechmaticsTTSService(TTSService):
 
     SPEECHMATICS_SAMPLE_RATE = 16000
 
+    @deprecated(
+        "`SpeechmaticsTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `SpeechmaticsTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Optional input parameters for Speechmatics TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``settings=SpeechmaticsTTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             max_retries: Maximum number of retries for TTS requests. Defaults to 5.
@@ -94,6 +98,7 @@ class SpeechmaticsTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SpeechmaticsTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             aiohttp_session: Shared aiohttp session for HTTP requests.
             sample_rate: Audio sample rate in Hz.
@@ -101,6 +106,7 @@ class SpeechmaticsTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SpeechmaticsTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
