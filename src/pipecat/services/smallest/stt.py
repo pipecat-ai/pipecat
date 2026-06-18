@@ -8,11 +8,8 @@
 
 This module provides a STT service using Smallest AI's Waves API:
 
-- ``SmallestSTTService``: WebSocket-based real-time STT using the Pulse model.
-  Streams audio continuously and receives interim/final transcripts with low
-  latency. Each utterance opens a session; sending ``close_stream`` flushes the
-  final transcript and the server closes the session. The service reconnects
-  automatically for the next utterance.
+- ``SmallestSTTService``: WebSocket-based real-time STT. Streams audio
+  continuously and receives interim/final transcripts with low latency.
 """
 
 import asyncio
