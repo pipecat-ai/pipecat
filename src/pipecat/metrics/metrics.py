@@ -38,6 +38,21 @@ class TTFBMetricsData(MetricsData):
     value: float
 
 
+class TTFAMetricsData(MetricsData):
+    """Time To First Audio (TTFA) metrics data.
+
+    Measures the time from a TTS request to the first audible audio sample,
+    i.e. time-to-first-byte plus any leading silence the service pads onto the
+    start of its response. Comparing TTFA against TTFB reveals how much of the
+    perceived latency is silence padding rather than service response time.
+
+    Parameters:
+        value: TTFA measurement in seconds.
+    """
+
+    value: float
+
+
 class ProcessingMetricsData(MetricsData):
     """General processing time metrics data.
 
