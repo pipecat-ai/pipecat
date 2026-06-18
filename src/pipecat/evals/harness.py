@@ -906,6 +906,7 @@ class EvalSession:
                         reason=f"send_after never fired: {e}",
                     )
                 )
+                self._debug(f"FAIL: {turn.send_after.event}: {failures[-1].reason}")
                 self._progress(
                     EvalTurnProgress(
                         turn_idx, -1, turn.send_after.event, "timeout", failures[-1].reason
@@ -953,6 +954,7 @@ class EvalSession:
                         reason=reason,
                     )
                 )
+                self._debug(f"FAIL: {expectation.event}: {reason}")
                 self._progress(
                     EvalTurnProgress(turn_idx, exp_idx, expectation.event, "timeout", reason)
                 )
@@ -960,6 +962,7 @@ class EvalSession:
 
             if failure:
                 failures.append(failure)
+                self._debug(f"FAIL: {expectation.event}: {failure.reason}")
                 self._progress(
                     EvalTurnProgress(turn_idx, exp_idx, expectation.event, "failed", failure.reason)
                 )
@@ -1104,6 +1107,7 @@ class EvalSession:
                 # make; it completes only when all are found, in any order (a
                 # response arriving doesn't short-circuit it).
                 return await self._match_function_calls(expectation, deadline, turn_idx, exp_idx)
+            self._debug(f"match: waiting for {expectation.event!r}")
             event = await self._next_matching_event(expectation.event, deadline)
             payload_failure = self._check_payload(event, expectation, turn_idx, exp_idx)
             if payload_failure:
@@ -1127,7 +1131,7 @@ class EvalSession:
             )
             if val is not None
         )
-        self._debug(f"match: aggregating {expectation.event!r} ({check})")
+        self._debug(f"match: waiting for {expectation.event!r} ({check})")
         aggregate = ""
         last_reason = ""
         seen_any = False
@@ -1136,8 +1140,7 @@ class EvalSession:
                 event = await self._next_matching_event(expectation.event, deadline)
             except TimeoutError:
                 if not seen_any:
-                    self._debug(f"match: timeout, no {expectation.event!r} event arrived")
-                    raise  # no response at all → "no matching event arrived"
+                    raise  # no response at all → caller logs "no matching event arrived"
                 self._debug(f"eval: timeout, not satisfied: {last_reason}")
                 return fail(f"not satisfied within {budget_ms}ms: {last_reason}")
 
@@ -1198,8 +1201,16 @@ class EvalSession:
         def fail(reason: str) -> EvalAssertionFailure:
             return EvalAssertionFailure(turn_idx, exp_idx, expectation.event, reason)
 
+        def spec_sig(spec) -> str:
+            name = spec.name or "any function"
+            if not spec.args:
+                return name
+            args = ", ".join(f"{k}={v!r}" for k, v in spec.args.items())
+            return f"{name}({args})"
+
         matched: list[str] = []
         for spec in expectation.calls or []:
+            self._debug(f"match: waiting for {expectation.event!r} ({spec_sig(spec)})")
             try:
                 event = await self._next_function_call(spec.name, deadline)
             except TimeoutError:
