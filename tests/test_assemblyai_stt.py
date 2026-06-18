@@ -352,6 +352,51 @@ def test_voice_focus_threshold_out_of_range_raises(value):
         )
 
 
+# --- mode (latency/accuracy preset) ---
+
+
+def test_mode_omitted_by_default():
+    service = AssemblyAISTTService(api_key="test-key")
+    assert "mode" not in _query(service)
+
+
+def test_mode_sent_for_u3_rt_pro():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(mode="max_accuracy"),
+    )
+    assert _query(service)["mode"] == ["max_accuracy"]
+
+
+def test_mode_sent_for_universal_3_5_pro():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(model="universal-3-5-pro", mode="min_latency"),
+    )
+    assert _query(service)["mode"] == ["min_latency"]
+
+
+def test_mode_omitted_for_universal_streaming():
+    # mode is a U3 Pro-only parameter.
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(
+            model="universal-streaming-english",
+            mode="max_accuracy",
+        ),
+    )
+    assert "mode" not in _query(service)
+
+
+@pytest.mark.parametrize("value", ["min_latency", "balanced", "max_accuracy"])
+def test_mode_values_accepted(value):
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(mode=value),
+    )
+    assert _query(service)["mode"] == [value]
+
+
 # --- update_agent_context() ---
 
 
