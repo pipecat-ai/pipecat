@@ -63,7 +63,11 @@ from pipecat.bus.subscriber import BusSubscriber
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.registry import WorkerRegistry
 from pipecat.registry.types import WorkerReadyData, WorkerRegistryEntry
-from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import (
+    BaseTaskManager,
+    TaskManager,
+    TaskManagerParams,
+)
 from pipecat.utils.base_object import BaseObject
 from pipecat.utils.startup import run_setup_hook
 from pipecat.workers.base_worker import BaseWorker, WorkerParams
@@ -111,6 +115,7 @@ class WorkerRunner(BaseObject, BusSubscriber):
         handle_sigint: bool = True,
         handle_sigterm: bool = False,
         force_gc: bool = False,
+        check_dangling_tasks: bool = True,
         loop: asyncio.AbstractEventLoop | None = None,
         task_manager: BaseTaskManager | None = None,
     ):
@@ -126,6 +131,8 @@ class WorkerRunner(BaseObject, BusSubscriber):
             handle_sigterm: Whether to automatically handle SIGTERM signals.
             force_gc: Whether to force garbage collection after the main
                 worker completes.
+            check_dangling_tasks: Whether to warn about tasks left running on
+                the shared task manager once every worker has finished.
             task_manager: Optional task manager for handling asyncio tasks.
             loop: Event loop to use. If None, uses the current running loop.
 
@@ -138,6 +145,7 @@ class WorkerRunner(BaseObject, BusSubscriber):
 
         self._bus: WorkerBus = bus or AsyncQueueBus()
         self._registry = WorkerRegistry(runner_name=self.name)
+        self._check_dangling_tasks = check_dangling_tasks
 
         if loop is not None:
             with warnings.catch_warnings():
@@ -284,6 +292,11 @@ class WorkerRunner(BaseObject, BusSubscriber):
 
         if self._force_gc:
             await self._gc_collect()
+
+        # Report dangling tasks on the shared task manager after everything has
+        # been torn down. Workers sharing this task manager leave the report to
+        # us; only workers with their own task manager report themselves.
+        self._print_dangling_tasks()
 
         logger.debug(f"WorkerRunner '{self}': finished running")
 
@@ -510,3 +523,10 @@ class WorkerRunner(BaseObject, BusSubscriber):
         collected = await asyncio.to_thread(gc.collect)
         logger.debug(f"Garbage collector: collected {collected} objects.")
         logger.debug(f"Garbage collector: uncollectable objects {gc.garbage}")
+
+    def _print_dangling_tasks(self) -> None:
+        """Warn about tasks left running on the task manager this runner owns."""
+        if self._check_dangling_tasks:
+            tasks = [t.get_name() for t in self.task_manager.current_tasks()]
+            if tasks:
+                logger.warning(f"{self} dangling tasks detected: {tasks}")
