@@ -59,7 +59,7 @@ from pipecat.pipeline.job_decorator import _collect_job_handlers
 from pipecat.pipeline.worker_ready_decorator import _collect_worker_ready_handlers
 from pipecat.registry import WorkerRegistry
 from pipecat.registry.types import WorkerErrorData, WorkerReadyData
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
 
 
@@ -68,10 +68,10 @@ class WorkerParams:
     """Configuration parameters for worker execution.
 
     Parameters:
-        loop: The asyncio event loop to use for worker execution.
+        task_manager: Task manager for handling asyncio tasks.
     """
 
-    loop: asyncio.AbstractEventLoop
+    task_manager: BaseTaskManager
 
 
 @dataclass
@@ -161,6 +161,7 @@ class BaseWorker(BaseObject, BusSubscriber):
         name: str | None = None,
         *,
         active: bool = True,
+        task_manager: BaseTaskManager | None = None,
     ):
         """Initialize the BaseWorker.
 
@@ -169,8 +170,9 @@ class BaseWorker(BaseObject, BusSubscriber):
                 name is used (useful for instances that don't participate
                 in inter-worker communication).
             active: Whether the worker starts active. Defaults to True.
+            task_manager: Optional task manager for handling asyncio tasks.
         """
-        super().__init__(name=name)
+        super().__init__(name=name, task_manager=task_manager)
 
         # Runner-provided context. Populated by ``attach()`` before
         # ``run()`` is called. Accessing ``self.bus`` / ``self.registry``
@@ -330,9 +332,7 @@ class BaseWorker(BaseObject, BusSubscriber):
         Args:
             params: Configuration parameters for worker execution.
         """
-        task_manager = TaskManager()
-        task_manager.setup(TaskManagerParams(loop=params.loop))
-        await super().setup(task_manager)
+        await super().setup(self._task_manager or params.task_manager)
 
         await self.start()
         try:

@@ -63,7 +63,7 @@ from pipecat.bus.subscriber import BusSubscriber
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.registry import WorkerRegistry
 from pipecat.registry.types import WorkerReadyData, WorkerRegistryEntry
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
 from pipecat.utils.base_object import BaseObject
 from pipecat.utils.startup import run_setup_hook
 from pipecat.workers.base_worker import BaseWorker, WorkerParams
@@ -112,6 +112,7 @@ class WorkerRunner(BaseObject, BusSubscriber):
         handle_sigterm: bool = False,
         force_gc: bool = False,
         loop: asyncio.AbstractEventLoop | None = None,
+        task_manager: BaseTaskManager | None = None,
     ):
         """Initialize the worker runner.
 
@@ -125,12 +126,28 @@ class WorkerRunner(BaseObject, BusSubscriber):
             handle_sigterm: Whether to automatically handle SIGTERM signals.
             force_gc: Whether to force garbage collection after the main
                 worker completes.
+            task_manager: Optional task manager for handling asyncio tasks.
             loop: Event loop to use. If None, uses the current running loop.
+
+                .. deprecated:: 1.5.0
+                    Use ``task_manager`` (which owns its own loop) instead.
+                    ``loop`` will be removed in 2.0.0.
         """
-        super().__init__(name=name or f"runner-{uuid.uuid4().hex[:8]}")
+        task_manager = task_manager or TaskManager(loop=loop or asyncio.get_running_loop())
+        super().__init__(name=name or f"runner-{uuid.uuid4().hex[:8]}", task_manager=task_manager)
 
         self._bus: WorkerBus = bus or AsyncQueueBus()
         self._registry = WorkerRegistry(runner_name=self.name)
+
+        if loop is not None:
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "`loop` is deprecated since 1.5.0 and will be removed in 2.0.0. "
+                    "Use `task_manager` instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
 
         self._entries: dict[str, _WorkerEntry] = {}
         self._known_runners: set[str] = set()
@@ -142,7 +159,6 @@ class WorkerRunner(BaseObject, BusSubscriber):
         self._handle_sigint = handle_sigint
         self._handle_sigterm = handle_sigterm
         self._force_gc = force_gc
-        self._loop = loop or asyncio.get_running_loop()
 
         self._register_event_handler("on_ready")
         self._register_event_handler("on_error")
@@ -335,10 +351,7 @@ class WorkerRunner(BaseObject, BusSubscriber):
         """One-time per-run setup: worker manager, bus, signal handlers, launched workers."""
         if self._running:
             return
-        task_manager = TaskManager()
-        task_manager.setup(TaskManagerParams(loop=self._loop))
-        await super().setup(task_manager)
-        await self._bus.setup(task_manager)
+        await self._bus.setup(self.task_manager)
 
         if self._handle_sigint:
             self._setup_sigint()
@@ -397,7 +410,7 @@ class WorkerRunner(BaseObject, BusSubscriber):
     async def _run_worker(self, worker: BaseWorker) -> None:
         """Drive a registered worker to completion."""
         try:
-            params = WorkerParams(loop=self._loop)
+            params = WorkerParams(task_manager=self.task_manager)
             await worker.run(params)
         except asyncio.CancelledError:
             pass

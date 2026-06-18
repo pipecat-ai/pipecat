@@ -52,16 +52,24 @@ class BaseObject(ABC):
     classes in the framework should inherit from this base class.
     """
 
-    def __init__(self, *, name: str | None = None, **kwargs):
+    def __init__(
+        self,
+        *,
+        name: str | None = None,
+        task_manager: BaseTaskManager | None = None,
+        **kwargs,
+    ):
         """Initialize the base object.
 
         Args:
             name: Optional custom name for the object. If not provided,
                 generates a name using the class name and instance count.
+            task_manager: Optional task manager for handling asyncio tasks.
             **kwargs: Additional arguments passed to parent class.
         """
         self._id: int = obj_id()
         self._name = name or f"{self.__class__.__name__}#{obj_count(self)}"
+        self._task_manager = task_manager
 
         # Registered event handlers.
         self._event_handlers: dict[str, EventHandler] = {}
@@ -70,10 +78,6 @@ class BaseObject(ABC):
         # automatically removed from the set. When we cleanup we wait for all
         # event tasks still being executed.
         self._event_tasks = set()
-
-        # Task manager. Populated by setup(); accessing the task_manager
-        # property before setup raises.
-        self._task_manager: BaseTaskManager | None = None
 
     @property
     def id(self) -> int:

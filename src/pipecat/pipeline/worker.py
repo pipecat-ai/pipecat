@@ -78,7 +78,7 @@ from pipecat.processors.frameworks.rtvi.models import (
     UIJobUpdateData,
     UISnapshotMessage,
 )
-from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.startup import run_setup_hook
 from pipecat.utils.tracing.setup import is_tracing_available
@@ -305,14 +305,14 @@ class PipelineWorker(BaseWorker):
             params: Configuration parameters for the pipeline.
             rtvi_observer_params: The RTVI observer parameter to use if RTVI is enabled.
             rtvi_processor: The RTVI processor to add if RTVI is enabled.
-            task_manager: Optional worker manager for handling asyncio tasks.
+            task_manager: Optional task manager for handling asyncio tasks.
             tool_resources: Deprecated alias for ``app_resources``.
 
                 .. deprecated:: 1.2.0
                     Use ``app_resources`` instead. ``tool_resources`` will be
                     removed in 2.0.0.
         """
-        super().__init__(name=name, active=active)
+        super().__init__(name=name, active=active, task_manager=task_manager)
         self._bridged = bridged
         if tool_resources is not None:
             with warnings.catch_warnings():
@@ -363,10 +363,6 @@ class PipelineWorker(BaseWorker):
 
         self._finished = False
         self._cancelled = False
-
-        # This worker maneger will handle all the asyncio tasks created by this
-        # PipelineWorker and its frame processors.
-        self._pipeline_task_manager = task_manager or TaskManager()
 
         # This queue is the queue used to push frames to the pipeline.
         self._push_queue = asyncio.Queue()
@@ -998,10 +994,7 @@ class PipelineWorker(BaseWorker):
 
     async def _setup(self, params: WorkerParams):
         """Set up the pipeline worker and all processors."""
-        await super().setup(self._pipeline_task_manager)
-
-        mgr_params = TaskManagerParams(loop=params.loop)
-        self.task_manager.setup(mgr_params)
+        await super().setup(self._task_manager or params.task_manager)
 
         setup = FrameProcessorSetup(
             clock=self._clock,
