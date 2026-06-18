@@ -59,7 +59,12 @@ class BaseTaskManager(ABC):
         pass
 
     @abstractmethod
-    def create_task(self, coroutine: Coroutine, name: str) -> asyncio.Task:
+    def create_task(
+        self,
+        coroutine: Coroutine,
+        name: str,
+        context: Context | None = None,
+    ) -> asyncio.Task:
         """Creates and schedules a new asyncio Task that runs the given coroutine.
 
         The task is added to a global set of created tasks.
@@ -67,6 +72,7 @@ class BaseTaskManager(ABC):
         Args:
             coroutine: The coroutine to be executed within the task.
             name: The name to assign to the task for identification.
+            context: Optional context manager to use when creating the task.
 
         Returns:
             The created task object.
@@ -155,7 +161,12 @@ class TaskManager(BaseTaskManager):
         """
         return self._loop
 
-    def create_task(self, coroutine: Coroutine, name: str) -> asyncio.Task:
+    def create_task(
+        self,
+        coroutine: Coroutine,
+        name: str,
+        context: Context | None = None,
+    ) -> asyncio.Task:
         """Creates and schedules a new asyncio Task that runs the given coroutine.
 
         The task is added to a global set of created tasks.
@@ -163,6 +174,7 @@ class TaskManager(BaseTaskManager):
         Args:
             coroutine: The coroutine to be executed within the task.
             name: The name to assign to the task for identification.
+            context: Optional context manager to use when creating the task.
 
         Returns:
             The created task object.
@@ -183,7 +195,7 @@ class TaskManager(BaseTaskManager):
                 last = tb[-1]
                 logger.error(f"{name} unexpected exception ({last.filename}:{last.lineno}): {e}")
 
-        task = self._loop.create_task(run_coroutine(), context=self._context)
+        task = self._loop.create_task(run_coroutine(), context=context or self._context)
         task.set_name(name)
 
         def close_unawaited_coroutine(_: asyncio.Task):

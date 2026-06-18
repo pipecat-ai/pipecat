@@ -16,6 +16,7 @@ import inspect
 import traceback
 from abc import ABC
 from collections.abc import Coroutine
+from contextvars import Context
 from dataclasses import dataclass
 from typing import Any
 
@@ -127,12 +128,18 @@ class BaseObject(ABC):
         """
         self._task_manager = task_manager
 
-    def create_task(self, coroutine: Coroutine, name: str | None = None) -> asyncio.Task:
+    def create_task(
+        self,
+        coroutine: Coroutine,
+        name: str | None = None,
+        context: Context | None = None,
+    ) -> asyncio.Task:
         """Create a new task managed by this object's task manager.
 
         Args:
             coroutine: The coroutine to run in the task.
             name: Optional name for the task.
+            context: Optional context manager to use when creating the task.
 
         Returns:
             The created asyncio task.
@@ -142,7 +149,7 @@ class BaseObject(ABC):
             # name for any other awaitable subtype.
             cr_code = getattr(coroutine, "cr_code", None)
             name = getattr(cr_code, "co_name", "task")
-        return self.task_manager.create_task(coroutine, f"{self}::{name}")
+        return self.task_manager.create_task(coroutine, f"{self}::{name}", context)
 
     async def cancel_task(self, task: asyncio.Task, timeout: float | None = 1.0):
         """Cancel a task managed by this object's task manager.
