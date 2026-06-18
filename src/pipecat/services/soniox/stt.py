@@ -508,7 +508,15 @@ class SonioxSTTService(WebsocketSTTService):
 
             # If vad_force_turn_endpoint is not enabled, we need to enable endpoint detection.
             # Either one or the other is required.
-            enable_endpoint_detection = not self._vad_force_turn_endpoint
+            #
+            # HYBRID (voiceman): when ``_endpoint_backstop`` is set, enable Soniox's native
+            # endpoint detection EVEN WITH vad_force_turn_endpoint=True. The VAD-driven
+            # FINALIZE (process_frame, below) stays the low-latency fast path; native
+            # endpointing becomes a backstop that still closes the turn when the local VAD
+            # misses a soft/overlapping utterance (otherwise the turn hangs to user_idle).
+            enable_endpoint_detection = (not self._vad_force_turn_endpoint) or getattr(
+                self, "_endpoint_backstop", False
+            )
 
             s = self._settings
 
