@@ -148,7 +148,8 @@ class MetricsLogObserver(BaseObserver):
             )
         elif isinstance(metrics_data, TTFAMetricsData):
             logger.debug(
-                f"📊 {processor_info} TTFA{model_info}: {metrics_data.value}s at {time_sec:.3f}s"
+                f"📊 {processor_info} TTFA{model_info}: {metrics_data.ttfa}s "
+                f"({metrics_data.leading_silence}s leading silence) at {time_sec:.3f}s"
             )
         elif isinstance(metrics_data, ProcessingMetricsData):
             logger.debug(
