@@ -4503,6 +4503,7 @@ redis = [
     { name = "redis", extra = ["hiredis"] },
 ]
 rnnoise = [
+    { name = "av" },
     { name = "pyrnnoise" },
 ]
 runner = [
@@ -4592,6 +4593,7 @@ requires-dist = [
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.49.0,<1" },
     { name = "asyncpg", marker = "extra == 'pgmq'", specifier = ">=0.30.0" },
     { name = "audioop-lts", marker = "python_full_version >= '3.13'", specifier = "~=0.2.1" },
+    { name = "av", marker = "extra == 'rnnoise'", specifier = "<17.1.0" },
     { name = "aws-sdk-bedrock-runtime", marker = "python_full_version >= '3.12' and extra == 'aws-nova-sonic'", specifier = "~=0.4.0" },
     { name = "aws-sdk-sagemaker-runtime-http2", marker = "python_full_version >= '3.12' and extra == 'sagemaker'" },
     { name = "azure-cognitiveservices-speech", marker = "extra == 'azure'", specifier = ">=1.47.0,<2" },
@@ -4652,7 +4654,7 @@ requires-dist = [
     { name = "pygobject", marker = "extra == 'gstreamer'", specifier = "~=3.50.0" },
     { name = "pyjwt", marker = "extra == 'livekit'", specifier = ">=2.12.0,<3" },
     { name = "pyloudnorm", specifier = "~=0.2.0" },
-    { name = "pyrnnoise", marker = "extra == 'rnnoise'", specifier = "~=0.4.1" },
+    { name = "pyrnnoise", marker = "extra == 'rnnoise'", specifier = "~=0.4.3" },
     { name = "python-dotenv", marker = "extra == 'runner'", specifier = ">=1.0.0,<2.0.0" },
     { name = "pyvips", extras = ["binary"], marker = "extra == 'moondream'", specifier = "~=3.0.0" },
     { name = "pyyaml", specifier = ">=6,<7" },
