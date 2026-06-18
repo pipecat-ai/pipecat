@@ -25,7 +25,7 @@ from pipecat.services.llm_service import (
     LLMService,
 )
 from pipecat.services.settings import LLMSettings
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 
 @dataclass
@@ -167,7 +167,6 @@ class TestLLMServiceFunctionCallReadsAppResources(unittest.IsolatedAsyncioTestCa
         # compatibility with custom FrameProcessors whose ``setup()`` overrides
         # still read it. The field is populated, but reading it warns.
         task_manager = TaskManager()
-        task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
         resources = _Resources(user_name="John")
 
         # Construction itself does not warn — only reads do.
@@ -258,7 +257,7 @@ class TestFrameProcessorSetupToolResourcesBackwardsCompat(unittest.IsolatedAsync
 
         await worker.queue_frame(EndFrame())
         with self.assertWarns(DeprecationWarning):
-            await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
+            await worker.run(WorkerParams(task_manager=TaskManager()))
 
         self.assertIs(legacy.captured_tool_resources, resources)
 
@@ -276,7 +275,7 @@ class TestFrameProcessorSetupToolResourcesBackwardsCompat(unittest.IsolatedAsync
 
         await worker.queue_frame(EndFrame())
         with self.assertWarns(DeprecationWarning):
-            await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
+            await worker.run(WorkerParams(task_manager=TaskManager()))
 
         self.assertIs(legacy.captured_tool_resources, resources)
 
@@ -289,7 +288,7 @@ class TestFrameProcessorPipelineTaskAccess(unittest.IsolatedAsyncioTestCase):
         worker = PipelineWorker(pipeline, app_resources=resources)
 
         await worker.queue_frame(EndFrame())
-        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
+        await worker.run(WorkerParams(task_manager=TaskManager()))
 
         self.assertIs(recorder.observed_task, worker)
         self.assertIs(recorder.observed_app_resources, resources)
