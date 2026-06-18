@@ -313,7 +313,8 @@ class DograhTTSService(WebsocketTTSService):
                     logger.trace(f"Received final message for context {ctx_id}")
                     if ctx_id:
                         self._remote_initialized_context_ids.discard(ctx_id)
-                        await self.remove_audio_context(ctx_id)
+                        if self.audio_context_available(ctx_id):
+                            await self.remove_audio_context(ctx_id)
                     continue
 
                 # Skip messages for unavailable contexts

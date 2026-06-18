@@ -14,6 +14,8 @@ where applicable and Pipecat-specific conventions for additional context.
 import json
 from typing import TYPE_CHECKING, Any
 
+from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
+
 # Import for type checking only
 if TYPE_CHECKING:
     from opentelemetry.trace import Span
@@ -24,6 +26,61 @@ from pipecat.utils.tracing.setup import is_tracing_available
 
 if is_tracing_available():
     from opentelemetry.trace import Span
+
+
+def _span_tools(tools: Any | None, adapter_type: AdapterType | None = None) -> list[Any]:
+    """Return a concrete list of tools suitable for span attributes."""
+    if not tools:
+        return []
+
+    if isinstance(tools, ToolsSchema):
+        span_tools: list[Any] = list(tools.standard_tools)
+        if tools.custom_tools:
+            if adapter_type:
+                span_tools.extend(tools.custom_tools.get(adapter_type, []))
+            else:
+                for custom_tools in tools.custom_tools.values():
+                    span_tools.extend(custom_tools)
+        return span_tools
+
+    if isinstance(tools, list):
+        return tools
+
+    if isinstance(tools, tuple):
+        return list(tools)
+
+    return [tools]
+
+
+def _span_tool_names(tools: list[Any]) -> list[str]:
+    """Extract display names from common standard and provider-native tool formats."""
+    names: list[str] = []
+
+    for tool in tools:
+        if isinstance(tool, dict):
+            name = tool.get("name")
+            if isinstance(name, str):
+                names.append(name)
+
+            function = tool.get("function")
+            if isinstance(function, dict):
+                function_name = function.get("name")
+                if isinstance(function_name, str):
+                    names.append(function_name)
+
+            function_declarations = tool.get("function_declarations")
+            if isinstance(function_declarations, list):
+                for declaration in function_declarations:
+                    if isinstance(declaration, dict):
+                        declaration_name = declaration.get("name")
+                        if isinstance(declaration_name, str):
+                            names.append(declaration_name)
+        elif hasattr(tool, "name"):
+            name = getattr(tool, "name", None)
+            if isinstance(name, str):
+                names.append(name)
+
+    return names
 
 
 def _get_provider_name_from_service_name(service_name: str) -> str:
@@ -335,19 +392,13 @@ def add_gemini_live_span_attributes(
     if audio_data_size is not None:
         span.set_attribute("audio.data_size_bytes", audio_data_size)
 
-    if tools:
-        span.set_attribute("tools.count", len(tools))
+    span_tools = _span_tools(tools, AdapterType.GEMINI)
+    if span_tools:
+        span.set_attribute("tools.count", len(span_tools))
         span.set_attribute("tools.available", True)
 
         # Add individual tool names for easier filtering
-        tool_names = []
-        for tool in tools:
-            if isinstance(tool, dict) and "name" in tool:
-                tool_names.append(tool["name"])
-            elif hasattr(tool, "name"):
-                tool_name = getattr(tool, "name", None)
-                if tool_name is not None:
-                    tool_names.append(tool_name)
+        tool_names = _span_tool_names(span_tools)
 
         if tool_names:
             span.set_attribute("tools.names", ",".join(tool_names))
@@ -427,19 +478,13 @@ def add_openai_realtime_span_attributes(
     if audio_data_size is not None:
         span.set_attribute("audio.data_size_bytes", audio_data_size)
 
-    if tools:
-        span.set_attribute("tools.count", len(tools))
+    span_tools = _span_tools(tools, AdapterType.OPENAI)
+    if span_tools:
+        span.set_attribute("tools.count", len(span_tools))
         span.set_attribute("tools.available", True)
 
         # Add individual tool names for easier filtering
-        tool_names = []
-        for tool in tools:
-            if isinstance(tool, dict) and "name" in tool:
-                tool_names.append(tool["name"])
-            elif hasattr(tool, "name"):
-                tool_names.append(getattr(tool, "name"))
-            elif isinstance(tool, dict) and "function" in tool and "name" in tool["function"]:
-                tool_names.append(tool["function"]["name"])
+        tool_names = _span_tool_names(span_tools)
 
         if tool_names:
             span.set_attribute("tools.names", ",".join(tool_names))
