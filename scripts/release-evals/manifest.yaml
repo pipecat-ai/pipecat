@@ -167,6 +167,8 @@ suite:
     scenarios: [weather_function_call]
   - bot: function-calling/function-calling-groq.py
     scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-hopper.py
+    scenarios: [weather_function_call]
   - bot: function-calling/function-calling-inception.py
     scenarios: [weather_function_call]
   - bot: function-calling/function-calling-mistral.py
