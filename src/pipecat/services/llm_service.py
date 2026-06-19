@@ -982,6 +982,32 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             return explicit
         return decorated if decorated is not None else default
 
+    def _advertised_handler_changed(self, item: FunctionCallRegistryItem, new_handler: Any) -> bool:
+        """Whether an advertised handler differs from the one already registered.
+
+        Normalizes a ``DirectFunctionWrapper`` to its underlying ``.function`` on
+        both sides, then compares by identity. Flows reuses one closure per node
+        across repeated context frames (no change) but builds a fresh closure on
+        transition (a real change), so identity is the right test.
+
+        Args:
+            item: The currently registered entry.
+            new_handler: The advertised handler — a raw callable or a
+                ``DirectFunctionWrapper``.
+
+        Returns:
+            True if ``new_handler`` is a different callable than ``item`` holds.
+        """
+        current = (
+            item.handler.function
+            if isinstance(item.handler, DirectFunctionWrapper)
+            else item.handler
+        )
+        new = (
+            new_handler.function if isinstance(new_handler, DirectFunctionWrapper) else new_handler
+        )
+        return current is not new
+
     def _register_advertised_tool_handlers(self, tools: Any) -> None:
         """Register handlers for any tools in the given set that carry one.
 
@@ -995,9 +1021,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         plain list of direct functions / ``FunctionSchema`` objects, or
         ``NOT_GIVEN`` — normalizing as needed.
 
-        Any tool whose name is already registered (explicitly, or from a previous
-        context / tool set) is left untouched, so explicit registration always
-        wins and repeated frames don't re-register.
+        Explicit ``register_function`` registrations are always left untouched,
+        so explicit registration wins. An auto-registered entry (from a previous
+        advertised set) is rebound when the new set carries a *different* handler
+        for the same name — so a re-declared per-node handler takes effect — and
+        left untouched when the handler is unchanged, so repeated frames don't
+        churn.
 
         Args:
             tools: The tools to scan for handlers.
@@ -1013,7 +1042,21 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
         # Register direct functions.
         for wrapper in tools.direct_functions:
-            if wrapper.name in self._functions:
+            existing = self._functions.get(wrapper.name)
+            if existing is not None:
+                # An auto-registered entry whose advertised handler changed is
+                # rebound to the new handler. Explicit registrations and unchanged
+                # handlers are left untouched, so explicit wins and repeated frames
+                # don't churn.
+                if existing.auto_registered and self._advertised_handler_changed(
+                    existing, wrapper.function
+                ):
+                    self._register_direct_function(wrapper.function)
+                    self._functions[wrapper.name].auto_registered = True
+                    logger.debug(
+                        f"{self}: rebound advertised direct function '{wrapper.name}' "
+                        "to its new handler"
+                    )
                 continue
             if wrapper.name in self._explicitly_unregistered_function_names:
                 # Explicitly unregistered while still advertised — leave it gone so
@@ -1021,9 +1064,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 continue
             self._register_direct_function(wrapper.function)
             # Mark the entry as advertised-tool-set-managed so it can be pruned on a
-            # later sync that stops advertising it. Names already in _functions are
-            # skipped above, so explicit registrations keep their default
-            # auto_registered=False and are never pruned.
+            # later sync that stops advertising it. Explicit registrations are
+            # handled above and keep their default auto_registered=False, so they
+            # are never pruned.
             self._functions[wrapper.name].auto_registered = True
             logger.debug(
                 f"{self}: auto-registered handler for advertised direct function '{wrapper.name}'"
@@ -1036,8 +1079,22 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         for schema in tools.standard_tools:
             if schema.handler is None:
                 continue
-            if schema.name in self._functions:
-                self._warn_if_redundant_manual_registration(schema.name)
+            existing = self._functions.get(schema.name)
+            if existing is not None:
+                # Rebind an auto-registered entry whose advertised handler changed;
+                # otherwise leave it (explicit wins, unchanged handlers don't churn)
+                # and warn if a manual registration shadows a handler-carrying schema.
+                if existing.auto_registered and self._advertised_handler_changed(
+                    existing, schema.handler
+                ):
+                    self.register_function(schema.name, schema.handler)
+                    self._functions[schema.name].auto_registered = True
+                    logger.debug(
+                        f"{self}: rebound advertised FunctionSchema '{schema.name}' "
+                        "to its new handler"
+                    )
+                else:
+                    self._warn_if_redundant_manual_registration(schema.name)
                 continue
             if schema.name in self._explicitly_unregistered_function_names:
                 continue
