@@ -84,6 +84,56 @@ def language_to_xai_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
+def _xai_word_times(
+    graph_chars: list[str],
+    graph_times: list[list[float]],
+    partial_word: str = "",
+    partial_word_start_time: float = 0.0,
+) -> tuple[list[tuple[str, float]], str, float]:
+    """Convert xAI character timings into ``(word, start_time)`` pairs.
+
+    When ``with_timestamps`` is enabled, each xAI ``audio.delta`` carries
+    per-character ``graph_chars`` (including spaces and punctuation) and
+    ``graph_times`` as ``[start, end]`` second pairs. The times are absolute
+    from the start of the utterance and continue across chunks, so they are
+    used as-is. Words are split on spaces, each assigned the start time of its
+    first character, and a word that straddles a chunk boundary is carried over
+    via ``partial_word``.
+
+    Returns:
+        ``(word_times, partial_word, partial_word_start_time)`` where the latter
+        two describe an unterminated trailing word for the next chunk to finish.
+    """
+    if len(graph_chars) != len(graph_times):
+        logger.error(
+            f"xAI timestamp length mismatch: chars={len(graph_chars)}, times={len(graph_times)}"
+        )
+        return ([], partial_word, partial_word_start_time)
+
+    words: list[str] = []
+    word_start_times: list[float] = []
+    current_word = partial_word
+    word_start_time: float | None = partial_word_start_time if partial_word else None
+
+    for char, times in zip(graph_chars, graph_times):
+        if char == " ":
+            if current_word:
+                words.append(current_word)
+                word_start_times.append(word_start_time or 0.0)
+                current_word = ""
+                word_start_time = None
+        else:
+            if word_start_time is None:
+                word_start_time = times[0]
+            current_word += char
+
+    return (
+        list(zip(words, word_start_times)),
+        current_word,
+        word_start_time if word_start_time is not None else 0.0,
+    )
+
+
 @dataclass
 class XAITTSSettings(TTSSettings):
     """Settings for XAIHttpTTSService.
@@ -92,13 +142,11 @@ class XAITTSSettings(TTSSettings):
         speed: Speech speed multiplier from 0.7 to 1.5 (1.0 is normal).
         optimize_streaming_latency: Latency optimization level (0, 1, or 2).
         text_normalization: Whether to normalize text before synthesis.
-        with_timestamps: Whether to request character-level timing metadata.
     """
 
     speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     optimize_streaming_latency: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     text_normalization: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    with_timestamps: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class XAIHttpTTSService(TTSService):
@@ -140,7 +188,6 @@ class XAIHttpTTSService(TTSService):
             speed=None,
             optimize_streaming_latency=None,
             text_normalization=None,
-            with_timestamps=None,
         )
 
         if settings is not None:
@@ -223,8 +270,6 @@ class XAIHttpTTSService(TTSService):
             payload["optimize_streaming_latency"] = self._settings.optimize_streaming_latency
         if assert_given(self._settings.text_normalization) is not None:
             payload["text_normalization"] = self._settings.text_normalization
-        if assert_given(self._settings.with_timestamps) is not None:
-            payload["with_timestamps"] = self._settings.with_timestamps
 
         headers = {
             "Authorization": f"Bearer {self._api_key}",
@@ -269,7 +314,8 @@ class XAIWebsocketTTSSettings(TTSSettings):
         speed: Speech speed multiplier from 0.7 to 1.5 (1.0 is normal).
         optimize_streaming_latency: Latency optimization level (0, 1, or 2).
         text_normalization: Whether to normalize text before synthesis.
-        with_timestamps: Whether to request character-level timing metadata.
+        with_timestamps: Whether to request character timings. When enabled, the
+            service converts them into per-word ``TTSTextFrame`` objects.
     """
 
     speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -288,7 +334,14 @@ class XAITTSService(WebsocketTTSService):
 
     Audio parameters (voice, language, codec, sample rate) are passed as query
     string parameters on the WebSocket URL; changing any of them at runtime
-    reconnects the WebSocket.
+    reconnects the WebSocket. With ``with_timestamps`` enabled, xAI's
+    per-character timings are converted into per-word ``TTSTextFrame`` objects.
+
+    Note that xAI delivers timestamps in batches that are decoupled from the
+    audio stream (a batch can cover several seconds of speech and arrive in one
+    message), so the word ``TTSTextFrame`` objects are pushed in bursts rather
+    than evenly spread across playback. Each frame still carries an accurate
+    ``pts``, so consumers should schedule off ``pts`` rather than arrival time.
     """
 
     Settings = XAIWebsocketTTSSettings
@@ -326,15 +379,22 @@ class XAITTSService(WebsocketTTSService):
             speed=None,
             optimize_streaming_latency=None,
             text_normalization=None,
-            with_timestamps=None,
+            with_timestamps=True,
         )
 
         if settings is not None:
             default_settings.apply_update(settings)
 
+        # With word timestamps enabled, per-word TTSTextFrames drive the text
+        # output, so suppress the base class's aggregated text frame. Without
+        # them, fall back to the normal aggregated-text behavior.
+        with_timestamps = bool(assert_given(default_settings.with_timestamps))
+
         super().__init__(
             push_start_frame=True,
             push_stop_frames=True,
+            push_text_frames=not with_timestamps,
+            append_trailing_space=True,
             sample_rate=sample_rate,
             settings=default_settings,
             **kwargs,
@@ -344,6 +404,15 @@ class XAITTSService(WebsocketTTSService):
         self._base_url = base_url
         self._codec = codec
         self._receive_task = None
+
+        self._timestamp_context_id: str | None = None
+        self._partial_word: str = ""
+        self._partial_word_start_time: float = 0.0
+
+    def _reset_timestamp_state(self):
+        self._timestamp_context_id = None
+        self._partial_word = ""
+        self._partial_word_start_time = 0.0
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics."""
@@ -465,7 +534,38 @@ class XAITTSService(WebsocketTTSService):
         await self.stop_all_metrics()
         if self._websocket and self._websocket.state is State.OPEN:
             await self._get_websocket().send(json.dumps({"type": "text.clear"}))
+        self._reset_timestamp_state()
         await super().on_audio_context_interrupted(context_id)
+
+    async def _close_audio_context(self, context_id: str):
+        """Mark a context finished: emit its stop frame and drop it."""
+        await self.append_to_audio_context(context_id, TTSStoppedFrame(context_id=context_id))
+        await self.remove_audio_context(context_id)
+
+    async def _handle_word_timestamps(self, msg: dict, context_id: str):
+        """Emit word-timestamp frames from an ``audio.delta`` timing payload."""
+        timestamps = msg.get("audio_timestamps")
+        if not timestamps:
+            return
+        graph_chars = timestamps.get("graph_chars")
+        graph_times = timestamps.get("graph_times")
+        if not graph_chars or not graph_times:
+            return
+
+        # A new utterance clears any word carried over from the previous one.
+        if context_id != self._timestamp_context_id:
+            self._reset_timestamp_state()
+            self._timestamp_context_id = context_id
+
+        word_times, self._partial_word, self._partial_word_start_time = _xai_word_times(
+            graph_chars,
+            graph_times,
+            self._partial_word,
+            self._partial_word_start_time,
+        )
+
+        if word_times:
+            await self.add_word_timestamps(word_times, context_id)
 
     async def _receive_messages(self):
         async for message in self._get_websocket():
@@ -483,33 +583,35 @@ class XAITTSService(WebsocketTTSService):
 
             if msg_type == "audio.delta":
                 audio_b64 = msg.get("delta")
-                if not audio_b64:
-                    continue
-                audio = base64.b64decode(audio_b64)
-                await self.stop_ttfb_metrics()
+                if audio_b64:
+                    await self.stop_ttfb_metrics()
                 if context_id:
-                    frame = TTSAudioRawFrame(
-                        audio=audio,
-                        sample_rate=self.sample_rate,
-                        num_channels=1,
-                        context_id=context_id,
-                    )
-                    await self.append_to_audio_context(context_id, frame)
+                    if audio_b64:
+                        frame = TTSAudioRawFrame(
+                            audio=base64.b64decode(audio_b64),
+                            sample_rate=self.sample_rate,
+                            num_channels=1,
+                            context_id=context_id,
+                        )
+                        await self.append_to_audio_context(context_id, frame)
+                    # Timestamps arrive in their own (sometimes audio-less) deltas.
+                    await self._handle_word_timestamps(msg, context_id)
             elif msg_type == "audio.done":
                 await self.stop_all_metrics()
                 if context_id:
-                    await self.append_to_audio_context(
-                        context_id, TTSStoppedFrame(context_id=context_id)
-                    )
-                    await self.remove_audio_context(context_id)
+                    # Flush a trailing word that had no terminating space.
+                    if self._timestamp_context_id == context_id and self._partial_word:
+                        await self.add_word_timestamps(
+                            [(self._partial_word, self._partial_word_start_time)], context_id
+                        )
+                    self._reset_timestamp_state()
+                    await self._close_audio_context(context_id)
             elif msg_type == "error":
                 await self.stop_all_metrics()
+                self._reset_timestamp_state()
                 error_detail = msg.get("message") or msg.get("error") or str(msg)
                 if context_id:
-                    await self.append_to_audio_context(
-                        context_id, TTSStoppedFrame(context_id=context_id)
-                    )
-                    await self.remove_audio_context(context_id)
+                    await self._close_audio_context(context_id)
                 await self.push_error(error_msg=f"xAI TTS error: {error_detail}")
             elif msg_type == "audio.clear":
                 logger.trace(f"{self}: xAI acknowledged audio clear")
