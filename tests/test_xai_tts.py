@@ -10,6 +10,7 @@ import asyncio
 import base64
 import json
 import unittest
+from unittest.mock import AsyncMock, patch
 from urllib.parse import parse_qs, urlparse
 
 import aiohttp
@@ -17,16 +18,23 @@ import pytest
 import websockets
 from aiohttp import web
 from websockets.asyncio.server import serve
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     AggregatedTextFrame,
+    ErrorFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
 )
-from pipecat.services.xai.tts import XAIHttpTTSService, XAITTSService
+from pipecat.services.xai.tts import (
+    XAIHttpTTSService,
+    XAITTSService,
+    XAITTSSettings,
+    XAIWebsocketTTSSettings,
+)
 from pipecat.tests.utils import run_test
 
 
@@ -165,6 +173,156 @@ async def test_run_xai_websocket_tts_success():
     assert "text.done" in types_sent
     delta_msg = next(m for m in captured["messages"] if m.get("type") == "text.delta")
     assert delta_msg["delta"] == "Hello from xAI."
+
+
+@pytest.mark.asyncio
+async def test_xai_websocket_interruption_sends_text_clear():
+    """On barge-in the WS service cancels via text.clear and keeps the socket open."""
+    tts_service = XAITTSService(api_key="test-key", sample_rate=24000)
+
+    websocket = AsyncMock()
+    websocket.state = State.OPEN
+    tts_service._websocket = websocket
+
+    with (
+        patch.object(tts_service, "_connect", new=AsyncMock()) as connect_spy,
+        patch.object(tts_service, "_disconnect", new=AsyncMock()) as disconnect_spy,
+    ):
+        await tts_service.on_audio_context_interrupted("ctx-1")
+
+    sent = [json.loads(call.args[0]) for call in websocket.send.call_args_list]
+    assert {"type": "text.clear"} in sent
+    assert not connect_spy.called
+    assert not disconnect_spy.called
+
+
+@pytest.mark.asyncio
+async def test_xai_websocket_settings_in_url():
+    """Tunable settings appear as query params; booleans are lowercased for the URL."""
+    captured: dict = {"request_path": None}
+
+    async def handler(ws):
+        captured["request_path"] = ws.request.path
+        try:
+            async for raw in ws:
+                msg = json.loads(raw)
+                if msg.get("type") == "text.done":
+                    await ws.send(json.dumps({"type": "audio.done", "trace_id": "t"}))
+        except websockets.ConnectionClosed:
+            pass
+
+    async with serve(handler, "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+        base_url = f"ws://{host}:{port}/v1/tts"
+
+        tts_service = XAITTSService(
+            api_key="test-key",
+            base_url=base_url,
+            sample_rate=24000,
+            settings=XAIWebsocketTTSSettings(
+                speed=1.2,
+                optimize_streaming_latency=2,
+                text_normalization=True,
+                with_timestamps=False,
+            ),
+        )
+
+        await run_test(
+            tts_service,
+            frames_to_send=[TTSSpeakFrame(text="Hello from xAI."), _SleepAfterSpeak(0.3)],
+        )
+
+    query = parse_qs(urlparse(captured["request_path"]).query)
+    assert query["speed"] == ["1.2"]
+    assert query["optimize_streaming_latency"] == ["2"]
+    assert query["text_normalization"] == ["true"]
+    assert query["with_timestamps"] == ["false"]
+
+
+@pytest.mark.asyncio
+async def test_xai_http_settings_in_body(aiohttp_client):
+    """Tunable settings and language=auto appear in the HTTP request body."""
+    request_bodies = []
+
+    async def handler(request):
+        request_bodies.append(await request.json())
+
+        response = web.StreamResponse(
+            status=200,
+            reason="OK",
+            headers={"Content-Type": "audio/pcm"},
+        )
+        await response.prepare(request)
+        await response.write(b"\x00\x01\x02\x03" * 1024)
+        await response.write_eof()
+        return response
+
+    app = web.Application()
+    app.router.add_post("/v1/tts", handler)
+    client = await aiohttp_client(app)
+    base_url = str(client.make_url("/v1/tts"))
+
+    async with aiohttp.ClientSession() as session:
+        tts_service = XAIHttpTTSService(
+            api_key="test-key",
+            base_url=base_url,
+            aiohttp_session=session,
+            sample_rate=24000,
+            settings=XAITTSSettings(
+                language="auto",
+                speed=1.2,
+                optimize_streaming_latency=2,
+                text_normalization=True,
+                with_timestamps=True,
+            ),
+        )
+
+        await run_test(tts_service, frames_to_send=[TTSSpeakFrame(text="Hello from xAI.")])
+
+    assert len(request_bodies) == 1
+    body = request_bodies[0]
+    assert body["language"] == "auto"
+    assert body["speed"] == 1.2
+    assert body["optimize_streaming_latency"] == 2
+    assert body["text_normalization"] is True
+    assert body["with_timestamps"] is True
+
+
+@pytest.mark.asyncio
+async def test_xai_websocket_audio_clear_handled():
+    """A server audio.clear ack is handled without producing an error."""
+    audio_bytes = b"\x00\x01\x02\x03" * 1024
+
+    async def handler(ws):
+        try:
+            async for raw in ws:
+                msg = json.loads(raw)
+                if msg.get("type") == "text.done":
+                    await ws.send(json.dumps({"type": "audio.clear"}))
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "audio.delta",
+                                "delta": base64.b64encode(audio_bytes).decode("ascii"),
+                            }
+                        )
+                    )
+                    await ws.send(json.dumps({"type": "audio.done", "trace_id": "t"}))
+        except websockets.ConnectionClosed:
+            pass
+
+    async with serve(handler, "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+        base_url = f"ws://{host}:{port}/v1/tts"
+
+        tts_service = XAITTSService(api_key="test-key", base_url=base_url, sample_rate=24000)
+
+        down_frames, up_frames = await run_test(
+            tts_service,
+            frames_to_send=[TTSSpeakFrame(text="Hello from xAI."), _SleepAfterSpeak(0.3)],
+        )
+
+    assert not any(isinstance(frame, ErrorFrame) for frame in down_frames + up_frames)
 
 
 # Small helper imported lazily to avoid circular import in fixture-lite tests.

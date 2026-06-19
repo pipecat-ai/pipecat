@@ -38,7 +38,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
-from pipecat.services.tts_service import InterruptibleTTSService, TTSService
+from pipecat.services.tts_service import TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -278,7 +278,7 @@ class XAIWebsocketTTSSettings(TTSSettings):
     with_timestamps: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-class XAITTSService(InterruptibleTTSService):
+class XAITTSService(WebsocketTTSService):
     """xAI streaming text-to-speech service.
 
     Connects to xAI's WebSocket TTS endpoint and streams audio chunks back as
@@ -317,7 +317,7 @@ class XAITTSService(InterruptibleTTSService):
                 objects need no decoding downstream.
             settings: Runtime-updatable settings.
             **kwargs: Additional arguments passed to parent
-                ``InterruptibleTTSService``.
+                ``WebsocketTTSService``.
         """
         default_settings = self.Settings(
             model=None,
@@ -460,6 +460,13 @@ class XAITTSService(InterruptibleTTSService):
             return
         await self._get_websocket().send(json.dumps({"type": "text.done"}))
 
+    async def on_audio_context_interrupted(self, context_id: str):
+        """Cancel the current xAI utterance on barge-in without reconnecting."""
+        await self.stop_all_metrics()
+        if self._websocket and self._websocket.state is State.OPEN:
+            await self._get_websocket().send(json.dumps({"type": "text.clear"}))
+        await super().on_audio_context_interrupted(context_id)
+
     async def _receive_messages(self):
         async for message in self._get_websocket():
             if isinstance(message, bytes):
@@ -504,6 +511,8 @@ class XAITTSService(InterruptibleTTSService):
                     )
                     await self.remove_audio_context(context_id)
                 await self.push_error(error_msg=f"xAI TTS error: {error_detail}")
+            elif msg_type == "audio.clear":
+                logger.trace(f"{self}: xAI acknowledged audio clear")
             else:
                 logger.debug(f"{self}: unhandled xAI message type: {msg_type}")
 
