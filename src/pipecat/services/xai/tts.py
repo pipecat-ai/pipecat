@@ -19,7 +19,7 @@ See https://docs.x.ai/developers/rest-api-reference/inference/voice.
 import base64
 import json
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlencode
 
@@ -37,7 +37,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import TTSSettings
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -86,9 +86,19 @@ def language_to_xai_language(language: Language) -> str:
 
 @dataclass
 class XAITTSSettings(TTSSettings):
-    """Settings for XAIHttpTTSService."""
+    """Settings for XAIHttpTTSService.
 
-    pass
+    Parameters:
+        speed: Speech speed multiplier from 0.7 to 1.5 (1.0 is normal).
+        optimize_streaming_latency: Latency optimization level (0, 1, or 2).
+        text_normalization: Whether to normalize text before synthesis.
+        with_timestamps: Whether to request character-level timing metadata.
+    """
+
+    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    optimize_streaming_latency: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    text_normalization: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    with_timestamps: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class XAIHttpTTSService(TTSService):
@@ -127,6 +137,10 @@ class XAIHttpTTSService(TTSService):
             model=None,
             voice="eve",
             language=Language.EN,
+            speed=None,
+            optimize_streaming_latency=None,
+            text_normalization=None,
+            with_timestamps=None,
         )
 
         if settings is not None:
@@ -193,7 +207,7 @@ class XAIHttpTTSService(TTSService):
             self._session = aiohttp.ClientSession()
             self._session_owner = True
 
-        payload = {
+        payload: dict[str, Any] = {
             "text": text,
             "voice_id": self._settings.voice,
             "output_format": {
@@ -202,6 +216,15 @@ class XAIHttpTTSService(TTSService):
             },
         }
         payload["language"] = str(self._settings.language) if self._settings.language else "auto"
+
+        if assert_given(self._settings.speed) is not None:
+            payload["speed"] = self._settings.speed
+        if assert_given(self._settings.optimize_streaming_latency) is not None:
+            payload["optimize_streaming_latency"] = self._settings.optimize_streaming_latency
+        if assert_given(self._settings.text_normalization) is not None:
+            payload["text_normalization"] = self._settings.text_normalization
+        if assert_given(self._settings.with_timestamps) is not None:
+            payload["with_timestamps"] = self._settings.with_timestamps
 
         headers = {
             "Authorization": f"Bearer {self._api_key}",
@@ -240,9 +263,19 @@ class XAIHttpTTSService(TTSService):
 
 @dataclass
 class XAIWebsocketTTSSettings(TTSSettings):
-    """Settings for XAITTSService (WebSocket streaming)."""
+    """Settings for XAITTSService (WebSocket streaming).
 
-    pass
+    Parameters:
+        speed: Speech speed multiplier from 0.7 to 1.5 (1.0 is normal).
+        optimize_streaming_latency: Latency optimization level (0, 1, or 2).
+        text_normalization: Whether to normalize text before synthesis.
+        with_timestamps: Whether to request character-level timing metadata.
+    """
+
+    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    optimize_streaming_latency: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    text_normalization: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    with_timestamps: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class XAITTSService(InterruptibleTTSService):
@@ -290,6 +323,10 @@ class XAITTSService(InterruptibleTTSService):
             model=None,
             voice="eve",
             language=Language.EN,
+            speed=None,
+            optimize_streaming_latency=None,
+            text_normalization=None,
+            with_timestamps=None,
         )
 
         if settings is not None:
@@ -371,6 +408,15 @@ class XAITTSService(InterruptibleTTSService):
             "codec": self._codec,
             "sample_rate": self.sample_rate,
         }
+        if assert_given(self._settings.speed) is not None:
+            params["speed"] = self._settings.speed
+        if assert_given(self._settings.optimize_streaming_latency) is not None:
+            params["optimize_streaming_latency"] = self._settings.optimize_streaming_latency
+        # urlencode stringifies bools as "True"/"False"; xAI expects "true"/"false".
+        if assert_given(self._settings.text_normalization) is not None:
+            params["text_normalization"] = str(self._settings.text_normalization).lower()
+        if assert_given(self._settings.with_timestamps) is not None:
+            params["with_timestamps"] = str(self._settings.with_timestamps).lower()
         return f"{self._base_url}?{urlencode(params)}"
 
     async def _connect_websocket(self):
