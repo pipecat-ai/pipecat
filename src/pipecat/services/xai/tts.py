@@ -201,8 +201,7 @@ class XAIHttpTTSService(TTSService):
                 "sample_rate": self.sample_rate,
             },
         }
-        if self._settings.language:
-            payload["language"] = str(self._settings.language)
+        payload["language"] = str(self._settings.language) if self._settings.language else "auto"
 
         headers = {
             "Authorization": f"Bearer {self._api_key}",
@@ -254,9 +253,9 @@ class XAITTSService(InterruptibleTTSService):
     messages and each utterance is terminated with ``text.done``. The server
     responds with ``audio.delta`` chunks followed by an ``audio.done`` message.
 
-    Audio parameters (voice, language, codec, sample rate, bit rate) are passed
-    as query string parameters on the WebSocket URL; changing any of them at
-    runtime reconnects the WebSocket.
+    Audio parameters (voice, language, codec, sample rate) are passed as query
+    string parameters on the WebSocket URL; changing any of them at runtime
+    reconnects the WebSocket.
     """
 
     Settings = XAIWebsocketTTSSettings
