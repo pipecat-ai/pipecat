@@ -138,6 +138,38 @@ class TestFunctionCallUserMuteStrategy(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(await strategy.process_frame(InterruptionFrame()))
 
+    async def test_tolerates_double_delivery_of_result_frame(self):
+        """Multi-worker bus topologies can redeliver the same result frame
+        to a child worker (it has already been handled by the parent). The
+        strategy must tolerate the second delivery — ``set.discard`` over
+        ``set.remove``. Pre-fix ``remove`` would ``KeyError`` and tear down
+        the frame loop."""
+        strategy = FunctionCallUserMuteStrategy()
+        started = FunctionCallsStartedFrame(
+            function_calls=[
+                FunctionCallFromLLM(
+                    function_name="fn", tool_call_id="abc-123", arguments={}, context=None
+                )
+            ]
+        )
+        result = FunctionCallResultFrame(
+            function_name="fn", tool_call_id="abc-123", arguments={}, result={}
+        )
+        await strategy.process_frame(started)
+        await strategy.process_frame(result)
+        # Second delivery must NOT raise — multi-worker reality.
+        await strategy.process_frame(result)
+        self.assertFalse(bool(strategy._function_call_in_progress))
+
+    async def test_tolerates_orphan_cancel_frame(self):
+        """An orphan ``FunctionCallCancelFrame`` (tool_call_id never seen
+        in a started frame) must be a silent no-op, not a ``KeyError``."""
+        strategy = FunctionCallUserMuteStrategy()
+        orphan = FunctionCallCancelFrame(function_name="fn", tool_call_id="never-started")
+        # Must not raise.
+        await strategy.process_frame(orphan)
+        self.assertFalse(bool(strategy._function_call_in_progress))
+
 
 if __name__ == "__main__":
     unittest.main()
