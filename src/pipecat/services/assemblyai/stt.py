@@ -159,6 +159,11 @@ class AssemblyAISTTSettings(STTSettings):
             Float in [0.0, 1.0]; higher values suppress more. Only takes effect
             when ``voice_focus`` is set. Only applicable to U3 Pro models.
             Defaults to None (use the server default).
+        mode: Latency/accuracy preset, trading transcription accuracy against
+            turn-finalization latency. One of "min_latency", "balanced", or
+            "max_accuracy". Only applicable to U3 Pro models; the server defaults
+            to "balanced" and rejects this parameter for other models. Defaults
+            to None (not sent).
     """
 
     formatted_finals: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -185,6 +190,9 @@ class AssemblyAISTTSettings(STTSettings):
         default_factory=lambda: NOT_GIVEN
     )
     voice_focus_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    mode: Literal["min_latency", "balanced", "max_accuracy"] | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class AssemblyAISTTService(WebsocketSTTService):
@@ -290,6 +298,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             previous_context_n_turns=None,
             voice_focus=None,
             voice_focus_threshold=None,
+            mode=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -399,6 +408,14 @@ class AssemblyAISTTService(WebsocketSTTService):
             logger.warning(
                 "voice_focus_threshold has no effect unless voice_focus is set "
                 "(to 'near-field' or 'far-field')."
+            )
+
+        # mode (latency/accuracy preset) is U3 Pro-only; the server rejects it
+        # for other models.
+        if not is_u3_pro and default_settings.mode is not None:
+            logger.warning(
+                "mode is only supported by U3 Pro models and will be ignored "
+                f"for model '{default_settings.model}'."
             )
 
         # 6. Configure pipecat turn mode (mutates default_settings)
@@ -630,14 +647,15 @@ class AssemblyAISTTService(WebsocketSTTService):
         }
 
         # continuous_partials, interruption_delay, agent_context,
-        # previous_context_n_turns, and voice_focus(_threshold) only apply to
-        # the U3 Pro family.
+        # previous_context_n_turns, voice_focus(_threshold), and mode only apply
+        # to the U3 Pro family.
         if is_u3_pro_model(s.model):
             optional_fields["continuous_partials"] = s.continuous_partials
             optional_fields["interruption_delay"] = s.interruption_delay
             optional_fields["previous_context_n_turns"] = s.previous_context_n_turns
             optional_fields["voice_focus"] = s.voice_focus
             optional_fields["voice_focus_threshold"] = s.voice_focus_threshold
+            optional_fields["mode"] = s.mode
             # isinstance narrows away None/NOT_GIVEN for the typed clip call.
             if isinstance(s.agent_context, str):
                 optional_fields["agent_context"] = self._clip_agent_context(s.agent_context)
