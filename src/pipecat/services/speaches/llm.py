@@ -57,6 +57,29 @@ def _merge_consecutive_roles(messages: list) -> list:
     return merged
 
 
+def _ensure_user_first(messages: list) -> list:
+    """Guarantee the first non-system turn is ``user`` (a Gemma requirement).
+
+    vLLM/Gemma rejects a history whose first turn after the optional system
+    message is ``assistant`` ("Conversation roles must alternate ..."). Live voice
+    agents routinely produce exactly that: the bot speaks first (an opening
+    greeting or a node-transition line), so the recorded history starts
+    ``[system, assistant, user, ...]``. Those leading assistant turns aren't needed
+    as context for the next reply, so drop them up to the first user turn. No-op
+    when there is no user turn yet, or when the sequence already starts with user.
+    """
+    sys_end = 0
+    while sys_end < len(messages) and messages[sys_end].get("role") == "system":
+        sys_end += 1
+    first_user = next(
+        (i for i in range(sys_end, len(messages)) if messages[i].get("role") == "user"),
+        None,
+    )
+    if first_user is None or first_user == sys_end:
+        return messages
+    return messages[:sys_end] + messages[first_user:]
+
+
 @dataclass
 class SpeachesLLMSettings(OpenAILLMSettings):
     """Settings for Speaches LLM service."""
@@ -103,11 +126,11 @@ class SpeachesLLMService(OpenAILLMService):
         params = super().build_chat_completion_params(params_from_context)
         messages = params.get("messages")
         if isinstance(messages, list) and len(messages) > 1:
-            merged = _merge_consecutive_roles(messages)
+            merged = _ensure_user_first(_merge_consecutive_roles(messages))
             if len(merged) != len(messages):
                 logger.debug(
-                    f"{self}: collapsed {len(messages) - len(merged)} consecutive "
-                    f"same-role message(s) for strict role alternation"
+                    f"{self}: normalized {len(messages) - len(merged)} message(s) "
+                    f"for strict Gemma role alternation"
                 )
             params["messages"] = merged
         return params
