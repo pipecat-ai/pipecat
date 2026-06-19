@@ -30,8 +30,8 @@ class FrameProcessorMetrics(BaseObject):
 
     Provides comprehensive metrics tracking for frame processing operations,
     including timing measurements, resource usage, and performance analytics.
-    Supports TTFB tracking, processing duration metrics, and usage statistics
-    for LLM and TTS operations.
+    Supports TTFB tracking, TTFA tracking, processing duration metrics, and
+    usage statistics for LLM and TTS operations.
     """
 
     # Cap on buffered audio while waiting for a TTFA speech onset, so a response
