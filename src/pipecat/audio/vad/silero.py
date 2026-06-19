@@ -61,10 +61,11 @@ class SileroOnnxModel:
 
     def _validate_input(self, x, sr: int):
         """Validate and preprocess input audio data."""
-        if np.ndim(x) == 1:
+        input_dims = np.ndim(x)
+        if input_dims == 1:
             x = np.expand_dims(x, 0)
-        if np.ndim(x) > 2:
-            raise ValueError(f"Too many dimensions for input audio chunk {x.dim()}")
+        if input_dims > 2:
+            raise ValueError(f"Too many dimensions for input audio chunk {input_dims}")
 
         if sr not in self.sample_rates:
             raise ValueError(
