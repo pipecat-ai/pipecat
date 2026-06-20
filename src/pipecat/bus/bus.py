@@ -15,6 +15,8 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 from typing import cast
 
+from loguru import logger
+
 from pipecat.bus.messages import BusLocalMessage, BusMessage, BusSystemMessage
 from pipecat.bus.queue import BusMessageQueue
 from pipecat.bus.subscriber import BusSubscriber
@@ -170,7 +172,18 @@ class WorkerBus(BaseObject):
             while True:
                 message = await sub.queue.get()
                 if isinstance(message, BusSystemMessage):
-                    await sub.subscriber.on_bus_message(cast(BusMessage, message))
+                    # A subscriber exception must not tear down the dispatch task,
+                    # or the subscriber would silently stop receiving all future
+                    # messages (including cancel/cleanup). Log and keep going.
+                    try:
+                        await sub.subscriber.on_bus_message(cast(BusMessage, message))
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        logger.exception(
+                            f"{self}: subscriber '{sub.subscriber.name}' raised handling "
+                            f"system message {message}; keeping dispatch alive"
+                        )
                 else:
                     sub.data_queue.put_nowait(message)
         except asyncio.CancelledError:
@@ -181,6 +194,17 @@ class WorkerBus(BaseObject):
         try:
             while True:
                 message = await sub.data_queue.get()
-                await sub.subscriber.on_bus_message(message)
+                # A subscriber exception must not tear down the dispatch task,
+                # or the subscriber would silently stop receiving all future
+                # messages (including cancel/cleanup). Log and keep going.
+                try:
+                    await sub.subscriber.on_bus_message(message)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception(
+                        f"{self}: subscriber '{sub.subscriber.name}' raised handling "
+                        f"data message {message}; keeping dispatch alive"
+                    )
         except asyncio.CancelledError:
             pass
