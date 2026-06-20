@@ -10,10 +10,10 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import Frame, TranscriptionFrame
+from pipecat.evals.transport import EvalTransportParams
+from pipecat.frames.frames import Frame, InterimTranscriptionFrame, TranscriptionFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
@@ -22,6 +22,7 @@ from pipecat.services.together.stt import TogetherSTTService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
@@ -32,6 +33,8 @@ class TranscriptionLogger(FrameProcessor):
 
         if isinstance(frame, TranscriptionFrame):
             print(f"Transcription: {frame.text}")
+        elif isinstance(frame, InterimTranscriptionFrame):
+            print(f"Interim transcription: {frame.text}")
 
         # Push all frames through
         await self.push_frame(frame, direction)
@@ -40,6 +43,10 @@ class TranscriptionLogger(FrameProcessor):
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(audio_in_enabled=True),
     "twilio": lambda: FastAPIWebsocketParams(audio_in_enabled=True),
     "webrtc": lambda: TransportParams(audio_in_enabled=True),
@@ -49,14 +56,15 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = TogetherSTTService(api_key=os.getenv("TOGETHER_API_KEY"))
+    stt = TogetherSTTService(api_key=os.environ["TOGETHER_API_KEY"])
 
     tl = TranscriptionLogger()
+
     vad_processor = VADProcessor(vad_analyzer=SileroVADAnalyzer())
 
-    pipeline = Pipeline([transport.input(), vad_processor, stt, tl])
+    pipeline = Pipeline([transport.input(), vad_processor, stt, tl, transport.output()])
 
-    task = PipelineTask(
+    worker = PipelineWorker(
         pipeline,
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
@@ -64,11 +72,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-        await task.cancel()
+        await worker.cancel()
 
-    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.run(task)
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 async def bot(runner_args: RunnerArguments):

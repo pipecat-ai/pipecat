@@ -14,21 +14,13 @@ This module provides a STT service using Together AI's WebSocket API:
 
 import base64
 import json
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Optional
+from typing import Any
 
 from loguru import logger
-
-from pipecat.services.settings import STTSettings
-from pipecat.services.stt_latency import TOGETHER_TTFS_P99
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Together, you need to `pip install pipecat-ai[together]`.")
-    raise Exception(f"Missing module: {e}")
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -41,6 +33,8 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import STTSettings
+from pipecat.services.stt_latency import TOGETHER_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -78,9 +72,9 @@ class TogetherSTTService(WebsocketSTTService):
         self,
         *,
         api_key: str,
-        sample_rate: Optional[int] = None,
+        sample_rate: int | None = None,
         base_url: str = "wss://api.together.ai/v1",
-        settings: Optional[Settings] = None,
+        settings: Settings | None = None,
         ttfs_p99_latency: float = TOGETHER_TTFS_P99,
         **kwargs,
     ):
@@ -118,7 +112,7 @@ class TogetherSTTService(WebsocketSTTService):
         """Check if this service can generate processing metrics."""
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Together AI language format.
 
         Args:
@@ -166,7 +160,7 @@ class TogetherSTTService(WebsocketSTTService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Send audio data to Together AI for transcription.
 
         Args:
@@ -251,6 +245,12 @@ class TogetherSTTService(WebsocketSTTService):
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
+    def _get_websocket(self):
+        """Return the active WebSocket connection or raise if disconnected."""
+        if self._websocket:
+            return self._websocket
+        raise Exception("Websocket not connected")
+
     # ------------------------------------------------------------------
     # Client events
     # ------------------------------------------------------------------
@@ -298,7 +298,7 @@ class TogetherSTTService(WebsocketSTTService):
         Called by ``WebsocketService._receive_task_handler`` which wraps
         this method with automatic reconnection on connection errors.
         """
-        async for message in self._websocket:
+        async for message in self._get_websocket():
             try:
                 evt = json.loads(message)
             except json.JSONDecodeError:
@@ -360,7 +360,7 @@ class TogetherSTTService(WebsocketSTTService):
 
     @traced_stt
     async def _handle_transcription_trace(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
+        self, transcript: str, is_final: bool, language: Language | None = None
     ):
         """Record transcription result for tracing.
 

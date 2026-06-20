@@ -14,32 +14,24 @@ This module provides a TTS service using Together AI's WebSocket API:
 
 import base64
 import json
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Optional
+from typing import Any
 
 from loguru import logger
-
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Together, you need to `pip install pipecat-ai[together]`.")
-    raise Exception(f"Missing module: {e}")
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
-    InterruptionFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -81,8 +73,8 @@ class TogetherTTSService(WebsocketTTSService):
         *,
         api_key: str,
         url: str = "wss://api.together.ai/v1/audio/speech/websocket",
-        sample_rate: Optional[int] = 24000,
-        settings: Optional[Settings] = None,
+        sample_rate: int | None = 24000,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Together AI TTS service.
@@ -122,7 +114,7 @@ class TogetherTTSService(WebsocketTTSService):
         """Check if this service can generate processing metrics."""
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Together AI language format.
 
         Args:
@@ -215,7 +207,7 @@ class TogetherTTSService(WebsocketTTSService):
                     "type": "tts_session.updated",
                     "session": {"voice": self._settings.voice},
                 }
-                await self._websocket.send(json.dumps(voice_update_msg))
+                await self._get_websocket().send(json.dumps(voice_update_msg))
                 logger.debug(f"Sent initial voice setting to WebSocket: {self._settings.voice}")
             except Exception as e:
                 logger.error(f"Error sending initial voice setting: {e}")
@@ -244,6 +236,12 @@ class TogetherTTSService(WebsocketTTSService):
             self._session_id = None
             await self._call_event_handler("on_disconnected")
 
+    def _get_websocket(self):
+        """Return the active WebSocket connection or raise if disconnected."""
+        if self._websocket:
+            return self._websocket
+        raise Exception("Websocket not connected")
+
     # ------------------------------------------------------------------
     # Client events
     # ------------------------------------------------------------------
@@ -265,7 +263,7 @@ class TogetherTTSService(WebsocketTTSService):
                 exception=e,
             )
 
-    async def flush_audio(self, context_id: Optional[str] = None):
+    async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio by committing the text buffer."""
         if not self._websocket or self._websocket.state is State.CLOSED:
             return
@@ -282,7 +280,7 @@ class TogetherTTSService(WebsocketTTSService):
         Called by ``WebsocketService._receive_task_handler`` which wraps
         this method with automatic reconnection on connection errors.
         """
-        async for message in self._websocket:
+        async for message in self._get_websocket():
             if not isinstance(message, str):
                 continue
 
@@ -364,6 +362,10 @@ class TogetherTTSService(WebsocketTTSService):
         item_id = evt.get("item_id")
         logger.debug(f"{self} audio generation complete for: {item_id}")
         await self.stop_all_metrics()
+        context_id = self.get_active_audio_context_id()
+        if context_id:
+            await self.append_to_audio_context(context_id, TTSStoppedFrame(context_id=context_id))
+            await self.remove_audio_context(context_id)
 
     async def _handle_tts_failed(self, evt: dict):
         """Handle a TTS failure.
@@ -397,23 +399,23 @@ class TogetherTTSService(WebsocketTTSService):
     # Interruption handling
     # ------------------------------------------------------------------
 
-    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
-        """Handle interruption by clearing the Together AI text buffer.
+    async def on_audio_context_interrupted(self, context_id: str):
+        """Clear the Together AI text buffer when the bot is interrupted.
 
         Args:
-            frame: The interruption frame.
-            direction: Frame processing direction.
+            context_id: The ID of the audio context that was interrupted.
         """
-        await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
-        await self._ws_send({"type": "input_text_buffer.clear"})
+        if context_id:
+            await self._ws_send({"type": "input_text_buffer.clear"})
+        await super().on_audio_context_interrupted(context_id)
 
     # ------------------------------------------------------------------
     # TTS generation
     # ------------------------------------------------------------------
 
     @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using Together AI's streaming API.
 
         Args:
