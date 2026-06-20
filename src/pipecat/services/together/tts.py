@@ -222,7 +222,7 @@ class TogetherTTSService(WebsocketTTSService):
                 await self._get_websocket().send(json.dumps(voice_update_msg))
                 logger.debug(f"Sent initial voice setting to WebSocket: {self._settings.voice}")
             except Exception as e:
-                logger.error(f"Error sending initial voice setting: {e}")
+                logger.warning(f"Error sending initial voice setting: {e}")
 
             logger.debug("Connected to Together AI TTS")
 
@@ -363,7 +363,10 @@ class TogetherTTSService(WebsocketTTSService):
                 )
                 await self.append_to_audio_context(context_id, frame)
             except Exception as e:
-                logger.error(f"{self} error processing audio delta: {e}")
+                await self.push_error(
+                    error_msg=f"Error processing audio delta: {e}",
+                    exception=e,
+                )
 
     async def _handle_audio_done(self, evt: dict):
         """Handle audio output completion for a speech segment.
