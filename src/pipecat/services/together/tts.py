@@ -36,6 +36,11 @@ from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
+# Together TTS streams 24 kHz signed 16-bit mono PCM for all models; the API does
+# not support requesting a different rate. The output transport resamples to the
+# pipeline's rate. See https://docs.together.ai/reference/audio-speech-websocket
+TOGETHER_TTS_SAMPLE_RATE = 24000
+
 
 @dataclass
 class TogetherTTSSettings(TTSSettings):
@@ -73,7 +78,7 @@ class TogetherTTSService(WebsocketTTSService):
         *,
         api_key: str,
         url: str = "wss://api.together.ai/v1/audio/speech/websocket",
-        sample_rate: int | None = 24000,
+        sample_rate: int | None = TOGETHER_TTS_SAMPLE_RATE,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -82,10 +87,17 @@ class TogetherTTSService(WebsocketTTSService):
         Args:
             api_key: Together AI API key for authentication.
             url: WebSocket URL for Together AI TTS API.
-            sample_rate: Audio sample rate in Hz.
+            sample_rate: Output sample rate for emitted PCM frames. Defaults to
+                24000; Together streams at 24 kHz and does not support other rates.
             settings: Runtime-updatable settings for the TTS service.
             **kwargs: Additional arguments passed to WebsocketTTSService.
         """
+        if sample_rate != TOGETHER_TTS_SAMPLE_RATE:
+            logger.warning(
+                f"Together TTS streams at {TOGETHER_TTS_SAMPLE_RATE} Hz; "
+                f"configured sample_rate={sample_rate}"
+            )
+
         default_settings = self.Settings(
             model="hexgrad/Kokoro-82M",
             voice="af_heart",
