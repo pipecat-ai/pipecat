@@ -11,7 +11,7 @@ from typing import Any
 from openai import NOT_GIVEN as OPENAI_NOT_GIVEN
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.bus.adapters.base import DeserializeFunc, SerializeFunc, TypeAdapter
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
@@ -90,12 +90,21 @@ class LLMContextAdapter(TypeAdapter):
             )
         return deserialize_value(data)
 
-    def _serialize_tools(self, tools: Any) -> list[dict[str, Any]]:
-        return [tool.to_default_dict() for tool in tools.standard_tools]
+    def _serialize_tools(self, tools: Any) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "standard_tools": [tool.to_default_dict() for tool in tools.standard_tools]
+        }
+        if tools.custom_tools:
+            # custom_tools is dict[AdapterType, list[dict]] of pure JSON; serialize
+            # the enum keys to their string values so it survives network transport.
+            result["custom_tools"] = {
+                adapter_type.value: t for adapter_type, t in tools.custom_tools.items()
+            }
+        return result
 
-    def _deserialize_tools(self, data: list[dict[str, Any]]) -> Any:
+    def _deserialize_tools(self, data: dict[str, Any]) -> Any:
         tools = []
-        for item in data:
+        for item in data["standard_tools"]:
             params = item.get("parameters", {})
             tools.append(
                 FunctionSchema(
@@ -105,4 +114,7 @@ class LLMContextAdapter(TypeAdapter):
                     required=params.get("required", []),
                 )
             )
-        return ToolsSchema(standard_tools=tools)
+        custom_tools = None
+        if data.get("custom_tools"):
+            custom_tools = {AdapterType(key): value for key, value in data["custom_tools"].items()}
+        return ToolsSchema(standard_tools=tools, custom_tools=custom_tools)
