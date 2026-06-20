@@ -19,6 +19,7 @@ from enum import StrEnum
 
 import numpy as np
 from loguru import logger
+from typing_extensions import override
 
 from pipecat.frames.frames import Frame, TranscriptionFrame
 from pipecat.services.settings import STTSettings, assert_given
@@ -113,6 +114,11 @@ class MoonshineSTTService(SegmentedSTTService):
             True, as this service supports metric generation.
         """
         return True
+
+    @override
+    def _segment_audio_format(self) -> str:
+        """Moonshine consumes raw 16-bit PCM segments."""
+        return "pcm"
 
     def _load(self) -> Transcriber:
         """Download (first time) and load the Moonshine model.

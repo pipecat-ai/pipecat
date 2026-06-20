@@ -303,6 +303,11 @@ class WhisperSTTService(SegmentedSTTService):
         """
         return True
 
+    @override
+    def _segment_audio_format(self) -> str:
+        """Whisper local models consume raw 16-bit PCM segments."""
+        return "pcm"
+
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert from pipecat Language to Whisper language code.
 

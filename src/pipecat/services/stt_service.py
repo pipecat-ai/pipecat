@@ -722,7 +722,9 @@ class SegmentedSTTService(STTService):
 
     Requires VAD to be enabled in the pipeline to function properly. Maintains a
     small audio buffer to account for the delay between actual speech start and
-    VAD detection.
+    VAD detection. Subclasses can override the protected
+    :meth:`_segment_audio_format` contract to choose whether the buffered segment
+    is delivered to ``run_stt()`` as a WAV container or raw PCM bytes.
     """
 
     def __init__(self, *, sample_rate: int | None = None, **kwargs):
@@ -748,6 +750,35 @@ class SegmentedSTTService(STTService):
         """
         await super().start(frame)
         self._audio_buffer_size_1s = self.sample_rate * 2
+
+    def _segment_audio_format(self) -> str:
+        """Return the audio container format passed to ``run_stt()``.
+
+        Subclasses override this protected contract to opt into a different
+        segment representation. The default remains WAV for backward
+        compatibility with providers that expect a file container.
+
+        Returns:
+            The segment audio format. Supported values are ``"wav"`` and
+            ``"pcm"``.
+        """
+        return "wav"
+
+    def _build_segment_audio(self) -> bytes:
+        """Serialize the buffered segment in the subclass-defined format."""
+        segment_audio_format = self._segment_audio_format()
+        if segment_audio_format == "pcm":
+            return bytes(self._audio_buffer)
+        if segment_audio_format != "wav":
+            raise ValueError(f"Unsupported segment audio format: {segment_audio_format!r}")
+
+        content = io.BytesIO()
+        with wave.open(content, "wb") as wav:
+            wav.setsampwidth(2)
+            wav.setnchannels(1)
+            wav.setframerate(self.sample_rate)
+            wav.writeframes(self._audio_buffer)
+        return content.getvalue()
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame, marking TranscriptionFrames as finalized.
@@ -778,19 +809,12 @@ class SegmentedSTTService(STTService):
     async def _handle_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         self._user_speaking = False
 
-        content = io.BytesIO()
-        wav = wave.open(content, "wb")
-        wav.setsampwidth(2)
-        wav.setnchannels(1)
-        wav.setframerate(self.sample_rate)
-        wav.writeframes(self._audio_buffer)
-        wav.close()
-        content.seek(0)
+        audio = self._build_segment_audio()
 
         # Start clean.
         self._audio_buffer.clear()
 
-        await self.process_generator(self.run_stt(content.read()))
+        await self.process_generator(self.run_stt(audio))
 
     async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
         """Process audio frames by buffering them for segmented transcription.
