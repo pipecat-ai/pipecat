@@ -231,6 +231,51 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertIsNone(s.turns[0].user)
         self.assertEqual(s.turns[0].expect[0].event, "llm_response")
 
+    def test_dtmf_turn_parsed(self):
+        s = EvalScenario.load(
+            _write(
+                """
+                name: dtmf
+                turns:
+                  - dtmf: "123#"
+                    expect:
+                      - event: user_transcription
+                        text_contains: "DTMF: 123#"
+                """
+            )
+        )
+        self.assertEqual(s.turns[0].dtmf, "123#")
+        self.assertIsNone(s.turns[0].user)
+
+    def test_dtmf_unquoted_int_normalized(self):
+        """An unquoted digit sequence parses as int; it's coerced to a string."""
+        s = EvalScenario.load(_write("name: dtmf\nturns: [{dtmf: 123}]\n"))
+        self.assertEqual(s.turns[0].dtmf, "123")
+
+    def test_dtmf_invalid_entry_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load(_write('name: bad\nturns: [{dtmf: "1A"}]\n'))
+        self.assertIn("invalid keypad entry", str(cm.exception))
+
+    def test_dtmf_and_user_mutually_exclusive(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load(_write('name: bad\nturns: [{user: hi, dtmf: "1"}]\n'))
+        self.assertIn("one or the other", str(cm.exception))
+
+    def test_send_after_allowed_on_dtmf_turn(self):
+        s = EvalScenario.load(
+            _write(
+                """
+                name: bargein
+                turns:
+                  - dtmf: "0"
+                    send_after: {event: llm_started, delay_ms: 300}
+                """
+            )
+        )
+        assert s.turns[0].send_after is not None
+        self.assertEqual(s.turns[0].send_after.event, "llm_started")
+
     def test_judge_eval_preserved(self):
         s = EvalScenario.load(
             _write(
@@ -330,9 +375,14 @@ class TestEvalsScenarioParser(unittest.TestCase):
             )
         self.assertIn("positive 'delay_ms:'", str(cm.exception))
 
-    def test_missing_expect_rejected(self):
+    def test_missing_expect_defaults_to_empty(self):
+        """A turn without `expect:` just sends/waits (e.g. paced keypresses)."""
+        s = EvalScenario.load(_write("name: ok\nturns: [{user: hi}]\n"))
+        self.assertEqual(s.turns[0].expect, [])
+
+    def test_expect_non_list_rejected(self):
         with self.assertRaises(ValueError) as cm:
-            EvalScenario.load(_write("name: bad\nturns: [{user: hi}]\n"))
+            EvalScenario.load(_write("name: bad\nturns: [{user: hi, expect: nope}]\n"))
         self.assertIn("expect", str(cm.exception))
 
     def test_expectation_missing_event_rejected(self):
