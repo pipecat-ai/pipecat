@@ -129,9 +129,8 @@ class SmallestSTTService(WebsocketSTTService):
     for real-time voice applications where immediate feedback is needed.
 
     Uses Pipecat's VAD to detect when the user stops speaking and sends
-    a ``close_stream`` message to flush the final transcript. The server
-    closes the session after the final response; the service reconnects
-    automatically for the next utterance.
+    a ``finalize`` message to flush the final transcript while keeping the
+    session alive for the next utterance.
 
     Connects to ``wss://api.smallest.ai/waves/v1/stt/live?model=pulse``.
 
@@ -241,18 +240,9 @@ class SmallestSTTService(WebsocketSTTService):
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             if self._websocket and self._websocket.state is State.OPEN:
                 try:
-                    # Mark as intentionally disconnecting before sending close_stream.
-                    # The v4 API closes the session after the final transcript, which
-                    # would look like a quick-failure to WebsocketService's reconnect
-                    # guard (_MIN_STABLE_CONNECTION_DURATION). Setting _disconnecting=True
-                    # makes _maybe_try_reconnect treat it as a clean exit rather than an
-                    # error, breaking the receive loop instead of incrementing the failure
-                    # counter. _connect() resets _disconnecting=False on reconnect.
-                    self._disconnecting = True
-                    await self._websocket.send(json.dumps({"type": "close_stream"}))
+                    await self._websocket.send(json.dumps({"type": "finalize"}))
                 except Exception as e:
-                    self._disconnecting = False
-                    logger.warning(f"{self} failed to send close_stream: {e}")
+                    logger.warning(f"{self} failed to send finalize: {e}")
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Send audio to the Smallest Pulse WebSocket for transcription.
@@ -292,11 +282,6 @@ class SmallestSTTService(WebsocketSTTService):
         try:
             await self._connect_websocket()
             await super()._connect()
-
-            # After close_stream the server closes the session; the receive task
-            # exits naturally. Clear it so we can create a fresh one on reconnect.
-            if self._receive_task is not None and self._receive_task.done():
-                self._receive_task = None
 
             if self._websocket and not self._receive_task:
                 self._receive_task = self.create_task(
@@ -390,9 +375,8 @@ class SmallestSTTService(WebsocketSTTService):
         The response contains:
             - ``transcript``: The recognized text.
             - ``is_final``: Whether this is a final (vs. interim) result.
-            - ``is_last``: Whether this is the final message of the session.
-              When ``True`` the server closes the WebSocket; the service
-              reconnects automatically for the next utterance.
+            - ``is_last``: Whether this is the last message of the session.
+              Only ``True`` after ``close_stream`` is sent at call end.
             - ``language``: The detected or specified language.
             - ``session_id``: Unique identifier for the WebSocket session.
         """
