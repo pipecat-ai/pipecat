@@ -255,3 +255,12 @@ suite:
     scenarios: [filter_incomplete_turns_function_calling]
   - bot: turn-management/turn-management-filter-incomplete-turns-function-calling.py
     scenarios: [filter_incomplete_turns]
+
+  #
+  # DTMF: the caller drives a keypad phone menu (IVR) with DTMF tones instead of
+  # speech. The bot's DTMFAggregator turns each keypress into a transcription the
+  # LLM responds to, so the harness can assert on the resulting transcription and
+  # reply just like a spoken turn.
+  #
+  - bot: features/features-dtmf-menu.py
+    scenarios: [dtmf_menu]
