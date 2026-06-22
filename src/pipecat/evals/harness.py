@@ -898,19 +898,20 @@ class EvalSession:
             try:
                 await self._wait_send_after(turn.send_after)
             except TimeoutError as e:
+                # Only the event-anchored wait can time out; the pure-delay form
+                # just sleeps. So event is never None here, but fall back for typing.
+                event_name = turn.send_after.event or "send_after"
                 failures.append(
                     EvalAssertionFailure(
                         turn_index=turn_idx,
                         expectation_index=-1,
-                        event_name=turn.send_after.event,
+                        event_name=event_name,
                         reason=f"send_after never fired: {e}",
                     )
                 )
-                self._debug(f"FAIL: {turn.send_after.event}: {failures[-1].reason}")
+                self._debug(f"FAIL: {event_name}: {failures[-1].reason}")
                 self._progress(
-                    EvalTurnProgress(
-                        turn_idx, -1, turn.send_after.event, "timeout", failures[-1].reason
-                    )
+                    EvalTurnProgress(turn_idx, -1, event_name, "timeout", failures[-1].reason)
                 )
                 return failures
 
@@ -1048,8 +1049,17 @@ class EvalSession:
         If the event was seen earlier in the run, anchor on that time (potentially
         fire immediately). Otherwise, poll the latest_event_times map until the
         event arrives, then anchor on that.
+
+        With no event (``send_after.event is None``), it's a pure time delay:
+        sleep ``delay_ms`` from now (i.e. from the previous turn's send).
         """
         target_delay_s = send_after.delay_ms / 1000.0
+
+        if send_after.event is None:
+            self._debug(f"send_after: waiting {send_after.delay_ms}ms")
+            await asyncio.sleep(target_delay_s)
+            return
+
         deadline = time.monotonic() + SEND_AFTER_MAX_WAIT_S
         self._debug(f"send_after: waiting for {send_after.event!r} + {send_after.delay_ms}ms")
 

@@ -61,6 +61,8 @@ A turn may also include ``send_after:`` to schedule its user send relative to a
 prior event (used for interruption / barge-in tests), or ``image:`` (a path,
 relative to the scenario file) to register an image for the turn — when a
 function-calling-video bot requests a user image, the eval transport serves it.
+``send_after`` with only ``delay_ms`` (no ``event``) is a pure time delay
+relative to the previous send, rather than an event anchor.
 
 Top-level optional fields:
     context: LLM messages the bot's context should start from. When given, the
@@ -167,7 +169,7 @@ class EvalExpectation:
 
 @dataclass
 class EvalSendAfter:
-    """Event-driven scheduling for a turn's user send.
+    """Scheduling for when a turn's user send fires.
 
     When set on a :class:`EvalTurn`, the harness waits for ``event`` to have been
     seen (either earlier in the run or arriving now), then waits an additional
@@ -175,12 +177,17 @@ class EvalSendAfter:
     tests: ``send_after: {event: llm_started, delay_ms: 500}`` means
     "interrupt 500ms after the bot started responding."
 
+    ``event`` is optional: a bare ``send_after: {delay_ms: 500}`` is a pure time
+    delay with no event anchor (500ms after the previous turn's send).
+
     Parameters:
-        event: Name of the event to schedule from.
-        delay_ms: Additional delay in milliseconds after the event was received.
+        event: Name of the event to schedule from, or ``None`` for a pure
+            ``delay_ms`` time delay with no event anchor.
+        delay_ms: Additional delay in milliseconds after the event was received
+            (or, when ``event`` is ``None``, after the previous turn's send).
     """
 
-    event: str
+    event: str | None
     delay_ms: int
 
 
@@ -507,13 +514,19 @@ def _parse_send_after(s: Any, path: Path, turn_idx: int) -> EvalSendAfter:
         raise ValueError(f"{path}: turn #{turn_idx} 'send_after:' must be a mapping")
 
     event = s.get("event")
-    if not event or not isinstance(event, str):
-        raise ValueError(f"{path}: turn #{turn_idx} 'send_after:' missing or invalid 'event:'")
+    if event is not None and not isinstance(event, str):
+        raise ValueError(f"{path}: turn #{turn_idx} 'send_after.event' must be a string if present")
 
     delay_ms = s.get("delay_ms", 0)
     if not isinstance(delay_ms, int) or delay_ms < 0:
         raise ValueError(
             f"{path}: turn #{turn_idx} 'send_after.delay_ms' must be a non-negative int"
+        )
+
+    # With no event to anchor on, a zero delay would be a no-op send_after.
+    if event is None and delay_ms == 0:
+        raise ValueError(
+            f"{path}: turn #{turn_idx} 'send_after:' needs an 'event:' or a positive 'delay_ms:'"
         )
 
     return EvalSendAfter(event=event, delay_ms=delay_ms)

@@ -302,6 +302,34 @@ class TestEvalsScenarioParser(unittest.TestCase):
             )
         self.assertIn("non-negative", str(cm.exception))
 
+    def test_send_after_without_event_is_pure_delay(self):
+        s = EvalScenario.load(
+            _write(
+                """
+                name: paced
+                turns:
+                  - user: "first"
+                    expect: [{event: llm_started}]
+                  - user: "second"
+                    send_after: {delay_ms: 500}
+                    expect: [{event: llm_started}]
+                """
+            )
+        )
+        assert s.turns[1].send_after is not None
+        self.assertIsNone(s.turns[1].send_after.event)
+        self.assertEqual(s.turns[1].send_after.delay_ms, 500)
+
+    def test_send_after_without_event_or_delay_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load(
+                _write(
+                    "name: bad\n"
+                    "turns: [{user: hi, send_after: {delay_ms: 0}, expect: [{event: x}]}]\n"
+                )
+            )
+        self.assertIn("positive 'delay_ms:'", str(cm.exception))
+
     def test_missing_expect_rejected(self):
         with self.assertRaises(ValueError) as cm:
             EvalScenario.load(_write("name: bad\nturns: [{user: hi}]\n"))
