@@ -13,7 +13,7 @@ Services:
 Supported languages: as-IN, bn-IN, en-IN, gu-IN, hi-IN, kn-IN,
 ml-IN, mr-IN, or-IN, pa-IN, ta-IN, te-IN.
 
-For API docs see: https://docs.inya.ai/vachana/introduction/introduction
+For API docs see: https://docs.gnani.ai/api/STT/speech-to-text
 """
 
 import asyncio
@@ -35,6 +35,8 @@ from pipecat.frames.frames import (
 from pipecat.services.gnani._common import (
     GNANI_STT_REST_URL,
     GNANI_STT_WS_URL,
+    STT_SUPPORTED_FORMATS,
+    STT_SUPPORTED_SAMPLE_RATES,
     get_language_string,
     stt_language_to_gnani,
 )
@@ -165,10 +167,14 @@ class GnaniSTTSettings(STTSettings):
     """Settings for GnaniSTTService (WebSocket streaming).
 
     Parameters:
-        sample_rate: Audio sample rate (8000 or 16000 Hz).
+        sample_rate: Audio sample rate (8000, 16000, 44100, or 48000 Hz).
+        format: 'verbatim' for raw output, 'transcribe' for ITN-normalized output.
+        itn_native_numerals: When format='transcribe', render digits in native script.
     """
 
     sample_rate: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    format: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    itn_native_numerals: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GnaniSTTService(STTService):
@@ -206,13 +212,30 @@ class GnaniSTTService(STTService):
         keepalive_interval: float = 5.0,
         **kwargs,
     ):
+        resolved_rate = sample_rate or 16000
+        if resolved_rate not in STT_SUPPORTED_SAMPLE_RATES:
+            raise ValueError(
+                f"sample_rate must be one of {STT_SUPPORTED_SAMPLE_RATES}, got {resolved_rate}"
+            )
+
         default_settings = self.Settings(language=Language.EN_IN, model=None)
 
         if settings is not None:
             default_settings.apply_update(settings)
 
+        if (
+            hasattr(default_settings, "format")
+            and default_settings.format
+            and default_settings.format not in (NOT_GIVEN, None)
+            and default_settings.format not in STT_SUPPORTED_FORMATS
+        ):
+            raise ValueError(
+                f"format must be one of {STT_SUPPORTED_FORMATS}, "
+                f"got '{default_settings.format}'"
+            )
+
         super().__init__(
-            sample_rate=sample_rate or 16000,
+            sample_rate=resolved_rate,
             keepalive_timeout=keepalive_timeout,
             keepalive_interval=keepalive_interval,
             settings=default_settings,
@@ -270,8 +293,17 @@ class GnaniSTTService(STTService):
             headers = {
                 "x-api-key-id": self._api_key,
                 "lang_code": lang or "en-IN",
+                "x-sample-rate": str(self.sample_rate),
                 **sdk_headers(),
             }
+
+            fmt = getattr(self._settings, "format", None)
+            if fmt and fmt not in (NOT_GIVEN, None):
+                headers["x-format"] = fmt
+
+            itn = getattr(self._settings, "itn_native_numerals", None)
+            if itn and itn not in (NOT_GIVEN, None):
+                headers["itn_native_numerals"] = str(itn).lower()
 
             self._ws = await websocket_connect(
                 GNANI_STT_WS_URL,

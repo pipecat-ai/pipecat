@@ -13,7 +13,7 @@ Services:
 - GnaniSSETTSService: SSE streaming synthesis (lower latency than REST)
 - GnaniTTSService: WebSocket streaming synthesis with interruption handling
 
-For API docs see: https://docs.inya.ai/vachana/TTS/tts-inference
+For API docs see: https://docs.gnani.ai/api/TTS/tts-inference
 """
 
 import asyncio
@@ -332,48 +332,70 @@ class GnaniSSETTSService(TTSService):
 
                 await self.start_tts_usage_metrics(text)
 
-                buf = ""
+                current_event = ""
                 async for raw_line in response.content:
                     line = raw_line.decode("utf-8", errors="ignore").strip()
                     if not line:
                         continue
+
                     if line.startswith("event:"):
+                        current_event = line[len("event:"):].strip()
                         continue
+
                     if line.startswith("data:"):
-                        line = line[len("data:"):].strip()
-
-                    buf += line
-                    try:
-                        data = json.loads(buf)
-                    except json.JSONDecodeError:
+                        data_str = line[len("data:"):].strip()
+                    else:
                         continue
-                    buf = ""
 
-                    if "error" in data or data.get("status") == "error":
-                        yield ErrorFrame(
-                            error=f"Gnani TTS SSE: {data.get('message', data.get('error', ''))}"
-                        )
+                    if current_event == "audio_chunk":
+                        if not data_str:
+                            continue
+                        try:
+                            audio_bytes = _strip_wav_header(base64.b64decode(data_str))
+                        except Exception:
+                            continue
+                        if audio_bytes:
+                            await self.stop_ttfb_metrics()
+                            yield TTSAudioRawFrame(
+                                audio=audio_bytes,
+                                sample_rate=self.sample_rate,
+                                num_channels=1,
+                                context_id=context_id,
+                            )
+
+                    elif current_event == "completed":
                         return
 
-                    if data.get("status") == "streaming_started":
-                        continue
-
-                    audio_b64 = data.get("audio", "")
-                    if not audio_b64:
-                        continue
-
-                    audio_bytes = _strip_wav_header(base64.b64decode(audio_b64))
-                    if audio_bytes:
-                        await self.stop_ttfb_metrics()
-                        yield TTSAudioRawFrame(
-                            audio=audio_bytes,
-                            sample_rate=self.sample_rate,
-                            num_channels=1,
-                            context_id=context_id,
-                        )
-
-                    if data.get("is_final", False):
+                    elif current_event == "error":
+                        try:
+                            err_data = json.loads(data_str)
+                            msg = err_data.get("message", data_str)
+                        except (json.JSONDecodeError, ValueError):
+                            msg = data_str
+                        yield ErrorFrame(error=f"Gnani TTS SSE: {msg}")
                         return
+
+                    else:
+                        try:
+                            data = json.loads(data_str)
+                        except (json.JSONDecodeError, ValueError):
+                            continue
+                        if data.get("status") == "error":
+                            yield ErrorFrame(
+                                error=f"Gnani TTS SSE: {data.get('message', '')}"
+                            )
+                            return
+                        audio_b64 = data.get("audio", "")
+                        if audio_b64:
+                            audio_bytes = _strip_wav_header(base64.b64decode(audio_b64))
+                            if audio_bytes:
+                                await self.stop_ttfb_metrics()
+                                yield TTSAudioRawFrame(
+                                    audio=audio_bytes,
+                                    sample_rate=self.sample_rate,
+                                    num_channels=1,
+                                    context_id=context_id,
+                                )
 
         except asyncio.CancelledError:
             raise
@@ -450,6 +472,7 @@ class GnaniTTSService(InterruptibleTTSService):
         self._ws = None
         self._receive_task = None
         self._bot_speaking = False
+        self._awaiting_first_chunk = False
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -490,13 +513,12 @@ class GnaniTTSService(InterruptibleTTSService):
             }
 
             self._bot_speaking = True
+            self._awaiting_first_chunk = True
             await self._ws.send(json.dumps(request_body))
             await self.start_tts_usage_metrics(text)
 
         except Exception as e:
             yield ErrorFrame(error=f"Error sending TTS request: {e}", exception=e)
-        finally:
-            await self.stop_ttfb_metrics()
 
         yield None
 
@@ -586,6 +608,9 @@ class GnaniTTSService(InterruptibleTTSService):
     async def _handle_audio_chunk(self, audio_bytes: bytes):
         audio_bytes = _strip_wav_header(audio_bytes)
         if audio_bytes:
+            if self._awaiting_first_chunk:
+                self._awaiting_first_chunk = False
+                await self.stop_ttfb_metrics()
             await self.push_frame(
                 TTSAudioRawFrame(
                     audio=audio_bytes,

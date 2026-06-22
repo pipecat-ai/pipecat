@@ -4,7 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Shared constants and helpers for Gnani Vachana Pipecat services."""
+"""Shared constants and helpers for Gnani Vachana Pipecat services.
+
+API docs: https://docs.gnani.ai/api/introduction/introduction
+"""
 
 from pipecat.transcriptions.language import Language, resolve_language
 
@@ -15,10 +18,14 @@ GNANI_TTS_REST_URL = "https://api.vachana.ai/api/v1/tts/inference"
 GNANI_TTS_SSE_URL = "https://api.vachana.ai/api/v1/tts/sse"
 GNANI_TTS_WS_URL = "wss://api.vachana.ai/api/v1/tts"
 
-STT_SUPPORTED_SAMPLE_RATES = (8000, 16000)
+STT_SUPPORTED_SAMPLE_RATES = (8000, 16000, 44100, 48000)
 TTS_SUPPORTED_SAMPLE_RATES = (8000, 16000, 22050, 44100)
 
 STREAM_CHUNK_BYTES = 1024
+
+STT_FORMAT_VERBATIM = "verbatim"
+STT_FORMAT_TRANSCRIBE = "transcribe"
+STT_SUPPORTED_FORMATS = (STT_FORMAT_VERBATIM, STT_FORMAT_TRANSCRIBE)
 
 SUPPORTED_VOICES = frozenset({
     "Karan", "Simran", "Nara", "Riya", "Viraj", "Raju",
@@ -27,7 +34,6 @@ SUPPORTED_VOICES = frozenset({
 SUPPORTED_LANGUAGES = frozenset({
     "as-IN", "bn-IN", "en-IN", "gu-IN", "hi-IN", "kn-IN",
     "ml-IN", "mr-IN", "or-IN", "pa-IN", "ta-IN", "te-IN",
-    "en-IN,hi-IN",
 })
 
 STREAM_SUPPORTED_LANGUAGES = frozenset({
