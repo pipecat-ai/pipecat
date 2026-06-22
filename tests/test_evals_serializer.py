@@ -120,6 +120,19 @@ class TestRTVIEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await self.serializer.deserialize(json.dumps(msg)))
         self.assertEqual(self.serializer.get_user_image(), (img, "image/png"))
 
+    async def test_dtmf_message_forwarded_to_processor(self):
+        # DTMF is now a first-class RTVI message handled by the RTVIProcessor, so
+        # the serializer just forwards it like any other RTVI message.
+        msg = {
+            "label": RTVI.MESSAGE_LABEL,
+            "type": "dtmf",
+            "id": "9",
+            "data": {"button": "#"},
+        }
+        frame = await self.serializer.deserialize(json.dumps(msg))
+        self.assertIsInstance(frame, InputTransportMessageFrame)
+        self.assertEqual(frame.message["type"], "dtmf")
+
     async def test_non_context_client_message_is_forwarded(self):
         msg = {
             "label": RTVI.MESSAGE_LABEL,

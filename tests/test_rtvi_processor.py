@@ -8,9 +8,13 @@ import unittest
 import warnings
 from unittest.mock import AsyncMock, Mock
 
+from pydantic import ValidationError
+
 import pipecat.processors.frameworks.rtvi.models as RTVI
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     InputAudioRawFrame,
+    InputDTMFFrame,
     InputTransportStartAudioStreamingFrame,
 )
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
@@ -180,6 +184,25 @@ class TestRTVIFrameBasedAudio(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(pushed), 1)
         self.assertIsInstance(pushed[0], InputAudioRawFrame)
         self.assertEqual(pushed[0].sample_rate, 16000)
+
+
+class TestRTVIDTMF(unittest.IsolatedAsyncioTestCase):
+    async def asyncTearDown(self):
+        if hasattr(self, "processor"):
+            await self.processor.cleanup()
+
+    async def test_dtmf_pushes_input_dtmf_frame_downstream(self):
+        self.processor = RTVIProcessor()
+        self.processor.push_frame = AsyncMock()
+        await self.processor._handle_dtmf(RTVI.DTMFInputData(button=KeypadEntry.ONE))
+        pushed = [c.args[0] for c in self.processor.push_frame.call_args_list]
+        self.assertEqual(len(pushed), 1)
+        self.assertIsInstance(pushed[0], InputDTMFFrame)
+        self.assertEqual(pushed[0].button, KeypadEntry.ONE)
+
+    def test_dtmf_input_data_rejects_invalid_button(self):
+        with self.assertRaises(ValidationError):
+            RTVI.DTMFInputData.model_validate({"button": "Z"})
 
 
 if __name__ == "__main__":

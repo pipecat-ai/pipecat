@@ -68,6 +68,23 @@ class TestTranslate(unittest.TestCase):
         self.assertEqual(len(s._tts_audio), 0)
         self.assertTrue(s._queue.empty())
 
+    def test_discard_preserves_user_transcription(self):
+        # A DTMF keypress emits its user_transcription right before the turn-start
+        # interruption. The discard must keep it (it's the turn's input) while
+        # still dropping the bot's interrupted output.
+        s = _session(bot_audio=True)
+        s._queue.put_nowait({"type": "llm_response", "text": "greeting"})
+        s._queue.put_nowait({"type": "user_transcription", "transcript": "DTMF: 1#"})
+        self.assertEqual(
+            s._translate({"type": "user-started-speaking"}),
+            [{"type": "user_started_speaking"}],
+        )
+        # The bot output is gone; the user transcription survives, still queued.
+        self.assertEqual(
+            s._queue.get_nowait(), {"type": "user_transcription", "transcript": "DTMF: 1#"}
+        )
+        self.assertTrue(s._queue.empty())
+
     def test_user_transcription_final_only(self):
         s = _session()
         interim = {"type": "user-transcription", "data": {"text": "he", "final": False}}
@@ -396,6 +413,24 @@ class TestAudioSender(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(sent), 2)  # 2s -> two ~1s slices
         self.assertEqual(b"".join(chunk for chunk, _ in sent), b"\x01\x02" * 16000 * 2)
         self.assertTrue(all(rate == 16000 for _, rate in sent))
+
+
+class TestDTMFSender(unittest.IsolatedAsyncioTestCase):
+    """A dtmf turn sends one RTVI ``dtmf`` message per key."""
+
+    async def test_send_user_dtmf_one_message_per_key(self):
+        s = _session()
+        sent: list[RTVI.Message] = []
+
+        async def fake_send(message):
+            sent.append(message)
+
+        s._send = fake_send
+        await s._send_user_dtmf("12#")
+
+        self.assertEqual(len(sent), 3)
+        self.assertTrue(all(m.type == "dtmf" for m in sent))
+        self.assertEqual([m.data["button"] for m in sent], ["1", "2", "#"])
 
 
 def _free_port() -> int:

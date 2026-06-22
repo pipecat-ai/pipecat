@@ -731,20 +731,30 @@ class EvalSession:
     def _discard_interrupted_output(self) -> None:
         """Drop the bot's interrupted, un-matched output (on user interruption).
 
-        Clears the response buffers and drains the unmatched event queue, so a
-        greeting (or any prior bot output) the user just interrupted can't be
-        matched against this turn. Diagnostics (``events_seen``,
-        ``latest_event_times``) are left intact for send_after lookups.
+        Clears the response buffers and drains the bot's pending output from the
+        event queue, so a greeting (or any prior bot output) the user just
+        interrupted can't be matched against this turn. ``user_transcription`` is
+        preserved: a DTMF keypress emits its transcription immediately before the
+        turn-start interruption, and that transcription is the turn's *input*, not
+        the stale bot output this discard is meant to clear — dropping it would
+        race the matcher. Diagnostics (``events_seen``, ``latest_event_times``)
+        are left intact for send_after lookups.
         """
         self._text_buffer = []
         self._tts_audio = bytearray()
+        preserved: list[dict] = []
         dropped = 0
         while not self._queue.empty():
             try:
-                self._queue.get_nowait()
-                dropped += 1
+                event = self._queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
+            if event.get("type") == "user_transcription":
+                preserved.append(event)
+            else:
+                dropped += 1
+        for event in preserved:
+            self._queue.put_nowait(event)
         if dropped:
             self._debug(f"discard: dropped {dropped} queued event(s) on interruption")
 
@@ -898,19 +908,20 @@ class EvalSession:
             try:
                 await self._wait_send_after(turn.send_after)
             except TimeoutError as e:
+                # Only the event-anchored wait can time out; the pure-delay form
+                # just sleeps. So event is never None here, but fall back for typing.
+                event_name = turn.send_after.event or "send_after"
                 failures.append(
                     EvalAssertionFailure(
                         turn_index=turn_idx,
                         expectation_index=-1,
-                        event_name=turn.send_after.event,
+                        event_name=event_name,
                         reason=f"send_after never fired: {e}",
                     )
                 )
-                self._debug(f"FAIL: {turn.send_after.event}: {failures[-1].reason}")
+                self._debug(f"FAIL: {event_name}: {failures[-1].reason}")
                 self._progress(
-                    EvalTurnProgress(
-                        turn_idx, -1, turn.send_after.event, "timeout", failures[-1].reason
-                    )
+                    EvalTurnProgress(turn_idx, -1, event_name, "timeout", failures[-1].reason)
                 )
                 return failures
 
@@ -929,8 +940,15 @@ class EvalSession:
             # judged in context (e.g. a terse "That's four" answering this question).
             if self._judge is not None:
                 self._judge.add_user_message(turn.user)
+        elif turn.dtmf is not None:
+            self._debug(f"send: dtmf {turn.dtmf!r}")
+            await self._send_user_dtmf(turn.dtmf)
+            # Record the keypresses for judge context, so the bot's reply is judged
+            # knowing what was pressed.
+            if self._judge is not None:
+                self._judge.add_user_message(f"(DTMF keypad input: {turn.dtmf})")
 
-        self._progress(EvalTurnProgress(turn_idx, -1, turn.user or "", "turn"))
+        self._progress(EvalTurnProgress(turn_idx, -1, turn.user or turn.dtmf or "", "turn"))
 
         # All of a turn's expectations share one deadline anchored at the send, so a
         # stalled turn fails within a single ``within_ms`` budget instead of spending
@@ -991,6 +1009,23 @@ class EvalSession:
         )
         await self._send(message)
 
+    async def _send_user_dtmf(self, keys: str) -> None:
+        """Send a DTMF keypress turn: one RTVI ``dtmf`` message per key.
+
+        The bot's ``RTVIProcessor`` turns each into an ``InputDTMFFrame`` pushed
+        downstream, the same path a telephony transport's keypress takes. The
+        bot's ``DTMFAggregator`` (if any) accumulates them and flushes — on the
+        ``#`` terminator or its idle timeout — into a transcription the bot reacts
+        to. Keys go out back-to-back; use ``send_after`` across turns to pace them.
+        """
+        for key in keys:
+            message = RTVI.Message(
+                type="dtmf",
+                id=self._message_id(),
+                data={"button": key},
+            )
+            await self._send(message)
+
     async def _send_image(self, image_path: str) -> None:
         """Register an image (base64, with its MIME type) for the current turn.
 
@@ -1048,8 +1083,17 @@ class EvalSession:
         If the event was seen earlier in the run, anchor on that time (potentially
         fire immediately). Otherwise, poll the latest_event_times map until the
         event arrives, then anchor on that.
+
+        With no event (``send_after.event is None``), it's a pure time delay:
+        sleep ``delay_ms`` from now (i.e. from the previous turn's send).
         """
         target_delay_s = send_after.delay_ms / 1000.0
+
+        if send_after.event is None:
+            self._debug(f"send_after: waiting {send_after.delay_ms}ms")
+            await asyncio.sleep(target_delay_s)
+            return
+
         deadline = time.monotonic() + SEND_AFTER_MAX_WAIT_S
         self._debug(f"send_after: waiting for {send_after.event!r} + {send_after.delay_ms}ms")
 
