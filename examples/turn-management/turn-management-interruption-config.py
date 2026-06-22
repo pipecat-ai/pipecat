@@ -81,11 +81,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context,
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
-<<<<<<< HEAD:examples/turn-management/turn-management-interruption-config.py
                 start=[MinWordsUserTurnStartStrategy(min_words=3)],
-=======
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())],
->>>>>>> 594bc8cea (Refactor imports in interruptible-gnani.py for clarity and remove redundant lines.):examples/foundational/54-gnani-stt.py
             ),
             vad_analyzer=SileroVADAnalyzer(),
         ),

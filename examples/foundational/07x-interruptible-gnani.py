@@ -36,9 +36,6 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 load_dotenv(override=True)
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
@@ -63,10 +60,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = GnaniSTTService(
         api_key=os.getenv("GNANI_API_KEY"),
-        organization_id=os.getenv("GNANI_ORGANIZATION_ID"),
-        params=GnaniSTTService.InputParams(
+        settings=GnaniSTTService.Settings(
             language=Language.EN_IN,
-            api_user_id=os.getenv("GNANI_USER_ID", "pipecat-user"),
         ),
     )
 

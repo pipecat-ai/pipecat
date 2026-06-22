@@ -6,6 +6,9 @@
 
 """Gnani Vachana speech AI service integrations for Pipecat.
 
+This module re-exports services from the ``pipecat-gnani`` package so that
+they are available under the ``pipecat.services.gnani`` namespace.
+
 STT Services:
 - GnaniHttpSTTService: REST-based file transcription (requires VAD)
 - GnaniSTTService: WebSocket streaming speech-to-text with VAD
@@ -18,22 +21,18 @@ TTS Services:
 API docs: https://docs.gnani.ai/api/introduction/introduction
 """
 
-from pipecat.services.gnani._common import (
+from pipecat_gnani import (
     STT_FORMAT_TRANSCRIBE,
     STT_FORMAT_VERBATIM,
     SUPPORTED_VOICES,
-)
-from pipecat.services.gnani.stt import (
     GnaniHttpSTTService,
     GnaniHttpSTTSettings,
-    GnaniSTTService,
-    GnaniSTTSettings,
-)
-from pipecat.services.gnani.tts import (
     GnaniHttpTTSService,
     GnaniHttpTTSSettings,
     GnaniSSETTSService,
     GnaniSSETTSSettings,
+    GnaniSTTService,
+    GnaniSTTSettings,
     GnaniTTSService,
     GnaniTTSSettings,
 )

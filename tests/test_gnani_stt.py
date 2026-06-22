@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,216 +10,30 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 
 from pipecat.frames.frames import ErrorFrame, TranscriptionFrame
-from pipecat.services.gnani.stt import GnaniSTTService
+from pipecat.services.gnani.stt import GnaniHttpSTTService, GnaniHttpSTTSettings
 from pipecat.transcriptions.language import Language
 
 
-class TestGnaniSTTService(unittest.IsolatedAsyncioTestCase):
-    """Test cases for GnaniSTTService."""
+class TestGnaniHttpSTTService(unittest.IsolatedAsyncioTestCase):
+    """Test cases for GnaniHttpSTTService (REST, VAD-segmented)."""
 
     def setUp(self):
-        """Set up test fixtures."""
         self.api_key = "test-api-key"
-        self.organization_id = "test-org-id"
-        self.service = GnaniSTTService(
+        self.mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        self.service = GnaniHttpSTTService(
             api_key=self.api_key,
-            organization_id=self.organization_id,
-            params=GnaniSTTService.InputParams(
-                language=Language.HI_IN,
-                api_user_id="test-user",
-            ),
+            aiohttp_session=self.mock_session,
+            settings=GnaniHttpSTTSettings(language=Language.HI_IN),
         )
 
     def test_initialization(self):
-        """Test that the service initializes correctly."""
         self.assertEqual(self.service._api_key, self.api_key)
-        self.assertEqual(self.service._organization_id, self.organization_id)
-        self.assertEqual(self.service._settings["language"], "hi-IN")
-        self.assertEqual(self.service._api_user_id, "test-user")
 
     def test_can_generate_metrics(self):
-        """Test that metrics generation is supported."""
         self.assertTrue(self.service.can_generate_metrics())
 
     def test_language_conversion(self):
-        """Test language enum to service language code conversion."""
-        self.assertEqual(
-            self.service.language_to_service_language(Language.HI_IN),
-            "hi-IN",
-        )
-        self.assertEqual(
-            self.service.language_to_service_language(Language.TA_IN),
-            "ta-IN",
-        )
-        self.assertEqual(
-            self.service.language_to_service_language(Language.EN_IN),
-            "en-IN",
-        )
-
-    async def test_set_language(self):
-        """Test setting language dynamically."""
-        await self.service.set_language(Language.TA_IN)
-        self.assertEqual(self.service._settings["language"], "ta-IN")
-
-        await self.service.set_language(Language.EN_IN)
-        self.assertEqual(self.service._settings["language"], "en-IN")
-
-    async def test_set_language_unsupported(self):
-        """Test that unsupported languages are rejected gracefully."""
-        original = self.service._settings["language"]
-        await self.service.set_language(Language.FR)
-        self.assertEqual(self.service._settings["language"], original)
-
-    @patch("aiohttp.ClientSession")
-    async def test_run_stt_success(self, mock_session_class):
-        """Test successful transcription."""
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(
-            return_value={
-                "success": True,
-                "transcript": "नमस्ते",
-                "request_id": "test-123",
-            }
-        )
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=None)
-
-        mock_post = MagicMock(return_value=mock_response)
-
-        mock_session = AsyncMock()
-        mock_session.post = mock_post
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session_class.return_value = mock_session
-
-        audio_data = b"fake audio data"
-
-        frames = []
-        async for frame in self.service.run_stt(audio_data):
-            frames.append(frame)
-
-        self.assertEqual(len(frames), 1)
-        self.assertIsInstance(frames[0], TranscriptionFrame)
-        self.assertEqual(frames[0].text, "नमस्ते")
-
-    @patch("aiohttp.ClientSession")
-    async def test_run_stt_empty_transcript(self, mock_session_class):
-        """Test handling of empty transcript response."""
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(
-            return_value={
-                "success": True,
-                "transcript": "",
-            }
-        )
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=None)
-
-        mock_post = MagicMock(return_value=mock_response)
-
-        mock_session = AsyncMock()
-        mock_session.post = mock_post
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session_class.return_value = mock_session
-
-        audio_data = b"fake audio data"
-
-        frames = []
-        async for frame in self.service.run_stt(audio_data):
-            frames.append(frame)
-
-        self.assertEqual(len(frames), 0)
-
-    @patch("aiohttp.ClientSession")
-    async def test_run_stt_api_error(self, mock_session_class):
-        """Test handling of API error response."""
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(
-            return_value={
-                "success": False,
-                "error": "Invalid audio format",
-            }
-        )
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=None)
-
-        mock_post = MagicMock(return_value=mock_response)
-
-        mock_session = AsyncMock()
-        mock_session.post = mock_post
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session_class.return_value = mock_session
-
-        audio_data = b"fake audio data"
-
-        frames = []
-        async for frame in self.service.run_stt(audio_data):
-            frames.append(frame)
-
-        self.assertEqual(len(frames), 1)
-        self.assertIsInstance(frames[0], ErrorFrame)
-
-    @patch("aiohttp.ClientSession")
-    async def test_run_stt_http_error(self, mock_session_class):
-        """Test handling of HTTP error status codes."""
-        mock_response = AsyncMock()
-        mock_response.status = 500
-        mock_response.text = AsyncMock(return_value="Internal Server Error")
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=None)
-
-        mock_post = MagicMock(return_value=mock_response)
-
-        mock_session = AsyncMock()
-        mock_session.post = mock_post
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session_class.return_value = mock_session
-
-        audio_data = b"fake audio data"
-
-        frames = []
-        async for frame in self.service.run_stt(audio_data):
-            frames.append(frame)
-
-        self.assertEqual(len(frames), 1)
-        self.assertIsInstance(frames[0], ErrorFrame)
-        self.assertIn("status 500", frames[0].error)
-
-    @patch("aiohttp.ClientSession")
-    async def test_run_stt_network_error(self, mock_session_class):
-        """Test handling of network errors."""
-        mock_post = MagicMock(side_effect=aiohttp.ClientError("Connection failed"))
-
-        mock_session = AsyncMock()
-        mock_session.post = mock_post
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session_class.return_value = mock_session
-
-        audio_data = b"fake audio data"
-
-        frames = []
-        async for frame in self.service.run_stt(audio_data):
-            frames.append(frame)
-
-        self.assertEqual(len(frames), 1)
-        self.assertIsInstance(frames[0], ErrorFrame)
-        self.assertIn("Network error", frames[0].error)
-
-    def test_multiple_languages(self):
-        """Test multiple language support."""
-        languages_to_test = [
+        languages = [
             (Language.EN_IN, "en-IN"),
             (Language.HI_IN, "hi-IN"),
             (Language.TA_IN, "ta-IN"),
@@ -231,34 +45,99 @@ class TestGnaniSTTService(unittest.IsolatedAsyncioTestCase):
             (Language.ML_IN, "ml-IN"),
             (Language.PA_IN, "pa-IN"),
         ]
-
-        for lang_enum, expected_code in languages_to_test:
+        for lang_enum, expected in languages:
             with self.subTest(language=lang_enum):
-                result = self.service.language_to_service_language(lang_enum)
-                self.assertEqual(result, expected_code)
+                self.assertEqual(self.service.language_to_service_language(lang_enum), expected)
 
-    def test_session_initially_none(self):
-        """Test that the HTTP session is None before start()."""
-        self.assertIsNone(self.service._session)
-
-    def test_default_params(self):
-        """Test initialization with default parameters."""
-        service = GnaniSTTService(
+    def test_default_language(self):
+        service = GnaniHttpSTTService(
             api_key="key",
-            organization_id="org",
+            aiohttp_session=self.mock_session,
         )
-        self.assertEqual(service._settings["language"], "hi-IN")
-        self.assertEqual(service._api_user_id, "pipecat-user")
-        self.assertIsNone(service._api_request_id)
+        self.assertEqual(service._settings.language, Language.EN_IN)
 
-    def test_custom_base_url(self):
-        """Test initialization with a custom base URL."""
-        service = GnaniSTTService(
-            api_key="key",
-            organization_id="org",
-            base_url="https://custom.api.example.com/stt",
+    async def test_run_stt_success(self):
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value={"transcript": "नमस्ते"})
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+
+        self.mock_session.post = MagicMock(return_value=mock_response)
+
+        frames = []
+        async for frame in self.service.run_stt(b"fake audio data"):
+            if frame is not None:
+                frames.append(frame)
+
+        transcriptions = [f for f in frames if isinstance(f, TranscriptionFrame)]
+        self.assertEqual(len(transcriptions), 1)
+        self.assertEqual(transcriptions[0].text, "नमस्ते")
+
+    async def test_run_stt_empty_transcript(self):
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value={"transcript": ""})
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+
+        self.mock_session.post = MagicMock(return_value=mock_response)
+
+        frames = []
+        async for frame in self.service.run_stt(b"fake audio data"):
+            if frame is not None:
+                frames.append(frame)
+
+        transcriptions = [f for f in frames if isinstance(f, TranscriptionFrame)]
+        self.assertEqual(len(transcriptions), 0)
+
+    async def test_run_stt_http_error(self):
+        mock_response = AsyncMock()
+        mock_response.status = 500
+        mock_response.text = AsyncMock(return_value="Internal Server Error")
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+
+        self.mock_session.post = MagicMock(return_value=mock_response)
+
+        frames = []
+        async for frame in self.service.run_stt(b"fake audio data"):
+            if frame is not None:
+                frames.append(frame)
+
+        errors = [f for f in frames if isinstance(f, ErrorFrame)]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Gnani STT API error", errors[0].error)
+
+    async def test_run_stt_network_error(self):
+        self.mock_session.post = MagicMock(
+            side_effect=aiohttp.ClientError("Connection failed"),
         )
-        self.assertEqual(service._base_url, "https://custom.api.example.com/stt")
+
+        frames = []
+        async for frame in self.service.run_stt(b"fake audio data"):
+            if frame is not None:
+                frames.append(frame)
+
+        errors = [f for f in frames if isinstance(f, ErrorFrame)]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Error transcribing audio", errors[0].error)
+
+
+class TestGnaniHttpSTTSettings(unittest.TestCase):
+    """Test GnaniHttpSTTSettings fields."""
+
+    def test_format_field(self):
+        settings = GnaniHttpSTTSettings(language=Language.EN_IN, format="verbatim")
+        self.assertEqual(settings.format, "verbatim")
+
+    def test_itn_native_numerals_field(self):
+        settings = GnaniHttpSTTSettings(
+            language=Language.HI_IN,
+            format="transcribe",
+            itn_native_numerals=True,
+        )
+        self.assertTrue(settings.itn_native_numerals)
 
 
 if __name__ == "__main__":

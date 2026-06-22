@@ -1,11 +1,18 @@
-- Added `GnaniSTTService` for speech-to-text transcription using Gnani's multilingual AI-powered transcription API:
+- Added Gnani Vachana speech AI services via the `pipecat-gnani` package:
 
-  - Support for 10+ Indian languages (Hindi, Tamil, Telugu, Kannada, Gujarati, Marathi, Bengali, Malayalam, Punjabi, and English-India)
-  - REST API-based transcription with segmented audio processing
-  - Extends `SegmentedSTTService` for VAD-based audio buffering
-  - Dynamic language switching support with `set_language()` method
-  - Built-in metrics support for TTFB and processing time tracking
-  - Proper error handling with `ErrorFrame` integration
-  - Traced transcription using `@traced_stt` decorator
+  **STT (Speech-to-Text):**
+  - `GnaniHttpSTTService`: REST-based transcription with VAD-segmented audio
+  - `GnaniSTTService`: WebSocket streaming real-time transcription
+
+  **TTS (Text-to-Speech):**
+  - `GnaniHttpTTSService`: REST-based single-request synthesis
+  - `GnaniSSETTSService`: SSE streaming synthesis (lower latency)
+  - `GnaniTTSService`: WebSocket streaming synthesis with interruption handling
+
+  **Features:**
+  - Support for 12 Indian languages (Assamese, Bengali, English-India, Gujarati, Hindi, Kannada, Malayalam, Marathi, Odia, Punjabi, Tamil, Telugu)
+  - 6 voices: Karan, Simran, Nara, Riya, Viraj, Raju
+  - Dynamic language switching via `set_language()`
+  - Built-in metrics (TTFB and processing time)
+  - Traced transcription (`@traced_stt`) and synthesis (`@traced_tts`)
   - Complete foundational example at `examples/foundational/07x-interruptible-gnani.py`
-

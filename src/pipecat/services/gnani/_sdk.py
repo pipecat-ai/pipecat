@@ -4,13 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import platform
+"""Re-export SDK header helper from the ``pipecat-gnani`` package."""
 
-from pipecat import version as pipecat_version
+from pipecat_gnani._sdk import sdk_headers
 
-
-def sdk_headers() -> dict[str, str]:
-    """SDK identification headers for Gnani Vachana API."""
-    return {
-        "User-Agent": f"Pipecat/{pipecat_version()} Python/{platform.python_version()}",
-    }
+__all__ = ["sdk_headers"]
