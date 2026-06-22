@@ -22,6 +22,7 @@ from typing import (
 
 from pydantic import BaseModel, ConfigDict
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     AggregationType,
 )
@@ -238,6 +239,17 @@ class SendTextData(BaseModel):
 
     content: str
     options: SendTextOptions | None = None
+
+
+class DTMFInputData(BaseModel):
+    """Data format for a DTMF keypress sent from the client.
+
+    Carries a single keypad entry. Clients send one ``dtmf`` message per key, the
+    way a telephony transport delivers them; the bot's DTMF handling (e.g. a
+    ``DTMFAggregator``) sequences them.
+    """
+
+    button: KeypadEntry
 
 
 class LLMFunctionCallStartMessageData(BaseModel):

@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallResultFrame,
     InputAudioRawFrame,
+    InputDTMFFrame,
     InputTransportMessageFrame,
     InputTransportStartAudioStreamingFrame,
     LLMConfigureOutputFrame,
@@ -359,6 +360,9 @@ class RTVIProcessor(FrameProcessor):
                     await self._handle_send_text(data)
                 case "raw-audio" | "raw-audio-batch":
                     await self._handle_audio_buffer(message.data)
+                case "dtmf":
+                    data = RTVI.DTMFInputData.model_validate(message.data)
+                    await self._handle_dtmf(data)
 
                 case _:
                     await self._send_error_response(message.id, f"Unsupported type {message.type}")
@@ -442,6 +446,16 @@ class RTVIProcessor(FrameProcessor):
         except (KeyError, TypeError, ValueError) as e:
             # Handle missing keys, decoding errors, and invalid types
             logger.error(f"Error processing audio buffer: {e}")
+
+    async def _handle_dtmf(self, data: RTVI.DTMFInputData):
+        """Handle a DTMF keypress from the client.
+
+        Like ``_handle_audio_buffer``, the RTVIProcessor sits at the top of the
+        pipeline, so pushing ``InputDTMFFrame`` downstream reaches the input
+        transport and the bot's DTMF handling exactly as a telephony transport's
+        keypress would.
+        """
+        await self.push_frame(InputDTMFFrame(button=data.button))
 
     async def _handle_send_text(self, data: RTVI.SendTextData):
         """Handle a send-text message from the client."""
