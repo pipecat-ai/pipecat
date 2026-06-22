@@ -398,6 +398,24 @@ class TestAudioSender(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(rate == 16000 for _, rate in sent))
 
 
+class TestDTMFSender(unittest.IsolatedAsyncioTestCase):
+    """A dtmf turn sends one RTVI ``dtmf`` message per key."""
+
+    async def test_send_user_dtmf_one_message_per_key(self):
+        s = _session()
+        sent: list[RTVI.Message] = []
+
+        async def fake_send(message):
+            sent.append(message)
+
+        s._send = fake_send
+        await s._send_user_dtmf("12#")
+
+        self.assertEqual(len(sent), 3)
+        self.assertTrue(all(m.type == "dtmf" for m in sent))
+        self.assertEqual([m.data["button"] for m in sent], ["1", "2", "#"])
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("localhost", 0))

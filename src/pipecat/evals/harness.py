@@ -930,8 +930,15 @@ class EvalSession:
             # judged in context (e.g. a terse "That's four" answering this question).
             if self._judge is not None:
                 self._judge.add_user_message(turn.user)
+        elif turn.dtmf is not None:
+            self._debug(f"send: dtmf {turn.dtmf!r}")
+            await self._send_user_dtmf(turn.dtmf)
+            # Record the keypresses for judge context, so the bot's reply is judged
+            # knowing what was pressed.
+            if self._judge is not None:
+                self._judge.add_user_message(f"(DTMF keypad input: {turn.dtmf})")
 
-        self._progress(EvalTurnProgress(turn_idx, -1, turn.user or "", "turn"))
+        self._progress(EvalTurnProgress(turn_idx, -1, turn.user or turn.dtmf or "", "turn"))
 
         # All of a turn's expectations share one deadline anchored at the send, so a
         # stalled turn fails within a single ``within_ms`` budget instead of spending
@@ -991,6 +998,23 @@ class EvalSession:
             ).model_dump(),
         )
         await self._send(message)
+
+    async def _send_user_dtmf(self, keys: str) -> None:
+        """Send a DTMF keypress turn: one RTVI ``dtmf`` message per key.
+
+        The bot's ``RTVIProcessor`` turns each into an ``InputDTMFFrame`` pushed
+        downstream, the same path a telephony transport's keypress takes. The
+        bot's ``DTMFAggregator`` (if any) accumulates them and flushes — on the
+        ``#`` terminator or its idle timeout — into a transcription the bot reacts
+        to. Keys go out back-to-back; use ``send_after`` across turns to pace them.
+        """
+        for key in keys:
+            message = RTVI.Message(
+                type="dtmf",
+                id=self._message_id(),
+                data={"button": key},
+            )
+            await self._send(message)
 
     async def _send_image(self, image_path: str) -> None:
         """Register an image (base64, with its MIME type) for the current turn.
