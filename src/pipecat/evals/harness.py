@@ -731,20 +731,30 @@ class EvalSession:
     def _discard_interrupted_output(self) -> None:
         """Drop the bot's interrupted, un-matched output (on user interruption).
 
-        Clears the response buffers and drains the unmatched event queue, so a
-        greeting (or any prior bot output) the user just interrupted can't be
-        matched against this turn. Diagnostics (``events_seen``,
-        ``latest_event_times``) are left intact for send_after lookups.
+        Clears the response buffers and drains the bot's pending output from the
+        event queue, so a greeting (or any prior bot output) the user just
+        interrupted can't be matched against this turn. ``user_transcription`` is
+        preserved: a DTMF keypress emits its transcription immediately before the
+        turn-start interruption, and that transcription is the turn's *input*, not
+        the stale bot output this discard is meant to clear — dropping it would
+        race the matcher. Diagnostics (``events_seen``, ``latest_event_times``)
+        are left intact for send_after lookups.
         """
         self._text_buffer = []
         self._tts_audio = bytearray()
+        preserved: list[dict] = []
         dropped = 0
         while not self._queue.empty():
             try:
-                self._queue.get_nowait()
-                dropped += 1
+                event = self._queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
+            if event.get("type") == "user_transcription":
+                preserved.append(event)
+            else:
+                dropped += 1
+        for event in preserved:
+            self._queue.put_nowait(event)
         if dropped:
             self._debug(f"discard: dropped {dropped} queued event(s) on interruption")
 
