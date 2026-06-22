@@ -26,11 +26,14 @@ from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType
 # rate/prosody, which is heard as "the voice changing rate" + jumps + ticks at
 # every join. We still insert a space after the merged boundary punctuation so the
 # TTS pauses naturally at the internal "., ! ?" (no rushed run-on).
-_MIN_CHUNK_CHARS: int = 0  # was 40. Lowered to 0 so TTS fires on the FIRST real
-# sentence boundary immediately (fastest time-to-first-audio) instead of merging
-# short sentences up to 40 chars. Trade-off: a reply made of several very short
-# sentences may sound slightly choppier (per-clip prosody jumps); raise toward
-# ~15-20 if the voice quality regresses while keeping most of the latency win.
+_MIN_CHUNK_CHARS: int = 40  # RESTORED from 0. At 0, every sentence boundary fired
+# its own tiny TTS clip; on Deepdub (a separate WS synthesis per clip, ~600-900ms
+# TTFB each) that was heard as "the voice changing rate" + jumps + cut seams after
+# short sentences like "באיזה גודל?" (run 113 — exactly the symptom this comment
+# warned about). Merging short sentences up to 40 chars makes the TTS generate ONE
+# longer, continuously-prosodied utterance = seamless. Costs a little
+# time-to-first-audio on multi-short-sentence replies; worth it (esp. Deepdub).
+# Lower toward ~20 only if first-audio latency becomes a problem.
 
 # Mid-sentence splitting is DISABLED for fluency. The user wants joins to happen
 # ONLY at real sentence boundaries (". ! ?") so the voice never appears to cut in
