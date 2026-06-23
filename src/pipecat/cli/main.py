@@ -73,7 +73,12 @@ def _build_app():
 
     # `create` is a plain command (not a sub-Typer group) so it can take an optional
     # positional target path followed by options (e.g. `pc create . --bot-type web`).
-    app.command("create", help="Create a new Pipecat project")(create_command)
+    # It is `hidden=True` so it doesn't appear in `pipecat --help`: `pipecat init` is the
+    # single advertised starting point for humans. `create` stays fully functional — it's
+    # the scaffolder that coding agents and automation call non-interactively (per the
+    # bundled AGENTS.md), and that `init` itself wraps — just no longer surfaced as an
+    # entry point.
+    app.command("create", help="Create a new Pipecat project", hidden=True)(create_command)
 
     # `init` makes a project agent-ready (writes AGENTS.md + CLAUDE.md). ignore_unknown_options
     # lets it catch legacy scaffolder flags (now `pipecat create`) and redirect with a clear

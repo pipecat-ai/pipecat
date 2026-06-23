@@ -7,8 +7,9 @@
 """Pipecat CLI - command-line tools for building Pipecat AI voice agents.
 
 This package provides command-line tools for:
-- Scaffolding new Pipecat projects with `pipecat create`
-- Making a project agent-ready (AGENTS.md + CLAUDE.md) with `pipecat init`
+- Starting a new Pipecat project with `pipecat init` to scaffold a bot and
+make it agent-ready
+- Running behavioral evals against a bot with `pipecat eval`
 
 And allows installing extensions like Pipecat Cloud:
 - Deploying to Pipecat Cloud with `pipecat cloud`

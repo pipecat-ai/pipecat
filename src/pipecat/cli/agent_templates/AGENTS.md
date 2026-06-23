@@ -40,8 +40,8 @@ pipecat create --name mybot \
 #   • --dry-run prints the resolved config as JSON; --config project.json drives it from a file.
 #   • --transport is repeatable — pass each transport you want (production + a local-dev one, §2).
 #   • --bot-type is inferred from --transport (telephony if any telephony transport, else web) — omit it.
-
-# Humans (interactive wizard): `pipecat create quickstart` (defaults) or `pipecat create`.
+#   • `create` is intentionally NOT listed in `pipecat --help`, but it's fully functional —
+#     it's the scaffolder you build with. Use it headlessly as shown.
 ```
 
 **Choose *with* the user, not for them.** Map their requirements to the real options and confirm transport / services / mode / deployment (§7) before scaffolding — don't silently pick or guess. Mode affects testing speed — **cascade (STT→LLM→TTS)** gets the fast text-mode eval loop (§6); **realtime (speech-to-speech)** is tested in audio mode — but both run headless, so pick the mode the use case needs.
