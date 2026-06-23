@@ -131,7 +131,7 @@ Retrieval-augmented generation, grounding, and long-term memory (Mem0, Gemini).
 
 ### [`features/`](./features/)
 
-Miscellaneous features: wake phrases, live translation, service switching, voice switching, and more.
+Miscellaneous features: wake phrases, live translation, service switching, voice switching, DTMF keypad menus, and more.
 
 ## Advanced Usage
 
