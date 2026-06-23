@@ -6,18 +6,40 @@
 
 """Tests for :class:`pipecat.transports.websocket.rtvi_client.RTVIClientTransport`.
 
-These cover the RTVI-specific bits added on top of the WebSocket client transport:
-the ``client-ready`` handshake message and ``bot-ready`` detection. The full
-connect/receive path is exercised end-to-end by the eval integration tests.
+``TestRTVIClientTransportHandshake`` covers the RTVI-specific bits added on top of
+the WebSocket client transport (the ``client-ready`` handshake message and
+``bot-ready`` detection). ``TestRTVIClientTransportIntegration`` runs the transport
+in a real pipeline against a tiny RTVI WebSocket server and asserts the bot's
+server messages arrive as the right frames.
 """
 
 import json
+import socket
 import unittest
 from unittest.mock import AsyncMock
 
+import websockets
+
 import pipecat.processors.frameworks.rtvi.models as RTVI
+from pipecat.frames.frames import (
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
+    TranscriptionFrame,
+)
 from pipecat.serializers.rtvi_client import RTVIClientSerializer
+from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.transports.websocket.rtvi_client import RTVIClientTransport
+
+
+def _rtvi(msg_type: str, data: dict | None = None) -> str:
+    return json.dumps({"label": RTVI.MESSAGE_LABEL, "type": msg_type, "id": "x", "data": data})
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("localhost", 0))
+        return s.getsockname()[1]
 
 
 class TestRTVIClientTransportHandshake(unittest.IsolatedAsyncioTestCase):
@@ -67,6 +89,82 @@ class TestRTVIClientTransportHandshake(unittest.IsolatedAsyncioTestCase):
         )
         await self.transport._on_message(None, msg)
         self.assertTrue(self.transport.bot_ready)
+
+
+class _BotServer:
+    """A tiny RTVI server: on client-ready, reply bot-ready then a scripted turn."""
+
+    def __init__(self, port: int, replies: list[str]):
+        self.port = port
+        self._replies = replies
+        self.received: list[dict] = []
+        self._server = None
+
+    async def _handler(self, ws):
+        async for raw in ws:
+            self.received.append(json.loads(raw))
+            if json.loads(raw).get("type") == "client-ready":
+                await ws.send(_rtvi("bot-ready", {"version": RTVI.PROTOCOL_VERSION}))
+                for reply in self._replies:
+                    await ws.send(reply)
+
+    async def __aenter__(self):
+        self._server = await websockets.serve(self._handler, "localhost", self.port)
+        return self
+
+    async def __aexit__(self, *exc):
+        self._server.close()
+        await self._server.wait_closed()
+
+    @property
+    def url(self) -> str:
+        return f"ws://localhost:{self.port}"
+
+
+class TestRTVIClientTransportIntegration(unittest.IsolatedAsyncioTestCase):
+    """Run the transport in a pipeline against a real RTVI server."""
+
+    async def test_bot_messages_become_frames(self):
+        replies = [
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "Paris"}),
+            _rtvi("bot-llm-stopped"),
+            _rtvi(
+                "user-transcription",
+                {"text": "hello", "user_id": "u", "timestamp": "t", "final": True},
+            ),
+        ]
+        async with _BotServer(_free_port(), replies) as server:
+            transport = RTVIClientTransport(server.url)
+            down, _ = await run_test(
+                transport.input(),
+                frames_to_send=[SleepFrame(sleep=0.5)],  # let connect/handshake/replies flow
+            )
+
+        # The bot's server messages arrived as the expected pipeline frames, in order.
+        kinds = [
+            type(f)
+            for f in down
+            if isinstance(
+                f,
+                (
+                    LLMFullResponseStartFrame,
+                    LLMTextFrame,
+                    LLMFullResponseEndFrame,
+                    TranscriptionFrame,
+                ),
+            )
+        ]
+        self.assertEqual(
+            kinds,
+            [LLMFullResponseStartFrame, LLMTextFrame, LLMFullResponseEndFrame, TranscriptionFrame],
+        )
+        text = next(f for f in down if isinstance(f, LLMTextFrame))
+        self.assertEqual(text.text, "Paris")
+
+        # The transport completed the handshake (the server saw client-ready).
+        self.assertTrue(any(m.get("type") == "client-ready" for m in server.received))
+        self.assertTrue(transport.bot_ready)
 
 
 if __name__ == "__main__":
