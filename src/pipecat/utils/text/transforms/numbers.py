@@ -16,19 +16,21 @@ _NUMBER_RE = re.compile(r"\b(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\b")
 
 
 def expand_numbers(
-    digit_cutoff: int = 2025,
+    digit_cutoff: int | None = 2025,
 ) -> Callable[[str, str | AggregationType], object]:
     """Return a transform that expands numbers to their spoken form.
 
-    Numbers above *digit_cutoff* are read digit-by-digit (e.g. ``"2026"`` →
-    ``"2 0 2 6"``). Numbers at or below the cutoff are expanded as quantities
-    (e.g. ``"42"`` → ``"forty two"``).
+    When *digit_cutoff* is set, numbers above it are read digit-by-digit
+    (e.g. ``"2026"`` → ``"2 0 2 6"``). Numbers at or below the cutoff are
+    expanded as quantities (e.g. ``"42"`` → ``"forty two"``). Pass ``None``
+    to expand all numbers as words regardless of magnitude.
 
     Requires the ``num2words`` package
     (``pip install pipecat-ai[voice-formatting]``).
 
     Args:
         digit_cutoff: Numbers larger than this value are read digit-by-digit.
+            ``None`` disables the cutoff so every number is expanded as a word.
 
     Returns:
         An async transform callable compatible with ``text_transforms``.
@@ -45,7 +47,7 @@ def expand_numbers(
         frac_str = match.group(2)
         whole = int(whole_str)
 
-        if whole > digit_cutoff:
+        if digit_cutoff is not None and whole > digit_cutoff:
             return " ".join(whole_str)
 
         try:

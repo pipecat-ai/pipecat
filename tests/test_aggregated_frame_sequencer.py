@@ -956,5 +956,171 @@ class TestCJKProcessWordFlagPropagation(unittest.TestCase):
         )
 
 
+# ---------------------------------------------------------------------------
+# Voice-formatting: sequencer behaviour when transforms change alnum content
+#
+# Simulates the billing message scenario:
+#   user_facing: "Your balance is $5, due on 3/15. Call us at 555-1234."
+#   tts (post-transform): "Your balance is five dollars, due on 3/15. Call us at 555-1234."
+#
+# Expected sequencer behaviour:
+#   - "five"    → append_to_context=False (mid transformed segment, suppress)
+#   - "dollars," → append_to_context=True (segment completes, raw_text="$5,")
+#   - All other words → append_to_context=True (unchanged segments)
+# ---------------------------------------------------------------------------
+
+_BILL_UF = "Your balance is $5, due on 3/15. Call us at 555-1234."
+_BILL_TTS = "Your balance is five dollars, due on 3/15. Call us at 555-1234."
+_BILL_WORDS = [
+    "Your",
+    "balance",
+    "is",
+    "five",
+    "dollars,",
+    "due",
+    "on",
+    "3/15.",
+    "Call",
+    "us",
+    "at",
+    "555-1234.",
+]
+
+
+class TestVoiceFormattingTransforms(unittest.TestCase):
+    """Sequencer correctly handles transform-aware trackers for billing messages."""
+
+    def _setup(self, with_llm_text: bool = False):
+        seq = AggregatedFrameSequencer(name="test-billing")
+        source = AggregatedTextFrame(_BILL_UF, AggregationType.SENTENCE)
+        tracker = WordCompletionTracker(
+            _BILL_TTS,
+            llm_text=_BILL_UF if with_llm_text else None,
+            user_facing_text=_BILL_UF,
+        )
+        seq.register_spoken(source, "ctx1", tracker, append_to_context=True)
+        return seq, source
+
+    def _advance(self, seq, *words):
+        for word in words:
+            seq.process_word(word, pts=10, context_id="ctx1")
+
+    def _word_frames(self, frames):
+        return [f for f in frames if isinstance(f, TTSTextFrame)]
+
+    def _progress_frames(self, frames):
+        return [f for f in frames if isinstance(f, AggregatedTextProgressFrame)]
+
+    # --- append_to_context ---
+
+    def test_pre_transform_words_append_to_context(self):
+        seq, _ = self._setup()
+        for word in ("Your", "balance", "is"):
+            result = seq.process_word(word, pts=10, context_id="ctx1")
+            wf = self._word_frames(result)
+            self.assertTrue(wf[0].append_to_context, f"word '{word}' should append to context")
+
+    def test_mid_transform_word_suppressed(self):
+        """`five` is mid-segment: append_to_context must be False."""
+        seq, _ = self._setup()
+        self._advance(seq, "Your", "balance", "is")
+        result = seq.process_word("five", pts=20, context_id="ctx1")
+        wf = self._word_frames(result)
+        self.assertEqual(len(wf), 1)
+        self.assertFalse(wf[0].append_to_context)
+
+    def test_completing_transform_word_appends_to_context(self):
+        """`dollars,` completes the segment: append_to_context must be True."""
+        seq, _ = self._setup()
+        self._advance(seq, "Your", "balance", "is", "five")
+        result = seq.process_word("dollars,", pts=30, context_id="ctx1")
+        wf = self._word_frames(result)
+        self.assertEqual(len(wf), 1)
+        self.assertTrue(wf[0].append_to_context)
+
+    def test_post_transform_words_append_to_context(self):
+        seq, _ = self._setup()
+        self._advance(seq, "Your", "balance", "is", "five", "dollars,")
+        result = seq.process_word("due", pts=40, context_id="ctx1")
+        wf = self._word_frames(result)
+        self.assertTrue(wf[0].append_to_context)
+
+    # --- raw_text / llm_consumed ---
+
+    def test_mid_transform_word_raw_text_none(self):
+        """`five` is mid-segment: raw_text must be None so it is not written to context."""
+        seq, _ = self._setup(with_llm_text=True)
+        self._advance(seq, "Your", "balance", "is")
+        result = seq.process_word("five", pts=20, context_id="ctx1")
+        wf = self._word_frames(result)
+        self.assertIsNone(wf[0].raw_text)
+
+    def test_completing_transform_word_raw_text_is_original(self):
+        """`dollars,` completing the segment must carry `$5,` as raw_text."""
+        seq, _ = self._setup(with_llm_text=True)
+        self._advance(seq, "Your", "balance", "is", "five")
+        result = seq.process_word("dollars,", pts=30, context_id="ctx1")
+        wf = self._word_frames(result)
+        self.assertEqual(wf[0].raw_text, "$5,")
+
+    # --- AggregatedTextProgressFrame ---
+
+    def test_progress_accumulated_held_during_transform(self):
+        """While 'five' is being spoken, accumulated_text must not include '$5,'."""
+        seq, _ = self._setup()
+        self._advance(seq, "Your", "balance", "is")
+        result = seq.process_word("five", pts=20, context_id="ctx1")
+        pf = self._progress_frames(result)
+        self.assertEqual(len(pf), 1)
+        self.assertNotIn("$5", pf[0].accumulated_text)
+
+    def test_progress_accumulated_jumps_after_transform_completes(self):
+        """After 'dollars,' completes, accumulated_text must include 'Your balance is $5,'."""
+        seq, _ = self._setup()
+        self._advance(seq, "Your", "balance", "is", "five")
+        result = seq.process_word("dollars,", pts=30, context_id="ctx1")
+        pf = self._progress_frames(result)
+        self.assertEqual(len(pf), 1)
+        self.assertEqual(pf[0].accumulated_text, "Your balance is $5,")
+
+    def test_progress_remaining_after_transform_completes(self):
+        """After 'dollars,', remaining_text starts with 'due on 3/15.'"""
+        seq, _ = self._setup()
+        self._advance(seq, "Your", "balance", "is", "five")
+        result = seq.process_word("dollars,", pts=30, context_id="ctx1")
+        pf = self._progress_frames(result)
+        self.assertTrue(pf[0].remaining_text.startswith(" due on 3/15."), pf[0].remaining_text)
+
+    def test_progress_full_sentence_completion(self):
+        """After all words the slot is complete and the queue is empty."""
+        seq, _ = self._setup()
+        for word in _BILL_WORDS:
+            seq.process_word(word, pts=10, context_id="ctx1")
+        self.assertEqual(seq._slots, [])
+
+    # --- force_complete during transform ---
+
+    def test_force_complete_mid_transform_emits_remaining_tts_text(self):
+        """force_complete when mid-segment emits remaining tts_text (not user_facing_text)."""
+        seq, _ = self._setup()
+        self._advance(seq, "Your", "balance", "is", "five")
+        # "dollars," never arrives — force complete
+        result = seq.force_complete(last_word_pts=99)
+        wf = self._word_frames(result)
+        self.assertEqual(len(wf), 1)
+        # Remaining tts_text starts with "dollars," (the unexpanded portion)
+        self.assertIn("dollars,", wf[0].text)
+
+    def test_force_complete_after_transform_emits_remaining_unchanged_text(self):
+        """force_complete after the transform emits remaining tts_text correctly."""
+        seq, _ = self._setup()
+        self._advance(seq, "Your", "balance", "is", "five", "dollars,", "due", "on")
+        result = seq.force_complete(last_word_pts=99)
+        wf = self._word_frames(result)
+        self.assertEqual(len(wf), 1)
+        self.assertIn("3/15.", wf[0].text)
+        self.assertIn("555-1234.", wf[0].text)
+
+
 if __name__ == "__main__":
     unittest.main()

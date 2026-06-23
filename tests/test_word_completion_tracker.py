@@ -1684,5 +1684,195 @@ class TestWordCompletionTrackerCJK(unittest.TestCase):
         self.assertEqual(tracker.get_remaining_tts_text(), "你的智能")
 
 
+# ---------------------------------------------------------------------------
+# Voice-formatting transforms: segment-map cursor alignment
+#
+# Simulates the billing message scenario where currency expansion changes the
+# alnum content:
+#   user_facing / llm: "Your balance is $5, due on 3/15. Call us at 555-1234."
+#   tts (post-transform): "Your balance is five dollars, due on 3/15. Call us at 555-1234."
+#
+# Segment map produced by SequenceMatcher:
+#   Seg 1 (unchanged): "Your balance is "  →  "Your balance is "
+#   Seg 2 (transformed): "$5,"  →  "five dollars,"
+#   Seg 3 (unchanged): " due on 3/15. Call us at 555-1234."  →  same
+# ---------------------------------------------------------------------------
+
+_BILLING_UF = "Your balance is $5, due on 3/15. Call us at 555-1234."
+_BILLING_TTS = "Your balance is five dollars, due on 3/15. Call us at 555-1234."
+_BILLING_WORDS = [
+    "Your",
+    "balance",
+    "is",
+    "five",
+    "dollars,",
+    "due",
+    "on",
+    "3/15.",
+    "Call",
+    "us",
+    "at",
+    "555-1234.",
+]
+
+
+class TestWordCompletionTrackerWithTransforms(unittest.TestCase):
+    """Tracker behaviour when text transforms expand alnum content."""
+
+    def _tracker(self, llm_text=None):
+        return WordCompletionTracker(
+            _BILLING_TTS,
+            llm_text=llm_text,
+            user_facing_text=_BILLING_UF,
+        )
+
+    def _advance(self, tracker, *words):
+        for word in words:
+            tracker.add_word_and_check_complete(word)
+
+    # --- segment map construction ---
+
+    def test_segment_map_built_when_alnum_differs(self):
+        """Segment map is created when tts_text and user_facing_text differ in alnum content."""
+        self.assertIsNotNone(self._tracker()._segment_map)
+
+    def test_segment_map_not_built_for_equal_texts(self):
+        """No segment map when tts_text and user_facing_text have the same alnum sequence."""
+        tracker = WordCompletionTracker("hello world")
+        self.assertIsNone(tracker._segment_map)
+
+    # --- suppress_in_context ---
+
+    def test_suppress_false_before_transformed_segment(self):
+        """Words before the transformed segment are not suppressed."""
+        tracker = self._tracker()
+        self._advance(tracker, "Your", "balance", "is")
+        self.assertFalse(tracker.suppress_in_context())
+
+    def test_suppress_true_mid_transformed_segment(self):
+        """'five' is mid-flight inside the '$5,' segment — must be suppressed."""
+        tracker = self._tracker()
+        self._advance(tracker, "Your", "balance", "is", "five")
+        self.assertTrue(tracker.suppress_in_context())
+
+    def test_suppress_false_when_transformed_segment_completes(self):
+        """'dollars,' completes the segment — must not be suppressed."""
+        tracker = self._tracker()
+        self._advance(tracker, "Your", "balance", "is", "five", "dollars,")
+        self.assertFalse(tracker.suppress_in_context())
+
+    def test_suppress_false_for_words_after_transform(self):
+        """Words after the transformed segment are not suppressed."""
+        tracker = self._tracker()
+        self._advance(tracker, "Your", "balance", "is", "five", "dollars,", "due")
+        self.assertFalse(tracker.suppress_in_context())
+
+    def test_suppress_false_after_reset(self):
+        """reset() clears segment map state so suppress_in_context returns False."""
+        tracker = self._tracker()
+        self._advance(tracker, "Your", "balance", "is", "five")
+        tracker.reset()
+        self.assertFalse(tracker.suppress_in_context())
+
+    # --- user-facing cursor alignment ---
+
+    def test_user_facing_pos_held_during_transformed_segment(self):
+        """user_facing_pos must not advance while 'five' is in the transformed segment."""
+        tracker = self._tracker()
+        self._advance(tracker, "Your", "balance", "is")
+        pos_after_seg1 = tracker._user_facing_pos
+        tracker.add_word_and_check_complete("five")
+        self.assertEqual(tracker._user_facing_pos, pos_after_seg1)
+
+    def test_user_facing_pos_jumps_when_segment_completes(self):
+        """user_facing_pos jumps to end of '$5,' after 'dollars,' is processed."""
+        tracker = self._tracker()
+        self._advance(tracker, "Your", "balance", "is", "five")
+        pos_before = tracker._user_facing_pos
+        tracker.add_word_and_check_complete("dollars,")
+        expected = _BILLING_UF.index("$5,") + len("$5,")  # 16 + 3 = 19
+        self.assertEqual(tracker._user_facing_pos, expected)
+        self.assertGreater(tracker._user_facing_pos, pos_before)
+
+    def test_accumulated_user_facing_after_transform_segment(self):
+        """get_accumulated_user_facing_text() equals 'Your balance is $5,' after 'dollars,'."""
+        tracker = self._tracker()
+        self._advance(tracker, "Your", "balance", "is", "five", "dollars,")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "Your balance is $5,")
+
+    def test_remaining_user_facing_after_transform_segment(self):
+        """get_remaining_user_facing_text() starts with 'due on 3/15.' after 'dollars,'."""
+        tracker = self._tracker()
+        self._advance(tracker, "Your", "balance", "is", "five", "dollars,")
+        remaining = tracker.get_remaining_user_facing_text(strip=True)
+        self.assertTrue(remaining.startswith("due on 3/15."), remaining)
+        self.assertIn("555-1234.", remaining)
+
+    def test_accumulated_plus_remaining_reconstructs_user_facing(self):
+        """Accumulated + remaining (strip=False) reconstructs the full user_facing_text."""
+        tracker = self._tracker()
+        self._advance(tracker, "Your", "balance", "is", "five", "dollars,")
+        acc = tracker.get_accumulated_user_facing_text()
+        rem = tracker.get_remaining_user_facing_text(strip=False)
+        self.assertEqual(acc + rem, _BILLING_UF)
+
+    # --- completion ---
+
+    def test_non_completing_words_return_false(self):
+        """All words except the last return False from add_word_and_check_complete."""
+        tracker = self._tracker()
+        for word in _BILLING_WORDS[:-1]:
+            self.assertFalse(
+                tracker.add_word_and_check_complete(word), f"word '{word}' should not complete"
+            )
+
+    def test_last_word_completes(self):
+        """The final word '555-1234.' completes the tracker."""
+        tracker = self._tracker()
+        for word in _BILLING_WORDS[:-1]:
+            tracker.add_word_and_check_complete(word)
+        self.assertTrue(tracker.add_word_and_check_complete(_BILLING_WORDS[-1]))
+
+    def test_full_sentence_accumulated_user_facing_equals_original(self):
+        """After all words, accumulated user_facing_text equals the original string."""
+        tracker = self._tracker()
+        for word in _BILLING_WORDS:
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), _BILLING_UF)
+
+    # --- llm_text attribution ---
+
+    def test_mid_segment_llm_consumed_is_none(self):
+        """'five' is in a transformed segment — llm_consumed must be None (suppressed)."""
+        tracker = self._tracker(llm_text=_BILLING_UF)
+        self._advance(tracker, "Your", "balance", "is")
+        tracker.add_word_and_check_complete("five")
+        self.assertIsNone(tracker.get_llm_consumed())
+
+    def test_completing_word_llm_consumed_is_original_segment(self):
+        """'dollars,' completing the segment carries '$5,' as llm_consumed."""
+        tracker = self._tracker(llm_text=_BILLING_UF)
+        self._advance(tracker, "Your", "balance", "is", "five")
+        tracker.add_word_and_check_complete("dollars,")
+        self.assertEqual(tracker.get_llm_consumed(), "$5,")
+
+    def test_unchanged_word_llm_consumed_matches_word(self):
+        """An unchanged word's llm_consumed contains that word."""
+        tracker = self._tracker(llm_text=_BILLING_UF)
+        tracker.add_word_and_check_complete("Your")
+        llm = tracker.get_llm_consumed()
+        self.assertIsNotNone(llm)
+        self.assertIn("Your", llm)
+
+    def test_post_transform_word_llm_consumed_matches_word(self):
+        """A word after the transformed segment has a valid llm_consumed."""
+        tracker = self._tracker(llm_text=_BILLING_UF)
+        self._advance(tracker, "Your", "balance", "is", "five", "dollars,")
+        tracker.add_word_and_check_complete("due")
+        llm = tracker.get_llm_consumed()
+        self.assertIsNotNone(llm)
+        self.assertIn("due", llm)
+
+
 if __name__ == "__main__":
     unittest.main()

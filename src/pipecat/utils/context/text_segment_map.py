@@ -156,11 +156,19 @@ class TextSegmentMap:
             remaining -= consume
 
             if self._seg_consumed == seg.tts_alnum_count:
-                # Segment complete: jump both cursors to the end of the original segment.
+                # Segment complete: set user_facing_pos to the exact byte offset.
                 self._user_facing_pos = seg.original_end
-                self._llm_pos = advance_by_alnums(
-                    self._llm_text, self._llm_pos, seg.original_alnum_count
-                )
+                if seg.is_transformed:
+                    # Transformed: llm_pos was held (not advanced) during the segment,
+                    # so jump by the full original_alnum_count from where it was held.
+                    self._llm_pos = advance_by_alnums(
+                        self._llm_text, self._llm_pos, seg.original_alnum_count
+                    )
+                else:
+                    # Unchanged: llm_pos was advanced proportionally word-by-word.
+                    # Only advance by `consume` (the chars in this final call), not
+                    # original_alnum_count, which would double-count prior advances.
+                    self._llm_pos = advance_by_alnums(self._llm_text, self._llm_pos, consume)
                 self._last_completed = seg
                 self._seg_idx += 1
                 self._seg_consumed = 0
