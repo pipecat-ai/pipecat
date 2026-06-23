@@ -195,7 +195,8 @@ class SimpleTextAggregator(BaseTextAggregator):
             # the reply still aggregates at full sentence boundaries (avoids choppy
             # comma-splitting through the whole answer).
             if (
-                not self._emitted_since_reset
+                self._first_chunk_immediate
+                and not self._emitted_since_reset
                 and not self._needs_lookahead
                 and char in (",", "،", "؛", ";", "—", "–")
                 and len(self._text) >= 12
