@@ -181,7 +181,11 @@ class FrameProcessorMetrics(BaseObject):
             f"{self._processor_name()} TTFA: {value:.3f}s ({silence_duration:.3f}s leading silence)"
         )
         ttfa = TTFAMetricsData(
-            processor=self._processor_name(), value=value, model=self._model_name()
+            processor=self._processor_name(),
+            ttfa=value,
+            leading_silence=silence_duration,
+            ttfb=self._last_ttfb_time,
+            model=self._model_name(),
         )
         self._ttfa_active = False
         self._ttfa_buffer = b""

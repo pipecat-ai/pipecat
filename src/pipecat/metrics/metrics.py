@@ -43,14 +43,22 @@ class TTFAMetricsData(MetricsData):
 
     Measures the time from a TTS request to the first audible audio sample,
     i.e. time-to-first-byte plus any leading silence the service pads onto the
-    start of its response. Comparing TTFA against TTFB reveals how much of the
-    perceived latency is silence padding rather than service response time.
+    start of its response. ``ttfa`` is reported with its breakdown so consumers
+    can see how much of the perceived latency is silence padding rather than
+    service response time, without correlating a separate ``TTFBMetricsData``.
 
     Parameters:
-        value: TTFA measurement in seconds.
+        ttfa: TTFA measurement in seconds (``ttfb`` plus ``leading_silence``).
+        ttfb: Time-to-first-byte that TTFA builds on, in seconds. This mirrors
+            the standalone ``TTFBMetricsData`` (emitted earlier) for convenience;
+            it is not a separate measurement, so don't aggregate both.
+        leading_silence: Silence padding before the first audible sample, in
+            seconds (``ttfa`` minus ``ttfb``).
     """
 
-    value: float
+    ttfa: float
+    ttfb: float
+    leading_silence: float
 
 
 class ProcessingMetricsData(MetricsData):
