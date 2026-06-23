@@ -100,18 +100,34 @@ class SimpleTextAggregator(BaseTextAggregator):
     most straightforward implementation of text aggregation for TTS processing.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(
+        self,
+        *,
+        min_chunk_chars: int = _MIN_CHUNK_CHARS,
+        first_chunk_immediate: bool = True,
+        **kwargs,
+    ):
         """Initialize the simple text aggregator.
 
         Creates an empty text buffer ready to begin accumulating text tokens.
 
         Args:
+            min_chunk_chars: Merge sentences until a chunk reaches this many chars.
+                A high value (e.g. on Deepdub, which re-synthesizes — with its own
+                prosody — every chunk on a fresh connection) makes a whole turn ONE
+                continuous synthesis (smooth, consistent voice) at the cost of
+                time-to-first-audio. Default keeps the low-latency module value.
+            first_chunk_immediate: When True, the FIRST chunk of a turn fires on its
+                first sentence boundary for low latency (subsequent sentences still
+                merge). Set False to merge the first chunk too (one synthesis/turn).
             **kwargs: Additional arguments passed to BaseTextAggregator (e.g. aggregation_type).
         """
         super().__init__(**kwargs)
         self._text = ""
         self._needs_lookahead: bool = False
         self._emitted_since_reset: bool = False
+        self._min_chunk_chars: int = max(0, int(min_chunk_chars))
+        self._first_chunk_immediate: bool = first_chunk_immediate
 
     @property
     def text(self) -> Aggregation:
@@ -311,7 +327,9 @@ class SimpleTextAggregator(BaseTextAggregator):
                 # the whole reply), which is the latency regression in run 124.
                 # Subsequent short sentences still merge (seamless tail); their latency
                 # hides behind the first chunk's playback.
-                if len(candidate) < _MIN_CHUNK_CHARS and self._emitted_since_reset:
+                if len(candidate) < self._min_chunk_chars and (
+                    self._emitted_since_reset or not self._first_chunk_immediate
+                ):
                     if not has_space_gap:
                         self._text = (
                             self._text[: last_punct_idx + 1]
@@ -341,7 +359,8 @@ class SimpleTextAggregator(BaseTextAggregator):
         # Subsequent sentences keep the careful lookahead path (handles "?!" and
         # run-on punctuation); their latency hides behind the prior chunk's synthesis.
         if (
-            not self._emitted_since_reset
+            self._first_chunk_immediate
+            and not self._emitted_since_reset
             and not self._needs_lookahead
             and self._text
             and self._text[-1] in _STRONG_ENDERS
