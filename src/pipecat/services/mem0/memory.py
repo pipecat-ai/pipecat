@@ -243,6 +243,10 @@ class Mem0MemoryService(FrameProcessor):
                     )
                 )
 
+            # Mem0 2.x returns {"results": [...]} from search(); older/cloud
+            # versions may return a bare list. Normalize to a list so callers
+            # get a consistent shape (matches get_all() handling above).
+            results = results.get("results", []) if isinstance(results, dict) else results
             logger.debug(f"Retrieved {len(results)} memories from Mem0")
             return results
         except Exception as e:
@@ -268,7 +272,7 @@ class Mem0MemoryService(FrameProcessor):
 
         # Format memories as a message
         memory_text = self.system_prompt
-        for i, memory in enumerate(memories["results"], 1):
+        for i, memory in enumerate(memories, 1):
             memory_text += f"{i}. {memory.get('memory', '')}\n\n"
 
         # Add memories as a system message or user message based on configuration
