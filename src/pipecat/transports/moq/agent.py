@@ -12,17 +12,19 @@ module hosts *many* sessions off one connection, discovering clients by MoQ
 announcement -- the same pattern as ``moq-boy``'s viewer fan-in.
 
 One long-lived :class:`MOQAgentServer` holds a single ``moq.Client`` and a
-shared ``moq.OriginProducer``. It subscribes to a client prefix and, for each
+shared ``moq.OriginProducer``. It subscribes to the REQUEST prefix and, for each
 broadcast announced under it, spawns a fresh pipeline:
 
-    {client_prefix}/{id}    <- browser publishes its mic here (unauthenticated)
-    {bot_prefix}/{id}       <- the agent publishes its reply here
+    {request_prefix}/{id}     <- client publishes its mic (request) here
+    {response_prefix}/{id}    <- the agent publishes its reply (response) here
 
-Mirroring ``moq-boy``'s ``anon``/``demo`` split, the client prefix is
-unauthenticated (anyone can talk) while the bot prefix is where the agent
-publishes; in production that's an authenticated ``demo/...`` path so only the
-server can answer, but the single shared connection holds the one publish
-token for the whole fleet.
+Request and response live under SEPARATE prefixes on purpose: the server only
+``announced()``s ``request/*``, so its own ``response/*`` publishes never appear
+in its discovery stream (no announcement loop), and a per-client token can be
+scoped tightly -- publish ``request/<id>``, subscribe ``response/<id>`` -- so a
+client can't read another's request or spoof a response. The prefixes are just
+strings; the deployment chooses auth + namespacing (e.g. ``demo/pipecat/request``
+behind minted tokens, or open ``request`` for a public demo).
 
 The per-session media engine (Opus publish/subscribe, the ``transcript.json``
 side-channel, audio pacing/PTS) is inherited unchanged from
@@ -46,8 +48,8 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-DEFAULT_CLIENT_PREFIX = "anon/voice/client"
-DEFAULT_BOT_PREFIX = "anon/voice/bot"
+DEFAULT_REQUEST_PREFIX = "request"
+DEFAULT_RESPONSE_PREFIX = "response"
 DEFAULT_RELAY_URL = "http://localhost:4443"
 
 
@@ -76,8 +78,8 @@ class MOQAgentSession(MOQTransport):
     Args:
         params: MOQ configuration parameters (audio/transcript settings).
         origin: The server's shared ``OriginProducer`` to publish the reply on.
-        bot_path: Full broadcast path for the bot's reply (e.g. ``anon/voice/bot/abc``).
-        peer_path: Full broadcast path of the client's mic (e.g. ``anon/voice/client/abc``).
+        bot_path: Full broadcast path for the agent's response (e.g. ``response/abc``).
+        peer_path: Full broadcast path of the client's request/mic (e.g. ``request/abc``).
         peer_broadcast: The already-announced ``BroadcastConsumer`` for the mic.
     """
 
@@ -160,8 +162,10 @@ class MOQAgentServer:
         params: Per-session MOQ media parameters (shared by every session).
         run_bot: Builds and runs one session's pipeline to completion.
         relay_url: The MoQ relay to dial.
-        client_prefix: Announcement prefix to discover client mics under.
-        bot_prefix: Prefix to publish bot replies under.
+        request_prefix: Announcement prefix to discover client requests (mics) under.
+        response_prefix: Prefix to publish the agent's responses under. Keep it
+            DISJOINT from request_prefix so the server never discovers its own
+            replies (no announcement loop).
         verify_ssl: Verify the relay's TLS certificate (off for self-signed dev relays).
         max_sessions: Concurrency cap; excess clients queue (each session is a
             full STT+LLM+TTS pipeline, so this bounds cost / rate limits).
@@ -176,8 +180,8 @@ class MOQAgentServer:
         run_bot: SessionBot,
         *,
         relay_url: str = DEFAULT_RELAY_URL,
-        client_prefix: str = DEFAULT_CLIENT_PREFIX,
-        bot_prefix: str = DEFAULT_BOT_PREFIX,
+        request_prefix: str = DEFAULT_REQUEST_PREFIX,
+        response_prefix: str = DEFAULT_RESPONSE_PREFIX,
         verify_ssl: bool = True,
         max_sessions: int = 8,
         should_serve: ServeFilter | None = None,
@@ -186,8 +190,8 @@ class MOQAgentServer:
         self._params = params
         self._run_bot = run_bot
         self._relay_url = relay_url
-        self._client_prefix = client_prefix.rstrip("/")
-        self._bot_prefix = bot_prefix.rstrip("/")
+        self._request_prefix = request_prefix.rstrip("/")
+        self._response_prefix = response_prefix.rstrip("/")
         self._verify_ssl = verify_ssl
         self._should_serve = should_serve
         self._sem = asyncio.Semaphore(max_sessions)
@@ -198,19 +202,19 @@ class MOQAgentServer:
         origin = moq.OriginProducer()
         logger.info(
             f"MOQ agent server: connecting to {self._relay_url} "
-            f"(discover {self._client_prefix!r}/* -> reply {self._bot_prefix!r}/*)"
+            f"(discover {self._request_prefix!r}/* -> reply {self._response_prefix!r}/*)"
         )
         async with moq.Client(
             self._relay_url, publish=origin, subscribe=origin, tls_verify=self._verify_ssl
         ) as client:
             # announced(prefix) re-roots at the prefix, so ann.path is the
             # suffix after it (the session id), e.g. "abc" for
-            # "{client_prefix}/abc" -- same as moq-boy's viewer_id. Strip
+            # "{request_prefix}/abc" -- same as moq-boy's viewer_id. Strip
             # defensively in case a build hands back the full path.
-            async with client.announced(self._client_prefix) as announced:
+            async with client.announced(self._request_prefix) as announced:
                 async for ann in announced:
                     sid = ann.path
-                    prefix = self._client_prefix + "/"
+                    prefix = self._request_prefix + "/"
                     if sid.startswith(prefix):
                         sid = sid[len(prefix) :]
                     if not sid:
@@ -237,8 +241,8 @@ class MOQAgentServer:
             session = MOQAgentSession(
                 self._params,
                 origin=origin,
-                bot_path=f"{self._bot_prefix}/{sid}",
-                peer_path=f"{self._client_prefix}/{sid}",
+                bot_path=f"{self._response_prefix}/{sid}",
+                peer_path=f"{self._request_prefix}/{sid}",
                 peer_broadcast=broadcast,
             )
             logger.info(f"MOQ agent server: session {sid!r} starting")

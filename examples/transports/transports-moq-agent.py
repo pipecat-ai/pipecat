@@ -17,13 +17,14 @@ Requirements:
 
 Usage:
     # Local dev: run a moq relay (e.g. `just relay` in the moq repo on :4443),
-    # then point the agent at it. Clients announce under anon/voice/client/*.
+    # then point the agent at it. Clients announce under request/*.
     uv run python examples/transports/transports-moq-agent.py \\
         --relay-url http://localhost:4443 --no-verify-ssl
 
-    # Production: dial moq.dev and publish replies under an authenticated prefix.
+    # Production: dial moq.dev with authenticated/namespaced prefixes.
     uv run python examples/transports/transports-moq-agent.py \\
-        --relay-url https://relay.moq.dev --bot-prefix demo/voice/bot
+        --relay-url https://relay.moq.dev \\
+        --request-prefix demo/pipecat/request --response-prefix demo/pipecat/response
 """
 
 import argparse
@@ -46,9 +47,9 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.moq.agent import (
-    DEFAULT_BOT_PREFIX,
-    DEFAULT_CLIENT_PREFIX,
     DEFAULT_RELAY_URL,
+    DEFAULT_REQUEST_PREFIX,
+    DEFAULT_RESPONSE_PREFIX,
     MOQAgentServer,
     MOQAgentSession,
 )
@@ -141,8 +142,8 @@ async def run_session_bot(transport: MOQAgentSession, client_id: str):
 async def main():
     parser = argparse.ArgumentParser(description="MoQ voice-agent server")
     parser.add_argument("--relay-url", default=os.getenv("MOQ_RELAY_URL", DEFAULT_RELAY_URL))
-    parser.add_argument("--client-prefix", default=DEFAULT_CLIENT_PREFIX)
-    parser.add_argument("--bot-prefix", default=DEFAULT_BOT_PREFIX)
+    parser.add_argument("--request-prefix", default=DEFAULT_REQUEST_PREFIX)
+    parser.add_argument("--response-prefix", default=DEFAULT_RESPONSE_PREFIX)
     parser.add_argument("--max-sessions", type=int, default=8)
     parser.add_argument(
         "--no-verify-ssl",
@@ -160,8 +161,8 @@ async def main():
         params,
         run_session_bot,
         relay_url=args.relay_url,
-        client_prefix=args.client_prefix,
-        bot_prefix=args.bot_prefix,
+        request_prefix=args.request_prefix,
+        response_prefix=args.response_prefix,
         verify_ssl=not args.no_verify_ssl,
         max_sessions=args.max_sessions,
     )

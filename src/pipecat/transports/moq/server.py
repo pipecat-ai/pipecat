@@ -43,9 +43,9 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.moq.agent import (
-    DEFAULT_BOT_PREFIX,
-    DEFAULT_CLIENT_PREFIX,
     DEFAULT_RELAY_URL,
+    DEFAULT_REQUEST_PREFIX,
+    DEFAULT_RESPONSE_PREFIX,
     MOQAgentServer,
     MOQAgentSession,
 )
@@ -135,8 +135,8 @@ async def _run(args: argparse.Namespace) -> None:
         params,
         run_session_bot,
         relay_url=args.relay_url,
-        client_prefix=args.client_prefix,
-        bot_prefix=args.bot_prefix,
+        request_prefix=args.request_prefix,
+        response_prefix=args.response_prefix,
         verify_ssl=not args.no_verify_ssl,
         max_sessions=args.max_sessions,
     )
@@ -148,8 +148,8 @@ def main() -> None:
     """Console-script entry point (``moq-voice-agent``)."""
     parser = argparse.ArgumentParser(description="MoQ voice-agent server")
     parser.add_argument("--relay-url", default=os.getenv("MOQ_RELAY_URL", DEFAULT_RELAY_URL))
-    parser.add_argument("--client-prefix", default=DEFAULT_CLIENT_PREFIX)
-    parser.add_argument("--bot-prefix", default=DEFAULT_BOT_PREFIX)
+    parser.add_argument("--request-prefix", default=DEFAULT_REQUEST_PREFIX)
+    parser.add_argument("--response-prefix", default=DEFAULT_RESPONSE_PREFIX)
     parser.add_argument("--max-sessions", type=int, default=8)
     parser.add_argument(
         "--no-verify-ssl",
