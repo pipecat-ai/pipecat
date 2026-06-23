@@ -212,7 +212,7 @@ When adding a new service:
 
 **Unit tests.** Test utilities live in `src/pipecat/tests/utils.py`. Use `run_test()` to send frames through a pipeline and assert expected output frames in each direction. Use `SleepFrame(sleep=N)` to add delays between frames.
 
-**Behavioral evals.** `pipecat.evals` (`src/pipecat/evals/`) is a behavioral eval framework that drives a *real bot* end-to-end and asserts on its behavior — use it to confirm a feature works (interruptions, function calls, vision, multi-turn, transcription) rather than only checking frame plumbing. The harness connects to a bot's **eval transport** as an RTVI client, plays scripted user turns (synthesizing audio in audio mode), and checks each expectation (latency, `text_contains`, an expected `function_call`, or an LLM judge of the bot's reply).
+**Behavioral evals.** `pipecat.evals` (`src/pipecat/evals/`) is a behavioral eval framework that drives a *real bot* end-to-end and asserts on its behavior — use it to confirm a feature works (interruptions, function calls, vision, multi-turn, transcription, DTMF) rather than only checking frame plumbing. The harness connects to a bot's **eval transport** as an RTVI client, plays scripted user turns (synthesizing audio in audio mode), and checks each expectation (latency, `text_contains`, an expected `function_call`, or an LLM judge of the bot's reply).
 
 A scenario is a YAML file of `turns` with `expect:` assertions; scenarios are reusable across bots. To confirm a behavior while developing:
 
