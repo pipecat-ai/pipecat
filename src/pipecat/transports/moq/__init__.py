@@ -6,7 +6,12 @@
 
 """MoQ (Media over QUIC) transport for Pipecat."""
 
-from pipecat.transports.moq.agent import MOQAgentServer, MOQAgentSession
+from pipecat.transports.moq.agent import (
+    MOQAgentServer,
+    MOQAgentSession,
+    ServeFilter,
+    SessionBot,
+)
 from pipecat.transports.moq.transport import (
     MOQInputTransport,
     MOQOutputTransport,
@@ -19,6 +24,8 @@ from pipecat.transports.moq.transport import (
 __all__ = [
     "MOQAgentServer",
     "MOQAgentSession",
+    "ServeFilter",
+    "SessionBot",
     "MOQInputTransport",
     "MOQOutputTransport",
     "MOQParams",
