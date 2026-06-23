@@ -11,6 +11,9 @@ import unicodedata
 
 from loguru import logger
 
+from pipecat.utils.text.transforms._alnum_utils import advance_by_alnums as _advance_by_alnums_fn
+from pipecat.utils.text.transforms._alnum_utils import normalize as _normalize_fn
+
 
 class WordCompletionTracker:
     """Tracks whether all words from a source AggregatedTextFrame have been spoken.
@@ -102,50 +105,25 @@ class WordCompletionTracker:
         self._llm_consumed: str | None = None
         self._frame_word: str | None = None
 
+        # Built only when tts_text and user_facing_text have different alnum sequences,
+        # which happens when text transforms (e.g. currency expansion) changed the
+        # alphanumeric content. When None, the existing per-char cursor logic is used.
+        self._segment_map = None
+        uf_normalized = self._normalize(self._user_facing_text)
+        if uf_normalized != self._tts_normalized:
+            from pipecat.utils.context.text_segment_map import TextSegmentMap
+
+            self._segment_map = TextSegmentMap(tts_text, self._user_facing_text, llm_text)
+
     @staticmethod
     def _normalize(text: str) -> str:
         """Strip XML/HTML tags then keep only lowercase alphanumeric characters.
 
-        Accented letters (e.g. ã, é) are reduced to their base letter so TTS output
-        can be matched against LLM text even when the provider strips diacritics.
-        Non-Latin scripts (CJK, Hangul) are kept as-is — each original character
-        contributes exactly one char to the result, keeping normalized length in sync
-        with raw alnum counts used by _advance_by_alnums.
+        Delegates to :func:`pipecat.utils.text.transforms._alnum_utils.normalize`.
+        Kept as a static method for backward compatibility with callers that reference
+        ``WordCompletionTracker._normalize`` directly.
         """
-        text = re.sub(r"<[^>]+>", "", text)
-        result = []
-        for char in text:
-            # Ignore punctuation, spaces, emojis, etc.
-            # Keep only letters and numbers.
-            if not char.isalnum():
-                continue
-            # NFD decomposes accented characters into:
-            #   é -> e + ◌́
-            #   ã -> a + ◌̃
-            #
-            # Non-accented characters usually stay unchanged.
-            nfd = unicodedata.normalize("NFD", char)
-            # Unicode category "Mn" means:
-            #   Mark, Nonspacing
-            #
-            # These are combining accent marks that modify
-            # the previous character but are not standalone.
-            #
-            # Example:
-            #   "é" becomes:
-            #       nfd[0] = "e"
-            #       nfd[1] = "◌́"  (category = "Mn")
-            #
-            # If the second character is a combining accent,
-            # keep only the base letter.
-            if len(nfd) >= 2 and unicodedata.category(nfd[1]) == "Mn":
-                # Accented letter: keep the base character only (drops the combining mark).
-                result.append(nfd[0].lower())
-            else:
-                # Regular ASCII, numbers, CJK, Hangul, etc.
-                # are kept unchanged (except lowercase conversion).
-                result.append(char.lower())
-        return "".join(result)
+        return _normalize_fn(text)
 
     # Typographic variants that LLMs commonly emit but TTS services normalize away.
     _TYPOGRAPHY_FOLD = str.maketrans(
@@ -177,41 +155,16 @@ class WordCompletionTracker:
     def _advance_by_alnums(text: str, start_pos: int, n: int) -> int:
         """Return the position in *text* after advancing past *n* alphanumeric chars.
 
-        Moves through the text one character at a time, counting only alphanumeric
-        characters. XML/HTML tags (``<...>``) are skipped entirely — their content
-        is not counted against the budget, so the returned span includes the full tag.
-        Other non-alphanumeric characters (spaces, punctuation) are also passed over
-        without decrementing the budget.
-
-        After the *n* alnum chars are consumed, advances further past any immediately
-        following punctuation (e.g. the ``,`` in ``"questions,"`` or the ``.`` in
-        ``"done."``), stopping before the next space, alnum char, or XML tag.
+        Delegates to :func:`pipecat.utils.text.transforms._alnum_utils.advance_by_alnums`.
+        Kept as a static method for backward compatibility with callers that reference
+        ``WordCompletionTracker._advance_by_alnums`` directly.
 
         Args:
             text: The source text to scan.
             start_pos: Starting position in *text*.
             n: Number of alphanumeric characters to consume.
         """
-        pos = start_pos
-        count = 0
-        while pos < len(text) and count < n:
-            if text[pos] == "<":
-                end = text.find(">", pos)
-                pos = end + 1 if end != -1 else pos + 1
-            elif text[pos].isalnum():
-                count += 1
-                pos += 1
-            else:
-                pos += 1
-
-        while pos < len(text):
-            if text[pos] == "<":
-                break
-            if text[pos].isalnum() or text[pos].isspace():
-                break
-            pos += 1
-
-        return pos
+        return _advance_by_alnums_fn(text, start_pos, n)
 
     def add_word_and_check_complete(self, word: str) -> bool:
         """Record a spoken word from a word-timestamp event.
@@ -307,55 +260,89 @@ class WordCompletionTracker:
             # Word fits entirely in this frame.
             self._frame_word = word
 
-        # Advance the TTS cursor by the same alnum count so the force-complete
-        # path knows where in _tts_text to start from.
+        # Always advance the TTS cursor (tracks position in tts_text for force-complete).
         self._tts_pos = self._advance_by_alnums(self._tts_text, self._tts_pos, chars_for_frame)
 
-        self._user_facing_pos = self._advance_by_alnums(
-            self._user_facing_text, self._user_facing_pos, chars_for_frame
-        )
+        if self._segment_map is not None:
+            # Segment-map path: advance user_facing and llm cursors via segment boundaries.
+            # Track prev_llm_pos so we can slice _llm_consumed from the span.
+            prev_llm_pos = self._llm_pos
+            self._segment_map.advance(chars_for_frame)
+            self._user_facing_pos = self._segment_map.user_facing_pos
+            self._llm_pos = self._segment_map.llm_pos
 
-        if self._llm_text is not None:
-            if self.is_complete:
-                # Consume ALL remaining LLM text: closing tags (e.g. </card>)
-                # and any trailing punctuation that the TTS will not send separately.
-                self._llm_consumed = self._llm_text[self._llm_pos :]
-                self._llm_pos = len(self._llm_text)
-            else:
-                if chars_for_frame == 0:
-                    # Consume exactly the raw word in llm_text, skipping any
-                    # leading spaces that belong to the previous token's span.
-                    start = self._llm_pos
-                    while start < len(self._llm_text) and self._llm_text[start].isspace():
-                        start += 1
-                    end = start + len(word)
-                    self._llm_consumed = self._llm_text[start:end]
-                    self._llm_pos = end
+            if self._llm_text is not None:
+                if self.is_complete and self._llm_pos < len(self._llm_text):
+                    # Final word: sweep all remaining llm_text (closing tags etc.)
+                    self._llm_consumed = self._llm_text[self._llm_pos :]
+                    self._llm_pos = len(self._llm_text)
+                elif self._segment_map.in_transformed_segment:
+                    # Mid transformed segment: suppress per-word attribution.
+                    self._llm_consumed = None
                 else:
-                    # Advance through llm_text by exactly chars_for_frame alphanumeric
-                    # chars. Non-alnum chars (spaces, opening tags) are included in the
-                    # slice, preserving the original formatting for the context.
-                    new_pos = self._advance_by_alnums(
-                        self._llm_text, self._llm_pos, chars_for_frame
+                    # Span from prev position to new position covers the consumed text.
+                    self._llm_consumed = self._llm_text[prev_llm_pos : self._llm_pos]
+                    completed = self._segment_map.last_completed_segment
+                    if completed is None or not completed.is_transformed:
+                        # Unchanged segment: validate the span as in the original path.
+                        word_without_punctuation = self._remove_trailing_punctuation(
+                            self._frame_word
+                        )
+                        if word_without_punctuation and self._fold_typography(
+                            word_without_punctuation
+                        ) not in self._fold_typography(self._llm_consumed):
+                            logger.warning(
+                                f"WordCompletionTracker: llm_consumed {repr(self._llm_consumed)!s} "
+                                f"does not contain frame_word {repr(self._frame_word)!s}, discarding"
+                            )
+                            self._llm_consumed = None
+        else:
+            # Original per-char path (no transforms changed alnum content).
+            self._user_facing_pos = self._advance_by_alnums(
+                self._user_facing_text, self._user_facing_pos, chars_for_frame
+            )
+
+            if self._llm_text is not None:
+                if self.is_complete:
+                    # Consume ALL remaining LLM text: closing tags (e.g. </card>)
+                    # and any trailing punctuation that the TTS will not send separately.
+                    self._llm_consumed = self._llm_text[self._llm_pos :]
+                    self._llm_pos = len(self._llm_text)
+                else:
+                    if chars_for_frame == 0:
+                        # Consume exactly the raw word in llm_text, skipping any
+                        # leading spaces that belong to the previous token's span.
+                        start = self._llm_pos
+                        while start < len(self._llm_text) and self._llm_text[start].isspace():
+                            start += 1
+                        end = start + len(word)
+                        self._llm_consumed = self._llm_text[start:end]
+                        self._llm_pos = end
+                    else:
+                        # Advance through llm_text by exactly chars_for_frame alphanumeric
+                        # chars. Non-alnum chars (spaces, opening tags) are included in the
+                        # slice, preserving the original formatting for the context.
+                        new_pos = self._advance_by_alnums(
+                            self._llm_text, self._llm_pos, chars_for_frame
+                        )
+                        self._llm_consumed = self._llm_text[self._llm_pos : new_pos]
+                        self._llm_pos = new_pos
+                # This should not happen: the LLM cursor is driven by the same
+                # alnum count as the word stream, so the consumed span must contain
+                # the frame word. If it doesn't, the cursors drifted out of sync
+                # in an unexpected way — discard rather than returning a corrupt span.
+                # Also removing punctuation from the frame word to match the
+                # expected text, since some TTS services may add punctuation to
+                # the raw text.
+                word_without_punctuation = self._remove_trailing_punctuation(self._frame_word)
+                if word_without_punctuation and self._fold_typography(
+                    word_without_punctuation
+                ) not in self._fold_typography(self._llm_consumed):
+                    logger.warning(
+                        f"WordCompletionTracker: llm_consumed {repr(self._llm_consumed)!s} "
+                        f"does not contain frame_word {repr(self._frame_word)!s}, discarding"
                     )
-                    self._llm_consumed = self._llm_text[self._llm_pos : new_pos]
-                    self._llm_pos = new_pos
-            # This should not happen: the LLM cursor is driven by the same
-            # alnum count as the word stream, so the consumed span must contain
-            # the frame word. If it doesn't, the cursors drifted out of sync
-            # in an unexpected way — discard rather than returning a corrupt span.
-            # Also removing punctuation from the frame word to match the
-            # expected text, since some TTS services may add punctuation to
-            # the raw text.
-            word_without_punctuation = self._remove_trailing_punctuation(self._frame_word)
-            if word_without_punctuation and self._fold_typography(
-                word_without_punctuation
-            ) not in self._fold_typography(self._llm_consumed):
-                logger.warning(
-                    f"WordCompletionTracker: llm_consumed {repr(self._llm_consumed)!s} "
-                    f"does not contain frame_word {repr(self._frame_word)!s}, discarding"
-                )
-                self._llm_consumed = None
+                    self._llm_consumed = None
 
         return self.is_complete
 
@@ -425,6 +412,18 @@ class WordCompletionTracker:
         while pos < len(self._tts_text) and self._tts_text[pos].isspace():
             pos += 1
         return pos < len(self._tts_text) and not self._tts_text[pos].isalnum()
+
+    def suppress_in_context(self) -> bool:
+        """True when the last word is mid-flight inside a transformed segment.
+
+        When True, the sequencer sets ``append_to_context=False`` on the emitted
+        ``TTSTextFrame`` so intermediate TTS words (e.g. "forty", "two") are not
+        written to the conversation context. Only the completing word of the segment
+        carries ``raw_text`` with the original text (e.g. ``"$42.50"``).
+        """
+        if self._segment_map is None:
+            return False
+        return self._segment_map.in_transformed_segment
 
     def get_word_for_frame(self) -> str | None:
         """Return the portion of the last word that belongs to this frame.
@@ -527,3 +526,5 @@ class WordCompletionTracker:
         self._overflow_word = None
         self._llm_consumed = None
         self._frame_word = None
+        if self._segment_map is not None:
+            self._segment_map.reset()
