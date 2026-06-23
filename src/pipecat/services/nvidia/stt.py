@@ -270,6 +270,8 @@ class NvidiaSTTService(STTService):
         stop_history_eou: int = -1,
         stop_threshold_eou: float = -1.0,
         custom_configuration: str = "",
+        keepalive_timeout: float | None = 30.0,
+        keepalive_interval: float = 5.0,
         settings: Settings | None = None,
         ttfs_p99_latency: float | None = NVIDIA_TTFS_P99,
         **kwargs,
@@ -300,6 +302,9 @@ class NvidiaSTTService(STTService):
             stop_threshold_eou: End-of-utterance stop threshold. Use -1.0 for Nemotron Speech default.
             custom_configuration: Custom Nemotron Speech configuration string
                 (e.g. ``"enable_vad_endpointing:true,neural_vad.onset:0.65"``).
+            keepalive_timeout: Seconds of no audio before sending silence to keep the
+                NVIDIA ASR stream active. None disables keepalive.
+            keepalive_interval: Seconds between idle checks when keepalive is enabled.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
@@ -337,6 +342,8 @@ class NvidiaSTTService(STTService):
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
+            keepalive_timeout=keepalive_timeout,
+            keepalive_interval=keepalive_interval,
             settings=default_settings,
             **kwargs,
         )
@@ -477,6 +484,8 @@ class NvidiaSTTService(STTService):
         if not self._thread_task:
             self._thread_task = self.create_task(self._thread_task_handler())
 
+        self._create_keepalive_task()
+
         logger.debug(f"Initialized NvidiaSTTService with model: {self._settings.model}")
 
     async def stop(self, frame: EndFrame):
@@ -504,6 +513,9 @@ class NvidiaSTTService(STTService):
         current gRPC stream but keep buffering audio on the same iterator until
         the replacement stream starts consuming it.
         """
+        if close_iterator:
+            await self._cancel_keepalive_task()
+
         iterator = self._audio_iterator
         if close_iterator:
             self._audio_iterator = None
@@ -568,6 +580,17 @@ class NvidiaSTTService(STTService):
             await asyncio.to_thread(self._response_handler, iterator)
         except asyncio.CancelledError:
             raise
+
+    def _is_keepalive_ready(self) -> bool:
+        """Check if there is an active NVIDIA audio stream for keepalive."""
+        iterator = self._audio_iterator
+        return iterator is not None and not iterator.closed
+
+    async def _send_keepalive(self, silence: bytes):
+        """Send silent audio through the active NVIDIA stream iterator."""
+        iterator = self._audio_iterator
+        if iterator is not None and not iterator.closed:
+            await iterator.put(silence)
 
     @traced_stt
     async def _handle_transcription(
