@@ -241,7 +241,7 @@ Text mode **bypasses STT, VAD, and TTS** (the `user:` turn is sent as text), so 
 |---|---|
 | correctness depends on how real speech transcribes (numbers, names, accents, homophones) | text skips STT — it never sees a transcript |
 | turn-taking / end-of-turn / VAD timing matters | text skips VAD |
-| you assert `user_started_speaking` / `user_stopped_speaking` / `user_transcription` / `tts_response` | these events **only fire in audio mode** |
+| you assert `user_started_speaking` / `user_stopped_speaking` / `tts_response` | these events **only fire in audio mode** (`user_transcription` fires in both modes — STT in audio, DTMF aggregator in text) |
 | TTS intelligibility / pronunciation matters | needs `judge: {modality: audio}` so you judge the transcription of real speech (`response`) |
 | final pre-ship / CI confidence pass over the real round trip | text never exercises the real STT/VAD/TTS round trip |
 

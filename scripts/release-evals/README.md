@@ -112,9 +112,10 @@ pipecat eval run scenarios/capital_question.yaml --bot-url ws://localhost:7860
 
 ## Scenarios
 
-A scenario is a sequence of `turns`. A turn either sends a `user` utterance and
-asserts on the events that come back, or it's observation-only (no `user`) and
-just asserts — used for bot-first turns like an opening greeting. The full file
+A scenario is a sequence of `turns`. A turn sends a `user` utterance, presses
+DTMF keys with `dtmf:` (mutually exclusive with `user:`), or is
+observation-only (neither field) and just asserts — used for bot-first turns
+like an opening greeting. The full file
 format (events, expectations, `send_after:`, `image:`, ...) is documented in the
 [`pipecat.evals.scenario`](../../src/pipecat/evals/scenario.py) module docstring.
 
