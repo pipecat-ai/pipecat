@@ -8,9 +8,12 @@
 
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 import pipecat.cli
+import pipecat.cli.commands.create as create_mod
+import pipecat.cli.commands.init as init_mod
 from pipecat.cli.main import app
 
 runner = CliRunner()
@@ -106,12 +109,28 @@ class TestInitAgentReady:
         # Redirect must not write a half-initialized project.
         assert not (tmp_path / "AGENTS.md").exists()
 
-    def test_quickstart_redirects_without_creating_dir(self, tmp_path, monkeypatch):
+    def test_quickstart_scaffolds_and_makes_agent_ready(self, tmp_path, monkeypatch):
+        # `init quickstart` is the human front door for the canned bot: it scaffolds the
+        # quickstart in-place AND drops the agent guide, all in ./pipecat-quickstart.
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(app, ["init", "quickstart"])
-        assert result.exit_code == 1
-        assert "pipecat create quickstart" in result.output
-        assert not (tmp_path / "quickstart").exists()
+        assert result.exit_code == 0, result.output
+        project = tmp_path / "pipecat-quickstart"
+        # Agent-ready files...
+        assert (project / "AGENTS.md").exists()
+        assert (project / "CLAUDE.md").read_text(encoding="utf-8").strip() == "@AGENTS.md"
+        # ...plus a runnable bot in the same directory.
+        assert (project / "server" / "bot.py").exists()
+
+    def test_quickstart_omits_developer_guide(self, tmp_path, monkeypatch):
+        # GETTING_STARTED.md is from-scratch onboarding; the prebuilt quickstart skips it.
+        # Its one still-useful piece (Context Hub setup) lives in the scaffold's README.
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(app, ["init", "quickstart"])
+        assert result.exit_code == 0, result.output
+        project = tmp_path / "pipecat-quickstart"
+        assert not (project / "GETTING_STARTED.md").exists()
+        assert "Context Hub" in (project / "README.md").read_text(encoding="utf-8")
 
     def test_target_is_a_file_errors(self, tmp_path):
         afile = tmp_path / "afile"
@@ -119,6 +138,85 @@ class TestInitAgentReady:
         result = runner.invoke(app, ["init", str(afile)])
         assert result.exit_code == 1
         assert "not a directory" in result.output
+
+
+class TestBuildMethodRouting:
+    """Interactive `init` routes the developer to a coding agent or an in-place scaffold."""
+
+    @pytest.fixture
+    def _select(self, monkeypatch):
+        """Force-interactive init and stub questionary.select; returns a setter for the choice."""
+        import questionary
+
+        monkeypatch.setattr(init_mod, "_is_interactive", lambda: True)
+        chosen = {"value": None}
+
+        class _Q:
+            def ask(self):
+                return chosen["value"]
+
+        monkeypatch.setattr(questionary, "select", lambda *a, **k: _Q())
+        return lambda value: chosen.__setitem__("value", value)
+
+    def test_scaffold_branch_runs_create_in_place(self, tmp_path, monkeypatch, _select):
+        _select("scaffold")
+        captured = {}
+        monkeypatch.setattr(
+            create_mod,
+            "scaffold_interactive",
+            lambda dest, name, in_place: captured.update(dest=dest, name=name, in_place=in_place),
+        )
+        result = runner.invoke(app, ["init", str(tmp_path)])
+        assert result.exit_code == 0, result.output
+        # The scaffold lands in init's target dir, in-place, named after it.
+        assert captured == {"dest": tmp_path, "name": tmp_path.name, "in_place": True}
+        # Scaffolding now ends in a built bot, so the from-scratch developer guide is
+        # skipped — its place is taken by the scaffold's README (see test_quickstart_*).
+        assert not (tmp_path / "GETTING_STARTED.md").exists()
+        # ...but the core agent-ready files are still written.
+        assert (tmp_path / "AGENTS.md").exists()
+        assert (tmp_path / "CLAUDE.md").exists()
+
+    def test_agent_branch_does_not_scaffold(self, tmp_path, monkeypatch, _select):
+        _select("agent")
+        monkeypatch.setattr(
+            create_mod,
+            "scaffold_interactive",
+            lambda *a, **k: pytest.fail("agent branch must not scaffold"),
+        )
+        result = runner.invoke(app, ["init", str(tmp_path)])
+        assert result.exit_code == 0, result.output
+        assert "agent-ready" in result.output.lower()
+        assert not (tmp_path / "server").exists()
+        # The coding-agent path gets the developer guide.
+        assert (tmp_path / "GETTING_STARTED.md").exists()
+
+    def test_question_skipped_when_already_scaffolded(self, tmp_path, monkeypatch):
+        # Re-running init to refresh the guide in a scaffolded project must not offer to scaffold.
+        (tmp_path / "server").mkdir()
+        monkeypatch.setattr(init_mod, "_is_interactive", lambda: True)
+        import questionary
+
+        monkeypatch.setattr(
+            questionary,
+            "select",
+            lambda *a, **k: pytest.fail("no prompt on an already-scaffolded dir"),
+        )
+        result = runner.invoke(app, ["init", str(tmp_path)])
+        assert result.exit_code == 0, result.output
+        assert (tmp_path / "AGENTS.md").exists()
+
+    def test_no_prompt_without_a_tty(self, tmp_path, monkeypatch):
+        # The default CliRunner stdin isn't a tty, so init stays a pure file-drop (today's behavior).
+        import questionary
+
+        monkeypatch.setattr(
+            questionary, "select", lambda *a, **k: pytest.fail("no prompt without a tty")
+        )
+        result = runner.invoke(app, ["init", str(tmp_path)])
+        assert result.exit_code == 0, result.output
+        assert (tmp_path / "AGENTS.md").exists()
+        assert not (tmp_path / "server").exists()
 
 
 class TestBundledGuide:
