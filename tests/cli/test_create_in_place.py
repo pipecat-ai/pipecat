@@ -61,6 +61,24 @@ def test_init_in_place_preserves_claude_md(tmp_path):
     assert (tmp_path / "server" / "bot.py").exists()
 
 
+def test_init_in_place_over_agent_guide(tmp_path):
+    """The init→create handoff: scaffold in-place into a dir already holding the guide.
+
+    Mirrors what interactive `pipecat init` leaves behind before its scaffold branch
+    runs `create` in-place. The guide files must survive, CLAUDE.md untouched.
+    """
+    (tmp_path / "AGENTS.md").write_text("# guide", encoding="utf-8")
+    (tmp_path / "GETTING_STARTED.md").write_text("# dev", encoding="utf-8")
+    (tmp_path / "CLAUDE.md").write_text("@AGENTS.md", encoding="utf-8")
+    result = runner.invoke(app, ["create", str(tmp_path), "--name", "demo", *SERVICE_FLAGS])
+    assert result.exit_code == 0, result.output
+
+    assert (tmp_path / "server" / "bot.py").exists()
+    assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == "# guide"
+    assert (tmp_path / "GETTING_STARTED.md").read_text(encoding="utf-8") == "# dev"
+    assert (tmp_path / "CLAUDE.md").read_text(encoding="utf-8") == "@AGENTS.md"
+
+
 def test_init_in_place_aborts_on_existing_project(tmp_path):
     """Refuses to clobber a directory that already contains a project."""
     (tmp_path / "server").mkdir()
