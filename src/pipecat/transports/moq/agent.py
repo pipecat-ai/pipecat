@@ -56,38 +56,12 @@ DEFAULT_RELAY_URL = "http://localhost:4443"
 # session fires ``on_disconnected`` once the client's mic track closes).
 SessionBot = Callable[["MOQAgentSession", str], Awaitable[None]]
 
-# Bit position of the fleet "internal relay" prefix in a 62-bit origin id (the
-# top 30 bits). Mirrors moq-edge's vod::hop PREFIX_SHIFT; the actual prefix VALUE
-# is never hardcoded here (see local_ingest).
-_INTERNAL_PREFIX_SHIFT = 32
-
-
-def local_ingest(hops: list[int]) -> bool:
-    """Whether this broadcast was ingested on the edge we're connected to.
-
-    Self-election for the per-edge fleet: a client's announcement propagates
-    across the relay mesh, so every edge's worker sees it. Only the worker on the
-    client's OWN edge should answer, else N edges spawn N bots for one client.
-
-    We elect off the hop chain (oldest-first), the same list moq-edge's VOD
-    recorder uses -- but from a different vantage point. The recorder runs
-    in-process and a relay never stamps its own id into its `cluster.origin`, so a
-    locally-ingested broadcast carries ZERO internal hops there. We reach the
-    origin over the internal UDS as a downstream consumer, so the serving edge
-    stamps itself LAST: a locally-ingested broadcast carries exactly ONE internal
-    hop (that edge), while a peer-forwarded one carries two or more.
-
-    The fleet prefix is read off the LAST hop (always the serving edge, which is
-    internal), never hardcoded -- mirroring how the relay derives it from its own
-    id, so this can't drift from the value tofu stamps.
-    """
-    if not hops:
-        # Over the UDS the serving edge is always present, so an empty chain is
-        # anomalous; don't claim it as ours.
-        return False
-    prefix = hops[-1] >> _INTERNAL_PREFIX_SHIFT
-    internal = sum(1 for hop in hops if (hop >> _INTERNAL_PREFIX_SHIFT) == prefix)
-    return internal == 1
+# Admission policy: decides whether to answer an announced client. Receives the
+# raw announcement (``.path``, ``.broadcast``, ``.hops``) and returns True to
+# serve it. ``None`` answers every client -- the generic default. A deployment
+# injects its own policy here (e.g. self-electing one relay edge per client by the
+# hop chain) without this library knowing anything about that policy.
+ServeFilter = Callable[["moq.Announcement"], bool]
 
 
 class MOQAgentSession(MOQTransport):
@@ -191,6 +165,9 @@ class MOQAgentServer:
         verify_ssl: Verify the relay's TLS certificate (off for self-signed dev relays).
         max_sessions: Concurrency cap; excess clients queue (each session is a
             full STT+LLM+TTS pipeline, so this bounds cost / rate limits).
+        should_serve: Optional admission policy ``(announcement) -> bool``. Return
+            False to decline a client (e.g. self-election on a multi-relay fleet).
+            Default answers every announced client.
     """
 
     def __init__(
@@ -203,6 +180,7 @@ class MOQAgentServer:
         bot_prefix: str = DEFAULT_BOT_PREFIX,
         verify_ssl: bool = True,
         max_sessions: int = 8,
+        should_serve: ServeFilter | None = None,
     ):
         """Initialize the MoQ agent server."""
         self._params = params
@@ -211,9 +189,9 @@ class MOQAgentServer:
         self._client_prefix = client_prefix.rstrip("/")
         self._bot_prefix = bot_prefix.rstrip("/")
         self._verify_ssl = verify_ssl
+        self._should_serve = should_serve
         self._sem = asyncio.Semaphore(max_sessions)
         self._tasks: set[asyncio.Task] = set()
-        self._warned_no_hops = False
 
     async def run(self):
         """Connect, then dispatch a session per announced client. Runs forever."""
@@ -238,41 +216,17 @@ class MOQAgentServer:
                     if not sid:
                         continue
 
-                    # Self-election: only answer clients ingested on OUR edge, else
-                    # every edge's worker answers the same client (announcements fan
-                    # out across the mesh). Inert until moq-rs exposes the hop chain
-                    # on the announcement; until then we serve every client (correct
-                    # single-edge, duplicated on a fleet -- see _announced_hops).
-                    hops = self._announced_hops(ann)
-                    if hops is not None and not local_ingest(hops):
-                        logger.debug(
-                            f"MOQ agent server: {sid!r} ingested on another edge; skipping"
-                        )
+                    # Optional admission policy: a deployment can decline a client
+                    # here (e.g. self-electing one relay edge per client on a fleet).
+                    # Default answers every announced client.
+                    if self._should_serve is not None and not self._should_serve(ann):
+                        logger.debug(f"MOQ agent server: declined client {sid!r}")
                         continue
 
                     logger.info(f"MOQ agent server: client {sid!r} announced")
                     task = asyncio.create_task(self._session(origin, sid, ann.broadcast))
                     self._tasks.add(task)
                     task.add_done_callback(self._tasks.discard)
-
-    def _announced_hops(self, ann) -> list[int] | None:
-        """The announced broadcast's hop chain (origin ids), or None if unavailable.
-
-        Proposed moq-rs API: ``ann.hops`` (origin ids, oldest-first), surfaced from
-        the same ``broadcast.info().hops`` the Rust VOD recorder reads. Logged once
-        so the self-election gap is visible.
-        """
-        hops = getattr(ann, "hops", None)
-        if hops is None:
-            if not self._warned_no_hops:
-                self._warned_no_hops = True
-                logger.warning(
-                    "MOQ agent server: this moq-rs build doesn't expose announcement hops; "
-                    "self-election is OFF -- safe on a single edge, but a multi-edge fleet "
-                    "will spawn a duplicate bot per client. Expose ann.hops to enable it."
-                )
-            return None
-        return list(hops)
 
     async def _session(
         self, origin: moq.OriginProducer, sid: str, broadcast: moq.BroadcastConsumer
