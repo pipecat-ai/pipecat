@@ -305,7 +305,13 @@ class SimpleTextAggregator(BaseTextAggregator):
                 # space after the punctuation on the BUFFER so the merged text reads
                 # "מצוין. מה" — the TTS then pauses naturally at the internal period
                 # instead of rushing through a run-on.
-                if len(candidate) < _MIN_CHUNK_CHARS:
+                # Merge short sentences ONLY after the first chunk. The first chunk
+                # must fire on its first sentence boundary for low time-to-first-audio
+                # — merging it made a short opener wait to accumulate 40 chars (often
+                # the whole reply), which is the latency regression in run 124.
+                # Subsequent short sentences still merge (seamless tail); their latency
+                # hides behind the first chunk's playback.
+                if len(candidate) < _MIN_CHUNK_CHARS and self._emitted_since_reset:
                     if not has_space_gap:
                         self._text = (
                             self._text[: last_punct_idx + 1]
@@ -341,9 +347,11 @@ class SimpleTextAggregator(BaseTextAggregator):
             and self._text[-1] in _STRONG_ENDERS
         ):
             candidate = self._text.strip()
-            if len(candidate) >= _MIN_CHUNK_CHARS and any(
-                c.isalpha() or c.isdigit() for c in candidate
-            ):
+            # Fire the first chunk immediately on a strong ender — NO _MIN_CHUNK_CHARS
+            # gate here. That gate blocked the opener for a short first sentence
+            # ("מצוין, תודה ששאלתם!" = 19 chars < 40), forcing it to wait for the
+            # whole reply = the latency regression (run 124).
+            if any(c.isalpha() or c.isdigit() for c in candidate):
                 result = _clean_sentence(candidate)
                 if result and any(c.isalpha() or c.isdigit() for c in result):
                     self._text = ""
