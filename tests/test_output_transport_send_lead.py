@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pydantic import ValidationError
 
-from pipecat.frames.frames import BotStoppedSpeakingFrame, StartFrame
+from pipecat.frames.frames import BotStoppedSpeakingFrame, EndFrame, StartFrame
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import TransportParams
 
@@ -220,6 +220,51 @@ class TestDrainAndCompensation(unittest.IsolatedAsyncioTestCase):
             await sender._bot_stopped_speaking()
         self.assertEqual(clock.sleeps, [])
         self.assertFalse(sender._bot_speaking)
+
+    async def test_bot_stopped_speaking_aborts_when_interrupted_during_drain(self):
+        transport, sender = _make_sender(lead=0.1)
+        sender._bot_speaking = True
+        clock = _FakeClock()
+        transport._next_send_time = clock.t + 0.07
+
+        async def interrupting_sleep(duration):
+            # An interruption lands while we wait for the lead to drain.
+            sender._bot_speaking = False
+            clock.t += duration
+
+        with (
+            patch("pipecat.transports.base_output.time.monotonic", clock.monotonic),
+            patch("pipecat.transports.base_output.asyncio.sleep", interrupting_sleep),
+        ):
+            await sender._bot_stopped_speaking()
+
+        # The drain ran, but bot-stopped is suppressed: the interruption already
+        # handled the stop, so we must not emit a second one.
+        pushed = [c.args[0] for c in transport.push_frame.call_args_list]
+        self.assertFalse(any(isinstance(f, BotStoppedSpeakingFrame) for f in pushed))
+
+
+class TestEndFrameDrain(unittest.IsolatedAsyncioTestCase):
+    async def test_end_frame_drains_lead_before_closing(self):
+        transport, sender = _make_sender(lead=0.1)
+        clock = _FakeClock()
+        transport._next_send_time = clock.t + 0.05  # 50ms still buffered
+        sender._send_silence = AsyncMock()
+
+        async def _frames():
+            yield EndFrame()
+
+        with (
+            patch.object(sender, "_next_frame", _frames),
+            patch("pipecat.transports.base_output.time.monotonic", clock.monotonic),
+            patch("pipecat.transports.base_output.asyncio.sleep", clock.sleep),
+        ):
+            await sender._audio_task_handler()
+
+        # Trailing silence is sent, then the residual lead is drained so the tail
+        # isn't cut off when the transport closes.
+        sender._send_silence.assert_awaited_once()
+        self.assertAlmostEqual(clock.sleeps[-1], 0.05)
 
 
 if __name__ == "__main__":
