@@ -67,7 +67,15 @@ Ignore `__init__.py`, `__pycache__`, test files, and files that only contain typ
 
 ### Step 4: Map source files to doc pages
 
-For each changed source file, find the corresponding doc page. Read the mapping file at `.claude/skills/update-docs/SOURCE_DOC_MAPPING.md` and apply its tiered lookup: tier 1 (known exceptions) → tier 2 (pattern matching) → tier 3 (search fallback). **First match wins.**
+For each changed source file, resolve the doc page to edit. Read the mapping file at `.claude/skills/update-docs/SOURCE_DOC_MAPPING.md` and apply this resolution order. **Confirm every candidate path exists in `DOCS_PATH` before using it.**
+
+1. **Skip list** — if the file matches the skip list, stop. It triggers no doc update.
+2. **Pattern match** — apply the pattern table to get a candidate path, then confirm the `.mdx` file exists (glob/`ls` it under `DOCS_PATH`). If it exists, use it.
+3. **Non-standard locations** — if the file is in the non-standard table, use that entry as the candidate path and confirm it exists.
+4. **Search** — if no candidate from steps 2–3 exists on disk, grep `DOCS_PATH` for the file's main class name (see the mapping file's Search section).
+5. **Unmapped** — if nothing resolves, treat the file as unmapped and report it in Step 8.
+
+Never edit a path you haven't confirmed exists. If a candidate path doesn't resolve, fall through to the search step.
 
 ### Step 5: Analyze each source-doc pair
 
@@ -164,7 +172,7 @@ Guide directories:
 
 After processing all mapped pairs, check for two kinds of gaps:
 
-**Missing pages**: Source files that had no doc page mapping (neither tier 1, 2, nor 3) and are not marked as "(skip)". For each, tell the user:
+**Missing pages**: Source files that resolved to no doc page (pattern, non-standard table, and search all came up empty) and are not on the skip list. For each, tell the user:
 
 - The source file path
 - The main class(es) it defines
@@ -312,7 +320,7 @@ After all edits are complete, print a summary:
 - **Preserve voice** — match the writing style of the existing doc page, don't impose a different tone.
 - **One PR at a time** — this skill operates on the current branch's diff against main. Don't look at other branches.
 - **Parallel analysis** — when multiple source files map to different doc pages, analyze and edit them in parallel for efficiency.
-- **Shared source files** — files like `services/google/google.py` are shared bases. Check which services import from them and update all affected doc pages.
+- **Shared source files** — files like `services/google/llm.py` are shared bases. Check which services import from them and update all affected doc pages.
 
 ## Checklist
 

@@ -2,25 +2,28 @@
 
 Maps pipecat source files to their documentation pages. Source paths are relative to `src/pipecat/`. Doc paths are relative to `DOCS_PATH`.
 
-## Name mismatches
+Doc paths in this file are candidates. Confirm each exists in `DOCS_PATH` before editing it; if it doesn't exist, fall through to the Search section.
 
-These source paths don't follow the standard `services/{provider}/{type}.py` → `api-reference/server/services/{type}/{provider}.mdx` pattern.
+## Non-standard locations
 
-| Source path                                 | Doc page                                                                                         |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `services/google/llm_vertex.py`             | `api-reference/server/services/llm/google-vertex.mdx`                                            |
-| `services/google/google.py`                 | (shared base — check which services use it)                                                      |
-| `services/google/gemini_live/**`            | `api-reference/server/services/s2s/gemini-live.mdx`                                              |
-| `services/google/gemini_live/llm_vertex.py` | `api-reference/server/services/s2s/gemini-live-vertex.mdx`                                       |
-| `services/aws_nova_sonic/**`                | `api-reference/server/services/s2s/aws.mdx`                                                      |
-| `services/ultravox/**`                      | `api-reference/server/services/s2s/ultravox.mdx`                                                 |
-| `services/grok/realtime/**`                 | `api-reference/server/services/s2s/grok.mdx`                                                     |
-| `services/openai/realtime/**`               | `api-reference/server/services/s2s/openai.mdx`                                                   |
-| `processors/frameworks/rtvi.py`             | `api-reference/server/rtvi/rtvi-processor.mdx` and `api-reference/server/rtvi/rtvi-observer.mdx` |
-| `processors/idle_frame_processor.py`        | `api-reference/server/pipeline/pipeline-idle-detection.mdx`                                      |
-| `pipeline/worker.py`                        | `api-reference/server/pipeline/pipeline-worker.mdx`                                              |
-| `pipeline/runner.py`                        | `api-reference/server/utilities/runner/guide.mdx`                                                |
-| `transports/base_transport.py`              | `api-reference/server/services/transport/transport-params.mdx`                                   |
+These source paths don't follow the standard `services/{provider}/{type}.py` → `api-reference/server/services/{type}/{provider}.mdx` pattern. Use the doc page below as the candidate path.
+
+| Source path                                 | Doc page                                                                                           |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `services/google/vertex/llm.py`             | `api-reference/server/services/llm/google-vertex.mdx`                                              |
+| `services/google/llm.py`                    | `api-reference/server/services/llm/google.mdx` (shared base; also affects `llm/google-vertex.mdx`) |
+| `services/google/gemini_live/**`            | `api-reference/server/services/s2s/gemini-live.mdx`                                                |
+| `services/google/gemini_live/vertex/llm.py` | `api-reference/server/services/s2s/gemini-live-vertex.mdx`                                         |
+| `services/aws/nova_sonic/**`                | `api-reference/server/services/s2s/aws.mdx`                                                        |
+| `services/ultravox/**`                      | `api-reference/server/services/s2s/ultravox.mdx`                                                   |
+| `services/grok/realtime/**`                 | `api-reference/server/services/s2s/grok.mdx`                                                       |
+| `services/openai/realtime/**`               | `api-reference/server/services/s2s/openai.mdx`                                                     |
+| `services/openai/responses/llm.py`          | `api-reference/server/services/llm/openai-responses.mdx`                                           |
+| `processors/frameworks/rtvi.py`             | `api-reference/server/rtvi/rtvi-processor.mdx` and `api-reference/server/rtvi/rtvi-observer.mdx`   |
+| `processors/idle_frame_processor.py`        | `api-reference/server/pipeline/pipeline-idle-detection.mdx`                                        |
+| `pipeline/worker.py`                        | `api-reference/server/pipeline/pipeline-worker.mdx`                                                |
+| `pipeline/runner.py`                        | `api-reference/server/utilities/runner/guide.mdx`                                                  |
+| `transports/base_transport.py`              | `api-reference/server/services/transport/transport-params.mdx`                                     |
 
 ## Skip list
 
@@ -33,9 +36,9 @@ These files should never trigger doc updates.
 | `services/tts_service.py`            | Internal base class                  |
 | `services/llm_service.py`            | Internal base class                  |
 | `services/websocket_service.py`      | Internal base class                  |
-| `services/openai_realtime_beta/**`   | Deprecated                           |
-| `services/openai_realtime/**`        | Deprecated                           |
-| `services/gemini_multimodal_live/**` | Deprecated                           |
+| `services/image_service.py`          | Internal base class                  |
+| `services/vision_service.py`         | Internal base class                  |
+| `services/settings.py`               | Internal                             |
 | `services/aws/agent_core.py`         | Internal                             |
 | `services/aws/sagemaker/**`          | No doc page                          |
 | `transports/base_input.py`           | Internal base class                  |
@@ -43,7 +46,7 @@ These files should never trigger doc updates.
 | `transports/websocket/client.py`     | No doc page                          |
 | `serializers/base_serializer.py`     | Internal base class                  |
 | `serializers/protobuf.py`            | Internal                             |
-| `processors/audio/**`                | Internal                             |
+| `processors/audio/vad_processor.py`  | No doc page                          |
 | `pipeline/pipeline.py`               | Core architecture, not a service doc |
 
 ## Pattern matching
@@ -64,14 +67,15 @@ For files not in the tables above, apply these patterns. Convert underscores to 
 | `audio/vad/**`                    | `api-reference/server/utilities/audio/` (match by class name)     |
 | `audio/filters/**`                | `api-reference/server/utilities/audio/` (match by class name)     |
 | `audio/mixers/**`                 | `api-reference/server/utilities/audio/` (match by class name)     |
+| `processors/audio/**`             | `api-reference/server/utilities/audio/` (match by class name)     |
 | `processors/filters/**`           | `api-reference/server/utilities/filters/` (match by class name)   |
 
-If the doc file doesn't exist at the resolved path, the file is **unmapped**.
+A pattern result is only valid if the file exists in `DOCS_PATH`. If it doesn't exist, fall through to the Search section before treating the file as unmapped.
 
-## Search fallback
+## Search
 
-For files that don't match any table or pattern above:
+For files that match no pattern above, or whose candidate doesn't exist in `DOCS_PATH`:
 
-1. Extract the main class name(s) from the source file
-2. Search the docs directory for that class name: `grep -r "ClassName" DOCS_PATH/api-reference/ DOCS_PATH/pipecat/`
-3. If found in a doc page, use that as the mapping
+1. Extract the main class name(s) from the source file.
+2. Grep `DOCS_PATH` for that class name: `grep -rl "ClassName" DOCS_PATH/api-reference/ DOCS_PATH/pipecat/`.
+3. If a page is found, use it. If nothing is found, the file is **unmapped** — report it in SKILL.md Step 8.
