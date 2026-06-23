@@ -43,6 +43,20 @@ def _list_options_callback(value: bool):
     raise typer.Exit(0)
 
 
+def scaffold_interactive(dest: Path | None, derived_name: str | None, in_place: bool):
+    """Run the interactive wizard and generate a project.
+
+    Shared by ``pipecat create`` (interactive mode) and ``pipecat init`` (when the
+    developer chooses to scaffold a runnable bot). ``dest`` is the resolved output
+    location: the exact target directory when ``in_place`` is True, otherwise the
+    parent the ``<name>`` subfolder is created under (``None`` = current directory).
+    """
+    config_result = ask_project_questions(default_name=derived_name)
+    generator = ProjectGenerator(config_result)
+    project_path = generator.generate(dest, in_place=in_place)
+    generator.print_next_steps(project_path, in_place=in_place)
+
+
 def create_command(
     ctx: typer.Context,
     target: str | None = typer.Argument(
@@ -283,15 +297,8 @@ def create_command(
             generator.print_next_steps(project_path, in_place=in_place)
 
         else:
-            # Interactive mode: ask questions
-            config_result = ask_project_questions(default_name=derived_name)
-
-            # Generate project
-            generator = ProjectGenerator(config_result)
-            project_path = generator.generate(dest if in_place else output_dir, in_place=in_place)
-
-            # Show next steps
-            generator.print_next_steps(project_path, in_place=in_place)
+            # Interactive mode: ask questions, then scaffold.
+            scaffold_interactive(dest if in_place else output_dir, derived_name, in_place)
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Project creation cancelled.[/yellow]")
@@ -306,48 +313,62 @@ def create_command(
         raise typer.Exit(1)
 
 
+def scaffold_quickstart(
+    output_dir: Path | None = None, *, dest: Path | None = None, in_place: bool = False
+):
+    """Generate the canned quickstart project (no questions).
+
+    Sets up a project with SmallWebRTC, Daily, Deepgram STT, OpenAI LLM, and Cartesia
+    TTS — the fastest way to get a voice agent running. Shared by ``pipecat create
+    quickstart`` (creates a ``pipecat-quickstart`` subfolder) and ``pipecat init
+    quickstart`` (scaffolds in-place into an already agent-ready directory, via
+    ``dest`` / ``in_place``).
+    """
+    project_name = "pipecat-quickstart"
+
+    console.print("[bold cyan]Let's create your Pipecat project![/bold cyan]\n")
+
+    # Display all pre-selected defaults
+    console.print(f"[green]✔[/green] Project name: [cyan]{project_name}[/cyan]")
+    console.print("[green]✔[/green] Bot type: [cyan]Web/Mobile[/cyan]")
+    console.print("[green]✔[/green] Transport: [cyan]SmallWebRTC, Daily[/cyan]")
+    console.print("[green]✔[/green] Pipeline architecture: [cyan]Cascade (STT → LLM → TTS)[/cyan]")
+    console.print("[green]✔[/green] Speech-to-Text: [cyan]Deepgram[/cyan]")
+    console.print("[green]✔[/green] Language model: [cyan]OpenAI[/cyan]")
+    console.print("[green]✔[/green] Text-to-Speech: [cyan]Cartesia[/cyan]")
+    console.print("[green]✔[/green] Deploy to Pipecat Cloud: [cyan]Yes[/cyan]")
+
+    # Build config with quickstart defaults
+    project_config = ProjectConfig(
+        project_name=project_name,
+        bot_type="web",
+        transports=["smallwebrtc", "daily"],
+        mode="cascade",
+        stt_service="deepgram_stt",
+        llm_service="openai_responses_llm",
+        tts_service="cartesia_tts",
+        deploy_to_cloud=True,
+    )
+
+    # Generate project
+    generator = ProjectGenerator(project_config)
+    project_path = generator.generate(
+        dest if in_place else output_dir, non_interactive=True, in_place=in_place
+    )
+
+    # Show next steps
+    generator.print_next_steps(project_path, in_place=in_place)
+
+
 def quickstart_command(output_dir: Path | None = None):
     """Create a new Pipecat project with quickstart defaults.
 
-    Sets up a project with SmallWebRTC, Deepgram STT, OpenAI LLM, and Cartesia TTS
-    — the fastest way to get a voice agent running. Dispatched from ``create_command``
-    when the target is ``quickstart`` (e.g. ``pc create quickstart [-o DIR]``).
+    Dispatched from ``create_command`` when the target is ``quickstart`` (e.g.
+    ``pc create quickstart [-o DIR]``). Wraps :func:`scaffold_quickstart` with the
+    standard create error handling.
     """
     try:
-        project_name = "pipecat-quickstart"
-
-        console.print("[bold cyan]Let's create your Pipecat project![/bold cyan]\n")
-
-        # Display all pre-selected defaults
-        console.print(f"[green]✔[/green] Project name: [cyan]{project_name}[/cyan]")
-        console.print("[green]✔[/green] Bot type: [cyan]Web/Mobile[/cyan]")
-        console.print("[green]✔[/green] Transport: [cyan]SmallWebRTC, Daily[/cyan]")
-        console.print(
-            "[green]✔[/green] Pipeline architecture: [cyan]Cascade (STT → LLM → TTS)[/cyan]"
-        )
-        console.print("[green]✔[/green] Speech-to-Text: [cyan]Deepgram[/cyan]")
-        console.print("[green]✔[/green] Language model: [cyan]OpenAI[/cyan]")
-        console.print("[green]✔[/green] Text-to-Speech: [cyan]Cartesia[/cyan]")
-        console.print("[green]✔[/green] Deploy to Pipecat Cloud: [cyan]Yes[/cyan]")
-
-        # Build config with quickstart defaults
-        project_config = ProjectConfig(
-            project_name=project_name,
-            bot_type="web",
-            transports=["smallwebrtc", "daily"],
-            mode="cascade",
-            stt_service="deepgram_stt",
-            llm_service="openai_responses_llm",
-            tts_service="cartesia_tts",
-            deploy_to_cloud=True,
-        )
-
-        # Generate project
-        generator = ProjectGenerator(project_config)
-        project_path = generator.generate(output_dir, non_interactive=True)
-
-        # Show next steps
-        generator.print_next_steps(project_path)
+        scaffold_quickstart(output_dir=output_dir)
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Project creation cancelled.[/yellow]")
