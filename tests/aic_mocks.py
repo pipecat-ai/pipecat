@@ -7,8 +7,9 @@
 """Shared aic_sdk test mocks for the AIC test suite.
 
 Importing in: ``tests/test_aic_filter.py``, ``tests/test_aic_vad.py``,
-``tests/test_aic_quail_vad.py``. Keep behavior aligned with the live
-``aic_sdk`` 2.5.0 surface so the suite stays representative.
+``tests/test_aic_quail_vad.py``, ``tests/test_aic_tyto_analyzer.py``. Keep
+behavior aligned with the live ``aic_sdk`` 2.5.0 surface so the suite stays
+representative.
 """
 
 from typing import Any
@@ -130,3 +131,69 @@ class MockModel:
 
     def get_optimal_sample_rate(self) -> int:
         return self._optimal_sample_rate
+
+
+class MockAnalysisResult:
+    """Stand-in for ``aic_sdk.AnalysisResult`` (Tyto)."""
+
+    def __init__(
+        self,
+        risk_score: float = 0.0,
+        speaker_reverb: float = 0.0,
+        speaker_loudness: float = 0.0,
+        interfering_speech: float = 0.0,
+        media_speech: float = 0.0,
+        noise: float = 0.0,
+        packet_loss: float = 0.0,
+    ) -> None:
+        self.risk_score = risk_score
+        self.speaker_reverb = speaker_reverb
+        self.speaker_loudness = speaker_loudness
+        self.interfering_speech = interfering_speech
+        self.media_speech = media_speech
+        self.noise = noise
+        self.packet_loss = packet_loss
+
+
+class MockCollector:
+    """Stand-in for ``aic_sdk.Collector`` (Tyto).
+
+    Records ``initialize`` configs and buffered arrays so tests can assert on the
+    audio tap. ``raise_on_buffer`` exercises the buffering error path.
+    """
+
+    def __init__(self, raise_on_buffer: bool = False) -> None:
+        self.raise_on_buffer = raise_on_buffer
+        self.initialized_with: list[Any] = []
+        self.buffer_calls: list[np.ndarray] = []
+
+    def initialize(self, config: Any) -> None:
+        self.initialized_with.append(config)
+
+    def buffer(self, audio: np.ndarray) -> None:
+        if self.raise_on_buffer:
+            raise RuntimeError("buffer error")
+        self.buffer_calls.append(audio.copy())
+
+
+class MockAnalyzer:
+    """Stand-in for ``aic_sdk.Analyzer`` (Tyto).
+
+    Returns ``result`` from ``analyze_buffered`` (default all-zeros);
+    ``raise_on_analyze`` exercises the analysis error path.
+    """
+
+    def __init__(
+        self,
+        result: MockAnalysisResult | None = None,
+        raise_on_analyze: bool = False,
+    ) -> None:
+        self.result = result or MockAnalysisResult()
+        self.raise_on_analyze = raise_on_analyze
+        self.analyze_calls = 0
+
+    def analyze_buffered(self) -> MockAnalysisResult:
+        self.analyze_calls += 1
+        if self.raise_on_analyze:
+            raise RuntimeError("analyze error")
+        return self.result
