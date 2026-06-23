@@ -1,0 +1,19 @@
+name: weather_no_function_call
+
+# Text, end to end: ask for the weather. Tests that the bot speaks a correct,
+# grounded answer, WITHOUT checking that it invokes a function. (Useful, for
+# example, for testing Perplexity, which doesn't support tool calling; it
+# answers from its built-in web search instead.)
+
+judge: !include judge_text.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "What's the weather in San Francisco, California? Use Fahrenheit."
+    expect:
+      - event: response
+        eval: "the response describes the weather in San Francisco, including a temperature in degrees"

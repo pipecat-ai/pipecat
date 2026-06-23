@@ -189,8 +189,10 @@ suite:
       - weather_and_restaurant
   - bot: function-calling/function-calling-openrouter.py
     scenarios: [weather_function_call]
+  # Perplexity's completions API doesn't support tool calling, so this bot
+  # answers from web-grounded search instead of invoking a function.
   - bot: function-calling/function-calling-perplexity.py
-    scenarios: [item_price]
+    scenarios: [weather_no_function_call]
   - bot: function-calling/function-calling-qwen.py
     scenarios: [weather_function_call]
   - bot: function-calling/function-calling-sambanova.py
