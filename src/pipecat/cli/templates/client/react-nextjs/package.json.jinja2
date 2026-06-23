@@ -9,15 +9,15 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@pipecat-ai/client-js": "^1.11.0",
-    "@pipecat-ai/client-react": "^1.6.0",
+    "@pipecat-ai/client-js": "^1.12.0",
+    "@pipecat-ai/client-react": "^1.7.1",
 {%- for transport in transports %}
 {%- if transport.value == 'daily' %}
-    "@pipecat-ai/daily-transport": "^1.6.6",
+    "@pipecat-ai/daily-transport": "^1.6.7",
 {%- elif transport.value == 'smallwebrtc' %}
-    "@pipecat-ai/small-webrtc-transport": "^1.10.4",
+    "@pipecat-ai/small-webrtc-transport": "^1.10.5",
 {%- elif transport.value == 'websocket' %}
-    "@pipecat-ai/websocket-transport": "^1.6.7",
+    "@pipecat-ai/websocket-transport": "^1.7.0",
 {%- endif %}
 {%- endfor %}
     "@pipecat-ai/voice-ui-kit": "^0.11.0",
