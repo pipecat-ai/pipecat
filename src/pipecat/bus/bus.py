@@ -168,43 +168,33 @@ class WorkerBus(BaseObject):
 
     async def _router_task(self, sub: BusSubscription):
         """Route system messages inline, data messages to the data queue."""
-        try:
-            while True:
-                message = await sub.queue.get()
-                if isinstance(message, BusSystemMessage):
-                    # A subscriber exception must not tear down the dispatch task,
-                    # or the subscriber would silently stop receiving all future
-                    # messages (including cancel/cleanup). Log and keep going.
-                    try:
-                        await sub.subscriber.on_bus_message(cast(BusMessage, message))
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception:
-                        logger.exception(
-                            f"{self}: subscriber '{sub.subscriber.name}' raised handling "
-                            f"system message {message}; keeping dispatch alive"
-                        )
-                else:
-                    sub.data_queue.put_nowait(message)
-        except asyncio.CancelledError:
-            pass
-
-    async def _data_dispatch_task(self, sub: BusSubscription):
-        """Process data messages sequentially from the data queue."""
-        try:
-            while True:
-                message = await sub.data_queue.get()
+        while True:
+            message = await sub.queue.get()
+            if isinstance(message, BusSystemMessage):
                 # A subscriber exception must not tear down the dispatch task,
                 # or the subscriber would silently stop receiving all future
                 # messages (including cancel/cleanup). Log and keep going.
                 try:
-                    await sub.subscriber.on_bus_message(message)
-                except asyncio.CancelledError:
-                    raise
+                    await sub.subscriber.on_bus_message(cast(BusMessage, message))
                 except Exception:
                     logger.exception(
                         f"{self}: subscriber '{sub.subscriber.name}' raised handling "
-                        f"data message {message}; keeping dispatch alive"
+                        f"system message {message}; keeping dispatch alive"
                     )
-        except asyncio.CancelledError:
-            pass
+            else:
+                sub.data_queue.put_nowait(message)
+
+    async def _data_dispatch_task(self, sub: BusSubscription):
+        """Process data messages sequentially from the data queue."""
+        while True:
+            message = await sub.data_queue.get()
+            # A subscriber exception must not tear down the dispatch task,
+            # or the subscriber would silently stop receiving all future
+            # messages (including cancel/cleanup). Log and keep going.
+            try:
+                await sub.subscriber.on_bus_message(message)
+            except Exception:
+                logger.exception(
+                    f"{self}: subscriber '{sub.subscriber.name}' raised handling "
+                    f"data message {message}; keeping dispatch alive"
+                )

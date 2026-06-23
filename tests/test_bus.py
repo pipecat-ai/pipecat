@@ -295,7 +295,7 @@ class _FailingSub(BusSubscriber):
         self.received.append(message)
 
 
-class TestSubscriberExceptionIsolation(unittest.IsolatedAsyncioTestCase):
+class TestSubscriberException(unittest.IsolatedAsyncioTestCase):
     """A subscriber exception must not stop future delivery to that subscriber."""
 
     async def test_data_dispatch_survives_subscriber_exception(self):
