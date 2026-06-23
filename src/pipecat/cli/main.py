@@ -75,12 +75,12 @@ def _build_app():
     # positional target path followed by options (e.g. `pc create . --bot-type web`).
     app.command("create", help="Create a new Pipecat project")(create_command)
 
-    # `init` makes a project agent-ready (writes AGENTS.md + CLAUDE.md). ignore_unknown_options
+    # `init` initializes a new Pipecat project (writes AGENTS.md + CLAUDE.md). ignore_unknown_options
     # lets it catch legacy scaffolder flags (now `pipecat create`) and redirect with a clear
     # message instead of an opaque "no such option" error.
     app.command(
         "init",
-        help="Make a project agent-ready (writes AGENTS.md + CLAUDE.md)",
+        help="Initialize a new Pipecat project (writes AGENTS.md + CLAUDE.md)",
         context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
     )(init_command)
 

@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for `pipecat init` — making a project agent-ready (AGENTS.md + CLAUDE.md)."""
+"""Tests for `pipecat init` — initializing a project (AGENTS.md + CLAUDE.md)."""
 
 from pathlib import Path
 
@@ -109,14 +109,14 @@ class TestInitAgentReady:
         # Redirect must not write a half-initialized project.
         assert not (tmp_path / "AGENTS.md").exists()
 
-    def test_quickstart_scaffolds_and_makes_agent_ready(self, tmp_path, monkeypatch):
+    def test_quickstart_scaffolds_and_writes_guide(self, tmp_path, monkeypatch):
         # `init quickstart` is the human front door for the canned bot: it scaffolds the
         # quickstart in-place AND drops the agent guide, all in ./pipecat-quickstart.
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(app, ["init", "quickstart"])
         assert result.exit_code == 0, result.output
         project = tmp_path / "pipecat-quickstart"
-        # Agent-ready files...
+        # Coding-agent guide files...
         assert (project / "AGENTS.md").exists()
         assert (project / "CLAUDE.md").read_text(encoding="utf-8").strip() == "@AGENTS.md"
         # ...plus a runnable bot in the same directory.
@@ -173,7 +173,7 @@ class TestBuildMethodRouting:
         # Scaffolding now ends in a built bot, so the from-scratch developer guide is
         # skipped — its place is taken by the scaffold's README (see test_quickstart_*).
         assert not (tmp_path / "GETTING_STARTED.md").exists()
-        # ...but the core agent-ready files are still written.
+        # ...but the core coding-agent guide files are still written.
         assert (tmp_path / "AGENTS.md").exists()
         assert (tmp_path / "CLAUDE.md").exists()
 
@@ -186,7 +186,7 @@ class TestBuildMethodRouting:
         )
         result = runner.invoke(app, ["init", str(tmp_path)])
         assert result.exit_code == 0, result.output
-        assert "agent-ready" in result.output.lower()
+        assert "your project is ready" in result.output.lower()
         assert not (tmp_path / "server").exists()
         # The coding-agent path gets the developer guide.
         assert (tmp_path / "GETTING_STARTED.md").exists()

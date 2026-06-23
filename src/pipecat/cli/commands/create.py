@@ -169,7 +169,7 @@ def create_command(
     # command and routing the `quickstart` token preserves `pc create quickstart [-o ...]`.
     #
     # NOTE: this is the `pipecat create` scaffolder (formerly `pipecat init`). `pipecat init`
-    # is now a separate command that makes a project agent-ready (see commands/init.py).
+    # is now a separate command that initializes a new Pipecat project (see commands/init.py).
     if target == "quickstart":
         return quickstart_command(output_dir=output_dir)
 
@@ -321,7 +321,7 @@ def scaffold_quickstart(
     Sets up a project with SmallWebRTC, Daily, Deepgram STT, OpenAI LLM, and Cartesia
     TTS — the fastest way to get a voice agent running. Shared by ``pipecat create
     quickstart`` (creates a ``pipecat-quickstart`` subfolder) and ``pipecat init
-    quickstart`` (scaffolds in-place into an already agent-ready directory, via
+    quickstart`` (scaffolds in-place into an already-initialized directory, via
     ``dest`` / ``in_place``).
     """
     project_name = "pipecat-quickstart"

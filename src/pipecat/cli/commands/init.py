@@ -6,7 +6,7 @@
 
 """``pipecat init`` — the single starting point for building a Pipecat app.
 
-``pipecat init`` makes a project agent-ready, then routes you to a build method:
+``pipecat init`` initializes a new Pipecat project, then routes you to a build method:
 
 - ``AGENTS.md`` — the coding-agent guide (read natively by most coding agents).
 - ``CLAUDE.md`` — a one-line ``@AGENTS.md`` import so Claude Code loads it too.
@@ -21,7 +21,7 @@ After writing AGENTS.md + CLAUDE.md, interactive ``init`` asks how you want to b
 hand off to a coding agent (which later scaffolds with ``pipecat create``), or scaffold
 a runnable bot right now (it runs the ``pipecat create`` wizard in-place in the same
 directory). ``pipecat init quickstart`` skips the question and scaffolds the canned
-quickstart bot in-place — agent-ready *and* runnable in one step.
+quickstart bot in-place — the coding-agent guide *and* a runnable bot in one step.
 
 ``pipecat create`` remains the scaffolder itself: coding agents and automation call
 it directly (non-interactively); ``init`` is the human entry point that wraps it.
@@ -71,7 +71,7 @@ def _guide_footer() -> str:
 def _write_agent_guide(target_dir: Path, force: bool) -> None:
     """Write the core agent guide — AGENTS.md and CLAUDE.md — into a directory.
 
-    These make the project agent-ready and are wanted on *every* path (coding agent,
+    These set up the project for coding agents and are wanted on *every* path (coding agent,
     scaffold-now, quickstart), so they're written upfront. ``AGENTS.md`` is pipecat-owned
     and always (re)written, so re-running refreshes it after a Pipecat upgrade; ``CLAUDE.md``
     is the developer's own entry point and is only overwritten with ``force``.
@@ -142,7 +142,7 @@ def _is_interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
-def _print_agent_ready(target_dir: Path) -> None:
+def _print_ready(target_dir: Path) -> None:
     """Print the guidance shown when the developer keeps the coding-agent path.
 
     Names the project directory so the developer knows where to open their session,
@@ -152,7 +152,7 @@ def _print_agent_ready(target_dir: Path) -> None:
     """
     where = "here" if target_dir.resolve() == Path.cwd() else f"in [bold]{target_dir}[/bold]"
     console.print(
-        f"\n[bold]Project is agent-ready.[/bold]\n\n"
+        f"\n[bold]Your project is ready.[/bold]\n\n"
         f"Read [bold]{_GETTING_STARTED_FILE}[/bold] for how to prompt your agent, then open a "
         f"coding session {where} to start building."
     )
@@ -170,7 +170,7 @@ def _route_build_method(target_dir: Path) -> None:
     already_scaffolded = (target_dir / "server").exists()
     if already_scaffolded or not _is_interactive():
         _write_developer_guide(target_dir)
-        _print_agent_ready(target_dir)
+        _print_ready(target_dir)
         return
 
     import questionary
@@ -189,7 +189,7 @@ def _route_build_method(target_dir: Path) -> None:
     # `ask()` returns None on Ctrl-C / EOF — fall through to the safe agent path.
     if choice != "scaffold":
         _write_developer_guide(target_dir)
-        _print_agent_ready(target_dir)
+        _print_ready(target_dir)
         return
 
     # Scaffold now: run the `create` wizard in-place. The scaffold lands in the same
@@ -213,11 +213,11 @@ def _route_build_method(target_dir: Path) -> None:
 
 
 def _init_quickstart(force: bool) -> None:
-    """``pipecat init quickstart``: the canned quickstart, made agent-ready.
+    """``pipecat init quickstart``: the canned quickstart, with the coding-agent guide.
 
     Writes the agent guide into ``pipecat-quickstart/`` and scaffolds the quickstart
-    bot in-place there, so the learner's first project is both runnable and
-    agent-ready. The human counterpart to ``pipecat create quickstart`` (which omits
+    bot in-place there, so the learner's first project is both runnable and set up for
+    coding agents. The human counterpart to ``pipecat create quickstart`` (which omits
     the guide). Non-interactive — it's a fixed preset, so there's no build-method
     question.
 
@@ -245,8 +245,7 @@ def init_command(
     ctx: typer.Context,
     target: str | None = typer.Argument(
         None,
-        help="Directory to make agent-ready (or 'quickstart' for the canned bot). "
-        "Created if missing.",
+        help="Directory to initialize (or 'quickstart' for the canned bot). Created if missing.",
     ),
     force: bool = typer.Option(
         False,
@@ -254,7 +253,7 @@ def init_command(
         help=f"Also overwrite an existing {_CLAUDE_FILE} ({_AGENTS_FILE} is always refreshed).",
     ),
 ):
-    """Make a project agent-ready, then choose how to build.
+    """Initialize a new Pipecat project, then choose how to build.
 
     Writes AGENTS.md + CLAUDE.md + GETTING_STARTED.md, then (interactively) hands you
     off to a coding agent or scaffolds a runnable bot in-place with ``pipecat create``.
@@ -263,11 +262,11 @@ def init_command(
 
         pipecat init                 # prompt for a directory, then choose how to build
         pipecat init my-bot          # set up ./my-bot
-        pipecat init quickstart      # agent-ready canned quickstart bot in ./pipecat-quickstart
+        pipecat init quickstart      # canned quickstart bot in ./pipecat-quickstart
         pipecat init my-bot --force  # overwrite existing files in ./my-bot
         pipecat init .               # set up the current directory
     """
-    # `pipecat init quickstart`: scaffold the canned bot in-place, made agent-ready.
+    # `pipecat init quickstart`: scaffold the canned bot in-place, with the coding-agent guide.
     if target == "quickstart":
         return _init_quickstart(force)
 
@@ -278,7 +277,7 @@ def init_command(
         unexpected = " ".join(ctx.args)
         console.print(
             f"[red]Unexpected arguments:[/red] {unexpected}\n\n"
-            "`pipecat init` makes a project agent-ready (writes AGENTS.md, CLAUDE.md, "
+            "`pipecat init` initializes a new Pipecat project (writes AGENTS.md, CLAUDE.md, "
             "and GETTING_STARTED.md); it takes only an optional target directory and `--force`.\n"
             "To scaffold non-interactively, use [bold]`pipecat create`[/bold] — run "
             "`pipecat create --help`."
