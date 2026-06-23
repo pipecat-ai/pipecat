@@ -16,8 +16,12 @@ pipecat Frame pipeline.
 Each participant publishes under a per-participant broadcast path
 ``<namespace>/<participant_id>`` (e.g. ``pipecat/bot0``); the bot
 subscribes to the peer at ``<namespace>/<peer_id>``. Audio rides on a
-single Opus track; transcript (RTVI JSON) rides on a raw byte track in
-the same broadcast.
+single Opus track; transcript (RTVI JSON) rides on a fixed-name
+``transcript.json`` raw byte track in the same broadcast (one JSON
+message per group). The transcript is a side-channel, like moq-boy's
+``status``/``command`` tracks: it deliberately bypasses the catalog
+(which only describes media renditions), so the browser reads it by
+the well-known name rather than by catalog discovery.
 
 Two modes:
 
@@ -28,6 +32,9 @@ Two modes:
   the need for a separate ``moq-relay`` process for local dev. The
   self-signed cert fingerprints are exposed via
   :attr:`MOQTransport.cert_fingerprints` so a browser can pin them.
+
+For a long-lived multi-session agent that discovers clients by MoQ
+announcement (no ``/start`` control plane), see :mod:`pipecat.transports.moq.agent`.
 """
 
 import asyncio
@@ -68,7 +75,11 @@ DEFAULT_NAMESPACE = "pipecat"
 DEFAULT_PARTICIPANT_ID = "bot0"
 DEFAULT_PEER_ID = "client0"
 DEFAULT_AUDIO_OUT_TRACK = "bot-audio"
-DEFAULT_TRANSCRIPT_TRACK = "transcript"
+# Fixed-name JSON side-channel track (cf. ``catalog.json``). Carries RTVI
+# events, one JSON message per group. Not a catalog rendition, so the
+# browser subscribes by this well-known name. Delta-encoding (moq-json) does
+# not apply: RTVI is a stream of discrete events, not a mutating document.
+DEFAULT_TRANSCRIPT_TRACK = "transcript.json"
 
 # Pin the Opus wire rate to its highest supported internal rate (Opus
 # supports {8, 12, 16, 24, 48} kHz). Chrome's WebCodecs Opus decoder
@@ -148,7 +159,9 @@ class MOQParams(TransportParams):
         peer_id: The id of the peer (browser/client) the bot subscribes
             to: ``<namespace>/<peer_id>``.
         audio_out_track: Name of the bot's outgoing audio track.
-        transcript_track: Name of the bot's outgoing transcript track.
+        transcript_track: Name of the bot's outgoing transcript track. A
+            fixed-name raw byte track carrying RTVI JSON (one message per
+            group), discovered by convention rather than via the catalog.
         verify_ssl: Verify the relay's TLS certificate. Client mode only.
         connection_timeout: Seconds to wait for the peer broadcast to be
             announced before giving up.
