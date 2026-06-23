@@ -12,7 +12,7 @@ is the only glue needed:
 
 - **Inbound** (harness → bot): JSON RTVI messages are wrapped in an
   :class:`~pipecat.frames.frames.InputTransportMessageFrame` so the bot's
-  ``RTVIProcessor`` parses and routes them (``send-text``, ``raw-audio``,
+  ``RTVIProcessor`` parses and routes them (``send-text``, ``raw-audio``, ``dtmf``,
   ``client-ready``, ...). Two control messages are the exception: a
   ``client-message`` with ``t = "eval-context"`` is short-circuited into an
   :class:`LLMMessagesUpdateFrame` (reseeding the bot's context), and one with

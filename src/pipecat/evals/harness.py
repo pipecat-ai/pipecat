@@ -38,7 +38,7 @@ scenario ``event:``             RTVI server message(s)
 Matching semantics: expected events must appear in the specified order, but
 unmatched events may appear between them (so a scenario doesn't have to
 enumerate every event the bot emits). The ``within_ms`` budget for each
-expectation is measured from the most recent ``send-text`` / ``raw-audio`` send
+expectation is measured from the most recent ``send-text`` / ``raw-audio`` / ``dtmf`` send
 (default 60s when omitted).
 
 An ``llm_response`` with a content check (``text_contains`` / ``eval:``)
@@ -184,8 +184,8 @@ class EvalTurnProgress:
 class EvalSession:
     """Runs one :class:`EvalScenario` against a bot over a single WebSocket session.
 
-    Connects as an RTVI client, drives each turn (sending ``send-text`` or
-    ``raw-audio``), collects the RTVI events the bot emits, and asserts on them.
+    Connects as an RTVI client, drives each turn (sending ``send-text``,
+    ``raw-audio``, or ``dtmf``), collects the RTVI events the bot emits, and asserts on them.
     Build one with :meth:`from_scenario` (which constructs the judge, speech, and
     transcriber the scenario needs), then await :meth:`run`.
     """
