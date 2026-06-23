@@ -37,7 +37,7 @@ class VoiceFormatter:
         normalize_acronyms: bool = True,
         expand_currency: bool = True,
         expand_numbers: bool = False,
-        number_digit_cutoff: int | None = 2025,
+        number_digit_cutoff: int | None = None,
         expand_percentages: bool = True,
         expand_units: bool = True,
         email_to_speech: bool = True,
@@ -59,8 +59,8 @@ class VoiceFormatter:
                 since it can affect numbers that are better read as digits. Requires
                 ``num2words``.
             number_digit_cutoff: Numbers above this value are read digit-by-digit
-                instead of as a quantity. ``None`` disables the cutoff. Only used
-                when ``expand_numbers=True``.
+                instead of as a quantity. Defaults to ``None`` (expand all numbers
+                as words). Only used when ``expand_numbers=True``.
             expand_percentages: Expand percentage expressions (e.g. ``"50%"`` →
                 ``"fifty percent"``). Requires ``num2words``.
             expand_units: Expand unit abbreviations (e.g. ``"5km"`` →
