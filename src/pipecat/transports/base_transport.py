@@ -36,6 +36,18 @@ class TransportParams(BaseModel):
         audio_out_end_silence_secs: How much silence to send after an EndFrame (0 for no silence).
         audio_out_auto_silence: Insert silence frames when the audio output queue is empty.
             When False, the transport will wait for audio data instead of inserting silence.
+        audio_out_send_lead_secs: Maximum seconds of audio the paced sender may push ahead of
+            real-time playback, acting as a jitter buffer. The receiving endpoint (e.g. a
+            telephony provider) buffers whatever is sent early, so a send stall shorter than
+            this lead is absorbed without an audible gap. ``0.0`` (default) keeps strict
+            just-in-time pacing. Only applies to transports that emulate an audio device by
+            pacing their sends (e.g. WebSocket/telephony); transports backed by a real device
+            or an SFU ignore it. Must be ``>= 0``. A small value (typically 0.5-2.0s) is
+            usually enough to cover process stalls (event-loop hiccups, CPU throttling);
+            larger values give diminishing returns and increase cost: bot-stopped and
+            end-of-call are delayed by up to the lead, and on transports that don't clear the
+            endpoint buffer on interruption (e.g. plain WebSocket) up to the lead of already
+            sent audio keeps playing after a barge-in.
         audio_in_enabled: Enable audio input streaming.
         audio_in_sample_rate: Input audio sample rate in Hz.
         audio_in_channels: Number of input audio channels.
@@ -71,6 +83,7 @@ class TransportParams(BaseModel):
     audio_out_destinations: list[str] = Field(default_factory=list)
     audio_out_end_silence_secs: int = 2
     audio_out_auto_silence: bool = True
+    audio_out_send_lead_secs: float = Field(default=0.0, ge=0.0)
     audio_in_enabled: bool = False
     audio_in_sample_rate: int | None = None
     audio_in_channels: int = 1

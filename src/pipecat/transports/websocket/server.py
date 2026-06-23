@@ -288,14 +288,6 @@ class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
 
         self._websocket: websockets.WebSocketServerProtocol | None = None
 
-        # write_audio_frame() is called quickly, as soon as we get audio
-        # (e.g. from the TTS), and since this is just a network connection we
-        # would be sending it to quickly. Instead, we want to block to emulate
-        # an audio device, this is what the send interval is. It will be
-        # computed on StartFrame.
-        self._send_interval = 0
-        self._next_send_time = 0
-
         # Whether we have seen a StartFrame already.
         self._initialized = False
 
@@ -327,7 +319,6 @@ class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
 
         if self._params.serializer:
             await self._params.serializer.setup(frame)
-        self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
@@ -364,7 +355,6 @@ class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
 
         if isinstance(frame, InterruptionFrame):
             await self._write_frame(frame)
-            self._next_send_time = 0
 
     async def send_message(
         self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
@@ -430,17 +420,6 @@ class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
             logger.debug(f"{self}: client disconnected while sending")
         except Exception as e:
             logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
-
-    async def _write_audio_sleep(self):
-        """Simulate audio device timing by sleeping between audio chunks."""
-        # Simulate a clock.
-        current_time = time.monotonic()
-        sleep_duration = max(0, self._next_send_time - current_time)
-        await asyncio.sleep(sleep_duration)
-        if sleep_duration == 0:
-            self._next_send_time = time.monotonic() + self._send_interval
-        else:
-            self._next_send_time += self._send_interval
 
 
 class SingleClientWebsocketServerTransport(BaseTransport):

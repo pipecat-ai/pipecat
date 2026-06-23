@@ -90,6 +90,15 @@ class BaseOutputTransport(FrameProcessor):
         # it.
         self._media_senders: dict[Any, BaseOutputTransport.MediaSender] = {}
 
+        # Paced audio sender clock. Network transports have no real playback
+        # device to provide back-pressure, so they emulate one by pacing their
+        # sends (see `_write_audio_sleep`). `_send_interval` is the real playback
+        # duration of one output chunk and `_next_send_time` is the monotonic
+        # deadline by which the next chunk must be sent. Both are initialized on
+        # StartFrame. Transports backed by a real device or an SFU don't use them.
+        self._send_interval = 0.0
+        self._next_send_time = 0.0
+
         if params.video_out_bitrate is not None:
             import warnings
 
@@ -133,6 +142,12 @@ class BaseOutputTransport(FrameProcessor):
         # will chunk them. This will help with interruption handling.
         audio_bytes_10ms = int(self._sample_rate / 100) * self._params.audio_out_channels * 2
         self._audio_chunk_size = audio_bytes_10ms * self._params.audio_out_10ms_chunks
+
+        # Real playback duration of one output chunk. `_audio_chunk_size` is in
+        # bytes and audio is 16-bit (2 bytes/sample), so dividing by 2 converts
+        # bytes to samples before dividing by the sample rate.
+        if self._sample_rate > 0:
+            self._send_interval = (self._audio_chunk_size / self._sample_rate) / 2
 
     async def stop(self, frame: EndFrame):
         """Stop the output transport and cleanup resources.
@@ -194,6 +209,32 @@ class BaseOutputTransport(FrameProcessor):
 
         # Sending a frame indicating that the output transport is ready and able to receive frames.
         await self.push_frame(OutputTransportReadyFrame(), FrameDirection.UPSTREAM)
+
+    async def _write_audio_sleep(self):
+        """Pace audio sends to emulate a real-time playback device.
+
+        Network transports send audio as fast as they receive it, so without
+        pacing they would flood the receiving endpoint. This blocks between
+        chunks to match real-time playback.
+
+        Sends are allowed to run up to ``audio_out_send_lead_secs`` ahead of real
+        time. That lead is a jitter buffer: the endpoint buffers whatever it
+        receives early, so a send stall shorter than the lead is absorbed and
+        then caught up by a burst, with no audible gap. With the default lead of
+        ``0.0`` this is strict just-in-time pacing.
+        """
+        now = time.monotonic()
+        sleep_duration = max(0, self._next_send_time - now - self._params.audio_out_send_lead_secs)
+        await asyncio.sleep(sleep_duration)
+        if now > self._next_send_time:
+            # We were already past this chunk's deadline before sleeping: stream
+            # start, a post-interruption reset (deadline is 0), or a stall longer
+            # than the lead. Re-anchor the schedule to now.
+            self._next_send_time = time.monotonic() + self._send_interval
+        else:
+            # On schedule, possibly within the lead window. Advance on the
+            # absolute grid so pacing doesn't drift and the lead is preserved.
+            self._next_send_time += self._send_interval
 
     async def send_message(
         self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
@@ -541,6 +582,12 @@ class BaseOutputTransport(FrameProcessor):
             Args:
                 _: The start interruption frame (unused).
             """
+            # Abandon any audio buffered ahead of real time. Telephony
+            # serializers clear the endpoint's playout buffer on interruption,
+            # so the send lead must be dropped (not drained) on the way to
+            # bot-stopped below; resetting the deadline makes the drain a no-op.
+            self._transport._next_send_time = 0
+
             # Cancel tasks.
             await self._cancel_clock_task()
             await self._cancel_video_task()
@@ -675,8 +722,31 @@ class BaseOutputTransport(FrameProcessor):
             await self._transport.push_frame(downstream_frame)
             await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
+        async def _drain_send_lead(self):
+            """Wait for audio sent ahead of real time (the send lead) to play out.
+
+            When ``audio_out_send_lead_secs`` is set, the paced sender runs ahead
+            of real playback, so ``_next_send_time`` is the monotonic time the
+            audio handed to the endpoint finishes playing. Sleeping until then
+            keeps playback-derived signals (e.g. bot-stopped) aligned with what
+            the listener actually hears. A no-op when no lead is configured or
+            the buffer has already drained (e.g. after an interruption reset).
+            """
+            if self._params.audio_out_send_lead_secs <= 0:
+                return
+            remaining = self._transport._next_send_time - time.monotonic()
+            if remaining > 0:
+                await asyncio.sleep(remaining)
+
         async def _bot_stopped_speaking(self):
             """Handle bot stopped speaking event."""
+            if not self._bot_speaking:
+                return
+
+            # Let the send-lead buffer play out so this reflects real playback
+            # end. Re-check afterwards: the await yields, and an interruption
+            # may have stopped us in the meantime.
+            await self._drain_send_lead()
             if not self._bot_speaking:
                 return
 
@@ -838,6 +908,9 @@ class BaseOutputTransport(FrameProcessor):
                 if isinstance(frame, EndFrame):
                     # Send some final silence so words don't cut out.
                     await self._send_silence(self._params.audio_out_end_silence_secs)
+                    # Wait for the send-lead buffer to play out before letting the
+                    # transport close, so the tail isn't cut off.
+                    await self._drain_send_lead()
                     break
 
                 # Handle frame.
