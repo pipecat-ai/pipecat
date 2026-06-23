@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""``pipecat init`` — the single front door for building a Pipecat app.
+"""``pipecat init`` — the single starting point for building a Pipecat app.
 
 ``pipecat init`` makes a project agent-ready, then routes you to a build method:
 
