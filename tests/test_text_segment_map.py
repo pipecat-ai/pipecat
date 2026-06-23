@@ -6,7 +6,7 @@
 
 import unittest
 
-from pipecat.utils.context.text_segment_map import TextSegment, TextSegmentMap
+from pipecat.utils.context.text_segment_map import TextSegmentMap
 
 
 class TestTextSegmentMapBuild(unittest.TestCase):
@@ -138,23 +138,28 @@ class TestTextSegmentMapAdvance(unittest.TestCase):
 
 
 class TestTextSegmentMapWithLlmText(unittest.TestCase):
-    def test_llm_pos_advances_past_tag_content(self):
+    def test_llm_pos_advances_past_digits_stops_before_closing_tag(self):
+        # Transformed segment: "$42" → "forty two dollars" (15 alnum)
+        # advance_by_alnums("<card>$42</card>", 0, 2) counts "4" and "2",
+        # then the trailing loop hits "<" and stops — result is 9.
         smap = TextSegmentMap(
             "forty two dollars",
             "$42",
             llm_text="<card>$42</card>",
         )
-        # "forty two dollars" normalized = "fortytwodollars" = 15 alnum chars
-        # advance_by_alnums("<card>$42</card>", 0, 2) stops before </card>
         smap.advance(15)
-        # llm_pos is after the "42" but before the closing tag
-        self.assertGreaterEqual(smap.llm_pos, 2)
-        self.assertLessEqual(smap.llm_pos, len("<card>$42</card>"))
+        # Position 9 is the "<" that opens "</card>" — the two alnum digits
+        # have been consumed but the closing tag is still unread (it will be
+        # swept by WordCompletionTracker on the final "is_complete" word).
+        self.assertEqual(smap.llm_pos, 9)
 
     def test_llm_pos_defaults_to_original_text_when_not_provided(self):
+        # "50%" → "fifty percent" (12 alnum).  original_alnum_count = 2 ("50").
+        # advance_by_alnums("50%", 0, 2) consumes "5" and "0", then the
+        # trailing loop advances past "%" (non-alnum, non-space, non-tag) → 3.
         smap = TextSegmentMap("fifty percent", "50%")
-        smap.advance(len("fiftypercent"))
-        self.assertGreaterEqual(smap.llm_pos, 2)
+        smap.advance(12)
+        self.assertEqual(smap.llm_pos, 3)  # past "50%"
 
 
 class TestTextSegmentMapReset(unittest.TestCase):
