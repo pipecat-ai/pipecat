@@ -3567,6 +3567,28 @@
       "location": "pipecat/transports/whatsapp/client.py"
     },
     {
+      "subject": "TaskManager.setup",
+      "module": "pipecat.utils.asyncio.task_manager",
+      "kind": "method",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "TaskManager",
+      "message": "`TaskManager.setup` is deprecated since 1.5.0 and will be removed in 2.0.0. Use `TaskManager` instead.",
+      "location": "pipecat/utils/asyncio/task_manager.py"
+    },
+    {
+      "subject": "TaskManagerParams",
+      "module": "pipecat.utils.asyncio.task_manager",
+      "kind": "class",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "TaskManager",
+      "message": "`TaskManagerParams` is deprecated since 1.5.0 and will be removed in 2.0.0. Use `TaskManager` instead.",
+      "location": "pipecat/utils/asyncio/task_manager.py"
+    },
+    {
       "subject": "LLMContextSummarizationConfig",
       "module": "pipecat.utils.context.llm_context_summarization",
       "kind": "class",
@@ -3587,6 +3609,17 @@
       "replacement": "timeout_secs",
       "message": "Use ``timeout_secs`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/workers/llm/tool_decorator.py"
+    },
+    {
+      "subject": "WorkerRunner.loop",
+      "module": "pipecat.workers.runner",
+      "kind": "parameter",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "task_manager",
+      "message": "Use ``task_manager`` (which owns its own loop) instead. ``loop`` will be removed in 2.0.0.",
+      "location": "pipecat/workers/runner.py"
     },
     {
       "subject": "WorkerRunner.run.worker",

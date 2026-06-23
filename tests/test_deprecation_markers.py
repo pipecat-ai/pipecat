@@ -43,6 +43,7 @@ from pipecat.pipeline.pipeline import Pipeline  # noqa: E402
 from pipecat.pipeline.runner import PipelineRunner  # noqa: E402
 from pipecat.pipeline.worker import PipelineTask, PipelineTaskParams  # noqa: E402
 from pipecat.processors.filters.identity_filter import IdentityFilter  # noqa: E402
+from pipecat.utils.asyncio.task_manager import TaskManager  # noqa: E402
 
 SRC_ROOT = Path(__file__).parent.parent / "src" / "pipecat"
 _SCAN = dscan.scan_source(SRC_ROOT)
@@ -143,7 +144,7 @@ def test_pipeline_task_warns():
 @pytest.mark.asyncio
 async def test_pipeline_task_params_warns():
     with pytest.warns(DeprecationWarning, match="`PipelineTaskParams` is deprecated"):
-        PipelineTaskParams(loop=asyncio.get_running_loop())
+        PipelineTaskParams(task_manager=TaskManager())
 
 
 @pytest.mark.asyncio

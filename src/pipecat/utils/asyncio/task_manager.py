@@ -16,14 +16,25 @@ import inspect
 import traceback
 from abc import ABC, abstractmethod
 from collections.abc import Coroutine, Sequence
+from contextvars import Context
 from dataclasses import dataclass
 
 from loguru import logger
 
+from pipecat.utils.deprecation import deprecated
 
+
+@deprecated(
+    "`TaskManagerParams` is deprecated since 1.5.0 and will be removed in 2.0.0. "
+    "Use `TaskManager` instead."
+)
 @dataclass
 class TaskManagerParams:
     """Configuration parameters for task manager initialization.
+
+    .. deprecated:: 1.5.0
+        Use :class:`TaskManager` (pass ``loop`` to its constructor) instead.
+        Will be removed in 2.0.0.
 
     Parameters:
         loop: The asyncio event loop to use for task management.
@@ -39,15 +50,6 @@ class BaseTaskManager(ABC):
     """
 
     @abstractmethod
-    def setup(self, params: TaskManagerParams):
-        """Initialize the task manager with configuration parameters.
-
-        Args:
-            params: Configuration parameters for task management.
-        """
-        pass
-
-    @abstractmethod
     def get_event_loop(self) -> asyncio.AbstractEventLoop:
         """Get the event loop used by this task manager.
 
@@ -57,7 +59,12 @@ class BaseTaskManager(ABC):
         pass
 
     @abstractmethod
-    def create_task(self, coroutine: Coroutine, name: str) -> asyncio.Task:
+    def create_task(
+        self,
+        coroutine: Coroutine,
+        name: str,
+        context: Context | None = None,
+    ) -> asyncio.Task:
         """Creates and schedules a new asyncio Task that runs the given coroutine.
 
         The task is added to a global set of created tasks.
@@ -65,6 +72,7 @@ class BaseTaskManager(ABC):
         Args:
             coroutine: The coroutine to be executed within the task.
             name: The name to assign to the task for identification.
+            context: Optional context manager to use when creating the task.
 
         Returns:
             The created task object.
@@ -113,34 +121,52 @@ class TaskManager(BaseTaskManager):
 
     """
 
-    def __init__(self) -> None:
-        """Initialize the task manager with empty task registry."""
-        self._tasks: dict[str, TaskData] = {}
-        self._params: TaskManagerParams | None = None
+    def __init__(
+        self,
+        *,
+        context: Context | None = None,
+        loop: asyncio.AbstractEventLoop | None = None,
+    ) -> None:
+        """Initialize the task manager with empty task registry.
 
+        Args:
+            context: Optional context manager to use when creating tasks.
+            loop: Event loop to use. If None, uses the current running loop.
+        """
+        self._context = context
+        self._loop = loop or asyncio.get_running_loop()
+        self._tasks: dict[str, TaskData] = {}
+
+    @deprecated(
+        "`TaskManager.setup` is deprecated since 1.5.0 and will be removed in 2.0.0. "
+        "Use `TaskManager` instead."
+    )
     def setup(self, params: TaskManagerParams):
         """Initialize the task manager with configuration parameters.
+
+        .. deprecated:: 1.5.0
+            Use the :class:`TaskManager` constructor (``loop`` / ``context``)
+            instead. Will be removed in 2.0.0.
 
         Args:
             params: Configuration parameters for task management.
         """
-        if not self._params:
-            self._params = params
+        pass
 
     def get_event_loop(self) -> asyncio.AbstractEventLoop:
         """Get the event loop used by this task manager.
 
         Returns:
             The asyncio event loop instance.
-
-        Raises:
-            Exception: If the task manager is not properly set up.
         """
-        if not self._params:
-            raise Exception("TaskManager is not setup: unable to get event loop")
-        return self._params.loop
+        return self._loop
 
-    def create_task(self, coroutine: Coroutine, name: str) -> asyncio.Task:
+    def create_task(
+        self,
+        coroutine: Coroutine,
+        name: str,
+        context: Context | None = None,
+    ) -> asyncio.Task:
         """Creates and schedules a new asyncio Task that runs the given coroutine.
 
         The task is added to a global set of created tasks.
@@ -148,6 +174,7 @@ class TaskManager(BaseTaskManager):
         Args:
             coroutine: The coroutine to be executed within the task.
             name: The name to assign to the task for identification.
+            context: Optional context manager to use when creating the task.
 
         Returns:
             The created task object.
@@ -168,10 +195,7 @@ class TaskManager(BaseTaskManager):
                 last = tb[-1]
                 logger.error(f"{name} unexpected exception ({last.filename}:{last.lineno}): {e}")
 
-        if not self._params:
-            raise Exception("TaskManager is not setup: unable to get event loop")
-
-        task = self._params.loop.create_task(run_coroutine())
+        task = self._loop.create_task(run_coroutine(), context=context or self._context)
         task.set_name(name)
 
         def close_unawaited_coroutine(_: asyncio.Task):
