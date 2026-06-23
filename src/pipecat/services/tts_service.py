@@ -1095,6 +1095,19 @@ class TTSService(AIService):
             if aggregation_type == type or aggregation_type == "*":
                 transformed_text = await transform(transformed_text, type)
 
+        # A text transform can legitimately empty the text — e.g. stripping a
+        # leaked tool call that was the entire utterance, or collapsing a
+        # delivery/laughter tag. The pre-transform whitespace gates above don't
+        # catch this because the *input* was non-empty. Sending empty/whitespace
+        # to the provider crashes strict engines (Cartesia returns HTTP 400
+        # "transcript must not be empty"/"No valid transcripts passed", which
+        # killed the call). Mirror the pre-transform gate and skip synthesis for
+        # this frame so the turn stays alive.
+        if not transformed_text or not transformed_text.strip():
+            if not self._is_streaming_tokens:
+                await self.stop_processing_metrics()
+            return
+
         self._tts_contexts[context_id] = TTSContext(
             append_to_context=append_tts_text_to_context
             if append_tts_text_to_context is not None
