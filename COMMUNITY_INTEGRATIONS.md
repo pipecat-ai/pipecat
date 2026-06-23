@@ -465,7 +465,8 @@ except Exception as e:
 ### Testing
 
 - Your foundational example serves as a valuable integration-level test
-- Unit tests are nice to have. As the Pipecat teams provides better guidance, we will encourage unit testing more
+- Use the behavioral eval harness (`pipecat eval run`) to test your foundational example end-to-end; [see the docs](https://docs.pipecat.ai/pipecat/evals/overview) for more details
+- Unit tests are nice to have
 
 ## Disclaimer
 
