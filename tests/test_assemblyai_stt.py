@@ -19,8 +19,14 @@ def _query(service: AssemblyAISTTService) -> dict[str, list[str]]:
     return parse_qs(urlparse(service._build_ws_url()).query)
 
 
-def test_continuous_partials_defaults_to_true_for_u3_rt_pro():
-    # u3-rt-pro is the default model; continuous_partials should be on by default.
+def test_default_model_is_universal_3_5_pro():
+    # universal-3-5-pro is the default model sent to AssemblyAI.
+    service = AssemblyAISTTService(api_key="test-key")
+    assert _query(service)["speech_model"] == ["universal-3-5-pro"]
+
+
+def test_continuous_partials_defaults_to_true_for_u3_pro():
+    # universal-3-5-pro is the default U3 Pro model; continuous_partials should be on by default.
     service = AssemblyAISTTService(api_key="test-key")
     assert _query(service)["continuous_partials"] == ["true"]
 

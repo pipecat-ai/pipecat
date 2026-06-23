@@ -278,7 +278,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="u3-rt-pro",
+            model="universal-3-5-pro",
             language=Language.EN,
             formatted_finals=True,
             word_finalization_max_wait_time=None,

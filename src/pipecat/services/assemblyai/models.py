@@ -141,8 +141,8 @@ class AssemblyAIConnectionParams(BaseModel):
         min_end_of_turn_silence_when_confident: DEPRECATED. Use min_turn_silence instead.
         max_turn_silence: Maximum silence duration before forcing end-of-turn.
         keyterms_prompt: List of key terms to guide transcription. Will be JSON serialized before sending.
-        prompt: Optional text prompt to guide the transcription. Only used when speech_model is "u3-rt-pro".
-        speech_model: Select between English, multilingual, and u3-rt-pro models. Defaults to "u3-rt-pro".
+        prompt: Optional text prompt to guide the transcription. Only used when speech_model is "universal-3-5-pro".
+        speech_model: Select between English, multilingual, and Universal-3.5 Pro models. Defaults to "universal-3-5-pro".
         language_detection: Enable automatic language detection. Only applicable to
             universal-streaming-multilingual. When enabled, Turn messages include
             language_code and language_confidence fields. Defaults to None (not sent).
@@ -176,7 +176,7 @@ class AssemblyAIConnectionParams(BaseModel):
         "u3-rt-pro",
         "u3-rt-pro-beta-1",
         "universal-3-5-pro",
-    ] = "u3-rt-pro"
+    ] = "universal-3-5-pro"
     language_detection: bool | None = None
     format_turns: bool = True
     speaker_labels: bool | None = None
