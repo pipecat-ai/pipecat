@@ -79,7 +79,6 @@ Example::
 
 import asyncio
 import base64
-import json
 import mimetypes
 import time
 import traceback
@@ -104,7 +103,6 @@ from pipecat.evals.scenario import (
     describe_config,
 )
 from pipecat.evals.serializer import (
-    EVAL_BOT_AUDIO_TYPE,
     EVAL_CANCEL_MESSAGE_TYPE,
     EVAL_CONFIGURE_MESSAGE_TYPE,
     EVAL_CONTEXT_MESSAGE_TYPE,
@@ -113,12 +111,14 @@ from pipecat.evals.serializer import (
 from pipecat.evals.speech import EvalSpeech
 from pipecat.evals.transcribe import EvalTranscriber
 from pipecat.frames.frames import (
+    EndFrame,
     Frame,
     FunctionCallInProgressFrame,
     InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
+    OutputTransportMessageUrgentFrame,
     TranscriptionFrame,
     TTSTextFrame,
     UserStartedSpeakingFrame,
@@ -126,7 +126,14 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineWorker
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.serializers.rtvi_client import RTVIClientSerializer
+from pipecat.transports.websocket.client import WebsocketClientParams
+from pipecat.transports.websocket.rtvi_client import RTVIClientTransport
 from pipecat.utils.base_object import BaseObject
+from pipecat.workers.runner import WorkerRunner
 
 # Generous default so an expectation without an explicit ``within_ms`` waits
 # long enough for slow LLM/TTS responses (and function-call round-trips) rather
@@ -275,6 +282,27 @@ class EvalTurnProgress:
     detail: str = ""
 
 
+class _BotFrameSink(FrameProcessor):
+    """Pipeline tap that turns the bot's incoming frames into matcher events.
+
+    Sits at the end of the eval pipeline; for every frame the
+    :class:`RTVIClientTransport` produces it calls back into the session's
+    :meth:`EvalSession._frames_to_events` and enqueues the results for the
+    matcher, then passes the frame on. Outgoing frames (the RTVI client messages
+    the session injects) flow through untouched — they don't map to events.
+    """
+
+    def __init__(self, session: "EvalSession"):
+        super().__init__()
+        self._session = session
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        for event in self._session._frames_to_events(frame):
+            await self._session._enqueue(event)
+        await self.push_frame(frame, direction)
+
+
 class EvalSession(BaseObject):
     """Runs one :class:`EvalScenario` against a bot over a single WebSocket session.
 
@@ -364,6 +392,9 @@ class EvalSession(BaseObject):
         self._trigger_disconnect = trigger_disconnect or scenario.trigger_disconnect
 
         self._ws: ClientConnection | None = None
+        # The eval pipeline that talks to the bot (built in run()).
+        self._transport: RTVIClientTransport | None = None
+        self._worker: PipelineWorker | None = None
         self._queue: asyncio.Queue = asyncio.Queue()
         # function_call events popped while matching another expectation, held so
         # the turn's calls can be matched by name in any order (reset per turn).
@@ -536,11 +567,11 @@ class EvalSession(BaseObject):
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
 
-        # Retry the connect until the bot accepts it or we time out. Attempts
-        # before the bot is listening fail with ConnectionRefused (no WebSocket
-        # handshake, so no server-side error) — this doubles as readiness waiting,
-        # which is why callers (e.g. the release orchestrator) can launch the bot
-        # and connect straight away without a separate, handshake-noisy port probe.
+        # Readiness probe: retry-connect until the bot accepts (so callers can launch
+        # the bot and connect immediately), then close it — the transport owns the
+        # real session. A bot that never accepts is a clean <connect> failure. The
+        # eval transport only fires on_client_disconnected when trigger_disconnect is
+        # set, so this transient probe doesn't perturb the bot.
         deadline = time.monotonic() + self._connect_timeout_s
         connect_error: Exception | None = None
         while self._ws is None and time.monotonic() < deadline:
@@ -566,9 +597,26 @@ class EvalSession(BaseObject):
                 turns=turns,
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
+        await self._ws.close()
+        self._ws = None
+
+        # Build the eval pipeline: the RTVI client transport talks to the bot, and a
+        # sink turns the bot's frames into matcher events.
+        params = WebsocketClientParams(
+            audio_in_enabled=self._scenario.bot_audio,
+            audio_out_enabled=self._scenario.bot_audio,
+            serializer=RTVIClientSerializer(),
+        )
+        transport = RTVIClientTransport(self._connect_url(), params)
+        pipeline = Pipeline([transport.input(), _BotFrameSink(self), transport.output()])
+        worker = PipelineWorker(pipeline, enable_rtvi=False, cancel_on_idle_timeout=False)
+        self._transport = transport
+        self._worker = worker
+        runner = WorkerRunner()
+        await runner.add_workers(worker)
+        run_task = asyncio.create_task(runner.run())
 
         failures: list[EvalAssertionFailure] = []
-        reader_task: asyncio.Task | None = None
         try:
             # Start the injected sub-pipelines (built by from_scenario from the
             # scenario config). Each tags its logs with an ``eval_pipeline`` label
@@ -587,8 +635,6 @@ class EvalSession(BaseObject):
                 with logger.contextualize(eval_pipeline="transcription"):
                     self._transcriber.debug = self._debug
                     await self._transcriber.start()
-
-            reader_task = asyncio.create_task(self._reader_loop())
 
             self._debug("connected")
             try:
@@ -655,29 +701,30 @@ class EvalSession(BaseObject):
                 record.status = "failed"
                 record.failures.append(failure)
         finally:
-            if reader_task is not None:
-                reader_task.cancel()
-                try:
-                    await reader_task
-                except (asyncio.CancelledError, Exception):
-                    pass
             # Tear each sub-pipeline down under the same eval_pipeline label as its
-            # setup, so its shutdown logs (e.g. "Cancelling pipeline worker") are
-            # attributed to it rather than leaking into the harness catch-all.
+            # setup, so its shutdown logs are attributed to it.
             if self._speech is not None:
                 with logger.contextualize(eval_pipeline="speech"):
                     await self._speech.aclose()
             if self._transcriber is not None:
                 with logger.contextualize(eval_pipeline="transcription"):
                     await self._transcriber.aclose()
-            # Optionally ask the bot to tear its pipeline down gracefully (closing
-            # its STT/TTS/LLM connections) so the process exits on its own. Skipped
-            # by default so the bot stays up for more scenarios; the eval transport
-            # survives the disconnect either way (best-effort; the suite still has a
-            # kill fallback).
+            # Optionally ask the bot to tear its pipeline down gracefully so it exits
+            # on its own (best-effort; skipped by default so it stays up for more
+            # scenarios).
             if self._stop_bot:
                 await self._send_cancel()
-            await self._ws.close()
+            # Stop the eval pipeline: end the worker (which disconnects the
+            # transport), falling back to cancel if it doesn't wind down cleanly.
+            try:
+                await self._worker.queue_frame(EndFrame())
+                await asyncio.wait_for(run_task, timeout=5.0)
+            except (TimeoutError, asyncio.CancelledError, Exception):
+                run_task.cancel()
+                try:
+                    await run_task
+                except (asyncio.CancelledError, Exception):
+                    pass
             # Progress handlers run as tasks; wait them out so every record is
             # delivered before the caller has the result in hand.
             await self.cleanup()
@@ -777,18 +824,10 @@ class EvalSession(BaseObject):
         we raise :class:`TimeoutError` so the caller reports a clean connect-level
         failure.
         """
-        ready = RTVI.Message(
-            type="client-ready",
-            id=self._message_id(),
-            data=RTVI.ClientReadyData(
-                version=RTVI.PROTOCOL_VERSION,
-                about=RTVI.AboutClientData(library="pipecat-evals"),
-            ).model_dump(),
-        )
-        await self._send(ready)
-
+        # The transport sends client-ready on connect; gate on bot-ready here.
         # Hard gate — raises TimeoutError if the bot never announces readiness.
-        await self._wait_for_event("bot_ready", BOT_READY_TIMEOUT_S)
+        assert self._transport is not None
+        await self._transport.wait_for_bot_ready(timeout=BOT_READY_TIMEOUT_S)
 
         # Ask the bot's RTVIObserver to expose what this scenario needs, for the
         # duration of this eval only (bots keep their defaults; only the eval
@@ -823,9 +862,11 @@ class EvalSession(BaseObject):
             await self._send(context_message)
 
     async def _send(self, message: RTVI.Message) -> None:
-        """Serialize and send an RTVI message over the WebSocket."""
-        assert self._ws is not None  # connected before any send
-        await self._ws.send(message.model_dump_json())
+        """Send an RTVI client message to the bot through the transport pipeline."""
+        assert self._worker is not None  # pipeline built before any send
+        await self._worker.queue_frame(
+            OutputTransportMessageUrgentFrame(message=message.model_dump())
+        )
 
     async def _send_cancel(self) -> None:
         """Ask the bot to cancel its pipeline so it shuts down gracefully.
@@ -841,25 +882,6 @@ class EvalSession(BaseObject):
             )
             await self._send(message)
         except Exception:
-            pass
-
-    async def _reader_loop(self) -> None:
-        """Drain the WS, translate RTVI messages to friendly events, enqueue them."""
-        assert self._ws is not None  # started only after a successful connect
-        try:
-            async for raw in self._ws:
-                try:
-                    message = json.loads(raw)
-                except json.JSONDecodeError:
-                    logger.warning(f"Eval session: dropping non-JSON message: {raw!r}")
-                    continue
-                if message.get("label") != RTVI.MESSAGE_LABEL:
-                    continue
-                if self._wants_response:
-                    await self._handle_tts_audio(message)
-                for event in self._translate(message):
-                    await self._enqueue(event)
-        except (websockets.ConnectionClosed, asyncio.CancelledError):
             pass
 
     def _debug(self, msg: str) -> None:
@@ -916,39 +938,14 @@ class EvalSession(BaseObject):
         if dropped:
             self._debug(f"discard: dropped {dropped} queued event(s) {why}")
 
-    async def _handle_tts_audio(self, message: dict) -> None:
-        """Accumulate the bot's audio and emit a ``response`` per spoken turn.
-
-        We bound on the speaking boundaries (``bot-started-speaking`` /
-        ``bot-stopped-speaking``), not the TTS ones: the output transport delays
-        audio by PTS to play it out, so ``bot-tts-stopped`` fires while the tail
-        is still streaming. ``bot-stopped-speaking`` fires once the audio has
-        actually finished — only then is the buffer complete. The transcription is
-        enqueued as a ``response`` event, aggregated like ``llm_response``.
-        """
-        msg_type = message.get("type")
-        if msg_type == EVAL_BOT_AUDIO_TYPE:
-            data = message.get("data") or {}
-            self._tts_audio.extend(base64.b64decode(data.get("audio", "")))
-            self._tts_sample_rate = int(data.get("sampleRate", 0)) or self._tts_sample_rate
-        elif msg_type == "bot-started-speaking":
-            self._debug(f"bot-started-speaking: discarding {len(self._tts_audio)}B buffered")
-            self._tts_audio = bytearray()
-        elif msg_type == "bot-stopped-speaking":
-            self._debug(
-                f"bot-stopped-speaking: {len(self._tts_audio)}B @ {self._tts_sample_rate}Hz, "
-                f"transcriber={self._transcriber is not None}"
-            )
-            if not self._tts_audio or self._transcriber is None:
-                return
-            pcm, sample_rate = bytes(self._tts_audio), self._tts_sample_rate
-            self._tts_audio = bytearray()
-            text = await self._transcriber.transcribe(pcm, sample_rate)
-            self._debug(f"  transcribed: {len(pcm)}B -> {text!r}")
-            await self._enqueue({"type": "response", "text": text})
-
     def _translate(self, message: dict) -> list[dict]:
-        """Translate one RTVI server message into zero or more friendly events."""
+        """Translate one RTVI server message into zero or more friendly events.
+
+        .. note::
+            Superseded by :meth:`_frames_to_events` now that the harness consumes
+            the transport's frames; kept (with ``TestTranslate``) as the reference
+            for the message-name -> event mapping.
+        """
         msg_type = message.get("type")
         data = message.get("data") or {}
 
@@ -1040,13 +1037,11 @@ class EvalSession(BaseObject):
     def _frames_to_events(self, frame: Frame) -> list[dict]:
         """Translate one incoming pipeline frame into zero or more friendly events.
 
-        The frame-based counterpart of :meth:`_translate`: when the harness runs on
-        an :class:`~pipecat.transports.websocket.rtvi_client.RTVIClientTransport`,
-        the transport deserializes the bot's RTVI server messages into frames, and
-        this maps those frames to the events the matcher consumes — applying the
-        same modality/aggregation rules (buffer the LLM text, suppress an
-        interrupted response's straggler, etc.). Kept deliberately parallel to
-        :meth:`_translate` so the two stay easy to compare during the migration.
+        The :class:`~pipecat.transports.websocket.rtvi_client.RTVIClientTransport`
+        deserializes the bot's RTVI server messages into frames; this maps those
+        frames to the events the matcher consumes, applying the modality/aggregation
+        rules (buffer the LLM text, suppress an interrupted response's straggler,
+        emit ``tts_response`` only in audio mode, etc.).
         """
         if isinstance(frame, UserStartedSpeakingFrame):
             self._discard_interrupted_output()
@@ -1340,14 +1335,6 @@ class EvalSession(BaseObject):
             },
         )
         await self._send(message)
-
-    async def _wait_for_event(self, event_name: str, timeout_s: float) -> None:
-        """Block until ``event_name`` has been seen, or raise TimeoutError."""
-        deadline = time.monotonic() + timeout_s
-        while event_name not in self._latest_event_times:
-            if time.monotonic() >= deadline:
-                raise TimeoutError(event_name)
-            await asyncio.sleep(SEND_AFTER_POLL_S)
 
     async def _wait_send_after(self, send_after: EvalSendAfter) -> None:
         """Block until ``send_after.event`` has been seen + ``delay_ms`` has elapsed.
