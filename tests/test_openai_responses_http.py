@@ -11,6 +11,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from openai.types.responses import (
     ResponseCompletedEvent,
+    ResponseFunctionCallArgumentsDeltaEvent,
+    ResponseFunctionCallArgumentsDoneEvent,
+    ResponseFunctionToolCall,
     ResponseOutputItemAddedEvent,
     ResponseOutputMessage,
     ResponseTextDeltaEvent,
@@ -87,6 +90,34 @@ def _text_delta(output_index, delta):
     event = MagicMock(spec=ResponseTextDeltaEvent)
     event.output_index = output_index
     event.delta = delta
+    return event
+
+
+def _function_call_item_added(item_id, name, call_id):
+    """Build a ResponseOutputItemAddedEvent carrying a function tool call."""
+    item = MagicMock(spec=ResponseFunctionToolCall)
+    item.id = item_id
+    item.name = name
+    item.call_id = call_id
+    event = MagicMock(spec=ResponseOutputItemAddedEvent)
+    event.output_index = 0
+    event.item = item
+    return event
+
+
+def _function_call_args_delta(item_id, delta):
+    """Build a ResponseFunctionCallArgumentsDeltaEvent."""
+    event = MagicMock(spec=ResponseFunctionCallArgumentsDeltaEvent)
+    event.item_id = item_id
+    event.delta = delta
+    return event
+
+
+def _function_call_args_done(item_id, arguments):
+    """Build a ResponseFunctionCallArgumentsDoneEvent."""
+    event = MagicMock(spec=ResponseFunctionCallArgumentsDoneEvent)
+    event.item_id = item_id
+    event.arguments = arguments
     return event
 
 
@@ -255,3 +286,31 @@ class TestHttpMessageDeduplication:
         assert service._push_llm_text.await_count == 2
         service._push_llm_text.assert_any_await("Hello")
         service._push_llm_text.assert_any_await(" world")
+
+
+# ---------------------------------------------------------------------------
+# _process_context — function calls
+# ---------------------------------------------------------------------------
+
+
+class TestHttpFunctionCalls:
+    @pytest.mark.asyncio
+    async def test_function_call_sequence(self):
+        """A streamed function call is accumulated and dispatched."""
+        service = _make_service()
+        service.run_function_calls = AsyncMock()
+
+        await _run(
+            service,
+            _function_call_item_added("fc_1", "get_weather", "call_1"),
+            _function_call_args_delta("fc_1", '{"loc'),
+            _function_call_args_delta("fc_1", 'ation": "SF"}'),
+            _function_call_args_done("fc_1", '{"location": "SF"}'),
+        )
+
+        service.run_function_calls.assert_awaited_once()
+        fc_list = service.run_function_calls.call_args[0][0]
+        assert len(fc_list) == 1
+        assert fc_list[0].function_name == "get_weather"
+        assert fc_list[0].tool_call_id == "call_1"
+        assert fc_list[0].arguments == {"location": "SF"}
