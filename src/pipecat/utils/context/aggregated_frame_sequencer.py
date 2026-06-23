@@ -234,7 +234,7 @@ class AggregatedFrameSequencer:
             )
         ]
 
-        if active and active.tracker:
+        if active and active.tracker and not suppress:
             frames.append(self._build_progress_frame(active, pts))
 
         if is_complete and active:

@@ -1065,14 +1065,16 @@ class TestVoiceFormattingTransforms(unittest.TestCase):
 
     # --- AggregatedTextProgressFrame ---
 
-    def test_progress_accumulated_held_during_transform(self):
-        """While 'five' is being spoken, accumulated_text must not include '$5,'."""
+    def test_no_progress_frame_emitted_mid_transform(self):
+        """No AggregatedTextProgressFrame is emitted for mid-segment words ('five').
+
+        The user_facing_pos is held during a transformed segment, so emitting a
+        progress frame with identical accumulated/remaining text would be redundant.
+        """
         seq, _ = self._setup()
         self._advance(seq, "Your", "balance", "is")
         result = seq.process_word("five", pts=20, context_id="ctx1")
-        pf = self._progress_frames(result)
-        self.assertEqual(len(pf), 1)
-        self.assertNotIn("$5", pf[0].accumulated_text)
+        self.assertEqual(self._progress_frames(result), [])
 
     def test_progress_accumulated_jumps_after_transform_completes(self):
         """After 'dollars,' completes, accumulated_text must include 'Your balance is $5,'."""
