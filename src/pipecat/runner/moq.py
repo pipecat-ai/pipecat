@@ -201,5 +201,5 @@ def _build_moq_client_config(
         "namespace": namespace,
         "clientId": args.moq_client_id,
         "botId": args.moq_bot_id,
-        "transcriptTrack": "transcript",
+        "transcriptTrack": "transcript.json",
     }
