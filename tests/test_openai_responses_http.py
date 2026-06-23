@@ -9,7 +9,12 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from openai.types.responses import ResponseCompletedEvent
+from openai.types.responses import (
+    ResponseCompletedEvent,
+    ResponseOutputItemAddedEvent,
+    ResponseOutputMessage,
+    ResponseTextDeltaEvent,
+)
 from openai.types.responses.response_usage import (
     InputTokensDetails,
     OutputTokensDetails,
@@ -66,6 +71,22 @@ def _completed_event(usage):
     response.model = "gpt-4.1"
     event = MagicMock(spec=ResponseCompletedEvent)
     event.response = response
+    return event
+
+
+def _message_item_added(output_index):
+    """Build a ResponseOutputItemAddedEvent for a message item at the index."""
+    event = MagicMock(spec=ResponseOutputItemAddedEvent)
+    event.output_index = output_index
+    event.item = MagicMock(spec=ResponseOutputMessage)
+    return event
+
+
+def _text_delta(output_index, delta):
+    """Build a ResponseTextDeltaEvent for the given output item and text."""
+    event = MagicMock(spec=ResponseTextDeltaEvent)
+    event.output_index = output_index
+    event.delta = delta
     return event
 
 
@@ -174,3 +195,63 @@ class TestHttpTokenUsageMetrics:
         assert tokens.total_tokens == 0
         assert tokens.cache_read_input_tokens == 0
         assert tokens.reasoning_tokens == 0
+
+
+# ---------------------------------------------------------------------------
+# _process_context — duplicate message item handling
+# ---------------------------------------------------------------------------
+
+
+class TestHttpMessageDeduplication:
+    """The Responses API can emit multiple message items with identical text.
+
+    With ``deduplicate_output_messages`` enabled, only text from the first
+    message item is forwarded; otherwise every delta is forwarded (default).
+    """
+
+    @pytest.mark.asyncio
+    async def test_duplicate_messages_dropped_when_enabled(self):
+        service = _make_service()
+        service._settings.deduplicate_output_messages = True
+
+        await _run(
+            service,
+            _message_item_added(0),
+            _text_delta(0, "Hello"),
+            _message_item_added(1),
+            _text_delta(1, "Hello"),
+        )
+
+        service._push_llm_text.assert_awaited_once_with("Hello")
+
+    @pytest.mark.asyncio
+    async def test_duplicate_messages_kept_when_disabled(self):
+        # Default behavior: forward every delta, including the duplicate.
+        service = _make_service()
+
+        await _run(
+            service,
+            _message_item_added(0),
+            _text_delta(0, "Hello"),
+            _message_item_added(1),
+            _text_delta(1, "Hello"),
+        )
+
+        assert service._push_llm_text.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_single_message_streams_all_deltas_when_enabled(self):
+        # A normal single-message response must not lose any text.
+        service = _make_service()
+        service._settings.deduplicate_output_messages = True
+
+        await _run(
+            service,
+            _message_item_added(0),
+            _text_delta(0, "Hello"),
+            _text_delta(0, " world"),
+        )
+
+        assert service._push_llm_text.await_count == 2
+        service._push_llm_text.assert_any_await("Hello")
+        service._push_llm_text.assert_any_await(" world")
