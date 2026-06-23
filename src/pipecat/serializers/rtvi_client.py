@@ -18,10 +18,10 @@ It is the inverse of
 pipeline frames into server messages on the bot side.
 
 .. note::
-    This first cut covers the messages a text-mode conversation needs (the LLM
-    response lifecycle, transcriptions, speaking/interruption signals). TTS text,
-    function-call, metrics, and inbound bot audio are added as the eval-simulation
-    work progresses.
+    This covers the messages a text-mode conversation needs (the LLM response
+    lifecycle, transcriptions, speaking/interruption signals, function calls). TTS
+    text, metrics, and inbound bot audio are added as the eval-simulation work
+    progresses.
 """
 
 import base64
@@ -34,6 +34,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     Frame,
+    FunctionCallInProgressFrame,
     InterimTranscriptionFrame,
     InterruptionFrame,
     LLMFullResponseEndFrame,
@@ -132,6 +133,14 @@ class RTVIClientSerializer(FrameSerializer):
                 return BotStoppedSpeakingFrame()
             case "bot-interrupted":
                 return InterruptionFrame()
+            case "llm-function-call-in-progress":
+                # function_name/arguments may be absent at the bot's default
+                # report level; "" maps back to "no name reported" downstream.
+                return FunctionCallInProgressFrame(
+                    function_name=payload.get("function_name") or "",
+                    tool_call_id=payload.get("tool_call_id", ""),
+                    arguments=payload.get("arguments") or {},
+                )
             case "user-transcription":
                 text = payload.get("text", "")
                 user_id = payload.get("user_id", "")
