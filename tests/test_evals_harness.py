@@ -39,6 +39,16 @@ from pipecat.evals.scenario import (
     EvalSendAfter,
     EvalTurn,
 )
+from pipecat.frames.frames import (
+    AggregationType,
+    FunctionCallInProgressFrame,
+    InterruptionFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
+    TranscriptionFrame,
+    TTSTextFrame,
+)
 
 
 def _rtvi(msg_type: str, data: dict | None = None) -> str:
@@ -47,6 +57,72 @@ def _rtvi(msg_type: str, data: dict | None = None) -> str:
 
 def _session(bot_audio: bool = False) -> EvalSession:
     return EvalSession(EvalScenario(name="t", turns=[], bot_audio=bot_audio), "ws://localhost:0")
+
+
+class TestFramesToEvents(unittest.TestCase):
+    """Frame-based translation (the RTVIClientTransport path) mirrors _translate."""
+
+    def _one(self, result):
+        self.assertEqual(len(result), 1)
+        return result[0]
+
+    def test_llm_lifecycle_aggregates_text(self):
+        s = _session(bot_audio=False)
+        self.assertEqual(
+            s._frames_to_events(LLMFullResponseStartFrame()), [{"type": "llm_started"}]
+        )
+        self.assertEqual(s._frames_to_events(LLMTextFrame(text="Hello ")), [])
+        self.assertEqual(s._frames_to_events(LLMTextFrame(text="world")), [])
+        self.assertEqual(
+            self._one(s._frames_to_events(LLMFullResponseEndFrame())),
+            {"type": "llm_response", "text": "Hello world"},
+        )
+
+    def test_interruption_suppresses_straggler(self):
+        s = _session(bot_audio=False)
+        s._frames_to_events(LLMFullResponseStartFrame())
+        s._frames_to_events(LLMTextFrame(text="Tell me about Paris"))
+        self.assertEqual(s._frames_to_events(InterruptionFrame()), [{"type": "bot_interrupted"}])
+        # Straggler from the interrupted response is dropped.
+        self.assertEqual(s._frames_to_events(LLMTextFrame(text=" what would")), [])
+        self.assertEqual(s._frames_to_events(LLMFullResponseEndFrame()), [])
+        # The genuinely new response.
+        s._frames_to_events(LLMFullResponseStartFrame())
+        s._frames_to_events(LLMTextFrame(text="Tokyo"))
+        self.assertEqual(
+            self._one(s._frames_to_events(LLMFullResponseEndFrame())),
+            {"type": "llm_response", "text": "Tokyo"},
+        )
+
+    def test_user_transcription(self):
+        s = _session()
+        self.assertEqual(
+            s._frames_to_events(TranscriptionFrame(text="hello", user_id="u", timestamp="t")),
+            [{"type": "user_transcription", "transcript": "hello"}],
+        )
+
+    def test_function_call(self):
+        s = _session()
+        event = self._one(
+            s._frames_to_events(
+                FunctionCallInProgressFrame(
+                    function_name="get_weather", tool_call_id="c", arguments={"city": "Paris"}
+                )
+            )
+        )
+        self.assertEqual(
+            event, {"type": "function_call", "name": "get_weather", "args": {"city": "Paris"}}
+        )
+
+    def test_tts_text_only_in_audio_mode(self):
+        def tts(text):
+            return TTSTextFrame(text=text, aggregated_by=AggregationType.SENTENCE)
+
+        self.assertEqual(_session(bot_audio=False)._frames_to_events(tts("x")), [])
+        self.assertEqual(
+            _session(bot_audio=True)._frames_to_events(tts("spoken")),
+            [{"type": "tts_response", "text": "spoken"}],
+        )
 
 
 class TestTranslate(unittest.TestCase):

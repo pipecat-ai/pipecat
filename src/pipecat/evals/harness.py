@@ -112,6 +112,20 @@ from pipecat.evals.serializer import (
 )
 from pipecat.evals.speech import EvalSpeech
 from pipecat.evals.transcribe import EvalTranscriber
+from pipecat.frames.frames import (
+    Frame,
+    FunctionCallInProgressFrame,
+    InterruptionFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
+    TranscriptionFrame,
+    TTSTextFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
+)
 from pipecat.utils.base_object import BaseObject
 
 # Generous default so an expectation without an explicit ``within_ms`` waits
@@ -1022,6 +1036,61 @@ class EvalSession(BaseObject):
                 ]
             case _:
                 return []
+
+    def _frames_to_events(self, frame: Frame) -> list[dict]:
+        """Translate one incoming pipeline frame into zero or more friendly events.
+
+        The frame-based counterpart of :meth:`_translate`: when the harness runs on
+        an :class:`~pipecat.transports.websocket.rtvi_client.RTVIClientTransport`,
+        the transport deserializes the bot's RTVI server messages into frames, and
+        this maps those frames to the events the matcher consumes — applying the
+        same modality/aggregation rules (buffer the LLM text, suppress an
+        interrupted response's straggler, etc.). Kept deliberately parallel to
+        :meth:`_translate` so the two stay easy to compare during the migration.
+        """
+        if isinstance(frame, UserStartedSpeakingFrame):
+            self._discard_interrupted_output()
+            self._awaiting_llm_restart = True
+            return [{"type": "user_started_speaking"}]
+        if isinstance(frame, InterruptionFrame):
+            self._discard_interrupted_output()
+            self._awaiting_llm_restart = True
+            return [{"type": "bot_interrupted"}]
+        if isinstance(frame, UserStoppedSpeakingFrame):
+            return [{"type": "user_stopped_speaking"}]
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            return [{"type": "vad_user_started_speaking"}]
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
+            return [{"type": "vad_user_stopped_speaking"}]
+        if isinstance(frame, TranscriptionFrame):
+            return [{"type": "user_transcription", "transcript": frame.text}]
+        if isinstance(frame, LLMFullResponseStartFrame):
+            self._awaiting_llm_restart = False
+            self._text_buffer = []
+            return [{"type": "llm_started"}]
+        if isinstance(frame, LLMTextFrame):
+            if self._awaiting_llm_restart:
+                return []
+            self._text_buffer.append(frame.text)
+            return []
+        if isinstance(frame, LLMFullResponseEndFrame):
+            if self._awaiting_llm_restart:
+                self._text_buffer = []
+                return []
+            return [self._segment_event("llm_response", "".join(self._text_buffer))]
+        if isinstance(frame, TTSTextFrame):
+            if self._scenario.bot_audio:
+                return [self._segment_event("tts_response", frame.text)]
+            return []
+        if isinstance(frame, FunctionCallInProgressFrame):
+            return [
+                {
+                    "type": "function_call",
+                    "name": frame.function_name or None,
+                    "args": dict(frame.arguments or {}),
+                }
+            ]
+        return []
 
     def _segment_event(self, event_type: str, text: str) -> dict:
         """Build one response segment of ``event_type``.
