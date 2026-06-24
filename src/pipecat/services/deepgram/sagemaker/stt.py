@@ -210,8 +210,30 @@ class DeepgramSageMakerSTTService(STTService):
         """
         return True
 
+    async def _do_reconnect(self):
+        """Disconnect and reconnect to apply updated settings.
+
+        Called by ``STTService._reconnect()`` inside the reconnecting guard.
+        Tears down the current BiDi session and re-establishes it with the
+        updated query string built from ``self._settings``.
+        """
+        await self._disconnect()
+        await self._connect()
+
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
-        """Apply a settings delta and warn about unhandled changes."""
+        """Apply a settings delta and reconnect so the new query string takes effect.
+
+        All STT settings are baked into the SageMaker query string at connection
+        time, so any change requires a fresh connection. Uses
+        ``_request_reconnect()`` which defers the reconnect until after the
+        current user turn if the user is speaking.
+
+        Args:
+            delta: Settings delta to apply.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
         changed = await super()._update_settings(delta)
 
         if not changed:
@@ -221,12 +243,7 @@ class DeepgramSageMakerSTTService(STTService):
         if isinstance(self._settings, self.Settings):
             self._settings._sync_extra_to_fields()
 
-        # TODO: someday we could reconnect here to apply updated settings.
-        # Code might look something like the below:
-        # await self._disconnect()
-        # await self._connect()
-
-        self._warn_unhandled_updated_settings(changed)
+        await self._request_reconnect()
 
         return changed
 
