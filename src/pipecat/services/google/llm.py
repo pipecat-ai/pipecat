@@ -38,7 +38,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchResponseFrame
 from pipecat.services.google.utils import update_google_client_http_options
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.llm_service import BaseModelT, FunctionCallFromLLM, LLMService
 from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
@@ -334,6 +334,60 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                     return part.text
 
         return None
+
+    async def run_structured_inference(
+        self,
+        context: LLMContext,
+        output_type: type[BaseModelT],
+        max_tokens: int | None = None,
+        system_instruction: str | None = None,
+    ) -> BaseModelT | None:
+        """Run a one-shot, out-of-band inference returning a validated Pydantic model.
+
+        Args:
+            context: The LLM context containing conversation history.
+            output_type: A Pydantic model class describing the desired output schema.
+            max_tokens: Optional maximum number of tokens to generate. If provided,
+                overrides the service's default max_tokens setting.
+            system_instruction: Optional system instruction to use for this inference.
+                If provided, overrides any system instruction in the context.
+
+        Returns:
+            A validated ``output_type`` instance, or None if no structured response
+            is produced.
+        """
+        effective_instruction = system_instruction or self._settings.system_instruction
+        adapter = self.get_llm_adapter()
+        params = adapter.get_llm_invocation_params(
+            context, system_instruction=effective_instruction
+        )
+        messages = params["messages"]
+        system = params["system_instruction"]
+        tools = params["tools"]
+
+        # Build generation config using the same method as streaming
+        generation_params = self._build_generation_params(
+            system_instruction=system, tools=tools if tools else None
+        )
+
+        # Override max_output_tokens if provided
+        if max_tokens is not None:
+            generation_params["max_output_tokens"] = max_tokens
+
+        # Request JSON output validated against the caller's schema
+        generation_params["response_mime_type"] = "application/json"
+        generation_params["response_schema"] = output_type
+
+        generation_config = GenerateContentConfig(**generation_params)
+
+        response = await self._client.aio.models.generate_content(
+            model=self._settings.model,
+            contents=messages,
+            config=generation_config,
+        )
+
+        # The genai SDK validates the JSON into an `output_type` instance.
+        return response.parsed
 
     def _build_generation_params(
         self,
