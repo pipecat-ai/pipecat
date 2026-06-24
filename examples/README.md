@@ -61,6 +61,10 @@ uv run getting-started/06-voice-agent.py -t twilio -x NGROK_HOST_NAME
 
 Progressive introduction to Pipecat, from minimal TTS to a full voice agent with function calling.
 
+### [`flows/`](./flows/)
+
+Structured conversations with [Pipecat Flows](../src/pipecat/flows): predefined and dynamic conversation paths with state management, across multiple LLM providers.
+
 ### [`voice/`](./voice/)
 
 Full STT + LLM + TTS voice agent pipelines showcasing different speech service providers (Deepgram, ElevenLabs, Cartesia, etc.)
