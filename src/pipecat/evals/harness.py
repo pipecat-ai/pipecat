@@ -116,7 +116,6 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallInProgressFrame,
     InputTransportMessageFrame,
-    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
@@ -1053,10 +1052,6 @@ class EvalSession(BaseObject):
         computed VAD/speaking frames are internal plumbing and ignored here; the
         scenario's speaking/VAD/``user_transcription`` events come from the reports.
         """
-        if isinstance(frame, InterruptionFrame):
-            self._discard_interrupted_output()
-            self._awaiting_llm_restart = True
-            return [{"type": "bot_interrupted"}]
         if isinstance(frame, TranscriptionFrame):
             # In the eval pipeline a TranscriptionFrame only ever comes from our own
             # STT transcribing the bot's captured audio -> the bot's spoken response.
@@ -1111,6 +1106,10 @@ class EvalSession(BaseObject):
             self._discard_interrupted_output()
             self._awaiting_llm_restart = True
             return [{"type": "user_started_speaking"}]
+        if msg_type == "bot-interrupted":
+            self._discard_interrupted_output()
+            self._awaiting_llm_restart = True
+            return [{"type": "bot_interrupted"}]
         if msg_type == "user-stopped-speaking":
             return [{"type": "user_stopped_speaking"}]
         if msg_type == "vad-user-started-speaking":

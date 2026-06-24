@@ -85,9 +85,12 @@ class TestFramesToEvents(unittest.TestCase):
 
     def test_interruption_suppresses_straggler(self):
         s = _session(bot_audio=False)
+        interrupt = InputTransportMessageFrame(
+            message={"label": RTVI.MESSAGE_LABEL, "type": "bot-interrupted"}
+        )
         s._frames_to_events(LLMFullResponseStartFrame())
         s._frames_to_events(LLMTextFrame(text="Tell me about Paris"))
-        self.assertEqual(s._frames_to_events(InterruptionFrame()), [{"type": "bot_interrupted"}])
+        self.assertEqual(s._frames_to_events(interrupt), [{"type": "bot_interrupted"}])
         # Straggler from the interrupted response is dropped.
         self.assertEqual(s._frames_to_events(LLMTextFrame(text=" what would")), [])
         self.assertEqual(s._frames_to_events(LLMFullResponseEndFrame()), [])
@@ -151,16 +154,21 @@ class TestFramesToEvents(unittest.TestCase):
             s._frames_to_events(msg("vad-user-stopped-speaking")),
             [{"type": "vad_user_stopped_speaking"}],
         )
+        self.assertEqual(
+            s._frames_to_events(msg("bot-interrupted")),
+            [{"type": "bot_interrupted"}],
+        )
 
     def test_computed_vad_and_speaking_frames_are_ignored(self):
-        # The user aggregator's own VAD/speaking frames (computed from the bot's
-        # audio) are internal plumbing, not scenario events.
+        # The user aggregator's own VAD/speaking/interruption frames (computed from
+        # the bot's audio) are internal plumbing, not scenario events.
         s = _session(bot_audio=True)
         for frame in (
             VADUserStartedSpeakingFrame(),
             VADUserStoppedSpeakingFrame(),
             UserStartedSpeakingFrame(),
             UserStoppedSpeakingFrame(),
+            InterruptionFrame(),
         ):
             self.assertEqual(s._frames_to_events(frame), [])
 

@@ -272,6 +272,10 @@ _REPORTED_EVENT_TYPES = frozenset(
         "vad-user-started-speaking",
         "vad-user-stopped-speaking",
         "user-transcription",
+        # The bot reporting *its* output was interrupted. Kept as a message so it
+        # doesn't become an InterruptionFrame, which the harness's own user
+        # aggregator already broadcasts when our VAD detects the bot speaking.
+        "bot-interrupted",
     }
 )
 
