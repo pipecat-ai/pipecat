@@ -119,14 +119,11 @@ class TestFramesToEvents(unittest.TestCase):
         # Interim transcriptions are ignored.
         self.assertEqual(s._frames_to_events(msg({"text": "hel", "final": False})), [])
 
-    def test_transcription_frame_is_the_response_in_audio_mode(self):
-        # Our STT transcribing the bot's audio -> the response (audio mode only).
+    def test_transcription_frame_is_ignored_by_the_sink(self):
+        # The user aggregator consumes the STT's TranscriptionFrames to build the
+        # bot's turn; the response is emitted from on_user_turn_stopped, not here.
         frame = TranscriptionFrame(text="Paris", user_id="bot", timestamp="t")
-        self.assertEqual(
-            _session(bot_audio=True)._frames_to_events(frame),
-            [{"type": "response", "text": "Paris"}],
-        )
-        self.assertEqual(_session(bot_audio=False)._frames_to_events(frame), [])
+        self.assertEqual(_session(bot_audio=True)._frames_to_events(frame), [])
 
     def test_reported_speaking_and_vad_events_from_messages(self):
         # The bot's reports about the harness (its raw VAD and turn-level speaking)
@@ -228,14 +225,12 @@ class TestTranslate(unittest.TestCase):
         # is discarded so it can't be matched against this turn.
         s = _session(bot_audio=True)
         s._text_buffer = ["greeting"]
-        s._tts_audio = bytearray(b"\x01\x02\x03\x04")
         s._queue.put_nowait({"type": "llm_response", "text": "greeting"})
         self.assertEqual(
             s._translate({"type": "user-started-speaking"}),
             [{"type": "user_started_speaking"}],
         )
         self.assertEqual(s._text_buffer, [])
-        self.assertEqual(len(s._tts_audio), 0)
         self.assertTrue(s._queue.empty())
 
     def test_discard_preserves_user_transcription(self):

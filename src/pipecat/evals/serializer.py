@@ -85,6 +85,11 @@ EVAL_IMAGE_MESSAGE_TYPE = "eval-image"
 # so the harness reader sees it; the harness transcribes the audio locally.
 EVAL_BOT_AUDIO_TYPE = "eval-bot-audio"
 
+# Rate the harness resamples the bot's audio to before its pipeline VAD/STT see
+# it. 16 kHz is what Silero and the local STT models (Whisper/Moonshine) expect;
+# the harness configures its input transport at this rate to match.
+HARNESS_STT_SAMPLE_RATE = 16000
+
 
 class RTVIEvalSerializer(FrameSerializer):
     """Bridges JSON RTVI messages and pipeline frames for the eval harness.
@@ -299,6 +304,17 @@ class RTVIHarnessSerializer(RTVIClientSerializer):
       sink tell the two apart by source RTVI message instead of by frame type.
     """
 
+    def __init__(self, **kwargs):
+        """Initialize the serializer.
+
+        Args:
+            **kwargs: Additional arguments passed to ``RTVIClientSerializer``.
+        """
+        super().__init__(**kwargs)
+        # Lazily created on the first bot-audio chunk; resamples the bot's audio to
+        # HARNESS_STT_SAMPLE_RATE for the pipeline's VAD/STT.
+        self._resampler = None
+
     async def deserialize(self, data: str | bytes) -> Frame | None:
         """Deserialize an RTVI server message, handling the eval-specific types.
 
@@ -317,9 +333,14 @@ class RTVIHarnessSerializer(RTVIClientSerializer):
             msg_type = message.get("type")
             if msg_type == EVAL_BOT_AUDIO_TYPE:
                 payload = message.get("data") or {}
+                audio = base64.b64decode(payload.get("audio", ""))
+                sample_rate = int(payload.get("sampleRate", 0))
+                if sample_rate and sample_rate != HARNESS_STT_SAMPLE_RATE and audio:
+                    audio = await self._resample(audio, sample_rate)
+                    sample_rate = HARNESS_STT_SAMPLE_RATE
                 return InputAudioRawFrame(
-                    audio=base64.b64decode(payload.get("audio", "")),
-                    sample_rate=int(payload.get("sampleRate", 0)),
+                    audio=audio,
+                    sample_rate=sample_rate,
                     num_channels=1,
                 )
             if msg_type in _REPORTED_EVENT_TYPES:
@@ -328,3 +349,16 @@ class RTVIHarnessSerializer(RTVIClientSerializer):
                 return InputTransportMessageFrame(message=message)
 
         return await super().deserialize(data)
+
+    async def _resample(self, audio: bytes, in_rate: int) -> bytes:
+        """Resample bot audio to HARNESS_STT_SAMPLE_RATE for the pipeline VAD/STT.
+
+        Uses a stream resampler so it keeps state across the bot's audio chunks
+        (a per-chunk file resampler introduces boundary artifacts that garble the
+        STT).
+        """
+        if self._resampler is None:
+            from pipecat.audio.utils import create_stream_resampler
+
+            self._resampler = create_stream_resampler()
+        return await self._resampler.resample(audio, in_rate, HARNESS_STT_SAMPLE_RATE)

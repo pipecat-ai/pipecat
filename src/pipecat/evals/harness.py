@@ -92,6 +92,7 @@ from loguru import logger
 from websockets.asyncio.client import ClientConnection
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.audio import load_user_audio
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.scenario import (
@@ -107,10 +108,11 @@ from pipecat.evals.serializer import (
     EVAL_CONFIGURE_MESSAGE_TYPE,
     EVAL_CONTEXT_MESSAGE_TYPE,
     EVAL_IMAGE_MESSAGE_TYPE,
+    HARNESS_STT_SAMPLE_RATE,
     RTVIHarnessSerializer,
 )
+from pipecat.evals.services import stt_service
 from pipecat.evals.speech import EvalSpeech
-from pipecat.evals.transcribe import EvalTranscriber
 from pipecat.frames.frames import (
     EndFrame,
     Frame,
@@ -120,12 +122,17 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMTextFrame,
     OutputTransportMessageUrgentFrame,
-    TranscriptionFrame,
     TTSTextFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.stt_service import STTService
 from pipecat.transports.websocket.client import WebsocketClientParams
 from pipecat.transports.websocket.rtvi_client import RTVIClientTransport
 from pipecat.utils.base_object import BaseObject
@@ -305,7 +312,7 @@ class EvalSession(BaseObject):
     Connects as an RTVI client, drives each turn (sending ``send-text``,
     ``raw-audio``, or ``dtmf``), collects the RTVI events the bot emits, and asserts on them.
     Build one with :meth:`from_scenario` (which constructs the judge, speech, and
-    transcriber the scenario needs), then await :meth:`run`.
+    STT the scenario needs), then await :meth:`run`.
 
     Event handlers available:
 
@@ -333,14 +340,14 @@ class EvalSession(BaseObject):
         trigger_disconnect: bool = False,
         judge: EvalJudge | None = None,
         speech: EvalSpeech | None = None,
-        transcriber: EvalTranscriber | None = None,
+        stt: STTService | None = None,
     ):
         """Initialize the eval session.
 
-        The ``judge``, ``speech``, and ``transcriber`` are injected pre-built:
+        The ``judge``, ``speech``, and ``stt`` are injected pre-built:
         :meth:`from_scenario` constructs the defaults from the scenario's config
-        (via the respective ``from_config``) and passes them in. Construct and
-        pass your own to override them (e.g. a custom judge LLM or TTS service).
+        and passes them in. Construct and pass your own to override them (e.g. a
+        custom judge LLM, TTS, or STT service).
 
         Args:
             scenario: The parsed scenario to run.
@@ -372,9 +379,9 @@ class EvalSession(BaseObject):
             speech: The :class:`~pipecat.evals.speech.EvalSpeech` for synthesizing
                 user audio, or ``None`` for text-mode scenarios. Started and
                 stopped by the session.
-            transcriber: The :class:`~pipecat.evals.transcribe.EvalTranscriber`
-                for the ``response`` event, or ``None`` when unused. Started and
-                stopped by the session.
+            stt: The ``STTService`` that transcribes the bot's audio into the
+                ``response`` event (added to the eval pipeline in audio mode), or
+                ``None`` when unused.
         """
         super().__init__()
 
@@ -428,15 +435,12 @@ class EvalSession(BaseObject):
         # no text (llm_started, function_call, speaking events).
         self._last_match_text: str = ""
 
-        # response (audio modality): the harness captures the bot's actual audio
-        # and transcribes it locally for the judge. Lazy — only set up when a
-        # scenario asserts `response`.
+        # response (audio modality): an STT in the eval pipeline transcribes the
+        # bot's actual audio. Only built when a scenario asserts `response`.
         self._wants_response: bool = any(
             exp.event == "response" for turn in scenario.turns for exp in turn.expect
         )
-        self._transcriber: EvalTranscriber | None = transcriber
-        self._tts_audio: bytearray = bytearray()  # current spoken segment's audio
-        self._tts_sample_rate: int = 0
+        self._stt: STTService | None = stt
 
         self._register_event_handler("on_progress")
         if on_progress is not None:
@@ -458,13 +462,13 @@ class EvalSession(BaseObject):
         trigger_disconnect: bool = False,
         judge: EvalJudge | None = None,
         speech: EvalSpeech | None = None,
-        transcriber: EvalTranscriber | None = None,
+        stt: STTService | None = None,
     ) -> "EvalSession":
         """Build a ready-to-run session from a scenario, constructing what it needs.
 
-        Builds the judge, speech, and transcriber the scenario calls for — each via
-        its ``from_config`` — and injects them into a new session. Pass ``judge`` /
-        ``speech`` / ``transcriber`` to override any of them with your own pre-built
+        Builds the judge, speech, and STT the scenario calls for and injects them
+        into a new session. Pass ``judge`` /
+        ``speech`` / ``stt`` to override any of them with your own pre-built
         instance. Then await :meth:`run`::
 
             session = EvalSession.from_scenario(scenario, "ws://localhost:7860")
@@ -497,7 +501,7 @@ class EvalSession(BaseObject):
                 scenario has ``eval:`` assertions).
             speech: Override the user-audio generator (default: built from
                 ``scenario.user_speech`` in audio mode).
-            transcriber: Override the bot-audio transcriber (default: built from
+            stt: Override the bot-audio STT (default: built from
                 ``scenario.transcriber`` when the scenario asserts ``response``).
 
         Returns:
@@ -515,9 +519,9 @@ class EvalSession(BaseObject):
                 )
 
         wants_response = any(exp.event == "response" for turn in turns for exp in turn.expect)
-        if transcriber is None and wants_response and scenario.bot_audio:
+        if stt is None and wants_response and scenario.bot_audio:
             with logger.contextualize(eval_pipeline="transcription"):
-                transcriber = EvalTranscriber.from_config(scenario.transcriber)
+                stt = stt_service(scenario.transcriber)
 
         session = cls(
             scenario,
@@ -529,7 +533,7 @@ class EvalSession(BaseObject):
             trigger_disconnect=trigger_disconnect,
             judge=judge,
             speech=speech,
-            transcriber=transcriber,
+            stt=stt,
         )
         if on_progress is not None:
             session._add_legacy_progress_callback(on_progress)
@@ -599,10 +603,14 @@ class EvalSession(BaseObject):
         self._ws = None
 
         # Build the eval pipeline: the RTVI client transport talks to the bot, and a
-        # sink turns the bot's frames into matcher events.
+        # sink turns the bot's frames into matcher events. In audio mode an STT plus
+        # a user aggregator (with its own VAD) sit between them: the aggregator's VAD
+        # segments the bot's audio so the STT produces the `response`, and the
+        # aggregator gives us on_user_turn_stopped (the judge hook for simulations).
         params = WebsocketClientParams(
             audio_in_enabled=self._scenario.bot_audio,
             audio_out_enabled=self._scenario.bot_audio,
+            audio_in_sample_rate=HARNESS_STT_SAMPLE_RATE if self._scenario.bot_audio else 0,
             serializer=RTVIHarnessSerializer(),
         )
         transport = RTVIClientTransport(self._connect_url(), params)
@@ -611,7 +619,28 @@ class EvalSession(BaseObject):
         async def _on_bot_ready(_transport):
             self._bot_ready_event.set()
 
-        pipeline = Pipeline([transport.input(), _BotFrameSink(self), transport.output()])
+        sink = _BotFrameSink(self)
+        if self._scenario.bot_audio and self._stt is not None:
+            user_aggregator = LLMContextAggregatorPair(
+                LLMContext(),
+                user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+            ).user()
+
+            # The aggregator consumes the STT's TranscriptionFrames to build the
+            # bot's turn, so the response comes from the aggregated turn text here
+            # (not from a frame at the sink). This is also the judge hook for sims.
+            # Skip while awaiting an LLM restart: an interrupted turn finalizes
+            # *after* the interruption, and that straggler must not be matched
+            # against the next turn (mirrors the llm_response suppression).
+            @user_aggregator.event_handler("on_user_turn_stopped")
+            async def _on_user_turn_stopped(_aggregator, _strategy, message):
+                if message.content and not self._awaiting_llm_restart:
+                    await self._enqueue({"type": "response", "text": message.content})
+
+            processors = [transport.input(), self._stt, user_aggregator, sink, transport.output()]
+        else:
+            processors = [transport.input(), sink, transport.output()]
+        pipeline = Pipeline(processors)
         worker = PipelineWorker(pipeline, enable_rtvi=False, cancel_on_idle_timeout=False)
         self._worker = worker
         runner = WorkerRunner()
@@ -632,11 +661,6 @@ class EvalSession(BaseObject):
             if self._speech is not None:
                 with logger.contextualize(eval_pipeline="speech"):
                     await self._speech.start()
-
-            if self._transcriber is not None:
-                with logger.contextualize(eval_pipeline="transcription"):
-                    self._transcriber.debug = self._debug
-                    await self._transcriber.start()
 
             self._debug("connected")
             try:
@@ -708,9 +732,6 @@ class EvalSession(BaseObject):
             if self._speech is not None:
                 with logger.contextualize(eval_pipeline="speech"):
                     await self._speech.aclose()
-            if self._transcriber is not None:
-                with logger.contextualize(eval_pipeline="transcription"):
-                    await self._transcriber.aclose()
             # Optionally ask the bot to tear its pipeline down gracefully so it exits
             # on its own (best-effort; skipped by default so it stays up for more
             # scenarios).
@@ -923,7 +944,6 @@ class EvalSession(BaseObject):
             why: What prompted the drop, for the debug trace.
         """
         self._text_buffer = []
-        self._tts_audio = bytearray()
         preserved: list[dict] = []
         dropped = 0
         while not self._queue.empty():
@@ -1045,19 +1065,13 @@ class EvalSession(BaseObject):
         rules (buffer the LLM text, suppress an interrupted response's straggler,
         emit ``tts_response`` only in audio mode, etc.).
 
-        Two kinds of frame arrive: what the harness *computes* from the bot's audio
-        (the STT's ``TranscriptionFrame`` and the user aggregator's own VAD/speaking
-        frames) and what the bot *reports* about the harness (carried as
-        ``InputTransportMessageFrame``; see :data:`RTVIHarnessSerializer`). The
-        computed VAD/speaking frames are internal plumbing and ignored here; the
-        scenario's speaking/VAD/``user_transcription`` events come from the reports.
+        The bot *reports* events about the harness as ``InputTransportMessageFrame``
+        (see :data:`RTVIHarnessSerializer`), which this maps to scenario events. What
+        the harness *computes* from the bot's audio is handled elsewhere: the
+        ``response`` comes from the user aggregator's ``on_user_turn_stopped`` (it
+        consumes the STT's ``TranscriptionFrame``s, so they never reach here), and
+        the aggregator's own VAD/speaking frames are internal plumbing, ignored here.
         """
-        if isinstance(frame, TranscriptionFrame):
-            # In the eval pipeline a TranscriptionFrame only ever comes from our own
-            # STT transcribing the bot's captured audio -> the bot's spoken response.
-            if self._scenario.bot_audio:
-                return [self._segment_event("response", frame.text)]
-            return []
         if isinstance(frame, InputTransportMessageFrame):
             return self._message_to_events(frame.message)
         if isinstance(frame, LLMFullResponseStartFrame):
@@ -1125,10 +1139,9 @@ class EvalSession(BaseObject):
     def _segment_event(self, event_type: str, text: str) -> dict:
         """Build one response segment of ``event_type``.
 
-        Used for ``llm_response`` (the LLM text), ``tts_response`` (the TTS's spoken
-        text), and ``response`` (our STT's transcription of the bot's audio). The
-        text may be empty (e.g. an interrupted response); the matcher aggregates
-        successive segments until the content check passes.
+        Used for ``llm_response`` (the LLM text) and ``tts_response`` (the TTS's
+        spoken text). The text may be empty (e.g. an interrupted response); the
+        matcher aggregates successive segments until the content check passes.
         """
         return {"type": event_type, "text": text}
 

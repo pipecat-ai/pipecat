@@ -279,8 +279,7 @@ class EvalSpeech:
 
         pcm = bytearray()
         # run_tts's base signature types it as a coroutine, but every concrete TTS
-        # overrides it as an async generator; iterate it as such (mirrors
-        # EvalTranscriber's run_stt handling).
+        # overrides it as an async generator; iterate it as such.
         frames = cast(AsyncGenerator[object, None], self._service.run_tts(text, context_id="eval"))
         async for frame in frames:
             if isinstance(frame, TTSAudioRawFrame):

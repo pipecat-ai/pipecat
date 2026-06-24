@@ -4,14 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for the eval service constructors (config -> EvalJudge/EvalSpeech/EvalTranscriber)."""
+"""Tests for the eval service constructors (config -> EvalJudge/EvalSpeech/STT)."""
 
 import unittest
 
 from pipecat.evals.judge import EvalJudge
-from pipecat.evals.services import _cfg_language, cartesia_service
+from pipecat.evals.services import _cfg_language, cartesia_service, stt_service
 from pipecat.evals.speech import EvalSpeech, tts_cache_key, tts_sample_rate
-from pipecat.evals.transcribe import EvalTranscriber
 from pipecat.transcriptions.language import Language
 from pipecat.utils.types import NOT_GIVEN
 
@@ -28,25 +27,15 @@ def _fake_judge_llm(config):
     return ("FAKE_JUDGE", config)
 
 
-class TestTranscriberFromConfig(unittest.TestCase):
+class TestSTTServiceFromConfig(unittest.TestCase):
     def test_unknown_service_rejected(self):
         with self.assertRaises(ValueError):
-            EvalTranscriber.from_config({"service": "nope"})
+            stt_service({"service": "nope"})
 
     def test_factory_escape_hatch(self):
-        t = EvalTranscriber.from_config({"factory": "tests.test_evals_services._fake_stt"})
-        self.assertEqual(t._service[0], "FAKE_STT")
-        self.assertEqual(t._service[2], 16000)  # STT_SAMPLE_RATE
-
-    def test_padding_secs(self):
-        from pipecat.evals.transcribe import SILENCE_PAD_S
-
-        default = EvalTranscriber.from_config({"factory": "tests.test_evals_services._fake_stt"})
-        self.assertEqual(default._padding_secs, SILENCE_PAD_S)
-        override = EvalTranscriber.from_config(
-            {"factory": "tests.test_evals_services._fake_stt", "padding_secs": 0.5}
-        )
-        self.assertEqual(override._padding_secs, 0.5)
+        stt = stt_service({"factory": "tests.test_evals_services._fake_stt"})
+        self.assertEqual(stt[0], "FAKE_STT")
+        self.assertEqual(stt[2], 16000)  # STT_SAMPLE_RATE
 
 
 class TestVoiceFromConfig(unittest.TestCase):

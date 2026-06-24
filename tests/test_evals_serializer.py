@@ -185,7 +185,22 @@ class TestRTVIHarnessSerializer(unittest.IsolatedAsyncioTestCase):
         return json.dumps({"label": RTVI.MESSAGE_LABEL, "type": msg_type, "data": data})
 
     async def test_eval_bot_audio_becomes_input_audio(self):
+        # Already at the harness STT rate (16 kHz): passes through unchanged.
         pcm = b"\x01\x02\x03\x04"
+        frame = await self.serializer.deserialize(
+            self._server(
+                EVAL_BOT_AUDIO_TYPE,
+                {"audio": base64.b64encode(pcm).decode("ascii"), "sampleRate": 16000},
+            )
+        )
+        self.assertIsInstance(frame, InputAudioRawFrame)
+        self.assertEqual(frame.audio, pcm)
+        self.assertEqual(frame.sample_rate, 16000)
+        self.assertEqual(frame.num_channels, 1)
+
+    async def test_eval_bot_audio_resampled_to_harness_rate(self):
+        # A different rate is resampled to the harness STT rate for the pipeline VAD/STT.
+        pcm = b"\x00\x00" * 480  # 20ms @ 24kHz
         frame = await self.serializer.deserialize(
             self._server(
                 EVAL_BOT_AUDIO_TYPE,
@@ -193,9 +208,7 @@ class TestRTVIHarnessSerializer(unittest.IsolatedAsyncioTestCase):
             )
         )
         self.assertIsInstance(frame, InputAudioRawFrame)
-        self.assertEqual(frame.audio, pcm)
-        self.assertEqual(frame.sample_rate, 24000)
-        self.assertEqual(frame.num_channels, 1)
+        self.assertEqual(frame.sample_rate, 16000)
 
     async def test_user_transcription_stays_a_raw_message(self):
         # Kept as the raw message (not a TranscriptionFrame) so the sink can tell it

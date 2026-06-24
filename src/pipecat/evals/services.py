@@ -9,11 +9,12 @@
 Each function builds a concrete pipecat service (TTS, STT, or judge LLM) from a
 scenario's config mapping. They are the dispatch targets behind the ``service:``
 name in :meth:`pipecat.evals.speech.EvalSpeech.from_config`,
-:meth:`pipecat.evals.transcribe.EvalTranscriber.from_config`, and
-:meth:`pipecat.evals.judge.EvalJudge.from_config`. The heavy provider imports
-stay lazy inside each function so importing this module stays cheap.
+:func:`stt_service`, and :meth:`pipecat.evals.judge.EvalJudge.from_config`. The
+heavy provider imports stay lazy inside each function so importing this module
+stays cheap.
 """
 
+import importlib
 import os
 from typing import Any
 
@@ -57,6 +58,50 @@ def _cfg_language(cfg: dict) -> Language | NotGiven:
             f"Unknown language {value!r} in eval speech/transcription config; "
             "expected a language code like 'zh' or a Language value."
         ) from e
+
+
+# STT/VAD in the eval pipeline run at 16 kHz (see
+# ``pipecat.evals.serializer.HARNESS_STT_SAMPLE_RATE``); passed to a custom STT
+# factory so it can size buffers accordingly.
+STT_SAMPLE_RATE = 16000
+
+
+def stt_service(config: dict | None) -> STTService:
+    """Build an STT service for transcribing the bot's audio (the ``response``).
+
+    Dispatches on the scenario's ``judge.transcription:`` mapping: a custom
+    ``factory`` (dotted path to a callable taking ``(config, sample_rate)`` and
+    returning an ``STTService``) takes precedence; otherwise the ``service`` name
+    selects a built-in (default ``"moonshine"``, a local model). The returned
+    service goes straight into the eval pipeline, so any pipeline STT works
+    (segmented local models or streaming providers).
+
+    Args:
+        config: The ``transcription`` mapping, or ``None`` for the Moonshine default.
+
+    Returns:
+        A constructed ``STTService`` (model loaded), ready to add to the pipeline.
+    """
+    config = config or {}
+
+    custom = config.get("factory")
+    if custom:
+        module_name, _, attr = custom.rpartition(".")
+        if not module_name:
+            raise ValueError(f"transcription.factory must be a dotted path: {custom!r}")
+        factory = getattr(importlib.import_module(module_name), attr)
+        return factory(config, STT_SAMPLE_RATE)
+
+    name = str(config.get("service", "moonshine")).lower()
+    if name == "whisper":
+        return whisper_service(config)
+    if name == "moonshine":
+        return moonshine_service(config)
+
+    raise ValueError(
+        f"Unknown STT service: {name!r}. Known: whisper, moonshine. "
+        "Or set transcription.factory to a 'module.func' returning an STTService."
+    )
 
 
 def kokoro_service(voice_cfg: dict, sample_rate: int) -> TTSService:
@@ -136,9 +181,8 @@ def whisper_service(config: dict) -> STTService:
     ``large-v3-turbo``) at higher concurrency. Override with ``device: cuda`` (and
     ``compute_type``) in the ``transcription`` config if you have GPU headroom.
 
-    The eval transcribes audio it already knows is the bot speaking (the harness
-    captures it between ``bot-started-speaking`` and ``bot-stopped-speaking``), so
-    Whisper's non-speech filter is counterproductive here: the default
+    The eval only feeds this STT the bot's own audio (segmented by the harness's
+    VAD), so Whisper's non-speech filter is counterproductive here: the default
     ``no_speech_prob=0.4`` drops correct transcriptions of synthetic/TTS speech,
     whose ``no_speech_prob`` jitters across ~0.4-0.6 run to run (a dropped segment
     yields no ``TranscriptionFrame``, so the harness then waits out the whole
