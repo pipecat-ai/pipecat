@@ -10,7 +10,7 @@
 
 > Want to dive right in? Run `pipecat init quickstart` or follow the [quickstart guide](https://docs.pipecat.ai/getting-started/quickstart).
 
-## 🚀 What You Can Build
+## 🚀 What you can build
 
 - **Voice Assistants** – natural, streaming conversations with AI
 - **Multi-Agent Systems** – specialists that hand off, fan out in parallel, or run as sidecars over a shared bus
@@ -28,7 +28,7 @@
 - **Multi-Agent Ready**: Each pipeline is an agent. Compose them with handoff, parallel fan-out, sidecar workers, or distributed deployments
 - **Real-Time**: Ultra-low latency interaction with different transports (e.g. WebSockets or WebRTC)
 
-## 🌐 Pipecat Ecosystem
+## 🌐 Pipecat ecosystem
 
 ### 📱 Client SDKs
 
@@ -39,7 +39,7 @@ Building client applications? You can connect to Pipecat from any platform using
 
 ### 🧭 Structured conversations
 
-Looking to build structured conversations? Check out [Pipecat Flows](https://github.com/pipecat-ai/pipecat-flows) for managing complex conversational states and transitions.
+Need predefined or dynamic conversation paths with state management? [Pipecat Flows](https://github.com/pipecat-ai/pipecat/tree/main/src/pipecat/flows) is built into Pipecat — import it from `pipecat.flows`, and see the [Flows examples](https://github.com/pipecat-ai/pipecat/tree/main/examples/flows).
 
 ### 🪄 Beautiful UIs
 
@@ -57,7 +57,7 @@ Looking for help debugging your pipeline and processors? Check out [Whisker](htt
 
 Love terminal applications? Check out [Tail](https://github.com/pipecat-ai/tail), a terminal dashboard for Pipecat.
 
-### 🤖 Claude Code Skills
+### 🤖 Claude Code skills
 
 Use [Pipecat Skills](https://github.com/pipecat-ai/skills) with [Claude Code](https://claude.ai/code) to scaffold projects, deploy to Pipecat Cloud, and more. Install the marketplace with:
 
@@ -67,11 +67,11 @@ claude plugin marketplace add pipecat-ai/skills
 
 and install any of the available plugins.
 
-### 🧩 Community Integrations
+### 🧩 Community integrations
 
 Build and share your own Pipecat service integrations! Browse existing [community integrations](https://docs.pipecat.ai/api-reference/server/services/supported-services) or check out our [guide](COMMUNITY_INTEGRATIONS.md) to create your own.
 
-### 📺️ Pipecat TV Channel
+### 📺️ Pipecat TV channel
 
 Catch new features, interviews, and how-tos on our [Pipecat TV](https://www.youtube.com/playlist?list=PLzU2zoMTQIHjqC3v4q2XVSR3hGSzwKFwH) channel.
 
@@ -104,7 +104,7 @@ Catch new features, interviews, and how-tos on our [Pipecat TV](https://www.yout
 
 📚 [View full services documentation →](https://docs.pipecat.ai/api-reference/server/services/supported-services)
 
-## ⚡ Getting started
+## ⚡ Installation
 
 You can get started with Pipecat running on your local machine, then move your agent processes to the cloud when you're ready.
 
@@ -142,10 +142,23 @@ You can get started with Pipecat running on your local machine, then move your a
 
 > **Using pip?** You can still use `pip install pipecat-ai` and `pip install "pipecat-ai[option,...]"` to get set up.
 
-## 🧪 Code examples
+## 🏁 Getting started
 
-- [Foundational](https://github.com/pipecat-ai/pipecat/tree/main/examples) — small snippets that build on each other, introducing one or two concepts at a time
-- [Example apps](https://github.com/pipecat-ai/pipecat-examples) — complete applications that you can use as starting points for development
+Once installed, there are a few ways to start building:
+
+### From code examples
+
+- [Getting started examples](https://github.com/pipecat-ai/pipecat/tree/main/examples/getting-started) — small snippets that build on each other, introducing one or two concepts at a time
+- [All examples](https://github.com/pipecat-ai/pipecat/tree/main/examples) — the full set: voice agents, transports, telephony, vision, multi-worker systems, and more
+- [Example apps](https://github.com/pipecat-ai/pipecat-examples) — complete applications you can use as starting points for development
+
+### Using the CLI
+
+Scaffold a working project in under a minute with the Pipecat CLI, then iterate from there. Follow the [quickstart guide](https://docs.pipecat.ai/pipecat/get-started/quickstart).
+
+### Using Pipecat Flows
+
+For structured conversations — predefined or dynamic conversation paths with state management — use [Pipecat Flows](https://github.com/pipecat-ai/pipecat/tree/main/src/pipecat/flows), built into Pipecat: `from pipecat.flows import FlowManager`. See the [Flows examples](https://github.com/pipecat-ai/pipecat/tree/main/examples/flows) and the [Flows guide](https://docs.pipecat.ai/guides/features/pipecat-flows).
 
 ## 🛠️ Contributing to the framework
 
@@ -154,7 +167,7 @@ You can get started with Pipecat running on your local machine, then move your a
 **Minimum Python Version:** 3.11
 **Recommended Python Version:** >= 3.12
 
-### Setup Steps
+### Setup steps
 
 1. Clone the repository and navigate to it:
 
@@ -179,7 +192,7 @@ You can get started with Pipecat running on your local machine, then move your a
 
 > **Note**: Some extras (local, gstreamer) require system dependencies. See documentation if you encounter build errors.
 
-### Claude Code Skills
+### Claude Code skills
 
 Install development workflow skills for contributing to Pipecat with [Claude Code](https://claude.ai/code):
 
