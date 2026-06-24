@@ -50,7 +50,6 @@ These files should never trigger doc updates.
 | `serializers/protobuf.py`            | Internal                             |
 | `processors/audio/**`                | Internal                             |
 | `pipeline/pipeline.py`               | Core architecture, not a service doc |
-| `flows/__init__.py`                  | Re-exports only                      |
 
 ## Pattern matching
 
