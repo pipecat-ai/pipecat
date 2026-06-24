@@ -56,6 +56,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import (
     LLMUsageMetricsData,
     ProcessingMetricsData,
+    TTFAMetricsData,
     TTFBMetricsData,
     TTSUsageMetricsData,
 )
@@ -827,6 +828,10 @@ class RTVIObserver(BaseObserver):
                 if "ttfb" not in metrics:
                     metrics["ttfb"] = []
                 metrics["ttfb"].append(d.model_dump(exclude_none=True))
+            elif isinstance(d, TTFAMetricsData):
+                if "ttfa" not in metrics:
+                    metrics["ttfa"] = []
+                metrics["ttfa"].append(d.model_dump(exclude_none=True))
             elif isinstance(d, ProcessingMetricsData):
                 if "processing" not in metrics:
                     metrics["processing"] = []
