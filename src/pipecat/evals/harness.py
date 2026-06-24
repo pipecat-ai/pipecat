@@ -107,6 +107,7 @@ from pipecat.evals.serializer import (
     EVAL_CONFIGURE_MESSAGE_TYPE,
     EVAL_CONTEXT_MESSAGE_TYPE,
     EVAL_IMAGE_MESSAGE_TYPE,
+    RTVIHarnessSerializer,
 )
 from pipecat.evals.speech import EvalSpeech
 from pipecat.evals.transcribe import EvalTranscriber
@@ -114,6 +115,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     FunctionCallInProgressFrame,
+    InputTransportMessageFrame,
     InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -129,7 +131,6 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.serializers.rtvi_client import RTVIClientSerializer
 from pipecat.transports.websocket.client import WebsocketClientParams
 from pipecat.transports.websocket.rtvi_client import RTVIClientTransport
 from pipecat.utils.base_object import BaseObject
@@ -607,7 +608,7 @@ class EvalSession(BaseObject):
         params = WebsocketClientParams(
             audio_in_enabled=self._scenario.bot_audio,
             audio_out_enabled=self._scenario.bot_audio,
-            serializer=RTVIClientSerializer(),
+            serializer=RTVIHarnessSerializer(),
         )
         transport = RTVIClientTransport(self._connect_url(), params)
 
@@ -1064,7 +1065,20 @@ class EvalSession(BaseObject):
         if isinstance(frame, VADUserStoppedSpeakingFrame):
             return [{"type": "vad_user_stopped_speaking"}]
         if isinstance(frame, TranscriptionFrame):
-            return [{"type": "user_transcription", "transcript": frame.text}]
+            # In the eval pipeline a TranscriptionFrame only ever comes from our own
+            # STT transcribing the bot's captured audio -> the bot's spoken response.
+            # The bot's reported user-transcription arrives as an
+            # InputTransportMessageFrame instead (see below / RTVIHarnessSerializer).
+            if self._scenario.bot_audio:
+                return [self._segment_event("response", frame.text)]
+            return []
+        if isinstance(frame, InputTransportMessageFrame):
+            message = frame.message
+            if isinstance(message, dict) and message.get("type") == "user-transcription":
+                payload = message.get("data") or {}
+                if payload.get("final", True):
+                    return [{"type": "user_transcription", "transcript": payload.get("text", "")}]
+            return []
         if isinstance(frame, LLMFullResponseStartFrame):
             self._awaiting_llm_restart = False
             self._text_buffer = []
@@ -1096,9 +1110,10 @@ class EvalSession(BaseObject):
     def _segment_event(self, event_type: str, text: str) -> dict:
         """Build one response segment of ``event_type``.
 
-        Used for ``llm_response`` (the LLM text) and ``tts_response`` (the TTS's
-        spoken text). The text may be empty (e.g. an interrupted response); the
-        matcher aggregates successive segments until the content check passes.
+        Used for ``llm_response`` (the LLM text), ``tts_response`` (the TTS's spoken
+        text), and ``response`` (our STT's transcription of the bot's audio). The
+        text may be empty (e.g. an interrupted response); the matcher aggregates
+        successive segments until the content check passes.
         """
         return {"type": event_type, "text": text}
 

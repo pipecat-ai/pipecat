@@ -42,6 +42,7 @@ from pipecat.evals.scenario import (
 from pipecat.frames.frames import (
     AggregationType,
     FunctionCallInProgressFrame,
+    InputTransportMessageFrame,
     InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -94,12 +95,31 @@ class TestFramesToEvents(unittest.TestCase):
             {"type": "llm_response", "text": "Tokyo"},
         )
 
-    def test_user_transcription(self):
+    def test_user_transcription_from_message(self):
+        # The bot's reported user-transcription arrives as a raw RTVI message frame,
+        # not a TranscriptionFrame (which the eval reserves for the bot's response).
         s = _session()
+
+        def msg(data):
+            return InputTransportMessageFrame(
+                message={"label": RTVI.MESSAGE_LABEL, "type": "user-transcription", "data": data}
+            )
+
         self.assertEqual(
-            s._frames_to_events(TranscriptionFrame(text="hello", user_id="u", timestamp="t")),
+            s._frames_to_events(msg({"text": "hello", "final": True})),
             [{"type": "user_transcription", "transcript": "hello"}],
         )
+        # Interim transcriptions are ignored.
+        self.assertEqual(s._frames_to_events(msg({"text": "hel", "final": False})), [])
+
+    def test_transcription_frame_is_the_response_in_audio_mode(self):
+        # Our STT transcribing the bot's audio -> the response (audio mode only).
+        frame = TranscriptionFrame(text="Paris", user_id="bot", timestamp="t")
+        self.assertEqual(
+            _session(bot_audio=True)._frames_to_events(frame),
+            [{"type": "response", "text": "Paris"}],
+        )
+        self.assertEqual(_session(bot_audio=False)._frames_to_events(frame), [])
 
     def test_function_call(self):
         s = _session()

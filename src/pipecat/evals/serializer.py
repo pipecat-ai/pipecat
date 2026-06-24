@@ -42,6 +42,7 @@ import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
     CancelWorkerFrame,
     Frame,
+    InputAudioRawFrame,
     InputTransportMessageFrame,
     LLMMessagesUpdateFrame,
     OutputAudioRawFrame,
@@ -51,6 +52,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frameworks.rtvi.frames import RTVIConfigureObserverFrame
 from pipecat.processors.frameworks.rtvi.observer import RTVIFunctionCallReportLevel
 from pipecat.serializers.base_serializer import FrameSerializer
+from pipecat.serializers.rtvi_client import RTVIClientSerializer
 
 # A ``client-message`` with this ``t`` is intercepted by the serializer and
 # turned into an ``LLMMessagesUpdateFrame`` instead of being forwarded to the
@@ -252,3 +254,53 @@ class RTVIEvalSerializer(FrameSerializer):
             function_call_report_level=report_level,
             vad_user_speaking_enabled=vad_user_speaking_enabled,
         )
+
+
+class RTVIHarnessSerializer(RTVIClientSerializer):
+    """Client-side serializer for the eval harness's RTVI pipeline.
+
+    Extends :class:`~pipecat.serializers.rtvi_client.RTVIClientSerializer` (which
+    handles the generic RTVI server messages) with the two eval-specific bits:
+
+    - ``eval-bot-audio`` (the bot's captured synthesized audio, sent only when the
+      harness asks for it) is decoded into an
+      :class:`~pipecat.frames.frames.InputAudioRawFrame` so a real STT in the eval
+      pipeline can transcribe what the bot *actually said* (the ``response``).
+    - ``user-transcription`` is deserialized to a raw
+      :class:`~pipecat.frames.frames.InputTransportMessageFrame` rather than a
+      ``TranscriptionFrame``. In the eval pipeline a ``TranscriptionFrame`` means
+      "our STT transcribed the bot's audio" (the ``response``); keeping the bot's
+      reported user transcription as a message lets the sink tell the two apart by
+      the source RTVI message instead of by frame type, so both ``response`` and
+      ``user_transcription`` remain available in audio mode.
+    """
+
+    async def deserialize(self, data: str | bytes) -> Frame | None:
+        """Deserialize an RTVI server message, handling the eval-specific types.
+
+        Args:
+            data: JSON text (or bytes) sent by the bot.
+
+        Returns:
+            The corresponding frame, or ``None`` to drop the message.
+        """
+        try:
+            message = json.loads(data)
+        except (json.JSONDecodeError, TypeError):
+            return await super().deserialize(data)
+
+        if isinstance(message, dict) and message.get("label") == RTVI.MESSAGE_LABEL:
+            msg_type = message.get("type")
+            if msg_type == EVAL_BOT_AUDIO_TYPE:
+                payload = message.get("data") or {}
+                return InputAudioRawFrame(
+                    audio=base64.b64decode(payload.get("audio", "")),
+                    sample_rate=int(payload.get("sampleRate", 0)),
+                    num_channels=1,
+                )
+            if msg_type == "user-transcription":
+                # Kept as the raw message so the sink maps it to user_transcription;
+                # see the class docstring for why it isn't a TranscriptionFrame.
+                return InputTransportMessageFrame(message=message)
+
+        return await super().deserialize(data)

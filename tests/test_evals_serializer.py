@@ -12,16 +12,21 @@ import unittest
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.serializer import (
+    EVAL_BOT_AUDIO_TYPE,
     EVAL_CONFIGURE_MESSAGE_TYPE,
     EVAL_CONTEXT_MESSAGE_TYPE,
     EVAL_IMAGE_MESSAGE_TYPE,
     RTVIEvalSerializer,
+    RTVIHarnessSerializer,
 )
 from pipecat.frames.frames import (
+    InputAudioRawFrame,
     InputTransportMessageFrame,
+    LLMFullResponseStartFrame,
     LLMMessagesUpdateFrame,
     OutputAudioRawFrame,
     OutputTransportMessageUrgentFrame,
+    TranscriptionFrame,
 )
 from pipecat.processors.frameworks.rtvi.frames import RTVIConfigureObserverFrame
 from pipecat.processors.frameworks.rtvi.observer import RTVIFunctionCallReportLevel
@@ -168,6 +173,57 @@ class TestRTVIEvalSerializerSerialize(unittest.IsolatedAsyncioTestCase):
     async def test_audio_frame_dropped(self):
         frame = OutputAudioRawFrame(audio=b"\x00\x00", sample_rate=16000, num_channels=1)
         self.assertIsNone(await self.serializer.serialize(frame))
+
+
+class TestRTVIHarnessSerializer(unittest.IsolatedAsyncioTestCase):
+    """The client-side serializer the harness pipeline uses to talk to the bot."""
+
+    def setUp(self):
+        self.serializer = RTVIHarnessSerializer()
+
+    def _server(self, msg_type: str, data: dict | None = None) -> str:
+        return json.dumps({"label": RTVI.MESSAGE_LABEL, "type": msg_type, "data": data})
+
+    async def test_eval_bot_audio_becomes_input_audio(self):
+        pcm = b"\x01\x02\x03\x04"
+        frame = await self.serializer.deserialize(
+            self._server(
+                EVAL_BOT_AUDIO_TYPE,
+                {"audio": base64.b64encode(pcm).decode("ascii"), "sampleRate": 24000},
+            )
+        )
+        self.assertIsInstance(frame, InputAudioRawFrame)
+        self.assertEqual(frame.audio, pcm)
+        self.assertEqual(frame.sample_rate, 24000)
+        self.assertEqual(frame.num_channels, 1)
+
+    async def test_user_transcription_stays_a_raw_message(self):
+        # Kept as the raw message (not a TranscriptionFrame) so the sink can tell it
+        # apart from the STT's transcription of the bot's audio.
+        data = {"text": "hello", "user_id": "u", "final": True}
+        frame = await self.serializer.deserialize(self._server("user-transcription", data))
+        self.assertIsInstance(frame, InputTransportMessageFrame)
+        self.assertEqual(frame.message["type"], "user-transcription")
+        self.assertEqual(frame.message["data"], data)
+
+    async def test_generic_messages_delegate_to_base(self):
+        # Non-eval RTVI messages keep the base RTVIClientSerializer mapping.
+        self.assertIsInstance(
+            await self.serializer.deserialize(self._server("bot-llm-started")),
+            LLMFullResponseStartFrame,
+        )
+        self.assertIsNone(await self.serializer.deserialize(self._server("bot-ready")))
+        self.assertIsNone(await self.serializer.deserialize("not json"))
+
+    async def test_base_no_longer_maps_user_transcription_to_transcription(self):
+        # Sanity: only the eval subclass diverts user-transcription; the generic
+        # base still produces a TranscriptionFrame (unchanged for other clients).
+        from pipecat.serializers.rtvi_client import RTVIClientSerializer
+
+        frame = await RTVIClientSerializer().deserialize(
+            self._server("user-transcription", {"text": "hi", "final": True})
+        )
+        self.assertIsInstance(frame, TranscriptionFrame)
 
 
 if __name__ == "__main__":
