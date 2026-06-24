@@ -68,7 +68,7 @@ Ignore `__init__.py`, `__pycache__`, test files, and files that only contain typ
 
 ### Step 4: Map source files to doc pages
 
-For each changed source file, find the corresponding doc page. Read the mapping file at `.claude/skills/update-docs/SOURCE_DOC_MAPPING.md` and apply its tiered lookup: tier 1 (known exceptions) → tier 2 (pattern matching) → tier 3 (search fallback). **First match wins.** Files under `src/pipecat/flows/` use the dedicated **Pipecat Flows** section of the mapping (its own API-reference and guide tables) rather than the service patterns.
+For each changed source file, find the corresponding doc page. Read the mapping file at `.claude/skills/update-docs/SOURCE_DOC_MAPPING.md` and apply its tiered lookup: tier 1 (known exceptions) → tier 2 (pattern matching) → tier 3 (search fallback). **First match wins.**
 
 ### Step 5: Analyze each source-doc pair
 
@@ -139,12 +139,12 @@ For each doc page that needs updates, edit **only the sections that need changes
 
 ### Step 7: Update guides
 
-Guides at `DOCS_PATH/pipecat/` reference specific class names, parameters, imports, and code patterns. After completing reference doc edits, check if any guides need updates too.
+Guides at `DOCS_PATH/pipecat/` and `DOCS_PATH/pipecat-flows/` reference specific class names, parameters, imports, and code patterns. After completing reference doc edits, check if any guides need updates too.
 
 For each changed source file, collect the class names, renamed parameters, and changed imports from the diff. Search the guides directory:
 
 ```bash
-grep -rl "ClassName\|old_param_name" DOCS_PATH/pipecat/
+grep -rl "ClassName\|old_param_name" DOCS_PATH/pipecat/ DOCS_PATH/pipecat-flows/
 ```
 
 For each guide that references changed code:
@@ -160,7 +160,7 @@ Guide directories:
 - `pipecat/fundamentals/` — practical how-tos (metrics, recording, transcripts, etc.)
 - `pipecat/features/` — feature-specific guides (Gemini Live, OpenAI audio, WhatsApp, etc.)
 - `pipecat/telephony/` — telephony integration guides (Twilio, Plivo, Telnyx, etc.)
-- `pipecat-flows/guides/` — Pipecat Flows guides (nodes-and-messages, functions, context-strategies, state-management, actions); check these when `src/pipecat/flows/**` changed, per the mapping's Pipecat Flows section
+- `pipecat-flows/guides/` — Pipecat Flows guides (nodes-and-messages, functions, context-strategies, state-management, actions); check these when `src/pipecat/flows/**` changed
 
 ### Step 8: Identify doc gaps
 

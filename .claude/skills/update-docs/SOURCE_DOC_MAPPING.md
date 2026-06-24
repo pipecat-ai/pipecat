@@ -21,43 +21,11 @@ These source paths don't follow the standard `services/{provider}/{type}.py` →
 | `pipeline/worker.py`                        | `api-reference/server/pipeline/pipeline-worker.mdx`                                              |
 | `pipeline/runner.py`                        | `api-reference/server/utilities/runner/guide.mdx`                                                |
 | `transports/base_transport.py`              | `api-reference/server/services/transport/transport-params.mdx`                                   |
-
-## Pipecat Flows
-
-Flows lives under `src/pipecat/flows/` and is documented separately from the services/transports above. Source paths below are relative to `src/pipecat/`; doc paths live in the `pipecat-ai/docs` repo.
-
-### API reference pages
-
-| Source file          | Doc page(s)                                                                                                          | Notes                                                                                                                                       |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `flows/types.py`     | `api-reference/pipecat-flows/types.mdx`                                                                              | NodeConfig, FlowsFunctionSchema, ActionConfig, ContextStrategy, ContextStrategyConfig, type aliases, `flows_tool_options` (and the deprecated `flows_direct_function` alias) |
-| `flows/manager.py`   | `api-reference/pipecat-flows/flow-manager.mdx`                                                                       | FlowManager constructor, properties, methods                                                                                                |
-| `flows/actions.py`   | `api-reference/pipecat-flows/flow-manager.mdx` (register_action), `api-reference/pipecat-flows/types.mdx` (ActionConfig) | Built-in action types and custom action registration                                                                                  |
-| `flows/adapters.py`  | `api-reference/pipecat-flows/overview.mdx`                                                                           | LLM Provider Support table                                                                                                                   |
-| `flows/exceptions.py`| `api-reference/pipecat-flows/exceptions.mdx`                                                                         | Exception hierarchy and descriptions                                                                                                         |
-
-### Guide pages
-
-Changes to Flows source may also affect the guides under `pipecat-flows/guides/`.
-
-| Source file          | Guide page(s)                                  | What to check                                                                                            |
-| -------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `flows/types.py`     | `pipecat-flows/guides/nodes-and-messages.mdx`  | NodeConfig properties, message format, respond_immediately                                              |
-| `flows/types.py`     | `pipecat-flows/guides/functions.mdx`           | FlowsFunctionSchema examples, direct functions, `flows_tool_options` (and the deprecated `flows_direct_function` alias) |
-| `flows/types.py`     | `pipecat-flows/guides/context-strategies.mdx`  | ContextStrategy enum values, ContextStrategyConfig usage                                                 |
-| `flows/manager.py`   | `pipecat-flows/guides/state-management.mdx`    | FlowManager initialization, state dict, global_functions                                                |
-| `flows/actions.py`   | `pipecat-flows/guides/actions.mdx`             | Built-in actions, custom actions, action timing                                                         |
-| `flows/adapters.py`  | `pipecat-flows/guides/nodes-and-messages.mdx`  | Cross-Provider Compatibility section                                                                    |
-| `flows/exceptions.py`| (rarely affects guides)                        |                                                                                                         |
-
-### Other pages
-
-| Page                                       | When to check                                                                  |
-| ------------------------------------------ | ------------------------------------------------------------------------------ |
-| `pipecat-flows/introduction.mdx`           | Rarely changes; only if installation or high-level framing changes             |
-| `pipecat-flows/guides/quickstart.mdx`      | If FlowManager init signature, FlowsFunctionSchema, or handler return types change |
-| `pipecat-flows/examples.mdx`               | Only if examples are added or removed                                          |
-| `pipecat-flows/migration/migration-1.0.mdx`| Only on major API removals or new deprecations                                 |
+| `flows/types.py`                            | `api-reference/pipecat-flows/types.mdx`                                                          |
+| `flows/manager.py`                          | `api-reference/pipecat-flows/flow-manager.mdx`                                                   |
+| `flows/actions.py`                          | `api-reference/pipecat-flows/flow-manager.mdx` and `api-reference/pipecat-flows/types.mdx`       |
+| `flows/adapters.py`                         | `api-reference/pipecat-flows/overview.mdx`                                                       |
+| `flows/exceptions.py`                       | `api-reference/pipecat-flows/exceptions.mdx`                                                     |
 
 ## Skip list
 
