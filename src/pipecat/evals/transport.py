@@ -29,12 +29,13 @@ sets:
 
 The input side runs a **virtual microphone** (:class:`EvalMicrophone`), enabled
 per connection by ``?user_audio=true`` (audio-mode scenarios): the harness sends
-each user utterance as a few large ``raw-audio`` messages, and the input
-transport plays them into the pipeline at real-time cadence (~20ms frames) with
-locally generated silence in between — so VADs, turn models, and streaming STTs
-see exactly what a live client's mic would produce, without a continuous frame
-stream crossing the wire. Text-mode scenarios leave the mic off, so no silence
-is ever fed into the bot's STT.
+each user utterance as a rapid burst of ``raw-audio`` chunks (its TTS audio,
+unpaced on the wire), and the input transport plays them into the pipeline at
+real-time cadence (~20ms frames) with locally generated silence in between — so
+VADs, turn models, and streaming STTs see exactly what a live client's mic would
+produce, without the harness having to pace a continuous frame stream across the
+wire. Text-mode scenarios leave the mic off, so no silence is ever fed into the
+bot's STT.
 
 Client disconnects behave as on any transport: the bot's
 ``on_client_disconnected`` handler fires normally, and whether the pipeline
@@ -123,9 +124,9 @@ async def _write_wav(path: str, audio: bytes, sample_rate: int, num_channels: in
 class EvalMicrophone:
     """Plays harness-sent utterances into the pipeline at real-time cadence.
 
-    The harness sends each user utterance as a few large ``raw-audio`` messages
-    (cheap on the wire — no continuous frame stream to encode and ship). A real
-    microphone, though, delivers small frames at real-time pace, and
+    The harness sends each user utterance as a rapid burst of ``raw-audio``
+    chunks (unpaced on the wire — no real-time frame stream to pace and ship). A
+    real microphone, though, delivers small frames at real-time pace, and
     timing-sensitive consumers rely on that: VAD start windows, Krisp IP/turn
     models, and turn-detecting STTs all break if a whole utterance floods the
     pipeline at once. This class is the eval transport's virtual microphone:

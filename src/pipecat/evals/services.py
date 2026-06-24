@@ -6,12 +6,12 @@
 
 """Service constructors for the eval harness.
 
-Each function builds a concrete pipecat service (TTS, STT, or judge LLM) from a
-scenario's config mapping. They are the dispatch targets behind the ``service:``
-name in :meth:`pipecat.evals.speech.EvalSpeech.from_config`,
-:func:`stt_service`, and :meth:`pipecat.evals.judge.EvalJudge.from_config`. The
-heavy provider imports stay lazy inside each function so importing this module
-stays cheap.
+Each function builds a concrete pipecat service from a scenario's config mapping.
+:func:`stt_service_from_config` and :func:`tts_service_from_config` are the
+top-level dispatchers (alongside :meth:`pipecat.evals.judge.EvalJudge.from_config`
+for the judge); the rest are the per-provider builders they dispatch to on the
+``service:`` name. The heavy provider imports stay lazy inside each function so
+importing this module stays cheap.
 """
 
 import importlib
@@ -60,21 +60,16 @@ def _cfg_language(cfg: dict) -> Language | NotGiven:
         ) from e
 
 
-# STT/VAD in the eval pipeline run at 16 kHz (see
-# ``pipecat.evals.serializer.HARNESS_STT_SAMPLE_RATE``); passed to a custom STT
-# factory so it can size buffers accordingly.
-STT_SAMPLE_RATE = 16000
-
-
-def stt_service(config: dict | None) -> STTService:
+def stt_service_from_config(config: dict | None) -> STTService:
     """Build an STT service for transcribing the bot's audio (the ``response``).
 
     Dispatches on the scenario's ``judge.transcription:`` mapping: a custom
-    ``factory`` (dotted path to a callable taking ``(config, sample_rate)`` and
-    returning an ``STTService``) takes precedence; otherwise the ``service`` name
-    selects a built-in (default ``"moonshine"``, a local model). The returned
-    service goes straight into the eval pipeline, so any pipeline STT works
-    (segmented local models or streaming providers).
+    ``factory`` (dotted path to a callable taking ``config`` and returning an
+    ``STTService``) takes precedence; otherwise the ``service`` name selects a
+    built-in (default ``"moonshine"``, a local model). The returned service goes
+    straight into the eval pipeline, so any pipeline STT works (segmented local
+    models or streaming providers) — the pipeline's ``StartFrame`` configures its
+    sample rate.
 
     Args:
         config: The ``transcription`` mapping, or ``None`` for the Moonshine default.
@@ -90,7 +85,7 @@ def stt_service(config: dict | None) -> STTService:
         if not module_name:
             raise ValueError(f"transcription.factory must be a dotted path: {custom!r}")
         factory = getattr(importlib.import_module(module_name), attr)
-        return factory(config, STT_SAMPLE_RATE)
+        return factory(config)
 
     name = str(config.get("service", "moonshine")).lower()
     if name == "whisper":
@@ -104,12 +99,76 @@ def stt_service(config: dict | None) -> STTService:
     )
 
 
-def kokoro_service(voice_cfg: dict, sample_rate: int) -> TTSService:
+def tts_service_from_config(
+    voice_cfg: dict,
+    *,
+    cache_dir: str | None = None,
+    use_cache: bool = True,
+) -> "TTSService":
+    """Build the user-audio TTS (a caching wrapper) from a ``user_audio`` mapping.
+
+    Honors a custom ``factory`` (dotted path to a callable taking ``voice_cfg``
+    and returning a ``TTSService``); otherwise dispatches on the ``service`` name
+    (``kokoro`` or ``cartesia``). The provider service is wrapped in a
+    :class:`~pipecat.evals.tts.CachingTTSService` so the scripted user utterances
+    are synthesized once and reused across runs. To use a fully custom setup,
+    construct ``CachingTTSService`` directly with your own inner ``TTSService`` and
+    pass it to :meth:`pipecat.evals.harness.EvalSession.from_scenario`.
+
+    The ``user_audio`` sample rate isn't applied here: the pipeline's ``StartFrame``
+    configures the wrapper and its inner service (the harness sets it from the
+    config), so the builders don't take a rate.
+
+    Args:
+        voice_cfg: ``user_audio`` mapping — ``service`` and ``voice`` at minimum;
+            optional ``model`` / ``api_key`` for Cartesia.
+        cache_dir: Where to store cached audio (see ``CachingTTSService``).
+        use_cache: When False, force fresh synthesis.
+
+    Returns:
+        A configured ``CachingTTSService`` (not yet started).
+    """
+    # Lazy import to keep this module cheap and avoid importing the TTS stack
+    # unless a scenario actually needs synthesized user audio.
+    from pipecat.evals.tts import CachingTTSService, tts_cache_key
+
+    custom = voice_cfg.get("factory")
+    if custom:
+        module_name, _, attr = custom.rpartition(".")
+        if not module_name:
+            raise ValueError(f"user_audio.factory must be a dotted path: {custom!r}")
+        factory = getattr(importlib.import_module(module_name), attr)
+        inner = factory(voice_cfg)
+    else:
+        name = str(voice_cfg.get("service", "")).lower()
+        voice = str(voice_cfg.get("voice", ""))
+        if not name or not voice:
+            raise ValueError("user_audio config requires at least 'service' and 'voice'")
+        if name == "kokoro":
+            inner = kokoro_service(voice_cfg)
+        elif name == "cartesia":
+            inner = cartesia_service(voice_cfg)
+        else:
+            raise ValueError(
+                f"Unknown TTS service: {name!r}. Known: kokoro, cartesia. "
+                "Or set user_audio.factory to a 'module.func' returning a TTSService."
+            )
+
+    return CachingTTSService(
+        inner,
+        cache_key=tts_cache_key(voice_cfg),
+        cache_dir=cache_dir,
+        use_cache=use_cache,
+    )
+
+
+def kokoro_service(voice_cfg: dict) -> TTSService:
     """Build a local Kokoro TTS service from the ``user_audio`` config.
 
     Kokoro runs an ONNX model locally (no API key, no per-run cost), so the eval
     suite synthesizes user audio for free. The model files are downloaded once
-    on first use and cached under ``~/.cache/kokoro-onnx``.
+    on first use and cached under ``~/.cache/kokoro-onnx``. The pipeline's
+    ``StartFrame`` configures its sample rate.
 
     Args:
         voice_cfg: The ``user.speech`` config mapping:
@@ -119,8 +178,6 @@ def kokoro_service(voice_cfg: dict, sample_rate: int) -> TTSService:
               When omitted, Kokoro keeps its own default (English). Voices are
               language-specific, so a non-English language needs a matching voice
               — ``af_heart`` speaks US English whatever the language is set to.
-
-        sample_rate: Sample rate for the synthesized audio.
     """
     from pipecat.services.kokoro.tts import KokoroTTSService
 
@@ -129,12 +186,13 @@ def kokoro_service(voice_cfg: dict, sample_rate: int) -> TTSService:
             voice=str(voice_cfg.get("voice", "")),
             language=_cfg_language(voice_cfg),
         ),
-        sample_rate=sample_rate,
     )
 
 
-def cartesia_service(voice_cfg: dict, sample_rate: int) -> TTSService:
+def cartesia_service(voice_cfg: dict) -> TTSService:
     """Build a Cartesia TTS service from the ``user_audio`` config.
+
+    The pipeline's ``StartFrame`` configures its sample rate.
 
     Args:
         voice_cfg: The ``user.speech`` config mapping:
@@ -144,8 +202,6 @@ def cartesia_service(voice_cfg: dict, sample_rate: int) -> TTSService:
             - ``api_key``: Optional key (falls back to ``$CARTESIA_API_KEY``).
             - ``language``: Optional language code (e.g. ``zh``) or ``Language``.
               When omitted, Cartesia keeps its own default (English).
-
-        sample_rate: Sample rate for the synthesized audio.
 
     Raises:
         RuntimeError: If no API key is given in the config or the environment.
@@ -167,7 +223,6 @@ def cartesia_service(voice_cfg: dict, sample_rate: int) -> TTSService:
             model=voice_cfg.get("model") or "sonic-2",
             language=_cfg_language(voice_cfg),
         ),
-        sample_rate=sample_rate,
     )
 
 

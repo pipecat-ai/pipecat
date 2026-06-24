@@ -155,8 +155,8 @@ class EvalJudge:
 
         Raises:
             ValueError: If ``service`` is unknown (matching
-                :meth:`pipecat.evals.speech.EvalSpeech.from_config` and
-                :func:`pipecat.evals.services.stt_service`).
+                :func:`pipecat.evals.services.tts_service_from_config` and
+                :func:`pipecat.evals.services.stt_service_from_config`).
 
         Example::
 

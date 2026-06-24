@@ -546,14 +546,14 @@ class TestConnectURL(unittest.TestCase):
         self.assertIn("capture_bot_audio=true", url)
         self.assertNotIn("skip_tts", url)  # audio mode, so no skip
 
-    def test_speech_adds_user_audio(self):
+    def test_user_tts_adds_user_audio(self):
         # Audio-mode user turns enable the transport's virtual mic; text-mode
         # scenarios must not (the mic would feed silence into the bot's STT).
         scenario = EvalScenario(name="t", turns=[], bot_audio=True)
-        session = EvalSession(scenario, "ws://localhost:7860", speech=object())
+        session = EvalSession(scenario, "ws://localhost:7860", user_tts=object())
         self.assertIn("user_audio=true", session._connect_url())
-        no_speech = EvalSession(scenario, "ws://localhost:7860")
-        self.assertNotIn("user_audio", no_speech._connect_url())
+        no_tts = EvalSession(scenario, "ws://localhost:7860")
+        self.assertNotIn("user_audio", no_tts._connect_url())
 
 
 class TestResponseTranscriptionSkip(unittest.IsolatedAsyncioTestCase):
@@ -598,28 +598,24 @@ class TestTextContainsResolution(unittest.TestCase):
 
 
 class TestAudioSender(unittest.IsolatedAsyncioTestCase):
-    """User audio goes out whole; the eval transport's virtual mic paces it bot-side."""
+    """User audio is spoken by pushing a TTSSpeakFrame into the pipeline."""
 
-    async def test_send_user_audio_sends_whole_utterance(self):
+    async def test_send_user_audio_queues_tts_speak_frame(self):
+        from pipecat.frames.frames import TTSSpeakFrame
+
         s = _session(bot_audio=True)
-        sent: list[tuple[bytes, int]] = []
+        queued: list = []
 
-        class _FakeSpeech:
-            sample_rate = 16000
+        class _FakeWorker:
+            async def queue_frame(self, frame):
+                queued.append(frame)
 
-            async def generate(self, text):
-                return b"\x01\x02" * 16000 * 2, 16000  # 2s of 16kHz mono
+        s._worker = _FakeWorker()
+        await s._send_user_audio("hello world")
 
-        async def fake_send_raw(chunk, sample_rate):
-            sent.append((chunk, sample_rate))
-
-        s._speech = _FakeSpeech()
-        s._send_raw_audio = fake_send_raw
-        await s._send_user_audio("hello")
-
-        self.assertEqual(len(sent), 2)  # 2s -> two ~1s slices
-        self.assertEqual(b"".join(chunk for chunk, _ in sent), b"\x01\x02" * 16000 * 2)
-        self.assertTrue(all(rate == 16000 for _, rate in sent))
+        self.assertEqual(len(queued), 1)
+        self.assertIsInstance(queued[0], TTSSpeakFrame)
+        self.assertEqual(queued[0].text, "hello world")
 
 
 class TestAudioFileSender(unittest.IsolatedAsyncioTestCase):
@@ -636,39 +632,45 @@ class TestAudioFileSender(unittest.IsolatedAsyncioTestCase):
         sf.write(str(path), data, sample_rate)
         return tone
 
-    async def test_file_is_sent_as_raw_audio_at_its_own_rate(self):
+    @staticmethod
+    def _capture_queued(session) -> list:
+        queued: list = []
+
+        class _FakeWorker:
+            async def queue_frame(self, frame):
+                queued.append(frame)
+
+        session._worker = _FakeWorker()
+        return queued
+
+    async def test_file_is_queued_as_one_audio_frame_at_its_own_rate(self):
+        from pipecat.frames.frames import OutputAudioRawFrame
+
         d = Path(tempfile.mkdtemp())
         tone = self._write_tone(d / "hi.wav", sample_rate=16000, seconds=2.0)
 
         s = _session(bot_audio=True)
-        sent: list[tuple[bytes, int]] = []
-
-        async def fake_send_raw(chunk, sample_rate):
-            sent.append((chunk, sample_rate))
-
-        s._send_raw_audio = fake_send_raw
+        queued = self._capture_queued(s)
         await s._send_audio_file(str(d / "hi.wav"))
 
-        self.assertEqual(len(sent), 2)  # 2s -> two ~1s slices
-        self.assertTrue(all(rate == 16000 for _, rate in sent))
-        self.assertEqual(b"".join(chunk for chunk, _ in sent), tone.tobytes())
+        self.assertEqual(len(queued), 1)
+        self.assertIsInstance(queued[0], OutputAudioRawFrame)
+        self.assertEqual(queued[0].sample_rate, 16000)
+        self.assertEqual(queued[0].num_channels, 1)
+        self.assertEqual(queued[0].audio, tone.tobytes())
 
     async def test_non_native_rate_is_preserved(self):
-        # The rate travels with the audio, so a recording need not match the bot.
+        # The frame carries the file's rate (the output transport resamples it),
+        # so a recording need not match the bot.
         d = Path(tempfile.mkdtemp())
         self._write_tone(d / "hi.wav", sample_rate=44100, seconds=0.5)
 
         s = _session(bot_audio=True)
-        sent: list[tuple[bytes, int]] = []
-
-        async def fake_send_raw(chunk, sample_rate):
-            sent.append((chunk, sample_rate))
-
-        s._send_raw_audio = fake_send_raw
+        queued = self._capture_queued(s)
         await s._send_audio_file(str(d / "hi.wav"))
 
-        self.assertTrue(sent)
-        self.assertTrue(all(rate == 44100 for _, rate in sent))
+        self.assertEqual(len(queued), 1)
+        self.assertEqual(queued[0].sample_rate, 44100)
 
     async def test_stereo_is_downmixed_to_mono(self):
         d = Path(tempfile.mkdtemp())
@@ -1289,31 +1291,32 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([t.status for t in result.turns], ["not_run"])
 
     async def test_unexpected_error_surfaced_not_swallowed(self):
-        # A sub-pipeline that fails to start (e.g. a local model thrashing under
-        # load) must be reported as a structured failure with its traceback, not
-        # propagate out raw and get swallowed as a bare "error:" with no eval.log.
-        class _BoomSpeech:
-            sample_rate = 16000
+        # An unexpected error mid-run (here a judge raising) must be reported as a
+        # structured failure with its traceback, not propagate out raw and get
+        # swallowed as a bare "error:" with no eval.log.
+        class _BoomJudge:
+            def add_user_message(self, text):
+                raise RuntimeError("judge boom")
 
-            async def start(self):
-                raise RuntimeError("kokoro boom")
-
-            async def aclose(self):
+            def add_assistant_message(self, text):
                 pass
+
+            async def evaluate(self, criterion):
+                raise AssertionError("unreachable")
 
         scenario = EvalScenario(
             name="boom",
             turns=[EvalTurn(user="hi", expect=[EvalExpectation(event="llm_started")])],
         )
         result = await EvalSession.from_scenario(
-            scenario, self.server.url, speech=_BoomSpeech()
+            scenario, self.server.url, judge=_BoomJudge()
         ).run()
         self.assertFalse(result.passed)
         self.assertEqual(len(result.failures), 1)
         self.assertEqual(result.failures[0].event_name, "<error>")
-        self.assertIn("RuntimeError: kokoro boom", result.failures[0].reason)
+        self.assertIn("RuntimeError: judge boom", result.failures[0].reason)
         # The full traceback is preserved in the debug trace (saved to <bot>.eval.log).
-        self.assertTrue(any("kokoro boom" in line for line in result.debug_log))
+        self.assertTrue(any("judge boom" in line for line in result.debug_log))
         self.assertTrue(any("Traceback" in line for line in result.debug_log))
         # The raise came before any turn started, so none of them are scored.
         self.assertEqual([t.status for t in result.turns], ["not_run"])

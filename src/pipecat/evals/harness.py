@@ -111,8 +111,8 @@ from pipecat.evals.serializer import (
     HARNESS_STT_SAMPLE_RATE,
     RTVIHarnessSerializer,
 )
-from pipecat.evals.services import stt_service
-from pipecat.evals.speech import EvalSpeech
+from pipecat.evals.services import stt_service_from_config, tts_service_from_config
+from pipecat.evals.tts import CachingTTSService, tts_sample_rate
 from pipecat.frames.frames import (
     EndFrame,
     Frame,
@@ -121,11 +121,13 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
+    OutputAudioRawFrame,
     OutputTransportMessageUrgentFrame,
+    TTSSpeakFrame,
     TTSTextFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -145,13 +147,6 @@ DEFAULT_EVENT_TIMEOUT_MS = 60000
 SEND_AFTER_MAX_WAIT_S = 30.0
 SEND_AFTER_POLL_S = 0.01
 BOT_READY_TIMEOUT_S = 10.0
-
-# Audio injection: each synthesized utterance is sent as a few large ``raw-audio``
-# messages (sliced to stay well under the websocket message-size limit). The eval
-# transport's virtual mic (``pipecat.evals.transport.EvalMicrophone``) plays them
-# into the bot's pipeline at real-time cadence with silence in between, so the
-# harness doesn't pace frames — and no continuous frame stream crosses the wire.
-SEND_CHUNK_MS = 1000
 
 # Categories for :attr:`EvalAssertionFailure.kind`, the stable key for grouping
 # failures across runs. Each says how an assertion failed, so a repeated suite can
@@ -310,9 +305,9 @@ class EvalSession(BaseObject):
     """Runs one :class:`EvalScenario` against a bot over a single WebSocket session.
 
     Connects as an RTVI client, drives each turn (sending ``send-text``,
-    ``raw-audio``, or ``dtmf``), collects the RTVI events the bot emits, and asserts on them.
-    Build one with :meth:`from_scenario` (which constructs the judge, speech, and
-    STT the scenario needs), then await :meth:`run`.
+    ``raw-audio``, or ``dtmf``), collects the RTVI events the bot emits, and
+    asserts on them. Build one with :meth:`from_scenario` (which constructs the
+    judge, user TTS, and STT the scenario needs), then await :meth:`run`.
 
     Event handlers available:
 
@@ -339,12 +334,12 @@ class EvalSession(BaseObject):
         stop_bot: bool = False,
         trigger_disconnect: bool = False,
         judge: EvalJudge | None = None,
-        speech: EvalSpeech | None = None,
-        stt: STTService | None = None,
+        user_tts: CachingTTSService | None = None,
+        bot_stt: STTService | None = None,
     ):
         """Initialize the eval session.
 
-        The ``judge``, ``speech``, and ``stt`` are injected pre-built:
+        The ``judge``, ``user_tts``, and ``bot_stt`` are injected pre-built:
         :meth:`from_scenario` constructs the defaults from the scenario's config
         and passes them in. Construct and pass your own to override them (e.g. a
         custom judge LLM, TTS, or STT service).
@@ -376,10 +371,10 @@ class EvalSession(BaseObject):
                 to avoid that between scenarios.
             judge: The :class:`~pipecat.evals.judge.EvalJudge` for ``eval:``
                 assertions, or ``None`` if the scenario has none.
-            speech: The :class:`~pipecat.evals.speech.EvalSpeech` for synthesizing
-                user audio, or ``None`` for text-mode scenarios. Started and
-                stopped by the session.
-            stt: The ``STTService`` that transcribes the bot's audio into the
+            user_tts: The :class:`~pipecat.evals.tts.CachingTTSService` that
+                synthesizes user audio (added to the eval pipeline in audio mode),
+                or ``None`` for text-mode scenarios.
+            bot_stt: The ``STTService`` that transcribes the bot's audio into the
                 ``response`` event (added to the eval pipeline in audio mode), or
                 ``None`` when unused.
         """
@@ -415,7 +410,7 @@ class EvalSession(BaseObject):
 
         # One persistent TTS pipeline reused across the scenario's audio turns,
         # started in run(); None for text-mode scenarios.
-        self._speech: EvalSpeech | None = speech
+        self._user_tts: CachingTTSService | None = user_tts
 
         # Accumulates the bot's output text for the current response, to
         # synthesize llm_response. Source depends on the mode: bot-llm-text in
@@ -440,7 +435,7 @@ class EvalSession(BaseObject):
         self._wants_response: bool = any(
             exp.event == "response" for turn in scenario.turns for exp in turn.expect
         )
-        self._stt: STTService | None = stt
+        self._bot_stt: STTService | None = bot_stt
 
         self._register_event_handler("on_progress")
         if on_progress is not None:
@@ -461,14 +456,14 @@ class EvalSession(BaseObject):
         stop_bot: bool = False,
         trigger_disconnect: bool = False,
         judge: EvalJudge | None = None,
-        speech: EvalSpeech | None = None,
-        stt: STTService | None = None,
+        user_tts: CachingTTSService | None = None,
+        bot_stt: STTService | None = None,
     ) -> "EvalSession":
         """Build a ready-to-run session from a scenario, constructing what it needs.
 
-        Builds the judge, speech, and STT the scenario calls for and injects them
+        Builds the judge, user TTS, and STT the scenario calls for and injects them
         into a new session. Pass ``judge`` /
-        ``speech`` / ``stt`` to override any of them with your own pre-built
+        ``user_tts`` / ``bot_stt`` to override any of them with your own pre-built
         instance. Then await :meth:`run`::
 
             session = EvalSession.from_scenario(scenario, "ws://localhost:7860")
@@ -499,9 +494,9 @@ class EvalSession(BaseObject):
                 ``trigger_disconnect`` field also opts in). Off by default.
             judge: Override the judge (default: built from ``scenario.judge`` when the
                 scenario has ``eval:`` assertions).
-            speech: Override the user-audio generator (default: built from
+            user_tts: Override the user-audio TTS (default: built from
                 ``scenario.user_speech`` in audio mode).
-            stt: Override the bot-audio STT (default: built from
+            bot_stt: Override the bot-audio STT (default: built from
                 ``scenario.transcriber`` when the scenario asserts ``response``).
 
         Returns:
@@ -512,16 +507,16 @@ class EvalSession(BaseObject):
             with logger.contextualize(eval_pipeline="judge"):
                 judge = EvalJudge.from_config(scenario.judge)
 
-        if speech is None and scenario.user_speech is not None:
+        if user_tts is None and scenario.user_speech is not None:
             with logger.contextualize(eval_pipeline="speech"):
-                speech = EvalSpeech.from_config(
+                user_tts = tts_service_from_config(
                     scenario.user_speech, cache_dir=cache_dir, use_cache=use_cache
                 )
 
         wants_response = any(exp.event == "response" for turn in turns for exp in turn.expect)
-        if stt is None and wants_response and scenario.bot_audio:
+        if bot_stt is None and wants_response and scenario.bot_audio:
             with logger.contextualize(eval_pipeline="transcription"):
-                stt = stt_service(scenario.transcriber)
+                bot_stt = stt_service_from_config(scenario.transcriber)
 
         session = cls(
             scenario,
@@ -532,8 +527,8 @@ class EvalSession(BaseObject):
             stop_bot=stop_bot,
             trigger_disconnect=trigger_disconnect,
             judge=judge,
-            speech=speech,
-            stt=stt,
+            user_tts=user_tts,
+            bot_stt=bot_stt,
         )
         if on_progress is not None:
             session._add_legacy_progress_callback(on_progress)
@@ -602,15 +597,31 @@ class EvalSession(BaseObject):
         await self._ws.close()
         self._ws = None
 
-        # Build the eval pipeline: the RTVI client transport talks to the bot, and a
-        # sink turns the bot's frames into matcher events. In audio mode an STT plus
-        # a user aggregator (with its own VAD) sit between them: the aggregator's VAD
-        # segments the bot's audio so the STT produces the `response`, and the
-        # aggregator gives us on_user_turn_stopped (the judge hook for simulations).
+        # Build one eval pipeline for both modes:
+        #
+        #   input -> [STT -> user aggregator] -> sink -> [user TTS] -> output
+        #
+        # The STT + aggregator (with the aggregator's own VAD) transcribe the bot's
+        # audio into the `response`; the user TTS turns TTSSpeakFrames into the audio
+        # sent to the bot. Each bracketed stage is present only when its service was
+        # built (audio scenarios); in text mode they're simply absent and no audio
+        # flows. The sink turns the bot's frames into matcher events either way.
+        user_audio_rate = (
+            tts_sample_rate(self._scenario.user_speech) if self._scenario.user_speech else 0
+        )
         params = WebsocketClientParams(
             audio_in_enabled=self._scenario.bot_audio,
-            audio_out_enabled=self._scenario.bot_audio,
+            audio_out_enabled=self._sends_user_audio,
             audio_in_sample_rate=HARNESS_STT_SAMPLE_RATE if self._scenario.bot_audio else 0,
+            audio_out_sample_rate=user_audio_rate,
+            # Send the user TTS's audio as fast as the connection allows: the bot's
+            # virtual mic (enabled by `user_audio=true`) re-paces it to real time and
+            # fills the gaps between utterances with silence, so pacing here too would
+            # double-pace and truncate the utterance.
+            audio_out_paced=False,
+            # Send raw PCM, not WAV: the audio goes out chunk by chunk, so a per-chunk
+            # WAV header would splice header bytes through the stream and garble it.
+            add_wav_header=False,
             serializer=RTVIHarnessSerializer(),
         )
         transport = RTVIClientTransport(self._connect_url(), params)
@@ -620,7 +631,8 @@ class EvalSession(BaseObject):
             self._bot_ready_event.set()
 
         sink = _BotFrameSink(self)
-        if self._scenario.bot_audio and self._stt is not None:
+        processors: list = [transport.input()]
+        if self._bot_stt is not None:
             user_aggregator = LLMContextAggregatorPair(
                 LLMContext(),
                 user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -637,11 +649,30 @@ class EvalSession(BaseObject):
                 if message.content and not self._awaiting_llm_restart:
                     await self._enqueue({"type": "response", "text": message.content})
 
-            processors = [transport.input(), self._stt, user_aggregator, sink, transport.output()]
-        else:
-            processors = [transport.input(), sink, transport.output()]
+            processors += [self._bot_stt, user_aggregator]
+        processors.append(sink)
+        if self._user_tts is not None:
+            # The user TTS speaks only the harness's TTSSpeakFrames; the bot's text
+            # flowing past it is passed through unspoken (see CachingTTSService), so
+            # no echo and no gate needed.
+            processors.append(self._user_tts)
+        processors.append(transport.output())
         pipeline = Pipeline(processors)
-        worker = PipelineWorker(pipeline, enable_rtvi=False, cancel_on_idle_timeout=False)
+        # The StartFrame's rates drive the in-pipeline services: the bot-audio STT
+        # reads `audio_in_sample_rate`, the user TTS produces `audio_out_sample_rate`.
+        # Set them from the scenario so the user TTS synthesizes at the configured
+        # user_audio rate rather than the PipelineParams `audio_out` default (a
+        # mismatch that would mislabel the cached audio). Text-mode scenarios have no
+        # audio in/out, so the STT rate is a harmless placeholder for `audio_out`.
+        worker = PipelineWorker(
+            pipeline,
+            params=PipelineParams(
+                audio_in_sample_rate=HARNESS_STT_SAMPLE_RATE,
+                audio_out_sample_rate=user_audio_rate or HARNESS_STT_SAMPLE_RATE,
+            ),
+            enable_rtvi=False,
+            cancel_on_idle_timeout=False,
+        )
         self._worker = worker
         runner = WorkerRunner()
         await runner.add_workers(worker)
@@ -649,19 +680,10 @@ class EvalSession(BaseObject):
 
         failures: list[EvalAssertionFailure] = []
         try:
-            # Start the injected sub-pipelines (built by from_scenario from the
-            # scenario config). Each tags its logs with an ``eval_pipeline`` label
-            # via logger.contextualize: the tasks created here inherit it
-            # (contextvars copy into asyncio tasks), so the underlying service's
-            # logs carry the label too, regardless of which TTS/STT/LLM service is
-            # used. The CLI routes each label to its own log file (see
-            # _LOG_CATEGORIES). These run under the same `try` as the turns so a
-            # sub-pipeline that fails to start (e.g. a local model under load) is
-            # surfaced as a failure rather than propagating out raw (see below).
-            if self._speech is not None:
-                with logger.contextualize(eval_pipeline="speech"):
-                    await self._speech.start()
-
+            # The STT and user TTS run inside the pipeline (started by the worker
+            # above); the judge runs out-of-band during matching. Everything below
+            # is under this `try` so a service that fails to start (e.g. a local
+            # model under load) surfaces as a failure rather than propagating raw.
             self._debug("connected")
             try:
                 await self._handshake()
@@ -727,11 +749,6 @@ class EvalSession(BaseObject):
                 record.status = "failed"
                 record.failures.append(failure)
         finally:
-            # Tear each sub-pipeline down under the same eval_pipeline label as its
-            # setup, so its shutdown logs are attributed to it.
-            if self._speech is not None:
-                with logger.contextualize(eval_pipeline="speech"):
-                    await self._speech.aclose()
             # Optionally ask the bot to tear its pipeline down gracefully so it exits
             # on its own (best-effort; skipped by default so it stays up for more
             # scenarios).
@@ -763,6 +780,11 @@ class EvalSession(BaseObject):
             debug_log=self._debug_log,
         )
 
+    @property
+    def _sends_user_audio(self) -> bool:
+        """Whether any user turn reaches the bot as audio, synthesized or from a file."""
+        return self._user_tts is not None or any(t.audio for t in self._scenario.turns)
+
     def _connect_url(self) -> str:
         """Bot URL with the per-connection eval query flags.
 
@@ -784,7 +806,7 @@ class EvalSession(BaseObject):
         flags = []
         if not self._scenario.bot_audio:
             flags.append("skip_tts=true")
-        if self._speech is not None or any(t.audio for t in self._scenario.turns):
+        if self._sends_user_audio:
             flags.append("user_audio=true")
         if self._wants_response:
             flags.append("capture_bot_audio=true")
@@ -1234,11 +1256,11 @@ class EvalSession(BaseObject):
             self._drop_pending_bot_output("before send")
 
         if turn.user is not None:
-            how = turn.audio or ("audio" if self._speech is not None else "text")
+            how = turn.audio or ("audio" if self._user_tts is not None else "text")
             self._debug(f"send: {turn.user!r} ({how})")
             if turn.audio is not None:
                 await self._send_audio_file(turn.audio)
-            elif self._speech is not None:
+            elif self._user_tts is not None:
                 await self._send_user_audio(turn.user)
             else:
                 await self._send_user_text(turn.user, self._scenario.bot_audio)
@@ -1253,6 +1275,16 @@ class EvalSession(BaseObject):
             # knowing what was pressed.
             if self._judge is not None:
                 self._judge.add_user_message(f"(DTMF keypad input: {turn.dtmf})")
+
+        if turn.user is not None or turn.dtmf is not None:
+            # Start the turn clean: drop bot output still queued from the previous
+            # turn (e.g. a long greeting only partly consumed, whose extra segments
+            # would otherwise be matched as this turn's response), and suppress
+            # in-flight stragglers until the bot's fresh response begins
+            # (bot-llm-started clears the flag), so this turn matches only what the
+            # bot says in reply to this input.
+            self._discard_interrupted_output()
+            self._awaiting_llm_restart = True
 
         await self._progress(EvalTurnProgress(turn_idx, -1, turn.user or turn.dtmf or "", "turn"))
 
@@ -1351,39 +1383,28 @@ class EvalSession(BaseObject):
         await self._send(message)
 
     async def _send_user_audio(self, text: str) -> None:
-        """Render ``text`` to audio (cached) and send it to the bot.
+        """Speak ``text`` as the user by pushing a ``TTSSpeakFrame`` into the pipeline.
 
-        The whole utterance goes out as a few large ``raw-audio`` messages; the
-        eval transport's virtual mic plays it into the bot's pipeline at
-        real-time cadence (see ``pipecat.evals.transport.EvalMicrophone``).
+        The user TTS (:class:`~pipecat.evals.tts.CachingTTSService`) renders it to
+        audio (cached), which the output transport serializes to ``raw-audio``; the
+        bot's eval transport plays it into the bot's pipeline at real-time cadence
+        (see ``pipecat.evals.transport.EvalMicrophone``).
         """
-        assert self._speech is not None  # only called for audio-mode turns
-        pcm, sample_rate = await self._speech.generate(text)
-        for chunk in _audio_chunks(pcm, sample_rate):
-            await self._send_raw_audio(chunk, sample_rate)
+        assert self._worker is not None  # pipeline built before any send
+        await self._worker.queue_frame(TTSSpeakFrame(text))
 
     async def _send_audio_file(self, path: str) -> None:
         """Play a turn's ``audio:`` recording to the bot in place of synthesizing it.
 
-        The file's own sample rate travels with the audio, so a recording does
-        not have to match the bot's input rate.
+        The recording is pushed into the pipeline as one audio frame; the output
+        transport resamples it to the user-audio rate and serializes it to
+        ``raw-audio`` exactly like the user TTS's audio.
         """
+        assert self._worker is not None  # pipeline built before any send
         pcm, sample_rate = await load_user_audio(path)
-        for chunk in _audio_chunks(pcm, sample_rate):
-            await self._send_raw_audio(chunk, sample_rate)
-
-    async def _send_raw_audio(self, chunk: bytes, sample_rate: int) -> None:
-        """Send one PCM chunk to the bot as an RTVI ``raw-audio`` message."""
-        message = RTVI.Message(
-            type="raw-audio",
-            id=self._message_id(),
-            data={
-                "base64Audio": base64.b64encode(chunk).decode("ascii"),
-                "sampleRate": sample_rate,
-                "numChannels": 1,
-            },
+        await self._worker.queue_frame(
+            OutputAudioRawFrame(audio=pcm, sample_rate=sample_rate, num_channels=1)
         )
-        await self._send(message)
 
     async def _wait_send_after(self, send_after: EvalSendAfter) -> None:
         """Block until ``send_after.event`` has been seen + ``delay_ms`` has elapsed.
@@ -1801,15 +1822,3 @@ def _text_contains(content: str, needle: str) -> bool:
     their own, so a phrase is matched on collapsed whitespace.
     """
     return " ".join(needle.split()) in " ".join(content.split())
-
-
-def _audio_chunks(pcm: bytes, sample_rate: int):
-    """Yield ``pcm`` as ~1s slices (16-bit mono), staying well under websocket limits.
-
-    A websocket server's default max message size is 1MiB; one second of 16kHz
-    mono is ~43KB base64-encoded, so even long utterances ship in a handful of
-    messages.
-    """
-    bytes_per_chunk = (sample_rate * SEND_CHUNK_MS // 1000) * 2
-    for offset in range(0, len(pcm), bytes_per_chunk):
-        yield pcm[offset : offset + bytes_per_chunk]
