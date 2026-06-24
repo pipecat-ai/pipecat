@@ -95,6 +95,7 @@ from websockets.asyncio.client import ClientConnection
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.audio import load_user_audio
+from pipecat.evals.client_transport import EvalHarnessTransport
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.scenario import (
     FUNCTION_CALL_EVENTS,
@@ -119,6 +120,7 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallInProgressFrame,
     InputTransportMessageFrame,
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
@@ -138,7 +140,6 @@ from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.stt_service import STTService
 from pipecat.transports.websocket.client import WebsocketClientParams
-from pipecat.transports.websocket.rtvi_client import RTVIClientTransport
 from pipecat.utils.base_object import BaseObject
 from pipecat.workers.runner import WorkerRunner
 
@@ -285,11 +286,17 @@ class EvalTurnProgress:
 class _BotFrameSink(FrameProcessor):
     """Pipeline tap that turns the bot's incoming frames into matcher events.
 
-    Sits at the end of the eval pipeline; for every frame the
-    :class:`RTVIClientTransport` produces it calls back into the session's
+    Sits between the bot-audio side and the user-audio side of the eval pipeline;
+    for every frame it calls back into the session's
     :meth:`EvalSession._frames_to_events` and enqueues the results for the
     matcher, then passes the frame on. Outgoing frames (the RTVI client messages
     the session injects) flow through untouched — they don't map to events.
+
+    It also stops the harness's *computed* interruptions here: the user aggregator
+    runs a VAD on the bot's incoming audio, so when the bot speaks it broadcasts an
+    ``InterruptionFrame`` downstream. Letting that reach the user TTS / output would
+    flush the user audio we're paced-sending (dropping a barge-in turn, and the
+    user's side of the recording), so the sink swallows it.
     """
 
     def __init__(self, session: "EvalSession"):
@@ -300,6 +307,10 @@ class _BotFrameSink(FrameProcessor):
         await super().process_frame(frame, direction)
         for event in self._session._frames_to_events(frame):
             await self._session._enqueue(event)
+        # The bot-audio VAD's interruption must not propagate into the user-audio
+        # path (user TTS + output); see the class docstring.
+        if isinstance(frame, InterruptionFrame) and direction == FrameDirection.DOWNSTREAM:
+            return
         await self.push_frame(frame, direction)
 
 
@@ -619,17 +630,13 @@ class EvalSession(BaseObject):
             audio_out_enabled=self._sends_user_audio,
             audio_in_sample_rate=HARNESS_STT_SAMPLE_RATE if self._scenario.bot_audio else 0,
             audio_out_sample_rate=user_audio_rate,
-            # Send the user TTS's audio as fast as the connection allows: the bot's
-            # virtual mic (enabled by `user_audio=true`) re-paces it to real time and
-            # fills the gaps between utterances with silence, so pacing here too would
-            # double-pace and truncate the utterance.
-            audio_out_paced=False,
-            # Send raw PCM, not WAV: the audio goes out chunk by chunk, so a per-chunk
-            # WAV header would splice header bytes through the stream and garble it.
-            add_wav_header=False,
             serializer=RTVIHarnessSerializer(),
         )
-        transport = RTVIClientTransport(self._connect_url(), params)
+        # EvalHarnessTransport's output streams the user TTS to the bot like a live
+        # client's mic (paced, with silence when idle), so the bot needs no virtual
+        # mic and the harness recording captures the user turn at the right time. The
+        # stream runs only when audio_out_enabled (audio-mode scenarios).
+        transport = EvalHarnessTransport(self._connect_url(), params)
 
         @transport.event_handler("on_bot_ready")
         async def _on_bot_ready(_transport):
@@ -825,22 +832,16 @@ class EvalSession(BaseObject):
         ``skip_tts`` (text mode) silences the bot before any LLM runs; the eval
         transport must read it at connect time because frames are ordered and a
         later message can't precede an on-connect greeting (see
-        :mod:`pipecat.evals.transport`). ``user_audio`` turns on the transport's
-        virtual mic whenever the harness sends audio, whether synthesized or
-        played from a turn's ``audio:`` file; without it the transport plays no
-        mic at all, so a text-mode scenario never feeds silence into the bot's
-        STT. ``capture_bot_audio`` makes the bot forward its synthesized audio to
-        the harness, both for ``response``/``tts_response`` transcription and so the
-        harness can record the bot's side (recording itself is harness-side now).
-        ``trigger_disconnect`` asks the transport to fire the bot's
-        ``on_client_disconnected`` handler when the connection ends (off by default,
-        since bots often cancel there).
+        :mod:`pipecat.evals.transport`). ``capture_bot_audio`` makes the bot forward
+        its synthesized audio to the harness, both for ``response``/``tts_response``
+        transcription and so the harness can record the bot's side (recording itself
+        is harness-side now). ``trigger_disconnect`` asks the transport to fire the
+        bot's ``on_client_disconnected`` handler when the connection ends (off by
+        default, since bots often cancel there).
         """
         flags = []
         if not self._scenario.bot_audio:
             flags.append("skip_tts=true")
-        if self._sends_user_audio:
-            flags.append("user_audio=true")
         # Forward the bot's audio when a scenario asserts on it (response) or when
         # recording an audio scenario (the harness records the bot's side from it).
         if self._wants_response or (self._record_path and self._scenario.bot_audio):

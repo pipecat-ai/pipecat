@@ -48,15 +48,11 @@ class WebsocketClientParams(TransportParams):
     Parameters:
         add_wav_header: Whether to add WAV headers to audio frames.
         serializer: Frame serializer for encoding/decoding messages.
-        audio_out_paced: Whether to pace outgoing audio to real time (emulating
-            an audio device). Disable this when the receiver paces the audio
-            itself, so the audio is sent as fast as the connection allows.
     """
 
     add_wav_header: bool = True
     additional_headers: dict[str, str] | None = None
     serializer: FrameSerializer | None = None
-    audio_out_paced: bool = True
 
 
 class WebsocketClientCallbacks(BaseModel):
@@ -444,10 +440,8 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         if not await self._write_frame(frame):
             return False
 
-        # Simulate audio playback with a sleep, unless the receiver paces the
-        # audio itself (then we send as fast as the connection allows).
-        if self._params.audio_out_paced:
-            await self._write_audio_sleep()
+        # Simulate audio playback with a sleep.
+        await self._write_audio_sleep()
 
         return True
 

@@ -546,14 +546,13 @@ class TestConnectURL(unittest.TestCase):
         self.assertIn("capture_bot_audio=true", url)
         self.assertNotIn("skip_tts", url)  # audio mode, so no skip
 
-    def test_user_tts_adds_user_audio(self):
-        # Audio-mode user turns enable the transport's virtual mic; text-mode
-        # scenarios must not (the mic would feed silence into the bot's STT).
-        scenario = EvalScenario(name="t", turns=[], bot_audio=True)
-        session = EvalSession(scenario, "ws://localhost:7860", user_tts=object())
-        self.assertIn("user_audio=true", session._connect_url())
-        no_tts = EvalSession(scenario, "ws://localhost:7860")
-        self.assertNotIn("user_audio", no_tts._connect_url())
+    def test_skip_tts_flag_in_text_mode(self):
+        # Text-mode scenarios silence the bot (skip_tts before any greeting);
+        # audio-mode scenarios let it speak.
+        text = EvalScenario(name="t", turns=[], bot_audio=False)
+        self.assertIn("skip_tts=true", EvalSession(text, "ws://localhost:7860")._connect_url())
+        audio = EvalScenario(name="t", turns=[], bot_audio=True)
+        self.assertNotIn("skip_tts", EvalSession(audio, "ws://localhost:7860")._connect_url())
 
 
 class TestResponseTranscriptionSkip(unittest.IsolatedAsyncioTestCase):
@@ -688,18 +687,22 @@ class TestAudioFileSender(unittest.IsolatedAsyncioTestCase):
         self.assertIn("x.txt", str(cm.exception))
 
 
-class TestAudioFileEnablesMic(unittest.TestCase):
-    def test_audio_turn_adds_user_audio_flag(self):
-        # Without the flag the transport runs no mic and the audio is dropped,
-        # even though the scenario names no TTS.
+class TestAudioFileEnablesUserAudio(unittest.TestCase):
+    def test_audio_turn_enables_user_audio_output(self):
+        # The harness streams user audio only when audio output is enabled, so
+        # a turn that plays a file must enable it even though the scenario
+        # names no TTS.
         scenario = EvalScenario(
             name="t",
-            turns=[EvalTurn(user="hi", audio="/tmp/hi.wav")],
             bot_audio=True,
             user_audio=True,
+            turns=[EvalTurn(user="hi", audio="hi.wav", expect=[])],
         )
-        url = EvalSession(scenario, "ws://localhost:7860")._connect_url()
-        self.assertIn("user_audio=true", url)
+        self.assertTrue(EvalSession(scenario, "ws://localhost:7860")._sends_user_audio)
+
+    def test_text_turns_do_not(self):
+        scenario = EvalScenario(name="t", bot_audio=True, turns=[EvalTurn(user="hi", expect=[])])
+        self.assertFalse(EvalSession(scenario, "ws://localhost:7860")._sends_user_audio)
 
 
 class TestDTMFSender(unittest.IsolatedAsyncioTestCase):
