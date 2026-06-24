@@ -1,10 +1,8 @@
 # Getting Started — Building Pipecat Bots with a Coding Agent
 
 **This file is for you**: how to drive your coding agent well. The other
-files here are for the **agent**: AGENTS.md teaches it how to build Pipecat
-apps — scaffold with `pipecat create`, check APIs against live sources
-instead of stale training data, verify its own work with headless evals —
-and CLAUDE.md loads it into Claude Code.
+files here (`AGENTS.md`, `CLAUDE.md`) are the agent's guide; it picks them
+up automatically, so you don't need to read them.
 
 ## First: set up the Pipecat Context Hub
 
