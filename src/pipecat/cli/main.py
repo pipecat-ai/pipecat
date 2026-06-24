@@ -72,8 +72,9 @@ def _build_app():
 
     # `init` is the single entry point for building a Pipecat app: it writes the
     # coding-agent guide and can scaffold a runnable bot (interactively or from flags/a
-    # config file, e.g. `pipecat init . --bot-type web -t daily ...`).
-    app.command("init", help="Initialize a new Pipecat project")(init_command)
+    # config file, e.g. `pipecat init . --bot-type web -t daily ...`). No `help=` here so
+    # the command's docstring (summary + examples) drives `pipecat init --help`.
+    app.command("init")(init_command)
 
     # `pipecat create` was removed (folded into `init`). Keep a hidden stub so an old
     # command or muscle-memory invocation gets a clear pointer instead of Click's bare

@@ -57,6 +57,11 @@ _GETTING_STARTED_FILE = "GETTING_STARTED.md"
 # Fixed destination for `pipecat init quickstart`.
 _QUICKSTART_DIR = "pipecat-quickstart"
 
+# `--help` panels grouping the scaffold flags, so `pipecat init --help` reads as
+# "what to build" vs. "optional features" instead of one flat wall of options.
+_PANEL_SCAFFOLD = "Scaffold options"
+_PANEL_FEATURES = "Scaffold features"
+
 
 def _guide_footer() -> str:
     """Provenance stamp appended to pipecat-owned guide files.
@@ -259,75 +264,140 @@ def init_command(
     ctx: typer.Context,
     target: str | None = typer.Argument(
         None,
-        help="Directory to initialize (or 'quickstart' for the canned bot). Created if missing.",
+        help="Project directory: initialized, and scaffolded in place when scaffold options "
+        "are given. Use '.' for the current directory; created if missing. Pass 'quickstart' "
+        "for the canned bot.",
     ),
     force: bool = typer.Option(
         False,
         "--force",
         help=f"Also overwrite an existing {_CLAUDE_FILE} ({_AGENTS_FILE} is always refreshed).",
     ),
-    # --- Scaffold options (presence switches to non-interactive scaffolding) ---
     name: str | None = typer.Option(
-        None, "--name", "-n", help="Project name (defaults to the target directory name)"
+        None,
+        "--name",
+        "-n",
+        help="Project name (defaults to the target directory name)",
+        rich_help_panel=_PANEL_SCAFFOLD,
     ),
     bot_type: str | None = typer.Option(
         None,
         "--bot-type",
         "-b",
         help="Bot type: 'web' or 'telephony' (inferred from --transport if omitted)",
+        rich_help_panel=_PANEL_SCAFFOLD,
     ),
     transport: list[str] | None = typer.Option(
-        None, "--transport", "-t", help="Transport (repeatable, e.g. -t daily -t smallwebrtc)"
+        None,
+        "--transport",
+        "-t",
+        help="Transport (repeatable, e.g. -t daily -t smallwebrtc)",
+        rich_help_panel=_PANEL_SCAFFOLD,
     ),
     mode: str | None = typer.Option(
-        None, "--mode", "-m", help="Pipeline mode: 'cascade' or 'realtime'"
+        None,
+        "--mode",
+        "-m",
+        help="Pipeline mode: 'cascade' or 'realtime'",
+        rich_help_panel=_PANEL_SCAFFOLD,
     ),
-    stt: str | None = typer.Option(None, "--stt", help="STT service (cascade mode)"),
-    llm: str | None = typer.Option(None, "--llm", help="LLM service (cascade mode)"),
-    tts: str | None = typer.Option(None, "--tts", help="TTS service (cascade mode)"),
+    stt: str | None = typer.Option(
+        None, "--stt", help="STT service (cascade mode)", rich_help_panel=_PANEL_SCAFFOLD
+    ),
+    llm: str | None = typer.Option(
+        None, "--llm", help="LLM service (cascade mode)", rich_help_panel=_PANEL_SCAFFOLD
+    ),
+    tts: str | None = typer.Option(
+        None, "--tts", help="TTS service (cascade mode)", rich_help_panel=_PANEL_SCAFFOLD
+    ),
     realtime: str | None = typer.Option(
-        None, "--realtime", help="Realtime service (realtime mode)"
+        None,
+        "--realtime",
+        help="Realtime service (realtime mode)",
+        rich_help_panel=_PANEL_SCAFFOLD,
     ),
-    video: str | None = typer.Option(None, "--video", help="Video avatar service"),
+    video: str | None = typer.Option(
+        None, "--video", help="Video avatar service", rich_help_panel=_PANEL_SCAFFOLD
+    ),
     client_framework: str | None = typer.Option(
-        None, "--client-framework", help="Client framework: 'react', 'vanilla', or 'none'"
+        None,
+        "--client-framework",
+        help="Client framework: 'react', 'vanilla', or 'none'",
+        rich_help_panel=_PANEL_SCAFFOLD,
     ),
     client_server: str | None = typer.Option(
-        None, "--client-server", help="Client dev server: 'vite' or 'nextjs'"
+        None,
+        "--client-server",
+        help="Client dev server: 'vite' or 'nextjs'",
+        rich_help_panel=_PANEL_SCAFFOLD,
     ),
     daily_pstn_mode: str | None = typer.Option(
-        None, "--daily-pstn-mode", help="Daily PSTN mode: 'dial-in' or 'dial-out'"
+        None,
+        "--daily-pstn-mode",
+        help="Daily PSTN mode: 'dial-in' or 'dial-out'",
+        rich_help_panel=_PANEL_SCAFFOLD,
     ),
     twilio_daily_sip_mode: str | None = typer.Option(
-        None, "--twilio-daily-sip-mode", help="Twilio+Daily SIP mode: 'dial-in' or 'dial-out'"
+        None,
+        "--twilio-daily-sip-mode",
+        help="Twilio+Daily SIP mode: 'dial-in' or 'dial-out'",
+        rich_help_panel=_PANEL_SCAFFOLD,
     ),
-    recording: bool = typer.Option(False, "--recording/--no-recording", help="Enable recording"),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="JSON config file (triggers non-interactive scaffolding)",
+        rich_help_panel=_PANEL_SCAFFOLD,
+    ),
+    recording: bool = typer.Option(
+        False,
+        "--recording/--no-recording",
+        help="Enable recording",
+        rich_help_panel=_PANEL_FEATURES,
+    ),
     transcription: bool = typer.Option(
-        False, "--transcription/--no-transcription", help="Enable transcription"
+        False,
+        "--transcription/--no-transcription",
+        help="Enable transcription",
+        rich_help_panel=_PANEL_FEATURES,
     ),
     video_input: bool = typer.Option(
-        False, "--video-input/--no-video-input", help="Enable video input"
+        False,
+        "--video-input/--no-video-input",
+        help="Enable video input",
+        rich_help_panel=_PANEL_FEATURES,
     ),
     video_output: bool = typer.Option(
-        False, "--video-output/--no-video-output", help="Enable video output"
+        False,
+        "--video-output/--no-video-output",
+        help="Enable video output",
+        rich_help_panel=_PANEL_FEATURES,
     ),
     deploy_to_cloud: bool = typer.Option(
-        True, "--deploy-to-cloud/--no-deploy-to-cloud", help="Generate cloud deployment files"
+        True,
+        "--deploy-to-cloud/--no-deploy-to-cloud",
+        help="Generate cloud deployment files",
+        rich_help_panel=_PANEL_FEATURES,
     ),
     enable_krisp: bool = typer.Option(
-        False, "--enable-krisp/--no-enable-krisp", help="Enable Krisp noise cancellation"
+        False,
+        "--enable-krisp/--no-enable-krisp",
+        help="Enable Krisp noise cancellation",
+        rich_help_panel=_PANEL_FEATURES,
     ),
     observability: bool = typer.Option(
-        False, "--observability/--no-observability", help="Enable observability"
+        False,
+        "--observability/--no-observability",
+        help="Enable observability",
+        rich_help_panel=_PANEL_FEATURES,
     ),
     enable_eval: bool = typer.Option(
         False,
         "--eval/--no-eval",
         help="Add an 'eval' transport so the bot is runnable with `-t eval` for "
         "behavioral evals (see `pipecat eval`). Off by default.",
-    ),
-    config: Path | None = typer.Option(
-        None, "--config", "-c", help="JSON config file (triggers non-interactive scaffolding)"
+        rich_help_panel=_PANEL_FEATURES,
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print resolved scaffold config as JSON without writing files"
@@ -342,24 +412,19 @@ def init_command(
 ):
     r"""Initialize a new Pipecat project — and optionally scaffold it.
 
-    Writes the coding-agent guide (AGENTS.md + CLAUDE.md), then either scaffolds a runnable
-    bot or hands you off to a coding agent. Pass scaffold options (``--bot-type``,
-    ``--transport``, the service flags, or ``--config``) to build the project
-    non-interactively, in-place in the target directory; with no scaffold options, ``init``
-    writes GETTING_STARTED.md and (interactively) asks how you want to build.
+    Writes the coding-agent guide (AGENTS.md, CLAUDE.md). Pass scaffold options (or
+    ``--config``) to also build a runnable bot in place; with none, ``init`` asks how you
+    want to build.
 
     Examples::
 
-        pipecat init                       # prompt for a directory, then choose how to build
-        pipecat init my-bot                # set up ./my-bot
-        pipecat init quickstart            # canned quickstart bot in ./pipecat-quickstart
-        pipecat init .                     # set up the current directory
-        pipecat init . --bot-type web \
-          --transport daily --mode cascade \
-          --stt deepgram_stt --llm openai_llm \
-          --tts cartesia_tts               # scaffold in-place, non-interactively
+        pipecat init                # prompt for a directory, then choose how to build
+        pipecat init my-bot         # set up ./my-bot
+        pipecat init quickstart     # canned quickstart bot in ./pipecat-quickstart
+        pipecat init .              # set up the current directory
+        pipecat init . --bot-type web -t daily -m cascade --stt deepgram_stt --llm openai_llm --tts cartesia_tts
         pipecat init my-bot --config project-config.json   # scaffold from a config file
-        pipecat init --list-options        # print valid service/transport values as JSON
+        pipecat init --list-options # print valid service/transport values as JSON
     """
     # `pipecat init quickstart`: scaffold the canned bot in-place, with the coding-agent guide.
     if target == "quickstart":
