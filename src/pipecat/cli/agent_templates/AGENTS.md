@@ -41,8 +41,6 @@ pipecat init . \
 #   • --dry-run prints the resolved config as JSON; --config project.json drives it from a file.
 #   • --transport is repeatable — pass each transport you want (production + a local-dev one, §2).
 #   • --bot-type is inferred from --transport (telephony if any telephony transport, else web) — omit it.
-
-# Humans: `pipecat init quickstart` (canned defaults) or bare `pipecat init` (interactive wizard).
 ```
 
 **Choose *with* the user, not for them.** Map their requirements to the real options and confirm transport / services / mode / deployment (§7) before scaffolding — don't silently pick or guess. Mode affects testing speed — **cascade (STT→LLM→TTS)** gets the fast text-mode eval loop (§6); **realtime (speech-to-speech)** is tested in audio mode — but both run headless, so pick the mode the use case needs.
