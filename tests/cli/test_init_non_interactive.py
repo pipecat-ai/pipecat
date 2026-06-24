@@ -8,7 +8,8 @@
 
 These drive the real Typer command via ``--dry-run``, which resolves the full
 config (file values merged with CLI flags) and prints it as JSON without
-generating any files — exercising the merge logic in ``create_command`` end to end.
+generating any files — exercising the merge logic in ``run_non_interactive_scaffold``
+end to end.
 """
 
 import json
@@ -40,7 +41,7 @@ def _write_config(tmp_path, **overrides):
 
 def _dry_run(args):
     """Invoke `init ... --dry-run` and return the parsed resolved config."""
-    result = runner.invoke(app, ["create", *args, "--dry-run"])
+    result = runner.invoke(app, ["init", *args, "--dry-run"])
     assert result.exit_code == 0, result.stdout
     return json.loads(result.stdout)
 

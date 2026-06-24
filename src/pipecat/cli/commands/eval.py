@@ -77,7 +77,7 @@ def _format_detail(p: EvalTurnProgress) -> str:
 
 eval_app = typer.Typer(
     name="eval",
-    help="Run behavioral evals against a Pipecat bot.",
+    help="Run behavioral evals against a Pipecat bot",
     no_args_is_help=True,
 )
 

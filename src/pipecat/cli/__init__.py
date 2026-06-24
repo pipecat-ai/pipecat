@@ -8,8 +8,8 @@
 
 This package provides command-line tools for:
 - Initializing a new Pipecat project with `pipecat init` (the entry point: writes the
-  coding-agent guide, then helps you build with a coding agent or scaffold a bot)
-- Scaffolding a project with `pipecat create`
+  coding-agent guide, then helps you build with a coding agent or scaffolds a runnable
+  bot — interactively or non-interactively from flags or a config file)
 - Running behavioral evals against a bot with `pipecat eval`
 
 And allows installing extensions like Pipecat Cloud:

@@ -17,14 +17,17 @@
   path: it's onboarding for commissioning a build, so it doesn't fit a project
   that's already been scaffolded (where the README is the start-here).
 
-After writing AGENTS.md + CLAUDE.md, interactive ``init`` asks how you want to build:
-hand off to a coding agent (which later scaffolds with ``pipecat create``), or scaffold
-a runnable bot right now (it runs the ``pipecat create`` wizard in-place in the same
-directory). ``pipecat init quickstart`` skips the question and scaffolds the canned
-quickstart bot in-place — the coding-agent guide *and* a runnable bot in one step.
+``init`` is also the scaffolder. After writing AGENTS.md + CLAUDE.md it either:
 
-``pipecat create`` remains the scaffolder itself: coding agents and automation call
-it directly (non-interactively); ``init`` is the human entry point that wraps it.
+- builds the project from flags or a config file when any scaffold option is given
+  (``pipecat init . --bot-type web -t daily …``) — the non-interactive path coding
+  agents and automation use;
+- or, interactively, asks how you want to build: hand off to a coding agent, or scaffold
+  a runnable bot right now (the wizard, in-place in the same directory).
+
+``pipecat init quickstart`` skips the question and scaffolds the canned quickstart bot
+in-place — the coding-agent guide *and* a runnable bot in one step. The scaffolding
+itself lives in :mod:`pipecat.cli.scaffold`.
 
 Editing policy for the bundled guide: keep API specifics (signatures, imports,
 parameter names) out of AGENTS.md — it is a static snapshot, so anything that
@@ -38,6 +41,7 @@ import typer
 from rich.console import Console
 
 import pipecat.cli
+from pipecat.cli.scaffold import list_options_callback, run_non_interactive_scaffold
 
 console = Console()
 
@@ -50,7 +54,7 @@ _AGENTS_FILE = "AGENTS.md"
 _CLAUDE_FILE = "CLAUDE.md"
 _GETTING_STARTED_FILE = "GETTING_STARTED.md"
 
-# Fixed destination for `pipecat init quickstart`, matching `pipecat create quickstart`.
+# Fixed destination for `pipecat init quickstart`.
 _QUICKSTART_DIR = "pipecat-quickstart"
 
 
@@ -147,8 +151,8 @@ def _print_ready(target_dir: Path) -> None:
 
     Names the project directory so the developer knows where to open their session,
     except when init targeted the current directory (``pipecat init .``), where "here"
-    reads better than "in .". The agent runs ``pipecat create`` itself (per AGENTS.md),
-    so it's left out of this human-facing message.
+    reads better than "in .". The agent runs ``pipecat init`` itself to scaffold (per
+    AGENTS.md), so that's left out of this human-facing message.
     """
     where = "here" if target_dir.resolve() == Path.cwd() else f"in [bold]{target_dir}[/bold]"
     console.print(
@@ -192,10 +196,10 @@ def _route_build_method(target_dir: Path) -> None:
         _print_ready(target_dir)
         return
 
-    # Scaffold now: run the `create` wizard in-place. The scaffold lands in the same
-    # directory that already holds AGENTS.md/CLAUDE.md (in-place mode preserves CLAUDE.md),
-    # and its README carries the start-here guidance — so no GETTING_STARTED.md here.
-    from pipecat.cli.commands.create import scaffold_interactive
+    # Scaffold now: run the wizard in-place. The scaffold lands in the same directory that
+    # already holds AGENTS.md/CLAUDE.md (in-place mode preserves CLAUDE.md), and its README
+    # carries the start-here guidance — so no GETTING_STARTED.md here.
+    from pipecat.cli.scaffold import scaffold_interactive
 
     try:
         scaffold_interactive(target_dir, target_dir.name, in_place=True)
@@ -217,14 +221,13 @@ def _init_quickstart(force: bool) -> None:
 
     Writes the agent guide into ``pipecat-quickstart/`` and scaffolds the quickstart
     bot in-place there, so the learner's first project is both runnable and set up for
-    coding agents. The human counterpart to ``pipecat create quickstart`` (which omits
-    the guide). Non-interactive — it's a fixed preset, so there's no build-method
+    coding agents. Non-interactive — it's a fixed preset, so there's no build-method
     question.
 
     Skips ``GETTING_STARTED.md`` (the from-scratch developer onboarding): the bot
     already exists, so the scaffold's README is the start-here.
     """
-    from pipecat.cli.commands.create import scaffold_quickstart
+    from pipecat.cli.scaffold import scaffold_quickstart
 
     target_dir = Path(_QUICKSTART_DIR)
     # AGENTS.md + CLAUDE.md only — _write_agent_guide never writes GETTING_STARTED.md.
@@ -241,6 +244,17 @@ def _init_quickstart(force: bool) -> None:
         raise typer.Exit(1)
 
 
+# Scaffold options that, when present, switch `init` to non-interactive scaffolding.
+# A truthy/non-None value on any of these (or `--config`) means "build the project now"
+# rather than just writing the guide and prompting.
+def _scaffold_requested(*, config, name, bot_type, transport, mode, stt, llm, tts, realtime, video):
+    return (
+        config is not None
+        or bool(transport)
+        or any(v is not None for v in (name, bot_type, mode, stt, llm, tts, realtime, video))
+    )
+
+
 def init_command(
     ctx: typer.Context,
     target: str | None = typer.Argument(
@@ -252,38 +266,149 @@ def init_command(
         "--force",
         help=f"Also overwrite an existing {_CLAUDE_FILE} ({_AGENTS_FILE} is always refreshed).",
     ),
+    # --- Scaffold options (presence switches to non-interactive scaffolding) ---
+    name: str | None = typer.Option(
+        None, "--name", "-n", help="Project name (defaults to the target directory name)"
+    ),
+    bot_type: str | None = typer.Option(
+        None,
+        "--bot-type",
+        "-b",
+        help="Bot type: 'web' or 'telephony' (inferred from --transport if omitted)",
+    ),
+    transport: list[str] | None = typer.Option(
+        None, "--transport", "-t", help="Transport (repeatable, e.g. -t daily -t smallwebrtc)"
+    ),
+    mode: str | None = typer.Option(
+        None, "--mode", "-m", help="Pipeline mode: 'cascade' or 'realtime'"
+    ),
+    stt: str | None = typer.Option(None, "--stt", help="STT service (cascade mode)"),
+    llm: str | None = typer.Option(None, "--llm", help="LLM service (cascade mode)"),
+    tts: str | None = typer.Option(None, "--tts", help="TTS service (cascade mode)"),
+    realtime: str | None = typer.Option(
+        None, "--realtime", help="Realtime service (realtime mode)"
+    ),
+    video: str | None = typer.Option(None, "--video", help="Video avatar service"),
+    client_framework: str | None = typer.Option(
+        None, "--client-framework", help="Client framework: 'react', 'vanilla', or 'none'"
+    ),
+    client_server: str | None = typer.Option(
+        None, "--client-server", help="Client dev server: 'vite' or 'nextjs'"
+    ),
+    daily_pstn_mode: str | None = typer.Option(
+        None, "--daily-pstn-mode", help="Daily PSTN mode: 'dial-in' or 'dial-out'"
+    ),
+    twilio_daily_sip_mode: str | None = typer.Option(
+        None, "--twilio-daily-sip-mode", help="Twilio+Daily SIP mode: 'dial-in' or 'dial-out'"
+    ),
+    recording: bool = typer.Option(False, "--recording/--no-recording", help="Enable recording"),
+    transcription: bool = typer.Option(
+        False, "--transcription/--no-transcription", help="Enable transcription"
+    ),
+    video_input: bool = typer.Option(
+        False, "--video-input/--no-video-input", help="Enable video input"
+    ),
+    video_output: bool = typer.Option(
+        False, "--video-output/--no-video-output", help="Enable video output"
+    ),
+    deploy_to_cloud: bool = typer.Option(
+        True, "--deploy-to-cloud/--no-deploy-to-cloud", help="Generate cloud deployment files"
+    ),
+    enable_krisp: bool = typer.Option(
+        False, "--enable-krisp/--no-enable-krisp", help="Enable Krisp noise cancellation"
+    ),
+    observability: bool = typer.Option(
+        False, "--observability/--no-observability", help="Enable observability"
+    ),
+    enable_eval: bool = typer.Option(
+        False,
+        "--eval/--no-eval",
+        help="Add an 'eval' transport so the bot is runnable with `-t eval` for "
+        "behavioral evals (see `pipecat eval`). Off by default.",
+    ),
+    config: Path | None = typer.Option(
+        None, "--config", "-c", help="JSON config file (triggers non-interactive scaffolding)"
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print resolved scaffold config as JSON without writing files"
+    ),
+    list_options: bool = typer.Option(
+        False,
+        "--list-options",
+        help="Print available service options as JSON and exit",
+        callback=list_options_callback,
+        is_eager=True,
+    ),
 ):
-    """Initialize a new Pipecat project, then choose how to build.
+    r"""Initialize a new Pipecat project — and optionally scaffold it.
 
-    Writes AGENTS.md + CLAUDE.md + GETTING_STARTED.md, then (interactively) hands you
-    off to a coding agent or scaffolds a runnable bot in-place with ``pipecat create``.
+    Writes the coding-agent guide (AGENTS.md + CLAUDE.md), then either scaffolds a runnable
+    bot or hands you off to a coding agent. Pass scaffold options (``--bot-type``,
+    ``--transport``, the service flags, or ``--config``) to build the project
+    non-interactively, in-place in the target directory; with no scaffold options, ``init``
+    writes GETTING_STARTED.md and (interactively) asks how you want to build.
 
     Examples::
 
-        pipecat init                 # prompt for a directory, then choose how to build
-        pipecat init my-bot          # set up ./my-bot
-        pipecat init quickstart      # canned quickstart bot in ./pipecat-quickstart
-        pipecat init my-bot --force  # overwrite existing files in ./my-bot
-        pipecat init .               # set up the current directory
+        pipecat init                       # prompt for a directory, then choose how to build
+        pipecat init my-bot                # set up ./my-bot
+        pipecat init quickstart            # canned quickstart bot in ./pipecat-quickstart
+        pipecat init .                     # set up the current directory
+        pipecat init . --bot-type web \
+          --transport daily --mode cascade \
+          --stt deepgram_stt --llm openai_llm \
+          --tts cartesia_tts               # scaffold in-place, non-interactively
+        pipecat init my-bot --config project-config.json   # scaffold from a config file
+        pipecat init --list-options        # print valid service/transport values as JSON
     """
     # `pipecat init quickstart`: scaffold the canned bot in-place, with the coding-agent guide.
     if target == "quickstart":
         return _init_quickstart(force)
 
-    # The old scaffolder flags (`--name`, `--bot-type`, `--stt`, `-o`, …) belong to
-    # `pipecat create`. `ignore_unknown_options` (set at registration) drops them into
-    # ctx.args; redirect with a clear message instead of erroring opaquely.
-    if ctx.args:
-        unexpected = " ".join(ctx.args)
-        console.print(
-            f"[red]Unexpected arguments:[/red] {unexpected}\n\n"
-            "`pipecat init` initializes a new Pipecat project (writes AGENTS.md, CLAUDE.md, "
-            "and GETTING_STARTED.md); it takes only an optional target directory and `--force`.\n"
-            "To scaffold non-interactively, use [bold]`pipecat create`[/bold] — run "
-            "`pipecat create --help`."
-        )
-        raise typer.Exit(1)
+    scaffold_requested = _scaffold_requested(
+        config=config,
+        name=name,
+        bot_type=bot_type,
+        transport=transport,
+        mode=mode,
+        stt=stt,
+        llm=llm,
+        tts=tts,
+        realtime=realtime,
+        video=video,
+    )
 
+    if scaffold_requested:
+        return _scaffold_non_interactive(
+            ctx,
+            target=target,
+            force=force,
+            dry_run=dry_run,
+            config=config,
+            name=name,
+            bot_type=bot_type,
+            transport=transport,
+            mode=mode,
+            stt=stt,
+            llm=llm,
+            tts=tts,
+            realtime=realtime,
+            video=video,
+            client_framework=client_framework,
+            client_server=client_server,
+            daily_pstn_mode=daily_pstn_mode,
+            twilio_daily_sip_mode=twilio_daily_sip_mode,
+            recording=recording,
+            transcription=transcription,
+            video_input=video_input,
+            video_output=video_output,
+            deploy_to_cloud=deploy_to_cloud,
+            enable_krisp=enable_krisp,
+            observability=observability,
+            enable_eval=enable_eval,
+        )
+
+    # No scaffold options: write the guide and route to a build method.
     # No argument: prompt for the directory. `target` is just a path — `.` sets up the
     # current directory, any other value names a folder (created below if it doesn't exist).
     if target is None:
@@ -297,3 +422,44 @@ def init_command(
 
     _write_agent_guide(target_dir, force)
     _route_build_method(target_dir)
+
+
+def _scaffold_non_interactive(ctx: typer.Context, *, target, force, dry_run, config, **flags):
+    """Write the agent guide and scaffold the project in-place from flags/a config file.
+
+    The in-place sibling of the wizard path (:func:`_route_build_method`): same directory,
+    no ``GETTING_STARTED.md`` (the scaffold's README is the start-here). With no positional
+    target we scaffold into the current directory rather than prompting, so an automated run
+    (a coding agent that omits the ``.``) never hangs. ``--dry-run`` previews the resolved
+    config and writes nothing.
+    """
+    target_dir = Path(target or ".")
+    if target_dir.exists() and not target_dir.is_dir():
+        console.print(f"[red]Error:[/red] {target_dir} exists and is not a directory.")
+        raise typer.Exit(1)
+
+    # Don't write the guide on a dry run — it must leave the directory untouched.
+    if not dry_run:
+        _write_agent_guide(target_dir, force)
+
+    try:
+        run_non_interactive_scaffold(
+            ctx,
+            dest=target_dir,
+            in_place=True,
+            derived_name=target_dir.resolve().name or "pipecat-app",
+            dry_run=dry_run,
+            config=config,
+            **flags,
+        )
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Project creation cancelled.[/yellow]")
+        raise typer.Exit(1)
+    except typer.Exit:
+        raise
+    except FileExistsError as e:
+        console.print(f"\n[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"\n[red]Error creating project: {e}[/red]")
+        raise typer.Exit(1)

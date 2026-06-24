@@ -12,8 +12,8 @@ import pytest
 from typer.testing import CliRunner
 
 import pipecat.cli
-import pipecat.cli.commands.create as create_mod
 import pipecat.cli.commands.init as init_mod
+import pipecat.cli.scaffold as scaffold_mod
 from pipecat.cli.main import app
 
 runner = CliRunner()
@@ -31,7 +31,7 @@ class TestInitAgentReady:
         claude = tmp_path / "CLAUDE.md"
         getting_started = tmp_path / "GETTING_STARTED.md"
         assert agents.read_text(encoding="utf-8").strip()
-        assert "pipecat create" in agents.read_text(encoding="utf-8")
+        assert "pipecat init" in agents.read_text(encoding="utf-8")
         assert claude.read_text(encoding="utf-8").strip() == "@AGENTS.md"
         # Developer guidance: prompt-writing help with a copyable example prompt.
         gs_text = getting_started.read_text(encoding="utf-8")
@@ -92,7 +92,7 @@ class TestInitAgentReady:
         result = runner.invoke(app, ["init", str(tmp_path)])
         assert result.exit_code == 0, result.output
         # AGENTS.md is pipecat-owned → refreshed; CLAUDE.md is the dev's → preserved.
-        assert "pipecat create" in (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+        assert "pipecat init" in (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
         assert (tmp_path / "CLAUDE.md").read_text(encoding="utf-8") == "# my own claude config"
 
     def test_force_overwrites_claude(self, tmp_path):
@@ -102,12 +102,33 @@ class TestInitAgentReady:
         assert result.exit_code == 0, result.output
         assert (tmp_path / "CLAUDE.md").read_text(encoding="utf-8").strip() == "@AGENTS.md"
 
-    def test_legacy_scaffolder_flags_redirect(self, tmp_path):
-        result = runner.invoke(app, ["init", str(tmp_path), "--name", "x", "--bot-type", "web"])
-        assert result.exit_code == 1
-        assert "pipecat create" in result.output
-        # Redirect must not write a half-initialized project.
-        assert not (tmp_path / "AGENTS.md").exists()
+    def test_scaffold_flags_build_in_place(self, tmp_path):
+        # Scaffold flags now build the project in-place (no redirect to a separate command).
+        result = runner.invoke(
+            app,
+            [
+                "init",
+                str(tmp_path),
+                "--bot-type",
+                "web",
+                "-t",
+                "daily",
+                "-m",
+                "cascade",
+                "--stt",
+                "deepgram_stt",
+                "--llm",
+                "openai_llm",
+                "--tts",
+                "cartesia_tts",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        # init initialized for agent-led dev and scaffolded a runnable bot in the same dir.
+        assert (tmp_path / "AGENTS.md").exists()
+        assert (tmp_path / "server" / "bot.py").exists()
+        # The scaffold path skips the from-scratch developer guide.
+        assert not (tmp_path / "GETTING_STARTED.md").exists()
 
     def test_quickstart_scaffolds_and_writes_guide(self, tmp_path, monkeypatch):
         # `init quickstart` is the human front door for the canned bot: it scaffolds the
@@ -158,11 +179,11 @@ class TestBuildMethodRouting:
         monkeypatch.setattr(questionary, "select", lambda *a, **k: _Q())
         return lambda value: chosen.__setitem__("value", value)
 
-    def test_scaffold_branch_runs_create_in_place(self, tmp_path, monkeypatch, _select):
+    def test_scaffold_branch_scaffolds_in_place(self, tmp_path, monkeypatch, _select):
         _select("scaffold")
         captured = {}
         monkeypatch.setattr(
-            create_mod,
+            scaffold_mod,
             "scaffold_interactive",
             lambda dest, name, in_place: captured.update(dest=dest, name=name, in_place=in_place),
         )
@@ -180,7 +201,7 @@ class TestBuildMethodRouting:
     def test_agent_branch_does_not_scaffold(self, tmp_path, monkeypatch, _select):
         _select("agent")
         monkeypatch.setattr(
-            create_mod,
+            scaffold_mod,
             "scaffold_interactive",
             lambda *a, **k: pytest.fail("agent branch must not scaffold"),
         )
@@ -219,6 +240,21 @@ class TestBuildMethodRouting:
         assert not (tmp_path / "server").exists()
 
 
+class TestRemovedCreateCommand:
+    """`pipecat create` was folded into `init`; a hidden stub points users to it."""
+
+    def test_create_is_hidden_from_help(self):
+        out = runner.invoke(app, ["--help"]).output
+        assert "create" not in out
+        assert "init" in out
+
+    def test_create_errors_with_pointer_to_init(self):
+        # Old flags must not crash on parsing — the stub swallows them and prints guidance.
+        result = runner.invoke(app, ["create", "--name", "x", "--bot-type", "web"])
+        assert result.exit_code == 1
+        assert "pipecat init" in result.output
+
+
 class TestBundledGuide:
     """The guide must ship and be release-clean (catches packaging + content regressions)."""
 
@@ -230,10 +266,10 @@ class TestBundledGuide:
     def test_agents_content_is_release_clean(self):
         text = (AGENT_TEMPLATES / "AGENTS.md").read_text(encoding="utf-8")
         assert text.strip()
-        assert "pipecat create" in text
-        # No local-checkout paths or stale command name should ever ship.
+        assert "pipecat init" in text
+        # No local-checkout paths or the removed command name should ever ship.
         assert "/Users/" not in text
-        assert "pipecat init" not in text
+        assert "pipecat create" not in text
         assert "TODO(release)" not in text
 
     def test_claude_is_agents_import(self):

@@ -25,23 +25,24 @@ Always begin from the deterministic CLI scaffold. It gives you a known-good stru
 uv tool install "pipecat-ai[cli]"   # provides the `pipecat` (alias `pc`) command
 ```
 
-> ⚠️ **Agents: scaffold non-interactively** — bare `pipecat create` opens an interactive wizard that **hangs an automated run**. Pass every choice as flags (or `--config`):
+> ⚠️ **Agents: scaffold non-interactively** — bare `pipecat init` (no scaffold flags) opens an interactive wizard that **hangs an automated run**. Pass your choices as flags (or `--config`):
 
 ```bash
-# Headless: --name (or --config) switches to non-interactive mode.
+# Headless: any scaffold flag (--bot-type, a service, or --config) switches off the wizard.
+# Run it in the project directory you're already in; `.` scaffolds in place, name from the dir.
 # The service values below are EXAMPLES — map the user's actual choices, don't copy these.
-pipecat create --name mybot \
+pipecat init . \
   --transport smallwebrtc --mode cascade \
   --stt deepgram_stt --llm openai_llm --tts cartesia_tts \
   --eval                             # eval transport + starter scenarios, for verification (§6)
 #   • Don't hand-write flags from memory — discover them:
-#       pipecat create --help          # available flags
-#       pipecat create --list-options  # valid service/transport VALUES
+#       pipecat init --help          # available flags
+#       pipecat init --list-options  # valid service/transport VALUES
 #   • --dry-run prints the resolved config as JSON; --config project.json drives it from a file.
 #   • --transport is repeatable — pass each transport you want (production + a local-dev one, §2).
 #   • --bot-type is inferred from --transport (telephony if any telephony transport, else web) — omit it.
 
-# Humans (interactive wizard): `pipecat create quickstart` (defaults) or `pipecat create`.
+# Humans: `pipecat init quickstart` (canned defaults) or bare `pipecat init` (interactive wizard).
 ```
 
 **Choose *with* the user, not for them.** Map their requirements to the real options and confirm transport / services / mode / deployment (§7) before scaffolding — don't silently pick or guess. Mode affects testing speed — **cascade (STT→LLM→TTS)** gets the fast text-mode eval loop (§6); **realtime (speech-to-speech)** is tested in audio mode — but both run headless, so pick the mode the use case needs.
@@ -197,7 +198,7 @@ A voice app can't be eyeballed like a web page — but you don't need a live cal
 
 > **Deep reference:** the **Pipecat Evals docs** are the authoritative spec — look them up via your Pipecat MCP (§3): **Overview**, **Writing Scenarios** (the schema + the two modality axes), **Using the Library** (the Python API), **Agent Self-Improvement** (the closed-loop workflow this section describes). For working examples, copy the **scaffolded starters in `server/evals/`** rather than writing YAML from scratch. The eval harness ships in the `pipecat-ai[evals]` extra (the `pipecat eval` command plus the local Kokoro/Moonshine speech models); scaffolding with `--eval` adds it, so run evals from the **bot's own environment**.
 
-**Make your bot eval-able.** Scaffold with `pipecat create --eval` (headless) — pass it whenever you scaffold a bot you intend to test. The generated bot has the `eval` transport entry, eval dependencies in its env, and **runnable starter scenarios in `server/evals/`**: `starter_text.yaml` (the fast inner loop; cascade only) and `starter_audio.yaml` (the full round trip). They pass against the freshly scaffolded bot, so run them *first* to prove the loop, then edit them to match the bot you're building and copy them to grow the suite. For an **existing** bot, add the transport entry by hand (a one-time change; RTVI is already on by default for `PipelineWorker`, so that's the only edit):
+**Make your bot eval-able.** Scaffold with `pipecat init . --eval` (headless) — pass it whenever you scaffold a bot you intend to test. The generated bot has the `eval` transport entry, eval dependencies in its env, and **runnable starter scenarios in `server/evals/`**: `starter_text.yaml` (the fast inner loop; cascade only) and `starter_audio.yaml` (the full round trip). They pass against the freshly scaffolded bot, so run them *first* to prove the loop, then edit them to match the bot you're building and copy them to grow the suite. For an **existing** bot, add the transport entry by hand (a one-time change; RTVI is already on by default for `PipelineWorker`, so that's the only edit):
 ```python
 from pipecat.evals.transport import EvalTransportParams
 
