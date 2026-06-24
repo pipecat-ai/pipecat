@@ -19,7 +19,6 @@ defaulting its serializer to
 ``client-ready`` / ``bot-ready`` handshake.
 """
 
-import asyncio
 import json
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
@@ -42,8 +41,10 @@ class RTVIClientTransport(WebsocketClientTransport):
     Example::
 
         transport = RTVIClientTransport("ws://localhost:7860")
-        ...
-        await transport.wait_for_bot_ready()
+
+        @transport.event_handler("on_bot_ready")
+        async def on_bot_ready(transport):
+            ...
     """
 
     def __init__(self, uri: str, params: WebsocketClientParams | None = None):
@@ -58,24 +59,13 @@ class RTVIClientTransport(WebsocketClientTransport):
         params.serializer = params.serializer or RTVIClientSerializer()
         super().__init__(uri, params)
 
-        self._bot_ready_event = asyncio.Event()
+        self._bot_ready = False
         self._register_event_handler("on_bot_ready")
 
     @property
     def bot_ready(self) -> bool:
         """Whether the bot has answered the handshake with ``bot-ready``."""
-        return self._bot_ready_event.is_set()
-
-    async def wait_for_bot_ready(self, timeout: float = 10.0) -> None:
-        """Block until the bot answers with ``bot-ready``.
-
-        Args:
-            timeout: Seconds to wait before raising.
-
-        Raises:
-            TimeoutError: If ``bot-ready`` doesn't arrive within ``timeout``.
-        """
-        await asyncio.wait_for(self._bot_ready_event.wait(), timeout=timeout)
+        return self._bot_ready
 
     async def _on_connected(self, websocket):
         """On connect, fire the user's handler and start the RTVI handshake."""
@@ -84,8 +74,8 @@ class RTVIClientTransport(WebsocketClientTransport):
 
     async def _on_message(self, websocket, message):
         """Watch for ``bot-ready`` to complete the handshake, then dispatch normally."""
-        if not self._bot_ready_event.is_set() and self._is_bot_ready(message):
-            self._bot_ready_event.set()
+        if not self._bot_ready and self._is_bot_ready(message):
+            self._bot_ready = True
             await self._call_event_handler("on_bot_ready")
         await super()._on_message(websocket, message)
 

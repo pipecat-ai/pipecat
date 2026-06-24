@@ -392,9 +392,11 @@ class EvalSession(BaseObject):
         self._trigger_disconnect = trigger_disconnect or scenario.trigger_disconnect
 
         self._ws: ClientConnection | None = None
-        # The eval pipeline that talks to the bot (built in run()).
-        self._transport: RTVIClientTransport | None = None
+        # The eval pipeline's worker that talks to the bot (built in run()).
         self._worker: PipelineWorker | None = None
+        # Set by the transport's on_bot_ready handler once the bot completes the
+        # RTVI handshake; _handshake() waits on it.
+        self._bot_ready_event = asyncio.Event()
         self._queue: asyncio.Queue = asyncio.Queue()
         # function_call events popped while matching another expectation, held so
         # the turn's calls can be matched by name in any order (reset per turn).
@@ -608,9 +610,13 @@ class EvalSession(BaseObject):
             serializer=RTVIClientSerializer(),
         )
         transport = RTVIClientTransport(self._connect_url(), params)
+
+        @transport.event_handler("on_bot_ready")
+        async def _on_bot_ready(_transport):
+            self._bot_ready_event.set()
+
         pipeline = Pipeline([transport.input(), _BotFrameSink(self), transport.output()])
         worker = PipelineWorker(pipeline, enable_rtvi=False, cancel_on_idle_timeout=False)
-        self._transport = transport
         self._worker = worker
         runner = WorkerRunner()
         await runner.add_workers(worker)
@@ -824,10 +830,10 @@ class EvalSession(BaseObject):
         we raise :class:`TimeoutError` so the caller reports a clean connect-level
         failure.
         """
-        # The transport sends client-ready on connect; gate on bot-ready here.
-        # Hard gate — raises TimeoutError if the bot never announces readiness.
-        assert self._transport is not None
-        await self._transport.wait_for_bot_ready(timeout=BOT_READY_TIMEOUT_S)
+        # The transport sends client-ready on connect and fires on_bot_ready when
+        # the bot answers; our handler sets _bot_ready_event. Hard gate — raises
+        # TimeoutError if the bot never announces readiness.
+        await asyncio.wait_for(self._bot_ready_event.wait(), timeout=BOT_READY_TIMEOUT_S)
 
         # Ask the bot's RTVIObserver to expose what this scenario needs, for the
         # duration of this eval only (bots keep their defaults; only the eval
