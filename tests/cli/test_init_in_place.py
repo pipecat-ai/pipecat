@@ -77,21 +77,18 @@ def test_init_in_place_over_agent_guide(tmp_path):
     """The full agent loop: scaffold in-place into a dir already holding the guide.
 
     Mirrors what `pipecat init` leaves behind before the agent re-runs it to scaffold.
-    AGENTS.md is pipecat-owned and gets refreshed; the developer's CLAUDE.md and any
-    GETTING_STARTED.md are left untouched.
+    Preserve-by-default: the existing guide files are all kept as-is, and the bot is
+    scaffolded alongside them (refresh the guide explicitly with --overwrite-guide).
     """
-    (tmp_path / "AGENTS.md").write_text("# stale guide", encoding="utf-8")
+    (tmp_path / "AGENTS.md").write_text("# my guide", encoding="utf-8")
     (tmp_path / "GETTING_STARTED.md").write_text("# dev", encoding="utf-8")
     (tmp_path / "CLAUDE.md").write_text("@AGENTS.md", encoding="utf-8")
     result = runner.invoke(app, ["init", str(tmp_path), "--name", "demo", *SERVICE_FLAGS])
     assert result.exit_code == 0, result.output
 
     assert (tmp_path / "server" / "bot.py").exists()
-    # AGENTS.md is refreshed from the bundled template (no longer the stale stub).
-    agents = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
-    assert agents != "# stale guide"
-    assert "pipecat init" in agents
-    # The developer's files survive.
+    # Existing guide files survive untouched.
+    assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == "# my guide"
     assert (tmp_path / "GETTING_STARTED.md").read_text(encoding="utf-8") == "# dev"
     assert (tmp_path / "CLAUDE.md").read_text(encoding="utf-8") == "@AGENTS.md"
 
