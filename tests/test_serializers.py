@@ -9,6 +9,9 @@ from dataclasses import dataclass, field
 
 from pydantic import BaseModel
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
+from pipecat.bus.adapters import ToolsSchemaAdapter
 from pipecat.bus.messages import (
     BusActivateWorkerMessage,
     BusCancelMessage,
@@ -20,8 +23,9 @@ from pipecat.bus.messages import (
     BusMessage,
 )
 from pipecat.bus.serializers import JSONMessageSerializer
-from pipecat.frames.frames import TextFrame
+from pipecat.frames.frames import LLMContextFrame, TextFrame
 from pipecat.pipeline.job_context import JobStatus
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 
 
@@ -245,6 +249,49 @@ class TestJSONMessageSerializer(unittest.TestCase):
         restored = self.serializer.deserialize(data)
 
         self.assertEqual(restored.tag, "custom_tag")
+
+
+def _tools_with_custom():
+    """A ToolsSchema with both a standard tool and provider-specific custom tools."""
+    standard = FunctionSchema(
+        name="get_weather",
+        description="Get the weather",
+        properties={"city": {"type": "string"}},
+        required=["city"],
+    )
+    custom = {AdapterType.GEMINI: [{"google_search": {}}]}
+    return ToolsSchema(standard_tools=[standard], custom_tools=custom)
+
+
+class TestCustomToolsRoundTrip(unittest.TestCase):
+    """Provider-specific custom_tools must survive bus serialization (see #4833)."""
+
+    def test_tools_schema_adapter_preserves_custom_tools(self):
+        """ToolsSchemaAdapter round-trips custom_tools, not just standard_tools."""
+        adapter = ToolsSchemaAdapter()
+        ident = lambda x: x  # noqa: E731  (callback unused for tools)
+
+        restored = adapter.deserialize(adapter.serialize(_tools_with_custom(), ident), ident)
+
+        self.assertEqual([t.name for t in restored.standard_tools], ["get_weather"])
+        self.assertEqual(restored.custom_tools, {AdapterType.GEMINI: [{"google_search": {}}]})
+
+    def test_llm_context_frame_preserves_custom_tools_over_bus(self):
+        """An LLMContextFrame crossing the bus keeps the context's custom_tools."""
+        serializer = JSONMessageSerializer()
+        ctx = LLMContext(messages=[{"role": "user", "content": "hi"}], tools=_tools_with_custom())
+        msg = BusFrameMessage(
+            source="task_a",
+            frame=LLMContextFrame(context=ctx),
+            direction=FrameDirection.DOWNSTREAM,
+        )
+
+        restored = serializer.deserialize(serializer.serialize(msg))
+
+        self.assertIsInstance(restored.frame, LLMContextFrame)
+        tools = restored.frame.context.tools
+        self.assertEqual([t.name for t in tools.standard_tools], ["get_weather"])
+        self.assertEqual(tools.custom_tools, {AdapterType.GEMINI: [{"google_search": {}}]})
 
 
 if __name__ == "__main__":
