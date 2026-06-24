@@ -17,15 +17,10 @@ sets:
   that greets in ``on_client_connected`` queues its greeting there, so a config
   sent afterwards (as a client message) would arrive too late.
 - ``?capture_bot_audio=true`` makes the serializer forward the bot's synthesized
-  audio to the harness (for ``tts_response`` transcription).
-- ``?record=<path>`` records the conversation audio (user + bot) to ``<path>``.
-  The recorder is an :class:`~pipecat.processors.audio.audio_buffer_processor.AudioBufferProcessor`
-  placed *after* the real output transport (so both input and output audio flow
-  through it); ``output()`` returns that composite. Recording starts on connect
-  and is written on disconnect, before the bot's ``on_client_disconnected``
-  handler fires (a bot that cancels its pipeline there may exit right after, so
-  the write must land first). Recording is eval-only — the generic transport is
-  untouched.
+  audio to the harness, for transcription (``response`` / ``tts_response``) and so
+  the harness can record the bot's side. Recording lives in the harness pipeline
+  now, not here: the harness already sees both sides (the bot's audio via this
+  flag, the user's as its own TTS output), so the bot needs no recorder.
 
 The input side runs a **virtual microphone** (:class:`EvalMicrophone`), enabled
 per connection by ``?user_audio=true`` (audio-mode scenarios): the harness sends
@@ -47,14 +42,11 @@ sequential eval connections.
 import asyncio
 import io
 from collections.abc import Awaitable, Callable
-from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-import aiofiles
 from loguru import logger
 from PIL import Image
 
-from pipecat.audio.utils import pcm_to_wav
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -75,7 +67,6 @@ from pipecat.transports.websocket.server import (
 SKIP_TTS_QUERY_PARAM = "skip_tts"
 USER_AUDIO_QUERY_PARAM = "user_audio"
 CAPTURE_AUDIO_QUERY_PARAM = "capture_bot_audio"
-RECORD_QUERY_PARAM = "record"
 TRIGGER_DISCONNECT_QUERY_PARAM = "trigger_disconnect"
 
 # One virtual-mic frame per tick — the granularity a live transport delivers and
@@ -98,27 +89,6 @@ def _query_flag(websocket, name: str) -> bool:
     """Whether the client's connection URL set the boolean query param ``name``."""
     values = parse_qs(_query_string(websocket)).get(name, [])
     return bool(values) and values[0].strip().lower() in ("1", "true", "yes")
-
-
-def _query_value(websocket, name: str) -> str | None:
-    """The string value of query param ``name``, or ``None`` if absent/empty."""
-    values = parse_qs(_query_string(websocket)).get(name, [])
-    return values[0] if values and values[0] else None
-
-
-async def _write_wav(path: str, audio: bytes, sample_rate: int, num_channels: int) -> None:
-    """Write PCM ``audio`` to a 16-bit WAV at ``path`` (creating parent dirs).
-
-    Encodes the WAV in memory, then writes it to disk without blocking the event
-    loop.
-    """
-    wav = pcm_to_wav(audio, sample_rate, num_channels)
-
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    async with aiofiles.open(p, "wb") as f:
-        await f.write(wav)
-    logger.info(f"Eval recording saved: {p} ({len(audio)} bytes)")
 
 
 class EvalMicrophone:
@@ -343,13 +313,6 @@ class EvalOutputTransport(SingleClientWebsocketServerOutputTransport):
 class EvalTransport(SingleClientWebsocketServerTransport):
     """WebSocket server transport used by the eval harness (see the module docstring)."""
 
-    def __init__(self, *args, **kwargs):
-        """Initialize the transport and the (lazily built) recording composite."""
-        super().__init__(*args, **kwargs)
-        self._audio_buffer = None
-        self._record_output = None
-        self._record_path: str | None = None
-
     def input(self) -> SingleClientWebsocketServerInputTransport:
         """Return an input transport that can serve harness-provided images."""
         if not self._input:
@@ -358,22 +321,11 @@ class EvalTransport(SingleClientWebsocketServerTransport):
             )
         return self._input
 
-    def output(self):
-        """Return the output as a recorder composite: ``[real_output, AudioBufferProcessor]``.
-
-        ``self._output`` stays the real output transport, so the transport's
-        ``set_client_connection`` reaches it directly (no proxy). The buffer sits
-        after it, where both input and output audio flow.
-        """
-        if self._record_output is None:
-            from pipecat.pipeline.pipeline import Pipeline
-            from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
-
-            real = EvalOutputTransport(self, self._params, name=self._output_name)
-            self._output = real
-            self._audio_buffer = AudioBufferProcessor()
-            self._record_output = Pipeline([real, self._audio_buffer])
-        return self._record_output
+    def output(self) -> SingleClientWebsocketServerOutputTransport:
+        """Return the eval output transport."""
+        if not self._output:
+            self._output = EvalOutputTransport(self, self._params, name=self._output_name)
+        return self._output
 
     async def _on_client_connected(self, websocket):
         """Apply per-connection eval flags, then proceed (config before any greeting)."""
@@ -387,32 +339,11 @@ class EvalTransport(SingleClientWebsocketServerTransport):
         if isinstance(self._input, EvalInputTransport):
             await self._input.configure_mic(_query_flag(websocket, USER_AUDIO_QUERY_PARAM))
 
-        # Start recording as soon as the client connects so the bot's first audio
-        # (e.g. a greeting) is captured. Flushed on disconnect.
-        self._record_path = _query_value(websocket, RECORD_QUERY_PARAM)
-        if self._audio_buffer is not None and self._record_path:
-            await self._audio_buffer.start_recording()
-
         if self._input is not None and _query_flag(websocket, SKIP_TTS_QUERY_PARAM):
             logger.debug(f"{self}: eval client requested skip_tts; configuring LLM output")
             await self._input.push_frame(LLMConfigureOutputFrame(skip_tts=True))
 
         await super()._on_client_connected(websocket)
-
-    async def _on_client_disconnected(self, websocket):
-        """Flush the recording, then handle the disconnect normally."""
-        if self._audio_buffer is not None:
-            if self._record_path and self._audio_buffer.has_audio():
-                await _write_wav(
-                    self._record_path,
-                    self._audio_buffer.merge_audio_buffers(),
-                    self._audio_buffer.sample_rate,
-                    self._audio_buffer.num_channels,
-                )
-            await self._audio_buffer.stop_recording()
-            self._record_path = None
-
-        await super()._on_client_disconnected(websocket)
 
     async def _emit_client_disconnected(self, websocket):
         """Fire ``on_client_disconnected`` only when the harness asks for it.

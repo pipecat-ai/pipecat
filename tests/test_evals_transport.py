@@ -14,11 +14,9 @@ import unittest
 from pipecat.evals.transport import (
     AUDIO_CHUNK_MS,
     CAPTURE_AUDIO_QUERY_PARAM,
-    RECORD_QUERY_PARAM,
     SKIP_TTS_QUERY_PARAM,
     EvalMicrophone,
     _query_flag,
-    _query_value,
 )
 
 
@@ -107,18 +105,6 @@ class TestEvalMicrophone(unittest.IsolatedAsyncioTestCase):
         await self._run_mic(mic, 0.1)
 
         self.assertTrue(all(pcm == b"\x00" * len(pcm) for pcm in pushed))  # only silence
-
-
-class TestQueryValue(unittest.TestCase):
-    def test_reads_url_decoded_value(self):
-        ws = _ws(path="/?record=%2Ftmp%2Frec%2Fcap.wav")
-        self.assertEqual(_query_value(ws, RECORD_QUERY_PARAM), "/tmp/rec/cap.wav")
-
-    def test_none_when_absent(self):
-        self.assertIsNone(_query_value(_ws(path="/?skip_tts=true"), RECORD_QUERY_PARAM))
-
-    def test_none_when_empty(self):
-        self.assertIsNone(_query_value(_ws(path="/?record="), RECORD_QUERY_PARAM))
 
 
 if __name__ == "__main__":

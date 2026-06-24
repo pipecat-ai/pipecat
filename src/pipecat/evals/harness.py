@@ -83,6 +83,7 @@ import mimetypes
 import time
 import traceback
 import warnings
+import wave
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -133,6 +134,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.stt_service import STTService
 from pipecat.transports.websocket.client import WebsocketClientParams
@@ -392,6 +394,9 @@ class EvalSession(BaseObject):
         self._ws: ClientConnection | None = None
         # The eval pipeline's worker that talks to the bot (built in run()).
         self._worker: PipelineWorker | None = None
+        # Records the conversation audio (bot + user) when record_path is set and
+        # the scenario is audio mode; built into the pipeline and written in run().
+        self._audio_buffer: AudioBufferProcessor | None = None
         # Set by the transport's on_bot_ready handler once the bot completes the
         # RTVI handshake; _handshake() waits on it.
         self._bot_ready_event = asyncio.Event()
@@ -657,6 +662,13 @@ class EvalSession(BaseObject):
             # no echo and no gate needed.
             processors.append(self._user_tts)
         processors.append(transport.output())
+        # Record the conversation here, not on the bot: the harness pipeline already
+        # carries both sides (the bot's audio comes in as InputAudioRawFrame via the
+        # eval-bot-audio capture, the user's as the user-TTS OutputAudioRawFrame).
+        # Placed last so both flow through it; merged mono, so track order is moot.
+        if self._record_path and self._scenario.bot_audio:
+            self._audio_buffer = AudioBufferProcessor()
+            processors.append(self._audio_buffer)
         pipeline = Pipeline(processors)
         # The StartFrame's rates drive the in-pipeline services: the bot-audio STT
         # reads `audio_in_sample_rate`, the user TTS produces `audio_out_sample_rate`.
@@ -688,6 +700,9 @@ class EvalSession(BaseObject):
             try:
                 await self._handshake()
                 self._debug("handshake: ok (bot-ready)")
+                # Start now so the bot's first audio (e.g. a greeting) is captured.
+                if self._audio_buffer is not None:
+                    await self._audio_buffer.start_recording()
             except TimeoutError:
                 self._debug("handshake: failed (bot-ready not received)")
                 failures.append(
@@ -749,6 +764,10 @@ class EvalSession(BaseObject):
                 record.status = "failed"
                 record.failures.append(failure)
         finally:
+            # Write the recording before tearing down: the worker's EndFrame reaches
+            # the audio buffer and stops it (which clears its buffers), so the merged
+            # audio must be read first. The conversation is already done here.
+            self._write_recording()
             # Optionally ask the bot to tear its pipeline down gracefully so it exits
             # on its own (best-effort; skipped by default so it stays up for more
             # scenarios).
@@ -785,6 +804,21 @@ class EvalSession(BaseObject):
         """Whether any user turn reaches the bot as audio, synthesized or from a file."""
         return self._user_tts is not None or any(t.audio for t in self._scenario.turns)
 
+    def _write_recording(self) -> None:
+        """Write the recorded conversation audio (bot + user) to ``record_path``."""
+        buffer = self._audio_buffer
+        if buffer is None or not self._record_path or not buffer.has_audio():
+            return
+        audio = buffer.merge_audio_buffers()
+        path = Path(self._record_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with wave.open(str(path), "wb") as wf:
+            wf.setnchannels(buffer.num_channels)
+            wf.setsampwidth(2)
+            wf.setframerate(buffer.sample_rate)
+            wf.writeframes(audio)
+        self._debug(f"recording saved: {path} ({len(audio)} bytes)")
+
     def _connect_url(self) -> str:
         """Bot URL with the per-connection eval query flags.
 
@@ -795,23 +829,22 @@ class EvalSession(BaseObject):
         virtual mic whenever the harness sends audio, whether synthesized or
         played from a turn's ``audio:`` file; without it the transport plays no
         mic at all, so a text-mode scenario never feeds silence into the bot's
-        STT. ``capture_bot_audio`` makes the bot forward its synthesized audio for
-        ``tts_response`` transcription. ``record`` asks the eval transport to
-        record the conversation audio (audio mode only). ``trigger_disconnect``
-        asks the transport to fire the bot's ``on_client_disconnected`` handler
-        when the connection ends (off by default, since bots often cancel there).
+        STT. ``capture_bot_audio`` makes the bot forward its synthesized audio to
+        the harness, both for ``response``/``tts_response`` transcription and so the
+        harness can record the bot's side (recording itself is harness-side now).
+        ``trigger_disconnect`` asks the transport to fire the bot's
+        ``on_client_disconnected`` handler when the connection ends (off by default,
+        since bots often cancel there).
         """
-        from urllib.parse import quote
-
         flags = []
         if not self._scenario.bot_audio:
             flags.append("skip_tts=true")
         if self._sends_user_audio:
             flags.append("user_audio=true")
-        if self._wants_response:
+        # Forward the bot's audio when a scenario asserts on it (response) or when
+        # recording an audio scenario (the harness records the bot's side from it).
+        if self._wants_response or (self._record_path and self._scenario.bot_audio):
             flags.append("capture_bot_audio=true")
-        if self._record_path and self._scenario.bot_audio:
-            flags.append(f"record={quote(self._record_path, safe='')}")
         if self._trigger_disconnect:
             flags.append("trigger_disconnect=true")
         if not flags:
