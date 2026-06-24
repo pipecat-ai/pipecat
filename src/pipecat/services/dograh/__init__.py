@@ -10,11 +10,13 @@ This module provides unified access to various AI services through a single
 Dograh API endpoint, abstracting away provider-specific implementations.
 """
 
+from pipecat.services.dograh.flux.stt import DograhFluxSTTService
 from pipecat.services.dograh.llm import DograhLLMService
 from pipecat.services.dograh.stt import DograhSTTService, DograhSTTSettings
 from pipecat.services.dograh.tts import DograhTTSService, DograhTTSSettings
 
 __all__ = [
+    "DograhFluxSTTService",
     "DograhLLMService",
     "DograhSTTService",
     "DograhSTTSettings",
