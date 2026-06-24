@@ -99,7 +99,12 @@ class TextSegmentMap:
 
     @staticmethod
     def _build(tts_text: str, original_text: str) -> list[TextSegment]:
-        """Build a list of TextSegments via word-level SequenceMatcher diff."""
+        """Build aligned TextSegments from a word-level SequenceMatcher diff.
+
+        Each diff opcode (equal, replace, insert, delete) becomes a segment.
+        Segments whose normalized alphanumeric content differs are later treated
+        as transformed/atomic units during cursor advancement.
+        """
 
         def tokenize(text: str) -> list[str]:
             return re.split(r"(\s+)", text)
@@ -107,6 +112,46 @@ class TextSegmentMap:
         orig_tokens = tokenize(original_text)
         tts_tokens = tokenize(tts_text)
 
+        # SequenceMatcher produces a word-level alignment between the original
+        # and TTS texts. Each opcode becomes a TextSegment whose boundaries are
+        # tracked in the original text.
+        #
+        # Example:
+        #
+        #     original_text = "Your balance is $42.50"
+        #     tts_text      = "Your balance is forty two dollars and fifty cents"
+        #
+        # Tokenization preserves whitespace, so SequenceMatcher sees:
+        #
+        #     equal:
+        #         "Your balance is "
+        #
+        #     replace:
+        #         "$42.50"
+        #         ->
+        #         "forty two dollars and fifty cents"
+        #
+        # This produces two segments:
+        #
+        #     TextSegment(
+        #         original="Your balance is ",
+        #         tts="Your balance is ",
+        #         original_start=0,
+        #         original_end=16,
+        #     )
+        #
+        #     TextSegment(
+        #         original="$42.50",
+        #         tts="forty two dollars and fifty cents",
+        #         original_start=16,
+        #         original_end=22,
+        #     )
+        #
+        # During playback, unchanged segments advance cursors
+        # proportionally. Transformed segments are treated as atomic:
+        # the cursors are held while the expanded TTS text is being
+        # consumed and jump to original_end only when the entire
+        # transformed segment completes.
         matcher = difflib.SequenceMatcher(None, orig_tokens, tts_tokens, autojunk=False)
 
         segments: list[TextSegment] = []
