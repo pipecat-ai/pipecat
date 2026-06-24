@@ -595,7 +595,7 @@ class TestDeepgramSTTSettingsExtraSync:
         )
 
         svc = self._make_service(live_options=live_options)
-        kwargs = svc._build_connect_kwargs()
+        kwargs, _ = svc._build_connect_kwargs()
 
         # All should appear in connect kwargs
         assert kwargs["model"] == "nova-2"
@@ -617,10 +617,11 @@ class TestDeepgramSTTSettingsExtraSync:
         # 'custom_param' is unknown, so it stays in extra
         assert svc._settings.extra["custom_param"] == "test"
 
-        # Both forwarded to kwargs
-        kwargs = svc._build_connect_kwargs()
+        # Declared field forwarded to kwargs; unknown extra goes to request_options
+        kwargs, request_options = svc._build_connect_kwargs()
         assert kwargs["numerals"] == "true"
-        assert kwargs["custom_param"] == "test"
+        assert request_options is not None
+        assert request_options["additional_query_parameters"]["custom_param"] == "test"
 
 
 # ---------------------------------------------------------------------------
@@ -1224,3 +1225,7 @@ class TestInworldRealtimeSettingsFromMapping:
         assert store.session_properties.instructions == "Be concise."
         assert store.session_properties.output_modalities == ["text"]
         assert store.system_instruction == "Be concise."
+
+
+if __name__ == "__main__":
+    unittest.main()
