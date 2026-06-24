@@ -12,8 +12,9 @@ optional client). It has three entry points, all used by ``pipecat init``:
 - :func:`scaffold_interactive` — the wizard, run when the developer chooses "scaffold a
   runnable bot now" on interactive ``init``.
 - :func:`scaffold_quickstart` — the canned quickstart preset (``pipecat init quickstart``).
-- :func:`run_non_interactive_scaffold` — flags/config-file driven, no prompts
-  (``pipecat init . --bot-type web …``); the path coding agents and automation use.
+- :func:`resolve_scaffold_config` + :func:`generate_scaffold` — flags/config-file driven,
+  no prompts (``pipecat init . --bot-type web …``); the path coding agents and automation
+  use. Split so the config is validated before any files are written.
 
 These were formerly the body of the standalone ``pipecat create`` command, which has been
 removed — ``pipecat init`` is now the single entry point.
@@ -70,11 +71,9 @@ def scaffold_interactive(dest: Path | None, derived_name: str | None, in_place: 
     generator.print_next_steps(project_path, in_place=in_place)
 
 
-def run_non_interactive_scaffold(
+def resolve_scaffold_config(
     ctx: typer.Context,
     *,
-    dest: Path | None,
-    in_place: bool,
     derived_name: str | None,
     dry_run: bool,
     config: Path | None,
@@ -100,12 +99,13 @@ def run_non_interactive_scaffold(
     observability: bool,
     enable_eval: bool,
 ):
-    """Build a project from CLI flags and/or a config file — no prompts.
+    """Merge flags + config file into a validated ``ProjectConfig`` — no file writes.
 
-    Merges a ``--config`` file (if given) with the CLI flags, validates the result, and
-    generates the project. An explicit CLI flag always wins; the file value applies only
-    when the flag was omitted. On ``dry_run`` the resolved config is printed as JSON and
-    nothing is written.
+    Merges a ``--config`` file (if given) with the CLI flags and validates the result. An
+    explicit CLI flag always wins; the file value applies only when the flag was omitted.
+    Exits non-zero with a clear message on a validation error, and on ``dry_run`` prints
+    the resolved config as JSON and exits zero — so callers can validate *before* writing
+    anything (see :func:`generate_scaffold`).
 
     ``ctx`` is the calling Typer command's context — used to tell which flags the user
     actually typed (vs. their defaults). The parameter names here must match the option
@@ -200,6 +200,16 @@ def run_non_interactive_scaffold(
         print(config_to_json(project_config))
         raise typer.Exit(0)
 
+    return project_config
+
+
+def generate_scaffold(project_config, *, dest: Path | None, in_place: bool):
+    """Generate a project from an already-validated config and print next steps.
+
+    The write half of non-interactive scaffolding; pair it with
+    :func:`resolve_scaffold_config`, which validates first so a bad invocation fails
+    without touching the directory.
+    """
     generator = ProjectGenerator(project_config)
     project_path = generator.generate(dest, non_interactive=True, in_place=in_place)
     generator.print_next_steps(project_path, in_place=in_place)

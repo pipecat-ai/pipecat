@@ -41,7 +41,11 @@ import typer
 from rich.console import Console
 
 import pipecat.cli
-from pipecat.cli.scaffold import list_options_callback, run_non_interactive_scaffold
+from pipecat.cli.scaffold import (
+    generate_scaffold,
+    list_options_callback,
+    resolve_scaffold_config,
+)
 
 console = Console()
 
@@ -260,6 +264,28 @@ def _scaffold_requested(*, config, name, bot_type, transport, mode, stt, llm, tt
     )
 
 
+# Every scaffold/feature option, by parameter name — used to detect flags the user
+# explicitly typed (vs. defaulted) so `init quickstart` can flag the ones it ignores.
+_SCAFFOLD_PARAM_NAMES = (
+    "name", "bot_type", "transport", "mode", "stt", "llm", "tts", "realtime", "video",
+    "client_framework", "client_server", "daily_pstn_mode", "twilio_daily_sip_mode", "config",
+    "recording", "transcription", "video_input", "video_output", "deploy_to_cloud",
+    "enable_krisp", "observability", "enable_eval",
+)  # fmt: skip
+
+
+def _has_explicit_scaffold_flags(ctx: typer.Context) -> bool:
+    """Whether the user typed any scaffold/feature flag on the command line.
+
+    Uses the Typer context's parameter source so boolean toggles (which can't be told from
+    their default by value) are detected too.
+    """
+    return any(
+        (src := ctx.get_parameter_source(p)) is not None and src.name == "COMMANDLINE"
+        for p in _SCAFFOLD_PARAM_NAMES
+    )
+
+
 def init_command(
     ctx: typer.Context,
     target: str | None = typer.Argument(
@@ -428,6 +454,13 @@ def init_command(
     """
     # `pipecat init quickstart`: scaffold the canned bot in-place, with the coding-agent guide.
     if target == "quickstart":
+        # quickstart is a fixed preset — scaffold flags don't apply. Say so instead of
+        # silently ignoring them.
+        if _has_explicit_scaffold_flags(ctx):
+            console.print(
+                "[yellow]Note:[/yellow] `quickstart` is a fixed preset; "
+                "ignoring the scaffold options you passed."
+            )
         return _init_quickstart(force)
 
     scaffold_requested = _scaffold_requested(
@@ -495,28 +528,28 @@ def _scaffold_non_interactive(ctx: typer.Context, *, target, force, dry_run, con
     The in-place sibling of the wizard path (:func:`_route_build_method`): same directory,
     no ``GETTING_STARTED.md`` (the scaffold's README is the start-here). With no positional
     target we scaffold into the current directory rather than prompting, so an automated run
-    (a coding agent that omits the ``.``) never hangs. ``--dry-run`` previews the resolved
-    config and writes nothing.
+    (a coding agent that omits the ``.``) never hangs.
+
+    The scaffold config is resolved and validated *before* the guide is written, so an
+    invalid invocation (or ``--dry-run``) fails without leaving a half-initialized directory.
     """
     target_dir = Path(target or ".")
     if target_dir.exists() and not target_dir.is_dir():
         console.print(f"[red]Error:[/red] {target_dir} exists and is not a directory.")
         raise typer.Exit(1)
 
-    # Don't write the guide on a dry run — it must leave the directory untouched.
-    if not dry_run:
-        _write_agent_guide(target_dir, force)
-
     try:
-        run_non_interactive_scaffold(
+        # Validate first: this exits non-zero on a bad config, or zero on --dry-run, before
+        # anything is written. Only a fully valid, non-dry-run invocation reaches the writes.
+        project_config = resolve_scaffold_config(
             ctx,
-            dest=target_dir,
-            in_place=True,
             derived_name=target_dir.resolve().name or "pipecat-app",
             dry_run=dry_run,
             config=config,
             **flags,
         )
+        _write_agent_guide(target_dir, force)
+        generate_scaffold(project_config, dest=target_dir, in_place=True)
     except KeyboardInterrupt:
         console.print("\n[yellow]Project creation cancelled.[/yellow]")
         raise typer.Exit(1)

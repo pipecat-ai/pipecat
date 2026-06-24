@@ -102,3 +102,18 @@ def test_init_in_place_aborts_on_existing_project(tmp_path):
     result = runner.invoke(app, ["init", str(tmp_path), "--name", "demo", *SERVICE_FLAGS])
     assert result.exit_code == 1
     assert "already exists" in result.output
+
+
+def test_invalid_scaffold_flags_write_nothing(tmp_path):
+    """An incomplete scaffold invocation fails before writing — no half-initialized dir.
+
+    The config is validated before the guide is written, so a bad invocation leaves the
+    directory untouched rather than dropping AGENTS.md/CLAUDE.md and then erroring.
+    """
+    # --bot-type with no transport/mode/services is invalid.
+    result = runner.invoke(app, ["init", str(tmp_path), "--bot-type", "web"])
+    assert result.exit_code == 1
+    assert "validation failed" in result.output.lower()
+    assert not (tmp_path / "AGENTS.md").exists()
+    assert not (tmp_path / "CLAUDE.md").exists()
+    assert not (tmp_path / "server").exists()

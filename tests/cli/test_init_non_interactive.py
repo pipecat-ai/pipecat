@@ -8,7 +8,7 @@
 
 These drive the real Typer command via ``--dry-run``, which resolves the full
 config (file values merged with CLI flags) and prints it as JSON without
-generating any files — exercising the merge logic in ``run_non_interactive_scaffold``
+generating any files — exercising the merge logic in ``resolve_scaffold_config``
 end to end.
 """
 

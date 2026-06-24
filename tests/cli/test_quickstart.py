@@ -44,3 +44,12 @@ class TestQuickstart:
         assert "Deepgram" in result.output
         assert "OpenAI" in result.output
         assert "Cartesia" in result.output
+
+    def test_quickstart_warns_when_scaffold_flags_passed(self, tmp_path, monkeypatch):
+        # quickstart is a fixed preset; combining it with scaffold flags should warn rather
+        # than silently ignore them — but still scaffold the canned (web) bot.
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(app, ["init", "quickstart", "--bot-type", "telephony"])
+        assert result.exit_code == 0, result.output
+        assert "fixed preset" in result.output
+        assert (tmp_path / "pipecat-quickstart" / "server" / "bot.py").exists()
