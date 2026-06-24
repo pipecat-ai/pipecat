@@ -84,7 +84,7 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.environ["CARTESIA_API_KEY"])
+    stt = CartesiaSTTService(api_key=os.environ["CARTESIA_API_KEY"])
 
     # VoiceFormatter with all defaults enabled.
     # Pass explicit flags to turn individual transforms on or off, e.g.:
