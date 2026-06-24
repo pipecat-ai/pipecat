@@ -87,10 +87,9 @@ import wave
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
-import websockets
 from loguru import logger
-from websockets.asyncio.client import ClientConnection
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -402,7 +401,6 @@ class EvalSession(BaseObject):
         # Either the run-wide CLI flag or the scenario's own field opts in.
         self._trigger_disconnect = trigger_disconnect or scenario.trigger_disconnect
 
-        self._ws: ClientConnection | None = None
         # The eval pipeline's worker that talks to the bot (built in run()).
         self._worker: PipelineWorker | None = None
         # Records the conversation audio (bot + user) when record_path is set and
@@ -580,20 +578,32 @@ class EvalSession(BaseObject):
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
 
-        # Readiness probe: retry-connect until the bot accepts (so callers can launch
-        # the bot and connect immediately), then close it — the transport owns the
-        # real session. A bot that never accepts is a clean <connect> failure. The
-        # eval transport only fires on_client_disconnected when trigger_disconnect is
-        # set, so this transient probe doesn't perturb the bot.
+        # Readiness wait: the suite spawns a bot and immediately drives it, so retry a
+        # lightweight TCP connect until the bot's server is accepting (this is the only
+        # readiness wait — see EvalSuite). It deliberately does *not* complete the
+        # WebSocket/RTVI handshake: a full connect would fire the bot's
+        # on_client_connected (kicking off a greeting and mutating its context) and then
+        # throw it away, leaving the real session below with a duplicated opening. The
+        # transport owns the one real connection. A bot that never accepts is a clean
+        # <connect> failure.
+        u = urlsplit(self._bot_url)
+        host, port = u.hostname or "localhost", u.port or (443 if u.scheme == "wss" else 80)
         deadline = time.monotonic() + self._connect_timeout_s
         connect_error: Exception | None = None
-        while self._ws is None and time.monotonic() < deadline:
+        ready = False
+        while not ready and time.monotonic() < deadline:
             try:
-                self._ws = await websockets.connect(self._connect_url())
+                _reader, writer = await asyncio.open_connection(host, port)
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except OSError:
+                    pass
+                ready = True
             except OSError as e:  # not accepting connections yet
                 connect_error = e
                 await asyncio.sleep(0.25)
-        if self._ws is None:
+        if not ready:
             e = connect_error or TimeoutError("timed out")
             return EvalResult(
                 scenario_name=self._scenario.name,
@@ -610,8 +620,6 @@ class EvalSession(BaseObject):
                 turns=turns,
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
-        await self._ws.close()
-        self._ws = None
 
         # Build one eval pipeline for both modes:
         #
