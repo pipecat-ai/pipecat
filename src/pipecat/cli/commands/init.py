@@ -147,7 +147,31 @@ def _print_refresh_summary(statuses: list[str]) -> None:
         )
 
 
-def _write_agent_guide(target_dir: Path, overwrite: bool) -> None:
+def _offer_refresh(target_dir: Path) -> bool:
+    """Stale guide + interactive terminal: offer to refresh it now instead of just warning.
+
+    Someone re-running ``init`` on a project whose guide predates their current Pipecat
+    almost always wants the new guide, so turn the passive nudge into a one-keystroke
+    action. Returns True if the guide was refreshed (the caller then refreshes the rest of
+    the guide too). Non-interactive callers don't reach here — they get the printed nudge.
+    """
+    import questionary
+
+    from pipecat.cli.prompts.questions import custom_style
+
+    refresh = questionary.confirm(
+        "A guide file is from an older Pipecat. Refresh the guide files now?",
+        default=True,
+        style=custom_style,
+    ).ask()
+    # `ask()` returns None on Ctrl-C / EOF — treat anything but an explicit yes as "keep".
+    if refresh:
+        _write_agent_guide(target_dir, overwrite=True)
+        return True
+    return False
+
+
+def _write_agent_guide(target_dir: Path, overwrite: bool) -> list[str]:
     """Write the core agent guide — AGENTS.md and CLAUDE.md — into a directory.
 
     Wanted on *every* path (coding agent, scaffold-now, quickstart), so they're written
@@ -155,9 +179,10 @@ def _write_agent_guide(target_dir: Path, overwrite: bool) -> None:
     kept unless ``overwrite``. AGENTS.md carries a provenance footer (so a re-run can spot
     a stale guide); CLAUDE.md is the trivial ``@AGENTS.md`` pointer and is left unstamped.
 
-    The developer guide (``GETTING_STARTED.md``) is written separately, by
-    :func:`_write_developer_guide`, only on the coding-agent path. Exits non-zero on a
-    read/write error.
+    Returns the per-file statuses so the caller can follow up — a passive refresh nudge,
+    or an interactive offer to refresh. The developer guide (``GETTING_STARTED.md``) is
+    written separately, by :func:`_write_developer_guide`, only on the coding-agent path.
+    Exits non-zero on a read/write error.
     """
     try:
         agents_src = (_AGENT_TEMPLATES / _AGENTS_FILE).read_text(encoding="utf-8")
@@ -168,7 +193,7 @@ def _write_agent_guide(target_dir: Path, overwrite: bool) -> None:
 
     try:
         target_dir.mkdir(parents=True, exist_ok=True)
-        statuses = [
+        return [
             _write_guide_file(
                 target_dir / _AGENTS_FILE, agents_src, stamped=True, overwrite=overwrite
             ),
@@ -176,7 +201,6 @@ def _write_agent_guide(target_dir: Path, overwrite: bool) -> None:
                 target_dir / _CLAUDE_FILE, claude_src, stamped=False, overwrite=overwrite
             ),
         ]
-        _print_refresh_summary(statuses)
     except OSError as e:
         console.print(f"[red]Error writing files:[/red] {e}")
         raise typer.Exit(1)
@@ -297,7 +321,8 @@ def _init_quickstart(overwrite: bool) -> None:
 
     target_dir = Path(_QUICKSTART_DIR)
     # AGENTS.md + CLAUDE.md only — _write_agent_guide never writes GETTING_STARTED.md.
-    _write_agent_guide(target_dir, overwrite)
+    # Quickstart is a fixed, non-interactive preset, so a stale guide just gets the nudge.
+    _print_refresh_summary(_write_agent_guide(target_dir, overwrite))
     try:
         scaffold_quickstart(dest=target_dir, in_place=True)
     except typer.Exit:
@@ -577,7 +602,13 @@ def init_command(
         console.print(f"[red]Error:[/red] {target_dir} exists and is not a directory.")
         raise typer.Exit(1)
 
-    _write_agent_guide(target_dir, overwrite)
+    statuses = _write_agent_guide(target_dir, overwrite)
+    # A re-run on a guide from an older Pipecat: interactively offer to refresh it now
+    # (the expected payoff of re-running), otherwise fall back to the printed nudge.
+    if not overwrite and "kept-stale" in statuses and _is_interactive():
+        overwrite = _offer_refresh(target_dir)
+    else:
+        _print_refresh_summary(statuses)
     _route_build_method(target_dir, overwrite)
 
 
