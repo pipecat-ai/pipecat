@@ -1736,10 +1736,12 @@ class TestWordCompletionTrackerWithTransforms(unittest.TestCase):
         """Segment map is created when tts_text and user_facing_text differ in alnum content."""
         self.assertIsNotNone(self._tracker()._segment_map)
 
-    def test_segment_map_not_built_for_equal_texts(self):
-        """No segment map when tts_text and user_facing_text have the same alnum sequence."""
+    def test_segment_map_always_built(self):
+        """A segment map is always built, regardless of whether alnum sequences differ."""
+        from pipecat.utils.context.text_segment_map import TextSegmentMap
+
         tracker = WordCompletionTracker("hello world")
-        self.assertIsNone(tracker._segment_map)
+        self.assertIsInstance(tracker._segment_map, TextSegmentMap)
 
     # --- suppress_in_context ---
 
