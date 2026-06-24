@@ -256,23 +256,43 @@ class RTVIEvalSerializer(FrameSerializer):
         )
 
 
+# The bot's reports about *the user it is talking to* (i.e. about the harness):
+# its raw VAD, turn-level speaking, and the transcription of what it heard. The
+# harness surfaces these as scenario events, but does not let them drive its own
+# pipeline. They are kept as raw messages (mapped to events by the sink) for two
+# reasons: a ``TranscriptionFrame`` in the eval pipeline already means "our STT
+# transcribed the bot's audio" (the ``response``), and the VAD/speaking frames are
+# computed locally by the harness's own user aggregator from the bot's audio (a
+# different signal than the bot's VAD on the harness's audio). Routing the reports
+# as messages keeps both sides available without colliding by frame type.
+_REPORTED_EVENT_TYPES = frozenset(
+    {
+        "user-started-speaking",
+        "user-stopped-speaking",
+        "vad-user-started-speaking",
+        "vad-user-stopped-speaking",
+        "user-transcription",
+    }
+)
+
+
 class RTVIHarnessSerializer(RTVIClientSerializer):
     """Client-side serializer for the eval harness's RTVI pipeline.
 
     Extends :class:`~pipecat.serializers.rtvi_client.RTVIClientSerializer` (which
-    handles the generic RTVI server messages) with the two eval-specific bits:
+    handles the generic RTVI server messages) with the eval-specific bits:
 
     - ``eval-bot-audio`` (the bot's captured synthesized audio, sent only when the
       harness asks for it) is decoded into an
       :class:`~pipecat.frames.frames.InputAudioRawFrame` so a real STT in the eval
       pipeline can transcribe what the bot *actually said* (the ``response``).
-    - ``user-transcription`` is deserialized to a raw
-      :class:`~pipecat.frames.frames.InputTransportMessageFrame` rather than a
-      ``TranscriptionFrame``. In the eval pipeline a ``TranscriptionFrame`` means
-      "our STT transcribed the bot's audio" (the ``response``); keeping the bot's
-      reported user transcription as a message lets the sink tell the two apart by
-      the source RTVI message instead of by frame type, so both ``response`` and
-      ``user_transcription`` remain available in audio mode.
+    - The bot's reports about the harness (:data:`_REPORTED_EVENT_TYPES`:
+      ``user-transcription``, raw VAD, turn-level speaking) are kept as raw
+      :class:`~pipecat.frames.frames.InputTransportMessageFrame` rather than mapped
+      to ``TranscriptionFrame`` / VAD frames. Those frame types are reserved for
+      what the harness computes from the bot's audio (the STT's ``response`` and
+      the user aggregator's own VAD), so keeping the reports as messages lets the
+      sink tell the two apart by source RTVI message instead of by frame type.
     """
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
@@ -298,9 +318,9 @@ class RTVIHarnessSerializer(RTVIClientSerializer):
                     sample_rate=int(payload.get("sampleRate", 0)),
                     num_channels=1,
                 )
-            if msg_type == "user-transcription":
-                # Kept as the raw message so the sink maps it to user_transcription;
-                # see the class docstring for why it isn't a TranscriptionFrame.
+            if msg_type in _REPORTED_EVENT_TYPES:
+                # Kept as the raw message so the sink maps it to a scenario event;
+                # see the class docstring for why these aren't frames.
                 return InputTransportMessageFrame(message=message)
 
         return await super().deserialize(data)

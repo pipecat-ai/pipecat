@@ -49,6 +49,10 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     TranscriptionFrame,
     TTSTextFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 
 
@@ -120,6 +124,60 @@ class TestFramesToEvents(unittest.TestCase):
             [{"type": "response", "text": "Paris"}],
         )
         self.assertEqual(_session(bot_audio=False)._frames_to_events(frame), [])
+
+    def test_reported_speaking_and_vad_events_from_messages(self):
+        # The bot's reports about the harness (its raw VAD and turn-level speaking)
+        # arrive as raw messages and map to the matching scenario events.
+        s = _session(bot_audio=True)
+
+        def msg(msg_type):
+            return InputTransportMessageFrame(
+                message={"label": RTVI.MESSAGE_LABEL, "type": msg_type}
+            )
+
+        self.assertEqual(
+            s._frames_to_events(msg("user-started-speaking")),
+            [{"type": "user_started_speaking"}],
+        )
+        self.assertEqual(
+            s._frames_to_events(msg("user-stopped-speaking")),
+            [{"type": "user_stopped_speaking"}],
+        )
+        self.assertEqual(
+            s._frames_to_events(msg("vad-user-started-speaking")),
+            [{"type": "vad_user_started_speaking"}],
+        )
+        self.assertEqual(
+            s._frames_to_events(msg("vad-user-stopped-speaking")),
+            [{"type": "vad_user_stopped_speaking"}],
+        )
+
+    def test_computed_vad_and_speaking_frames_are_ignored(self):
+        # The user aggregator's own VAD/speaking frames (computed from the bot's
+        # audio) are internal plumbing, not scenario events.
+        s = _session(bot_audio=True)
+        for frame in (
+            VADUserStartedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(),
+            UserStartedSpeakingFrame(),
+            UserStoppedSpeakingFrame(),
+        ):
+            self.assertEqual(s._frames_to_events(frame), [])
+
+    def test_user_started_speaking_message_discards_interrupted_output(self):
+        # A new user turn drops the bot's leftover output (but keeps a queued
+        # user_transcription, which is the turn's input).
+        s = _session(bot_audio=True)
+        s._text_buffer = ["greeting"]
+        s._queue.put_nowait({"type": "response", "text": "greeting"})
+        s._queue.put_nowait({"type": "user_transcription", "transcript": "hi"})
+        msg = InputTransportMessageFrame(
+            message={"label": RTVI.MESSAGE_LABEL, "type": "user-started-speaking"}
+        )
+        self.assertEqual(s._frames_to_events(msg), [{"type": "user_started_speaking"}])
+        self.assertEqual(s._text_buffer, [])
+        self.assertEqual(s._queue.get_nowait(), {"type": "user_transcription", "transcript": "hi"})
+        self.assertTrue(s._queue.empty())
 
     def test_function_call(self):
         s = _session()

@@ -123,10 +123,6 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
     TranscriptionFrame,
     TTSTextFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
-    VADUserStartedSpeakingFrame,
-    VADUserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker
@@ -1049,36 +1045,26 @@ class EvalSession(BaseObject):
         frames to the events the matcher consumes, applying the modality/aggregation
         rules (buffer the LLM text, suppress an interrupted response's straggler,
         emit ``tts_response`` only in audio mode, etc.).
+
+        Two kinds of frame arrive: what the harness *computes* from the bot's audio
+        (the STT's ``TranscriptionFrame`` and the user aggregator's own VAD/speaking
+        frames) and what the bot *reports* about the harness (carried as
+        ``InputTransportMessageFrame``; see :data:`RTVIHarnessSerializer`). The
+        computed VAD/speaking frames are internal plumbing and ignored here; the
+        scenario's speaking/VAD/``user_transcription`` events come from the reports.
         """
-        if isinstance(frame, UserStartedSpeakingFrame):
-            self._discard_interrupted_output()
-            self._awaiting_llm_restart = True
-            return [{"type": "user_started_speaking"}]
         if isinstance(frame, InterruptionFrame):
             self._discard_interrupted_output()
             self._awaiting_llm_restart = True
             return [{"type": "bot_interrupted"}]
-        if isinstance(frame, UserStoppedSpeakingFrame):
-            return [{"type": "user_stopped_speaking"}]
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            return [{"type": "vad_user_started_speaking"}]
-        if isinstance(frame, VADUserStoppedSpeakingFrame):
-            return [{"type": "vad_user_stopped_speaking"}]
         if isinstance(frame, TranscriptionFrame):
             # In the eval pipeline a TranscriptionFrame only ever comes from our own
             # STT transcribing the bot's captured audio -> the bot's spoken response.
-            # The bot's reported user-transcription arrives as an
-            # InputTransportMessageFrame instead (see below / RTVIHarnessSerializer).
             if self._scenario.bot_audio:
                 return [self._segment_event("response", frame.text)]
             return []
         if isinstance(frame, InputTransportMessageFrame):
-            message = frame.message
-            if isinstance(message, dict) and message.get("type") == "user-transcription":
-                payload = message.get("data") or {}
-                if payload.get("final", True):
-                    return [{"type": "user_transcription", "transcript": payload.get("text", "")}]
-            return []
+            return self._message_to_events(frame.message)
         if isinstance(frame, LLMFullResponseStartFrame):
             self._awaiting_llm_restart = False
             self._text_buffer = []
@@ -1105,6 +1091,36 @@ class EvalSession(BaseObject):
                     "args": dict(frame.arguments or {}),
                 }
             ]
+        return []
+
+    def _message_to_events(self, message) -> list[dict]:
+        """Map one of the bot's reported RTVI messages to scenario events.
+
+        These are the bot's reports *about the harness* (its raw VAD, turn-level
+        speaking, and the transcription of what it heard), kept as raw messages by
+        :class:`RTVIHarnessSerializer` so they don't collide with the VAD/transcription
+        frames the harness computes from the bot's audio.
+        """
+        if not isinstance(message, dict):
+            return []
+        msg_type = message.get("type")
+        data = message.get("data") or {}
+        if msg_type == "user-started-speaking":
+            # A new user turn: drop any leftover bot output from a prior turn so it
+            # isn't aggregated into this one.
+            self._discard_interrupted_output()
+            self._awaiting_llm_restart = True
+            return [{"type": "user_started_speaking"}]
+        if msg_type == "user-stopped-speaking":
+            return [{"type": "user_stopped_speaking"}]
+        if msg_type == "vad-user-started-speaking":
+            return [{"type": "vad_user_started_speaking"}]
+        if msg_type == "vad-user-stopped-speaking":
+            return [{"type": "vad_user_stopped_speaking"}]
+        if msg_type == "user-transcription":
+            if data.get("final", True):
+                return [{"type": "user_transcription", "transcript": data.get("text", "")}]
+            return []
         return []
 
     def _segment_event(self, event_type: str, text: str) -> dict:
