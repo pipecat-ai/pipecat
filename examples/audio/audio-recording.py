@@ -171,6 +171,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client disconnected")
         await worker.cancel()
 
+    @audiobuffer.event_handler("on_recording_started")
+    async def on_recording_started(buffer):
+        logger.info(f"Recording started")
+
+    @audiobuffer.event_handler("on_recording_stopped")
+    async def on_recording_stopped(buffer):
+        logger.info(f"Recording stopped")
+
     # Handler for merged audio
     @audiobuffer.event_handler("on_audio_data")
     async def on_audio_data(buffer, audio, sample_rate, num_channels):

@@ -44,6 +44,8 @@ class AudioBufferProcessor(FrameProcessor):
     - on_track_audio_data: Triggered when buffer_size is reached, providing separate tracks
     - on_user_turn_audio_data: Triggered when user turn has ended, providing that user turn's audio
     - on_bot_turn_audio_data: Triggered when bot turn has ended, providing that bot turn's audio
+    - on_recording_started: Triggered when recording starts (state transitions to active)
+    - on_recording_stopped: Triggered after recording stops and the final audio has been emitted
 
     Audio handling:
 
@@ -99,6 +101,8 @@ class AudioBufferProcessor(FrameProcessor):
         self._register_event_handler("on_track_audio_data")
         self._register_event_handler("on_user_turn_audio_data")
         self._register_event_handler("on_bot_turn_audio_data")
+        self._register_event_handler("on_recording_started")
+        self._register_event_handler("on_recording_stopped")
 
     @property
     def sample_rate(self) -> int:
@@ -149,19 +153,29 @@ class AudioBufferProcessor(FrameProcessor):
     async def start_recording(self):
         """Start recording audio from both user and bot.
 
-        Initializes recording state and resets audio buffers.
+        Initializes recording state, resets audio buffers and triggers the
+        ``on_recording_started`` event. Does nothing when recording is already
+        active.
         """
+        if self._recording:
+            return
         self._recording = True
         self._reset_recording()
+        await self._call_event_handler("on_recording_started")
 
     async def stop_recording(self):
         """Stop recording and trigger final audio data handlers.
 
-        Calls audio handlers with any remaining buffered audio before stopping.
+        Calls audio handlers with any remaining buffered audio before stopping,
+        then triggers the ``on_recording_stopped`` event. Does nothing when
+        recording is not active.
         """
+        if not self._recording:
+            return
         await self._call_on_audio_data_handler()
         self._reset_recording()
         self._recording = False
+        await self._call_event_handler("on_recording_stopped")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming audio frames and manage audio buffers.

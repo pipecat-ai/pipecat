@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     AudioBufferStopRecordingFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    EndFrame,
     InputAudioRawFrame,
     OutputAudioRawFrame,
     StartFrame,
@@ -859,6 +860,102 @@ class TestRecordingControlFrames(unittest.IsolatedAsyncioTestCase):
                 AudioBufferStopRecordingFrame,
             ],
         )
+
+
+class TestRecordingLifecycleEvents(unittest.IsolatedAsyncioTestCase):
+    """Tests for the on_recording_started / on_recording_stopped events.
+
+    These fire only on actual recording state transitions, decoupling the
+    code that triggers recording (a direct call or a control frame) from
+    code that wants to react to it (UI indicators, logging, etc.).
+    """
+
+    async def test_started_event_fires_on_start(self):
+        """on_recording_started fires when recording transitions to active."""
+        p = await _make_processor(start=False)
+
+        fired = asyncio.Event()
+        p.add_event_handler("on_recording_started", lambda _: fired.set())
+
+        await p.start_recording()
+        await asyncio.wait_for(fired.wait(), timeout=1)
+        await p.cleanup()
+
+    async def test_started_event_fires_via_frame(self):
+        """on_recording_started fires when started by a control frame."""
+        p = await _make_processor(start=False)
+
+        fired = asyncio.Event()
+        p.add_event_handler("on_recording_started", lambda _: fired.set())
+
+        await p.process_frame(AudioBufferStartRecordingFrame(), FrameDirection.DOWNSTREAM)
+        await asyncio.wait_for(fired.wait(), timeout=1)
+        await p.cleanup()
+
+    async def test_started_event_not_refired_when_already_recording(self):
+        """A redundant start (already recording) does not re-fire the event."""
+        p = await _make_processor()  # already recording
+
+        started = []
+        p.add_event_handler("on_recording_started", lambda _: started.append(True))
+
+        await p.start_recording()
+        await asyncio.sleep(0.05)  # give any erroneously-scheduled handler a chance
+        self.assertEqual(len(started), 0)
+        await p.cleanup()
+
+    async def test_redundant_start_preserves_buffered_audio(self):
+        """A redundant start (already recording) does not reset the buffers."""
+        p = await _make_processor()  # already recording
+
+        await p.process_frame(
+            InputAudioRawFrame(
+                audio=struct.pack("<hh", 1000, -1000), sample_rate=16000, num_channels=1
+            ),
+            FrameDirection.DOWNSTREAM,
+        )
+        self.assertTrue(p.has_audio())
+
+        await p.start_recording()
+        self.assertTrue(p.has_audio())
+        await p.cleanup()
+
+    async def test_stopped_event_fires_with_final_audio_already_emitted(self):
+        """on_recording_stopped fires; the final audio handler runs as part of stop."""
+        p = await _make_processor()
+
+        await p.process_frame(
+            InputAudioRawFrame(
+                audio=struct.pack("<hh", 1000, -1000), sample_rate=16000, num_channels=1
+            ),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        audio_fired = asyncio.Event()
+        stopped_fired = asyncio.Event()
+        p.add_event_handler("on_audio_data", lambda *_: audio_fired.set())
+        p.add_event_handler("on_recording_stopped", lambda _: stopped_fired.set())
+
+        await p.stop_recording()
+
+        await asyncio.wait_for(audio_fired.wait(), timeout=1)
+        await asyncio.wait_for(stopped_fired.wait(), timeout=1)
+        # By the time stop signals, recording is off and buffers are cleared.
+        self.assertFalse(p._recording)
+        self.assertFalse(p.has_audio())
+        await p.cleanup()
+
+    async def test_stopped_event_not_fired_when_not_recording(self):
+        """Stopping when not recording (e.g. EndFrame before start) does not fire."""
+        p = await _make_processor(start=False)
+
+        stopped = []
+        p.add_event_handler("on_recording_stopped", lambda _: stopped.append(True))
+
+        await p.process_frame(EndFrame(), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(stopped), 0)
+        await p.cleanup()
 
 
 if __name__ == "__main__":
