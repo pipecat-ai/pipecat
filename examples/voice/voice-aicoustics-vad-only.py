@@ -144,7 +144,7 @@ class VADEventLogger(FrameProcessor):
 
 aic_filter = AICFilter(
     license_key=os.environ["AIC_SDK_LICENSE"],
-    model_id="quail-vf-2.1-l-16khz",
+    model_id="quail-vf-2.2-l-16khz",
     enhancement_level=0.8,
 )
 aic_vad_analyzer = LoggingAICQuailVADAnalyzer(
