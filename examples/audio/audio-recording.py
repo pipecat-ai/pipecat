@@ -52,7 +52,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import AudioBufferStartRecordingFrame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -163,10 +163,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        # Start recording audio
-        await audiobuffer.start_recording()
-        # Start conversation - empty prompt to let LLM follow system instructions
-        await worker.queue_frames([LLMRunFrame()])
+        # Start recording and kick off the conversation
+        await worker.queue_frames([AudioBufferStartRecordingFrame(), LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
