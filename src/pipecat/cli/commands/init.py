@@ -252,7 +252,7 @@ def _print_ready(target_dir: Path) -> None:
     )
 
 
-def _route_build_method(target_dir: Path, overwrite: bool) -> None:
+def _route_build_method(target_dir: Path, overwrite_guide: bool) -> None:
     """Ask whether to build with a coding agent or scaffold a runnable bot now.
 
     The coding-agent path adds the developer guide (GETTING_STARTED.md) and points the
@@ -263,7 +263,7 @@ def _route_build_method(target_dir: Path, overwrite: bool) -> None:
     """
     already_scaffolded = (target_dir / "server").exists()
     if already_scaffolded or not _is_interactive():
-        _write_developer_guide(target_dir, overwrite)
+        _write_developer_guide(target_dir, overwrite_guide)
         _print_ready(target_dir)
         return
 
@@ -282,7 +282,7 @@ def _route_build_method(target_dir: Path, overwrite: bool) -> None:
 
     # `ask()` returns None on Ctrl-C / EOF — fall through to the safe agent path.
     if choice != "scaffold":
-        _write_developer_guide(target_dir, overwrite)
+        _write_developer_guide(target_dir, overwrite_guide)
         _print_ready(target_dir)
         return
 
@@ -306,7 +306,7 @@ def _route_build_method(target_dir: Path, overwrite: bool) -> None:
         raise typer.Exit(1)
 
 
-def _init_quickstart(overwrite: bool) -> None:
+def _init_quickstart(overwrite_guide: bool) -> None:
     """``pipecat init quickstart``: the canned quickstart, with the coding-agent guide.
 
     Writes the agent guide into ``pipecat-quickstart/`` and scaffolds the quickstart
@@ -322,7 +322,7 @@ def _init_quickstart(overwrite: bool) -> None:
     target_dir = Path(_QUICKSTART_DIR)
     # AGENTS.md + CLAUDE.md only — _write_agent_guide never writes GETTING_STARTED.md.
     # Quickstart is a fixed, non-interactive preset, so a stale guide just gets the nudge.
-    _print_refresh_summary(_write_agent_guide(target_dir, overwrite))
+    _print_refresh_summary(_write_agent_guide(target_dir, overwrite_guide))
     try:
         scaffold_quickstart(dest=target_dir, in_place=True)
     except typer.Exit:
@@ -376,7 +376,7 @@ def init_command(
         "are given. Use '.' for the current directory; created if missing. Pass 'quickstart' "
         "for the canned bot.",
     ),
-    overwrite: bool = typer.Option(
+    overwrite_guide: bool = typer.Option(
         False,
         "--overwrite-guide",
         help=f"Overwrite existing guide files ({_AGENTS_FILE}, {_CLAUDE_FILE}, "
@@ -545,7 +545,7 @@ def init_command(
                 "[yellow]Note:[/yellow] `quickstart` is a fixed preset; "
                 "ignoring the scaffold options you passed."
             )
-        return _init_quickstart(overwrite)
+        return _init_quickstart(overwrite_guide)
 
     scaffold_requested = _scaffold_requested(
         config=config,
@@ -564,7 +564,7 @@ def init_command(
         return _scaffold_non_interactive(
             ctx,
             target=target,
-            overwrite=overwrite,
+            overwrite_guide=overwrite_guide,
             dry_run=dry_run,
             config=config,
             name=name,
@@ -602,17 +602,19 @@ def init_command(
         console.print(f"[red]Error:[/red] {target_dir} exists and is not a directory.")
         raise typer.Exit(1)
 
-    statuses = _write_agent_guide(target_dir, overwrite)
+    statuses = _write_agent_guide(target_dir, overwrite_guide)
     # A re-run on a guide from an older Pipecat: interactively offer to refresh it now
     # (the expected payoff of re-running), otherwise fall back to the printed nudge.
-    if not overwrite and "kept-stale" in statuses and _is_interactive():
-        overwrite = _offer_refresh(target_dir)
+    if not overwrite_guide and "kept-stale" in statuses and _is_interactive():
+        overwrite_guide = _offer_refresh(target_dir)
     else:
         _print_refresh_summary(statuses)
-    _route_build_method(target_dir, overwrite)
+    _route_build_method(target_dir, overwrite_guide)
 
 
-def _scaffold_non_interactive(ctx: typer.Context, *, target, overwrite, dry_run, config, **flags):
+def _scaffold_non_interactive(
+    ctx: typer.Context, *, target, overwrite_guide, dry_run, config, **flags
+):
     """Write the agent guide and scaffold the project in-place from flags/a config file.
 
     The in-place sibling of the wizard path (:func:`_route_build_method`): same directory,
@@ -638,7 +640,7 @@ def _scaffold_non_interactive(ctx: typer.Context, *, target, overwrite, dry_run,
             config=config,
             **flags,
         )
-        _write_agent_guide(target_dir, overwrite)
+        _write_agent_guide(target_dir, overwrite_guide)
         generate_scaffold(project_config, dest=target_dir, in_place=True)
     except KeyboardInterrupt:
         console.print("\n[yellow]Project creation cancelled.[/yellow]")
