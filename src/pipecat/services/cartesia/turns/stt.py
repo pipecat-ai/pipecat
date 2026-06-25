@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -32,6 +33,7 @@ from pipecat.frames.frames import (
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -171,6 +173,18 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
     def supports_ttfs(self) -> bool:
         """TTFS doesn't apply: the server defines turn boundaries directly."""
         return False
+
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Recommend external turn strategies: this service detects turns server-side.
+
+        Cartesia's turn-detection STT defines turn boundaries on the server and
+        emits ``UserStarted/StoppedSpeakingFrame``, so the user aggregator defers to
+        those rather than running local VAD/smart-turn. Applied unless the user
+        passed their own ``user_turn_strategies``.
+        """
+        frame = super().service_metadata_frame()
+        frame.user_turn_strategies = ExternalUserTurnStrategies()
+        return frame
 
     # ------------------------------------------------------------------
     # Lifecycle
