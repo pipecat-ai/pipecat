@@ -126,8 +126,10 @@ class TwilioFrameSerializer(FrameSerializer):
                     f"auto_hang_up is enabled but missing required parameters: {', '.join(missing_credentials)}"
                 )
 
-            # Validate region and edge are both provided if either is specified
-            if (region and not edge) or (edge and not region):
+            # Validate region and edge are both provided if either is specified.
+            # Only applies when deriving Twilio's FQDN host; base_url is used
+            # verbatim and ignores region/edge, so the pairing requirement is moot.
+            if not base_url and ((region and not edge) or (edge and not region)):
                 raise ValueError(
                     "Both edge and region parameters are required if one is set. "
                     f"Twilio's FQDN format requires both: api.{{edge}}.{{region}}.twilio.com. "
