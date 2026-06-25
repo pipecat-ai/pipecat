@@ -23,14 +23,17 @@ continuous stream:
   turn boundaries — instead of the VAD's idle timeout force-stopping a turn at a
   pause and splitting it mid-sentence.
 
-Pacing on the send side also makes the harness-side recording faithful: the
-:class:`~pipecat.processors.audio.audio_buffer_processor.AudioBufferProcessor`
-places audio by wall-clock, so a burst would collapse the user's turn into a blip;
-and the receive side's gap-filling keeps the bot track continuous too.
+The pacing and gap-filling exist for the bot and the VADs, where jitter is
+harmless. The *recording* must not depend on them: Python can't hold the ~40ms
+tick precisely, and a pacing underrun becomes silence wedged mid-word, so
+recording the paced/filled streams stutters. Instead :class:`HarnessRecorder` is
+fed the *raw* audio on each edge -- the user's TTS as produced, the bot's chunks
+as received, both gapless within a turn -- and reconstructs the recording from
+those (see its docstring), padding only the real between-turn pauses.
 
 :class:`EvalHarnessTransport` is the RTVI client transport the harness builds; it
 differs from :class:`~pipecat.transports.websocket.rtvi_client.RTVIClientTransport`
-only in returning these two stream-shaping transports.
+only in returning these two stream-shaping transports and wiring the recorder.
 
 The harness's bot-audio VAD broadcasts interruptions when the bot speaks; those are
 stopped at the harness sink before they reach the output transport (see
@@ -39,7 +42,10 @@ stopped at the harness sink before they reach the output transport (see
 
 import asyncio
 import time
+import wave
+from pathlib import Path
 
+from pipecat.audio.utils import create_stream_resampler, mix_audio
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -57,7 +63,130 @@ from pipecat.transports.websocket.rtvi_client import RTVIClientTransport
 # (``audio_out_10ms_chunks`` defaults to 4), so the receive side re-emits the bot's
 # chunks 1:1 rather than splitting them, and it's still fine-grained enough for the
 # VAD/turn models (well under their start/stop windows).
-FRAME_S = 0.05
+FRAME_S = 0.04
+
+
+async def _sleep_to_next_tick(next_send: float) -> float:
+    """Pace to the next ~``FRAME_S`` boundary, re-anchoring when behind.
+
+    Returns the next target time. When the loop has fallen behind (after a hiccup
+    such as the worker's startup model load, a GC pause, or inline VAD), the target
+    is already in the past; re-anchor to ``now + FRAME_S`` rather than firing a
+    burst of catch-up frames. A catch-up burst compresses audio in time and the
+    wall-clock recorder then renders it as a stutter. This mirrors the transport's
+    own :meth:`_write_audio_sleep`.
+    """
+    sleep_s = max(0.0, next_send - time.monotonic())
+    await asyncio.sleep(sleep_s)
+    return time.monotonic() + FRAME_S if sleep_s == 0 else next_send + FRAME_S
+
+
+class HarnessRecorder:
+    """Builds the conversation recording from raw source audio, decoupled from pacing.
+
+    The harness paces audio to the bot and fills gaps in the bot's audio for the
+    VADs, but Python can't hold a 40ms tick precisely; recording those paced/filled
+    streams stutters, because a pacing underrun becomes silence wedged mid-word.
+    This recorder is fed the *raw* audio instead -- the user's TTS as produced and
+    the bot's chunks as received (both gapless within a turn) -- and concatenates
+    each side contiguously, inserting silence only for a real between-turn pause (a
+    wall-clock gap longer than ``GAP_S``). Pacing jitter never reaches the recording.
+
+    Each side is captured on its own timeline (monotonic clock); :meth:`write`
+    resamples to a common rate, aligns the two by their first-audio offset, and
+    mixes to mono.
+    """
+
+    # A wall-clock gap longer than this is a real pause between turns; anything
+    # shorter is pacing/network jitter within a contiguous turn and stays gapless.
+    GAP_S = 0.2
+
+    def __init__(self, sample_rate: int):
+        """Initialize the recorder.
+
+        Args:
+            sample_rate: Output sample rate; both sides are resampled to it on write.
+        """
+        self._rate = sample_rate
+        self._user = _RecorderTrack()
+        self._bot = _RecorderTrack()
+
+    def add_user(self, audio: bytes, in_rate: int) -> None:
+        """Record a chunk of the user's TTS audio (raw, before pacing to the bot)."""
+        self._user.add(audio, in_rate)
+
+    def add_bot(self, audio: bytes, in_rate: int) -> None:
+        """Record a chunk of the bot's audio (raw, before the gap-fill loop)."""
+        self._bot.add(audio, in_rate)
+
+    def has_audio(self) -> bool:
+        """Whether any audio has been recorded on either side."""
+        return self._user.first is not None or self._bot.first is not None
+
+    async def write(self, path: str) -> bool:
+        """Resample both sides to a common rate, align, mix to mono, and write a WAV.
+
+        Returns:
+            True if a file was written, False if nothing was recorded.
+        """
+        firsts = [t.first for t in (self._user, self._bot) if t.first is not None]
+        if not firsts:
+            return False
+        start = min(firsts)
+        user = await self._user.rendered(self._rate, start)
+        bot = await self._bot.rendered(self._rate, start)
+        mixed = mix_audio(user, bot)
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with wave.open(str(out), "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(self._rate)
+            wf.writeframes(mixed)
+        return True
+
+
+class _RecorderTrack:
+    """One side of the recording: contiguous raw audio at its native rate.
+
+    Audio is appended at the source's native rate (no per-frame resampling on the
+    hot path). A real between-turn pause -- a wall-clock gap longer than
+    ``HarnessRecorder.GAP_S`` -- is filled with silence; shorter gaps are pacing
+    jitter within a contiguous turn and stay gapless. :meth:`rendered` resamples
+    the whole track once and pads its leading silence so both sides share a timeline.
+    """
+
+    def __init__(self):
+        self._buf = bytearray()
+        self._rate: int | None = None
+        self.first: float | None = None
+        self._last: float | None = None
+
+    def add(self, audio: bytes, in_rate: int) -> None:
+        """Append a raw audio chunk, inserting silence for a real preceding pause."""
+        if not audio:
+            return
+        self._rate = in_rate
+        now = time.monotonic()
+        if self._last is None:
+            self.first = now
+        else:
+            gap = (now - self._last) - len(audio) / (in_rate * 2)
+            if gap > HarnessRecorder.GAP_S:
+                fill = int(gap * in_rate * 2) & ~1  # keep 16-bit alignment
+                self._buf.extend(b"\x00" * fill)
+        self._buf.extend(audio)
+        self._last = now
+
+    async def rendered(self, out_rate: int, start: float) -> bytes:
+        """Resample the track to ``out_rate`` and prepend its silence since ``start``."""
+        if self.first is None or self._rate is None:
+            return b""
+        audio = bytes(self._buf)
+        if self._rate != out_rate:
+            audio = await create_stream_resampler().resample(audio, self._rate, out_rate)
+        lead = int((self.first - start) * out_rate * 2) & ~1
+        return b"\x00" * lead + audio
 
 
 class EvalHarnessOutputTransport(WebsocketClientOutputTransport):
@@ -75,11 +204,12 @@ class EvalHarnessOutputTransport(WebsocketClientOutputTransport):
     text-mode scenario sends nothing, so no silence is ever fed to the bot's STT.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, recorder: "HarnessRecorder | None" = None, **kwargs):
         """Initialize the transport and its (lazily started) send stream."""
         super().__init__(*args, **kwargs)
         self._pending = bytearray()
         self._send_task = None
+        self._recorder = recorder
 
     async def start(self, frame: StartFrame):
         """Start the transport and, in audio mode, the real-time send stream."""
@@ -107,6 +237,10 @@ class EvalHarnessOutputTransport(WebsocketClientOutputTransport):
         """
         if self._session.is_closing or not self._session.is_connected:
             return False
+        # Record the raw TTS audio here (gapless), not the paced frames the send
+        # task emits: pacing underruns/jitter would stutter the recording.
+        if self._recorder is not None:
+            self._recorder.add_user(frame.audio, frame.sample_rate)
         self._pending.extend(frame.audio)
         return False
 
@@ -136,8 +270,7 @@ class EvalHarnessOutputTransport(WebsocketClientOutputTransport):
             # stream keeps the user turn at the right time (pushing only audio would
             # leave the track idle and the recorder would misplace it).
             await self.push_frame(frame)
-            next_send += FRAME_S
-            await asyncio.sleep(max(0, next_send - time.monotonic()))
+            next_send = await _sleep_to_next_tick(next_send)
 
     async def _send_frame(self, frame: OutputAudioRawFrame):
         """Serialize and send one frame (raw PCM, via the RTVI serializer)."""
@@ -165,11 +298,12 @@ class EvalHarnessInputTransport(WebsocketClientInputTransport):
     :class:`EvalHarnessOutputTransport`.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, recorder: "HarnessRecorder | None" = None, **kwargs):
         """Initialize the transport and its (lazily started) fill stream."""
         super().__init__(*args, **kwargs)
         self._bot_pcm = bytearray()
         self._fill_task = None
+        self._recorder = recorder
 
     async def start(self, frame: StartFrame):
         """Start the transport and, when audio is enabled, the gap-fill stream."""
@@ -194,6 +328,10 @@ class EvalHarnessInputTransport(WebsocketClientInputTransport):
         straight through (gaps and all) we buffer it, and :meth:`_fill_task_handler`
         paces it downstream with silence filling the gaps.
         """
+        # Record the raw bot audio here (gapless within a turn), not the gap-filled
+        # frames the fill task emits: those underruns would stutter the recording.
+        if self._recorder is not None:
+            self._recorder.add_bot(frame.audio, frame.sample_rate)
         self._bot_pcm.extend(frame.audio)
 
     async def _fill_task_handler(self):
@@ -214,8 +352,7 @@ class EvalHarnessInputTransport(WebsocketClientInputTransport):
             await super().push_audio_frame(
                 InputAudioRawFrame(audio=pcm, sample_rate=self.sample_rate, num_channels=1)
             )
-            next_send += FRAME_S
-            await asyncio.sleep(max(0, next_send - time.monotonic()))
+            next_send = await _sleep_to_next_tick(next_send)
 
     async def _cancel_fill_task(self):
         if self._fill_task is not None:
@@ -229,17 +366,35 @@ class EvalHarnessTransport(RTVIClientTransport):
     Identical to :class:`~pipecat.transports.websocket.rtvi_client.RTVIClientTransport`
     except that ``input()`` returns an :class:`EvalHarnessInputTransport` and
     ``output()`` an :class:`EvalHarnessOutputTransport` — both reshaping the audio
-    into the continuous real-time stream VAD/STT expect.
+    into the continuous real-time stream VAD/STT expect. When a ``recorder`` is
+    given, both edges feed it the *raw* audio (before pacing/filling) so the
+    recording is gapless regardless of the pacing jitter.
     """
+
+    def __init__(self, *args, recorder: "HarnessRecorder | None" = None, **kwargs):
+        """Initialize the transport, optionally wiring a recorder to both edges.
+
+        Args:
+            recorder: Optional :class:`HarnessRecorder` fed the raw audio on both
+                edges; ``None`` disables recording.
+            *args: Forwarded to :class:`~pipecat.transports.websocket.rtvi_client.RTVIClientTransport`.
+            **kwargs: Forwarded to the parent transport.
+        """
+        super().__init__(*args, **kwargs)
+        self._recorder = recorder
 
     def input(self) -> WebsocketClientInputTransport:
         """Return the gap-filling input transport."""
         if not self._input:
-            self._input = EvalHarnessInputTransport(self, self._session, self._params)
+            self._input = EvalHarnessInputTransport(
+                self, self._session, self._params, recorder=self._recorder
+            )
         return self._input
 
     def output(self) -> WebsocketClientOutputTransport:
         """Return the stream-shaping output transport."""
         if not self._output:
-            self._output = EvalHarnessOutputTransport(self, self._session, self._params)
+            self._output = EvalHarnessOutputTransport(
+                self, self._session, self._params, recorder=self._recorder
+            )
         return self._output
