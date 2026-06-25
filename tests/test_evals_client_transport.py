@@ -53,7 +53,7 @@ class TestEvalMicOutput(unittest.IsolatedAsyncioTestCase):
         out._send_mic_frame = capture
         out.push_frame = noop
 
-        utterance = b"\x01\x02" * (self.SR // 10)  # 100ms -> five 20ms chunks
+        utterance = b"\x01\x02" * (self.SR * 12 // 100)  # 120ms -> three 40ms chunks
         out._mic_pcm.extend(utterance)
 
         await self._run(out, 0.25)
@@ -62,7 +62,7 @@ class TestEvalMicOutput(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(b"".join(speech), utterance)  # full utterance, in order
         self.assertTrue(all(len(pcm) == self.CHUNK_BYTES for pcm in speech))
         self.assertIn(b"\x00" * self.CHUNK_BYTES, sent)  # silence keeps flowing
-        # Real-time pacing: ~0.25s emits ~12 frames, not hundreds.
+        # Real-time pacing: ~0.25s emits ~6 frames at 40ms, not hundreds.
         self.assertLess(len(sent), int(0.25 / MIC_FRAME_S) + 5)
 
 

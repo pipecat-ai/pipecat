@@ -14,7 +14,7 @@ while a TTS is producing, with gaps during pauses, so both edges must reconstruc
 the continuous stream:
 
 - :class:`EvalMicOutputTransport` (send side): the user TTS's audio is enqueued
-  and a real-time task ships one ~20ms frame every tick (queued audio when
+  and a real-time task ships one ~40ms frame every tick (queued audio when
   available, silence when idle), so the bot receives exactly what a live mic would
   produce and needs no virtual mic of its own.
 - :class:`EvalBotAudioInputTransport` (receive side): the bot's audio arrives in
@@ -53,9 +53,11 @@ from pipecat.transports.websocket.client import (
 )
 from pipecat.transports.websocket.rtvi_client import RTVIClientTransport
 
-# One mic frame per tick — the granularity a live transport delivers and what
-# VAD/turn models consume.
-MIC_FRAME_S = 0.02
+# One audio frame per tick, on both edges. 40ms matches the bot's output chunking
+# (``audio_out_10ms_chunks`` defaults to 4), so the receive side re-emits the bot's
+# chunks 1:1 rather than splitting them, and it's still fine-grained enough for the
+# VAD/turn models (well under their start/stop windows).
+MIC_FRAME_S = 0.04
 
 
 class EvalMicOutputTransport(WebsocketClientOutputTransport):
@@ -65,7 +67,7 @@ class EvalMicOutputTransport(WebsocketClientOutputTransport):
     real time, but with no audio in between), so the bot would see a whole
     utterance with no trailing silence — VADs and turn detectors need that
     silence to end a turn. This transport instead enqueues the user TTS's audio
-    and a real-time task emits one ~20ms frame every tick: the next queued chunk
+    and a real-time task emits one ~40ms frame every tick: the next queued chunk
     when there is one, silence otherwise. The result is the continuous stream a
     live mic produces, so the bot's stock input handles it with no virtual mic.
 
@@ -109,7 +111,7 @@ class EvalMicOutputTransport(WebsocketClientOutputTransport):
         return False
 
     async def _mic_task_handler(self):
-        """Send one ~20ms frame every tick: queued audio, or silence when idle."""
+        """Send one ~40ms frame every tick: queued audio, or silence when idle."""
         chunk = int(self.sample_rate * MIC_FRAME_S) * 2  # 16-bit mono
         silence = b"\x00" * chunk
         next_send = time.monotonic()
@@ -157,7 +159,7 @@ class EvalBotAudioInputTransport(WebsocketClientInputTransport):
     detect the bot's turn end; a gap reads as *no audio*, so the VAD's idle timeout
     force-stops the turn and splits it mid-sentence (e.g. "The capital of Germany."
     then "Is Berlin." as two turns). This transport buffers the bot's audio and a
-    real-time task re-emits one ~20ms frame every tick — the next queued chunk when
+    real-time task re-emits one ~40ms frame every tick — the next queued chunk when
     there is one, silence otherwise — so the VAD + smart-turn see speech-then-silence
     and judge the bot's real turn boundaries. Mirror of :class:`EvalMicOutputTransport`.
     """
@@ -194,7 +196,7 @@ class EvalBotAudioInputTransport(WebsocketClientInputTransport):
         self._bot_pcm.extend(frame.audio)
 
     async def _fill_task_handler(self):
-        """Push one ~20ms frame every tick: buffered bot audio, or silence."""
+        """Push one ~40ms frame every tick: buffered bot audio, or silence."""
         chunk = int(self.sample_rate * MIC_FRAME_S) * 2  # 16-bit mono
         silence = b"\x00" * chunk
         next_send = time.monotonic()
