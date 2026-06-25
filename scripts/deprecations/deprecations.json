@@ -131,7 +131,7 @@
       "removed_in": "2.0.0",
       "relation": "use_existing",
       "replacement": "LLMSummarizeContextFrame",
-      "message": "Use Pipecat's native context summarization instead. To trigger on-demand summarization during a node transition, push an ``LLMSummarizeContextFrame`` in a pre-action. See https://docs.pipecat.ai/guides/fundamentals/context-summarization. Will be removed in 2.0.0.",
+      "message": "Use :class:`LLMSummarizeContextFrame` instead — push it in a pre-action to trigger on-demand summarization during a node transition. See https://docs.pipecat.ai/guides/fundamentals/context-summarization. Will be removed in 2.0.0.",
       "location": "pipecat/flows/types.py"
     },
     {
