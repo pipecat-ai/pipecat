@@ -118,7 +118,7 @@ The quickest path: install the Pipecat CLI and scaffold a new phone or web/mobil
 
 ```bash
 uv tool install "pipecat-ai[cli]"
-pipecat create
+pipecat init
 ```
 
 Follow the [quickstart guide](https://docs.pipecat.ai/getting-started/quickstart) to get your first bot running, or see the [CLI reference](https://docs.pipecat.ai/api-reference/cli/overview) for more options.
