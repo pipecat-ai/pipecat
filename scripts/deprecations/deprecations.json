@@ -47,6 +47,39 @@
       "location": "pipecat/audio/turn/smart_turn/local_smart_turn_v2.py"
     },
     {
+      "subject": "AICQuailVADAnalyzer.minimum_speech_duration",
+      "module": "pipecat.audio.vad.aic_quail_vad",
+      "kind": "parameter",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "VADParams",
+      "message": "Use :class:`VADParams` (``start_secs``/``stop_secs``) instead. ``minimum_speech_duration`` is ignored and will be removed in 2.0.0.",
+      "location": "pipecat/audio/vad/aic_quail_vad.py"
+    },
+    {
+      "subject": "AICQuailVADAnalyzer.sensitivity",
+      "module": "pipecat.audio.vad.aic_quail_vad",
+      "kind": "parameter",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "VADParams",
+      "message": "Use :class:`VADParams` (``confidence``) instead. ``sensitivity`` is ignored and will be removed in 2.0.0.",
+      "location": "pipecat/audio/vad/aic_quail_vad.py"
+    },
+    {
+      "subject": "AICQuailVADAnalyzer.speech_hold_duration",
+      "module": "pipecat.audio.vad.aic_quail_vad",
+      "kind": "parameter",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "VADParams",
+      "message": "Use :class:`VADParams` (``start_secs``/``stop_secs``) instead. ``speech_hold_duration`` is ignored and will be removed in 2.0.0.",
+      "location": "pipecat/audio/vad/aic_quail_vad.py"
+    },
+    {
       "subject": "AICVADAnalyzer",
       "module": "pipecat.audio.vad.aic_vad",
       "kind": "class",

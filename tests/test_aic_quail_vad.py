@@ -214,6 +214,27 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         analyzer, _ = self._create_analyzer(model_download_dir=custom)
         self.assertEqual(analyzer._model_download_dir, custom)
 
+    def test_legacy_vad_params_warn_and_are_ignored(self):
+        """The released SDK-side VAD knobs are accepted but deprecated/ignored."""
+        for param, value in (
+            ("speech_hold_duration", 0.08),
+            ("minimum_speech_duration", 0.05),
+            ("sensitivity", 0.7),
+        ):
+            with self.assertWarns(DeprecationWarning):
+                analyzer, _ = self._create_analyzer(**{param: value})
+            # Accepted-but-ignored: not stashed anywhere on the instance.
+            self.assertFalse(hasattr(analyzer, f"_pending_{param}"))
+
+    def test_no_deprecation_warning_without_legacy_params(self):
+        """Constructing without the legacy params emits no DeprecationWarning."""
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            analyzer, _ = self._create_analyzer()  # must not raise
+            self.assertIsNotNone(analyzer)
+
     def test_construction_eagerly_loads_model_via_model_id(self):
         """__init__ downloads and loads the model so cold-start happens off-hot-path."""
         _, mocks = self._create_analyzer()

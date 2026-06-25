@@ -19,6 +19,7 @@ Classes:
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -88,6 +89,9 @@ class AICQuailVADAnalyzer(VADAnalyzer):
         model_id: str | None = DEFAULT_QUAIL_VAD_MODEL_ID,
         model_path: Path | None = None,
         model_download_dir: Path | None = None,
+        speech_hold_duration: float | None = None,
+        minimum_speech_duration: float | None = None,
+        sensitivity: float | None = None,
         sample_rate: int | None = None,
         params: VADParams | None = None,
     ) -> None:
@@ -107,6 +111,24 @@ class AICQuailVADAnalyzer(VADAnalyzer):
                 ``model_id`` when set.
             model_download_dir: Directory for downloaded models. Defaults to
                 ``~/.cache/pipecat/aic-models``.
+            speech_hold_duration: Deprecated; no longer used. Speech timing is
+                governed by Pipecat's ``VADParams``.
+
+                .. deprecated:: 1.5.0
+                    Use :class:`VADParams` (``start_secs``/``stop_secs``) instead.
+                    ``speech_hold_duration`` is ignored and will be removed in 2.0.0.
+            minimum_speech_duration: Deprecated; no longer used. Speech timing is
+                governed by Pipecat's ``VADParams``.
+
+                .. deprecated:: 1.5.0
+                    Use :class:`VADParams` (``start_secs``/``stop_secs``) instead.
+                    ``minimum_speech_duration`` is ignored and will be removed in 2.0.0.
+            sensitivity: Deprecated; no longer used. The speech-probability
+                threshold is now governed by Pipecat's ``VADParams.confidence``.
+
+                .. deprecated:: 1.5.0
+                    Use :class:`VADParams` (``confidence``) instead. ``sensitivity``
+                    is ignored and will be removed in 2.0.0.
             sample_rate: Initial sample rate; the pipeline will set this via
                 :meth:`set_sample_rate` once the transport rate is known.
             params: Optional :class:`VADParams` for the base state machine.
@@ -121,6 +143,24 @@ class AICQuailVADAnalyzer(VADAnalyzer):
             )
 
         super().__init__(sample_rate=sample_rate, params=params)
+
+        # These SDK-side knobs only affected the post-processed ``is_speech_detected``
+        # path, which the raw-probability ``voice_confidence`` no longer uses. They are
+        # accepted-but-ignored for one release cycle; gating now lives in ``VADParams``.
+        for _name, _value in (
+            ("speech_hold_duration", speech_hold_duration),
+            ("minimum_speech_duration", minimum_speech_duration),
+            ("sensitivity", sensitivity),
+        ):
+            if _value is not None:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("always")
+                    warnings.warn(
+                        f"`AICQuailVADAnalyzer({_name}=...)` is deprecated since 1.5.0, "
+                        "use `VADParams` instead. The parameter is ignored.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
 
         self._license_key = license_key
         self._model_id = model_id
