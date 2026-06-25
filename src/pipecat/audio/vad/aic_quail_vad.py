@@ -117,18 +117,21 @@ class AICQuailVADAnalyzer(VADAnalyzer):
                 .. deprecated:: 1.5.0
                     Use :class:`VADParams` (``start_secs``/``stop_secs``) instead.
                     ``speech_hold_duration`` is ignored and will be removed in 2.0.0.
+
             minimum_speech_duration: Deprecated; no longer used. Speech timing is
                 governed by Pipecat's ``VADParams``.
 
                 .. deprecated:: 1.5.0
                     Use :class:`VADParams` (``start_secs``/``stop_secs``) instead.
                     ``minimum_speech_duration`` is ignored and will be removed in 2.0.0.
+
             sensitivity: Deprecated; no longer used. The speech-probability
                 threshold is now governed by Pipecat's ``VADParams.confidence``.
 
                 .. deprecated:: 1.5.0
                     Use :class:`VADParams` (``confidence``) instead. ``sensitivity``
                     is ignored and will be removed in 2.0.0.
+
             sample_rate: Initial sample rate; the pipeline will set this via
                 :meth:`set_sample_rate` once the transport rate is known.
             params: Optional :class:`VADParams` for the base state machine.
