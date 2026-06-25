@@ -36,7 +36,7 @@ from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 if TYPE_CHECKING:
     from aic_sdk import VadContext
 
-DEFAULT_QUAIL_VAD_MODEL_ID = "quail-vf-vad-2.0-s-16khz"
+DEFAULT_QUAIL_VAD_MODEL_ID = "quail-vad-2.0-xxs-16khz"
 
 # Telemetry identifier registered with the AIC SDK; identifies pipecat to the
 # vendor's usage pipeline. Mirrors the value used by AICFilter; kept private
@@ -62,7 +62,7 @@ class AICQuailVADAnalyzer(VADAnalyzer):
 
     Comparison to :class:`pipecat.audio.vad.aic_vad.AICVADAnalyzer` (deprecated):
 
-    - **Model:** Quail VAD-only model (e.g. ``quail-vf-vad-2.0-s-16khz``); the
+    - **Model:** Quail VAD-only model (e.g. ``quail-vad-2.0-xxs-16khz``); the
       deprecated analyzer uses the enhancement model's internal VAD as a
       side-channel.
     - **Audio path:** runs on whatever the pipeline feeds it (raw or enhanced).
@@ -100,7 +100,7 @@ class AICQuailVADAnalyzer(VADAnalyzer):
         Args:
             license_key: ai-coustics SDK license key.
             model_id: Quail VAD model identifier. Defaults to the published
-                standalone VAD model ``"quail-vf-vad-2.0-s-16khz"``. See
+                standalone VAD model ``"quail-vad-2.0-xxs-16khz"``. See
                 https://artifacts.ai-coustics.io/ for the catalogue. Ignored if
                 ``model_path`` is provided.
             model_path: Optional path to a local ``.aicmodel`` file. Overrides

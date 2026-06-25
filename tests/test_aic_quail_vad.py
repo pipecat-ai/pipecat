@@ -40,7 +40,7 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         cls.DEFAULT_QUAIL_VAD_MODEL_ID = DEFAULT_QUAIL_VAD_MODEL_ID
 
     def setUp(self):
-        self.mock_model = MockModel(model_id="quail-vf-vad-2.0-s-16khz", optimal_num_frames=160)
+        self.mock_model = MockModel(model_id="quail-vad-2.0-xxs-16khz", optimal_num_frames=160)
         self.mock_processor = MockProcessorSync()
 
     def _create_analyzer(self, **kwargs):
@@ -197,9 +197,9 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         mock_executor_instance.shutdown.assert_called_once_with(wait=False)
 
     def test_default_model_id(self):
-        """Default model_id is the published standalone VF VAD 2.0 model."""
+        """Default model_id is the published standalone Quail VAD."""
         analyzer, _ = self._create_analyzer()
-        self.assertEqual(analyzer._model_id, "quail-vf-vad-2.0-s-16khz")
+        self.assertEqual(analyzer._model_id, "quail-vad-2.0-xxs-16khz")
         self.assertEqual(analyzer._model_id, self.DEFAULT_QUAIL_VAD_MODEL_ID)
 
     def test_default_download_dir(self):
@@ -218,7 +218,7 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         """__init__ downloads and loads the model so cold-start happens off-hot-path."""
         _, mocks = self._create_analyzer()
         mocks["Model"].download.assert_called_once_with(
-            "quail-vf-vad-2.0-s-16khz",
+            "quail-vad-2.0-xxs-16khz",
             str(Path.home() / ".cache" / "pipecat" / "aic-models"),
         )
         mocks["Model"].from_file.assert_called_once_with("/tmp/test.aicmodel")
