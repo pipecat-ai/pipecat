@@ -266,3 +266,12 @@ suite:
   #
   - bot: features/features-dtmf-menu.py
     scenarios: [dtmf_menu]
+
+  #
+  # Realtime (speech-to-speech): Gemini Live with a cap on how long a single user
+  # turn can run. The user rambles past the cap with no natural pause; the bot
+  # forces the turn to end (local VAD + activity_end) and takes its turn instead
+  # of waiting silently.
+  #
+  - bot: realtime/realtime-gemini-live-max-user-speech.py
+    scenarios: [max_user_speech]
