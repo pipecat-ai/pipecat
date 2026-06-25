@@ -8,7 +8,7 @@
 
 **Pipecat** is an open-source Python framework for building real-time voice and multimodal conversational agents. Build a single voice agent or a full multi-agent system where specialists hand off, fan out in parallel, and coordinate over a shared bus, locally or distributed across processes and machines. Orchestrate audio and video, AI services, transports, and conversation pipelines effortlessly, so you can focus on what makes your agents unique.
 
-> Want to dive right in? Run `pipecat create quickstart` or follow the [quickstart guide](https://docs.pipecat.ai/getting-started/quickstart).
+> Want to dive right in? Run `pipecat init quickstart` or follow the [quickstart guide](https://docs.pipecat.ai/getting-started/quickstart).
 
 ## 🚀 What You Can Build
 
@@ -47,7 +47,7 @@ Want to build beautiful and engaging experiences? Checkout the [Voice UI Kit](ht
 
 ### 🛠️ Create and deploy projects
 
-The [Pipecat CLI](https://docs.pipecat.ai/api-reference/cli/overview) ships with `pipecat-ai` — install it with `uv tool install "pipecat-ai[cli]"`. Scaffold a project in under a minute with `pipecat create`, or run `pipecat init` to make a project agent-ready so an AI coding assistant (Claude Code, Codex) builds it for you. Then use the CLI to monitor and deploy your agent to production.
+The [Pipecat CLI](https://docs.pipecat.ai/api-reference/cli/overview) ships with `pipecat-ai` — install it with `uv tool install "pipecat-ai[cli]"`. Run `pipecat init` to start a project: it sets you up so an AI coding assistant (Claude Code, Codex) builds it for you, and can scaffold a runnable bot in under a minute. Then use the CLI to monitor and deploy your agent to production.
 
 ### 🔍 Debugging
 

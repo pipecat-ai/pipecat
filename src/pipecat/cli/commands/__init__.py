@@ -6,6 +6,6 @@
 
 """CLI commands for Pipecat CLI."""
 
-from . import create, init
+from . import init
 
-__all__ = ["create", "init"]
+__all__ = ["init"]

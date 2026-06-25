@@ -671,7 +671,7 @@ def test_generation_uses_utf8_on_windows_locale(monkeypatch, temp_output_dir):
     monkeypatch.setattr(Path, "write_text", patched_write)
     monkeypatch.setattr(Path, "read_text", patched_read)
 
-    # Mirror the quickstart_command config from commands/create.py.
+    # Mirror the scaffold_quickstart config from cli/scaffold.py.
     config = ProjectConfig(
         project_name="pipecat-quickstart",
         bot_type="web",
