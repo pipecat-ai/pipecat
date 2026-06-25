@@ -6,24 +6,34 @@
 
 """Client-side WebSocket transport for the eval harness.
 
-The harness drives the bot as an RTVI client. A live client's microphone produces
-a continuous real-time audio stream — speech while the user talks, silence
-otherwise — and the bot's VAD, turn detection, and streaming STT all rely on that
-cadence. :class:`EvalMicOutputTransport` reproduces it on the *send* side: the
-user TTS's audio is enqueued and a real-time task ships one ~20ms frame every
-tick (queued audio when available, silence when idle), so the bot receives
-exactly what a live mic would produce and needs no virtual mic of its own.
+The harness drives the bot as an RTVI client. A real transport carries a
+continuous real-time audio stream in both directions — speech while a party
+talks, silence otherwise — and VAD, turn detection, and streaming STT all rely on
+that cadence. The eval bot's WebSocket transport instead sends/receives audio only
+while a TTS is producing, with gaps during pauses, so both edges must reconstruct
+the continuous stream:
 
-Pacing the audio here (rather than bursting it) also makes the harness-side
-recording faithful: the :class:`~pipecat.processors.audio.audio_buffer_processor.AudioBufferProcessor`
-places audio by wall-clock, so a burst would collapse the user's turn into a blip.
+- :class:`EvalMicOutputTransport` (send side): the user TTS's audio is enqueued
+  and a real-time task ships one ~20ms frame every tick (queued audio when
+  available, silence when idle), so the bot receives exactly what a live mic would
+  produce and needs no virtual mic of its own.
+- :class:`EvalBotAudioInputTransport` (receive side): the bot's audio arrives in
+  bursts with gaps; it is buffered and re-emitted at the same steady cadence, so
+  the harness's VAD + smart-turn see speech-then-silence and judge the bot's real
+  turn boundaries — instead of the VAD's idle timeout force-stopping a turn at a
+  pause and splitting it mid-sentence.
+
+Pacing on the send side also makes the harness-side recording faithful: the
+:class:`~pipecat.processors.audio.audio_buffer_processor.AudioBufferProcessor`
+places audio by wall-clock, so a burst would collapse the user's turn into a blip;
+and the receive side's gap-filling keeps the bot track continuous too.
 
 :class:`EvalHarnessTransport` is the RTVI client transport the harness builds; it
 differs from :class:`~pipecat.transports.websocket.rtvi_client.RTVIClientTransport`
-only in returning the mic-like output transport.
+only in returning these two stream-shaping transports.
 
 The harness's bot-audio VAD broadcasts interruptions when the bot speaks; those
-are stopped at the harness sink before they reach this transport (see
+are stopped at the harness sink before they reach the output transport (see
 ``_BotFrameSink``), so the paced user audio is never flushed mid-utterance.
 """
 
@@ -33,10 +43,14 @@ import time
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    InputAudioRawFrame,
     OutputAudioRawFrame,
     StartFrame,
 )
-from pipecat.transports.websocket.client import WebsocketClientOutputTransport
+from pipecat.transports.websocket.client import (
+    WebsocketClientInputTransport,
+    WebsocketClientOutputTransport,
+)
 from pipecat.transports.websocket.rtvi_client import RTVIClientTransport
 
 # One mic frame per tick — the granularity a live transport delivers and what
@@ -135,12 +149,91 @@ class EvalMicOutputTransport(WebsocketClientOutputTransport):
             self._mic_task = None
 
 
+class EvalBotAudioInputTransport(WebsocketClientInputTransport):
+    """Feeds the bot's audio to the harness's STT/VAD as a continuous stream.
+
+    The bot transmits audio only while its TTS is producing — there are gaps during
+    natural pauses (and after a turn). The harness runs a VAD on this audio to
+    detect the bot's turn end; a gap reads as *no audio*, so the VAD's idle timeout
+    force-stops the turn and splits it mid-sentence (e.g. "The capital of Germany."
+    then "Is Berlin." as two turns). This transport buffers the bot's audio and a
+    real-time task re-emits one ~20ms frame every tick — the next queued chunk when
+    there is one, silence otherwise — so the VAD + smart-turn see speech-then-silence
+    and judge the bot's real turn boundaries. Mirror of :class:`EvalMicOutputTransport`.
+    """
+
+    def __init__(self, *args, **kwargs):
+        """Initialize the transport and its (lazily started) fill stream."""
+        super().__init__(*args, **kwargs)
+        self._bot_pcm = bytearray()
+        self._fill_task = None
+
+    async def start(self, frame: StartFrame):
+        """Start the transport and, when audio is enabled, the gap-fill stream."""
+        await super().start(frame)
+        if self._params.audio_in_enabled and self._fill_task is None:
+            self._fill_task = self.create_task(self._fill_task_handler())
+
+    async def stop(self, frame: EndFrame):
+        """Stop the fill stream, then the transport."""
+        await self._cancel_fill_task()
+        await super().stop(frame)
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the fill stream, then the transport."""
+        await self._cancel_fill_task()
+        await super().cancel(frame)
+
+    async def push_audio_frame(self, frame: InputAudioRawFrame):
+        """Buffer the bot's audio; the fill task re-emits it at a steady cadence.
+
+        ``on_message`` routes the bot's incoming audio here; instead of pushing it
+        straight through (gaps and all) we buffer it, and :meth:`_fill_task_handler`
+        paces it downstream with silence filling the gaps.
+        """
+        self._bot_pcm.extend(frame.audio)
+
+    async def _fill_task_handler(self):
+        """Push one ~20ms frame every tick: buffered bot audio, or silence."""
+        chunk = int(self.sample_rate * MIC_FRAME_S) * 2  # 16-bit mono
+        silence = b"\x00" * chunk
+        next_send = time.monotonic()
+        while True:
+            if len(self._bot_pcm) >= chunk:
+                pcm = bytes(self._bot_pcm[:chunk])
+                del self._bot_pcm[:chunk]
+            elif self._bot_pcm:
+                pcm = bytes(self._bot_pcm) + silence[len(self._bot_pcm) :]
+                self._bot_pcm.clear()
+            else:
+                pcm = silence
+            # super() pushes through the normal input audio path (VAD/STT).
+            await super().push_audio_frame(
+                InputAudioRawFrame(audio=pcm, sample_rate=self.sample_rate, num_channels=1)
+            )
+            next_send += MIC_FRAME_S
+            await asyncio.sleep(max(0, next_send - time.monotonic()))
+
+    async def _cancel_fill_task(self):
+        if self._fill_task is not None:
+            await self.cancel_task(self._fill_task)
+            self._fill_task = None
+
+
 class EvalHarnessTransport(RTVIClientTransport):
-    """RTVI client transport whose output streams audio like a live mic.
+    """RTVI client transport whose audio edges behave like a live transport.
 
     Identical to :class:`~pipecat.transports.websocket.rtvi_client.RTVIClientTransport`
-    except that ``output()`` returns an :class:`EvalMicOutputTransport`.
+    except that ``output()`` returns an :class:`EvalMicOutputTransport` and
+    ``input()`` an :class:`EvalBotAudioInputTransport` — both reshaping the audio
+    into the continuous real-time stream VAD/STT expect.
     """
+
+    def input(self) -> WebsocketClientInputTransport:
+        """Return the gap-filling input transport."""
+        if not self._input:
+            self._input = EvalBotAudioInputTransport(self, self._session, self._params)
+        return self._input
 
     def output(self) -> WebsocketClientOutputTransport:
         """Return the mic-like output transport."""
