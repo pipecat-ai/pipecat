@@ -364,7 +364,14 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
             owner.setup = patched_setup
 
         def attach_run_tts_attributes(service, text, args, kwargs):
-            """Attach text-specific attributes to the in-flight TTS span."""
+            """Attach text-specific attributes to the in-flight TTS span.
+
+            When ``reuse_context_id_within_turn`` is True (the default), multiple
+            ``run_tts`` calls within a turn share the same ``context_id`` and
+            therefore the same span.  Appending to the accumulated text instead of
+            overwriting ensures the span captures the full turn text rather than
+            only the last synthesised chunk.
+            """
             if not getattr(service, "_tracing_enabled", False):
                 return
             try:
@@ -372,8 +379,11 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                 entry = getattr(service, "_tts_spans", {}).get(context_id)
                 if entry and text:
                     span = entry["span"]
-                    span.set_attribute("text", text)
-                    span.set_attribute("metrics.character_count", len(text))
+                    prior = entry.get("text", "")
+                    full_text = (prior + " " + text).strip() if prior else text
+                    entry["text"] = full_text
+                    span.set_attribute("text", full_text)
+                    span.set_attribute("metrics.character_count", len(full_text))
             except Exception as e:
                 logging.warning(f"Error attaching TTS text to span: {e}")
 
