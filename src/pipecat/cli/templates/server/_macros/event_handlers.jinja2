@@ -17,8 +17,8 @@ async def on_client_ready(rtvi):
 async def on_client_connected(transport, client):
     logger.info("Client connected")
     {% if recording %}
-    # Start recording audio
-    await audio_buffer.start_recording()
+    # Start recording audio by pushing a frame through the pipeline
+    await worker.queue_frames([AudioBufferStartRecordingFrame()])
     {% endif %}
     {% if bot_type != 'web' %}
     # Kick off the conversation
@@ -38,8 +38,8 @@ async def on_client_disconnected(transport, client):
 async def on_first_participant_joined(transport, participant):
     logger.debug(f"First participant joined: {participant['id']}")
     {% if recording %}
-    # Start recording audio
-    await audio_buffer.start_recording()
+    # Start recording audio by pushing a frame through the pipeline
+    await worker.queue_frames([AudioBufferStartRecordingFrame()])
     {% endif %}
     # Kick off the conversation
     context.add_message({"role": "developer", "content": "Start by concisely introducing yourself."})
@@ -67,8 +67,8 @@ async def on_dialout_answered(transport, data):
     logger.debug(f"Dial-out answered: {data}")
     dialout_manager.mark_successful()
     {% if recording %}
-    # Start recording audio
-    await audio_buffer.start_recording()
+    # Start recording audio by pushing a frame through the pipeline
+    await worker.queue_frames([AudioBufferStartRecordingFrame()])
     {% endif %}
 
 @transport.event_handler("on_dialout_error")
@@ -142,8 +142,8 @@ if request:
 async def on_client_connected(transport, client):
     logger.info("Client connected")
     {% if recording %}
-    # Start recording audio
-    await audio_buffer.start_recording()
+    # Start recording audio by pushing a frame through the pipeline
+    await worker.queue_frames([AudioBufferStartRecordingFrame()])
     {% endif %}
     context.add_message({"role": "developer", "content": "Start by concisely introducing yourself."})
     await worker.queue_frames([LLMRunFrame()])

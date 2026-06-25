@@ -93,7 +93,14 @@ class ServiceDefinition:
 # Feature definitions with metadata for auto-generation
 # Maps feature names to the list of classes/functions that need to be imported
 FEATURE_DEFINITIONS: dict[str, list[str]] = {
-    "recording": ["AudioBufferProcessor", "datetime", "io", "wave", "aiofiles"],
+    "recording": [
+        "AudioBufferProcessor",
+        "AudioBufferStartRecordingFrame",
+        "datetime",
+        "io",
+        "wave",
+        "aiofiles",
+    ],
     "transcription": ["AssistantTurnStoppedMessage", "UserTurnStoppedMessage"],
     "vad": ["SileroVADAnalyzer"],
     "pipeline": ["Pipeline", "WorkerRunner", "PipelineParams", "PipelineWorker"],

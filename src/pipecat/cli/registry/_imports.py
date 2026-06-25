@@ -186,6 +186,7 @@ FEATURE_IMPORTS = {
         "import aiofiles",
         "import datetime",
         "import io",
+        "from pipecat.frames.frames import AudioBufferStartRecordingFrame",
         "from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor",
         "import wave",
     ],
