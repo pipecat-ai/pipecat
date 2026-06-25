@@ -266,3 +266,15 @@ suite:
   #
   - bot: features/features-dtmf-menu.py
     scenarios: [dtmf_menu]
+
+  #
+  # Voicemail with resume: the bot reaches a voicemail system, leaves its
+  # message, then a human picks up and starts talking. The bot must drop the
+  # "leave a message" behavior and continue a live conversation (custom state
+  # management that reopens the detector's conversation path). Audio modality,
+  # because the VoicemailDetector keys off real speech-turn (VAD) signals. Run
+  # as a suite (fresh bot per scenario): the detector decides once per process,
+  # so it can't be re-driven against a long-lived bot.
+  #
+  - bot: features/features-voicemail-resume.py
+    scenarios: [voicemail_resume]

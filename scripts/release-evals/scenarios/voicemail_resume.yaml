@@ -1,0 +1,49 @@
+name: voicemail_resume
+
+# Voicemail-then-resume, end to end. The bot makes an outbound call, reaches a
+# voicemail system, leaves its message, and then a human picks up and starts
+# talking. The bot must drop the "leave a message" behavior and continue a live
+# conversation.
+#
+# Audio modality: the VoicemailDetector relies on real speech-turn (VAD) signals,
+# so this is tested with synthesized user speech (Kokoro) and the bot's real
+# audio transcribed back (Moonshine). The judge LLM is OpenAI (no local Ollama).
+#
+# Two assertions prove the whole flow:
+#   turn 0 — the bot detects voicemail and leaves its message (spoken aloud).
+#   turn 1 — after the message, a human speaks and the bot resumes a live chat.
+
+user:
+  modality: audio
+  speech:
+    service: kokoro
+    voice: af_heart
+
+judge:
+  modality: audio
+  eval:
+    service: openai
+    model: gpt-4o-mini
+  transcription:
+    service: moonshine
+    model: small-streaming
+
+turns:
+  # Turn 0: the call connects to a voicemail system. The classifier tags this as
+  # VOICEMAIL, the main LLM's reply is suppressed, and after the response delay
+  # the bot speaks its pre-written voicemail message.
+  - user: "You've reached Jordan's voicemail. Please leave a message after the tone."
+    expect:
+      - event: response
+        eval: "the bot leaves a voicemail message: it asks the person to call back (for example, gives a callback number) rather than holding a back-and-forth conversation"
+
+  # Turn 1: a human picks up and talks after the message. Sent shortly after the
+  # bot finishes its voicemail message, by which point the conversation path has
+  # been reopened. The bot should now talk with the caller as a live person.
+  - user: "Oh, hello? Sorry, I just got to the phone. This is Jordan speaking, what's this about?"
+    send_after:
+      event: response
+      delay_ms: 1500
+    expect:
+      - event: response
+        eval: "the bot talks with the caller as a live person — it responds to Jordan and continues the conversation (for example about the appointment), instead of only repeating a leave-a-message voicemail prompt"
