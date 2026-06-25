@@ -15,6 +15,8 @@ import time
 
 from pipecat.audio.utils import create_stream_resampler, interleave_stereo_audio, mix_audio
 from pipecat.frames.frames import (
+    AudioBufferStartRecordingFrame,
+    AudioBufferStopRecordingFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -173,6 +175,11 @@ class AudioBufferProcessor(FrameProcessor):
         # Update output sample rate if necessary.
         if isinstance(frame, StartFrame):
             self._update_sample_rate(frame)
+
+        if isinstance(frame, AudioBufferStartRecordingFrame):
+            await self.start_recording()
+        elif isinstance(frame, AudioBufferStopRecordingFrame):
+            await self.stop_recording()
 
         if self._recording:
             await self._process_recording(frame)

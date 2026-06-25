@@ -12,6 +12,8 @@ from unittest.mock import patch
 
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
+    AudioBufferStartRecordingFrame,
+    AudioBufferStopRecordingFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     InputAudioRawFrame,
@@ -22,6 +24,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.tests.utils import run_test
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
 
@@ -32,12 +35,15 @@ class _PassthroughResampler:
         return audio
 
 
-async def _make_processor(*, buffer_size: int = 0) -> AudioBufferProcessor:
-    """Create and start a processor ready to record.
+async def _make_processor(*, buffer_size: int = 0, start: bool = True) -> AudioBufferProcessor:
+    """Create a processor ready to record.
 
     Calls setup() and sends a StartFrame through the public process_frame path so that
     the processor is fully initialised (task manager set, sample rate configured,
     __started flag set) without needing a full pipeline.
+
+    When ``start`` is True the processor starts recording before returning; pass
+    ``start=False`` to leave recording off (e.g. to test frame-driven start).
     """
     processor = AudioBufferProcessor(sample_rate=16000, num_channels=2, buffer_size=buffer_size)
     processor._input_resampler = _PassthroughResampler()
@@ -57,7 +63,8 @@ async def _make_processor(*, buffer_size: int = 0) -> AudioBufferProcessor:
     await processor.process_frame(
         StartFrame(audio_out_sample_rate=16000), FrameDirection.DOWNSTREAM
     )
-    await processor.start_recording()
+    if start:
+        await processor.start_recording()
     return processor
 
 
@@ -770,6 +777,88 @@ class TestBotSilenceGapInsertion(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(p._last_bot_buffer_update_time)
         self.assertEqual(p._last_bot_buffer_update_time, 5.0)
         await p.cleanup()
+
+
+class TestRecordingControlFrames(unittest.IsolatedAsyncioTestCase):
+    """Tests for frame-driven recording control.
+
+    AudioBufferStartRecordingFrame / AudioBufferStopRecordingFrame let any
+    upstream processor start and stop recording from within the frame flow,
+    triggering the same start_recording() / stop_recording() methods as the
+    direct API.
+    """
+
+    async def test_start_recording_frame_enables_recording(self):
+        """A start frame turns recording on so subsequent audio is buffered."""
+        p = await _make_processor(start=False)
+        self.assertFalse(p._recording)
+
+        await p.process_frame(AudioBufferStartRecordingFrame(), FrameDirection.DOWNSTREAM)
+        self.assertTrue(p._recording)
+
+        audio = struct.pack("<hh", 1000, -1000)
+        await p.process_frame(
+            InputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        user_track, _ = await _capture_track_audio(p)
+        self.assertEqual(user_track, audio)
+        await p.cleanup()
+
+    async def test_audio_ignored_before_start_recording_frame(self):
+        """Audio arriving before a start frame is not buffered."""
+        p = await _make_processor(start=False)
+
+        await p.process_frame(
+            InputAudioRawFrame(audio=b"\x01\x02\x03\x04", sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        self.assertFalse(p.has_audio())
+        await p.cleanup()
+
+    async def test_stop_recording_frame_flushes_and_disables(self):
+        """A stop frame flushes buffered audio and turns recording off."""
+        p = await _make_processor()
+
+        audio = struct.pack("<hh", 1000, -1000)
+        await p.process_frame(
+            InputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        captured = {}
+        event = asyncio.Event()
+
+        async def on_track_audio_data(_, user, bot, sample_rate, num_channels):
+            captured["user"] = user
+            event.set()
+
+        p.add_event_handler("on_track_audio_data", on_track_audio_data)
+        await p.process_frame(AudioBufferStopRecordingFrame(), FrameDirection.DOWNSTREAM)
+
+        await asyncio.wait_for(event.wait(), timeout=1)
+        self.assertEqual(captured["user"], audio)
+        self.assertFalse(p._recording)
+        self.assertFalse(p.has_audio())
+        await p.cleanup()
+
+    async def test_recording_control_frames_passed_downstream(self):
+        """Control frames are re-pushed so other processors also react."""
+        processor = AudioBufferProcessor(sample_rate=16000, num_channels=2)
+
+        await run_test(
+            processor,
+            frames_to_send=[
+                AudioBufferStartRecordingFrame(),
+                AudioBufferStopRecordingFrame(),
+            ],
+            expected_down_frames=[
+                AudioBufferStartRecordingFrame,
+                AudioBufferStopRecordingFrame,
+            ],
+        )
 
 
 if __name__ == "__main__":
