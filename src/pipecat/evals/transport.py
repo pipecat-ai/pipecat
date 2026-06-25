@@ -22,10 +22,9 @@ sets:
   now, not here: the harness already sees both sides (the bot's audio via this
   flag, the user's as its own TTS output), so the bot needs no recorder.
 
-The input side needs no special handling: the harness streams the user audio
-over the wire like a live client's mic (continuous real-time frames, with silence
-when idle — see
-:class:`~pipecat.evals.client_transport.EvalMicOutputTransport`), so the bot's
+The input side needs no special handling: the harness streams the user audio over
+the wire as a continuous real-time stream (paced, with silence when idle — see
+:class:`~pipecat.evals.client_transport.EvalHarnessOutputTransport`), so the bot's
 stock input transport consumes it directly. This input transport only adds image
 serving (a function-calling-video bot has no camera under eval).
 
@@ -102,9 +101,10 @@ class EvalInputTransport(SingleClientWebsocketServerInputTransport):
     ``daily/transport.py`` but sourcing the image from the serializer instead of a
     live video frame.
 
-    The harness streams the user audio over the wire like a live client's mic (see
-    :class:`~pipecat.evals.client_transport.EvalMicOutputTransport`), so this side
-    needs no virtual mic: the bot's stock input handles the incoming audio.
+    The harness streams the user audio over the wire as a continuous real-time
+    stream (see :class:`~pipecat.evals.client_transport.EvalHarnessOutputTransport`),
+    so this side needs no special handling: the bot's stock input handles the
+    incoming audio.
     """
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

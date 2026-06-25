@@ -4,13 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for the eval harness's mic-like output transport."""
+"""Tests for the eval harness's client output transport."""
 
 import asyncio
 import types
 import unittest
 
-from pipecat.evals.client_transport import MIC_FRAME_S, EvalMicOutputTransport
+from pipecat.evals.client_transport import FRAME_S, EvalHarnessOutputTransport
 from pipecat.transports.websocket.client import WebsocketClientParams
 
 
@@ -19,14 +19,14 @@ def _fake_session():
     return types.SimpleNamespace(is_closing=False, is_connected=True)
 
 
-class TestEvalMicOutput(unittest.IsolatedAsyncioTestCase):
+class TestEvalHarnessOutput(unittest.IsolatedAsyncioTestCase):
     """The output streams queued audio at real time, silence otherwise."""
 
     SR = 16000
-    CHUNK_BYTES = int(SR * MIC_FRAME_S) * 2  # one ~20ms frame, 16-bit mono
+    CHUNK_BYTES = int(SR * FRAME_S) * 2  # one ~40ms frame, 16-bit mono
 
     async def _run(self, out, seconds):
-        task = asyncio.create_task(out._mic_task_handler())
+        task = asyncio.create_task(out._send_task_handler())
         try:
             await asyncio.sleep(seconds)
         finally:
@@ -37,7 +37,7 @@ class TestEvalMicOutput(unittest.IsolatedAsyncioTestCase):
                 pass
 
     async def test_paces_queued_audio_then_silence(self):
-        out = EvalMicOutputTransport(
+        out = EvalHarnessOutputTransport(
             None, _fake_session(), WebsocketClientParams(audio_out_enabled=True)
         )
         out._sample_rate = self.SR  # set by start(); skip the transport lifecycle
@@ -50,11 +50,11 @@ class TestEvalMicOutput(unittest.IsolatedAsyncioTestCase):
         async def noop(*args, **kwargs):  # the unlinked processor has no downstream
             pass
 
-        out._send_mic_frame = capture
+        out._send_frame = capture
         out.push_frame = noop
 
         utterance = b"\x01\x02" * (self.SR * 12 // 100)  # 120ms -> three 40ms chunks
-        out._mic_pcm.extend(utterance)
+        out._pending.extend(utterance)
 
         await self._run(out, 0.25)
 
@@ -63,7 +63,7 @@ class TestEvalMicOutput(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(len(pcm) == self.CHUNK_BYTES for pcm in speech))
         self.assertIn(b"\x00" * self.CHUNK_BYTES, sent)  # silence keeps flowing
         # Real-time pacing: ~0.25s emits ~6 frames at 40ms, not hundreds.
-        self.assertLess(len(sent), int(0.25 / MIC_FRAME_S) + 5)
+        self.assertLess(len(sent), int(0.25 / FRAME_S) + 5)
 
 
 if __name__ == "__main__":

@@ -294,8 +294,8 @@ class EvalExpectation:
             all of a turn's expectations share that one anchor, so a stalled turn
             fails within a single budget rather than one per expectation. For audio
             turns the anchor is when the utterance was *sent*, not when it finishes
-            playing out of the transport's virtual mic. Defaults to 60s when
-            omitted, so timing isn't asserted unless set explicitly.
+            streaming to the bot. Defaults to 60s when omitted, so timing isn't
+            asserted unless set explicitly.
         text_contains: Optional substring check on the event's text content
             (``llm_response.text`` or ``user_transcription.transcript``).
         calls: For a ``function_call`` event, the set of calls expected in the

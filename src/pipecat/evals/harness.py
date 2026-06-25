@@ -93,6 +93,7 @@ from loguru import logger
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.evals.audio import load_user_audio
 from pipecat.evals.client_transport import EvalHarnessTransport
 from pipecat.evals.judge import EvalJudge
@@ -640,10 +641,10 @@ class EvalSession(BaseObject):
             audio_out_sample_rate=user_audio_rate,
             serializer=RTVIHarnessSerializer(),
         )
-        # EvalHarnessTransport's output streams the user TTS to the bot like a live
-        # client's mic (paced, with silence when idle), so the bot needs no virtual
-        # mic and the harness recording captures the user turn at the right time. The
-        # stream runs only when audio_out_enabled (audio-mode scenarios).
+        # EvalHarnessTransport reshapes both audio edges into the continuous
+        # real-time stream VAD/STT expect: its output paces the user TTS to the bot
+        # (so the harness recording also captures the user turn at the right time),
+        # and its input fills gaps in the bot's audio. Audio-mode scenarios only.
         transport = EvalHarnessTransport(self._connect_url(), params)
 
         @transport.event_handler("on_bot_ready")
@@ -655,7 +656,9 @@ class EvalSession(BaseObject):
         if self._bot_stt is not None:
             user_aggregator = LLMContextAggregatorPair(
                 LLMContext(),
-                user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+                user_params=LLMUserAggregatorParams(
+                    vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.4))
+                ),
             ).user()
 
             # The aggregator consumes the STT's TranscriptionFrames to build the
@@ -1428,9 +1431,9 @@ class EvalSession(BaseObject):
         """Speak ``text`` as the user by pushing a ``TTSSpeakFrame`` into the pipeline.
 
         The user TTS (:class:`~pipecat.evals.tts.CachingTTSService`) renders it to
-        audio (cached), which the output transport serializes to ``raw-audio``; the
-        bot's eval transport plays it into the bot's pipeline at real-time cadence
-        (see ``pipecat.evals.transport.EvalMicrophone``).
+        audio (cached), which the output transport
+        (:class:`~pipecat.evals.client_transport.EvalHarnessOutputTransport`) paces
+        to the bot as a continuous real-time stream.
         """
         assert self._worker is not None  # pipeline built before any send
         await self._worker.queue_frame(TTSSpeakFrame(text))
