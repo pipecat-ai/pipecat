@@ -666,21 +666,13 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
         return True
 
     async def _update_settings(self, delta: LLMSettings) -> dict[str, Any]:
-        """Apply a settings delta.
-
-        Settings are stored but not applied to the active connection.
-        """
+        """Apply a settings delta and reconnect to apply updated settings."""
         changed = await super()._update_settings(delta)
 
         if not changed:
             return changed
 
-        # TODO: someday we could reconnect here to apply updated settings.
-        # Code might look something like the below:
-        # await self._disconnect()
-        # await self._connect()
-
-        self._warn_unhandled_updated_settings(changed)
+        await self._reconnect()
 
         return changed
 
