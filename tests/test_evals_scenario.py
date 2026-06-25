@@ -252,6 +252,22 @@ class TestEvalsScenarioParser(unittest.TestCase):
         s = EvalScenario.load(_write("name: dtmf\nturns: [{dtmf: 123}]\n"))
         self.assertEqual(s.turns[0].dtmf, "123")
 
+    def test_dtmf_unquoted_leading_zero_preserved(self):
+        """A leading zero must stay literal digits, not be read as YAML octal.
+
+        YAML 1.1 would otherwise parse `012` as octal 10, silently sending the
+        wrong keys; the scenario loader resolves only plain decimal as int.
+        """
+        for seq in ("012", "010", "007", "0420", "000"):
+            s = EvalScenario.load(_write(f"name: dtmf\nturns: [{{dtmf: {seq}}}]\n"))
+            self.assertEqual(s.turns[0].dtmf, seq)
+
+    def test_dtmf_unquoted_hex_rejected(self):
+        """A hex-looking token isn't read as a number; `x` fails validation."""
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load(_write("name: bad\nturns: [{dtmf: 0x10}]\n"))
+        self.assertIn("invalid keypad entry", str(cm.exception))
+
     def test_dtmf_invalid_entry_rejected(self):
         with self.assertRaises(ValueError) as cm:
             EvalScenario.load(_write('name: bad\nturns: [{dtmf: "1A"}]\n'))

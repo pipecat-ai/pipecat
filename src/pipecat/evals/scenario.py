@@ -123,6 +123,7 @@ relative to the scenario file's directory. This is handy for sharing the
     judge: !include judge_audio.yaml
 """
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -132,6 +133,37 @@ from loguru import logger
 from yamlinclude import YamlIncludeConstructor
 
 from pipecat.audio.dtmf.types import KeypadEntry
+
+
+class _ScenarioLoader(yaml.SafeLoader):
+    """SafeLoader that resolves only plain-decimal numeric scalars as ints.
+
+    PyYAML's SafeLoader follows YAML 1.1, which reinterprets unquoted numeric
+    scalars as octal (``010`` -> 8), hex (``0x10`` -> 16), or binary before
+    application code sees them. For DTMF that silently rewrites the digit
+    sequence the user typed (``dtmf: 012`` would load as ``10``). Dropping those
+    resolvers and keeping only plain decimal means ``dtmf: 123`` still loads as
+    an int (so the unquoted-digits convenience works), while leading-zero, hex,
+    and binary tokens stay strings and reach DTMF validation with their digits
+    intact. No scenario field wants an octal/hex literal, so this is safe
+    document-wide.
+    """
+
+
+# Strip the inherited int resolvers (which match octal/hex/binary/sexagesimal)
+# and register a decimal-only replacement. Underscores stay allowed to match
+# YAML's grouping syntax (e.g. ``1_000``); a leading zero (``012``) no longer
+# matches, so such tokens load as strings.
+_ScenarioLoader.yaml_implicit_resolvers = {
+    ch: [(tag, rx) for tag, rx in resolvers if tag != "tag:yaml.org,2002:int"]
+    for ch, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+yaml.add_implicit_resolver(
+    "tag:yaml.org,2002:int",
+    re.compile(r"^[-+]?(?:0|[1-9][0-9_]*)$"),
+    list("-+0123456789"),
+    Loader=_ScenarioLoader,
+)
 
 # Events whose payloads carry bot-generated text the judge can sensibly
 # evaluate. Asserting ``eval:`` on anything else (user transcripts, tool
@@ -326,7 +358,7 @@ class EvalScenario:
         # scenarios can share judge/user config. Includes resolve relative to the
         # scenario file's directory. Register the constructor on a private loader
         # subclass (not the global SafeLoader) so it has no global side effects.
-        class _Loader(yaml.SafeLoader):
+        class _Loader(_ScenarioLoader):
             pass
 
         YamlIncludeConstructor.add_to_loader_class(loader_class=_Loader, base_dir=str(path.parent))
