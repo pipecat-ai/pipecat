@@ -4,7 +4,7 @@ This directory contains examples showing how to build voice and multimodal agent
 
 ## Setup
 
-1. Follow the [README](https://github.com/pipecat-ai/pipecat/blob/main/README.md#%EF%B8%8F-contributing-to-the-framework) steps to get your local environment configured.
+1. Follow the [README](https://github.com/pipecat-ai/pipecat/blob/main/README.md#%EF%B8%8F-developing-pipecat) steps to get your local environment configured.
 
    > **Run from root directory**: Make sure you are running the steps from the root directory.
 

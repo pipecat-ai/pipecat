@@ -2,15 +2,13 @@
 
 [Pipecat Flows](../../src/pipecat/flows) is the structured-conversation framework built into Pipecat. It lets you build both predefined conversation paths and dynamically generated flows while handling the complexities of state management and LLM interactions. These examples show it in action.
 
-> Flows is part of `pipecat-ai` — import it from `pipecat.flows` (e.g. `from pipecat.flows import FlowManager, NodeConfig`). There's nothing extra to install beyond Pipecat itself.
+## Hello, world
 
-## Quickstart
-
-[`hello_world.py`](./hello_world.py) is the smallest possible Flow: a bot that asks for your favorite color and then says goodbye. It's a good first read — it shows the basics of nodes, functions, and transitions. Run it (see Setup below), open http://localhost:7860/client/, and click "Connect".
+[`hello_world.py`](./hello_world.py) is the smallest possible Flow: a bot that asks for your favorite color and then says goodbye. It's a good first read — it shows the basics of nodes, functions, and transitions. To run it, see Setup below.
 
 ## Setup
 
-1. Follow the [README](../../README.md#%EF%B8%8F-contributing-to-the-framework) steps to configure your local environment. Run the commands from the repo root.
+1. Follow the [README](../../README.md#%EF%B8%8F-developing-pipecat) steps to configure your local environment. Run the commands from the repo root.
 
 2. Copy the [`env.example`](../../env.example) file and add API keys for the services you plan to use:
 

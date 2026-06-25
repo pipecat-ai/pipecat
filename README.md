@@ -160,7 +160,7 @@ From here, the code examples below are the best way to learn — agents you can 
 - [Focused examples](https://github.com/pipecat-ai/pipecat/tree/main/examples) — small agents that each illustrate one or two specific services or concepts
 - [Example apps](https://github.com/pipecat-ai/pipecat-examples) — complete applications you can use as starting points for development
 
-## 🛠️ Contributing to the framework
+## 🛠️ Developing Pipecat
 
 ### Prerequisites
 
