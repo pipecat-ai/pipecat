@@ -221,7 +221,9 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
             ("minimum_speech_duration", 0.05),
             ("sensitivity", 0.7),
         ):
-            with self.assertWarns(DeprecationWarning):
+            # assertWarnsRegex also pins the message to the specific param name,
+            # so a regression that warns with the wrong param name is caught.
+            with self.assertWarnsRegex(DeprecationWarning, param):
                 analyzer, _ = self._create_analyzer(**{param: value})
             # Accepted-but-ignored: not stashed anywhere on the instance.
             self.assertFalse(hasattr(analyzer, f"_pending_{param}"))
@@ -483,6 +485,15 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(analyzer.voice_confidence(b"\x00" * 320), 1.0)
         self.mock_processor.vad_ctx.raw_probability = -0.2
         self.assertEqual(analyzer.voice_confidence(b"\x00" * 320), 0.0)
+
+    def test_voice_confidence_passes_through_exact_boundaries(self):
+        """The in-range boundaries 0.0 and 1.0 pass through unchanged (not clamped away)."""
+        analyzer, _ = self._create_analyzer()
+        self._initialize_at(analyzer, 16000)
+        self.mock_processor.vad_ctx.raw_probability = 0.0
+        self.assertEqual(analyzer.voice_confidence(b"\x00" * 320), 0.0)
+        self.mock_processor.vad_ctx.raw_probability = 1.0
+        self.assertEqual(analyzer.voice_confidence(b"\x00" * 320), 1.0)
 
     def test_voice_confidence_swallows_sdk_errors(self):
         """Exceptions from processor.process() return 0.0 (pipeline stays alive)."""

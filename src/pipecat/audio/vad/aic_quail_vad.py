@@ -50,7 +50,7 @@ _INT16_SCALE = 32768.0
 
 
 class AICQuailVADAnalyzer(VADAnalyzer):
-    """Standalone Quail VAD 2.0 analyzer powered by the ai-coustics SDK.
+    """Standalone Quail VAD analyzer powered by the ai-coustics SDK.
 
     The analyzer owns a dedicated :class:`aic_sdk.Processor` initialized with a
     Quail VAD-only model. Each :meth:`voice_confidence` call processes one audio
@@ -147,17 +147,17 @@ class AICQuailVADAnalyzer(VADAnalyzer):
         # These SDK-side knobs only affected the post-processed ``is_speech_detected``
         # path, which the raw-probability ``voice_confidence`` no longer uses. They are
         # accepted-but-ignored for one release cycle; gating now lives in ``VADParams``.
-        for _name, _value in (
-            ("speech_hold_duration", speech_hold_duration),
-            ("minimum_speech_duration", minimum_speech_duration),
-            ("sensitivity", sensitivity),
-        ):
-            if _value is not None:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("always")
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            for _name, _value in (
+                ("speech_hold_duration", speech_hold_duration),
+                ("minimum_speech_duration", minimum_speech_duration),
+                ("sensitivity", sensitivity),
+            ):
+                if _value is not None:
                     warnings.warn(
-                        f"`AICQuailVADAnalyzer({_name}=...)` is deprecated since 1.5.0, "
-                        "use `VADParams` instead. The parameter is ignored.",
+                        f"`AICQuailVADAnalyzer.{_name}` is deprecated since 1.5.0 and will "
+                        "be removed in 2.0.0. Use `VADParams` instead.",
                         DeprecationWarning,
                         stacklevel=2,
                     )
