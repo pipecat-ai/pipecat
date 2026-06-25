@@ -124,6 +124,13 @@ class AssemblyAISTTSettings(STTSettings):
         prompt: Optional text prompt to guide the transcription. Only
             used when model is "u3-rt-pro".
         language_detection: Enable automatic language detection.
+        language_code: Customer-declared audio language as an ISO code (e.g.
+            "en", "es", "fr"). On U3 Pro models, a tier-1 code
+            ("en"/"es"/"fr"/"de"/"it"/"pt") steers transcription toward that
+            language; other supported codes are "de", "tr", "nl", "sv", "no",
+            "da", "fi", "hi", "vi", "ar", "he", "ja", "ur", "zh". Mutually
+            exclusive with ``language_detection``. Defaults to None (not sent;
+            no steering).
         format_turns: Whether to format transcript turns.
         speaker_labels: Enable speaker diarization.
         vad_threshold: VAD confidence threshold (0.0–1.0) for classifying
@@ -178,6 +185,7 @@ class AssemblyAISTTSettings(STTSettings):
     keyterms_prompt: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language_detection: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_code: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     format_turns: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_labels: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -288,6 +296,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             keyterms_prompt=None,
             prompt=None,
             language_detection=None,
+            language_code=None,
             format_turns=True,
             speaker_labels=None,
             vad_threshold=None,
@@ -416,6 +425,16 @@ class AssemblyAISTTService(WebsocketSTTService):
             logger.warning(
                 "mode is only supported by U3 Pro models and will be ignored "
                 f"for model '{default_settings.model}'."
+            )
+
+        # language_code (declared language / steering) and language_detection
+        # (auto-detect) are mutually exclusive: you can't both declare a language
+        # and ask the server to detect one.
+        if default_settings.language_code is not None and default_settings.language_detection:
+            logger.warning(
+                "language_code and language_detection are both set; these are "
+                "mutually exclusive (declaring a language vs. auto-detecting it). "
+                "Both will be sent to AssemblyAI as-is."
             )
 
         # 6. Configure pipecat turn mode (mutates default_settings)
@@ -640,6 +659,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             "max_turn_silence": s.max_turn_silence,
             "prompt": s.prompt,
             "language_detection": s.language_detection,
+            "language_code": s.language_code,
             "format_turns": s.format_turns,
             "speaker_labels": s.speaker_labels,
             "vad_threshold": s.vad_threshold,

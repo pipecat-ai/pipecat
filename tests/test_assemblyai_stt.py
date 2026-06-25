@@ -7,9 +7,11 @@
 """Tests for the AssemblyAI streaming STT service connection parameters."""
 
 import asyncio
+import io
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+from loguru import logger
 
 from pipecat.services.assemblyai.stt import AssemblyAISTTService, is_u3_pro_model
 
@@ -401,6 +403,55 @@ def test_mode_values_accepted(value):
         settings=AssemblyAISTTService.Settings(mode=value),
     )
     assert _query(service)["mode"] == [value]
+
+
+# --- language_code ---
+
+
+def test_language_code_omitted_by_default():
+    # Unset means "not sent" — no steering, current behavior preserved.
+    service = AssemblyAISTTService(api_key="test-key")
+    assert "language_code" not in _query(service)
+
+
+def test_language_code_sent_when_set():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(language_code="es"),
+    )
+    assert _query(service)["language_code"] == ["es"]
+
+
+def test_language_code_sent_for_universal_streaming():
+    # language_code is not U3 Pro-only; it is forwarded for any model.
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(
+            model="universal-streaming-english",
+            language_code="en",
+        ),
+    )
+    assert _query(service)["language_code"] == ["en"]
+
+
+def test_language_code_with_language_detection_warns():
+    # language_code and language_detection are mutually exclusive; setting both
+    # warns but still forwards both (the server is the source of truth).
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="WARNING", format="{message}")
+    try:
+        service = AssemblyAISTTService(
+            api_key="test-key",
+            settings=AssemblyAISTTService.Settings(
+                language_code="es",
+                language_detection=True,
+            ),
+        )
+    finally:
+        logger.remove(handler_id)
+    assert _query(service)["language_code"] == ["es"]
+    assert _query(service)["language_detection"] == ["true"]
+    assert "mutually exclusive" in sink.getvalue()
 
 
 # --- update_agent_context() ---
