@@ -9,12 +9,14 @@ import unittest.mock
 from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import (
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMMarkerFrame,
     LLMTextFrame,
     UserTurnInferenceCompletedFrame,
+    VADUserStartedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_completion_mixin import (
@@ -166,6 +168,51 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         self.assertFalse(processor._turn_complete_found)
         self.assertEqual(processor._turn_text_buffer, "")
         self.assertFalse(processor._turn_suppressed)
+
+    async def test_incomplete_timeout_cancelled_on_resumed_speech(self):
+        """A VADUserStartedSpeakingFrame cancels a pending incomplete timeout.
+
+        Reproduces the resumed-speech half of #4707. Under
+        ``FilterIncompleteUserTurnStrategies`` the user can pause (the LLM
+        emits ○/◐, arming a re-prompt timer) and then resume speaking within
+        the SAME user turn. Stock behavior only cancels the timer on
+        ``InterruptionFrame``, which fires on a new turn — not on resumption
+        inside an already-open turn — so the timer runs to expiry and fires a
+        stale forced-✓ nudge while the user is mid-utterance. The mixin must
+        cancel the pending timeout when the user resumes speaking.
+        """
+        processor = MockProcessor()
+        processor._cancel_incomplete_timeout = AsyncMock()
+
+        # Patch the FrameProcessor-level handler so no live pipeline is needed.
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            await processor.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+        processor._cancel_incomplete_timeout.assert_awaited_once()
+
+    async def test_resumed_speech_cancels_timeout_without_resetting_turn(self):
+        """Resumed speech cancels the timer but keeps turn state, unlike an interruption.
+
+        A ``VADUserStartedSpeakingFrame`` within an open turn means the user
+        resumed mid-turn: cancel the pending ○/◐ re-prompt but leave the rest
+        of the turn-completion state intact for the next inference. By
+        contrast an ``InterruptionFrame`` (a new turn) both cancels the timer
+        and resets turn state.
+        """
+        processor = MockProcessor()
+        processor._cancel_incomplete_timeout = AsyncMock()
+        processor._turn_reset = AsyncMock()
+
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            # Resumed speech within the open turn: cancel the timer only.
+            await processor.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+            self.assertEqual(processor._cancel_incomplete_timeout.await_count, 1)
+            processor._turn_reset.assert_not_awaited()
+
+            # A new turn / interruption: cancel the timer and reset turn state.
+            await processor.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            self.assertEqual(processor._cancel_incomplete_timeout.await_count, 2)
+            processor._turn_reset.assert_awaited_once()
 
 
 class MockLLMService(LLMService):
