@@ -21,6 +21,8 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    ServiceMetadataFrame,
+    ServiceSwitcherRequestMetadataFrame,
     StartFrame,
 )
 from pipecat.metrics.metrics import MetricsData
@@ -70,6 +72,26 @@ class AIService(FrameProcessor):
         self.set_core_metrics_data(
             MetricsData(processor=self.name, model=model if isinstance(model, str) else "")
         )
+
+    def service_metadata_frame(self) -> ServiceMetadataFrame | None:
+        """The metadata frame this service broadcasts at start, or None.
+
+        Override to return a populated
+        :class:`~pipecat.frames.frames.ServiceMetadataFrame` (or a subtype such as
+        ``STTMetadataFrame``) describing this service for downstream processors, for
+        example the ``user_turn_strategies`` an STT with server-side end-of-turn
+        detection recommends. Return None to broadcast nothing.
+
+        Returns:
+            The metadata frame to broadcast, or None.
+        """
+        return None
+
+    async def broadcast_service_metadata(self):
+        """Broadcast this service's metadata frame, if any."""
+        frame = self.service_metadata_frame()
+        if frame is not None:
+            await self.broadcast_frame_instance(frame)
 
     async def start(self, frame: StartFrame):
         """Start the AI service.
@@ -183,6 +205,20 @@ class AIService(FrameProcessor):
             fields = ", ".join(sorted(unhandled))
             logger.warning(f"{self.name}: runtime update of [{fields}] is not currently supported")
 
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame and broadcast service metadata once the service starts.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction to push the frame.
+        """
+        await super().push_frame(frame, direction)
+
+        # Broadcast metadata after StartFrame goes downstream, so downstream sees
+        # StartFrame first.
+        if isinstance(frame, StartFrame):
+            await self.broadcast_service_metadata()
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames and handle service lifecycle.
 
@@ -201,6 +237,8 @@ class AIService(FrameProcessor):
             await self._stop(frame)
         elif isinstance(frame, CancelFrame):
             await self._cancel(frame)
+        elif isinstance(frame, ServiceSwitcherRequestMetadataFrame):
+            await self.broadcast_service_metadata()
 
     async def process_generator(self, generator: AsyncGenerator[Frame | None, None]):
         """Process frames from an async generator.

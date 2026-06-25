@@ -57,6 +57,7 @@ from pipecat.frames.frames import (
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
     RealtimeServiceMetadataFrame,
+    ServiceMetadataFrame,
     StartFrame,
     STTMetadataFrame,
     TextFrame,
@@ -819,14 +820,8 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
-        elif isinstance(frame, RealtimeServiceMetadataFrame):
-            await self._handle_realtime_service_metadata(frame)
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, STTMetadataFrame):
-            # Capture the STT TTFS P99 so the realtime-mode deferred
-            # handoff flush can size itself to the real transcript-arrival
-            # latency. Frame still flows downstream for other consumers.
-            self._ttfs_p99_latency = frame.ttfs_p99_latency
+        elif isinstance(frame, ServiceMetadataFrame):
+            await self._handle_service_metadata(frame)
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
@@ -927,6 +922,50 @@ class LLMUserAggregator(LLMContextAggregator):
             logger.warning(msg)
         else:
             logger.debug(msg)
+
+    async def _handle_service_metadata(self, frame: ServiceMetadataFrame):
+        """Dispatch a service metadata frame to its specific handler."""
+        if isinstance(frame, STTMetadataFrame):
+            await self._handle_stt_metadata(frame)
+        elif isinstance(frame, RealtimeServiceMetadataFrame):
+            await self._handle_realtime_service_metadata(frame)
+
+    async def _handle_stt_metadata(self, frame: STTMetadataFrame):
+        """Handle an ``STTMetadataFrame`` broadcast by an STT service at start.
+
+        Captures the STT TTFS P99 so the realtime-mode deferred handoff flush can
+        size itself to the real transcript-arrival latency, and applies any user
+        turn strategies the service recommends. The recommendation is honored only
+        when the user did not pass their own ``user_turn_strategies``, which always
+        wins. Applied via the controller so it takes effect even though the
+        strategies were already built at init.
+        """
+        self._ttfs_p99_latency = frame.ttfs_p99_latency
+        await self._handle_service_user_turn_strategies(
+            frame.service_name, frame.user_turn_strategies
+        )
+
+    async def _handle_service_user_turn_strategies(
+        self, service_name: str, user_turn_strategies: UserTurnStrategies | None
+    ):
+        """Apply user turn strategies a service recommends via its metadata frame.
+
+        Honored only when the user did not pass their own ``user_turn_strategies``,
+        which always wins. Applied via the controller so it takes effect even though
+        the strategies were already built at init.
+        """
+        if user_turn_strategies is None:
+            return
+
+        if self._params.user_turn_strategies is not None:
+            logger.debug(
+                f"{self}: ignoring user turn strategies recommended by "
+                f"`{service_name}`; using the user-provided strategies."
+            )
+            return
+
+        logger.debug(f"{self}: applying user turn strategies recommended by `{service_name}`.")
+        await self._user_turn_controller.update_strategies(user_turn_strategies)
 
     async def _handle_realtime_service_metadata(self, frame: RealtimeServiceMetadataFrame):
         """Handle a ``RealtimeServiceMetadataFrame`` broadcast by a realtime LLM service.
