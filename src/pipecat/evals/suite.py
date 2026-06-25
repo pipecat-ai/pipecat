@@ -8,9 +8,12 @@
 
 An :class:`EvalManifest` lists bots to spawn and the scenarios to run against
 each; an :class:`EvalSuite` spawns each bot with its eval transport on its own
-port, drives it with the harness (:meth:`pipecat.evals.harness.EvalSession.from_scenario`),
-and runs several concurrently. ``pipecat eval suite`` is the CLI in front of it;
-the release evals are just a manifest plus that command.
+port and drives it with the harness, running several concurrently. Each harness
+runs in its own subprocess (:mod:`pipecat.evals._session_subprocess`) so its
+STT/VAD/turn models load on their own GIL -- in one shared process those loads
+would stall the event loop that paces every other concurrent run's real-time
+audio. ``pipecat eval suite`` is the CLI in front of it; the release evals are
+just a manifest plus that command.
 
 Manifest format (YAML)::
 
@@ -65,7 +68,12 @@ from pathlib import Path
 import yaml
 from loguru import logger
 
-from pipecat.evals.harness import DEFAULT_EVENT_TIMEOUT_MS, EvalResult, EvalSession
+from pipecat.evals.harness import (
+    DEFAULT_EVENT_TIMEOUT_MS,
+    EvalAssertionFailure,
+    EvalResult,
+    EvalTurnResult,
+)
 from pipecat.utils.base_object import BaseObject
 
 DEFAULT_BASE_PORT = 7900
@@ -76,6 +84,10 @@ BOT_CONNECT_TIMEOUT_S = 60.0
 # How long to wait for a bot subprocess to exit after the harness asks it to
 # stop (via eval-cancel) before escalating to terminate/kill.
 BOT_STOP_TIMEOUT_S = 10.0
+# Safety net for a hung harness worker. The harness's own per-expectation timeouts
+# bound a healthy run far below this; the cap only catches a worker that wedges, so
+# it can't hold a concurrency slot forever.
+WORKER_SAFETY_TIMEOUT_S = 600.0
 # Default spawn template; {python}/{bot}/{port} are substituted per run.
 DEFAULT_SPAWN = "{python} {bot} -t eval --port {port}"
 # What a scenario file may be named, wherever one is looked for.
@@ -201,6 +213,33 @@ def _append_result(
     with contextlib.suppress(OSError):
         with results_path.open("a") as f:
             f.write(json.dumps(record) + "\n")
+
+
+def _result_from_dict(data: dict) -> EvalResult:
+    """Rebuild an :class:`EvalResult` from the JSON a harness worker writes back.
+
+    The inverse of ``dataclasses.asdict(result)`` in
+    :mod:`pipecat.evals._session_subprocess`; only ``failures`` and ``turns`` need
+    rehydrating into their dataclasses, the rest are plain JSON values.
+    """
+    return EvalResult(
+        scenario_name=data["scenario_name"],
+        passed=data["passed"],
+        failures=[EvalAssertionFailure(**f) for f in data.get("failures", [])],
+        turns=[
+            EvalTurnResult(
+                turn_index=t["turn_index"],
+                status=t.get("status", "not_run"),
+                failures=[EvalAssertionFailure(**f) for f in t.get("failures", [])],
+                duration_ms=t.get("duration_ms", 0),
+            )
+            for t in data.get("turns", [])
+        ],
+        duration_ms=data.get("duration_ms", 0),
+        events_seen=data.get("events_seen", []),
+        debug_log=data.get("debug_log", []),
+        skipped=data.get("skipped"),
+    )
 
 
 @dataclass
@@ -399,9 +438,9 @@ class EvalSuite(BaseObject):
     """Runs the (bot, scenario) runs of an :class:`EvalManifest`, spawning each bot.
 
     Spawns each bot with its eval transport on its own port, drives it with the
-    harness (:meth:`pipecat.evals.harness.EvalSession.from_scenario`), and runs several
-    concurrently (up to the manifest's ``concurrency``). The runs are mutated in
-    place as they execute so a live display can read their progress.
+    harness in a per-run subprocess (:mod:`pipecat.evals._session_subprocess`), and
+    runs several concurrently (up to the manifest's ``concurrency``). The runs are
+    mutated in place as they execute so a live display can read their progress.
 
     Event handlers available:
 
@@ -588,7 +627,11 @@ class EvalSuite(BaseObject):
             await self._call_event_handler("on_update", run)
 
             proc: asyncio.subprocess.Process | None = None
+            worker: asyncio.subprocess.Process | None = None
             logf = None
+            harness_logf = None
+            config_path = logs_dir / f"{safe}.config.json"
+            result_path = logs_dir / f"{safe}.result.json"
             try:
                 bot_path = run.bot_path
                 if bot_path is None or not bot_path.exists():
@@ -600,8 +643,6 @@ class EvalSuite(BaseObject):
                 if run.runner_body_path is not None and not run.runner_body_path.exists():
                     run.error = f"body not found: {run.runner_body_path}"
                     return
-
-                from pipecat.evals.scenario import EvalScenario
 
                 # Spawn the bot with the body file's directory as cwd, so relative
                 # paths inside the body (e.g. an image) resolve next to the file.
@@ -615,32 +656,67 @@ class EvalSuite(BaseObject):
                     cwd=cwd,
                 )
 
-                scenario = EvalScenario.load(run.scenario_path)
                 record_path = str(record_dir / f"{safe}.wav") if record_dir else None
-                # Under --debug, capture the harness's own logs (transcription / voice
-                # / judge) into a single <safe>.debug.log, scoped by this run's id so
-                # concurrent runs don't mix. The bot's own logs are captured
-                # separately in <safe>.log above.
-                with capture_pipeline_logs(logs_dir, safe, name=run.scenario, enabled=debug):
-                    run.result = await EvalSession.from_scenario(
-                        scenario,
-                        f"ws://localhost:{port}",
-                        connect_timeout_s=BOT_CONNECT_TIMEOUT_S,
-                        default_timeout_ms=default_timeout_ms,
-                        record_path=record_path,
-                        cache_dir=self.manifest.cache_dir,
-                        use_cache=use_cache,
-                        # The suite spawns a bot per run, so cancel it on teardown to
-                        # shut it down gracefully (faster than the kill fallback).
-                        stop_bot=True,
-                    ).run()
+                # Run the harness in its own process (see pipecat.evals._session_subprocess):
+                # each run loads its own STT/VAD/turn models, and ONNX session
+                # construction holds the GIL long enough that loading in one shared
+                # process would freeze the real-time audio pacing of every other
+                # concurrent run. The worker writes its result (and, under --debug, its
+                # own <safe>.debug.log) so the suite just reads it back.
+                config = {
+                    "scenario_path": str(run.scenario_path),
+                    "scenario_name": run.scenario,
+                    "bot_url": f"ws://localhost:{port}",
+                    "connect_timeout_s": BOT_CONNECT_TIMEOUT_S,
+                    "default_timeout_ms": default_timeout_ms,
+                    "record_path": record_path,
+                    "cache_dir": self.manifest.cache_dir,
+                    "use_cache": use_cache,
+                    # The suite spawns a bot per run, so cancel it on teardown to
+                    # shut it down gracefully (faster than the kill fallback).
+                    "stop_bot": True,
+                    "debug": debug,
+                    "logs_dir": str(logs_dir),
+                    "prefix": safe,
+                    "result_path": str(result_path),
+                }
+                config_path.write_text(json.dumps(config))
+                with contextlib.suppress(OSError):
+                    result_path.unlink()
+
+                harness_logf = (logs_dir / f"{safe}.harness.log").open("wb")
+                worker = await asyncio.create_subprocess_exec(
+                    sys.executable,
+                    "-m",
+                    "pipecat.evals._session_subprocess",
+                    str(config_path),
+                    stdout=harness_logf,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                try:
+                    await asyncio.wait_for(worker.wait(), timeout=WORKER_SAFETY_TIMEOUT_S)
+                except TimeoutError:
+                    worker.kill()
+                    await worker.wait()
+                    run.error = (
+                        f"error: harness worker timed out after {WORKER_SAFETY_TIMEOUT_S:.0f}s"
+                    )
+                    return
+
+                if worker.returncode != 0 or not result_path.exists():
+                    # The worker crashed before writing a result; its traceback is in
+                    # <safe>.harness.log.
+                    run.error = (
+                        f"error: harness worker exited {worker.returncode} (see {safe}.harness.log)"
+                    )
+                    return
+                run.result = _result_from_dict(json.loads(result_path.read_text()))
             except Exception as e:
-                # Errors raised inside EvalSession.run() are caught there and
-                # returned as a structured result; this catches the rest (scenario
-                # load, building the judge/voice/transcriber sub-pipelines, which
-                # load local models and can fail under load). Keep the exception
-                # type and stash the full traceback in <safe>.eval.log so the
-                # cause is recoverable instead of vanishing as a bare "error: ".
+                # The worker returns assertion failures (and its own errors) as a
+                # structured result; this catches problems on the suite side (spawning
+                # the bot or worker, reading the result back). Stash the full traceback
+                # in <safe>.eval.log so the cause is recoverable instead of vanishing
+                # as a bare "error: ".
                 run.error = f"error: {type(e).__name__}: {e}"
                 with contextlib.suppress(OSError):
                     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -653,10 +729,29 @@ class EvalSuite(BaseObject):
                     run.duration_ms = int((time.monotonic() - run.started_at) * 1000)
                 run.status = "done"
                 await self._call_event_handler("on_update", run)
+                # If the task was cancelled (e.g. Ctrl+C) the worker may still be
+                # running; kill it so it doesn't outlive the suite as an orphan.
+                if worker is not None and worker.returncode is None:
+                    worker.kill()
+                    with contextlib.suppress(ProcessLookupError):
+                        await worker.wait()
                 if proc is not None:
                     await self._stop_bot(proc)
                 if logf is not None:
                     logf.close()
+                if harness_logf is not None:
+                    harness_logf.close()
+                    # The worker silences its own logs, so on success its stdout is
+                    # just the import banner -- noise. Keep the file only when no
+                    # result came back (a crash/timeout), where it holds the traceback.
+                    if run.result is not None:
+                        with contextlib.suppress(OSError):
+                            (logs_dir / f"{safe}.harness.log").unlink()
+                # The config/result files are just the worker handoff; the result is
+                # now on `run`, so drop them to keep the run dir to real artifacts.
+                for tmp in (config_path, result_path):
+                    with contextlib.suppress(OSError):
+                        tmp.unlink()
                 # Save the harness's own decision trace next to the bot log.
                 if run.result is not None and run.result.debug_log:
                     (logs_dir / f"{safe}.eval.log").write_text(
