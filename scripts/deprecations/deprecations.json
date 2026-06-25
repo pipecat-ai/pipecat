@@ -1224,6 +1224,17 @@
       "location": "pipecat/services/elevenlabs/tts.py"
     },
     {
+      "subject": "EvoLinkLLMService.model",
+      "module": "pipecat.services.evolink.llm",
+      "kind": "parameter",
+      "deprecated_in": "0.0.105",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "settings=EvoLinkLLMService.Settings(model=...)",
+      "message": "Use ``settings=EvoLinkLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/evolink/llm.py"
+    },
+    {
       "subject": "FalImageGenService.InputParams",
       "module": "pipecat.services.fal.image",
       "kind": "class",

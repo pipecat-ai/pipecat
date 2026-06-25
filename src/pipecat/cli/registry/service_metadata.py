@@ -508,6 +508,16 @@ class ServiceRegistry:
             settings_params=["model", "system_instruction"],
         ),
         ServiceDefinition(
+            value="evolink_llm",
+            label="EvoLink",
+            package="pipecat-ai[evolink]",
+            class_name=["EvoLinkLLMService"],
+            env_prefix="EVOLINK",
+            include_params=["api_key"],
+            settings_params=["model", "system_instruction"],
+            param_defaults={"model": "gpt-5.2"},
+        ),
+        ServiceDefinition(
             value="fireworks_llm",
             label="Fireworks AI",
             package="pipecat-ai[fireworks]",
