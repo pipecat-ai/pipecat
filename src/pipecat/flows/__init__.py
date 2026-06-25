@@ -38,6 +38,12 @@ from .types import (
     flows_tool_options,
 )
 
+# NOTE: In Pipecat, we typically don't do this sort of re-exporting of nested
+# modules, but this is how we did it in the previous standalone pipecat-flows
+# package, which was subsequently moved here as pipecat.flows. Asking users to
+# import from pipecat.flows instead of pipecat_flows was a simple enough
+# breaking change, but asking them to also look through all their Flows-related
+# imports and find the right submodule felt like a much bigger ask.
 __all__ = [
     # Flow Manager
     "FlowManager",

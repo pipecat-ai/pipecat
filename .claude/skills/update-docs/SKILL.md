@@ -62,7 +62,7 @@ Filter to files that could affect documentation:
 - `src/pipecat/turns/**/*.py` (turn management)
 - `src/pipecat/observers/**/*.py` (observers)
 - `src/pipecat/pipeline/**/*.py` (pipeline core)
-- `src/pipecat/flows/**/*.py` (Pipecat Flows — documented under `api-reference/pipecat-flows/`)
+- `src/pipecat/flows/**/*.py` (Pipecat Flows)
 
 Ignore `__init__.py`, `__pycache__`, test files, and files that only contain type re-exports.
 
