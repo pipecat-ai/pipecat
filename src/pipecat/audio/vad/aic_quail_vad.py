@@ -4,16 +4,17 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Standalone Quail VAD 2.0 analyzer for Pipecat.
+"""Standalone Quail VAD analyzer for Pipecat.
 
-Runs the standalone Quail VAD 2.0 model from the ai-coustics SDK as a dedicated
-VAD-only processor. Unlike :class:`pipecat.audio.vad.aic_vad.AICVADAnalyzer`,
-which queries the model-internal VAD of :class:`pipecat.audio.filters.aic_filter.AICFilter`,
-this analyzer owns its own :class:`aic_sdk.Processor` instance and can be placed
+Runs a standalone Quail VAD-only model from the ai-coustics SDK (e.g. Quail VAD
+2.0 or VF VAD 2.0) as a dedicated VAD processor. Unlike
+:class:`pipecat.audio.vad.aic_vad.AICVADAnalyzer`, which queries the
+model-internal VAD of :class:`pipecat.audio.filters.aic_filter.AICFilter`, this
+analyzer owns its own :class:`aic_sdk.Processor` instance and can be placed
 anywhere in the pipeline.
 
 Classes:
-    AICQuailVADAnalyzer: Standalone Quail VAD 2.0 analyzer.
+    AICQuailVADAnalyzer: Standalone Quail VAD analyzer.
 """
 
 from __future__ import annotations
@@ -26,7 +27,6 @@ from aic_sdk import (
     Model,
     Processor,
     ProcessorConfig,
-    VadParameter,
     set_sdk_id,
 )
 from loguru import logger
@@ -36,7 +36,7 @@ from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 if TYPE_CHECKING:
     from aic_sdk import VadContext
 
-DEFAULT_QUAIL_VAD_MODEL_ID = "quail-vad-2.0-xxs-16khz"
+DEFAULT_QUAIL_VAD_MODEL_ID = "quail-vf-vad-2.0-s-16khz"
 
 # Telemetry identifier registered with the AIC SDK; identifies pipecat to the
 # vendor's usage pipeline. Mirrors the value used by AICFilter; kept private
@@ -53,34 +53,26 @@ class AICQuailVADAnalyzer(VADAnalyzer):
 
     The analyzer owns a dedicated :class:`aic_sdk.Processor` initialized with a
     Quail VAD-only model. Each :meth:`voice_confidence` call processes one audio
-    window through the processor and queries the resulting
-    :class:`aic_sdk.VadContext` for the speech-detected boolean, which is mapped
-    to ``1.0`` / ``0.0`` to satisfy the :class:`VADAnalyzer` interface.
+    window through the processor and returns the model's raw speech probability
+    in ``[0.0, 1.0]`` (:meth:`aic_sdk.VadContext.raw_vad_probability`). The base
+    :class:`VADAnalyzer` state machine then gates speech start/stop using its own
+    :class:`VADParams` (``confidence`` threshold, ``start_secs``, ``stop_secs``),
+    so the SDK's own VAD post-processing (sensitivity thresholding, speech-hold)
+    is intentionally bypassed — Pipecat owns the thresholding.
 
     Comparison to :class:`pipecat.audio.vad.aic_vad.AICVADAnalyzer` (deprecated):
 
-    - **Model:** Quail VAD-only model (e.g. ``quail-vad-2.0-xxs-16khz``); the
+    - **Model:** Quail VAD-only model (e.g. ``quail-vf-vad-2.0-s-16khz``); the
       deprecated analyzer uses the enhancement model's internal VAD as a
       side-channel.
     - **Audio path:** runs on whatever the pipeline feeds it (raw or enhanced).
       The deprecated analyzer reads post-enhancement VAD state from
       :class:`AICFilter`'s processor.
-    - **Sensitivity semantics:** speech-probability threshold in ``[0.0, 1.0]``
-      on dedicated VAD models. The deprecated analyzer's enhancement-model VAD
-      uses an energy threshold in ``[1.0, 15.0]``.
+    - **Confidence:** a continuous raw probability gated by Pipecat's
+      ``VADParams.confidence``. The deprecated analyzer exposes only a boolean
+      gated by the enhancement model's energy threshold (``[1.0, 15.0]``).
     - **Coupling:** independent — owns its own ``Processor``. The deprecated
       analyzer is bound to an :class:`AICFilter` instance.
-
-    Quail VAD parameters (applied via :class:`aic_sdk.VadParameter`):
-
-    - **speech_hold_duration**: seconds the VAD continues reporting speech after
-      the signal stops containing speech. Range 0.0 to 300x the model window
-      length. Default 0.03s.
-    - **minimum_speech_duration**: seconds of speech required before the VAD
-      reports speech detected. Range 0.0 to 1.0. Default 0.0s.
-    - **sensitivity**: speech-probability threshold on dedicated Quail VAD
-      models (range 0.0 to 1.0). Energy-based VADs keep the 1.0 to 15.0 range.
-      Default is model-specific.
 
     Example::
 
@@ -96,9 +88,6 @@ class AICQuailVADAnalyzer(VADAnalyzer):
         model_id: str | None = DEFAULT_QUAIL_VAD_MODEL_ID,
         model_path: Path | None = None,
         model_download_dir: Path | None = None,
-        speech_hold_duration: float | None = None,
-        minimum_speech_duration: float | None = None,
-        sensitivity: float | None = None,
         sample_rate: int | None = None,
         params: VADParams | None = None,
     ) -> None:
@@ -111,21 +100,13 @@ class AICQuailVADAnalyzer(VADAnalyzer):
         Args:
             license_key: ai-coustics SDK license key.
             model_id: Quail VAD model identifier. Defaults to the published
-                standalone VAD model ``"quail-vad-2.0-xxs-16khz"``. See
+                standalone VAD model ``"quail-vf-vad-2.0-s-16khz"``. See
                 https://artifacts.ai-coustics.io/ for the catalogue. Ignored if
                 ``model_path`` is provided.
             model_path: Optional path to a local ``.aicmodel`` file. Overrides
                 ``model_id`` when set.
             model_download_dir: Directory for downloaded models. Defaults to
                 ``~/.cache/pipecat/aic-models``.
-            speech_hold_duration: Optional override for the SDK's
-                ``VadParameter.SpeechHoldDuration``.
-            minimum_speech_duration: Optional override for the SDK's
-                ``VadParameter.MinimumSpeechDuration``.
-            sensitivity: Optional override for the SDK's
-                ``VadParameter.Sensitivity``. This is a probability threshold
-                in ``[0.0, 1.0]``. Values above this threshold are considered
-                speech.
             sample_rate: Initial sample rate; the pipeline will set this via
                 :meth:`set_sample_rate` once the transport rate is known.
             params: Optional :class:`VADParams` for the base state machine.
@@ -147,10 +128,6 @@ class AICQuailVADAnalyzer(VADAnalyzer):
         self._model_download_dir = model_download_dir or (
             Path.home() / ".cache" / "pipecat" / "aic-models"
         )
-
-        self._pending_speech_hold_duration = speech_hold_duration
-        self._pending_minimum_speech_duration = minimum_speech_duration
-        self._pending_sensitivity = sensitivity
 
         self._model: Model | None = None
         self._processor: Processor | None = None
@@ -235,27 +212,7 @@ class AICQuailVADAnalyzer(VADAnalyzer):
         self._in_f32 = np.zeros((1, num_frames), dtype=np.float32)
         self._inference_error_logged = False
         self._buffer_size_warning_logged = False
-        self._apply_vad_parameters()
         logger.debug(f"AICQuailVADAnalyzer initialized at {sample_rate} Hz, frames={num_frames}")
-
-    def _apply_vad_parameters(self) -> None:
-        vad_ctx = self._vad_ctx
-        if vad_ctx is None:
-            return
-        # Per-parameter try/except so a single SDK rejection doesn't silently
-        # drop the remaining params.
-        pending: list[tuple[VadParameter, float | None]] = [
-            (VadParameter.SpeechHoldDuration, self._pending_speech_hold_duration),
-            (VadParameter.MinimumSpeechDuration, self._pending_minimum_speech_duration),
-            (VadParameter.Sensitivity, self._pending_sensitivity),
-        ]
-        for parameter, value in pending:
-            if value is None:
-                continue
-            try:
-                vad_ctx.set_parameter(parameter, value)
-            except Exception as e:  # noqa: BLE001 - one bad param shouldn't drop the others
-                logger.warning(f"Quail VAD parameter {parameter} application failed: {e}")
 
     def set_sample_rate(self, sample_rate: int) -> None:
         """Set the sample rate. Recreates the SDK processor if the rate changed.
@@ -305,10 +262,12 @@ class AICQuailVADAnalyzer(VADAnalyzer):
                 :meth:`num_frames_required` samples.
 
         Returns:
-            ``1.0`` if the VAD reports speech, ``0.0`` otherwise. Returns
-            ``0.0`` if the processor is not yet initialized (i.e.
-            :meth:`set_sample_rate` has not run), if the buffer size does not
-            match the expected window, or if an SDK inference error occurs.
+            The model's raw speech probability in ``[0.0, 1.0]``. The base
+            :class:`VADAnalyzer` compares this against ``VADParams.confidence``
+            to decide speech. Returns ``0.0`` if the processor is not yet
+            initialized (i.e. :meth:`set_sample_rate` has not run), if the buffer
+            size does not match the expected window, or if an SDK inference error
+            occurs.
         """
         if self._processor is None or self._vad_ctx is None or self._in_f32 is None:
             return 0.0
@@ -330,7 +289,10 @@ class AICQuailVADAnalyzer(VADAnalyzer):
             # Successful inference re-arms the error latch so a fresh error
             # after a recovery is reported at ERROR rather than buried at DEBUG.
             self._inference_error_logged = False
-            return 1.0 if self._vad_ctx.is_speech_detected() else 0.0
+            # Raw model probability (no SDK post-processing); clamp defensively
+            # to the [0.0, 1.0] the VADAnalyzer state machine expects.
+            probability = float(self._vad_ctx.raw_vad_probability())
+            return max(0.0, min(1.0, probability))
         except Exception as e:  # noqa: BLE001 - keep the pipeline alive on SDK errors
             if not self._inference_error_logged:
                 logger.error(f"Quail VAD inference error: {e}")
