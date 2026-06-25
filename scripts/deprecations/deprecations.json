@@ -131,7 +131,7 @@
       "removed_in": "2.0.0",
       "relation": "use_existing",
       "replacement": "LLMSummarizeContextFrame",
-      "message": "Use Pipecat's native context summarization instead. To trigger on-demand summarization during a node transition, push an ``LLMSummarizeContextFrame`` in a pre-action. See https://docs.pipecat.ai/guides/fundamentals/context-summarization Will be removed in 2.0.0.",
+      "message": "Use Pipecat's native context summarization instead. To trigger on-demand summarization during a node transition, push an ``LLMSummarizeContextFrame`` in a pre-action. See https://docs.pipecat.ai/guides/fundamentals/context-summarization. Will be removed in 2.0.0.",
       "location": "pipecat/flows/types.py"
     },
     {
@@ -142,7 +142,7 @@
       "removed_in": "2.0.0",
       "relation": "use_existing",
       "replacement": "LLMContextSummaryConfig.summarization_prompt",
-      "message": "Deprecated along with RESET_WITH_SUMMARY. Use ``LLMContextSummaryConfig.summarization_prompt`` instead. Will be removed in 2.0.0.",
+      "message": "Use ``LLMContextSummaryConfig.summarization_prompt`` instead. Deprecated together with ``RESET_WITH_SUMMARY``. Will be removed in 2.0.0.",
       "location": "pipecat/flows/types.py"
     },
     {
@@ -151,9 +151,9 @@
       "kind": "class",
       "deprecated_in": "1.5.0",
       "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "FlowResult",
-      "message": "No replacement. ``FlowResult`` is no longer required or referenced by any handler type, and Pipecat's upstream function-call-result contract is ``Any`` — define your own ``TypedDict`` or return any JSON-serializable value. Will be removed in 2.0.0.",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. FlowResult is no longer required or referenced by any handler type, and Pipecat's upstream function-call-result contract is Any — define your own TypedDict or return any JSON-serializable value. Will be removed in 2.0.0.",
       "location": "pipecat/flows/types.py"
     },
     {

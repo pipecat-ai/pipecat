@@ -41,10 +41,10 @@ class FlowResult(TypedDict, total=False):
     """Optional convention TypedDict for ``status``/``error`` results.
 
     .. deprecated:: 1.5.0
-        No replacement. ``FlowResult`` is no longer required or referenced by
-        any handler type, and Pipecat's upstream function-call-result contract
-        is ``Any`` — define your own ``TypedDict`` or return any
-        JSON-serializable value. Will be removed in 2.0.0.
+        No replacement. FlowResult is no longer required or referenced by any
+        handler type, and Pipecat's upstream function-call-result contract is
+        Any — define your own TypedDict or return any JSON-serializable value.
+        Will be removed in 2.0.0.
 
     Parameters:
         status: Status of the function execution.
@@ -142,7 +142,7 @@ class ContextStrategy(Enum):
                 Use Pipecat's native context summarization instead. To trigger
                 on-demand summarization during a node transition, push an
                 ``LLMSummarizeContextFrame`` in a pre-action. See
-                https://docs.pipecat.ai/guides/fundamentals/context-summarization
+                https://docs.pipecat.ai/guides/fundamentals/context-summarization.
                 Will be removed in 2.0.0.
     """
 
@@ -160,9 +160,9 @@ class ContextStrategyConfig:
         summary_prompt: Required prompt text when using RESET_WITH_SUMMARY.
 
             .. deprecated:: 1.5.0
-                Deprecated along with RESET_WITH_SUMMARY. Use
-                ``LLMContextSummaryConfig.summarization_prompt`` instead.
-                Will be removed in 2.0.0.
+                Use ``LLMContextSummaryConfig.summarization_prompt`` instead.
+                Deprecated together with ``RESET_WITH_SUMMARY``. Will be removed
+                in 2.0.0.
     """
 
     strategy: ContextStrategy
