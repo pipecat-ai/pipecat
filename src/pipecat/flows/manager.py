@@ -50,7 +50,6 @@ from pipecat.flows.types import (
     ContextStrategyConfig,
     FlowArgs,
     FlowFunctionHandler,
-    FlowResult,
     FlowsDirectFunction,
     FlowsDirectFunctionWrapper,
     FlowsFunctionSchema,
@@ -393,7 +392,7 @@ class FlowManager:
 
     async def _call_handler(
         self, handler: FunctionHandler, args: FlowArgs
-    ) -> FlowResult | ConsolidatedFunctionResult:
+    ) -> Any | ConsolidatedFunctionResult:
         """Call handler with appropriate parameters based on its signature.
 
         Detects whether the handler can accept a flow_manager parameter and

@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from pipecat.flows.manager import FlowManager
 
 
+@deprecated("`FlowResult` is deprecated since 1.5.0 and will be removed in 2.0.0. No replacement.")
 class FlowResult(TypedDict, total=False):
     """Optional convention TypedDict for ``status``/``error`` results.
 
