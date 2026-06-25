@@ -111,7 +111,7 @@ async def switch_llm(flow_manager: FlowManager, llm: str) -> tuple[SwitchLLMResu
         return SwitchLLMResult(status="success", message=f"Already using {llm} LLM service."), None
 
     # Typically, you would just switch LLMs like this:
-    # await flow_manager.task.queue_frames([ManuallySwitchServiceFrame(service=new_llm)])
+    # await flow_manager.worker.queue_frames([ManuallySwitchServiceFrame(service=new_llm)])
 
     # But because we're in a tool call, and tool calls result in upstream
     # updates from the assistant context aggregator, we're pushing the
