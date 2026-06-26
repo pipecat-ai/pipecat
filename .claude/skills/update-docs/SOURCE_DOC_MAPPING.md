@@ -21,6 +21,11 @@ These source paths don't follow the standard `services/{provider}/{type}.py` →
 | `pipeline/worker.py`                        | `api-reference/server/pipeline/pipeline-worker.mdx`                                              |
 | `pipeline/runner.py`                        | `api-reference/server/utilities/runner/guide.mdx`                                                |
 | `transports/base_transport.py`              | `api-reference/server/services/transport/transport-params.mdx`                                   |
+| `flows/types.py`                            | `api-reference/pipecat-flows/types.mdx`                                                          |
+| `flows/manager.py`                          | `api-reference/pipecat-flows/flow-manager.mdx`                                                   |
+| `flows/actions.py`                          | `api-reference/pipecat-flows/flow-manager.mdx` and `api-reference/pipecat-flows/types.mdx`       |
+| `flows/adapters.py`                         | `api-reference/pipecat-flows/overview.mdx`                                                       |
+| `flows/exceptions.py`                       | `api-reference/pipecat-flows/exceptions.mdx`                                                     |
 
 ## Skip list
 

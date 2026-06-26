@@ -62,6 +62,7 @@ Filter to files that could affect documentation:
 - `src/pipecat/turns/**/*.py` (turn management)
 - `src/pipecat/observers/**/*.py` (observers)
 - `src/pipecat/pipeline/**/*.py` (pipeline core)
+- `src/pipecat/flows/**/*.py` (Pipecat Flows)
 
 Ignore `__init__.py`, `__pycache__`, test files, and files that only contain type re-exports.
 
@@ -138,12 +139,12 @@ For each doc page that needs updates, edit **only the sections that need changes
 
 ### Step 7: Update guides
 
-Guides at `DOCS_PATH/pipecat/` reference specific class names, parameters, imports, and code patterns. After completing reference doc edits, check if any guides need updates too.
+Guides at `DOCS_PATH/pipecat/` and `DOCS_PATH/pipecat-flows/` reference specific class names, parameters, imports, and code patterns. After completing reference doc edits, check if any guides need updates too.
 
 For each changed source file, collect the class names, renamed parameters, and changed imports from the diff. Search the guides directory:
 
 ```bash
-grep -rl "ClassName\|old_param_name" DOCS_PATH/pipecat/
+grep -rl "ClassName\|old_param_name" DOCS_PATH/pipecat/ DOCS_PATH/pipecat-flows/
 ```
 
 For each guide that references changed code:
@@ -159,6 +160,7 @@ Guide directories:
 - `pipecat/fundamentals/` — practical how-tos (metrics, recording, transcripts, etc.)
 - `pipecat/features/` — feature-specific guides (Gemini Live, OpenAI audio, WhatsApp, etc.)
 - `pipecat/telephony/` — telephony integration guides (Twilio, Plivo, Telnyx, etc.)
+- `pipecat-flows/guides/` — Pipecat Flows guides (nodes-and-messages, functions, context-strategies, state-management, actions); check these when `src/pipecat/flows/**` changed
 
 ### Step 8: Identify doc gaps
 
@@ -287,9 +289,11 @@ After all edits are complete, print a summary:
 ### Updated reference pages
 - `api-reference/server/services/stt/deepgram.mdx` — Updated Configuration (added `new_param`), InputParams (updated `language` default)
 - `api-reference/server/services/tts/elevenlabs.mdx` — Updated Event Handlers (added `on_connected`)
+- `api-reference/pipecat-flows/flow-manager.mdx` — Updated FlowManager constructor (added `new_param`)
 
 ### Updated guides
 - `pipecat/learn/speech-to-text.mdx` — Updated code example (renamed `old_param` → `new_param`)
+- `pipecat-flows/guides/state-management.mdx` — Updated FlowManager init example
 
 ### New service pages
 - `api-reference/server/services/tts/newprovider.mdx` — Created page, added to docs.json (Text-to-Speech), added to supported-services.mdx

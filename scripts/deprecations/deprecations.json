@@ -102,6 +102,83 @@
       "location": "pipecat/audio/vad/aic_vad.py"
     },
     {
+      "subject": "FlowManager.task",
+      "module": "pipecat.flows.manager",
+      "kind": "parameter",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "worker",
+      "message": "Use ``worker`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/flows/manager.py"
+    },
+    {
+      "subject": "FlowManager.task",
+      "module": "pipecat.flows.manager",
+      "kind": "property",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "FlowManager.worker",
+      "message": "`FlowManager.task` is deprecated since 1.5.0 and will be removed in 2.0.0. Use `FlowManager.worker` instead.",
+      "location": "pipecat/flows/manager.py"
+    },
+    {
+      "subject": "ContextStrategy.RESET_WITH_SUMMARY",
+      "module": "pipecat.flows.types",
+      "kind": "parameter",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "LLMSummarizeContextFrame",
+      "message": "Use :class:`LLMSummarizeContextFrame` instead — push it in a pre-action to trigger on-demand summarization during a node transition. See https://docs.pipecat.ai/guides/fundamentals/context-summarization. Will be removed in 2.0.0.",
+      "location": "pipecat/flows/types.py"
+    },
+    {
+      "subject": "ContextStrategyConfig.summary_prompt",
+      "module": "pipecat.flows.types",
+      "kind": "parameter",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "LLMContextSummaryConfig.summarization_prompt",
+      "message": "Use ``LLMContextSummaryConfig.summarization_prompt`` instead. Deprecated together with ``RESET_WITH_SUMMARY``. Will be removed in 2.0.0.",
+      "location": "pipecat/flows/types.py"
+    },
+    {
+      "subject": "FlowResult",
+      "module": "pipecat.flows.types",
+      "kind": "class",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`FlowResult` is deprecated since 1.5.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/flows/types.py"
+    },
+    {
+      "subject": "NodeConfig.role_messages",
+      "module": "pipecat.flows.types",
+      "kind": "parameter",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "role_message",
+      "message": "Use ``role_message`` (str) instead. Will be removed in 2.0.0.",
+      "location": "pipecat/flows/types.py"
+    },
+    {
+      "subject": "flows_direct_function",
+      "module": "pipecat.flows.types",
+      "kind": "function",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "rename",
+      "replacement": "flows_tool_options",
+      "message": "`flows_direct_function` is deprecated since 1.5.0 and will be removed in 2.0.0. Use `flows_tool_options` instead.",
+      "location": "pipecat/flows/types.py"
+    },
+    {
       "subject": "CancelTaskFrame",
       "module": "pipecat.frames.frames",
       "kind": "class",
