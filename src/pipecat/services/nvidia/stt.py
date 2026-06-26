@@ -270,8 +270,6 @@ class NvidiaSTTService(STTService):
         stop_history_eou: int = -1,
         stop_threshold_eou: float = -1.0,
         custom_configuration: str = "",
-        keepalive_timeout: float | None = 30.0,
-        keepalive_interval: float = 5.0,
         settings: Settings | None = None,
         ttfs_p99_latency: float | None = NVIDIA_TTFS_P99,
         **kwargs,
@@ -302,9 +300,6 @@ class NvidiaSTTService(STTService):
             stop_threshold_eou: End-of-utterance stop threshold. Use -1.0 for Nemotron Speech default.
             custom_configuration: Custom Nemotron Speech configuration string
                 (e.g. ``"enable_vad_endpointing:true,neural_vad.onset:0.65"``).
-            keepalive_timeout: Seconds of no audio before sending silence to keep the
-                NVIDIA ASR stream active. None disables keepalive.
-            keepalive_interval: Seconds between idle checks when keepalive is enabled.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
@@ -342,8 +337,8 @@ class NvidiaSTTService(STTService):
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
-            keepalive_timeout=keepalive_timeout,
-            keepalive_interval=keepalive_interval,
+            keepalive_timeout=30.0,
+            keepalive_interval=5.0,
             settings=default_settings,
             **kwargs,
         )
