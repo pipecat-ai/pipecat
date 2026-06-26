@@ -232,6 +232,8 @@ class SonioxSTTSettings(STTSettings):
         enable_language_identification: Whether to enable language identification.
         max_endpoint_delay_ms: Max ms before endpoint detection finalizes the turn (500-3000).
         endpoint_sensitivity: Endpoint detection sensitivity (-1.0 to 1.0); higher finalizes sooner.
+        endpoint_latency_adjustment_level: Reduces endpoint latency vs. the default (0-3); higher
+            finalizes sooner but may reduce accuracy.
         client_reference_id: Client reference ID to use for transcription.
     """
 
@@ -244,6 +246,9 @@ class SonioxSTTSettings(STTSettings):
     )
     max_endpoint_delay_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     endpoint_sensitivity: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpoint_latency_adjustment_level: int | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
     client_reference_id: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -315,6 +320,7 @@ class SonioxSTTService(WebsocketSTTService):
             enable_language_identification=False,
             max_endpoint_delay_ms=None,
             endpoint_sensitivity=None,
+            endpoint_latency_adjustment_level=None,
             client_reference_id=None,
         )
 
@@ -529,6 +535,7 @@ class SonioxSTTService(WebsocketSTTService):
                 "enable_endpoint_detection": enable_endpoint_detection,
                 "max_endpoint_delay_ms": s.max_endpoint_delay_ms,
                 "endpoint_sensitivity": s.endpoint_sensitivity,
+                "endpoint_latency_adjustment_level": s.endpoint_latency_adjustment_level,
                 "sample_rate": self.sample_rate,
                 "language_hints": _prepare_language_hints(assert_given(s.language_hints)),
                 "language_hints_strict": s.language_hints_strict,
