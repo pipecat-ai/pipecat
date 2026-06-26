@@ -89,6 +89,11 @@ class OpenAIResponsesLLMSettings(LLMSettings):
 
     Parameters:
         max_completion_tokens: Maximum completion tokens to generate.
+        store: Whether OpenAI should persist responses server-side (30-day retention).
+            Defaults to ``False``. Set to ``True`` to make ``previous_response_id``
+            reliable across reconnects, eliminating full-context retries on cache miss.
+            Combine with ``delete_responses_on_close=True`` on the service constructor
+            to delete all stored responses when the WebSocket connection closes.
     """
 
     # Override inherited LLMSettings fields to also accept openai's NotGiven
@@ -101,6 +106,7 @@ class OpenAIResponsesLLMSettings(LLMSettings):
     max_completion_tokens: int | _NotGiven | OpenAINotGiven = field(
         default_factory=lambda: _NOT_GIVEN
     )
+    store: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -234,11 +240,13 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         params: dict[str, Any] = {
             "model": self._settings.model,
             "stream": True,
-            # store=False avoids OpenAI-side 30-day conversation storage.
-            # The WebSocket variant's previous_response_id optimization
-            # still works with store=False because it uses a connection-local
-            # in-memory cache. See the class docstrings for details.
-            "store": False,
+            # store=False (default): no server-side storage; the WebSocket variant's
+            # previous_response_id optimization uses a connection-local in-memory
+            # cache instead.  store=True persists responses for 30 days on OpenAI's
+            # servers, making previous_response_id reliable across reconnects.
+            # Use delete_responses_on_close=True on the service to remove stored
+            # responses when the connection closes.
+            "store": self._settings.store,
             "input": invocation_params["input"],
         }
 
@@ -356,16 +364,30 @@ class OpenAIResponsesLLMService(
     Automatically uses ``previous_response_id`` to send only incremental context when
     possible, and falls back to full context on reconnection or cache miss.
 
-    The ``previous_response_id`` optimization works with ``store=False`` (the default)
-    because WebSocket mode uses a connection-local in-memory cache — no conversations
-    are stored on OpenAI's servers.  This is why the HTTP variant
-    (``OpenAIResponsesHttpLLMService``) does not offer this optimization by default
-    (or at all, yet): over HTTP, ``previous_response_id`` requires ``store=True``,
-    which enables OpenAI-side 30-day conversation storage.
+    With ``store=False`` (default) the ``previous_response_id`` optimization relies on
+    a connection-local in-memory cache on OpenAI's servers — no conversations are stored
+    persistently.  If the connection drops or the server evicts its cache, Pipecat falls
+    back to a full-context retry.
+
+    With ``store=True`` (opt-in), OpenAI persists each response for 30 days, making
+    ``previous_response_id`` reliable across reconnects and eliminating cache-miss retries.
+    To comply with data-retention policies, pass ``delete_responses_on_close=True`` — the
+    service will delete all response IDs it collected as soon as the WebSocket connection
+    closes::
+
+        llm = OpenAIResponsesLLMService(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            delete_responses_on_close=True,
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-4.1",
+                system_instruction="You are a helpful assistant.",
+                store=True,
+            ),
+        )
 
     This is the recommended variant for real-time / conversational use.
 
-    Example::
+    Example (default — no server-side storage)::
 
         llm = OpenAIResponsesLLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
@@ -380,6 +402,7 @@ class OpenAIResponsesLLMService(
         self,
         *,
         ws_url: str = "wss://api.openai.com/v1/responses",
+        delete_responses_on_close: bool = False,
         **kwargs,
     ):
         """Initialize the WebSocket-based OpenAI Responses API LLM service.
@@ -387,6 +410,11 @@ class OpenAIResponsesLLMService(
         Args:
             ws_url: WebSocket endpoint URL.
                 Defaults to ``wss://api.openai.com/v1/responses``.
+            delete_responses_on_close: When ``True``, all response IDs collected
+                during this connection are deleted from OpenAI's servers via the
+                Responses DELETE API when the WebSocket closes.  Only meaningful
+                when ``settings.store=True``; a warning is logged otherwise.
+                Defaults to ``False``.
             **kwargs: Additional arguments passed to the base class (api_key,
                 base_url, organization, project, default_headers, service_tier,
                 settings, etc.).
@@ -394,6 +422,18 @@ class OpenAIResponsesLLMService(
         super().__init__(**kwargs)
 
         self._ws_url = ws_url
+        self._delete_responses_on_close = delete_responses_on_close
+
+        if self._delete_responses_on_close and not self._settings.store:
+            logger.warning(
+                f"{self}: delete_responses_on_close=True has no effect when store=False "
+                f"(responses are not persisted server-side)."
+            )
+
+        # Response IDs collected for deletion on close (only populated when
+        # delete_responses_on_close=True). Intentionally survives reconnects so
+        # that IDs from all connections in a session are cleaned up at final close.
+        self._all_response_ids: list[str] = []
 
         # State for previous_response_id optimization
         self._previous_response_id: str | None = None
@@ -433,6 +473,8 @@ class OpenAIResponsesLLMService(
             await self.push_error(error_msg=f"Error disconnecting from WebSocket: {e}", exception=e)
         finally:
             self._websocket = None
+            if self._delete_responses_on_close:
+                await self._delete_all_responses()
             self._clear_previous_response_state()
             self._clear_cancellation_state()
 
@@ -603,6 +645,38 @@ class OpenAIResponsesLLMService(
         self._previous_input_length = None
         self._previous_input_hash = None
         self._previous_response_output = None
+
+    # -- server-side response deletion ----------------------------------------
+
+    async def _delete_all_responses(self):
+        """Delete all server-stored response IDs collected during this session.
+
+        Called from ``_disconnect_websocket()`` when ``delete_responses_on_close=True``.
+        Skips silently when ``store=False`` (no server-side data to delete).
+        Individual deletion failures are logged as warnings but do not propagate.
+        """
+        if not self._all_response_ids:
+            return
+
+        if not self._settings.store:
+            # store=False → connection-local cache only; nothing persisted server-side.
+            self._all_response_ids.clear()
+            return
+
+        ids = list(self._all_response_ids)
+        self._all_response_ids.clear()
+        logger.debug(f"{self}: Deleting {len(ids)} stored response(s) from OpenAI")
+        failed = 0
+        for response_id in ids:
+            try:
+                await self._client.responses.delete(response_id)
+            except Exception as e:
+                failed += 1
+                logger.warning(f"{self}: Failed to delete response {response_id}: {e}")
+        if failed:
+            logger.warning(f"{self}: {failed}/{len(ids)} response deletion(s) failed")
+        else:
+            logger.debug(f"{self}: All {len(ids)} response(s) deleted successfully")
 
     # -- response cancellation ------------------------------------------------
 
@@ -894,6 +968,8 @@ class OpenAIResponsesLLMService(
                 if response_id:
                     response_output = response.get("output") or []
                     self._store_previous_response_state(response_id, full_input, response_output)
+                    if self._delete_responses_on_close:
+                        self._all_response_ids.append(response_id)
 
                 break  # Response complete
 
