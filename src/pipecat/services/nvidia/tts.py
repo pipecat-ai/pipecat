@@ -94,7 +94,7 @@ class NvidiaTTSSettings(TTSSettings):
     """
 
     quality: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    synthesis_mode: NvidiaTTSSynthesisMode = NvidiaTTSSynthesisMode.PER_SENTENCE
+    synthesis_mode: NvidiaTTSSynthesisMode | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -209,6 +209,7 @@ class NvidiaTTSService(TTSService):
             voice="Magpie-Multilingual.EN-US.Aria",
             language=Language.EN_US,
             quality=20,
+            synthesis_mode=NvidiaTTSSynthesisMode.PER_SENTENCE,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
