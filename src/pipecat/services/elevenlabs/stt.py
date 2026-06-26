@@ -28,8 +28,6 @@ from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
-    CancelFrame,
-    EndFrame,
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
@@ -644,24 +642,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         await super().start(frame)
         self._audio_format = audio_format_from_sample_rate(self.sample_rate)
         await self._connect()
-
-    async def stop(self, frame: EndFrame):
-        """Stop the STT service and close WebSocket connection.
-
-        Args:
-            frame: Frame indicating service should stop.
-        """
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the STT service and close WebSocket connection.
-
-        Args:
-            frame: Frame indicating service should be cancelled.
-        """
-        await super().cancel(frame)
-        await self._disconnect()
 
     async def _start_metrics(self):
         """Start performance metrics collection for transcription processing."""

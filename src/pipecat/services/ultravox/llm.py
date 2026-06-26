@@ -411,6 +411,11 @@ class UltravoxRealtimeLLMService(LLMService):
         await super().cancel(frame)
         await self._disconnect()
 
+    async def cleanup(self):
+        """Release resources held by the service."""
+        await super().cleanup()
+        await self._disconnect()
+
     async def _disconnect(self):
         self._disconnecting = True
         if self._socket:

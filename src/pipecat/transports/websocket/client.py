@@ -296,6 +296,7 @@ class WebsocketClientInputTransport(BaseInputTransport):
     async def cleanup(self):
         """Clean up the input transport resources."""
         await super().cleanup()
+        await self._session.disconnect()
         await self._transport.cleanup()
 
     async def on_message(self, websocket, message):
@@ -404,6 +405,7 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
     async def cleanup(self):
         """Clean up the output transport resources."""
         await super().cleanup()
+        await self._session.disconnect()
         await self._transport.cleanup()
 
     async def send_message(

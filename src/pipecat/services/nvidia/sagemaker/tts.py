@@ -157,6 +157,11 @@ class NvidiaSageMakerHTTPTTSService(TTSService):
         await super().cancel(frame)
         await self._close_client()
 
+    async def cleanup(self):
+        """Release the SageMaker client at teardown."""
+        await super().cleanup()
+        await self._close_client()
+
     # ── Synthesis ─────────────────────────────────────────────────────────────
 
     @traced_tts
@@ -303,23 +308,9 @@ class NvidiaSageMakerTTSService(InterruptibleTTSService):
         await super().start(frame)
         await self._connect()
 
-    async def stop(self, frame: EndFrame):
-        """Stop the TTS service and disconnect from the SageMaker endpoint.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the TTS service and disconnect from the SageMaker endpoint.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._disconnect()
+    # Teardown is handled by the base WebsocketTTSService, whose stop/cancel/
+    # cleanup all route through self._disconnect() (which cancels the receive
+    # task and closes the bidi-stream session).
 
     # ── Connection management (WebsocketService abstract interface) ────────────
 

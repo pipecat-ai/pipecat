@@ -630,6 +630,11 @@ class SpeechmaticsSTTService(STTService):
         await super().cancel(frame)
         await self._disconnect()
 
+    async def cleanup(self):
+        """Release Speechmatics resources at pipeline teardown."""
+        await super().cleanup()
+        await self._disconnect()
+
     async def _connect(self) -> None:
         """Connect to the STT service.
 

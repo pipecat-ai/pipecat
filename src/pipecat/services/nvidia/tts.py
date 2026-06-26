@@ -374,8 +374,7 @@ class NvidiaTTSService(TTSService):
             frame: The end frame.
         """
         await super().stop(frame)
-        await self._abort_synthesis_stream()
-        self._close_client()
+        await self._teardown()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the NVIDIA TTS service.
@@ -384,6 +383,19 @@ class NvidiaTTSService(TTSService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
+        await self._teardown()
+
+    async def cleanup(self):
+        """Release all resources held by the service."""
+        await super().cleanup()
+        await self._teardown()
+
+    async def _teardown(self):
+        """Abort the active synthesis stream and close the gRPC client.
+
+        Idempotent so it can run from ``stop()``, ``cancel()``, and
+        ``cleanup()`` without duplicating teardown work.
+        """
         await self._abort_synthesis_stream()
         self._close_client()
 

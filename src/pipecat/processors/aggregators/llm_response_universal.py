@@ -759,7 +759,7 @@ class LLMUserAggregator(LLMContextAggregator):
             self._vad_controller.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
 
     async def cleanup(self):
-        """Clean up processor resources."""
+        """Release this aggregator's resources at teardown."""
         await super().cleanup()
         await self._cleanup()
 
@@ -1058,6 +1058,7 @@ class LLMUserAggregator(LLMContextAggregator):
         self._realtime_handoff_flush_task = None
 
     async def _cleanup(self):
+        await self._cancel_realtime_handoff_flush_task()
         if self._vad_controller:
             await self._vad_controller.cleanup()
         await self._user_turn_controller.cleanup()
@@ -1447,6 +1448,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """
         return bool(self._function_calls_in_progress)
 
+    async def cleanup(self):
+        """Release this aggregator's resources at teardown."""
+        await super().cleanup()
+        await self._cleanup()
+
     async def reset(self):
         """Reset the aggregation state."""
         await super().reset()
@@ -1638,6 +1644,15 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
     async def _handle_end_or_cancel(self, frame: Frame):
         await self._trigger_assistant_turn_stopped(interrupted=isinstance(frame, CancelFrame))
+        await self._cleanup()
+
+    async def _cleanup(self):
+        # Cancel any in-flight on_context_updated callback tasks and tear down
+        # the summarizer. Idempotent so it is safe to run from both the
+        # EndFrame/CancelFrame handler and cleanup().
+        for task in list(self._context_updated_tasks):
+            await self.cancel_task(task)
+        self._context_updated_tasks.clear()
         if self._summarizer:
             await self._summarizer.cleanup()
 

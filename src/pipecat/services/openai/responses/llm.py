@@ -436,6 +436,11 @@ class OpenAIResponsesLLMService(
             self._clear_previous_response_state()
             self._clear_cancellation_state()
 
+    async def cleanup(self):
+        """Release resources at teardown."""
+        await super().cleanup()
+        await self._disconnect()
+
     # -- previous_response_id optimization ------------------------------------
 
     @staticmethod
