@@ -24,17 +24,32 @@ SAMPLE_RATE = 16000
 PCM = bytes(range(0, 240)) * 4  # 960 bytes, even length
 
 
-class _CapturingSegmentedSTTService(SegmentedSTTService):
-    """Captures the bytes the base class hands to run_stt()."""
+def _make_capturing_service(wants_wav: bool | None = None) -> SegmentedSTTService:
+    """Build a SegmentedSTTService that captures the bytes handed to run_stt().
 
-    def __init__(self, **kwargs):
-        super().__init__(sample_rate=SAMPLE_RATE, **kwargs)
-        self.captured: list[bytes] = []
+    Defined as a factory (not a module-level class) so this concrete subclass
+    isn't picked up by the service-discovery scan in test_service_init.py, which
+    would try to construct it and fail on its (intentionally minimal) settings.
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        self.captured.append(audio)
-        return
-        yield  # make this an async generator
+    Args:
+        wants_wav: If None, inherit the base default; otherwise force the
+            ``wants_wav_segments`` contract to this value.
+    """
+
+    class _CapturingSegmentedSTTService(SegmentedSTTService):
+        def __init__(self, **kwargs):
+            super().__init__(sample_rate=SAMPLE_RATE, **kwargs)
+            self.captured: list[bytes] = []
+
+        async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+            self.captured.append(audio)
+            return
+            yield  # make this an async generator
+
+    if wants_wav is not None:
+        _CapturingSegmentedSTTService.wants_wav_segments = property(lambda self: wants_wav)
+
+    return _CapturingSegmentedSTTService()
 
 
 async def _drive_one_segment(service: SegmentedSTTService):
@@ -50,7 +65,7 @@ async def _drive_one_segment(service: SegmentedSTTService):
 
 @pytest.mark.asyncio
 async def test_default_mode_wraps_segment_in_wav():
-    service = _CapturingSegmentedSTTService()
+    service = _make_capturing_service()
     assert service.wants_wav_segments is True
 
     await _drive_one_segment(service)
@@ -68,12 +83,9 @@ async def test_default_mode_wraps_segment_in_wav():
 
 @pytest.mark.asyncio
 async def test_passthrough_mode_preserves_exact_pcm():
-    class _PCMService(_CapturingSegmentedSTTService):
-        @property
-        def wants_wav_segments(self) -> bool:
-            return False
+    service = _make_capturing_service(wants_wav=False)
+    assert service.wants_wav_segments is False
 
-    service = _PCMService()
     await _drive_one_segment(service)
 
     assert len(service.captured) == 1
