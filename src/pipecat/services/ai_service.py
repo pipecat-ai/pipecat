@@ -107,10 +107,10 @@ class AIService(FrameProcessor):
         self._tracing_context = frame.tracing_context
 
     async def stop(self, frame: EndFrame):
-        """Stop the AI service.
+        """Stop the AI service on a graceful end (``EndFrame``).
 
-        Called when the service should stop processing. Subclasses should
-        override this method to perform cleanup operations.
+        Runs in frame order, after pending frames drain. Override for graceful
+        shutdown behavior, such as flushing in-flight work before stopping.
 
         Args:
             frame: The end frame.
@@ -118,10 +118,11 @@ class AIService(FrameProcessor):
         pass
 
     async def cancel(self, frame: CancelFrame):
-        """Cancel the AI service.
+        """Cancel the AI service immediately (``CancelFrame``).
 
-        Called when the service should cancel all operations. Subclasses should
-        override this method to handle cancellation logic.
+        Runs at once, ahead of any queued frames, to abort active work fast (for
+        example, stop producing audio now). Override only for that time-sensitive
+        subset.
 
         Args:
             frame: The cancel frame.
