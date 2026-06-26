@@ -94,6 +94,115 @@ async def test_genai_backend_success(mock_genai_client_class):
         assert a_frame.sample_rate == 24000
 
 
+@patch("google.oauth2.service_account.Credentials.from_service_account_info")
+@patch("google.cloud.texttospeech_v1.TextToSpeechAsyncClient")
+def test_env_var_does_not_select_genai_backend(mock_gcp_client_class, mock_from_info):
+    """GOOGLE_API_KEY in the env must not flip a credentialed service onto GenAI.
+
+    The env var is commonly set for other Google services (e.g. the LLM), so it
+    must not silently override an explicit ``credentials=`` GCP configuration.
+    """
+    mock_from_info.return_value = MagicMock()
+
+    with patch.dict(os.environ, {"GOOGLE_API_KEY": "env-key"}):
+        tts = GeminiTTSService(credentials='{"type": "service_account"}')
+
+    assert not tts._use_genai
+    # The key is only resolved for the GenAI backend; on GCP it stays unset.
+    assert tts._api_key is None
+
+
+@patch("google.genai.Client")
+def test_use_genai_true_resolves_env_api_key(mock_genai_client_class):
+    """``use_genai=True`` selects GenAI and resolves the key from the env."""
+    with patch.dict(os.environ, {"GOOGLE_API_KEY": "env-key"}):
+        tts = GeminiTTSService(use_genai=True)
+
+    assert tts._use_genai
+    assert tts._api_key == "env-key"
+
+
+@patch("google.oauth2.service_account.Credentials.from_service_account_info")
+@patch("google.cloud.texttospeech_v1.TextToSpeechAsyncClient")
+def test_use_genai_false_overrides_api_key(mock_gcp_client_class, mock_from_info):
+    """An explicit ``use_genai=False`` wins even when an ``api_key`` is passed."""
+    mock_from_info.return_value = MagicMock()
+
+    tts = GeminiTTSService(
+        use_genai=False,
+        api_key="explicit-key",
+        credentials='{"type": "service_account"}',
+    )
+
+    assert not tts._use_genai
+    assert tts._api_key is None
+
+
+@pytest.mark.asyncio
+@patch("google.genai.Client")
+async def test_close_client_closes_genai_session(mock_genai_client_class):
+    """The GenAI client's async session is closed; the GCP path is a no-op."""
+    mock_client = MagicMock()
+    mock_client.aio.aclose = AsyncMock()
+    mock_genai_client_class.return_value = mock_client
+
+    tts = GeminiTTSService(api_key="test-api-key")
+    await tts._close_client()
+
+    mock_client.aio.aclose.assert_awaited_once()
+
+
+@patch("google.genai.Client")
+@patch("pipecat.services.google.tts.logger")
+def test_warns_for_unsupported_genai_settings_at_init(mock_logger, mock_genai_client_class):
+    """GenAI ignores prompt/style and multi-speaker; warn once at construction."""
+    mock_genai_client_class.return_value = MagicMock()
+
+    GeminiTTSService(
+        api_key="test-api-key",
+        settings=GeminiTTSService.Settings(prompt="Speak clearly", multi_speaker=True),
+    )
+
+    warnings = " ".join(str(call.args[0]) for call in mock_logger.warning.call_args_list)
+    assert "Prompt" in warnings
+    assert "Multi-speaker" in warnings
+
+
+@pytest.mark.asyncio
+@patch("google.genai.Client")
+@patch("pipecat.services.google.tts.logger")
+async def test_update_settings_warns_for_unsupported_genai_prompt(
+    mock_logger, mock_genai_client_class
+):
+    """A runtime settings change to an unsupported field warns on the GenAI backend."""
+    mock_genai_client_class.return_value = MagicMock()
+
+    tts = GeminiTTSService(api_key="test-api-key")
+    mock_logger.reset_mock()
+
+    await tts._update_settings(GeminiTTSService.Settings(prompt="Now use a style"))
+
+    warnings = " ".join(str(call.args[0]) for call in mock_logger.warning.call_args_list)
+    assert "Prompt" in warnings
+
+
+@patch("google.oauth2.service_account.Credentials.from_service_account_info")
+@patch("google.cloud.texttospeech_v1.TextToSpeechAsyncClient")
+@patch("pipecat.services.google.tts.logger")
+def test_no_genai_warning_on_gcp_backend(mock_logger, mock_gcp_client_class, mock_from_info):
+    """The GCP backend supports prompt/multi-speaker, so it must not warn about them."""
+    mock_from_info.return_value = MagicMock()
+
+    GeminiTTSService(
+        credentials='{"type": "service_account"}',
+        settings=GeminiTTSService.Settings(prompt="Speak clearly", multi_speaker=True),
+    )
+
+    warnings = " ".join(str(call.args[0]) for call in mock_logger.warning.call_args_list)
+    assert "Prompt" not in warnings
+    assert "Multi-speaker" not in warnings
+
+
 @pytest.mark.asyncio
 @patch("google.oauth2.service_account.Credentials.from_service_account_info")
 @patch("google.cloud.texttospeech_v1.TextToSpeechAsyncClient")
