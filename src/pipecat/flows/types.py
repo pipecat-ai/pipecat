@@ -42,10 +42,10 @@ class FlowResult(TypedDict, total=False):
     """Optional convention TypedDict for ``status``/``error`` results.
 
     .. deprecated:: 1.5.0
-        No replacement. FlowResult is no longer required or referenced by any
-        handler type, and Pipecat's upstream function-call-result contract is
-        Any — define your own TypedDict or return any JSON-serializable value.
-        Will be removed in 2.0.0.
+        No replacement. ``FlowResult`` is no longer required or referenced by
+        any handler type, and Pipecat's upstream function-call-result contract
+        is ``Any`` — define your own ``TypedDict`` or return any
+        JSON-serializable value. Will be removed in 2.0.0.
 
     Parameters:
         status: Status of the function execution.

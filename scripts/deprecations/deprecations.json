@@ -470,8 +470,8 @@
       "kind": "parameter",
       "deprecated_in": "1.4.0",
       "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "InputAudioRawFrame",
+      "relation": "none",
+      "replacement": null,
       "message": "No replacement; the parameter is ignored. Will be removed in 2.0.0. The processor no longer needs a transport reference — audio input and audio-streaming start are driven by frames (:class:`InputAudioRawFrame` and :class:`InputTransportStartAudioStreamingFrame`) pushed downstream. For client-ready audio gating, set ``audio_in_stream_on_start=False`` on the transport params.",
       "location": "pipecat/processors/frameworks/rtvi/processor.py"
     },
@@ -2274,9 +2274,9 @@
       "kind": "parameter",
       "deprecated_in": "1.4.0",
       "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "api_version",
-      "message": "No longer used. Mem0 2.0.0 removed the ``api_version`` / ``output_format`` parameters from the client. Will be removed in 2.0.0.",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. Mem0 2.0.0 removed the ``api_version`` / ``output_format`` parameters from the client. Will be removed in 2.0.0.",
       "location": "pipecat/services/mem0/memory.py"
     },
     {

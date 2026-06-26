@@ -49,7 +49,7 @@ class Mem0MemoryService(FrameProcessor):
             api_version: API version to use for Mem0 client operations.
 
                 .. deprecated:: 1.4.0
-                    No longer used. Mem0 2.0.0 removed the ``api_version`` /
+                    No replacement. Mem0 2.0.0 removed the ``api_version`` /
                     ``output_format`` parameters from the client. Will be
                     removed in 2.0.0.
 

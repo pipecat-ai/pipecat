@@ -77,6 +77,31 @@ def test_directives_state_removal_version():
     )
 
 
+def test_no_replacement_directive_extracts_no_replacement():
+    """A directive leading with "No replacement." records none — even with backticks.
+
+    The first-reference rule treats the first backtick/role token as the
+    replacement, so a no-replacement body may freely backtick contextual symbols
+    (the deprecated thing itself, related types) without one being mistaken for a
+    replacement, as long as it leads with the explicit marker.
+    """
+    body = (
+        "No replacement. ``FlowResult`` is no longer referenced by any handler; "
+        "the upstream contract is ``Any``. Will be removed in 2.0.0."
+    )
+    assert dscan.first_reference(body) is None
+    assert dscan.relation_for(body, dscan.first_reference(body)) == "none"
+
+    # An incidental relation verb in later prose doesn't override the marker.
+    moved = "No replacement. The old behavior moved to a different layer entirely."
+    assert dscan.relation_for(moved, dscan.first_reference(moved)) == "none"
+
+    # A real replacement is still extracted as before.
+    use = "Use :class:`Foo` instead. Will be removed in 2.0.0."
+    assert dscan.first_reference(use) == "Foo"
+    assert dscan.relation_for(use, "Foo") == "use_existing"
+
+
 # --- @deprecated decorator message consistency -------------------------------
 
 
