@@ -141,6 +141,43 @@ class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
         result = await expand_units("Hello world", "*")
         self.assertEqual(result, "Hello world")
 
+    async def test_ambiguous_in_preposition_not_expanded(self):
+        """'in' as a preposition after a number must not be treated as inches."""
+        result = await expand_units("1 in 5 people", "*")
+        self.assertNotIn("inches", result)
+        self.assertEqual(result, "1 in 5 people")
+
+    async def test_ambiguous_in_ratio_not_expanded(self):
+        """'9 in 10 dentists' must not expand 'in' to 'inches'."""
+        result = await expand_units("9 in 10 dentists recommend it", "*")
+        self.assertNotIn("inches", result)
+
+    async def test_ambiguous_m_not_expanded_as_meters(self):
+        """'m' alone after a number is highly ambiguous and must not be auto-expanded."""
+        result = await expand_units("1 m people voted", "*")
+        self.assertNotIn("meters", result)
+
+    async def test_ambiguous_g_not_expanded_as_grams(self):
+        """'g' standing alone in prose must not expand to 'grams'."""
+        result = await expand_units("1 g of something", "*")
+        self.assertNotIn("grams", result)
+
+
+class TestExpandUnitsUnambiguous(unittest.IsolatedAsyncioTestCase):
+    """Units that are unambiguous even with a space before them should still expand."""
+
+    async def test_km_with_space(self):
+        result = await expand_units("5 km away", "*")
+        self.assertIn("kilometers", result)
+
+    async def test_mph_with_space(self):
+        result = await expand_units("60 mph speed limit", "*")
+        self.assertIn("miles per hour", result)
+
+    async def test_ghz_with_space(self):
+        result = await expand_units("3 GHz processor", "*")
+        self.assertIn("gigahertz", result)
+
 
 class TestEmailToSpeech(unittest.IsolatedAsyncioTestCase):
     async def test_simple_email(self):

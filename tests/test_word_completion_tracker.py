@@ -1876,5 +1876,89 @@ class TestWordCompletionTrackerWithTransforms(unittest.TestCase):
         self.assertIn("due", llm)
 
 
+class TestWordCompletionTrackerTransformAtEndOfUtterance(unittest.TestCase):
+    """Context attribution when a transformed segment falls at the end of an utterance.
+
+    When a text transform expands a token (e.g. "$5" → "five dollars") and the
+    transformed span is the last thing spoken, the final TTS word ("dollars")
+    triggers the is_complete branch. That branch sweeps the remaining llm_text
+    ("$5") but then validates that the spoken word ("dollars") appears in the
+    sweep — which it doesn't. The sweep must be kept because "dollars" is the
+    expanded form of "$5", not a word that needs to appear verbatim in the
+    original.
+    """
+
+    def test_llm_consumed_preserved_when_final_word_completes_transformed_segment(self):
+        """llm_consumed must be the original token, not None, when the utterance ends on a transform."""
+        tracker = WordCompletionTracker(
+            "Your total is five dollars",  # post-transform TTS text
+            llm_text="Your total is $5",  # original LLM text
+            user_facing_text="Your total is $5",
+        )
+        tracker.add_word_and_check_complete("Your")
+        tracker.add_word_and_check_complete("total")
+        tracker.add_word_and_check_complete("is")
+        tracker.add_word_and_check_complete("five")  # mid-transform, suppressed
+        result = tracker.add_word_and_check_complete("dollars")  # completes transform + utterance
+
+        self.assertTrue(result, "tracker should be complete after 'dollars'")
+        self.assertIsNotNone(
+            tracker.get_llm_consumed(),
+            "llm_consumed must not be None when the final word completes a transformed segment",
+        )
+        self.assertEqual(tracker.get_llm_consumed(), "$5")
+
+    def test_llm_consumed_correct_for_single_word_transform_at_end(self):
+        """Single-word transform ending the utterance: llm_consumed is the original token."""
+        tracker = WordCompletionTracker(
+            "Price is five dollars",
+            llm_text="Price is $5",
+            user_facing_text="Price is $5",
+        )
+        tracker.add_word_and_check_complete("Price")
+        tracker.add_word_and_check_complete("is")
+        tracker.add_word_and_check_complete("five")
+        result = tracker.add_word_and_check_complete("dollars")
+
+        self.assertTrue(result)
+        self.assertIsNotNone(tracker.get_llm_consumed())
+        self.assertEqual(tracker.get_llm_consumed(), "$5")
+
+    def test_transform_at_end_with_llm_tags_sweeps_closing_tag(self):
+        """Transform at end with surrounding XML tags: closing tag must be swept into llm_consumed."""
+        tracker = WordCompletionTracker(
+            "Total is fifty percent",  # "50%" → "fifty percent"
+            llm_text="<price>Total is 50%</price>",
+            user_facing_text="Total is 50%",
+        )
+        tracker.add_word_and_check_complete("Total")
+        tracker.add_word_and_check_complete("is")
+        tracker.add_word_and_check_complete("fifty")
+        result = tracker.add_word_and_check_complete("percent")
+
+        self.assertTrue(result)
+        self.assertIsNotNone(tracker.get_llm_consumed())
+        self.assertIn("50%", tracker.get_llm_consumed())
+
+    def test_mid_sentence_transform_llm_consumed_is_unaffected(self):
+        """Mid-sentence transform behaviour must be preserved alongside the end-of-utterance fix."""
+        tracker = WordCompletionTracker(
+            "Your balance is five dollars due now",
+            llm_text="Your balance is $5 due now",
+            user_facing_text="Your balance is $5 due now",
+        )
+        tracker.add_word_and_check_complete("Your")
+        tracker.add_word_and_check_complete("balance")
+        tracker.add_word_and_check_complete("is")
+        tracker.add_word_and_check_complete("five")
+        self.assertIsNone(tracker.get_llm_consumed())  # suppressed mid-transform
+        tracker.add_word_and_check_complete("dollars")
+        self.assertEqual(tracker.get_llm_consumed(), "$5")  # segment completes
+        tracker.add_word_and_check_complete("due")
+        self.assertIsNotNone(tracker.get_llm_consumed())
+        tracker.add_word_and_check_complete("now")
+        self.assertTrue(tracker.is_complete)
+
+
 if __name__ == "__main__":
     unittest.main()
