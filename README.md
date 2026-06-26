@@ -121,7 +121,7 @@ uv tool install "pipecat-ai[cli]"
 pipecat init
 ```
 
-Follow the [quickstart guide](https://docs.pipecat.ai/getting-started/quickstart) to get your first bot running, or see the [CLI reference](https://docs.pipecat.ai/api-reference/cli/overview) for more options.
+Follow the [quickstart guide](https://docs.pipecat.ai/getting-started/quickstart) to get your very first bot running, or dive a little deeper into [bootstrapping a project](https://docs.pipecat.ai/pipecat/get-started/build-your-next-bot).
 
 ### Manual installation
 
