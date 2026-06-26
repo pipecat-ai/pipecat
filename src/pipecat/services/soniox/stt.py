@@ -235,6 +235,11 @@ class SonioxSTTSettings(STTSettings):
         endpoint_latency_adjustment_level: Reduces endpoint latency vs. the default (0-3); higher
             finalizes sooner but may reduce accuracy.
         client_reference_id: Client reference ID to use for transcription.
+
+    The ``max_endpoint_delay_ms``, ``endpoint_sensitivity`` and
+    ``endpoint_latency_adjustment_level`` settings only take effect when
+    ``vad_force_turn_endpoint=False``; otherwise Soniox endpoint detection is
+    disabled and these settings are ignored.
     """
 
     language_hints: list[Language] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
