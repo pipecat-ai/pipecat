@@ -167,6 +167,13 @@ class BaseInputTransport(FrameProcessor):
         if self._params.audio_in_filter:
             await self._params.audio_in_filter.stop()
 
+    async def cleanup(self):
+        """Release input transport resources at teardown."""
+        await super().cleanup()
+        await self._cancel_audio_task()
+        if self._params.audio_in_filter:
+            await self._params.audio_in_filter.stop()
+
     async def set_transport_ready(self, frame: StartFrame):
         """Called when the transport is ready to stream.
 

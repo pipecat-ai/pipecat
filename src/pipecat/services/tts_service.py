@@ -560,6 +560,12 @@ class TTSService(AIService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
+        # Prompt stop of audio production. cleanup() repeats this idempotently.
+        await self._stop_audio_context_task()
+
+    async def cleanup(self):
+        """Release TTS resources at teardown."""
+        await super().cleanup()
         await self._stop_audio_context_task()
 
     def add_text_transformer(
@@ -1630,6 +1636,34 @@ class WebsocketTTSService(TTSService, WebsocketService):
         """
         TTSService.__init__(self, **kwargs)
         WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
+
+    async def stop(self, frame: EndFrame):
+        """Stop the websocket TTS service on a graceful end.
+
+        Args:
+            frame: The end frame.
+        """
+        await super().stop(frame)
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the websocket TTS service immediately.
+
+        Disconnecting here is the prompt teardown: the websocket receive loop
+        runs independently of the audio-context task, so it keeps reading from
+        the provider until the socket is closed. Stopping only the audio-context
+        task (in :meth:`TTSService.cancel`) halts output but not reception.
+
+        Args:
+            frame: The cancel frame.
+        """
+        await super().cancel(frame)
+        await self._disconnect()
+
+    async def cleanup(self):
+        """Release websocket TTS resources at teardown."""
+        await super().cleanup()
+        await self._disconnect()
 
     async def _report_error(self, error: ErrorFrame):
         await self._call_event_handler("on_connection_error", error.error)
