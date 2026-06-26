@@ -8,6 +8,8 @@ import asyncio
 
 import pytest
 
+pytest.importorskip("riva.client")
+
 from pipecat.services.nvidia.stt import AudioChunkIterator, NvidiaSTTService
 
 
