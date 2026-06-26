@@ -30,6 +30,8 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     ErrorFrame,
     Frame,
     StartFrame,
@@ -1332,15 +1334,19 @@ class GeminiTTSService(GoogleBaseTTSService):
             http_options: HTTP client options for the google-genai client.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        self._api_key = api_key or os.environ.get("GOOGLE_API_KEY")
-        self._http_options = http_options
-
+        # Backend selection: an explicit ``use_genai`` wins; otherwise passing an
+        # ``api_key`` opts into the GenAI client. We deliberately don't auto-select
+        # GenAI from the GOOGLE_API_KEY env var alone — that var is commonly set for
+        # other Google services (e.g. the LLM), and reading it here would silently
+        # flip the backend out from under a GCP-credentialed user.
         if use_genai is not None:
             self._use_genai = use_genai
-        elif api_key is not None:
-            self._use_genai = True
         else:
-            self._use_genai = False
+            self._use_genai = api_key is not None
+
+        # The API key (param, then env) is only meaningful for the GenAI backend.
+        self._api_key = (api_key or os.environ.get("GOOGLE_API_KEY")) if self._use_genai else None
+        self._http_options = http_options
 
         if sample_rate and sample_rate != self.GOOGLE_SAMPLE_RATE:
             logger.warning(
@@ -1399,23 +1405,40 @@ class GeminiTTSService(GoogleBaseTTSService):
         self._location = location
         self._client = self._create_client(credentials, credentials_path)
 
-    def _create_client(self, credentials: str | None, credentials_path: str | None) -> Any:
+    def _create_client(
+        self, credentials: str | None, credentials_path: str | None
+    ) -> "texttospeech_v1.TextToSpeechAsyncClient | genai.Client":
         if self._use_genai:
             return genai.Client(api_key=self._api_key, http_options=self._http_options)
         else:
             return super()._create_client(credentials, credentials_path)
 
-    async def cancel(self, frame):
+    async def stop(self, frame: EndFrame):
+        """Stop the Gemini TTS service.
+
+        Args:
+            frame: The end frame.
+        """
+        await super().stop(frame)
+        await self._close_client()
+
+    async def cancel(self, frame: CancelFrame):
         """Cancel the Gemini TTS service.
 
         Args:
             frame: The cancel frame.
         """
         await super().cancel(frame)
+        await self._close_client()
+
+    async def _close_client(self):
+        # Only the GenAI client owns a closable async session; the GCP client
+        # manages its own lifecycle.
         if self._use_genai:
             try:
                 await self._client.aio.aclose()
             except Exception:
+                # Do nothing - we're shutting down anyway.
                 pass
 
     def language_to_service_language(self, language: Language) -> str | None:
@@ -1524,8 +1547,7 @@ class GeminiTTSService(GoogleBaseTTSService):
                 yield frame
 
         except Exception as e:
-            error_message = f"Gemini GCP TTS generation error: {str(e)}"
-            yield ErrorFrame(error=error_message)
+            yield ErrorFrame(error=f"Gemini GCP TTS generation error: {str(e)}")
 
     async def _run_genai_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating GenAI TTS [{text}]")
@@ -1593,5 +1615,4 @@ class GeminiTTSService(GoogleBaseTTSService):
                 yield TTSAudioRawFrame(audio_buffer, self.sample_rate, 1, context_id=context_id)
 
         except Exception as e:
-            error_message = f"Gemini GenAI TTS generation error: {str(e)}"
-            yield ErrorFrame(error=error_message)
+            yield ErrorFrame(error=f"Gemini GenAI TTS generation error: {str(e)}")
