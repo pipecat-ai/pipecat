@@ -60,7 +60,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = GoogleSTTService(
         settings=GoogleSTTService.Settings(
-            languages=[Language.EN_US, Language.DE],
+            languages=[Language.EN_US],
         ),
         credentials=os.environ["GOOGLE_TEST_CREDENTIALS"],
     )

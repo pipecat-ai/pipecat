@@ -37,6 +37,7 @@ async def test_genai_backend_success(mock_genai_client_class):
             class MockInlineData:
                 def __init__(self, d):
                     self.data = d
+
             self.inline_data = MockInlineData(data)
 
     class MockContent:

@@ -47,13 +47,13 @@ from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 
 try:
+    import google.genai as genai
     from google.api_core.client_options import ClientOptions
     from google.auth import default
     from google.auth.exceptions import GoogleAuthError
     from google.cloud import texttospeech_v1
-    from google.oauth2 import service_account
-    import google.genai as genai
     from google.genai.types import HttpOptions
+    from google.oauth2 import service_account
 
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -1349,9 +1349,8 @@ class GeminiTTSService(GoogleBaseTTSService):
             )
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_model = "gemini-3.1-flash-tts-preview"
         default_settings = self.Settings(
-            model=default_model,
+            model="gemini-3.1-flash-tts-preview",
             voice="Kore",
             language="en-US",
             prompt=None,
@@ -1398,19 +1397,20 @@ class GeminiTTSService(GoogleBaseTTSService):
         )
 
         self._location = location
-        self._client = self._create_client(
-            credentials, credentials_path
-        )
+        self._client = self._create_client(credentials, credentials_path)
 
-    def _create_client(
-        self, credentials: str | None, credentials_path: str | None
-    ) -> Any:
+    def _create_client(self, credentials: str | None, credentials_path: str | None) -> Any:
         if self._use_genai:
             return genai.Client(api_key=self._api_key, http_options=self._http_options)
         else:
             return super()._create_client(credentials, credentials_path)
 
     async def cancel(self, frame):
+        """Cancel the Gemini TTS service.
+
+        Args:
+            frame: The cancel frame.
+        """
         await super().cancel(frame)
         if self._use_genai:
             try:
@@ -1590,9 +1590,7 @@ class GeminiTTSService(GoogleBaseTTSService):
                                 )
 
             if audio_buffer:
-                yield TTSAudioRawFrame(
-                    audio_buffer, self.sample_rate, 1, context_id=context_id
-                )
+                yield TTSAudioRawFrame(audio_buffer, self.sample_rate, 1, context_id=context_id)
 
         except Exception as e:
             error_message = f"Gemini GenAI TTS generation error: {str(e)}"
