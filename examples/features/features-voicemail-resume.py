@@ -154,16 +154,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         # Resume support (the custom state management this example is about):
         #
-        # By default the detector closes its ConversationGate permanently once
+        # By default the detector closes its conversation path permanently once
         # voicemail is detected, which blocks the main LLM from ever hearing the
-        # called party again. We reopen that gate so that if a human picks up
-        # and starts talking after the message, their speech flows back into the
-        # main pipeline and the bot continues a normal conversation.
-        #
-        # The classifier branch stays closed (the call is already classified),
-        # so reopening only restores the live-conversation path.
-        voicemail._conversation_gate._gate_opened = True
-        logger.info("Conversation path reopened — the called party can keep talking.")
+        # called party again. reopen_conversation() restores that path, so if a
+        # human picks up and starts talking after the message, their speech flows
+        # back into the main pipeline and the bot continues a normal conversation.
+        # The classifier branch stays closed (the call is already classified).
+        voicemail.reopen_conversation()
+        logger.info("Conversation path reopened. The called party can keep talking.")
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 

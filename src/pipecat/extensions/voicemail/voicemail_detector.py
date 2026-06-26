@@ -210,6 +210,15 @@ class ConversationGate(NotifierGate):
         """
         super().__init__(voicemail_notifier, worker_name="conversation_gate")
 
+    def reopen(self) -> None:
+        """Reopen the conversation path after it was closed on voicemail.
+
+        The gate closes permanently when voicemail is detected. Reopening it
+        lets user input reach the main conversation LLM again, so a person who
+        picks up after the bot leaves its message can continue the call.
+        """
+        self._gate_opened = True
+
 
 class ClassificationProcessor(FrameProcessor):
     """Processor that handles LLM classification responses and triggers events.
@@ -706,6 +715,22 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
             The TTSGate processor instance.
         """
         return self._voicemail_gate
+
+    def reopen_conversation(self) -> None:
+        """Reopen the conversation path after voicemail handling.
+
+        By default the detector blocks the main conversation LLM permanently
+        once voicemail is detected. Call this after leaving a voicemail message
+        (for example, from an ``on_voicemail_detected`` handler) to let a person
+        who picks up keep talking to the bot.
+
+        Note:
+            This reopens the path immediately and leaves it open. Audio that
+            arrives after the message (a human, but also later machine prompts on
+            an answering system) will reach the main LLM, so use it when you want
+            the call to continue rather than end after the message.
+        """
+        self._conversation_gate.reopen()
 
     def add_event_handler(self, event_name: str, handler):
         """Add an event handler for voicemail detection events.
