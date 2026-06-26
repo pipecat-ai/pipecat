@@ -1405,6 +1405,13 @@ class GeminiTTSService(GoogleBaseTTSService):
         self._location = location
         self._client = self._create_client(credentials, credentials_path)
 
+        # Warn once now about settings the GenAI backend ignores, rather than on
+        # every utterance in run_tts.
+        self._warn_unsupported_genai_settings(
+            multi_speaker=default_settings.multi_speaker,
+            prompt=default_settings.prompt,
+        )
+
     def _create_client(
         self, credentials: str | None, credentials_path: str | None
     ) -> "texttospeech_v1.TextToSpeechAsyncClient | genai.Client":
@@ -1441,6 +1448,27 @@ class GeminiTTSService(GoogleBaseTTSService):
                 # Do nothing - we're shutting down anyway.
                 pass
 
+    def _warn_unsupported_genai_settings(
+        self, *, multi_speaker: bool | None, prompt: str | None
+    ) -> None:
+        """Warn about settings the GenAI backend silently ignores.
+
+        The Gemini API (GenAI) backend supports neither multi-speaker output nor
+        prompt/style instructions. This is a no-op on the GCP backend.
+        """
+        if not self._use_genai:
+            return
+        if multi_speaker:
+            logger.warning(
+                f"{self}: Multi-speaker is not supported by the Gemini API (GenAI) TTS "
+                "backend; using a single speaker."
+            )
+        if prompt:
+            logger.warning(
+                f"{self}: Prompt/style instructions are not supported by the Gemini API "
+                "(GenAI) TTS backend."
+            )
+
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Gemini TTS language format.
 
@@ -1476,6 +1504,11 @@ class GeminiTTSService(GoogleBaseTTSService):
         """
         if is_given(delta.voice) and delta.voice not in self.AVAILABLE_VOICES:
             logger.warning(f"Voice '{delta.voice}' not in known voices list. Using anyway.")
+
+        self._warn_unsupported_genai_settings(
+            multi_speaker=delta.multi_speaker if is_given(delta.multi_speaker) else None,
+            prompt=delta.prompt if is_given(delta.prompt) else None,
+        )
 
         return await super()._update_settings(delta)
 
@@ -1553,17 +1586,6 @@ class GeminiTTSService(GoogleBaseTTSService):
         logger.debug(f"{self}: Generating GenAI TTS [{text}]")
 
         try:
-            if self._settings.multi_speaker:
-                logger.warning(
-                    "Multi-speaker configuration is not supported with the Gemini API (GenAI) backend. "
-                    "Reverting to single speaker."
-                )
-
-            if self._settings.prompt:
-                logger.warning(
-                    "Prompt/style instructions are not supported by the Gemini API (GenAI) TTS backend."
-                )
-
             config = genai.types.GenerateContentConfig(
                 response_modalities=["AUDIO"],
                 speech_config=genai.types.SpeechConfig(
