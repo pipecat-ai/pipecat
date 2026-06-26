@@ -266,3 +266,17 @@ suite:
   #
   - bot: features/features-dtmf-menu.py
     scenarios: [dtmf_menu]
+
+  #
+  # Voicemail classify-and-route: a "roll your own" alternative to the built-in
+  # VoicemailDetector, using one custom FrameProcessor and no private state. It
+  # classifies the first caller turn, leaves a message on voicemail (then keeps
+  # the call open so a human who picks up can continue), or releases the turn to
+  # the main LLM on a live answer. Audio modality (the classifier keys off the
+  # real STT transcription). Run as a suite (fresh bot per scenario): the
+  # classifier decides once per process.
+  #
+  - bot: features/features-voicemail-resume.py
+    scenarios:
+      - voicemail_resume
+      - voicemail_human_answer

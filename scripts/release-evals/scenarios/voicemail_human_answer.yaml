@@ -1,0 +1,32 @@
+name: voicemail_human_answer
+
+# Roll-your-own voicemail classify-and-route, human-answers path. A live person
+# picks up immediately. The custom VoicemailClassifier must classify the first
+# turn as a conversation and RELEASE the buffered turn to the main LLM, so the bot
+# answers the person instead of leaving a voicemail message.
+#
+# This exercises the buffered-turn release path (the counterpart to the resume
+# scenario, which exercises the drop-and-leave-message path).
+
+user:
+  modality: audio
+  speech:
+    service: kokoro
+    voice: af_heart
+
+judge:
+  modality: audio
+  eval:
+    service: openai
+    model: gpt-4o-mini
+  transcription:
+    service: moonshine
+    model: small-streaming
+
+turns:
+  # Turn 0: a human answers. The classifier should tag this as a conversation and
+  # release the turn, so the main LLM responds about the appointment.
+  - user: "Hello? This is Dana speaking, who's calling?"
+    expect:
+      - event: response
+        eval: "the bot responds to Dana as a live person and talks about the call (for example the appointment), rather than leaving a leave-a-message voicemail prompt"
