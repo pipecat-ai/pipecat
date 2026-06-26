@@ -723,6 +723,13 @@ class SegmentedSTTService(STTService):
     Requires VAD to be enabled in the pipeline to function properly. Maintains a
     small audio buffer to account for the delay between actual speech start and
     VAD detection.
+
+    The buffered segment is passed to :meth:`run_stt` as a WAV container by
+    default, which is what cloud providers want for their upload APIs. Local
+    models that consume raw 16-bit PCM directly override
+    :attr:`wants_wav_segments` to return ``False`` so they receive the
+    unwrapped buffer instead. This is a subclass-level contract, not a
+    user-configurable option: the format is dictated by what the model expects.
     """
 
     def __init__(self, *, sample_rate: int | None = None, **kwargs):
@@ -748,6 +755,17 @@ class SegmentedSTTService(STTService):
         """
         await super().start(frame)
         self._audio_buffer_size_1s = self.sample_rate * 2
+
+    @property
+    def wants_wav_segments(self) -> bool:
+        """Whether segments are passed to :meth:`run_stt` as a WAV container.
+
+        Returns True (the default) for cloud providers whose upload APIs expect
+        a WAV file. Local models that read the buffer as raw 16-bit PCM override
+        this to return False; otherwise they would misinterpret the 44-byte WAV
+        header as audio samples.
+        """
+        return True
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame, marking TranscriptionFrames as finalized.
@@ -778,19 +796,25 @@ class SegmentedSTTService(STTService):
     async def _handle_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         self._user_speaking = False
 
-        content = io.BytesIO()
-        wav = wave.open(content, "wb")
-        wav.setsampwidth(2)
-        wav.setnchannels(1)
-        wav.setframerate(self.sample_rate)
-        wav.writeframes(self._audio_buffer)
-        wav.close()
-        content.seek(0)
+        if self.wants_wav_segments:
+            content = io.BytesIO()
+            wav = wave.open(content, "wb")
+            wav.setsampwidth(2)
+            wav.setnchannels(1)
+            wav.setframerate(self.sample_rate)
+            wav.writeframes(self._audio_buffer)
+            wav.close()
+            content.seek(0)
+            audio = content.read()
+        else:
+            # Local models read the buffer as raw 16-bit PCM; wrapping it in a
+            # WAV container would make them misread the 44-byte header as audio.
+            audio = bytes(self._audio_buffer)
 
         # Start clean.
         self._audio_buffer.clear()
 
-        await self.process_generator(self.run_stt(content.read()))
+        await self.process_generator(self.run_stt(audio))
 
     async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
         """Process audio frames by buffering them for segmented transcription.
