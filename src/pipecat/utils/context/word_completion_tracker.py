@@ -283,11 +283,17 @@ class WordCompletionTracker:
                 self._llm_pos = len(self._llm_text)
                 # Validate: the sweep must contain the frame word (safeguard for
                 # symbol/emoji words that complete a frame whose llm_text was already
-                # exhausted and does not include them).
+                # exhausted and does not include them). Skip this check when the
+                # completing word finishes a transformed segment — the spoken word
+                # (e.g. "dollars") won't appear verbatim in the original ("$5").
+                completed = self._segment_map.last_completed_segment
                 word_without_punctuation = self._remove_trailing_punctuation(self._frame_word)
-                if word_without_punctuation and self._fold_typography(
+                if (
                     word_without_punctuation
-                ) not in self._fold_typography(self._llm_consumed):
+                    and (completed is None or not completed.is_transformed)
+                    and self._fold_typography(word_without_punctuation)
+                    not in self._fold_typography(self._llm_consumed)
+                ):
                     logger.warning(
                         f"WordCompletionTracker: llm_consumed {repr(self._llm_consumed)!s} "
                         f"does not contain frame_word {repr(self._frame_word)!s}, discarding"

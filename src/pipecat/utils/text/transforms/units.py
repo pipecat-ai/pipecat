@@ -39,10 +39,25 @@ _UNIT_MAP: dict[str, str] = {
     "ghz": "gigahertz",
 }
 
-# Build pattern from longest to shortest to avoid partial matches
-_sorted_units = sorted(_UNIT_MAP.keys(), key=len, reverse=True)
+# Single-letter units that are also common English words: only expand when
+# they appear immediately after a digit with no intervening space, e.g. "5m"
+# but not "1 m people" (where "m" is a word) or "1 in 5" (preposition).
+_AMBIGUOUS_UNITS = {"in", "m", "g", "l"}
+
+_sorted_unambiguous = sorted(
+    (u for u in _UNIT_MAP if u not in _AMBIGUOUS_UNITS), key=len, reverse=True
+)
+_sorted_ambiguous = sorted(_AMBIGUOUS_UNITS, key=len, reverse=True)
+
+# Unambiguous units allow optional whitespace between the number and the unit.
 _UNIT_RE = re.compile(
-    r"(\d+(?:\.\d+)?)\s*(" + "|".join(re.escape(u) for u in _sorted_units) + r")\b",
+    r"(\d+(?:\.\d+)?)\s*(" + "|".join(re.escape(u) for u in _sorted_unambiguous) + r")\b",
+    re.IGNORECASE,
+)
+
+# Ambiguous units require the unit to follow the digit with no space.
+_AMBIGUOUS_UNIT_RE = re.compile(
+    r"(\d+(?:\.\d+)?)(" + "|".join(re.escape(u) for u in _sorted_ambiguous) + r")\b",
     re.IGNORECASE,
 )
 
@@ -68,4 +83,5 @@ async def expand_units(text: str, aggregation_type: str | AggregationType) -> st
         unit = _UNIT_MAP[match.group(2).lower()]
         return f"{number} {unit}"
 
-    return _UNIT_RE.sub(_replace, text)
+    text = _UNIT_RE.sub(_replace, text)
+    return _AMBIGUOUS_UNIT_RE.sub(_replace, text)
