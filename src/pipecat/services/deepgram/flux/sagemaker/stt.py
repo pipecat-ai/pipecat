@@ -211,6 +211,9 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
     async def _disconnect(self):
         """Disconnect from the SageMaker endpoint."""
         self._connection_established_event.clear()
+        # Unblock any pending Configure ack waiter so a teardown mid-update
+        # doesn't leave _send_configure hanging until its timeout.
+        self._cancel_configure_ack()
 
         if self._client and self._client.is_active:
             logger.debug("Disconnecting from Deepgram Flux on SageMaker...")
