@@ -1029,6 +1029,40 @@ def _setup_whatsapp_routes(app: FastAPI, args: argparse.Namespace):
             logger.error(f"Internal error processing webhook: {e}")
             raise HTTPException(status_code=500, detail="Internal server error processing webhook")
 
+    @app.post(
+        "/whatsapp/outbound",
+        summary="Initiate outbound WhatsApp call",
+        description="Dials out to a WhatsApp number using the bot's pipeline",
+    )
+    async def initiate_outbound_call(request: Request):
+        """Initiate an outbound WhatsApp call.
+
+        Expects JSON body: {"to": "62812xxxxxxx"}
+
+        The bot must have established a previous conversation with the target
+        number (WhatsApp requires a 7-day reply window from an inbound call).
+        """
+        if whatsapp_client is None:
+            raise HTTPException(status_code=503, detail="Service unavailable")
+
+        body = await request.json()
+        to_number = body.get("to")
+        if not to_number:
+            raise HTTPException(status_code=400, detail="Missing 'to' field")
+
+        try:
+            call_id = await whatsapp_client.initiate_outbound_call(
+                to_number=to_number,
+                connection_callback=connection_callback,
+            )
+            logger.info(f"Outbound call initiated: call_id={call_id}, to={to_number}")
+            return {"success": True, "call_id": call_id, "to": to_number}
+        except Exception as e:
+            logger.error(f"Failed to initiate outbound call to {to_number}: {e}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to initiate outbound call: {str(e)}"
+            )
+
     @asynccontextmanager
     async def whatsapp_lifespan(app: FastAPI):
         """Manage WhatsApp client lifecycle and cleanup connections."""

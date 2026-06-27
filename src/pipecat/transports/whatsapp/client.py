@@ -68,6 +68,7 @@ class WhatsAppClient:
         )
         self._whatsapp_secret = whatsapp_secret
         self._ongoing_calls_map: dict[str, SmallWebRTCConnection] = {}
+        self._pending_outbound_calls: dict[str, dict] = {}
 
         # Set default ICE servers if none provided
         if ice_servers is None:
@@ -124,7 +125,89 @@ class WhatsAppClient:
 
         # Clear the ongoing calls map
         self._ongoing_calls_map.clear()
+        self._pending_outbound_calls.clear()
         logger.debug("All calls terminated successfully")
+
+    async def initiate_outbound_call(
+        self,
+        to_number: str,
+        connection_callback: Callable[..., Awaitable[None]] | None = None,
+    ) -> str:
+        """Initiate an outbound WhatsApp call.
+
+        1. Creates a WebRTC connection and generates an SDP offer
+        2. Sends the offer to Meta's WhatsApp Cloud API
+        3. Stores the pending call for when the user answers
+
+        When the callee answers, Meta sends a 'connect' webhook which
+        triggers the existing inbound handler.
+
+        Args:
+            to_number: Target WhatsApp number (international format, no '+').
+            connection_callback: Callback invoked when callee answers.
+                Same signature as handle_webhook_request's connection_callback.
+
+        Returns:
+            The generated call ID for tracking.
+
+        Raises:
+            RuntimeError: If the offer creation or API call fails.
+        """
+        import uuid
+
+        call_id = str(uuid.uuid4())
+        logger.debug(f"Initiating outbound call to {to_number}, call_id: {call_id}")
+
+        try:
+            # 1. Create WebRTC connection and generate SDP offer
+            pipecat_connection = SmallWebRTCConnection(self._ice_servers)
+            offer = await pipecat_connection.create_offer()
+            sdp_offer = offer.get("sdp")
+            if not sdp_offer:
+                raise RuntimeError("Failed to generate SDP offer")
+
+            sdp_offer = self._filter_sdp_for_whatsapp(sdp_offer)
+            logger.debug(f"SDP offer generated for outbound call {call_id}")
+
+            # 2. Send offer to WhatsApp API
+            response = await self._whatsapp_api.initiate_call_to_whatsapp(
+                to_number=to_number, sdp=sdp_offer, call_id=call_id
+            )
+            if not response.get("success", False):
+                await pipecat_connection.disconnect()
+                error_msg = response.get("error", {}).get("message", "Unknown error")
+                raise RuntimeError(f"Failed to initiate outbound call: {error_msg}")
+
+            # 3. Store connection and pending state
+            self._ongoing_calls_map[call_id] = pipecat_connection
+            self._pending_outbound_calls[call_id] = {
+                "callback": connection_callback,
+                "to_number": to_number,
+            }
+
+            # Set up disconnect handler
+            @pipecat_connection.event_handler("closed")
+            async def handle_disconnected(webrtc_connection: SmallWebRTCConnection):
+                logger.debug(
+                    f"Peer connection closed: {webrtc_connection.pc_id} for call {call_id}"
+                )
+                self._ongoing_calls_map.pop(call_id, None)
+                self._pending_outbound_calls.pop(call_id, None)
+
+            logger.debug(f"Outbound call initiated to {to_number}, call_id: {call_id}")
+            return call_id
+
+        except Exception as e:
+            # Clean up on failure
+            if call_id in self._ongoing_calls_map:
+                conn = self._ongoing_calls_map.pop(call_id)
+                try:
+                    await conn.disconnect()
+                except Exception:
+                    pass
+            self._pending_outbound_calls.pop(call_id, None)
+            logger.error(f"Failed to initiate outbound call to {to_number}: {e}")
+            raise
 
     async def handle_verify_webhook_request(
         self, params: dict[str, str], expected_verification_token: str
@@ -317,9 +400,12 @@ class WhatsAppClient:
     async def _handle_connect_event(self, call: WhatsAppConnectCall) -> SmallWebRTCConnection:
         """Handle a CONNECT event by establishing WebRTC connection and accepting the call.
 
+        For inbound calls, creates a new WebRTC connection. For outbound calls
+        (pending in _pending_outbound_calls), uses the existing connection.
+
         This method:
-        1. Creates a new WebRTC connection using configured ICE servers
-        2. Initializes the connection with the provided SDP
+        1. Creates or reuses a WebRTC connection
+        2. Initializes/reinitializes the connection with the provided SDP
         3. Generates an SDP answer and filters it for WhatsApp compatibility
         4. Pre-accepts the call with WhatsApp API
         5. Accepts the call with WhatsApp API
@@ -334,53 +420,78 @@ class WhatsAppClient:
         Raises:
             Exception: If pre-accept or accept API calls fail
         """
-        logger.debug(f"Incoming call from {call.from_}, call_id: {call.id}")
+        logger.debug(f"Connect event for call {call.id} from {call.from_}")
 
+        # Check if this is an outbound call (callee answered)
+        pending = self._pending_outbound_calls.pop(call.id, None)
         pipecat_connection = None
+
         try:
-            # Create and initialize WebRTC connection
-            pipecat_connection = SmallWebRTCConnection(self._ice_servers)
-            await pipecat_connection.initialize(sdp=call.session.sdp, type=call.session.sdp_type)
-            answer = pipecat_connection.get_answer()
-            if answer is None:
-                raise RuntimeError("SmallWebRTC connection produced no SDP answer")
-            sdp_answer = answer.get("sdp")
-            if sdp_answer is None:
-                raise RuntimeError("SmallWebRTC SDP answer missing 'sdp' field")
-            sdp_answer = self._filter_sdp_for_whatsapp(sdp_answer)
+            if pending:
+                # Outbound: reuse existing connection, set remote description
+                pipecat_connection = self._ongoing_calls_map.get(call.id)
+                if not pipecat_connection:
+                    raise RuntimeError(
+                        f"No existing WebRTC connection found for outbound call {call.id}"
+                    )
+                await pipecat_connection.set_remote_description(
+                    sdp=call.session.sdp, type=call.session.sdp_type
+                )
+                answer = pipecat_connection.get_answer()
+                if answer is None:
+                    raise RuntimeError("SmallWebRTC connection produced no SDP answer")
+                sdp_answer = answer.get("sdp")
+                if sdp_answer is None:
+                    raise RuntimeError("SmallWebRTC SDP answer missing 'sdp' field")
+                sdp_answer = self._filter_sdp_for_whatsapp(sdp_answer)
+                logger.debug(f"SDP answer generated for outbound call {call.id}")
 
-            logger.debug(f"SDP answer generated for call {call.id}")
-
-            # Pre-accept the call
-            try:
+                # Pre-accept and accept (same flow as inbound)
                 pre_accept_resp = await self._whatsapp_api.answer_call_to_whatsapp(
                     call.id, "pre_accept", sdp_answer, call.from_
                 )
                 if not pre_accept_resp.get("success", False):
-                    logger.error(f"Failed to pre-accept call {call.id}: {pre_accept_resp}")
                     raise Exception(f"Failed to pre-accept call: {pre_accept_resp}")
 
-                logger.debug(f"Pre-accept successful for call {call.id}")
-            except Exception as e:
-                logger.error(f"Pre-accept API call failed for call {call.id}: {e}")
-                raise Exception(f"Failed to pre-accept call: {e}")
-
-            # Accept the call
-            try:
                 accept_resp = await self._whatsapp_api.answer_call_to_whatsapp(
                     call.id, "accept", sdp_answer, call.from_
                 )
                 if not accept_resp.get("success", False):
-                    logger.error(f"Failed to accept call {call.id}: {accept_resp}")
                     raise Exception(f"Failed to accept call: {accept_resp}")
 
-                logger.debug(f"Accept successful for call {call.id}")
-            except Exception as e:
-                logger.error(f"Accept API call failed for call {call.id}: {e}")
-                raise Exception(f"Failed to accept call: {e}")
+                logger.debug(f"Outbound call {call.id} accepted successfully")
 
-            # Store the connection for management
-            self._ongoing_calls_map[call.id] = pipecat_connection
+            else:
+                # Inbound: create new WebRTC connection
+                pipecat_connection = SmallWebRTCConnection(self._ice_servers)
+                await pipecat_connection.initialize(
+                    sdp=call.session.sdp, type=call.session.sdp_type
+                )
+                answer = pipecat_connection.get_answer()
+                if answer is None:
+                    raise RuntimeError("SmallWebRTC connection produced no SDP answer")
+                sdp_answer = answer.get("sdp")
+                if sdp_answer is None:
+                    raise RuntimeError("SmallWebRTC SDP answer missing 'sdp' field")
+                sdp_answer = self._filter_sdp_for_whatsapp(sdp_answer)
+                logger.debug(f"SDP answer generated for inbound call {call.id}")
+
+                # Pre-accept the call
+                pre_accept_resp = await self._whatsapp_api.answer_call_to_whatsapp(
+                    call.id, "pre_accept", sdp_answer, call.from_
+                )
+                if not pre_accept_resp.get("success", False):
+                    raise Exception(f"Failed to pre-accept call: {pre_accept_resp}")
+
+                # Accept the call
+                accept_resp = await self._whatsapp_api.answer_call_to_whatsapp(
+                    call.id, "accept", sdp_answer, call.from_
+                )
+                if not accept_resp.get("success", False):
+                    raise Exception(f"Failed to accept call: {accept_resp}")
+
+                # Store the connection
+                self._ongoing_calls_map[call.id] = pipecat_connection
 
             # Set up disconnect handler
             @pipecat_connection.event_handler("closed")
@@ -388,22 +499,36 @@ class WhatsAppClient:
                 logger.debug(
                     f"Peer connection closed: {webrtc_connection.pc_id} for call {call.id}"
                 )
-                # Clean up from ongoing calls map
                 self._ongoing_calls_map.pop(call.id, None)
+                self._pending_outbound_calls.pop(call.id, None)
+
+            # Invoke callback if provided (use stored callback for outbound, or the one passed to handle_webhook_request)
+            callback = (pending or {}).get("callback") if pending else None
+            if callback and pipecat_connection:
+                try:
+                    if len(inspect.signature(callback).parameters) >= 2:
+                        await callback(pipecat_connection, call)
+                    else:
+                        warnings.warn(
+                            "connection_callback with a single (connection) argument is deprecated. "
+                            "Update it to accept (connection, call: WhatsAppConnectCall).",
+                            DeprecationWarning,
+                            stacklevel=2,
+                        )
+                        await callback(pipecat_connection)
+                except Exception as cb_error:
+                    logger.error(f"Connection callback failed for call {call.id}: {cb_error}")
 
             logger.debug(f"WebRTC connection established successfully for call {call.id}")
             return pipecat_connection
 
         except Exception as e:
-            # Clean up connection on failure
-            if pipecat_connection:
+            if pipecat_connection and call.id not in pending:
                 try:
                     await pipecat_connection.disconnect()
-                except Exception as cleanup_error:
-                    logger.error(
-                        f"Failed to cleanup connection for call {call.id}: {cleanup_error}"
-                    )
-
+                except Exception:
+                    pass
+            self._ongoing_calls_map.pop(call.id, None)
             logger.error(f"Failed to handle connect event for call {call.id}: {e}")
             raise
 

@@ -319,6 +319,42 @@ class WhatsAppApi:
         ) as response:
             return await response.json()
 
+    async def initiate_call_to_whatsapp(
+        self, to_number: str, sdp: str, call_id: str
+    ) -> dict:
+        """Initiate an outbound WhatsApp call.
+
+        POSTs an SDP offer to Meta's WhatsApp Cloud API, which will ring
+        the target user's WhatsApp. When the user answers, Meta sends a
+        'connect' webhook back to our /whatsapp endpoint.
+
+        Args:
+            to_number: Target phone number (international format, no '+' prefix).
+            sdp: SDP offer from our WebRTC connection.
+            call_id: Server-generated UUID to correlate with the connect webhook.
+
+        Returns:
+            Dict containing the API response with success status.
+        """
+        logger.debug(f"Initiating outbound call to {to_number}, call_id: {call_id}")
+        async with self._session.post(
+            self._whatsapp_url,
+            headers={
+                "Authorization": f"Bearer {self._whatsapp_token}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "messaging_product": "whatsapp",
+                "to": to_number,
+                "action": "offer",
+                "call_id": call_id,
+                "session": {"sdp": sdp, "sdp_type": "offer"},
+            },
+        ) as response:
+            resp_json = await response.json()
+            logger.debug(f"Outbound call initiation response: {resp_json}")
+            return resp_json
+
     async def terminate_call_to_whatsapp(self, call_id: str):
         """Terminate an active WhatsApp call.
 
