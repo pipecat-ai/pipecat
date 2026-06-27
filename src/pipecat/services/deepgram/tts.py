@@ -177,11 +177,16 @@ class DeepgramTTSService(WebsocketTTSService):
         """Disconnect from Deepgram WebSocket and clean up tasks."""
         await super()._disconnect()
 
-        if self._receive_task:
-            await self.cancel_task(self._receive_task)
-            self._receive_task = None
-
-        await self._disconnect_websocket()
+        receive_task = self._receive_task
+        try:
+            await self._disconnect_websocket()
+        finally:
+            if receive_task:
+                try:
+                    await self.cancel_task(receive_task)
+                finally:
+                    if self._receive_task is receive_task:
+                        self._receive_task = None
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta.
