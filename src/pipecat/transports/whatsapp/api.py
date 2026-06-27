@@ -319,9 +319,7 @@ class WhatsAppApi:
         ) as response:
             return await response.json()
 
-    async def initiate_call_to_whatsapp(
-        self, to_number: str, sdp: str, call_id: str
-    ) -> dict:
+    async def initiate_call_to_whatsapp(self, to_number: str, sdp: str, call_id: str) -> dict:
         """Initiate an outbound WhatsApp call.
 
         POSTs an SDP offer to Meta's WhatsApp Cloud API, which will ring
