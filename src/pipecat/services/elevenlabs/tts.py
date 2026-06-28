@@ -799,11 +799,17 @@ class ElevenLabsTTSService(WebsocketTTSService):
     async def _disconnect_websocket(self):
         try:
             await self.stop_all_metrics()
+            websocket = self._websocket
 
-            if self._websocket:
+            if websocket:
                 logger.debug("Disconnecting from ElevenLabs")
-                await self._websocket.send(json.dumps({"close_socket": True}))
-                await self._websocket.close()
+                await websocket.send(json.dumps({"close_socket": True}))
+                try:
+                    async with asyncio.timeout(5):
+                        await websocket.wait_closed()
+                except TimeoutError:
+                    logger.warning("ElevenLabs websocket did not close within timeout")
+                await websocket.close()
                 logger.debug("Disconnected from ElevenLabs")
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
