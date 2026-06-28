@@ -95,7 +95,7 @@ class _ServiceToolSyncTests:
 
 
 class _SessionUpdateToolPreservationTests:
-    """Regression cases for services with a ``_send_session_update``.
+    """Regression cases shared by the nested-session-properties services.
 
     These services (OpenAI/Grok/Inworld realtime) convert their
     ``session_properties.tools`` from a ``ToolsSchema`` to the provider's list
@@ -103,6 +103,10 @@ class _SessionUpdateToolPreservationTests:
     copy: mutating the stored ``session_properties`` would leave ``tools`` a
     list, so the next ``_service_tools()`` fallback no longer recognizes it
     and the bundled handler silently stops registering.
+
+    They also share a ``_send_tool_result`` whose ``output`` already arrives as
+    a JSON-encoded string from the aggregator, so it must be passed through
+    rather than re-encoded into a double-encoded JSON string literal.
     """
 
     async def test_send_session_update_preserves_service_tools(self):
@@ -122,6 +126,30 @@ class _SessionUpdateToolPreservationTests:
         # ToolsSchema by the field validator.
         service = self._service([_sample_schema(sample_handler)])
         self.assertIsInstance(service._settings.session_properties.tools, ToolsSchema)
+
+    async def test_send_tool_result_passes_through_encoded_string(self):
+        # The aggregator hands _send_tool_result an already-JSON-encoded string;
+        # re-encoding it would double-encode it into a JSON string literal.
+        service = self._service(None)
+        service.send_client_event = AsyncMock()
+        await service._send_tool_result("call_1", '{"temperature": 72}')
+        item = service.send_client_event.call_args.args[0].item
+        self.assertEqual(item.output, '{"temperature": 72}')
+
+    async def test_send_tool_result_passes_through_completion_sentinel(self):
+        service = self._service(None)
+        service.send_client_event = AsyncMock()
+        await service._send_tool_result("call_1", "COMPLETED")
+        item = service.send_client_event.call_args.args[0].item
+        self.assertEqual(item.output, "COMPLETED")
+
+    async def test_send_tool_result_encodes_dict(self):
+        # A raw dict is still encoded, mirroring the AWS Nova Sonic guard.
+        service = self._service(None)
+        service.send_client_event = AsyncMock()
+        await service._send_tool_result("call_1", {"temperature": 72})
+        item = service.send_client_event.call_args.args[0].item
+        self.assertEqual(item.output, '{"temperature": 72}')
 
 
 class TestGeminiLiveServiceToolSync(_ServiceToolSyncTests, unittest.IsolatedAsyncioTestCase):

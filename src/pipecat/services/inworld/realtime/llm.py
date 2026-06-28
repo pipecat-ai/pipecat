@@ -1184,6 +1184,6 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         item = events.ConversationItem(
             type="function_call_output",
             call_id=tool_call_id,
-            output=result,
+            output=json.dumps(result, ensure_ascii=False) if isinstance(result, dict) else result,
         )
         await self.send_client_event(events.ConversationItemCreateEvent(item=item))
