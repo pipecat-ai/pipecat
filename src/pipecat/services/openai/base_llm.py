@@ -6,6 +6,7 @@
 
 """Base LLM service implementation for services that use the AsyncOpenAI client."""
 
+import ast
 import asyncio
 import json
 from collections.abc import Mapping
@@ -35,6 +36,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
+    UserStartedSpeakingFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -43,6 +45,94 @@ from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
 from pipecat.services.settings import LLMSettings, _NotGiven, assert_given
 from pipecat.utils.tracing.service_decorators import traced_llm
+
+
+def _recover_leaked_tool_call(content: str, known_names):
+    """Recover a tool call the model emitted as plain text.
+
+    Some models (notably Gemma-3 served by vLLM's ``pythonic`` tool parser)
+    cannot emit prose and a structured ``tool_calls`` delta in the same
+    generation, so they fall back to writing the call into the assistant
+    *content* as ``[func(arg=...)]`` or bare ``func(arg=...)``. When that
+    happens no structured tool call is produced and the call is never executed.
+
+    This scans ``content`` for a call to one of the registered ``known_names``,
+    balance-matching parentheses (so nested lists/dicts are handled) and parsing
+    the keyword arguments with :func:`ast.literal_eval`. It is deliberately
+    strict — it only matches a *known* tool name immediately followed by a
+    balanced ``(...)`` whose kwargs are pure literals — so ordinary text (even
+    Hebrew prose containing parentheses) will not false-positive.
+
+    Args:
+        content: The accumulated assistant content from the stream.
+        known_names: Iterable of registered tool names to look for.
+
+    Returns:
+        ``(name, args_dict, start, end)`` for the matched span, where ``start``
+        and ``end`` bound the call text (including any wrapping ``[`` / ``]``),
+        or ``None`` if no recognizable call is found.
+    """
+    if not content or not known_names:
+        return None
+    for name in known_names:
+        idx = 0
+        while True:
+            pos = content.find(name, idx)
+            if pos == -1:
+                break
+            idx = pos + len(name)
+            # Require a standalone identifier (not a substring of a larger word).
+            if pos > 0 and (content[pos - 1].isalnum() or content[pos - 1] == "_"):
+                continue
+            # The next non-space character must open the argument list.
+            j = idx
+            while j < len(content) and content[j] == " ":
+                j += 1
+            if j >= len(content) or content[j] != "(":
+                continue
+            # Balance parentheses, respecting string literals.
+            depth = 0
+            k = j
+            in_str = None
+            while k < len(content):
+                c = content[k]
+                if in_str:
+                    if c == in_str and content[k - 1] != "\\":
+                        in_str = None
+                elif c in "\"'":
+                    in_str = c
+                elif c == "(":
+                    depth += 1
+                elif c == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                k += 1
+            if k >= len(content) or depth != 0:
+                continue
+            call_src = content[pos : k + 1]
+            try:
+                node = ast.parse(call_src, mode="eval").body
+            except SyntaxError:
+                continue
+            if not isinstance(node, ast.Call):
+                continue
+            try:
+                args = {
+                    kw.arg: ast.literal_eval(kw.value)
+                    for kw in node.keywords
+                    if kw.arg is not None
+                }
+            except (ValueError, SyntaxError):
+                continue
+            start, end = pos, k + 1
+            # Absorb the pythonic-list wrapper `[ ... ]` if present.
+            if start > 0 and content[start - 1] == "[":
+                start -= 1
+            if end < len(content) and content[end] == "]":
+                end += 1
+            return name, args, start, end
+    return None
 
 
 @dataclass
@@ -228,6 +318,18 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         # Store pending function calls that need to be executed after TTS
         self._pending_function_calls = []
 
+        # --- Tool-call loop guard ---------------------------------------
+        # A failing/empty tool call (e.g. web_search with no query → Tavily
+        # 400) gets its error result written back to the context, which
+        # re-prompts the LLM, which can emit the same bad call again — an
+        # infinite tool-call loop that freezes the turn. We cap how many
+        # *consecutive* tool-call rounds a single user turn may trigger.
+        # Once the cap is hit, get_chat_completions() strips tools/tool_choice
+        # for the follow-up completion, forcing a plain text answer that can
+        # never loop. The counter resets on each new user turn.
+        self._max_tool_call_rounds_per_turn = 2
+        self._tool_call_rounds_this_turn = 0
+
     def create_client(
         self,
         api_key=None,
@@ -309,6 +411,21 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         )
 
         params = self.build_chat_completion_params(params_from_context)
+
+        # Tool-call loop guard: once a single user turn has triggered the max
+        # number of consecutive tool-call rounds, disable tools for the
+        # follow-up completion so the model is forced to answer in plain text.
+        # This guarantees a failing/empty tool (e.g. web_search with no query)
+        # can never spin in an infinite re-prompt loop.
+        if self._tool_call_rounds_this_turn >= self._max_tool_call_rounds_per_turn:
+            if params.get("tools"):
+                logger.warning(
+                    f"{self}: tool-call loop guard hit "
+                    f"({self._tool_call_rounds_this_turn} consecutive rounds this "
+                    f"turn); disabling tools for this completion to force a text answer"
+                )
+            params.pop("tools", None)
+            params.pop("tool_choice", None)
 
         if self._retry_on_timeout:
             try:
@@ -414,6 +531,9 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         function_name = ""
         arguments = ""
         tool_call_id = ""
+        # Accumulate streamed content so we can recover a tool call the model
+        # emitted as plain text instead of a structured tool_calls delta.
+        content_buffer = ""
 
         # Reset pending function calls when processing a new context
         self._pending_function_calls = []
@@ -509,6 +629,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                         arguments += tool_call.function.arguments
                 elif chunk.choices[0].delta.content:
                     text_generated_signal = True
+                    content_buffer += chunk.choices[0].delta.content
                     await self._push_llm_text(chunk.choices[0].delta.content)
 
                 # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
@@ -520,11 +641,45 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 ):
                     await self.push_frame(LLMTextFrame(chunk.choices[0].delta.audio["transcript"]))
 
+        # Recover a tool call the model emitted as plain text instead of a
+        # structured tool_calls delta (e.g. Gemma-3 via vLLM's pythonic parser
+        # writes `[func(args)]` into the content). Only fires when no structured
+        # call was produced AND the content contains a call to a *registered*
+        # tool, so the normal path is untouched. The recovered call is fed into
+        # the same variables the block below consumes, reusing all of its
+        # tested defer/run logic.
+        if not function_name and content_buffer:
+            recovered = _recover_leaked_tool_call(
+                content_buffer, [n for n in self._functions.keys() if n]
+            )
+            if recovered:
+                rec_name, rec_args, rec_start, rec_end = recovered
+                function_name = rec_name
+                arguments = json.dumps(rec_args)
+                tool_call_id = f"recovered_{func_idx}"
+                logger.warning(
+                    f"{self}: recovered tool call '{rec_name}' emitted as plain "
+                    f"text (structured tool_calls was empty)"
+                )
+                # If the call was the *only* content, it will be stripped from
+                # the spoken text downstream, leaving nothing to play — so no
+                # BotStoppedSpeakingFrame will fire to flush a deferred call.
+                # Run it immediately in that case.
+                remainder = (content_buffer[:rec_start] + content_buffer[rec_end:]).strip()
+                if not remainder:
+                    text_generated_signal = False
+
         # if we got a function name and arguments, check to see if it's a function with
         # a registered handler. If so, run the registered callback, save the result to
         # the context, and re-prompt to get a chat answer. If we don't have a registered
         # handler, raise an exception.
         if function_name:
+            # This completion produced at least one tool call: count it as one
+            # round against the per-turn loop guard. The next completion (the
+            # re-prompt after the tool result) will have tools stripped once the
+            # cap is reached (see get_chat_completions).
+            self._tool_call_rounds_this_turn += 1
+
             # added to the list as last function name and arguments not added to the list
             functions_list.append(function_name)
             arguments_list.append(arguments or "{}")
@@ -540,6 +695,20 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 except json.JSONDecodeError:
                     logger.warning(f"{self}: Failed to parse function call arguments: {arguments}")
                     continue
+
+                # Drop a malformed web_search call with an empty/missing query
+                # before it can run (Tavily would 400 and the error result would
+                # re-prompt the model into the same bad call). Skipping it here
+                # lets the model answer in plain text instead of looping.
+                if function_name == "web_search" and not str(
+                    (arguments or {}).get("query", "")
+                ).strip():
+                    logger.warning(
+                        f"{self}: dropping web_search call with empty/missing 'query' "
+                        f"argument (malformed); model must answer without it"
+                    )
+                    continue
+
                 function_calls.append(
                     FunctionCallFromLLM(
                         context=context,
@@ -548,6 +717,12 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                         arguments=arguments,
                     )
                 )
+
+            # Every collected call was dropped (e.g. only a malformed
+            # web_search). Nothing to run or defer — let the turn proceed with
+            # whatever text was generated.
+            if not function_calls:
+                return
 
             # Send the info frame with function calls so that it can be traced by service_decorators
             await self.push_frame(
@@ -576,6 +751,12 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             direction: The direction of frame processing.
         """
         await super().process_frame(frame, direction)
+
+        # A new user turn resets the tool-call loop guard: the user has spoken
+        # again, so the per-turn budget of consecutive tool-call rounds starts
+        # fresh.
+        if isinstance(frame, UserStartedSpeakingFrame):
+            self._tool_call_rounds_this_turn = 0
 
         # Handle BotStoppedSpeakingFrame to execute pending function calls
         if isinstance(frame, BotStoppedSpeakingFrame):
