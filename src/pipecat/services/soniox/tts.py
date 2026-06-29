@@ -18,7 +18,7 @@ import asyncio
 import base64
 import json
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import websockets
@@ -35,7 +35,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import TTSSettings
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TextAggregationMode, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -122,13 +122,19 @@ def language_to_soniox_tts_language(language: Language) -> str | None:
 class SonioxTTSSettings(TTSSettings):
     """Settings for SonioxTTSService.
 
-    ``voice``, ``model``, and ``language`` travel in the per-stream
+    ``voice``, ``model``, ``language``, and ``speed`` travel in the per-stream
     config message, so changing any of them does not require reconnecting the
     WebSocket. The current context is flushed so the next stream opens with the
     new values.
+
+    Parameters:
+        voice: Voice name (e.g. ``"Adrian"``) or the UUID of a cloned voice in
+            the project owning the API key.
+        speed: Speech rate multiplier in the range 0.7-1.3. ``None`` leaves it
+            unset and uses the Soniox server default (1.0).
     """
 
-    pass
+    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SonioxTTSService(WebsocketTTSService):
@@ -180,6 +186,7 @@ class SonioxTTSService(WebsocketTTSService):
             model="tts-rt-v1",
             voice="Adrian",
             language=Language.EN,
+            speed=None,
         )
 
         # Settings delta (canonical API, always wins)
@@ -347,7 +354,7 @@ class SonioxTTSService(WebsocketTTSService):
         if not changed:
             return changed
 
-        if changed.keys() & {"voice", "model", "language"}:
+        if changed.keys() & {"voice", "model", "language", "speed"}:
             if self._turn_context_id and self.audio_context_available(self._turn_context_id):
                 await self.flush_audio(context_id=self._turn_context_id)
             # Assign a new turn context ID so subsequent sentences in this turn
@@ -427,6 +434,8 @@ class SonioxTTSService(WebsocketTTSService):
         }
         if s.language is not None:
             config["language"] = s.language
+        if s.speed is not None:
+            config["speed"] = s.speed
         if self._audio_format.startswith("pcm_"):
             config["sample_rate"] = self.sample_rate
         return config
@@ -483,8 +492,12 @@ class SonioxTTSService(WebsocketTTSService):
             error_code = msg.get("error_code")
             if error_code is not None:
                 error_message = msg.get("error_message", "")
+                error_type = msg.get("error_type", "")
                 await self.push_error(
-                    error_msg=f"Soniox TTS error {error_code} (stream {stream_id}): {error_message}"
+                    error_msg=(
+                        f"Soniox TTS error {error_code} {error_type} "
+                        f"(stream {stream_id}): {error_message}"
+                    )
                 )
                 if stream_id and self.audio_context_available(stream_id):
                     await self.append_to_audio_context(
