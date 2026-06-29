@@ -1056,10 +1056,14 @@ class InworldTTSService(WebsocketTTSService):
                 error_msg = status.get("message", "Unknown error")
                 error_code = status.get("code")
 
-                # Handle "Context not found" error (code 5)
-                # This can happen when a keepalive message is sent but no context is available.
+                # Handle benign context errors:
+                # - "Context not found" (code 5): keepalive sent after context expired
+                # - "context_id is required": keepalive sent without a context
                 if error_code == 5 and "not found" in error_msg.lower():
                     logger.debug(f"{self}: Context {ctx_id} not found.")
+                    continue
+                if "context_id is required" in error_msg.lower():
+                    logger.debug(f"{self}: Contextless message rejected (benign): {error_msg}")
                     continue
 
                 # For other errors, push error frame
