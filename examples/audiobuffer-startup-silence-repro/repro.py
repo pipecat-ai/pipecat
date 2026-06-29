@@ -187,12 +187,18 @@ def report_case(name: str, user_track: bytes, sample_rate: int) -> bool:
     start_idx, run_s, start_s = longest_leading_zero_run(user_track, sample_rate)
     found = run_s > MIN_SILENCE_S
 
-    print(f"  user track length:        {len(user_track) // 2} samples "
-          f"({len(user_track) / 2 / sample_rate:.3f} s)")
-    print(f"  longest leading zero run: {run_s * 1000:.0f} ms "
-          f"(starts at {start_s:.3f} s, sample index {start_idx})")
-    print(f"  threshold:                {MIN_SILENCE_S * 1000:.0f} ms within first "
-          f"{LEADING_WINDOW_S:.1f} s")
+    print(
+        f"  user track length:        {len(user_track) // 2} samples "
+        f"({len(user_track) / 2 / sample_rate:.3f} s)"
+    )
+    print(
+        f"  longest leading zero run: {run_s * 1000:.0f} ms "
+        f"(starts at {start_s:.3f} s, sample index {start_idx})"
+    )
+    print(
+        f"  threshold:                {MIN_SILENCE_S * 1000:.0f} ms within first "
+        f"{LEADING_WINDOW_S:.1f} s"
+    )
     print(f"  result:                   {'INSERTED SILENCE DETECTED' if found else 'clean'}")
     return found
 
@@ -273,8 +279,10 @@ async def case_b_bot_sync() -> bool:
     *after* real audio, matching the customer's "short burst then silence"
     signature.
     """
-    print("BUG (b): short user burst, then bot opening while user is silent "
-          "(expect: inserted silence via bot-sync)")
+    print(
+        "BUG (b): short user burst, then bot opening while user is silent "
+        "(expect: inserted silence via bot-sync)"
+    )
     user_burst = make_tone(USER_IN_RATE, FRAME_MS, freq=440)
     bot_frame = make_tone(BOT_OUT_RATE, FRAME_MS, freq=880)
 
@@ -311,9 +319,15 @@ async def main():
 
     print("=" * 72)
     print("SUMMARY")
-    print(f"  CONTROL (steady audio):       {'silence (UNEXPECTED)' if control_found else 'clean (expected)'}")
-    print(f"  BUG (a) gap-fill:             {'silence (reproduced)' if a_found else 'clean (NOT reproduced)'}")
-    print(f"  BUG (b) bot-sync padding:     {'silence (reproduced)' if b_found else 'clean (NOT reproduced)'}")
+    print(
+        f"  CONTROL (steady audio):       {'silence (UNEXPECTED)' if control_found else 'clean (expected)'}"
+    )
+    print(
+        f"  BUG (a) gap-fill:             {'silence (reproduced)' if a_found else 'clean (NOT reproduced)'}"
+    )
+    print(
+        f"  BUG (b) bot-sync padding:     {'silence (reproduced)' if b_found else 'clean (NOT reproduced)'}"
+    )
     print()
 
     bug_reproduced = (a_found or b_found) and not control_found
