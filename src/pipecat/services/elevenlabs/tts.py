@@ -800,15 +800,21 @@ class ElevenLabsTTSService(WebsocketTTSService):
         try:
             await self.stop_all_metrics()
             websocket = self._websocket
-
             if websocket:
                 logger.debug("Disconnecting from ElevenLabs")
+                # The multi-stream protocol tears down in two steps: we ask
+                # ElevenLabs to close, then it closes. Wait for its close before
+                # forcing ours, so we don't race the closing handshake (which
+                # otherwise ends a notable fraction of sessions in a 1006 close).
+                # The timeout is only a fallback ceiling; the clean close
+                # normally arrives well within it.
                 await websocket.send(json.dumps({"close_socket": True}))
                 try:
-                    async with asyncio.timeout(5):
-                        await websocket.wait_closed()
+                    await asyncio.wait_for(websocket.wait_closed(), timeout=2.0)
                 except TimeoutError:
-                    logger.warning("ElevenLabs websocket did not close within timeout")
+                    logger.debug(
+                        "ElevenLabs did not close the WebSocket within 2.0s; closing from our side"
+                    )
                 await websocket.close()
                 logger.debug("Disconnected from ElevenLabs")
         except Exception as e:
