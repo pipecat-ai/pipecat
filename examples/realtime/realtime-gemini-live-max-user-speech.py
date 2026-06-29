@@ -79,6 +79,7 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.turns.user_mute.base_user_mute_strategy import BaseUserMuteStrategy
+from pipecat.utils.time import time_now_iso8601
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -215,13 +216,33 @@ class UserTranscriptCapture(FrameProcessor):
     This captures the *text*; it does not put the dropped tail back into the LLM
     context for that turn. Replace the log call with whatever you need (append
     to a transcript store, emit an event, write to your DB).
+
+    It also stamps when the user *started* talking. ``TranscriptionFrame.timestamp``
+    is set by the STT/realtime service at the moment it pushes the frame, not when
+    the user began speaking, so it lags the real turn start. We record the time as
+    ``UserStartedSpeakingFrame`` passes (the same turn-start signal the cap keys
+    off) and pair it with the transcript. If you want a more precise onset,
+    ``VADUserStartedSpeakingFrame`` carries a wall-clock ``timestamp`` field you
+    can read instead.
     """
 
+    def __init__(self):
+        """Initialize with no turn in progress."""
+        super().__init__()
+        self._turn_started_at: str | None = None
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Log every user transcript that passes by, then push it along."""
+        """Log every user transcript (with its turn-start time), then push it along."""
         await super().process_frame(frame, direction)
-        if isinstance(frame, TranscriptionFrame) and frame.text.strip():
-            logger.info(f"User transcript captured: {frame.text!r}")
+        if isinstance(frame, UserStartedSpeakingFrame):
+            # Stamp the real speech start now, not the later push time that the
+            # TranscriptionFrame carries.
+            self._turn_started_at = time_now_iso8601()
+        elif isinstance(frame, TranscriptionFrame) and frame.text.strip():
+            logger.info(
+                f"User transcript captured: {frame.text!r} "
+                f"(turn started: {self._turn_started_at}, frame pushed: {frame.timestamp})"
+            )
         await self.push_frame(frame, direction)
 
 
