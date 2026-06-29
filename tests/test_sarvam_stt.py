@@ -6,6 +6,8 @@
 
 import pytest
 
+pytest.importorskip("sarvamai")
+
 from pipecat.services.sarvam.stt import SarvamSTTService, language_to_sarvam_language
 from pipecat.transcriptions.language import Language
 

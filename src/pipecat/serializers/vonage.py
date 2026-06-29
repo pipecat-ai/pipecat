@@ -247,7 +247,7 @@ class VonageFrameSerializer(FrameSerializer):
 
             async with aiohttp.ClientSession() as session:
                 async with session.put(endpoint, headers=headers, json=data) as response:
-                    if response.status == 200:
+                    if response.status in (200, 204):
                         logger.info(f"Successfully terminated Vonage call {self._call_uuid}")
                     elif response.status == 404:
                         logger.debug(f"Vonage call {self._call_uuid} was already terminated")
