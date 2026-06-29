@@ -1058,11 +1058,13 @@ class InworldTTSService(WebsocketTTSService):
 
                 # Handle benign context errors:
                 # - "Context not found" (code 5): keepalive sent after context expired
-                # - "context_id is required": keepalive sent without a context
+                # - "context_id is required" / "no open context": keepalive sent
+                #   without an active context
                 if error_code == 5 and "not found" in error_msg.lower():
                     logger.debug(f"{self}: Context {ctx_id} not found.")
                     continue
-                if "context_id is required" in error_msg.lower():
+                lower_error_msg = error_msg.lower()
+                if "context_id is required" in lower_error_msg or "no open context" in lower_error_msg:
                     logger.debug(f"{self}: Contextless message rejected (benign): {error_msg}")
                     continue
 
