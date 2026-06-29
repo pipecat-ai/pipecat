@@ -109,6 +109,15 @@ class UserIdleController(BaseObject):
             await self._cancel_idle_timer()
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_turn_in_progress = False
+            # Start the idle timer when the user turn ends. In the normal case
+            # (bot responds), BotStartedSpeakingFrame will cancel it shortly
+            # after. In the edge case where the turn produced no text (e.g.,
+            # noise triggered VAD but STT returned nothing), there is no LLM
+            # call and therefore no subsequent BotStoppedSpeakingFrame to start
+            # the timer. Without this, the conversation enters a permanent dead
+            # state where the idle timer never fires again.
+            if self._function_calls_in_progress == 0:
+                await self._start_idle_timer()
         elif isinstance(frame, FunctionCallsStartedFrame):
             self._function_calls_in_progress += len(frame.function_calls)
             await self._cancel_idle_timer()

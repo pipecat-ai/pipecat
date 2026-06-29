@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
     UserIdleTimeoutUpdateFrame,
     UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
@@ -312,6 +313,97 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
         # Disable — should cancel running timer
         await controller.process_frame(UserIdleTimeoutUpdateFrame(timeout=0))
 
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertFalse(idle_triggered)
+
+        await controller.cleanup()
+
+    async def test_idle_fires_after_empty_user_turn(self):
+        """Test that idle timer starts when user turn ends without triggering a bot response.
+
+        Scenario: noise triggers VAD (UserStartedSpeaking), BotStoppedSpeaking
+        arrives during the user turn (ignored), then the turn ends
+        (UserStoppedSpeaking) with no text — so no LLM call and no subsequent
+        BotStoppedSpeaking. The idle timer must still fire.
+        """
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(self.task_manager)
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        # Bot finishes greeting
+        await controller.process_frame(BotStoppedSpeakingFrame())
+        # Noise interruption: VAD fires, user turn starts
+        await controller.process_frame(UserStartedSpeakingFrame())
+        # Bot stops speaking due to interruption (timer suppressed — turn in progress)
+        await controller.process_frame(BotStoppedSpeakingFrame())
+        # Turn ends with no text (empty transcription)
+        await controller.process_frame(UserStoppedSpeakingFrame())
+
+        # Timer should have started on UserStoppedSpeaking
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertTrue(idle_triggered)
+
+        await controller.cleanup()
+
+    async def test_user_stopped_speaking_timer_cancelled_by_bot(self):
+        """Test that the timer started on UserStoppedSpeaking is cancelled when bot speaks.
+
+        In the normal case (user spoke real text), the LLM responds and
+        BotStartedSpeakingFrame cancels the timer started by UserStoppedSpeaking.
+        """
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(self.task_manager)
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        # Normal flow: user speaks, turn ends, bot responds
+        await controller.process_frame(UserStartedSpeakingFrame())
+        await controller.process_frame(UserStoppedSpeakingFrame())
+        # Bot starts speaking shortly after (LLM response)
+        await asyncio.sleep(USER_IDLE_TIMEOUT * 0.3)
+        await controller.process_frame(BotStartedSpeakingFrame())
+
+        # Wait — timer should have been cancelled
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertFalse(idle_triggered)
+
+        await controller.cleanup()
+
+    async def test_user_stopped_speaking_no_timer_during_function_call(self):
+        """Test that UserStoppedSpeaking does not start timer while function calls are pending."""
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(self.task_manager)
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        # User speaks, function call starts during the turn
+        await controller.process_frame(UserStartedSpeakingFrame())
+        await controller.process_frame(
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+        )
+        # Turn ends while function call still in progress
+        await controller.process_frame(UserStoppedSpeakingFrame())
+
+        # Wait — timer should NOT have started (function call pending)
         await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
 
         self.assertFalse(idle_triggered)
