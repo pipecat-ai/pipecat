@@ -91,8 +91,7 @@ class DograhTTSService(WebsocketTTSService):
     """Dograh WebSocket-based TTS service with word timestamps.
 
     This service provides real-time text-to-speech using Dograh's unified WebSocket API.
-    The actual TTS provider (ElevenLabs, OpenAI, Deepgram, etc.) is determined by the
-    Dograh backend configuration. Supports word-level timestamps and audio streaming.
+    Supports word-level timestamps and audio streaming.
     """
 
     Settings = DograhTTSSettings
@@ -146,10 +145,10 @@ class DograhTTSService(WebsocketTTSService):
         self._base_url = base_url
         self._ws_path = ws_path
         self._correlation_id = correlation_id
-        # Only forward fields the upstream provider recognizes. Unknown
-        # fields (e.g. pitch/volume/language) get echoed verbatim by MPS to
-        # ElevenLabs, which then trips "voice_settings field must not change"
-        # on the second context of the connection.
+        # Only forward fields the upstream provider recognizes. Unknown fields
+        # (e.g. pitch/volume/language) would be echoed verbatim by MPS to the
+        # upstream provider, which may reject voice settings that change between
+        # contexts on the same connection.
         self._voice_settings: dict[str, float | bool] = {}
         speed = default_settings.speed
         if isinstance(speed, (int, float)):
@@ -164,6 +163,8 @@ class DograhTTSService(WebsocketTTSService):
         self._accumulated_text = ""
         self._start_metadata = None
         self._remote_initialized_context_ids: set[str] = set()
+        self._finished_context_ids: set[str] = set()
+        self._cancelled_context_ids: set[str] = set()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -214,6 +215,8 @@ class DograhTTSService(WebsocketTTSService):
             ws = await websocket_connect(url, additional_headers=headers)
             self._websocket = ws
             self._remote_initialized_context_ids.clear()
+            self._finished_context_ids.clear()
+            self._cancelled_context_ids.clear()
 
             # Send initial configuration
             config_msg = {
@@ -253,6 +256,8 @@ class DograhTTSService(WebsocketTTSService):
             logger.error(f"Error disconnecting from Dograh TTS service: {e}")
         finally:
             self._remote_initialized_context_ids.clear()
+            self._finished_context_ids.clear()
+            self._cancelled_context_ids.clear()
             await self.remove_active_audio_context()
             self._websocket = None
 
@@ -303,12 +308,10 @@ class DograhTTSService(WebsocketTTSService):
                 msg_type = msg.get("type")
                 ctx_id = msg.get("context_id")
 
-                # Handle final messages first. Unlike ElevenLabs's isFinal (which
-                # is a response to close_context), Dograh's "final" is sent
-                # proactively by the server to signal it's done generating audio.
-                # We must call remove_audio_context to signal the parent's
-                # _handle_audio_context loop to stop (otherwise it waits for a
-                # 3-second timeout).
+                # Handle final messages first. The server sends "final" to signal
+                # it is done generating audio for the context. We must call
+                # remove_audio_context to signal the parent's _handle_audio_context
+                # loop to stop (otherwise it waits for a 3-second timeout).
                 if msg_type == "final":
                     logger.trace(f"Received final message for context {ctx_id}")
                     if ctx_id:
@@ -430,12 +433,7 @@ class DograhTTSService(WebsocketTTSService):
     async def _send_text(self, text: str, context_id: str):
         """Send text to the WebSocket for synthesis."""
         if self._websocket and context_id:
-            msg = {
-                "type": "synthesize",
-                "text": text,
-                "context_id": context_id,
-                "flush": True,
-            }
+            msg = {"type": "synthesize", "text": text, "context_id": context_id}
             await self._websocket.send(json.dumps(msg))
 
     @traced_tts
@@ -480,6 +478,8 @@ class DograhTTSService(WebsocketTTSService):
 
                     await self._get_websocket().send(json.dumps(context_msg))
                     self._remote_initialized_context_ids.add(context_id)
+                    self._finished_context_ids.discard(context_id)
+                    self._cancelled_context_ids.discard(context_id)
                     logger.trace(f"Created new context {context_id} with voice settings")
 
                 # Send text for synthesis
@@ -496,36 +496,88 @@ class DograhTTSService(WebsocketTTSService):
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
-    async def _close_context(self, context_id: str):
-        """Close a Dograh TTS context via WebSocket.
+    async def _flush_usage_metrics(self):
+        """Bill the turn's accumulated text, then clear the buffer."""
+        if self._accumulated_text:
+            await self.start_tts_usage_metrics(self._accumulated_text)
+            self._accumulated_text = ""
+
+    async def _finalize_context_state(self):
+        """Flush usage metrics and reset word-timestamp state.
+
+        Used on interruption, where no completion hook fires for the context.
+        """
+        await self._flush_usage_metrics()
+        self._reset_state()
+
+    async def _finish_context(self, context_id: str):
+        """Finalize a context at end of turn.
+
+        Sends the ``close_context`` verb so the server finalizes the upstream
+        provider and a terminal ``final`` is emitted right after the last audio
+        byte, instead of the context completing via the audio-context idle timeout.
+
+        Only usage is billed here; word-timestamp state is reset later in
+        ``on_audio_context_completed`` (once the context has drained), because
+        alignment can still arrive after this message.
 
         Args:
-            context_id: The context ID to close.
+            context_id: The context ID to finalize.
         """
-        if context_id and self._websocket:
-            logger.trace(f"{self}: Closing context {context_id}")
+        if context_id and self._websocket and context_id not in self._finished_context_ids:
+            logger.trace(f"{self}: Finishing context {context_id}")
             self._remote_initialized_context_ids.discard(context_id)
+            self._finished_context_ids.add(context_id)
             try:
                 await self._websocket.send(
                     json.dumps({"type": "close_context", "context_id": context_id})
                 )
             except Exception as e:
-                logger.error(f"Error closing context: {e}")
+                logger.error(f"Error finishing context: {e}")
 
-        # Send accumulated usage metrics before resetting
-        if self._accumulated_text:
-            await self.start_tts_usage_metrics(self._accumulated_text)
-            self._accumulated_text = ""
+        await self._flush_usage_metrics()
 
-        self._reset_state()
+    async def _cancel_context(self, context_id: str):
+        """Abort a context on interruption.
+
+        Sends the ``cancel`` verb so the server stops upstream generation
+        immediately rather than letting the provider finish the buffered audio.
+        Requires server-side ``cancel`` handling; a server without it ignores the
+        message. The base class abandons the interrupted context
+        (``on_audio_context_completed`` does not fire for it), so usage is billed
+        and word-timestamp state is reset here.
+
+        Args:
+            context_id: The context ID to cancel.
+        """
+        if context_id and self._websocket and context_id not in self._cancelled_context_ids:
+            logger.trace(f"{self}: Cancelling context {context_id}")
+            self._remote_initialized_context_ids.discard(context_id)
+            self._cancelled_context_ids.add(context_id)
+            try:
+                await self._websocket.send(json.dumps({"type": "cancel", "context_id": context_id}))
+            except Exception as e:
+                logger.error(f"Error cancelling context: {e}")
+
+        await self._finalize_context_state()
 
     async def on_audio_context_interrupted(self, context_id: str):
-        """Close the Dograh context when the bot is interrupted."""
-        await self._close_context(context_id)
+        """Cancel the Dograh context when the bot is interrupted."""
+        await self._cancel_context(context_id)
+        await super().on_audio_context_interrupted(context_id)
 
     async def on_audio_context_completed(self, context_id: str):
-        """Close the Dograh context after all audio has been played."""
-        await self._close_context(context_id)
+        """Reset word-timestamp state after all audio for the context has played."""
+        self._reset_state()
+        await super().on_audio_context_completed(context_id)
+
+    async def on_turn_context_completed(self):
+        """Finish the server-side context at end of turn."""
+        context_id = self._turn_context_id
+        should_finish = bool(context_id and self.audio_context_available(context_id))
+        await super().on_turn_context_completed()
+        if should_finish and context_id:
+            await self._finish_context(context_id)
 
     async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio and finalize the current context.
@@ -537,9 +589,9 @@ class DograhTTSService(WebsocketTTSService):
         flush_id = context_id or self.get_active_audio_context_id()
         if not flush_id or not self._websocket:
             return
-        logger.trace(f"{self}: flushing audio")
-        # MPS routes by "type"; the bare {context_id, flush:true} shape is
-        # what the upstream ElevenLabs WS expects, but here we go through MPS.
+        logger.debug(f"{self}: flushing audio")
+        # MPS routes by "type" and translates this generic flush into whatever
+        # the upstream provider expects.
         msg = {"type": "flush", "context_id": flush_id}
         await self._websocket.send(json.dumps(msg))
 
