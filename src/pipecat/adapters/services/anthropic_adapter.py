@@ -210,6 +210,27 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
 
         return self.ConvertedMessages(messages=messages, system=system)
 
+    @staticmethod
+    def ensure_last_message_is_user(messages: list[MessageParam]) -> list[MessageParam]:
+        """Ensure the message list does not end with an assistant message.
+
+        Claude 4.6+ models do not support assistant message prefilling — the
+        conversation must end with a user turn.  When the last message has
+        ``role="assistant"``, a minimal user message is appended so that the
+        API request is accepted.
+
+        Args:
+            messages: The converted message list (may be mutated in-place).
+
+        Returns:
+            The same list, possibly with an appended user message.
+        """
+        if messages and messages[-1]["role"] == "assistant":
+            messages.append(
+                {"role": "user", "content": [{"type": "text", "text": "(continue)"}]}
+            )
+        return messages
+
     def _from_universal_context_message(self, message: LLMContextMessage) -> MessageParam:
         if isinstance(message, LLMSpecificMessage):
             return self._from_anthropic_specific_message(message)
