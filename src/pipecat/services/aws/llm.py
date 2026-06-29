@@ -499,39 +499,51 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
 
                 await self.stop_ttfb_metrics()
 
-                # Process the streaming response
-                tool_use_block = None
-                json_accumulator = ""
+                # Process the streaming response. Bedrock emits each tool call as
+                # its own content block, identified by contentBlockIndex, so we key
+                # accumulators by index to capture parallel tool calls instead of
+                # only the last one.
+                tool_use_blocks = {}
+                json_accumulators = {}
 
                 function_calls = []
 
                 async for event in response["stream"]:
                     # Handle text content
                     if "contentBlockDelta" in event:
-                        delta = event["contentBlockDelta"]["delta"]
+                        block = event["contentBlockDelta"]
+                        delta = block["delta"]
                         if "text" in delta:
                             await self._push_llm_text(delta["text"])
                             completion_tokens_estimate += self._estimate_tokens(delta["text"])
                         elif "toolUse" in delta and "input" in delta["toolUse"]:
                             # Handle partial JSON for tool use
-                            json_accumulator += delta["toolUse"]["input"]
+                            index = block["contentBlockIndex"]
+                            json_accumulators[index] = (
+                                json_accumulators.get(index, "") + delta["toolUse"]["input"]
+                            )
                             completion_tokens_estimate += self._estimate_tokens(
                                 delta["toolUse"]["input"]
                             )
 
                     # Handle tool use start
                     elif "contentBlockStart" in event:
-                        content_block_start = event["contentBlockStart"]["start"]
+                        block = event["contentBlockStart"]
+                        content_block_start = block["start"]
                         if "toolUse" in content_block_start:
-                            tool_use_block = {
+                            index = block["contentBlockIndex"]
+                            tool_use_blocks[index] = {
                                 "id": content_block_start["toolUse"].get("toolUseId", ""),
                                 "name": content_block_start["toolUse"].get("name", ""),
                             }
-                            json_accumulator = ""
+                            json_accumulators[index] = ""
 
-                    # Handle message completion with tool use
-                    elif "messageStop" in event and "stopReason" in event["messageStop"]:
-                        if event["messageStop"]["stopReason"] == "tool_use" and tool_use_block:
+                    # Handle tool use completion
+                    elif "contentBlockStop" in event:
+                        index = event["contentBlockStop"]["contentBlockIndex"]
+                        tool_use_block = tool_use_blocks.pop(index, None)
+                        if tool_use_block:
+                            json_accumulator = json_accumulators.pop(index, "")
                             try:
                                 arguments = json.loads(json_accumulator) if json_accumulator else {}
 
