@@ -778,8 +778,9 @@ class ElevenLabsTTSService(WebsocketTTSService):
             # Language can only be used with the ELEVENLABS_MULTILINGUAL_MODELS
             language = self._settings.language
             if model in ELEVENLABS_MULTILINGUAL_MODELS and language is not None:
-                url += f"&language_code={language}"
-                logger.debug(f"Using language code: {language}")
+                service_language = self.language_to_service_language(language)
+                url += f"&language_code={service_language}"
+                logger.debug(f"Using language code: {service_language}")
             elif language is not None:
                 logger.warning(
                     f"Language code [{language}] not applied. Language codes can only be used with multilingual models: {', '.join(sorted(ELEVENLABS_MULTILINGUAL_MODELS))}"
@@ -1391,8 +1392,9 @@ class ElevenLabsHttpTTSService(TTSService):
 
         language = assert_given(self._settings.language)
         if model_id in ELEVENLABS_MULTILINGUAL_MODELS and language:
-            payload["language_code"] = language
-            logger.debug(f"Using language code: {language}")
+            service_language = self.language_to_service_language(language)
+            payload["language_code"] = service_language
+            logger.debug(f"Using language code: {service_language}")
         elif language:
             logger.warning(
                 f"Language code [{language}] not applied. Language codes can only be used with multilingual models: {', '.join(sorted(ELEVENLABS_MULTILINGUAL_MODELS))}"
