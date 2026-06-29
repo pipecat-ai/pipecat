@@ -28,6 +28,8 @@ from pipecat.frames.frames import (
     LLMRunFrame,
     LLMTextFrame,
     UserTurnInferenceCompletedFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -232,6 +234,12 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         # both occur in the same turn.
         self._turn_completion_broadcasted = False
 
+        # Live VAD state, tracked from VAD speaking frames flowing through this
+        # processor. Used to re-validate the ``✓`` verdict: an LLM completion
+        # can resolve after the user has resumed speaking, and responding then
+        # would talk over them.
+        self._user_speaking = False
+
         # Timeout handling
         self._user_turn_completion_config = UserTurnCompletionConfig()
         self._incomplete_timeout_task: asyncio.Task | None = None
@@ -363,6 +371,13 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             frame: The frame to process.
             direction: The direction of frame processing.
         """
+        # Track live VAD state so a stale ✓ verdict can be re-validated in
+        # ``_push_turn_text``. Mirrors the gate the stop strategy applies.
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            self._user_speaking = True
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            self._user_speaking = False
+
         # Handle interruptions by cancelling timeout and resetting state
         if isinstance(frame, InterruptionFrame):
             await self._cancel_incomplete_timeout()
@@ -457,6 +472,21 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
 
         # Check for ✓ (COMPLETE) marker - user's turn was complete, respond normally
         if USER_TURN_COMPLETE_MARKER in self._turn_text_buffer:
+            # Re-validate the verdict against live VAD. The ✓ resolves with the
+            # latency of an LLM inference, so the user may have resumed speaking
+            # by the time it lands. Pushing the response (and broadcasting
+            # completion) now would talk over them and finalize a turn that is
+            # no longer over. Suppress this stale response and leave the turn
+            # open; the next inference re-evaluates once the user is silent.
+            if self._user_speaking:
+                logger.debug(
+                    f"COMPLETE ({USER_TURN_COMPLETE_MARKER}) detected but user is "
+                    "speaking; suppressing stale response and keeping turn open"
+                )
+                self._turn_suppressed = True
+                self._turn_text_buffer = ""
+                return
+
             logger.debug(f"COMPLETE ({USER_TURN_COMPLETE_MARKER}) detected, pushing buffered text")
 
             # Broadcast that the user turn is complete so a stop strategy
