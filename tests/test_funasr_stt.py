@@ -4,7 +4,7 @@ import types
 
 import pytest
 
-from pipecat.frames.frames import TranscriptionFrame
+from pipecat.frames.frames import ErrorFrame, TranscriptionFrame
 from pipecat.transcriptions.language import Language
 
 
@@ -89,6 +89,23 @@ def test_language_to_funasr_language_accepts_enums_and_strings(funasr_module):
     assert stt.language_to_funasr_language(None) == "auto"
 
 
+def test_funasr_language_to_frame_language_maps_supported_codes(funasr_module):
+    stt, _ = funasr_module
+
+    assert stt.funasr_language_to_frame_language("en") == Language.EN
+    assert stt.funasr_language_to_frame_language("auto") is None
+    assert stt.funasr_language_to_frame_language(None) is None
+    assert stt.funasr_language_to_frame_language("nospeech") is None
+
+
+def test_funasr_stt_exposes_metrics_and_language_mapping(funasr_module):
+    stt, _ = funasr_module
+    service = stt.FunASRSTTService()
+
+    assert service.can_generate_metrics() is True
+    assert service.language_to_service_language(Language.EN_US) == "en"
+
+
 @pytest.mark.asyncio
 async def test_run_stt_uses_settings_for_generation(funasr_module):
     stt, fake_auto_model = funasr_module
@@ -109,3 +126,44 @@ async def test_run_stt_uses_settings_for_generation(funasr_module):
     generate_call = fake_auto_model.instances[-1].generate_calls[-1]
     assert generate_call["language"] == "zh"
     assert generate_call["use_itn"] is False
+
+
+@pytest.mark.asyncio
+async def test_run_stt_returns_error_frame_when_model_is_missing(funasr_module):
+    stt, _ = funasr_module
+    service = stt.FunASRSTTService()
+    service._model = None
+
+    frames = [frame async for frame in service.run_stt(b"\x00\x00" * 160)]
+
+    assert len(frames) == 1
+    assert isinstance(frames[0], ErrorFrame)
+    assert frames[0].error == "FunASR model not available"
+
+
+@pytest.mark.asyncio
+async def test_run_stt_returns_error_frame_when_generation_fails(funasr_module):
+    stt, fake_auto_model = funasr_module
+    service = stt.FunASRSTTService()
+
+    def generate(**kwargs):
+        raise RuntimeError("boom")
+
+    fake_auto_model.instances[-1].generate = generate
+
+    frames = [frame async for frame in service.run_stt(b"\x00\x00" * 160)]
+
+    assert len(frames) == 1
+    assert isinstance(frames[0], ErrorFrame)
+    assert frames[0].error == "FunASR transcription error: boom"
+
+
+@pytest.mark.asyncio
+async def test_run_stt_skips_empty_transcripts(funasr_module):
+    stt, _ = funasr_module
+    service = stt.FunASRSTTService()
+    stt.rich_transcription_postprocess = lambda text: "   "
+
+    frames = [frame async for frame in service.run_stt(b"\x00\x00" * 160)]
+
+    assert frames == []
