@@ -917,7 +917,7 @@ class LLMUserAggregator(LLMContextAggregator):
             return
 
         msg = (
-            f"{self}: realtime_service_mode=True — mutated turn strategies: "
+            f"{self}: realtime mode — mutated turn strategies: "
             f"dropped {dropped or 'no'} start strategy(ies); set "
             f"wait_for_transcript=False on {flipped or 'no'} stop strategy(ies)."
         )
@@ -1606,8 +1606,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if self._paired_user_aggregator is None:
             raise RuntimeError(
                 f"{self}: realtime_service_mode is enabled but this assistant "
-                "aggregator has no paired user aggregator. Construct the pair "
-                "via LLMContextAggregatorPair(context, realtime_service_mode=True)."
+                "aggregator has no paired user aggregator. Build both aggregators "
+                "with LLMContextAggregatorPair(context) rather than constructing "
+                "them individually, so realtime mode is configured once and shared "
+                "across both halves."
             )
 
     async def push_aggregation(self) -> str:

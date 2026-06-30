@@ -194,11 +194,10 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         - Server-side VAD (Voice Activity Detection)
 
     Emits ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame`` from
-    Grok's server-side VAD events. Pair with
-    ``LLMContextAggregatorPair(..., realtime_service_mode=True)``
-    so context writes are decoupled from those frames. If you wire local
-    VAD (``LLMUserAggregatorParams.vad_analyzer``) on top of this
-    service, disable Grok's server-side turn detection first via
+    Grok's server-side VAD events. ``LLMContextAggregatorPair`` auto-detects
+    this realtime service and decouples context writes from those frames. If
+    you wire local VAD (``LLMUserAggregatorParams.vad_analyzer``) on top of
+    this service, disable Grok's server-side turn detection first via
     ``turn_detection=None`` (manual mode); otherwise both sources
     broadcast duplicate user-turn frames. See
     ``examples/realtime/realtime-grok-locally-driven-turns.py``.

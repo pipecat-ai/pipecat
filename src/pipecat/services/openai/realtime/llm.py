@@ -216,9 +216,9 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     OpenAI's server-side VAD events, so pipeline processors that depend on
     those frames (RTVI client speech events, ``TurnTrackingObserver``,
     ``AudioBufferProcessor`` turn recording, ``UserIdleController``, user
-    mute strategies, voicemail detector) work out of the box. Pair with
-    ``LLMContextAggregatorPair(..., realtime_service_mode=True)``
-    so context writes are decoupled from those frames; see the
+    mute strategies, voicemail detector) work out of the box.
+    ``LLMContextAggregatorPair`` auto-detects this realtime service and
+    decouples context writes from those frames; see the
     ``examples/realtime/realtime-openai.py`` example.
 
     If you wire local VAD (``LLMUserAggregatorParams.vad_analyzer``) on
