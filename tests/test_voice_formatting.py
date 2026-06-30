@@ -280,6 +280,15 @@ class TestExpandCurrency(unittest.IsolatedAsyncioTestCase):
         self.assertIn("one thousand dollars", result)
         self.assertNotIn("1,000", result)
 
+    async def test_multi_digit_without_separator(self):
+        # Regression: 4+ digit amounts without commas must capture the full integer.
+        # The integer group needs a \b so the regex backtracks onto the \d+ branch
+        # instead of matching only the first 3 digits and leaving a stray digit.
+        self.assertEqual(await expand_currency("$1000", "*"), "one thousand dollars")
+        result = await expand_currency("$1000.50", "*")
+        self.assertIn("one thousand dollars", result)
+        self.assertIn("fifty cents", result)
+
 
 class TestNormalizeDates(unittest.IsolatedAsyncioTestCase):
     async def test_iso_date(self):
