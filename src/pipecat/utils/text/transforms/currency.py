@@ -21,7 +21,7 @@ _CURRENCY_MAP: dict[str, tuple[str, str, str | None, str | None]] = {
     "₹": ("rupee", "rupees", "paisa", "paise"),
 }
 
-_CURRENCY_RE = re.compile(r"([€£¥₹\$])\s*(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?")
+_CURRENCY_RE = re.compile(r"([€£¥₹\$])\s*(\d{1,3}(?:,\d{3})*|\d+)\b(?:\.(\d{1,2}))?")
 
 
 def _amount_to_words(n: float, singular: str, plural: str) -> str:
