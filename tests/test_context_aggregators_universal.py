@@ -2208,6 +2208,16 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError):
             assistant._validate_realtime_pairing()
 
+    async def test_realtime_auto_enable_requires_paired_user_aggregator(self):
+        # Auto mode: when a realtime service flips the mode on, a missing pairing
+        # (unsupported direct construction) is caught instead of silently dropping
+        # the user-message flush — the check the auto-enable flip performs.
+        context = LLMContext()
+        assistant = LLMAssistantAggregator(context)  # defaults: mode=None, no pairing
+        assistant._realtime_service_mode = True  # simulate the auto-enable flip
+        with self.assertRaises(RuntimeError):
+            assistant._require_paired_user_aggregator()
+
     async def test_realtime_mode_assistant_rejects_mismatched_halves(self):
         # If a user code path constructs halves with mismatched configs
         # and wires them up by hand, assistant validation catches it.

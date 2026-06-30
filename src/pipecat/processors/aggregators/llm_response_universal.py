@@ -1551,6 +1551,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
             # mutations and recommendation logging.
             if frame.is_realtime_service and self._realtime_service_mode is None:
                 self._realtime_service_mode = True
+                # The mode just auto-enabled: the trailing flush needs the
+                # back-reference to the user half (always wired by the pair —
+                # this surfaces unsupported direct construction instead of
+                # silently dropping user messages).
+                self._require_paired_user_aggregator()
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
@@ -1572,13 +1577,14 @@ class LLMAssistantAggregator(LLMContextAggregator):
         ``LLMFullResponseStartFrame``. The pair sets this up; direct
         construction of the assistant with the private realtime kwargs
         bypasses that and is not supported.
+
+        Runs at ``StartFrame``. When the mode is auto-configured it's still
+        ``None`` here, so the back-reference is re-checked at the point it flips
+        on (see ``process_frame``); the mismatch check is intentionally not
+        re-run there, since the two halves flip independently off the broadcast.
         """
-        if self._realtime_service_mode and self._paired_user_aggregator is None:
-            raise RuntimeError(
-                f"{self}: realtime_service_mode is enabled but this assistant "
-                "aggregator has no paired user aggregator. Construct the pair "
-                "via LLMContextAggregatorPair(context, realtime_service_mode=True)."
-            )
+        if self._realtime_service_mode:
+            self._require_paired_user_aggregator()
         if (
             self._paired_user_aggregator is not None
             and self._realtime_service_mode != self._paired_user_aggregator._realtime_service_mode
@@ -1587,6 +1593,21 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 f"{self}: realtime_service_mode mismatch between user and "
                 "assistant halves. Use LLMContextAggregatorPair to construct "
                 "the pair so both halves share the same configuration."
+            )
+
+    def _require_paired_user_aggregator(self):
+        """Raise if realtime mode is active without a paired user aggregator.
+
+        Always satisfied when constructed via ``LLMContextAggregatorPair`` (which
+        wires the back-reference unconditionally); guards unsupported direct
+        construction so the missing flush surfaces loudly instead of silently
+        dropping user messages.
+        """
+        if self._paired_user_aggregator is None:
+            raise RuntimeError(
+                f"{self}: realtime_service_mode is enabled but this assistant "
+                "aggregator has no paired user aggregator. Construct the pair "
+                "via LLMContextAggregatorPair(context, realtime_service_mode=True)."
             )
 
     async def push_aggregation(self) -> str:
