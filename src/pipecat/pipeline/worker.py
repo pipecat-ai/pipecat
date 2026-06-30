@@ -181,7 +181,8 @@ class PipelineWorker(BaseWorker):
 
     - on_frame_reached_upstream: Called when upstream frames reach the source
     - on_frame_reached_downstream: Called when downstream frames reach the sink
-    - on_heartbeat_timeout: Called when a heartbeat frame is not received within the monitor timeout
+    - on_heartbeat_timeout: Called when a heartbeat frame is not received within the monitor timeout.
+          Fires repeatedly every ``heartbeats_monitor_secs`` for as long as the stall persists.
     - on_idle_timeout: Called when pipeline is idle beyond timeout threshold
     - on_pipeline_started: Called when pipeline starts with StartFrame
     - on_pipeline_finished: Called after the pipeline has reached any terminal state.
@@ -1221,10 +1222,10 @@ class PipelineWorker(BaseWorker):
     async def _heartbeat_monitor_handler(self):
         """Monitor heartbeat frames for processing time and timeout detection.
 
-        This worker monitors heartbeat frames. If a heartbeat frame has not
-        been received for a long period a warning will be logged. It also logs
-        the time that a heartbeat frame takes to processes, that is how long it
-        takes for the heartbeat frame to traverse all the pipeline.
+        Logs the time each heartbeat takes to traverse the pipeline. If no
+        heartbeat arrives within ``heartbeats_monitor_secs``, logs a warning
+        and fires ``on_heartbeat_timeout``. The event fires repeatedly every
+        ``heartbeats_monitor_secs`` for as long as the stall persists.
         """
         wait_time = self._params.heartbeats_monitor_secs
         while True:
