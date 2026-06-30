@@ -716,11 +716,6 @@ class LLMUserAggregator(LLMContextAggregator):
         # inferences fire before finalization.
         self._full_user_turn_aggregation: str | None = None
 
-        # Canonical reference to the active user turn strategies, kept in sync
-        # whenever they're replaced (service recommendations, realtime-mode
-        # mutations) so metadata-frame handlers can re-mutate / re-install them.
-        self._user_turn_strategies = user_turn_strategies
-
         self._user_turn_controller = UserTurnController(
             user_turn_strategies=user_turn_strategies,
             user_turn_stop_timeout=self._params.user_turn_stop_timeout,
@@ -975,7 +970,6 @@ class LLMUserAggregator(LLMContextAggregator):
             return
 
         logger.debug(f"{self}: applying user turn strategies recommended by `{service_name}`.")
-        self._user_turn_strategies = user_turn_strategies
         await self._user_turn_controller.update_strategies(user_turn_strategies)
 
     async def _handle_llm_service_metadata(self, frame: LLMServiceMetadataFrame):
@@ -1015,11 +1009,12 @@ class LLMUserAggregator(LLMContextAggregator):
         # already installed by _handle_service_metadata. Idempotent, so safe
         # even if the init-time mutation already ran (explicit
         # realtime_service_mode=True).
+        strategies = self._user_turn_controller.user_turn_strategies
         self._apply_realtime_mode_strategy_mutations(
-            self._user_turn_strategies,
+            strategies,
             are_user_provided_custom_strategies=self._params.user_turn_strategies is not None,
         )
-        await self._user_turn_controller.update_strategies(self._user_turn_strategies)
+        await self._user_turn_controller.update_strategies(strategies)
 
     async def _realtime_handoff_flush(self) -> None:
         """Commit the user message in realtime mode, allowing for late transcripts.

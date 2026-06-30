@@ -106,6 +106,11 @@ class UserTurnController(BaseObject):
         self._register_event_handler("on_user_turn_stop_timeout", sync=True)
         self._register_event_handler("on_reset_aggregation", sync=True)
 
+    @property
+    def user_turn_strategies(self) -> UserTurnStrategies:
+        """The currently active user turn strategies."""
+        return self._user_turn_strategies
+
     async def setup(self, task_manager: BaseTaskManager):
         """Initialize the controller with the given task manager.
 
