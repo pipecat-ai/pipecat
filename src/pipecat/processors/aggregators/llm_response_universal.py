@@ -902,9 +902,6 @@ class LLMUserAggregator(LLMContextAggregator):
 
         flipped: list[str] = []
         for s in user_turn_strategies.stop or []:
-            # Only flip (and record) when it's currently True, so re-running the
-            # mutation is a no-op — important now that it can run both at init
-            # and again when the realtime metadata frame arrives.
             if getattr(s, "wait_for_transcript", False):
                 try:
                     s.wait_for_transcript = False
