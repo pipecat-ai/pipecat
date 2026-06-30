@@ -40,7 +40,7 @@ class KrispVivaFilter(BaseAudioFilter):
     proprietary noise suppression algorithms. This filter requires a
     valid Krisp model file to operate.
 
-    Optionally supports TTS detection (iPhone screening feature) to delay voice isolation until
+    Optionally supports TTS detection (iPhone screening feature is standalone model) to delay voice isolation until
     bot speech playback has stopped, preventing later real human speech suppression artifacts.
     Provide ``tts_model_path`` (or set the ``KRISP_VIVA_TTS_MODEL_PATH`` environment variable) to enable this feature.
     """
@@ -48,10 +48,10 @@ class KrispVivaFilter(BaseAudioFilter):
     def __init__(
         self,
         model_path: str | None = None,
-        tts_model_path: str | None = None,
         frame_duration: int = 10,
         noise_suppression_level: int = 100,
         api_key: str = "",
+        tts_model_path: str | None = None,
         tts_threshold: float = 0.5,
         tts_detection_timeout: float = 3.0,
     ) -> None:
@@ -60,13 +60,13 @@ class KrispVivaFilter(BaseAudioFilter):
         Args:
             model_path: Path to the Krisp NC model file (.kef extension).
                 If None, uses KRISP_VIVA_FILTER_MODEL_PATH environment variable.
-            tts_model_path: Path to the Krisp TTS detection model file (.kef extension).
-                If None, uses KRISP_VIVA_TTS_MODEL_PATH environment variable.
-                When not set, TTS detection is disabled and NC starts immediately.
             frame_duration: Frame duration in milliseconds.
             noise_suppression_level: Noise suppression level.
             api_key: Krisp SDK API key. If empty, falls back to
                 the KRISP_VIVA_API_KEY environment variable.
+            tts_model_path: Path to the Krisp TTS detection model file (.kef extension).
+                If None, uses KRISP_VIVA_TTS_MODEL_PATH environment variable.
+                When not set, TTS detection is disabled and NC starts immediately.
             tts_threshold: Probability threshold (0–1) above which a frame is
                 classified as containing TTS. Only used when tts_model_path is set.
             tts_detection_timeout: Seconds to wait for TTS before starting NC.
@@ -194,6 +194,41 @@ class KrispVivaFilter(BaseAudioFilter):
             logger.error(f"Failed to create TTS detector: {e}", exc_info=True)
             raise RuntimeError(f"Failed to create TTS detector session: {e}") from e
 
+    def _advance_tts_detection(self, frames: np.ndarray) -> bool:
+        """Run TTS detection on audio frames.
+
+        Args:
+            frames: Audio frames as int16 samples shaped (num_frames, samples_per_frame).
+
+        Returns:
+            True when noise cancellation should activate, False while still in the
+            TTS detection phase.
+        """
+        frame_duration_s = self._frame_duration_ms / 1000.0
+
+        for tts_frame in frames:
+            frame_float = tts_frame.astype(np.float32) / 32768.0
+            probability = self._tts_detector.process(frame_float)
+            self._tts_elapsed_s += frame_duration_s
+            if probability > self._tts_threshold:
+                self._tts_ever_detected = True
+                self._tts_last_detected_s = self._tts_elapsed_s
+
+        if self._tts_ever_detected:
+            if self._tts_elapsed_s - self._tts_last_detected_s >= _TTS_CLEARED_COOLDOWN:
+                logger.debug("TTS cleared, starting NC filter")
+                return True
+            return False
+
+        if self._tts_elapsed_s >= self._tts_detection_timeout:
+            logger.debug(
+                f"TTS detection timeout ({self._tts_detection_timeout}s elapsed), "
+                "starting NC filter"
+            )
+            return True
+
+        return False
+
     async def start(self, sample_rate: int):
         """Initialize the Krisp processor with the transport's sample rate.
 
@@ -285,33 +320,8 @@ class KrispVivaFilter(BaseAudioFilter):
 
             # TTS detection phase: pass audio through until bot speech clears
             if self._tts_detection_active and self._tts_detector is not None:
-                frame_duration_s = self._frame_duration_ms / 1000.0
-
-                for i, tts_frame in enumerate(frames):
-                    frame_float = tts_frame.astype(np.float32) / 32768.0
-                    probability = self._tts_detector.process(frame_float)
-                    self._tts_elapsed_s += frame_duration_s
-                    if probability > self._tts_threshold:
-                        self._tts_ever_detected = True
-                        self._tts_last_detected_s = self._tts_elapsed_s
-
-                should_start_filtering = False
-                if self._tts_ever_detected:
-                    # TTS was seen; wait for it to clear
-                    if self._tts_elapsed_s - self._tts_last_detected_s >= _TTS_CLEARED_COOLDOWN:
-                        logger.debug("TTS cleared, starting NC filter")
-                        should_start_filtering = True
-                elif self._tts_elapsed_s >= self._tts_detection_timeout:
-                    # No TTS within the detection window; start NC immediately
-                    logger.debug(
-                        f"TTS detection timeout ({self._tts_detection_timeout}s elapsed), "
-                        "starting NC filter"
-                    )
-                    should_start_filtering = True
-
-                if not should_start_filtering:
+                if not self._advance_tts_detection(frames):
                     return audio_to_process
-
                 self._tts_detection_active = False
 
             # Apply NC filter
