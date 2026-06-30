@@ -23,15 +23,15 @@ async def normalize_acronyms(text: str, aggregation_type: str | AggregationType)
     requires no segment-map overhead.
 
     Args:
-        text: Input text possibly containing acronyms like NASA or HTTP.
+        text: Input text possibly containing acronyms like API or HTTP.
         aggregation_type: Aggregation type of the text frame (unused).
 
     Returns:
-        Text with acronyms letter-spaced (e.g. ``"NASA"`` → ``"N A S A"``).
+        Text with acronyms letter-spaced (e.g. ``"API"`` → ``"A P I"``).
 
     Example::
 
-        result = await normalize_acronyms("NASA and HTTP are acronyms", "*")
-        # "N A S A and H T T P are acronyms"
+        result = await normalize_acronyms("Use the API or HTTP endpoint", "*")
+        # "Use the A P I or H T T P endpoint"
     """
     return _ACRONYM_RE.sub(lambda m: " ".join(m.group(0)), text)

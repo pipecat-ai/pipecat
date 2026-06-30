@@ -12,12 +12,12 @@ dates, acronyms, and other special text are spoken naturally.
 
 Without voice formatting a TTS service might read:
   "$42.50" as "dollar sign four two point five zero"
-  "NASA"   as a single ambiguous word rather than "N A S A"
+  "API"    as a single word rather than "A P I"
   "3/15"   as "three slash fifteen"
 
 With VoiceFormatter these are pre-processed before the audio is synthesised:
   "$42.50"  →  "forty-two dollars and fifty cents"
-  "NASA"    →  "N A S A"
+  "API"     →  "A P I"
   "3/15/25" →  "March 15th, two thousand and twenty-five"
 
 Run locally:

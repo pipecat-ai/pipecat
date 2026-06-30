@@ -20,7 +20,7 @@ frames the transform applies to ("*" means all frames).
 This example shows a billing-assistant scenario where several transforms are
 composed:
   - strip_markdown       Remove bold/italic/headers the LLM might add
-  - normalize_acronyms   "NASA" → "N A S A"
+  - normalize_acronyms   "API" → "A P I"
   - email_to_speech      "user@example.com" → "user at example dot com"
   - expand_currency      "$42.50" → "forty-two dollars and fifty cents"
   - expand_percentages   "3.5%" → "three point five percent"

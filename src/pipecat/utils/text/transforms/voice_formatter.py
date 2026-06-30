@@ -51,8 +51,8 @@ class VoiceFormatter:
                 code spans). Enabled by default.
             expand_phone_numbers: Space out phone number digits for individual
                 pronunciation. Enabled by default.
-            normalize_acronyms: Space out uppercase acronyms (e.g. ``"NASA"`` →
-                ``"N A S A"``). Enabled by default.
+            normalize_acronyms: Space out uppercase acronyms (e.g. ``"API"`` →
+                ``"A P I"``). Enabled by default.
             expand_currency: Expand currency amounts to spoken form (e.g. ``"$42.50"``
                 → ``"forty two dollars and fifty cents"``). Requires ``num2words``.
             expand_numbers: Expand numeric digits to spoken words. Disabled by default
