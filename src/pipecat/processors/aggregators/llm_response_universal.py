@@ -2166,6 +2166,10 @@ class LLMContextAggregatorPair:
                 Both halves share this setting; mismatched halves are rejected
                 at ``StartFrame``.
         """
+        # realtime_service_mode stays manually settable (True/False) rather than
+        # being made purely auto-configured: explicit False lets users keep
+        # legacy, pre-realtime behavior if they want it, and it would feel wrong
+        # for a field to be auto-configurable but not also manually configurable.
         user_params = user_params or LLMUserAggregatorParams()
         assistant_params = assistant_params or LLMAssistantAggregatorParams()
         if add_tool_change_messages is not None:
