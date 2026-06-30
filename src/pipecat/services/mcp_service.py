@@ -235,7 +235,29 @@ class MCPClient(BaseObject):
             params.result_callback,
         )
 
+    async def call_tool(self, function_name: str, arguments: dict[str, Any] | None) -> str:
+        """Call an MCP tool by name and return its text result.
+
+        Requires the client to be started (via :meth:`start` or ``async with``).
+        Useful for callers that invoke a known tool directly rather than through
+        LLM function-call registration.
+
+        Args:
+            function_name: The MCP tool to call.
+            arguments: Arguments to pass to the tool.
+
+        Returns:
+            The tool's text output with any configured output filter applied, or
+            a fallback message when the call yields no text.
+        """
+        session = self._ensure_connected()
+        return await self._call_tool_text(session, function_name, arguments)
+
     async def _call_tool(self, session, function_name, arguments, result_callback):
+        response = await self._call_tool_text(session, function_name, arguments)
+        await result_callback(response)
+
+    async def _call_tool_text(self, session, function_name, arguments) -> str:
         logger.debug(f"Calling mcp tool '{function_name}'")
         results = None
         try:
@@ -273,7 +295,7 @@ class MCPClient(BaseObject):
         else:
             response = "Sorry, could not call the mcp tool"
 
-        await result_callback(response)
+        return response
 
     async def _list_tools_helper(self, session):
         available_tools = await session.list_tools()

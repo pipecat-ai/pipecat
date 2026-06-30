@@ -266,3 +266,12 @@ suite:
   #
   - bot: features/features-dtmf-menu.py
     scenarios: [dtmf_menu]
+
+  #
+  # Web search: the bot answers a current-events question by calling Keenable's
+  # search_web tool, and reads a specific URL with fetch_page.
+  #
+  - bot: features/features-keenable-web-search.py
+    scenarios:
+      - keenable_web_search
+      - keenable_fetch_page
