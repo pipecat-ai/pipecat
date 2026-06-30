@@ -2173,6 +2173,31 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         # Not realtime-mutated: wait_for_transcript keeps its default (True).
         self.assertTrue(strategies.stop[0].wait_for_transcript)
 
+    async def test_realtime_metadata_reapplies_mutation_on_rebroadcast(self):
+        # Regression: a second metadata broadcast (e.g. a ServiceSwitcher switch)
+        # re-adopts a fresh recommendation, so the realtime mutation must re-run.
+        # The one-shot guard governs only auto-enable/logging, not strategy install.
+        # (No-double-registration is covered at the controller level in
+        # test_user_turn_controller.py, since handlers are torn down at session end.)
+        _, pair = self._build_pair(realtime_service_mode=True)
+        frames_to_send = [
+            LLMServiceMetadataFrame(
+                service_name="FakeRealtimeLLM",
+                is_realtime_service=True,
+                user_turn_strategies=ExternalUserTurnStrategies(),
+            ),
+            LLMServiceMetadataFrame(
+                service_name="FakeRealtimeLLM",
+                is_realtime_service=True,
+                user_turn_strategies=ExternalUserTurnStrategies(),
+            ),
+        ]
+        await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
+        strategies = pair.user()._user_turn_controller.user_turn_strategies
+        self.assertIsInstance(strategies.stop[0], ExternalUserTurnStopStrategy)
+        # Mutation re-applied after the second broadcast (not skipped by the guard).
+        self.assertFalse(strategies.stop[0].wait_for_transcript)
+
     async def test_realtime_mode_assistant_requires_paired_user_aggregator(self):
         # Direct construction of the assistant half with realtime mode
         # set but no paired user half raises at StartFrame validation.

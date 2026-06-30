@@ -956,8 +956,8 @@ class LLMUserAggregator(LLMContextAggregator):
         """Apply user turn strategies a service recommends via its metadata frame.
 
         Honored only when the user did not pass their own ``user_turn_strategies``,
-        which always wins. Applied via the controller so it takes effect even though
-        the strategies were already built at init.
+        which always wins. ``update_strategies`` is idempotent, so this is safe to
+        re-run on a later broadcast (e.g. a ServiceSwitcher switch).
         """
         if user_turn_strategies is None:
             return
@@ -975,40 +975,35 @@ class LLMUserAggregator(LLMContextAggregator):
     async def _handle_llm_service_metadata(self, frame: LLMServiceMetadataFrame):
         """Handle an ``LLMServiceMetadataFrame`` broadcast by an LLM service.
 
-        Non-realtime services need no realtime configuration. For a realtime
-        service, auto-configure ``realtime_service_mode`` when it was left unset
-        (``None``); an explicit ``True``/``False`` is honored as-is. When the
-        mode ends up active, apply the realtime-mode strategy mutations. Any
-        external-turn-strategy recommendation has already been applied by
-        ``_handle_service_metadata`` via the shared ``user_turn_strategies``
-        path. Runs at most once per session.
+        Non-realtime services need no configuration. For a realtime service,
+        auto-configure ``realtime_service_mode`` (once) when the user left it unset
+        (``None``); an explicit ``True``/``False`` is honored as-is (``False`` opts
+        out silently). When the mode is active, strip transcript dependence from
+        the active strategies — including any external strategies
+        ``_handle_service_metadata`` just adopted.
+
+        The strategy mutation re-runs on every broadcast (so a re-adopted
+        recommendation is re-mutated, e.g. after a ServiceSwitcher switch); only
+        the auto-configuration + log is one-shot. ``update_strategies`` is
+        idempotent, so re-applying is safe.
         """
         if not frame.is_realtime_service:
             return
-        if self._realtime_metadata_handled:
-            return
-        self._realtime_metadata_handled = True
 
-        # Auto-configure: when the user left realtime_service_mode unset, enable
-        # it because a realtime service is present. An explicit True/False wins.
-        if self._realtime_service_mode is None:
-            self._realtime_service_mode = True
-            logger.debug(
-                f"{self}: detected realtime service `{frame.service_name}`; "
-                "auto-enabled realtime_service_mode."
-            )
+        # Auto-configure + log once per session.
+        if not self._realtime_metadata_handled:
+            self._realtime_metadata_handled = True
+            if self._realtime_service_mode is None:
+                self._realtime_service_mode = True
+                logger.debug(
+                    f"{self}: detected realtime service `{frame.service_name}`; "
+                    "auto-enabled realtime_service_mode."
+                )
 
         if not self._realtime_service_mode:
             # Explicitly disabled — honor it silently; the user opted out.
             return
 
-        logger.debug(f"{self}: realtime_service_mode active for `{frame.service_name}`.")
-
-        # Strip transcript dependence from whatever strategies are now active —
-        # defaults, user-provided, or the service-recommended external ones
-        # already installed by _handle_service_metadata. Idempotent, so safe
-        # even if the init-time mutation already ran (explicit
-        # realtime_service_mode=True).
         strategies = self._user_turn_controller.user_turn_strategies
         self._apply_realtime_mode_strategy_mutations(
             strategies,

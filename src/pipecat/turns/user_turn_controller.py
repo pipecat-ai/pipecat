@@ -196,11 +196,24 @@ class UserTurnController(BaseObject):
             s.add_event_handler("on_user_turn_stopped", self._on_user_turn_stopped)
 
     async def _cleanup_strategies(self):
+        # Remove the handlers _setup_strategies added (symmetric), so re-applying
+        # strategies via update_strategies — possibly reusing the same strategy
+        # instances — doesn't accumulate duplicate handler registrations.
         for s in self._user_turn_strategies.start or []:
             await s.cleanup()
+            s.remove_event_handler("on_push_frame", self._on_push_frame)
+            s.remove_event_handler("on_broadcast_frame", self._on_broadcast_frame)
+            s.remove_event_handler("on_user_turn_started", self._on_user_turn_started)
+            s.remove_event_handler("on_reset_aggregation", self._on_reset_aggregation)
 
         for s in self._user_turn_strategies.stop or []:
             await s.cleanup()
+            s.remove_event_handler("on_push_frame", self._on_push_frame)
+            s.remove_event_handler("on_broadcast_frame", self._on_broadcast_frame)
+            s.remove_event_handler(
+                "on_user_turn_inference_triggered", self._on_user_turn_inference_triggered
+            )
+            s.remove_event_handler("on_user_turn_stopped", self._on_user_turn_stopped)
 
     async def _handle_user_started_speaking(self, frame: UserStartedSpeakingFrame):
         self._user_speaking = True
