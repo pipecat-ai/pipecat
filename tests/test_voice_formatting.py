@@ -72,6 +72,12 @@ class TestExpandPhoneNumbers(unittest.IsolatedAsyncioTestCase):
         result = await expand_phone_numbers(text, "*")
         self.assertEqual(result, text)
 
+    async def test_no_match_inside_longer_digit_sequence(self):
+        # A 16-digit credit card number must not be treated as a phone number.
+        text = "Card 4111111111111111 is invalid"
+        result = await expand_phone_numbers(text, "*")
+        self.assertEqual(result, text)
+
 
 class TestNormalizeAcronyms(unittest.IsolatedAsyncioTestCase):
     async def test_nasa(self):
@@ -244,6 +250,22 @@ class TestVoiceFormatter(unittest.IsolatedAsyncioTestCase):
     async def test_expand_numbers_enabled(self):
         formatter = VoiceFormatter(expand_numbers=True, number_digit_cutoff=2025)
         self.assertIn("forty-two", await formatter("Room 42", "*"))
+
+    async def test_all_caps_email_not_mangled_by_acronym_expander(self):
+        # email_to_speech must run before normalize_acronyms so all-caps addresses
+        # like USER@EXAMPLE.COM are detected before letters are spaced out.
+        formatter = VoiceFormatter()
+        result = await formatter("Contact USER@EXAMPLE.COM today", "*")
+        self.assertIn("at", result)
+        self.assertNotIn("@", result)
+
+    async def test_uppercase_unit_not_broken_by_acronym_expander(self):
+        # expand_units must run before normalize_acronyms so "100 MB" is expanded
+        # to "100 megabytes" before "MB" gets letter-spaced to "M B".
+        formatter = VoiceFormatter()
+        result = await formatter("100 MB file", "*")
+        self.assertIn("megabytes", result)
+        self.assertNotIn("M B", result)
 
 
 class TestExpandCurrency(unittest.IsolatedAsyncioTestCase):

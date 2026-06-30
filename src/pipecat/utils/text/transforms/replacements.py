@@ -23,6 +23,9 @@ def replace_text(
     Rules are applied in the order provided. Whether the resulting transform is
     alphanumeric-preserving depends on the replacements supplied.
 
+    Patterns are compiled at construction time so invalid regex patterns raise
+    :exc:`re.error` immediately rather than during live TTS processing.
+
     Args:
         replacements: Ordered list of ``(regex_pattern, replacement_string)`` pairs.
 
@@ -38,10 +41,11 @@ def replace_text(
         ])
         tts = CartesiaTTSService(text_transforms=[("*", transform)])
     """
+    compiled = [(re.compile(pattern), replacement) for pattern, replacement in replacements]
 
     async def _transform(text: str, aggregation_type: str | AggregationType) -> str:
-        for pattern, replacement in replacements:
-            text = re.sub(pattern, replacement, text)
+        for pattern, replacement in compiled:
+            text = pattern.sub(replacement, text)
         return text
 
     return _transform
