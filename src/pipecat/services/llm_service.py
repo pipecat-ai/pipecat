@@ -63,7 +63,9 @@ from pipecat.processors.aggregators.llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
+from pipecat.services.settings import NOT_GIVEN as SETTINGS_NOT_GIVEN
 from pipecat.services.settings import LLMSettings, assert_given
+from pipecat.services.settings import is_given as settings_is_given
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServiceMixin
 from pipecat.utils.async_tool_cancellation import (
@@ -551,23 +553,29 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 f"{'enabled' if self._filter_incomplete_user_turns else 'disabled'}"
             )
 
-        if "system_instruction" in changed:
-            # The user replaced the base prompt; re-snapshot it so composition
-            # rebuilds the effective instruction from the new value.
-            base_si = self._settings.system_instruction
-            self._base_system_instruction = base_si if isinstance(base_si, str) else None
+        # Gate on delta presence: apply_update compares against the (possibly
+        # composed) _settings.system_instruction, not against _base — would
+        # silently skip the refresh when the delta equals the composed value.
+        delta_si = getattr(delta, "system_instruction", SETTINGS_NOT_GIVEN)
+        si_in_delta = settings_is_given(delta_si)
+        if si_in_delta:
+            new_base = delta_si if isinstance(delta_si, str) else None
+            if self._base_system_instruction != new_base:
+                self._base_system_instruction = new_base
 
         if "user_turn_completion_config" in changed and self._filter_incomplete_user_turns:
             self.set_user_turn_completion_config(
                 assert_given(self._settings.user_turn_completion_config)
             )
 
-        # Any of these fields changes the composed instruction; rebuild it.
-        if changed.keys() & {
-            "filter_incomplete_user_turns",
-            "system_instruction",
-            "user_turn_completion_config",
-        }:
+        # Any of these changes the composed instruction; rebuild it.
+        if si_in_delta or (
+            changed.keys()
+            & {
+                "filter_incomplete_user_turns",
+                "user_turn_completion_config",
+            }
+        ):
             self._compose_system_instruction()
 
         return changed

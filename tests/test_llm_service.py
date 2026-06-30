@@ -379,6 +379,27 @@ class TestAppendSystemInstruction(unittest.IsolatedAsyncioTestCase):
         await service._update_settings(LLMSettings(system_instruction="APP"))
         self.assertEqual(service._settings.system_instruction, "APP\n\nGUIDE")
 
+    async def test_runtime_update_refreshes_base_even_when_value_equals_composed(self):
+        # Regression: previously, the refresh of `_base_system_instruction`
+        # and the recompose were gated on `"system_instruction" in changed`
+        # from `Settings.apply_update`, which compares the delta against
+        # `_settings.system_instruction` (the composed value, including
+        # appended addons). When the delta happened to equal the composed
+        # value, the gate misfired and `_base` was left stale.
+        service = self._service("APP")
+        service.append_system_instruction("GUIDE")
+        # _base = "APP", _settings.system_instruction = "APP\n\nGUIDE"
+        composed = service._settings.system_instruction
+        self.assertEqual(service._base_system_instruction, "APP")
+        self.assertEqual(composed, "APP\n\nGUIDE")
+
+        # A new base equal to the current composed value must still refresh
+        # _base (and trigger a recompose).
+        await service._update_settings(LLMSettings(system_instruction=composed))
+        self.assertEqual(service._base_system_instruction, composed)
+        # _compose ran with the new base + the still-present appended addon.
+        self.assertEqual(service._settings.system_instruction, composed + "\n\nGUIDE")
+
     async def test_appended_guide_survives_async_tool_cancellation_toggle(self):
         service = self._service("APP")
         service.append_system_instruction("GUIDE")
