@@ -13,10 +13,12 @@ from pipecat.frames.frames import AggregationType
 # Matches common phone formats: (123) 456-7890, 123-456-7890, 123.456.7890,
 # +1 800 555 1234, etc.
 _PHONE_RE = re.compile(
+    r"(?<!\d)"  # not preceded by a digit (no partial match inside a longer number)
     r"(\+?1[\s.\-]?)?"  # optional country code
     r"(\(?\d{3}\)?[\s.\-]?)"  # area code
     r"(\d{3}[\s.\-]?)"  # exchange
     r"(\d{4})"  # subscriber
+    r"(?!\d)"  # not followed by a digit
 )
 
 

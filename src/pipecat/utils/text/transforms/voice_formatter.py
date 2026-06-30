@@ -81,24 +81,20 @@ class VoiceFormatter:
 
             self._transforms.append(_strip_markdown)
 
+        # email_to_speech must run before expand_phone_numbers (phone regex matches
+        # digit-only domains) and before normalize_acronyms (all-caps local parts get
+        # letter-spaced, breaking the email pattern).
+        if email_to_speech:
+            from pipecat.utils.text.transforms.email import email_to_speech as _email_to_speech
+
+            self._transforms.append(_email_to_speech)
+
         if expand_phone_numbers:
             from pipecat.utils.text.transforms.phone import (
                 expand_phone_numbers as _expand_phone_numbers,
             )
 
             self._transforms.append(_expand_phone_numbers)
-
-        if normalize_acronyms:
-            from pipecat.utils.text.transforms.acronyms import (
-                normalize_acronyms as _normalize_acronyms,
-            )
-
-            self._transforms.append(_normalize_acronyms)
-
-        if email_to_speech:
-            from pipecat.utils.text.transforms.email import email_to_speech as _email_to_speech
-
-            self._transforms.append(_email_to_speech)
 
         if normalize_dates:
             from pipecat.utils.text.transforms.dates import normalize_dates as _normalize_dates
@@ -117,10 +113,19 @@ class VoiceFormatter:
 
             self._transforms.append(_expand_percentages)
 
+        # expand_units must run before normalize_acronyms: uppercase unit abbreviations
+        # like "MB" or "MPH" would be letter-spaced first and then not recognized.
         if expand_units:
             from pipecat.utils.text.transforms.units import expand_units as _expand_units
 
             self._transforms.append(_expand_units)
+
+        if normalize_acronyms:
+            from pipecat.utils.text.transforms.acronyms import (
+                normalize_acronyms as _normalize_acronyms,
+            )
+
+            self._transforms.append(_normalize_acronyms)
 
         if expand_numbers:
             from pipecat.utils.text.transforms.numbers import expand_numbers as _expand_numbers
