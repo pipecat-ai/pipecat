@@ -9,7 +9,7 @@ import sys
 
 from loguru import logger
 
-from pipecat.frames.frames import Frame
+from pipecat.frames.frames import Frame, SystemFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -22,6 +22,10 @@ logger.add(sys.stderr, level="DEBUG")
 class NullProcessor(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
+        # Only pass system frames (e.g. StartFrame, CancelFrame) so heartbeat
+        # frames are swallowed, simulating a stalled pipeline.
+        if isinstance(frame, SystemFrame):
+            await self.push_frame(frame, direction)
 
 
 async def main():
