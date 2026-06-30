@@ -804,7 +804,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             heartbeat_timeout = True
             await worker.cancel()
 
-        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
+        await worker.run(WorkerParams(task_manager=TaskManager()))
         assert heartbeat_timeout
 
     async def test_heartbeat_timeout_fires_repeatedly(self):
@@ -828,7 +828,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             if timeout_count >= 2:
                 await worker.cancel()
 
-        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
+        await worker.run(WorkerParams(task_manager=TaskManager()))
         assert timeout_count >= 2
 
 
