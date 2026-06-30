@@ -7,14 +7,14 @@
 """Frame serializer that bridges the eval harness to a bot over RTVI.
 
 The eval harness (:mod:`pipecat.evals.harness`) talks to a bot using the RTVI
-protocol over a plain WebSocket (``WebsocketServerTransport``). This serializer
+protocol over a plain WebSocket (``SingleClientWebsocketServerTransport``). This serializer
 is the only glue needed:
 
 - **Inbound** (harness → bot): JSON RTVI messages are wrapped in an
   :class:`~pipecat.frames.frames.InputTransportMessageFrame` so the bot's
-  ``RTVIProcessor`` parses and routes them (``send-text``, ``raw-audio``,
+  ``RTVIProcessor`` parses and routes them (``send-text``, ``raw-audio``, ``dtmf``,
   ``client-ready``, ...). Two control messages are the exception: a
-  ``client-message`` with ``t = "eval-reset"`` is short-circuited into an
+  ``client-message`` with ``t = "eval-context"`` is short-circuited into an
   :class:`LLMMessagesUpdateFrame` (reseeding the bot's context), and one with
   ``t = "eval-configure"`` into an
   :class:`~pipecat.processors.frameworks.rtvi.frames.RTVIConfigureObserverFrame`
@@ -28,7 +28,7 @@ is the only glue needed:
   harness only asserts on semantic events.
 
 This lives under ``pipecat.evals`` rather than ``pipecat.serializers`` because
-it carries eval-specific behavior (the reset short-circuit, dropping audio) and
+it carries eval-specific behavior (the context short-circuit, dropping audio) and
 is not a general-purpose RTVI transport serializer.
 """
 
@@ -55,7 +55,7 @@ from pipecat.serializers.base_serializer import FrameSerializer
 # A ``client-message`` with this ``t`` is intercepted by the serializer and
 # turned into an ``LLMMessagesUpdateFrame`` instead of being forwarded to the
 # RTVIProcessor. Keeps per-eval context seeding out of the bot.
-EVAL_RESET_MESSAGE_TYPE = "eval-reset"
+EVAL_CONTEXT_MESSAGE_TYPE = "eval-context"
 
 # A ``client-message`` with this ``t`` is intercepted and turned into an
 # ``RTVIConfigureObserverFrame``. This is the trust boundary for raising the
@@ -87,7 +87,7 @@ EVAL_BOT_AUDIO_TYPE = "eval-bot-audio"
 class RTVIEvalSerializer(FrameSerializer):
     """Bridges JSON RTVI messages and pipeline frames for the eval harness.
 
-    Use as the serializer of a ``WebsocketServerTransport`` when running a bot
+    Use as the serializer of a ``SingleClientWebsocketServerTransport`` when running a bot
     under the eval harness. The bot pipeline must include an ``RTVIProcessor``
     and pass an ``RTVIObserver`` to the task.
     """
@@ -153,7 +153,7 @@ class RTVIEvalSerializer(FrameSerializer):
             data: JSON text (or bytes) sent by the harness.
 
         Returns:
-            An ``LLMMessagesUpdateFrame`` for the eval-reset control message, an
+            An ``LLMMessagesUpdateFrame`` for the eval-context control message, an
             ``InputTransportMessageFrame`` wrapping any other RTVI message, or
             ``None`` if the payload is not a valid RTVI message.
         """
@@ -167,9 +167,9 @@ class RTVIEvalSerializer(FrameSerializer):
             logger.warning(f"RTVIEvalSerializer: ignoring non-RTVI message: {message!r}")
             return None
 
-        reset = self._maybe_reset_frame(message)
-        if reset is not None:
-            return reset
+        context = self._maybe_context_frame(message)
+        if context is not None:
+            return context
 
         configure = self._maybe_configure_frame(message)
         if configure is not None:
@@ -184,12 +184,12 @@ class RTVIEvalSerializer(FrameSerializer):
 
         return InputTransportMessageFrame(message=message)
 
-    def _maybe_reset_frame(self, message: dict) -> Frame | None:
-        """Return an ``LLMMessagesUpdateFrame`` for the eval-reset message, else None."""
+    def _maybe_context_frame(self, message: dict) -> Frame | None:
+        """Return an ``LLMMessagesUpdateFrame`` for the eval-context message, else None."""
         if message.get("type") != "client-message":
             return None
         data: Any = message.get("data") or {}
-        if not isinstance(data, dict) or data.get("t") != EVAL_RESET_MESSAGE_TYPE:
+        if not isinstance(data, dict) or data.get("t") != EVAL_CONTEXT_MESSAGE_TYPE:
             return None
         payload = data.get("d") or {}
         messages = payload.get("messages", []) if isinstance(payload, dict) else []
@@ -239,9 +239,16 @@ class RTVIEvalSerializer(FrameSerializer):
         if not isinstance(data, dict) or data.get("t") != EVAL_CONFIGURE_MESSAGE_TYPE:
             return None
         payload = data.get("d") or {}
-        levels = payload.get("function_call_report_level") if isinstance(payload, dict) else None
+        if not isinstance(payload, dict):
+            payload = {}
+        levels = payload.get("function_call_report_level")
         report_level = None
         if isinstance(levels, dict):
             # Values arrive as strings ("none"/"name"/"full"); coerce to the enum.
             report_level = {k: RTVIFunctionCallReportLevel(v) for k, v in levels.items()}
-        return RTVIConfigureObserverFrame(function_call_report_level=report_level)
+        vad = payload.get("vad_user_speaking")
+        vad_user_speaking_enabled = bool(vad) if vad is not None else None
+        return RTVIConfigureObserverFrame(
+            function_call_report_level=report_level,
+            vad_user_speaking_enabled=vad_user_speaking_enabled,
+        )

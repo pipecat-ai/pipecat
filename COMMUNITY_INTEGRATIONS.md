@@ -40,24 +40,41 @@ Your repository must contain these components:
 
 Join our Discord: https://discord.gg/pipecat
 
-### Step 4: Submit for Listing
+### Step 4: Submit Your Documentation
 
-Submit a pull request to add your integration to our [Community Integrations documentation page](https://docs.pipecat.ai/server/services/community-integrations).
+Community integrations are documented alongside the core services on the [Supported Services page](https://docs.pipecat.ai/api-reference/server/services/supported-services), with a `Community` maintainer badge and their own service page. Submitting your docs means two things: a row on the Supported Services page and a dedicated service page.
 
 **To submit:**
 
 1. Fork the [Pipecat docs repository](https://github.com/pipecat-ai/docs)
-2. Edit the file `server/services/community-integrations.mdx`
-3. Add your integration to the appropriate service category table with:
-   - Service name
-   - Link to your repository
-   - Maintainer GitHub username(s)
-4. Include a link to your demo video (approx 30-60 seconds) in your PR description showing:
+2. **Add a row to the Supported Services page.** Edit `api-reference/server/services/supported-services.mdx` and add your integration to the appropriate category table:
+   - **Service** — your service name, linked to your new service page (see next step)
+   - **Setup** — the install command (e.g. `uv add pipecat-yourservice`)
+   - **Maintainer** — `Community`
+3. **Add a service page.** Create `api-reference/server/services/<category>/<your-service>.mdx`. The easiest path is to copy an existing community page (e.g. `image-generation/replicate.mdx`) and adapt it. Each page should include:
+   - The **community-maintained badge** at the top, via the shared snippet:
+     ```mdx
+     import { CommunityMaintained } from "/snippets/community-maintained.mdx";
+
+     <CommunityMaintained
+       maintainer="your-github-username"
+       maintainerUrl="https://github.com/your-github-username"
+       repo="https://github.com/your-org/pipecat-yourservice"
+     />
+     ```
+   - A short **overview** describing what the integration does (you can adapt the intro from your README)
+   - **Installation** — your install command
+   - **Prerequisites** — required accounts, API keys, and environment variables
+   - **Configuration** — constructor parameters and runtime `Settings`
+   - A minimal **usage** example showing the service in a pipeline
+   - A **compatibility** note with the last tested Pipecat version
+4. **Register the page in navigation.** Add the page path to `docs.json` under the matching `navigation` group, and add a redirect entry following the existing pattern.
+5. Include a link to your demo video (approx 30-60 seconds) in your PR description showing:
    - Core functionality of your integration
    - Handling of an interruption (if applicable to service type)
-5. Submit your pull request
+6. Submit your pull request
 
-Once your PR is submitted, post in the `#community-integrations` Discord channel to let us know.
+Keep your service page lightweight: it should point readers to your repository as the source of truth, not duplicate your full README. Once your PR is submitted, post in the `#community-integrations` Discord channel to let us know.
 
 ## Integration Patterns and Examples
 
@@ -448,7 +465,8 @@ except Exception as e:
 ### Testing
 
 - Your foundational example serves as a valuable integration-level test
-- Unit tests are nice to have. As the Pipecat teams provides better guidance, we will encourage unit testing more
+- Use the behavioral eval harness (`pipecat eval run`) to test your foundational example end-to-end; [see the docs](https://docs.pipecat.ai/pipecat/evals/overview) for more details
+- Unit tests are nice to have
 
 ## Disclaimer
 

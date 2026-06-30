@@ -12,6 +12,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -29,7 +30,6 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.transports.websocket.server import WebsocketServerParams
 from pipecat.workers.runner import WorkerRunner
 
 # Load environment variables
@@ -58,7 +58,7 @@ async def get_current_weather(params: FunctionCallParams, location: str, format:
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
-    "eval": lambda: WebsocketServerParams(
+    "eval": lambda: EvalTransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -120,7 +120,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             transition_threshold_seconds=360,
         ),
         # you could choose to pass tools here rather than via context
-        # tools=tools
+        # tools=[get_current_weather]
     )
 
     # AWS Nova Sonic drives the conversation server-side.
@@ -145,7 +145,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # )
     # from pipecat.turns.user_stop import BaseUserTurnStopStrategy
 
-    # Direct functions listed in the context are registered with the LLM automatically
     context = LLMContext(tools=[get_current_weather])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,

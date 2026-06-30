@@ -22,9 +22,11 @@ the bot's eval transport over RTVI, drives each turn, collects the RTVI events
 the bot emits, and asserts on them in order.
 
 Event names are the friendly names the harness maps RTVI server messages onto:
-``user_started_speaking``, ``user_stopped_speaking``, ``user_transcription``,
-``llm_started``, ``response``, ``llm_response``, ``tts_response``,
-``function_call``.
+``user_started_speaking``, ``user_stopped_speaking``, ``vad_user_started_speaking``,
+``vad_user_stopped_speaking``, ``user_transcription``, ``llm_started``, ``response``,
+``llm_response``, ``tts_response``, ``function_call``. The ``vad_*`` events are the raw
+VAD signal, useful as a timing anchor when a turn-detection strategy gates or defers the
+turn-level ``user_stopped_speaking`` (e.g. filtering incomplete turns).
 
 The bot's reply can be asserted three ways:
     response       the transcription of the bot's *actual synthesized audio* (a
@@ -55,14 +57,36 @@ Supported expectation fields (per event):
                                must satisfy, evaluated by a judge LLM (see
                                :mod:`pipecat.evals.judge`).
 
-A turn may also include ``send_after:`` to schedule its user send relative to a
-prior event (used for interruption / barge-in tests), or ``image:`` (a path,
-relative to the scenario file) to register an image for the turn — when a
-function-calling-video bot requests a user image, the eval transport serves it.
+Instead of ``user:``, a turn may press DTMF keys with ``dtmf:`` (the two are
+mutually exclusive — you press keys or you talk)::
+
+    turns:
+      - dtmf: "123#"            # quote it: an unquoted # starts a YAML comment
+        expect:
+          - event: user_transcription
+            text_contains: "DTMF: 123#"
+          - event: response
+            eval: "confirms the entered digits"
+
+Each character is sent as one ``InputDTMFFrame`` (``0``-``9``, ``*``, ``#``),
+regardless of the scenario's user/judge modality. A bot running a
+``DTMFAggregator`` accumulates them and flushes — on the ``#`` terminator or its
+idle timeout — into a ``DTMF: ...`` transcription it reacts to.
+
+A turn may also include ``send_after:`` to schedule its ``user``/``dtmf`` send
+relative to a prior event (used for interruption / barge-in tests), or
+``image:`` (a path, relative to the scenario file) to register an image for the
+turn — when a function-calling-video bot requests a user image, the eval
+transport serves it. ``send_after`` with only ``delay_ms`` (no ``event``) is a
+pure time delay relative to the previous send — handy for pacing keypresses
+across ``dtmf`` turns to exercise the aggregator's idle-timeout flush.
+
+``expect:`` is optional; omit it for a turn that only sends input or only waits.
 
 Top-level optional fields:
-    reset:  list of LLM messages the harness sends as a reset before driving
-            turns (default empty list, which clears the bot's context).
+    context: LLM messages the bot's context should start from. When given, the
+            harness sends them before driving turns (replacing the bot's
+            context); omit to leave the bot's own context untouched.
     user:   how user turns are delivered::
 
                 user:
@@ -99,6 +123,7 @@ relative to the scenario file's directory. This is handy for sharing the
     judge: !include judge_audio.yaml
 """
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -106,6 +131,39 @@ from typing import Any
 import yaml
 from loguru import logger
 from yamlinclude import YamlIncludeConstructor
+
+from pipecat.audio.dtmf.types import KeypadEntry
+
+
+class _ScenarioLoader(yaml.SafeLoader):
+    """SafeLoader that resolves only plain-decimal numeric scalars as ints.
+
+    PyYAML's SafeLoader follows YAML 1.1, which reinterprets unquoted numeric
+    scalars as octal (``010`` -> 8), hex (``0x10`` -> 16), or binary before
+    application code sees them. For DTMF that silently rewrites the digit
+    sequence the user typed (``dtmf: 012`` would load as ``10``). Dropping those
+    resolvers and keeping only plain decimal means ``dtmf: 123`` still loads as
+    an int (so the unquoted-digits convenience works), while leading-zero, hex,
+    and binary tokens stay strings and reach DTMF validation with their digits
+    intact. No scenario field wants an octal/hex literal, so this is safe
+    document-wide.
+    """
+
+
+# Strip the inherited int resolvers (which match octal/hex/binary/sexagesimal)
+# and register a decimal-only replacement. Underscores stay allowed to match
+# YAML's grouping syntax (e.g. ``1_000``); a leading zero (``012``) no longer
+# matches, so such tokens load as strings.
+_ScenarioLoader.yaml_implicit_resolvers = {
+    ch: [(tag, rx) for tag, rx in resolvers if tag != "tag:yaml.org,2002:int"]
+    for ch, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+yaml.add_implicit_resolver(
+    "tag:yaml.org,2002:int",
+    re.compile(r"^[-+]?(?:0|[1-9][0-9_]*)$"),
+    list("-+0123456789"),
+    Loader=_ScenarioLoader,
+)
 
 # Events whose payloads carry bot-generated text the judge can sensibly
 # evaluate. Asserting ``eval:`` on anything else (user transcripts, tool
@@ -164,20 +222,27 @@ class EvalExpectation:
 
 @dataclass
 class EvalSendAfter:
-    """Event-driven scheduling for a turn's user send.
+    """Scheduling for when a turn's input (``user`` or ``dtmf``) is sent.
 
     When set on a :class:`EvalTurn`, the harness waits for ``event`` to have been
     seen (either earlier in the run or arriving now), then waits an additional
-    ``delay_ms`` before sending the turn's ``user`` text. Used for barge-in
-    tests: ``send_after: {event: llm_started, delay_ms: 500}`` means
-    "interrupt 500ms after the bot started responding."
+    ``delay_ms`` before sending the turn's input. Used for barge-in tests:
+    ``send_after: {event: llm_started, delay_ms: 500}`` means "interrupt 500ms
+    after the bot started responding."
+
+    ``event`` is optional: a bare ``send_after: {delay_ms: 500}`` is a pure time
+    delay with no event anchor (500ms after the previous turn's send). Handy for
+    pacing keypresses across ``dtmf`` turns, where there is no per-key event to
+    anchor on.
 
     Parameters:
-        event: Name of the event to schedule from.
-        delay_ms: Additional delay in milliseconds after the event was received.
+        event: Name of the event to schedule from, or ``None`` for a pure
+            ``delay_ms`` time delay with no event anchor.
+        delay_ms: Additional delay in milliseconds after the event was received
+            (or, when ``event`` is ``None``, after the previous turn's send).
     """
 
-    event: str
+    event: str | None
     delay_ms: int
 
 
@@ -185,18 +250,31 @@ class EvalSendAfter:
 class EvalTurn:
     """One turn in a scenario.
 
-    A turn is either driven by the harness sending a ``user`` utterance, or it
-    is observation-only (no ``user`` field — useful for bot-first scenarios
-    like opening greetings).
+    A turn drives the bot one of three ways: the harness sends a ``user``
+    utterance (the person speaks), it sends a ``dtmf`` keypress sequence (the
+    person presses keys), or it is observation-only (neither field — useful for
+    bot-first scenarios like opening greetings). ``user`` and ``dtmf`` are
+    mutually exclusive: a turn is one or the other.
 
     Parameters:
         user: Optional text the harness sends as the user's turn — an RTVI
             ``send-text`` in text modality, or synthesized speech (``raw-audio``)
             in audio modality. If absent, the turn just waits for and asserts on
             expected events.
-        expect: Expected events, in the order they should arrive.
-        send_after: Optional event-driven schedule for when the ``user`` send
-            should fire. Only meaningful when ``user`` is set.
+        dtmf: Optional DTMF keypad sequence the harness sends, one
+            :class:`~pipecat.frames.frames.InputDTMFFrame` per character (e.g.
+            ``"123#"``). Each character must be a valid
+            :class:`~pipecat.audio.dtmf.types.KeypadEntry` (``0``-``9``, ``*``,
+            ``#``). Mutually exclusive with ``user``. The keys are injected the
+            same way regardless of the scenario's user/judge modality; a bot with
+            a ``DTMFAggregator`` turns them into a transcription it reacts to.
+            Quote the value in YAML (``dtmf: "123#"``) — an unquoted ``#`` starts
+            a comment.
+        expect: Expected events, in the order they should arrive. Optional —
+            omit it for a pure pacing/observation turn (e.g. a ``dtmf`` turn that
+            only presses keys, with the assertion on a later turn).
+        send_after: Optional schedule for when the turn's input should fire. Only
+            meaningful when ``user`` or ``dtmf`` is set.
         image: Optional path to an image to register for this turn (resolved
             relative to the scenario file). When a function-calling-video bot
             requests a user image during the turn, the eval transport serves this
@@ -204,7 +282,8 @@ class EvalTurn:
     """
 
     user: str | None
-    expect: list[EvalExpectation]
+    expect: list[EvalExpectation] = field(default_factory=list)
+    dtmf: str | None = None
     send_after: EvalSendAfter | None = None
     image: str | None = None
 
@@ -216,12 +295,13 @@ class EvalScenario:
     Parameters:
         name: The eval name (from ``name:``).
         turns: Ordered list of turns.
-        reset: Messages to seed the bot's LLM context with before this eval
-            runs. Sent by the harness as an ``eval-reset`` client message right
-            after the bot-ready handshake (the eval serializer turns it into an
-            ``LLMMessagesUpdateFrame``). Empty list (the default) clears the
-            context entirely; bots without an LLM context aggregator ignore the
-            resulting frame.
+        context: LLM messages the bot's context should start from for this eval.
+            When non-empty, the harness sends them as an ``eval-context`` client
+            message right after the bot-ready handshake (the eval serializer
+            turns it into an ``LLMMessagesUpdateFrame``, which replaces the
+            context); bots without an LLM context aggregator ignore the frame.
+            Omitted or empty (the default): the harness sends nothing and the
+            bot keeps the context it set up itself.
         judge: Judge LLM configuration dict with keys ``service``, ``model``,
             and optional ``endpoint``. Defaults to
             ``{"service": "ollama", "model": "gemma2:9b"}``.
@@ -239,16 +319,23 @@ class EvalScenario:
             to the bot, exercising its STT for real. Mapping with ``service``,
             ``voice``, and optional ``model`` / ``sample_rate`` /
             ``api_key``. Omit for text-only evals (default).
+        trigger_disconnect: Whether the harness fires the bot's
+            ``on_client_disconnected`` handler when this scenario's connection
+            ends. Bots often cancel their pipeline there, so this is False by
+            default to avoid that between scenarios; set True to exercise the
+            bot's disconnect path. Independent of ``--stop-bot``, which tears the
+            bot down via ``eval-cancel`` regardless of the handler.
         source_path: Path the scenario was loaded from, for error messages.
     """
 
     name: str
     turns: list[EvalTurn]
-    reset: list[dict] = field(default_factory=list)
+    context: list[dict] = field(default_factory=list)
     judge: dict = field(default_factory=lambda: {"service": "ollama", "model": "gemma2:9b"})
     bot_audio: bool = False
     transcriber: dict | None = None
     user_audio: dict | None = None
+    trigger_disconnect: bool = False
     source_path: Path | None = None
 
     @classmethod
@@ -271,7 +358,7 @@ class EvalScenario:
         # scenarios can share judge/user config. Includes resolve relative to the
         # scenario file's directory. Register the constructor on a private loader
         # subclass (not the global SafeLoader) so it has no global side effects.
-        class _Loader(yaml.SafeLoader):
+        class _Loader(_ScenarioLoader):
             pass
 
         YamlIncludeConstructor.add_to_loader_class(loader_class=_Loader, base_dir=str(path.parent))
@@ -292,13 +379,13 @@ class EvalScenario:
 
         turns = [_parse_turn(t, path, idx) for idx, t in enumerate(raw_turns)]
 
-        raw_reset = data.get("reset")
-        if raw_reset is None:
-            reset: list[dict] = []
-        elif isinstance(raw_reset, list):
-            reset = raw_reset
+        raw_context = data.get("context")
+        if raw_context is None:
+            context: list[dict] = []
+        elif isinstance(raw_context, list):
+            context = raw_context
         else:
-            raise ValueError(f"{path}: 'reset:' must be a list of message dicts")
+            raise ValueError(f"{path}: 'context:' must be a list of message dicts")
 
         # user: { modality: audio|text, speech: {...} }. Audio synthesizes each user
         # turn via TTS (exercising the bot's STT); text sends it as text. Stored
@@ -318,11 +405,12 @@ class EvalScenario:
         return cls(
             name=name,
             turns=turns,
-            reset=reset,
+            context=context,
             judge=judge,
             bot_audio=bot_audio,
             transcriber=transcriber,
             user_audio=user_audio,
+            trigger_disconnect=bool(data.get("trigger_disconnect", False)),
             source_path=path,
         )
 
@@ -466,17 +554,25 @@ def _parse_turn(t: Any, path: Path, idx: int) -> EvalTurn:
     if user is not None and not isinstance(user, str):
         raise ValueError(f"{path}: turn #{idx} 'user:' must be a string if present")
 
-    raw_expect = t.get("expect")
+    dtmf = _parse_dtmf(t.get("dtmf"), path, idx)
+    if user is not None and dtmf is not None:
+        raise ValueError(
+            f"{path}: turn #{idx} has both 'user:' and 'dtmf:' — a turn is one or the other"
+        )
+
+    # `expect:` is optional: a turn may just send input (e.g. paced keypresses)
+    # or just wait, with the assertion living on another turn.
+    raw_expect = t.get("expect", [])
     if not isinstance(raw_expect, list):
-        raise ValueError(f"{path}: turn #{idx} missing or invalid 'expect:' list")
+        raise ValueError(f"{path}: turn #{idx} 'expect:' must be a list if present")
 
     expect = [_parse_expectation(e, path, idx, ei) for ei, e in enumerate(raw_expect)]
 
     send_after = _parse_send_after(t.get("send_after"), path, idx) if "send_after" in t else None
-    if send_after is not None and user is None:
+    if send_after is not None and user is None and dtmf is None:
         raise ValueError(
-            f"{path}: turn #{idx} has 'send_after:' but no 'user:' — "
-            "send_after only schedules when the user message gets sent"
+            f"{path}: turn #{idx} has 'send_after:' but no 'user:' or 'dtmf:' — "
+            "send_after only schedules when the turn's input gets sent"
         )
 
     # Image paths resolve relative to the scenario file, so a scenario is portable.
@@ -486,7 +582,31 @@ def _parse_turn(t: Any, path: Path, idx: int) -> EvalTurn:
             raise ValueError(f"{path}: turn #{idx} 'image:' must be a path string")
         image = str((path.parent / image).resolve())
 
-    return EvalTurn(user=user, expect=expect, send_after=send_after, image=image)
+    return EvalTurn(user=user, dtmf=dtmf, expect=expect, send_after=send_after, image=image)
+
+
+def _parse_dtmf(dtmf: Any, path: Path, turn_idx: int) -> str | None:
+    """Parse and validate a turn's ``dtmf:`` keypad sequence."""
+    if dtmf is None:
+        return None
+    # YAML parses an unquoted digit sequence as an int (`dtmf: 123`); normalize so
+    # both `dtmf: 123` and `dtmf: "123#"` work the same.
+    if isinstance(dtmf, int):
+        dtmf = str(dtmf)
+    if not isinstance(dtmf, str) or not dtmf:
+        raise ValueError(
+            f"{path}: turn #{turn_idx} 'dtmf:' must be a non-empty string of keypad entries"
+        )
+    for ch in dtmf:
+        try:
+            KeypadEntry(ch)
+        except ValueError:
+            valid = ", ".join(e.value for e in KeypadEntry)
+            raise ValueError(
+                f"{path}: turn #{turn_idx} 'dtmf:' has invalid keypad entry {ch!r} "
+                f"(valid entries: {valid})"
+            )
+    return dtmf
 
 
 def _parse_send_after(s: Any, path: Path, turn_idx: int) -> EvalSendAfter:
@@ -495,13 +615,19 @@ def _parse_send_after(s: Any, path: Path, turn_idx: int) -> EvalSendAfter:
         raise ValueError(f"{path}: turn #{turn_idx} 'send_after:' must be a mapping")
 
     event = s.get("event")
-    if not event or not isinstance(event, str):
-        raise ValueError(f"{path}: turn #{turn_idx} 'send_after:' missing or invalid 'event:'")
+    if event is not None and not isinstance(event, str):
+        raise ValueError(f"{path}: turn #{turn_idx} 'send_after.event' must be a string if present")
 
     delay_ms = s.get("delay_ms", 0)
     if not isinstance(delay_ms, int) or delay_ms < 0:
         raise ValueError(
             f"{path}: turn #{turn_idx} 'send_after.delay_ms' must be a non-negative int"
+        )
+
+    # With no event to anchor on, a zero delay would be a no-op send_after.
+    if event is None and delay_ms == 0:
+        raise ValueError(
+            f"{path}: turn #{turn_idx} 'send_after:' needs an 'event:' or a positive 'delay_ms:'"
         )
 
     return EvalSendAfter(event=event, delay_ms=delay_ms)

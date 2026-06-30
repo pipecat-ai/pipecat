@@ -49,7 +49,7 @@ class Mem0MemoryService(FrameProcessor):
             api_version: API version to use for Mem0 client operations.
 
                 .. deprecated:: 1.4.0
-                    No longer used. Mem0 2.0.0 removed the ``api_version`` /
+                    No replacement. Mem0 2.0.0 removed the ``api_version`` /
                     ``output_format`` parameters from the client. Will be
                     removed in 2.0.0.
 
@@ -243,6 +243,10 @@ class Mem0MemoryService(FrameProcessor):
                     )
                 )
 
+            # Mem0 2.x returns {"results": [...]} from search(); older/cloud
+            # versions may return a bare list. Normalize to a list so callers
+            # get a consistent shape (matches get_all() handling above).
+            results = results.get("results", []) if isinstance(results, dict) else results
             logger.debug(f"Retrieved {len(results)} memories from Mem0")
             return results
         except Exception as e:
@@ -268,7 +272,7 @@ class Mem0MemoryService(FrameProcessor):
 
         # Format memories as a message
         memory_text = self.system_prompt
-        for i, memory in enumerate(memories["results"], 1):
+        for i, memory in enumerate(memories, 1):
             memory_text += f"{i}. {memory.get('memory', '')}\n\n"
 
         # Add memories as a system message or user message based on configuration

@@ -6,29 +6,29 @@
 
 """Manual demonstration of the missing-handler (developer-error) recovery path.
 
-When a tool is advertised to the LLM via ``tools``/``LLMContext`` but
-the developer forgets to call ``llm.register_function(...)`` to wire up
-its handler, the LLM happily emits a tool call and then... nothing
-happens on the Pipecat side, leaving the conversation stuck.
+When a tool is advertised to the LLM via ``tools``/``LLMContext`` but has no
+handler — neither set on its ``FunctionSchema`` nor registered via
+``llm.register_function(...)`` — the LLM happily emits a tool call and then...
+nothing happens on the Pipecat side, leaving the conversation stuck.
 
 Pipecat's recovery path (``LLMService._missing_function_call_handler``)
 catches this case:
 
 - Logs a ``logger.error`` distinguishing **developer error** (tool advertised
-  but no handler registered) from a hallucination (tool not advertised),
-  pointing at the missing ``register_function`` call.
+  but no handler wired up) from a hallucination (tool not advertised),
+  pointing at the missing handler.
 - Returns a neutral terminal tool result
   (``LLMService.MISSING_FUNCTION_CALL_MESSAGE_TEMPLATE``: "The function
   `X` is not currently available.") so the call still terminates with a
   normal tool result instead of leaving the conversation stuck.
 
-This example is **deliberately broken**: the weather schema is in
-``tools`` but ``register_function`` is *not* called. Ask the bot about
-the weather and observe:
+This example is **deliberately broken**: the weather schema is in ``tools``
+but its handler is wired up neither on the ``FunctionSchema`` nor via
+``register_function``. Ask the bot about the weather and observe:
 
 1. The LLM emits a tool call for ``get_current_weather``.
-2. ``logger.error`` fires with "advertised … but has no registered handler
-   — did you forget to call register_function()?"
+2. ``logger.error`` fires with "advertised to the LLM but has no handler —
+   set FunctionSchema.handler (recommended) or call register_function()".
 3. The terminal tool result is fed back to the LLM.
 4. The LLM responds in voice based on that result (typically something
    like "the weather function isn't available right now").
@@ -45,6 +45,7 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -61,7 +62,6 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.transports.websocket.server import WebsocketServerParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -87,7 +87,7 @@ weather_tools = ToolsSchema(standard_tools=[weather_function])
 
 
 transport_params = {
-    "eval": lambda: WebsocketServerParams(
+    "eval": lambda: EvalTransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -124,7 +124,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # *** DELIBERATELY OMITTED ***
     # The whole point of this example is to demonstrate the missing-handler
-    # recovery path. Re-add this line to wire the tool up correctly:
+    # recovery path. To wire the tool up correctly, either pass the handler to
+    # the schema above (recommended) —
+    #
+    #     weather_function = FunctionSchema(..., handler=fetch_weather_from_api)
+    #
+    # — or register it here:
     #
     # llm.register_function("get_current_weather", fetch_weather_from_api)
 

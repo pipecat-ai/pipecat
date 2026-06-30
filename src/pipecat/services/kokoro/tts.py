@@ -35,7 +35,7 @@ except ModuleNotFoundError as e:
     logger.error('In order to use Kokoro, you need to `uv add "pipecat-ai[kokoro]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
-KOKORO_CACHE_DIR = Path(os.path.expanduser("~/.cache/kokoro-onnx"))
+KOKORO_CACHE_DIR = Path(os.path.expanduser("~/.cache/pipecat/kokoro-onnx"))
 KOKORO_MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"
 KOKORO_VOICES_URL = (
     "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"

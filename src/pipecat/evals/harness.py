@@ -7,7 +7,7 @@
 """Eval session: drives a bot over RTVI and asserts on the events it emits.
 
 An :class:`EvalSession` connects to a running bot's eval transport (a
-``WebsocketServerTransport`` speaking RTVI via
+``SingleClientWebsocketServerTransport`` speaking RTVI via
 :class:`~pipecat.evals.serializer.RTVIEvalSerializer`), walks through a parsed
 :class:`~pipecat.evals.scenario.EvalScenario`, and verifies that the expected
 semantic events arrive in order, with the right payloads, within their latency
@@ -18,25 +18,27 @@ models (:mod:`pipecat.processors.frameworks.rtvi.models`) and translates the
 RTVI server messages it receives back into a small set of friendly event names
 the scenario files assert on:
 
-==========================  ==============================================
-scenario ``event:``         RTVI server message(s)
-==========================  ==============================================
-``user_started_speaking``   ``user-started-speaking``
-``user_stopped_speaking``   ``user-stopped-speaking``
-``user_transcription``      ``user-transcription`` (final only)
-``llm_started``             ``bot-llm-started``
-``llm_response``            the LLM text: ``bot-llm-text`` joined at ``bot-llm-stopped``
-``tts_response``            the TTS's spoken text: one segment per ``bot-tts-text``
-                            (audio modality only)
-``response``                local-STT transcription of the bot's actual audio
-                            (audio modality only); ``llm_response`` in text modality
-``function_call``           ``llm-function-call-in-progress``
-==========================  ==============================================
+==========================      ==============================================
+scenario ``event:``             RTVI server message(s)
+==========================      ==============================================
+``user_started_speaking``       ``user-started-speaking``
+``user_stopped_speaking``       ``user-stopped-speaking``
+``vad_user_started_speaking``   ``vad-user-started-speaking`` (raw VAD, ungated by turn detection)
+``vad_user_stopped_speaking``   ``vad-user-stopped-speaking`` (raw VAD, ungated by turn detection)
+``user_transcription``          ``user-transcription`` (final only)
+``llm_started``                 ``bot-llm-started``
+``llm_response``                the LLM text: ``bot-llm-text`` joined at ``bot-llm-stopped``
+``tts_response``                the TTS's spoken text: one segment per ``bot-tts-text``
+                                (audio modality only)
+``response``                    local-STT transcription of the bot's actual audio
+                                (audio modality only); ``llm_response`` in text modality
+``function_call``               ``llm-function-call-in-progress``
+==========================      ==============================================
 
 Matching semantics: expected events must appear in the specified order, but
 unmatched events may appear between them (so a scenario doesn't have to
 enumerate every event the bot emits). The ``within_ms`` budget for each
-expectation is measured from the most recent ``send-text`` / ``raw-audio`` send
+expectation is measured from the most recent ``send-text`` / ``raw-audio`` / ``dtmf`` send
 (default 60s when omitted).
 
 An ``llm_response`` with a content check (``text_contains`` / ``eval:``)
@@ -86,8 +88,8 @@ from pipecat.evals.serializer import (
     EVAL_BOT_AUDIO_TYPE,
     EVAL_CANCEL_MESSAGE_TYPE,
     EVAL_CONFIGURE_MESSAGE_TYPE,
+    EVAL_CONTEXT_MESSAGE_TYPE,
     EVAL_IMAGE_MESSAGE_TYPE,
-    EVAL_RESET_MESSAGE_TYPE,
 )
 from pipecat.evals.speech import EvalSpeech
 from pipecat.evals.transcribe import EvalTranscriber
@@ -182,8 +184,8 @@ class EvalTurnProgress:
 class EvalSession:
     """Runs one :class:`EvalScenario` against a bot over a single WebSocket session.
 
-    Connects as an RTVI client, drives each turn (sending ``send-text`` or
-    ``raw-audio``), collects the RTVI events the bot emits, and asserts on them.
+    Connects as an RTVI client, drives each turn (sending ``send-text``,
+    ``raw-audio``, or ``dtmf``), collects the RTVI events the bot emits, and asserts on them.
     Build one with :meth:`from_scenario` (which constructs the judge, speech, and
     transcriber the scenario needs), then await :meth:`run`.
     """
@@ -198,6 +200,7 @@ class EvalSession:
         on_progress: Callable[[EvalTurnProgress], None] | None = None,
         record_path: str | None = None,
         stop_bot: bool = False,
+        trigger_disconnect: bool = False,
         judge: EvalJudge | None = None,
         speech: EvalSpeech | None = None,
         transcriber: EvalTranscriber | None = None,
@@ -224,6 +227,11 @@ class EvalSession:
             stop_bot: When True, ask the bot to cancel its pipeline (and exit) on
                 teardown via ``eval-cancel``. The suite enables it to clean up
                 each spawned bot.
+            trigger_disconnect: When True (or when the scenario sets
+                ``trigger_disconnect``), ask the eval transport to fire the bot's
+                ``on_client_disconnected`` handler when this connection ends.
+                Bots often cancel their pipeline there, so it is off by default
+                to avoid that between scenarios.
             judge: The :class:`~pipecat.evals.judge.EvalJudge` for ``eval:``
                 assertions, or ``None`` if the scenario has none.
             speech: The :class:`~pipecat.evals.speech.EvalSpeech` for synthesizing
@@ -240,6 +248,8 @@ class EvalSession:
         self._on_progress = on_progress
         self._record_path = record_path
         self._stop_bot = stop_bot
+        # Either the run-wide CLI flag or the scenario's own field opts in.
+        self._trigger_disconnect = trigger_disconnect or scenario.trigger_disconnect
 
         self._ws: ClientConnection | None = None
         self._queue: asyncio.Queue = asyncio.Queue()
@@ -300,6 +310,7 @@ class EvalSession:
         cache_dir: str | None = None,
         use_cache: bool = True,
         stop_bot: bool = False,
+        trigger_disconnect: bool = False,
         judge: EvalJudge | None = None,
         speech: EvalSpeech | None = None,
         transcriber: EvalTranscriber | None = None,
@@ -329,6 +340,9 @@ class EvalSession:
                 (no cache reads or writes). Defaults to True.
             stop_bot: When True, ask the bot to cancel its pipeline (and exit) on
                 teardown. Leave False to keep it running for more scenarios.
+            trigger_disconnect: When True, fire the bot's ``on_client_disconnected``
+                handler when the connection ends (the scenario's own
+                ``trigger_disconnect`` field also opts in). Off by default.
             judge: Override the judge (default: built from ``scenario.judge`` when the
                 scenario has ``eval:`` assertions).
             speech: Override the user-audio generator (default: built from
@@ -363,6 +377,7 @@ class EvalSession:
             on_progress=on_progress,
             record_path=record_path,
             stop_bot=stop_bot,
+            trigger_disconnect=trigger_disconnect,
             judge=judge,
             speech=speech,
             transcriber=transcriber,
@@ -535,7 +550,9 @@ class EvalSession:
         mic at all, so a text-mode scenario never feeds silence into the bot's
         STT. ``capture_bot_audio`` makes the bot forward its synthesized audio for
         ``tts_response`` transcription. ``record`` asks the eval transport to
-        record the conversation audio (audio mode only).
+        record the conversation audio (audio mode only). ``trigger_disconnect``
+        asks the transport to fire the bot's ``on_client_disconnected`` handler
+        when the connection ends (off by default, since bots often cancel there).
         """
         from urllib.parse import quote
 
@@ -548,6 +565,8 @@ class EvalSession:
             flags.append("capture_bot_audio=true")
         if self._record_path and self._scenario.bot_audio:
             flags.append(f"record={quote(self._record_path, safe='')}")
+        if self._trigger_disconnect:
+            flags.append("trigger_disconnect=true")
         if not flags:
             return self._bot_url
         sep = "&" if "?" in self._bot_url else "?"
@@ -578,6 +597,21 @@ class EvalSession:
                         needs_name = True
         return "name" if needs_name else None
 
+    def _needs_vad_events(self) -> bool:
+        """Whether the scenario references raw VAD speaking events.
+
+        These (``vad_user_started_speaking`` / ``vad_user_stopped_speaking``) are
+        off by default; the harness asks the bot's RTVIObserver to emit them only
+        when a scenario asserts on or schedules from them.
+        """
+        vad_events = {"vad_user_started_speaking", "vad_user_stopped_speaking"}
+        for turn in self._scenario.turns:
+            if turn.send_after is not None and turn.send_after.event in vad_events:
+                return True
+            if any(exp.event in vad_events for exp in turn.expect):
+                return True
+        return False
+
     async def _handshake(self) -> None:
         """Send client-ready, wait for bot-ready, then optionally seed context.
 
@@ -601,31 +635,37 @@ class EvalSession:
         # Hard gate — raises TimeoutError if the bot never announces readiness.
         await self._wait_for_event("bot_ready", BOT_READY_TIMEOUT_S)
 
-        # If the scenario asserts on function-call name/args, ask the bot's
-        # RTVIObserver to report them for the duration of this eval. Bots keep
-        # the secure NONE default; only the eval transport understands this.
+        # Ask the bot's RTVIObserver to expose what this scenario needs, for the
+        # duration of this eval only (bots keep their defaults; only the eval
+        # transport understands this): raise the function-call report level if it
+        # asserts on call name/args, and enable raw VAD speaking events if it uses
+        # them.
         level = self._required_report_level()
-        if level is not None:
+        vad = self._needs_vad_events()
+        if level is not None or vad:
+            config: dict = {}
+            if level is not None:
+                config["function_call_report_level"] = {"*": level}
+            if vad:
+                config["vad_user_speaking"] = True
             configure = RTVI.Message(
                 type="client-message",
                 id=self._message_id(),
-                data={
-                    "t": EVAL_CONFIGURE_MESSAGE_TYPE,
-                    "d": {"function_call_report_level": {"*": level}},
-                },
+                data={"t": EVAL_CONFIGURE_MESSAGE_TYPE, "d": config},
             )
             await self._send(configure)
 
-        # Only send a reset when the scenario actually asked for one. An implicit
-        # empty reset would race with bot startup flows (e.g. a greeting added in
-        # on_client_connected), wiping the bot's context right after it set it up.
-        if self._scenario.reset:
-            reset = RTVI.Message(
+        # Only send the eval-context when the scenario provides starting context.
+        # An implicit empty one would race with bot startup flows (e.g. a greeting
+        # added in on_client_connected), wiping the bot's context right after it
+        # set it up.
+        if self._scenario.context:
+            context_message = RTVI.Message(
                 type="client-message",
                 id=self._message_id(),
-                data={"t": EVAL_RESET_MESSAGE_TYPE, "d": {"messages": self._scenario.reset}},
+                data={"t": EVAL_CONTEXT_MESSAGE_TYPE, "d": {"messages": self._scenario.context}},
             )
-            await self._send(reset)
+            await self._send(context_message)
 
     async def _send(self, message: RTVI.Message) -> None:
         """Serialize and send an RTVI message over the WebSocket."""
@@ -691,20 +731,30 @@ class EvalSession:
     def _discard_interrupted_output(self) -> None:
         """Drop the bot's interrupted, un-matched output (on user interruption).
 
-        Clears the response buffers and drains the unmatched event queue, so a
-        greeting (or any prior bot output) the user just interrupted can't be
-        matched against this turn. Diagnostics (``events_seen``,
-        ``latest_event_times``) are left intact for send_after lookups.
+        Clears the response buffers and drains the bot's pending output from the
+        event queue, so a greeting (or any prior bot output) the user just
+        interrupted can't be matched against this turn. ``user_transcription`` is
+        preserved: a DTMF keypress emits its transcription immediately before the
+        turn-start interruption, and that transcription is the turn's *input*, not
+        the stale bot output this discard is meant to clear — dropping it would
+        race the matcher. Diagnostics (``events_seen``, ``latest_event_times``)
+        are left intact for send_after lookups.
         """
         self._text_buffer = []
         self._tts_audio = bytearray()
+        preserved: list[dict] = []
         dropped = 0
         while not self._queue.empty():
             try:
-                self._queue.get_nowait()
-                dropped += 1
+                event = self._queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
+            if event.get("type") == "user_transcription":
+                preserved.append(event)
+            else:
+                dropped += 1
+        for event in preserved:
+            self._queue.put_nowait(event)
         if dropped:
             self._debug(f"discard: dropped {dropped} queued event(s) on interruption")
 
@@ -763,6 +813,10 @@ class EvalSession:
                 return [{"type": "bot_interrupted"}]
             case "user-stopped-speaking":
                 return [{"type": "user_stopped_speaking"}]
+            case "vad-user-started-speaking":
+                return [{"type": "vad_user_started_speaking"}]
+            case "vad-user-stopped-speaking":
+                return [{"type": "vad_user_stopped_speaking"}]
             case "user-transcription":
                 if data.get("final"):
                     return [{"type": "user_transcription", "transcript": data.get("text", "")}]
@@ -854,18 +908,20 @@ class EvalSession:
             try:
                 await self._wait_send_after(turn.send_after)
             except TimeoutError as e:
+                # Only the event-anchored wait can time out; the pure-delay form
+                # just sleeps. So event is never None here, but fall back for typing.
+                event_name = turn.send_after.event or "send_after"
                 failures.append(
                     EvalAssertionFailure(
                         turn_index=turn_idx,
                         expectation_index=-1,
-                        event_name=turn.send_after.event,
+                        event_name=event_name,
                         reason=f"send_after never fired: {e}",
                     )
                 )
+                self._debug(f"FAIL: {event_name}: {failures[-1].reason}")
                 self._progress(
-                    EvalTurnProgress(
-                        turn_idx, -1, turn.send_after.event, "timeout", failures[-1].reason
-                    )
+                    EvalTurnProgress(turn_idx, -1, event_name, "timeout", failures[-1].reason)
                 )
                 return failures
 
@@ -884,8 +940,15 @@ class EvalSession:
             # judged in context (e.g. a terse "That's four" answering this question).
             if self._judge is not None:
                 self._judge.add_user_message(turn.user)
+        elif turn.dtmf is not None:
+            self._debug(f"send: dtmf {turn.dtmf!r}")
+            await self._send_user_dtmf(turn.dtmf)
+            # Record the keypresses for judge context, so the bot's reply is judged
+            # knowing what was pressed.
+            if self._judge is not None:
+                self._judge.add_user_message(f"(DTMF keypad input: {turn.dtmf})")
 
-        self._progress(EvalTurnProgress(turn_idx, -1, turn.user or "", "turn"))
+        self._progress(EvalTurnProgress(turn_idx, -1, turn.user or turn.dtmf or "", "turn"))
 
         # All of a turn's expectations share one deadline anchored at the send, so a
         # stalled turn fails within a single ``within_ms`` budget instead of spending
@@ -909,6 +972,7 @@ class EvalSession:
                         reason=reason,
                     )
                 )
+                self._debug(f"FAIL: {expectation.event}: {reason}")
                 self._progress(
                     EvalTurnProgress(turn_idx, exp_idx, expectation.event, "timeout", reason)
                 )
@@ -916,6 +980,7 @@ class EvalSession:
 
             if failure:
                 failures.append(failure)
+                self._debug(f"FAIL: {expectation.event}: {failure.reason}")
                 self._progress(
                     EvalTurnProgress(turn_idx, exp_idx, expectation.event, "failed", failure.reason)
                 )
@@ -943,6 +1008,23 @@ class EvalSession:
             ).model_dump(),
         )
         await self._send(message)
+
+    async def _send_user_dtmf(self, keys: str) -> None:
+        """Send a DTMF keypress turn: one RTVI ``dtmf`` message per key.
+
+        The bot's ``RTVIProcessor`` turns each into an ``InputDTMFFrame`` pushed
+        downstream, the same path a telephony transport's keypress takes. The
+        bot's ``DTMFAggregator`` (if any) accumulates them and flushes — on the
+        ``#`` terminator or its idle timeout — into a transcription the bot reacts
+        to. Keys go out back-to-back; use ``send_after`` across turns to pace them.
+        """
+        for key in keys:
+            message = RTVI.Message(
+                type="dtmf",
+                id=self._message_id(),
+                data={"button": key},
+            )
+            await self._send(message)
 
     async def _send_image(self, image_path: str) -> None:
         """Register an image (base64, with its MIME type) for the current turn.
@@ -1001,8 +1083,17 @@ class EvalSession:
         If the event was seen earlier in the run, anchor on that time (potentially
         fire immediately). Otherwise, poll the latest_event_times map until the
         event arrives, then anchor on that.
+
+        With no event (``send_after.event is None``), it's a pure time delay:
+        sleep ``delay_ms`` from now (i.e. from the previous turn's send).
         """
         target_delay_s = send_after.delay_ms / 1000.0
+
+        if send_after.event is None:
+            self._debug(f"send_after: waiting {send_after.delay_ms}ms")
+            await asyncio.sleep(target_delay_s)
+            return
+
         deadline = time.monotonic() + SEND_AFTER_MAX_WAIT_S
         self._debug(f"send_after: waiting for {send_after.event!r} + {send_after.delay_ms}ms")
 
@@ -1060,6 +1151,7 @@ class EvalSession:
                 # make; it completes only when all are found, in any order (a
                 # response arriving doesn't short-circuit it).
                 return await self._match_function_calls(expectation, deadline, turn_idx, exp_idx)
+            self._debug(f"match: waiting for {expectation.event!r}")
             event = await self._next_matching_event(expectation.event, deadline)
             payload_failure = self._check_payload(event, expectation, turn_idx, exp_idx)
             if payload_failure:
@@ -1083,7 +1175,7 @@ class EvalSession:
             )
             if val is not None
         )
-        self._debug(f"match: aggregating {expectation.event!r} ({check})")
+        self._debug(f"match: waiting for {expectation.event!r} ({check})")
         aggregate = ""
         last_reason = ""
         seen_any = False
@@ -1092,8 +1184,7 @@ class EvalSession:
                 event = await self._next_matching_event(expectation.event, deadline)
             except TimeoutError:
                 if not seen_any:
-                    self._debug(f"match: timeout, no {expectation.event!r} event arrived")
-                    raise  # no response at all → "no matching event arrived"
+                    raise  # no response at all → caller logs "no matching event arrived"
                 self._debug(f"eval: timeout, not satisfied: {last_reason}")
                 return fail(f"not satisfied within {budget_ms}ms: {last_reason}")
 
@@ -1154,8 +1245,16 @@ class EvalSession:
         def fail(reason: str) -> EvalAssertionFailure:
             return EvalAssertionFailure(turn_idx, exp_idx, expectation.event, reason)
 
+        def spec_sig(spec) -> str:
+            name = spec.name or "any function"
+            if not spec.args:
+                return name
+            args = ", ".join(f"{k}={v!r}" for k, v in spec.args.items())
+            return f"{name}({args})"
+
         matched: list[str] = []
         for spec in expectation.calls or []:
+            self._debug(f"match: waiting for {expectation.event!r} ({spec_sig(spec)})")
             try:
                 event = await self._next_function_call(spec.name, deadline)
             except TimeoutError:

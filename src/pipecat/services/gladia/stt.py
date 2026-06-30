@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     TranslationFrame,
     UserStartedSpeakingFrame,
@@ -46,6 +47,7 @@ from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_
 from pipecat.services.stt_latency import GLADIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -352,6 +354,19 @@ class GladiaSTTService(WebsocketSTTService):
             True, indicating this service supports metrics generation.
         """
         return True
+
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Request external turn strategies when Gladia's VAD drives endpointing.
+
+        With ``enable_vad`` set, Gladia detects end of utterance server-side and
+        emits ``UserStarted/StoppedSpeakingFrame``, so the user aggregator defers to
+        those rather than running local VAD/smart-turn. Without it the defaults are
+        left in place. Applied unless the user passed their own ``user_turn_strategies``.
+        """
+        frame = super().service_metadata_frame()
+        if self._settings.enable_vad:
+            frame.user_turn_strategies = ExternalUserTurnStrategies()
+        return frame
 
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert pipecat Language enum to Gladia's language code.

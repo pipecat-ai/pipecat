@@ -60,7 +60,6 @@ def _build_app():
     import typer
     from rich.console import Console
 
-    from pipecat.cli.commands.create import create_command
     from pipecat.cli.commands.eval import eval_app
     from pipecat.cli.commands.init import init_command
 
@@ -71,18 +70,35 @@ def _build_app():
     )
     console = Console()
 
-    # `create` is a plain command (not a sub-Typer group) so it can take an optional
-    # positional target path followed by options (e.g. `pc create . --bot-type web`).
-    app.command("create", help="Create a new Pipecat project")(create_command)
+    # `init` is the single entry point for building a Pipecat app: it writes the
+    # coding-agent guide and can scaffold a runnable bot (interactively or from flags/a
+    # config file, e.g. `pipecat init . --bot-type web -t daily ...`). No `help=` here so
+    # the command's docstring (summary + examples) drives `pipecat init --help`.
+    app.command("init")(init_command)
 
-    # `init` makes a project agent-ready (writes AGENTS.md + CLAUDE.md). ignore_unknown_options
-    # lets it catch legacy scaffolder flags (now `pipecat create`) and redirect with a clear
-    # message instead of an opaque "no such option" error.
+    # `pipecat create` was removed (folded into `init`). Keep a hidden stub so an old
+    # command or muscle-memory invocation gets a clear pointer instead of Click's bare
+    # "No such command". ignore_unknown_options swallows the old scaffolder flags.
+    def _removed_create(ctx: typer.Context):
+        print(
+            "`pipecat create` was removed. Use `pipecat init` instead. It scaffolds "
+            "a project from flags or a config file, e.g.\n\n"
+            "    pipecat init . --bot-type web -t daily --stt deepgram_stt "
+            "--llm openai_llm --tts cartesia_tts\n\n"
+            "Run `pipecat init --help` or `pipecat init --list-options` for details.",
+            file=sys.stderr,
+        )
+        raise typer.Exit(1)
+
     app.command(
-        "init",
-        help="Make a project agent-ready (writes AGENTS.md + CLAUDE.md)",
+        "create",
+        help=(
+            "The create command was removed. Use the init command to scaffold your "
+            "Pipecat project. Run `pipecat init --help` for details."
+        ),
+        hidden=True,
         context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
-    )(init_command)
+    )(_removed_create)
 
     # `eval` is a first-party sub-Typer group, built in (not a plugin extension).
     app.add_typer(eval_app, name="eval")

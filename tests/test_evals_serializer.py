@@ -13,8 +13,8 @@ import unittest
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.serializer import (
     EVAL_CONFIGURE_MESSAGE_TYPE,
+    EVAL_CONTEXT_MESSAGE_TYPE,
     EVAL_IMAGE_MESSAGE_TYPE,
-    EVAL_RESET_MESSAGE_TYPE,
     RTVIEvalSerializer,
 )
 from pipecat.frames.frames import (
@@ -60,13 +60,13 @@ class TestRTVIEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
         frame = await self.serializer.deserialize(json.dumps(msg))
         self.assertIsInstance(frame, InputTransportMessageFrame)
 
-    async def test_eval_reset_short_circuits_to_messages_update(self):
+    async def test_eval_context_short_circuits_to_messages_update(self):
         msg = {
             "label": RTVI.MESSAGE_LABEL,
             "type": "client-message",
             "id": "4",
             "data": {
-                "t": EVAL_RESET_MESSAGE_TYPE,
+                "t": EVAL_CONTEXT_MESSAGE_TYPE,
                 "d": {"messages": [{"role": "system", "content": "be terse"}]},
             },
         }
@@ -89,6 +89,22 @@ class TestRTVIEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(frame, RTVIConfigureObserverFrame)
         self.assertEqual(frame.function_call_report_level, {"*": RTVIFunctionCallReportLevel.FULL})
 
+    async def test_eval_configure_enables_vad_user_speaking(self):
+        msg = {
+            "label": RTVI.MESSAGE_LABEL,
+            "type": "client-message",
+            "id": "8",
+            "data": {
+                "t": EVAL_CONFIGURE_MESSAGE_TYPE,
+                "d": {"vad_user_speaking": True},
+            },
+        }
+        frame = await self.serializer.deserialize(json.dumps(msg))
+        self.assertIsInstance(frame, RTVIConfigureObserverFrame)
+        self.assertTrue(frame.vad_user_speaking_enabled)
+        # Unset report level stays None, so it isn't disturbed.
+        self.assertIsNone(frame.function_call_report_level)
+
     async def test_eval_image_stored_and_not_forwarded(self):
         img = b"\x89PNG-fake-bytes"
         msg = {
@@ -104,7 +120,20 @@ class TestRTVIEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await self.serializer.deserialize(json.dumps(msg)))
         self.assertEqual(self.serializer.get_user_image(), (img, "image/png"))
 
-    async def test_non_reset_client_message_is_forwarded(self):
+    async def test_dtmf_message_forwarded_to_processor(self):
+        # DTMF is now a first-class RTVI message handled by the RTVIProcessor, so
+        # the serializer just forwards it like any other RTVI message.
+        msg = {
+            "label": RTVI.MESSAGE_LABEL,
+            "type": "dtmf",
+            "id": "9",
+            "data": {"button": "#"},
+        }
+        frame = await self.serializer.deserialize(json.dumps(msg))
+        self.assertIsInstance(frame, InputTransportMessageFrame)
+        self.assertEqual(frame.message["type"], "dtmf")
+
+    async def test_non_context_client_message_is_forwarded(self):
         msg = {
             "label": RTVI.MESSAGE_LABEL,
             "type": "client-message",

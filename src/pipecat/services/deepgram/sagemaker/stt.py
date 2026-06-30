@@ -144,7 +144,6 @@ class DeepgramSageMakerSTTService(STTService):
             search=None,
             smart_format=False,
             utterance_end_ms=None,
-            vad_events=False,
         )
 
         # 2. Apply live_options overrides — only if settings not provided
@@ -199,6 +198,7 @@ class DeepgramSageMakerSTTService(STTService):
         self._mip_opt_out = mip_opt_out
 
         self._client: SageMakerBidiClient | None = None
+        self._connection_task: asyncio.Task | None = None
         self._response_task: asyncio.Task | None = None
         self._keepalive_task: asyncio.Task | None = None
 
@@ -311,6 +311,16 @@ class DeepgramSageMakerSTTService(STTService):
         return "&".join(f"{k}={v}" for k, v in params.items())
 
     async def _connect(self):
+        """Launch the SageMaker connection in the background.
+
+        In the event that the BiDi handshake (``start_session``) is slow or fails,
+        it runs in a task rather than being awaited inline.
+        """
+        if self._connection_task:
+            return
+        self._connection_task = self.create_task(self._connect_handler())
+
+    async def _connect_handler(self):
         """Connect to the SageMaker endpoint and start the BiDi session.
 
         Builds the Deepgram query string from settings, creates the BiDi client,
@@ -353,6 +363,10 @@ class DeepgramSageMakerSTTService(STTService):
         (KeepAlive and response processing), and closes the BiDi session.
         Safe to call multiple times.
         """
+        if self._connection_task:
+            await self.cancel_task(self._connection_task)
+            self._connection_task = None
+
         if self._client and self._client.is_active:
             logger.debug("Disconnecting from Deepgram on SageMaker...")
 

@@ -209,11 +209,8 @@ FEATURE_IMPORTS = {
     ],
     "llm_run_frame": ["from pipecat.frames.frames import LLMRunFrame"],
     "observability": ["from pipecat_whisker import WhiskerObserver"],
-    "external_turn_strategies": [
-        "from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies"
-    ],
     "create_transport": ["from pipecat.runner.utils import create_transport"],
-    "eval": ["from pipecat.transports.websocket.server import WebsocketServerParams"],
+    "eval": ["from pipecat.evals.transport import EvalTransportParams"],
 }
 
 # Base imports always included in generated bot files

@@ -62,9 +62,6 @@ class ServiceDefinition:
             produces os.getenv("ENV_VAR", "default") instead of os.getenv("ENV_VAR").
             Use this for params where the quickstart should work without the user
             setting the env var (e.g., model or voice defaults).
-        external_turn_detection: If True, this STT service performs its own end-of-turn
-            detection, so the generated bot uses ExternalUserTurnStrategies() in the user
-            aggregator instead of VAD-driven turn taking (e.g. Deepgram Flux, Cartesia Turns).
     """
 
     value: str
@@ -78,7 +75,6 @@ class ServiceDefinition:
     recommended: bool = False
     additional_imports: list[str] | None = None
     param_defaults: dict[str, str] | None = None
-    external_turn_detection: bool = False
 
     def __post_init__(self):
         """Validate service definition after initialization."""
@@ -107,13 +103,12 @@ FEATURE_DEFINITIONS: dict[str, list[str]] = {
     # callee to answer/speak first, so they don't import or use it.
     "llm_run_frame": ["LLMRunFrame"],
     "observability": ["WhiskerObserver"],
-    "external_turn_strategies": ["ExternalUserTurnStrategies"],
     # Imported on the standard (non-PSTN/SIP) transport path: the collapsed bot()
     # calls create_transport. Dial-out and SIP construct their transports by hand.
     "create_transport": ["create_transport"],
-    # The "eval" transport entry (pc create --eval) needs WebsocketServerParams so the
+    # The "eval" transport entry (pc create --eval) needs EvalTransportParams so the
     # generated bot is runnable with `-t eval` for behavioral evals.
-    "eval": ["WebsocketServerParams"],
+    "eval": ["EvalTransportParams"],
 }
 
 
@@ -277,7 +272,6 @@ class ServiceRegistry:
             class_name=["CartesiaTurnsSTTService"],
             env_prefix="CARTESIA",
             include_params=["api_key"],
-            external_turn_detection=True,
         ),
         ServiceDefinition(
             value="deepgram_stt",
@@ -294,7 +288,6 @@ class ServiceRegistry:
             class_name=["DeepgramFluxSTTService"],
             env_prefix="DEEPGRAM",
             include_params=["api_key"],
-            external_turn_detection=True,
         ),
         ServiceDefinition(
             value="deepgram_flux_sagemaker_stt",
@@ -303,7 +296,6 @@ class ServiceRegistry:
             class_name=["DeepgramFluxSageMakerSTTService"],
             env_prefix="DEEPGRAM_FLUX_SAGEMAKER_STT",
             include_params=["endpoint_name", "region"],
-            external_turn_detection=True,
         ),
         ServiceDefinition(
             value="deepgram_sagemaker_stt",

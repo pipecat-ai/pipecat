@@ -270,5 +270,68 @@ class TestBusMessagePriority(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(sub.received[0], BusJobCancelMessage)
 
 
+class _FailingSub(BusSubscriber):
+    """Subscriber that raises on its first message, then records the rest.
+
+    Models a subscriber whose lifecycle hook (e.g. ``on_job_response``) throws:
+    the bus dispatch task must survive so later messages are still delivered.
+    """
+
+    _counter = itertools.count()
+
+    def __init__(self):
+        self._name = f"failing_{next(self._counter)}"
+        self.received = []
+        self._raised = False
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    async def on_bus_message(self, message):
+        if not self._raised:
+            self._raised = True
+            raise RuntimeError("simulated subscriber failure")
+        self.received.append(message)
+
+
+class TestSubscriberException(unittest.IsolatedAsyncioTestCase):
+    """A subscriber exception must not stop future delivery to that subscriber."""
+
+    async def test_data_dispatch_survives_subscriber_exception(self):
+        """A raise in on_bus_message must not tear down the data dispatch task."""
+        bus, _ = await create_test_bus()
+        sub = _FailingSub()
+        await bus.subscribe(sub)
+        await bus.start()
+
+        # First data message raises inside _data_dispatch_task.
+        await bus.send(BusDataMessage(source="first"))
+        await asyncio.sleep(0.05)
+        # Second data message must still be delivered (was lost before the fix).
+        await bus.send(BusDataMessage(source="second"))
+        await asyncio.sleep(0.05)
+        await bus.stop()
+
+        self.assertEqual([m.source for m in sub.received], ["second"])
+
+    async def test_router_survives_subscriber_exception_on_system_message(self):
+        """A raise on a system message must not tear down the router task."""
+        bus, _ = await create_test_bus()
+        sub = _FailingSub()
+        await bus.subscribe(sub)
+        await bus.start()
+
+        # First system message raises inline inside _router_task.
+        await bus.send(BusCancelMessage(source="first"))
+        await asyncio.sleep(0.05)
+        # Second system message must still be delivered (was lost before the fix).
+        await bus.send(BusCancelMessage(source="second"))
+        await asyncio.sleep(0.05)
+        await bus.stop()
+
+        self.assertEqual([m.source for m in sub.received], ["second"])
+
+
 if __name__ == "__main__":
     unittest.main()

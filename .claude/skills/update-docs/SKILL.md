@@ -14,6 +14,7 @@ Update documentation pages to reflect source code changes on the current branch.
 - `DOCS_PATH` (optional): Path to the docs repository root. If not provided, ask the user.
 
 Examples:
+
 - `/update-docs /Users/me/src/docs`
 - `/update-docs`
 
@@ -23,16 +24,18 @@ Examples:
 
 If `DOCS_PATH` was provided as an argument, use it. Otherwise, ask the user for the path to their docs repository.
 
-Verify the path exists and contains `server/services/` subdirectory.
+Verify the path exists and contains `api-reference/server/services/` subdirectory.
 
 ### Step 2: Create docs branch
 
 Get the current pipecat branch name:
+
 ```bash
 git rev-parse --abbrev-ref HEAD
 ```
 
 In the docs repo, create a new branch off main with a matching name:
+
 ```bash
 cd DOCS_PATH && git checkout main && git pull && git checkout -b {branch-name}-docs
 ```
@@ -44,11 +47,13 @@ All doc edits in subsequent steps are made on this branch.
 ### Step 3: Detect changed source files
 
 Run:
+
 ```bash
 git diff main..HEAD --name-only
 ```
 
 Filter to files that could affect documentation:
+
 - `src/pipecat/services/**/*.py` (service implementations)
 - `src/pipecat/transports/**/*.py` (transport implementations)
 - `src/pipecat/serializers/**/*.py` (serializer implementations)
@@ -57,6 +62,7 @@ Filter to files that could affect documentation:
 - `src/pipecat/turns/**/*.py` (turn management)
 - `src/pipecat/observers/**/*.py` (observers)
 - `src/pipecat/pipeline/**/*.py` (pipeline core)
+- `src/pipecat/flows/**/*.py` (Pipecat Flows)
 
 Ignore `__init__.py`, `__pycache__`, test files, and files that only contain type re-exports.
 
@@ -96,61 +102,72 @@ For each doc page that needs updates, edit **only the sections that need changes
 #### Section-specific guidance
 
 **Configuration** (constructor params):
+
 - Use `<ParamField path="name" type="type" default="value">` format if the page already uses it
 - Add new params in logical order (required first, then optional)
 - Remove params that no longer exist in source
 - Update types/defaults that changed
 
 **InputParams** (runtime settings):
+
 - Use markdown table format: `| Parameter | Type | Default | Description |`
 - Match the field names and types from the `InputParams(BaseModel)` class
 - Include the default values from the source
 
 **Usage** (code examples):
+
 - Update import paths, class names, and parameter names
 - Only modify examples if they would break or be misleading with the new API
 - Don't rewrite working examples just to add new optional params
 
 **Notes**:
+
 - Add notes for new behavioral gotchas or breaking changes
 - Remove notes about limitations that were fixed
 - Keep existing notes that are still accurate
 
 **Event Handlers**:
+
 - Update the event table and example code
 - Add new events, remove deleted ones
 - Update handler signatures if they changed
 
 **Overview / Key Features / Prerequisites**:
+
 - Only update if the PR fundamentally changes what the service does (new capability, removed capability, renamed class)
 - Most PRs will NOT need changes to these sections
 
 ### Step 7: Update guides
 
-Guides at `DOCS_PATH/guides/` reference specific class names, parameters, imports, and code patterns. After completing reference doc edits, check if any guides need updates too.
+Guides at `DOCS_PATH/pipecat/` and `DOCS_PATH/pipecat-flows/` reference specific class names, parameters, imports, and code patterns. After completing reference doc edits, check if any guides need updates too.
 
 For each changed source file, collect the class names, renamed parameters, and changed imports from the diff. Search the guides directory:
+
 ```bash
-grep -rl "ClassName\|old_param_name" DOCS_PATH/guides/
+grep -rl "ClassName\|old_param_name" DOCS_PATH/pipecat/ DOCS_PATH/pipecat-flows/
 ```
 
 For each guide that references changed code:
+
 1. Read the full guide
 2. Update class names, parameter names, import paths, and code examples that are now incorrect
 3. **Don't rewrite prose** — only fix the specific references that changed
 4. Leave guides alone if they reference the service generally but don't use any changed APIs
 
 Guide directories:
-- `guides/learn/` — conceptual tutorials (pipeline, LLM, STT, TTS, etc.)
-- `guides/fundamentals/` — practical how-tos (metrics, recording, transcripts, etc.)
-- `guides/features/` — feature-specific guides (Gemini Live, OpenAI audio, WhatsApp, etc.)
-- `guides/telephony/` — telephony integration guides (Twilio, Plivo, Telnyx, etc.)
+
+- `pipecat/learn/` — conceptual tutorials (pipeline, LLM, STT, TTS, etc.)
+- `pipecat/fundamentals/` — practical how-tos (metrics, recording, transcripts, etc.)
+- `pipecat/features/` — feature-specific guides (Gemini Live, OpenAI audio, WhatsApp, etc.)
+- `pipecat/telephony/` — telephony integration guides (Twilio, Plivo, Telnyx, etc.)
+- `pipecat-flows/guides/` — Pipecat Flows guides (nodes-and-messages, functions, context-strategies, state-management, actions); check these when `src/pipecat/flows/**` changed
 
 ### Step 8: Identify doc gaps
 
 After processing all mapped pairs, check for two kinds of gaps:
 
 **Missing pages**: Source files that had no doc page mapping (neither tier 1, 2, nor 3) and are not marked as "(skip)". For each, tell the user:
+
 - The source file path
 - The main class(es) it defines
 - Whether a new doc page should be created
@@ -161,8 +178,9 @@ If the user wants a new page, do all three of the following:
 
 #### 8a: Create the doc page
 
-Create the new `.mdx` file using this template structure:
-```
+Create the new `.mdx` file under `DOCS_PATH/api-reference/server/services/{category}/{provider}.mdx` using this template structure:
+
+````
 ---
 title: "Service Name"
 description: "Brief description"
@@ -180,7 +198,7 @@ description: "Brief description"
 
 ```bash
 uv add "pipecat-ai[package-name]"
-```
+````
 
 ## Prerequisites
 
@@ -209,11 +227,12 @@ uv add "pipecat-ai[package-name]"
 ## Event Handlers
 
 [Event table and example code]
-```
+
+````
 
 #### 8b: Add to docs.json
 
-Add the new page path to `DOCS_PATH/docs.json` in the correct navigation group. The path format is `server/services/{category}/{provider}` (without the `.mdx` extension).
+Add the new page path to `DOCS_PATH/docs.json` in the correct navigation group. The path format is `api-reference/server/services/{category}/{provider}` (without the `.mdx` extension).
 
 Find the matching group in the navigation structure:
 - **STT** → `"group": "Speech-to-Text"` under Services
@@ -233,25 +252,27 @@ Insert the new entry **alphabetically** within the group's `pages` array. For ex
 {
   "group": "Speech-to-Text",
   "pages": [
-    "server/services/stt/assemblyai",
-    "server/services/stt/aws",
+    "api-reference/server/services/stt/assemblyai",
+    "api-reference/server/services/stt/aws",
     ...
-    "server/services/stt/foo",
+    "api-reference/server/services/stt/foo",
     ...
   ]
 }
-```
+````
 
 #### 8c: Add to supported-services.mdx
 
-Add a new row to the correct category table in `DOCS_PATH/server/services/supported-services.mdx`.
+Add a new row to the correct category table in `DOCS_PATH/api-reference/server/services/supported-services.mdx`.
 
 Use this format:
+
 ```
-| [DisplayName](/server/services/{category}/{provider}) | `uv add "pipecat-ai[package]"` |
+| [DisplayName](/api-reference/server/services/{category}/{provider}) | `uv add "pipecat-ai[package]"` |
 ```
 
 To determine the correct values:
+
 - **DisplayName**: Use the service's human-readable name (e.g., "ElevenLabs", "AWS Polly", "Google Gemini")
 - **package**: Look at the service's `pyproject.toml` extras or the import pattern in the source code. For example, if the service is in `src/pipecat/services/foo/`, the package is typically `foo`.
 - If no pip dependencies are required, use `No dependencies required` instead.
@@ -266,14 +287,16 @@ After all edits are complete, print a summary:
 ## Documentation Updates
 
 ### Updated reference pages
-- `server/services/stt/deepgram.mdx` — Updated Configuration (added `new_param`), InputParams (updated `language` default)
-- `server/services/tts/elevenlabs.mdx` — Updated Event Handlers (added `on_connected`)
+- `api-reference/server/services/stt/deepgram.mdx` — Updated Configuration (added `new_param`), InputParams (updated `language` default)
+- `api-reference/server/services/tts/elevenlabs.mdx` — Updated Event Handlers (added `on_connected`)
+- `api-reference/pipecat-flows/flow-manager.mdx` — Updated FlowManager constructor (added `new_param`)
 
 ### Updated guides
-- `guides/learn/speech-to-text.mdx` — Updated code example (renamed `old_param` → `new_param`)
+- `pipecat/learn/speech-to-text.mdx` — Updated code example (renamed `old_param` → `new_param`)
+- `pipecat-flows/guides/state-management.mdx` — Updated FlowManager init example
 
 ### New service pages
-- `server/services/tts/newprovider.mdx` — Created page, added to docs.json (Text-to-Speech), added to supported-services.mdx
+- `api-reference/server/services/tts/newprovider.mdx` — Created page, added to docs.json (Text-to-Speech), added to supported-services.mdx
 
 ### Unmapped source files
 - `src/pipecat/services/newprovider/tts.py` — NewProviderTTSService (no doc page exists)

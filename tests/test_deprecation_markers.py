@@ -43,6 +43,7 @@ from pipecat.pipeline.pipeline import Pipeline  # noqa: E402
 from pipecat.pipeline.runner import PipelineRunner  # noqa: E402
 from pipecat.pipeline.worker import PipelineTask, PipelineTaskParams  # noqa: E402
 from pipecat.processors.filters.identity_filter import IdentityFilter  # noqa: E402
+from pipecat.utils.asyncio.task_manager import TaskManager  # noqa: E402
 
 SRC_ROOT = Path(__file__).parent.parent / "src" / "pipecat"
 _SCAN = dscan.scan_source(SRC_ROOT)
@@ -74,6 +75,31 @@ def test_directives_state_removal_version():
         "`Will be removed in X.Y.Z.` (a concrete semantic version):\n"
         + "\n".join(f"  {b}" for b in bad)
     )
+
+
+def test_no_replacement_directive_extracts_no_replacement():
+    """A directive leading with "No replacement." records none — even with backticks.
+
+    The first-reference rule treats the first backtick/role token as the
+    replacement, so a no-replacement body may freely backtick contextual symbols
+    (the deprecated thing itself, related types) without one being mistaken for a
+    replacement, as long as it leads with the explicit marker.
+    """
+    body = (
+        "No replacement. ``FlowResult`` is no longer referenced by any handler; "
+        "the upstream contract is ``Any``. Will be removed in 2.0.0."
+    )
+    assert dscan.first_reference(body) is None
+    assert dscan.relation_for(body, dscan.first_reference(body)) == "none"
+
+    # An incidental relation verb in later prose doesn't override the marker.
+    moved = "No replacement. The old behavior moved to a different layer entirely."
+    assert dscan.relation_for(moved, dscan.first_reference(moved)) == "none"
+
+    # A real replacement is still extracted as before.
+    use = "Use :class:`Foo` instead. Will be removed in 2.0.0."
+    assert dscan.first_reference(use) == "Foo"
+    assert dscan.relation_for(use, "Foo") == "use_existing"
 
 
 # --- @deprecated decorator message consistency -------------------------------
@@ -143,7 +169,7 @@ def test_pipeline_task_warns():
 @pytest.mark.asyncio
 async def test_pipeline_task_params_warns():
     with pytest.warns(DeprecationWarning, match="`PipelineTaskParams` is deprecated"):
-        PipelineTaskParams(loop=asyncio.get_running_loop())
+        PipelineTaskParams(task_manager=TaskManager())
 
 
 @pytest.mark.asyncio

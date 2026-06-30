@@ -35,7 +35,7 @@ The harness runs the judge, the user's voice, and the bot-speech transcriber
   [Moonshine](https://github.com/moonshine-ai/moonshine) (Whisper is available
   as an alternative via the scenario's `transcription:` block). All run from
   local ONNX/model files that download once on first use (cached under
-  `~/.cache`). No keys, no per-run cost.
+  `~/.cache/pipecat/evals/tts`). No keys, no per-run cost.
 - **Each bot's own credentials.** A bot is a real example, so it needs the same
   service API keys it normally would, in your `.env` (e.g. `$OPENAI_API_KEY`,
   `$CARTESIA_API_KEY`, `$DEEPGRAM_API_KEY`, ...). A bot whose keys are missing
@@ -112,9 +112,10 @@ pipecat eval run scenarios/capital_question.yaml --bot-url ws://localhost:7860
 
 ## Scenarios
 
-A scenario is a sequence of `turns`. A turn either sends a `user` utterance and
-asserts on the events that come back, or it's observation-only (no `user`) and
-just asserts — used for bot-first turns like an opening greeting. The full file
+A scenario is a sequence of `turns`. A turn sends a `user` utterance, presses
+DTMF keys with `dtmf:` (mutually exclusive with `user:`), or is
+observation-only (neither field) and just asserts — used for bot-first turns
+like an opening greeting. The full file
 format (events, expectations, `send_after:`, `image:`, ...) is documented in the
 [`pipecat.evals.scenario`](../../src/pipecat/evals/scenario.py) module docstring.
 

@@ -27,16 +27,18 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given, is_given
 from pipecat.services.stt_latency import SPEECHMATICS_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -536,6 +538,20 @@ class SpeechmaticsSTTService(STTService):
         # Event handlers
         if default_settings.enable_diarization:
             self._register_event_handler("on_speakers_result")
+
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Request external turn strategies when Speechmatics endpoints server-side.
+
+        Every mode other than the default ``EXTERNAL`` (which uses Pipecat's own
+        endpointing) has Speechmatics detect turns and emit the turn frames, so the
+        user aggregator defers to those. Applied unless the user passed their own
+        ``user_turn_strategies``.
+        """
+        frame = super().service_metadata_frame()
+        mode = self._settings.turn_detection_mode
+        if is_given(mode) and mode != TurnDetectionMode.EXTERNAL:
+            frame.user_turn_strategies = ExternalUserTurnStrategies()
+        return frame
 
     # ============================================================================
     # LIFE-CYCLE / SESSION MANAGEMENT

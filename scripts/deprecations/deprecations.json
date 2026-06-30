@@ -47,6 +47,39 @@
       "location": "pipecat/audio/turn/smart_turn/local_smart_turn_v2.py"
     },
     {
+      "subject": "AICQuailVADAnalyzer.minimum_speech_duration",
+      "module": "pipecat.audio.vad.aic_quail_vad",
+      "kind": "parameter",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "VADParams",
+      "message": "Use :class:`VADParams` (``start_secs``/``stop_secs``) instead. ``minimum_speech_duration`` is ignored and will be removed in 2.0.0.",
+      "location": "pipecat/audio/vad/aic_quail_vad.py"
+    },
+    {
+      "subject": "AICQuailVADAnalyzer.sensitivity",
+      "module": "pipecat.audio.vad.aic_quail_vad",
+      "kind": "parameter",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "VADParams",
+      "message": "Use :class:`VADParams` (``confidence``) instead. ``sensitivity`` is ignored and will be removed in 2.0.0.",
+      "location": "pipecat/audio/vad/aic_quail_vad.py"
+    },
+    {
+      "subject": "AICQuailVADAnalyzer.speech_hold_duration",
+      "module": "pipecat.audio.vad.aic_quail_vad",
+      "kind": "parameter",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "VADParams",
+      "message": "Use :class:`VADParams` (``start_secs``/``stop_secs``) instead. ``speech_hold_duration`` is ignored and will be removed in 2.0.0.",
+      "location": "pipecat/audio/vad/aic_quail_vad.py"
+    },
+    {
       "subject": "AICVADAnalyzer",
       "module": "pipecat.audio.vad.aic_vad",
       "kind": "class",
@@ -67,6 +100,83 @@
       "replacement": "AICQuailVADAnalyzer",
       "message": "Use :class:`AICQuailVADAnalyzer` instead. Will be removed in 1.6.0.",
       "location": "pipecat/audio/vad/aic_vad.py"
+    },
+    {
+      "subject": "FlowManager.task",
+      "module": "pipecat.flows.manager",
+      "kind": "parameter",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "worker",
+      "message": "Use ``worker`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/flows/manager.py"
+    },
+    {
+      "subject": "FlowManager.task",
+      "module": "pipecat.flows.manager",
+      "kind": "property",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "FlowManager.worker",
+      "message": "`FlowManager.task` is deprecated since 1.5.0 and will be removed in 2.0.0. Use `FlowManager.worker` instead.",
+      "location": "pipecat/flows/manager.py"
+    },
+    {
+      "subject": "ContextStrategy.RESET_WITH_SUMMARY",
+      "module": "pipecat.flows.types",
+      "kind": "parameter",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "LLMSummarizeContextFrame",
+      "message": "Use :class:`LLMSummarizeContextFrame` instead — push it in a pre-action to trigger on-demand summarization during a node transition. See https://docs.pipecat.ai/guides/fundamentals/context-summarization. Will be removed in 2.0.0.",
+      "location": "pipecat/flows/types.py"
+    },
+    {
+      "subject": "ContextStrategyConfig.summary_prompt",
+      "module": "pipecat.flows.types",
+      "kind": "parameter",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "LLMContextSummaryConfig.summarization_prompt",
+      "message": "Use ``LLMContextSummaryConfig.summarization_prompt`` instead. Deprecated together with ``RESET_WITH_SUMMARY``. Will be removed in 2.0.0.",
+      "location": "pipecat/flows/types.py"
+    },
+    {
+      "subject": "FlowResult",
+      "module": "pipecat.flows.types",
+      "kind": "class",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`FlowResult` is deprecated since 1.5.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/flows/types.py"
+    },
+    {
+      "subject": "NodeConfig.role_messages",
+      "module": "pipecat.flows.types",
+      "kind": "parameter",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "role_message",
+      "message": "Use ``role_message`` (str) instead. Will be removed in 2.0.0.",
+      "location": "pipecat/flows/types.py"
+    },
+    {
+      "subject": "flows_direct_function",
+      "module": "pipecat.flows.types",
+      "kind": "function",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "rename",
+      "replacement": "flows_tool_options",
+      "message": "`flows_direct_function` is deprecated since 1.5.0 and will be removed in 2.0.0. Use `flows_tool_options` instead.",
+      "location": "pipecat/flows/types.py"
     },
     {
       "subject": "CancelTaskFrame",
@@ -360,8 +470,8 @@
       "kind": "parameter",
       "deprecated_in": "1.4.0",
       "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "InputAudioRawFrame",
+      "relation": "none",
+      "replacement": null,
       "message": "No replacement; the parameter is ignored. Will be removed in 2.0.0. The processor no longer needs a transport reference — audio input and audio-streaming start are driven by frames (:class:`InputAudioRawFrame` and :class:`InputTransportStartAudioStreamingFrame`) pushed downstream. For client-ready audio gating, set ``audio_in_stream_on_start=False`` on the transport params.",
       "location": "pipecat/processors/frameworks/rtvi/processor.py"
     },
@@ -2164,9 +2274,9 @@
       "kind": "parameter",
       "deprecated_in": "1.4.0",
       "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "api_version",
-      "message": "No longer used. Mem0 2.0.0 removed the ``api_version`` / ``output_format`` parameters from the client. Will be removed in 2.0.0.",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. Mem0 2.0.0 removed the ``api_version`` / ``output_format`` parameters from the client. Will be removed in 2.0.0.",
       "location": "pipecat/services/mem0/memory.py"
     },
     {
@@ -3501,6 +3611,61 @@
       "location": "pipecat/transports/base_transport.py"
     },
     {
+      "subject": "WebsocketServerCallbacks",
+      "module": "pipecat.transports.websocket.server",
+      "kind": "class",
+      "deprecated_in": "1.4.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "SingleClientWebsocketServerCallbacks",
+      "message": "`WebsocketServerCallbacks` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `SingleClientWebsocketServerCallbacks` instead.",
+      "location": "pipecat/transports/websocket/server.py"
+    },
+    {
+      "subject": "WebsocketServerInputTransport",
+      "module": "pipecat.transports.websocket.server",
+      "kind": "class",
+      "deprecated_in": "1.4.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "SingleClientWebsocketServerInputTransport",
+      "message": "`WebsocketServerInputTransport` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `SingleClientWebsocketServerInputTransport` instead.",
+      "location": "pipecat/transports/websocket/server.py"
+    },
+    {
+      "subject": "WebsocketServerOutputTransport",
+      "module": "pipecat.transports.websocket.server",
+      "kind": "class",
+      "deprecated_in": "1.4.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "SingleClientWebsocketServerOutputTransport",
+      "message": "`WebsocketServerOutputTransport` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `SingleClientWebsocketServerOutputTransport` instead.",
+      "location": "pipecat/transports/websocket/server.py"
+    },
+    {
+      "subject": "WebsocketServerParams",
+      "module": "pipecat.transports.websocket.server",
+      "kind": "class",
+      "deprecated_in": "1.4.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "SingleClientWebsocketServerParams",
+      "message": "`WebsocketServerParams` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `SingleClientWebsocketServerParams` instead.",
+      "location": "pipecat/transports/websocket/server.py"
+    },
+    {
+      "subject": "WebsocketServerTransport",
+      "module": "pipecat.transports.websocket.server",
+      "kind": "class",
+      "deprecated_in": "1.4.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "SingleClientWebsocketServerTransport",
+      "message": "`WebsocketServerTransport` is deprecated since 1.4.0 and will be removed in 2.0.0. Use `SingleClientWebsocketServerTransport` instead.",
+      "location": "pipecat/transports/websocket/server.py"
+    },
+    {
       "subject": "WhatsAppClient.handle_webhook_request.connection_callback",
       "module": "pipecat.transports.whatsapp.client",
       "kind": "parameter",
@@ -3510,6 +3675,28 @@
       "replacement": "(connection,)",
       "message": "The single-argument ``(connection,)`` signature is deprecated. Use ``(connection, call: WhatsAppConnectCall)`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/transports/whatsapp/client.py"
+    },
+    {
+      "subject": "TaskManager.setup",
+      "module": "pipecat.utils.asyncio.task_manager",
+      "kind": "method",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "TaskManager",
+      "message": "`TaskManager.setup` is deprecated since 1.5.0 and will be removed in 2.0.0. Use `TaskManager` instead.",
+      "location": "pipecat/utils/asyncio/task_manager.py"
+    },
+    {
+      "subject": "TaskManagerParams",
+      "module": "pipecat.utils.asyncio.task_manager",
+      "kind": "class",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "TaskManager",
+      "message": "`TaskManagerParams` is deprecated since 1.5.0 and will be removed in 2.0.0. Use `TaskManager` instead.",
+      "location": "pipecat/utils/asyncio/task_manager.py"
     },
     {
       "subject": "LLMContextSummarizationConfig",
@@ -3532,6 +3719,17 @@
       "replacement": "timeout_secs",
       "message": "Use ``timeout_secs`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/workers/llm/tool_decorator.py"
+    },
+    {
+      "subject": "WorkerRunner.loop",
+      "module": "pipecat.workers.runner",
+      "kind": "parameter",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "task_manager",
+      "message": "Use ``task_manager`` (which owns its own loop) instead. ``loop`` will be removed in 2.0.0.",
+      "location": "pipecat/workers/runner.py"
     },
     {
       "subject": "WorkerRunner.run.worker",

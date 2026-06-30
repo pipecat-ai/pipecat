@@ -337,6 +337,8 @@ class NvidiaSTTService(STTService):
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
+            keepalive_timeout=30.0,
+            keepalive_interval=5.0,
             settings=default_settings,
             **kwargs,
         )
@@ -477,6 +479,8 @@ class NvidiaSTTService(STTService):
         if not self._thread_task:
             self._thread_task = self.create_task(self._thread_task_handler())
 
+        self._create_keepalive_task()
+
         logger.debug(f"Initialized NvidiaSTTService with model: {self._settings.model}")
 
     async def stop(self, frame: EndFrame):
@@ -504,6 +508,9 @@ class NvidiaSTTService(STTService):
         current gRPC stream but keep buffering audio on the same iterator until
         the replacement stream starts consuming it.
         """
+        if close_iterator:
+            await self._cancel_keepalive_task()
+
         iterator = self._audio_iterator
         if close_iterator:
             self._audio_iterator = None
@@ -568,6 +575,17 @@ class NvidiaSTTService(STTService):
             await asyncio.to_thread(self._response_handler, iterator)
         except asyncio.CancelledError:
             raise
+
+    def _is_keepalive_ready(self) -> bool:
+        """Check if there is an active NVIDIA audio stream for keepalive."""
+        iterator = self._audio_iterator
+        return iterator is not None and not iterator.closed
+
+    async def _send_keepalive(self, silence: bytes):
+        """Send silent audio through the active NVIDIA stream iterator."""
+        iterator = self._audio_iterator
+        if iterator is not None and not iterator.closed:
+            await iterator.put(silence)
 
     @traced_stt
     async def _handle_transcription(
@@ -721,6 +739,8 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
             boosted_lm_score=4.0,
             max_alternatives=1,
             word_time_offsets=False,
+            speaker_diarization=False,
+            diarization_max_speakers=0,
         )
 
         # 2. (no deprecated direct args for this service)

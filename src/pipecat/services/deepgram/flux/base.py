@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     EndFrame,
     InterimTranscriptionFrame,
     StartFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -28,6 +29,7 @@ from pipecat.frames.frames import (
 from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -205,6 +207,26 @@ class DeepgramFluxSTTBase(STTService):
         self._register_event_handler("on_eager_end_of_turn")
         self._register_event_handler("on_update")
 
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Deepgram Flux service supports metrics generation.
+        """
+        return True
+
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Recommend external turn strategies: Flux detects turns server-side.
+
+        Flux emits its own start-of-turn and end-of-turn events (as
+        ``UserStarted/StoppedSpeakingFrame``), so the user aggregator defers to
+        those rather than running local VAD/smart-turn. Applied unless the user
+        passed their own ``user_turn_strategies``.
+        """
+        frame = super().service_metadata_frame()
+        frame.user_turn_strategies = ExternalUserTurnStrategies()
+        return frame
+
     # ------------------------------------------------------------------
     # Abstract transport interface — implemented by each concrete subclass
     # ------------------------------------------------------------------
@@ -328,77 +350,6 @@ class DeepgramFluxSTTBase(STTService):
         except Exception as e:
             await self.push_error(error_msg=f"Error sending CloseStream: {e}", exception=e)
 
-    async def _send_configure(self, fields: set[str]):
-        """Send a Configure control message to update settings mid-stream.
-
-        Builds a Configure JSON message containing only the fields that changed
-        and sends it over the existing connection.
-
-        Args:
-            fields: Set of changed field names to include in the message.
-        """
-        message: dict[str, Any] = {"type": "Configure"}
-
-        if "keyterm" in fields:
-            message["keyterms"] = self._settings.keyterm
-
-        thresholds: dict[str, Any] = {}
-        if "eot_threshold" in fields:
-            thresholds["eot_threshold"] = self._settings.eot_threshold
-        if "eager_eot_threshold" in fields:
-            thresholds["eager_eot_threshold"] = self._settings.eager_eot_threshold
-        if "eot_timeout_ms" in fields:
-            thresholds["eot_timeout_ms"] = self._settings.eot_timeout_ms
-        if thresholds:
-            message["thresholds"] = thresholds
-
-        if "language_hints" in fields:
-            if self._settings.model != self._MULTILINGUAL_MODEL:
-                logger.warning(
-                    f"language_hints only supported on {self._MULTILINGUAL_MODEL}; "
-                    f"skipping Configure update for model {self._settings.model!r}"
-                )
-            else:
-                hints = self._settings.language_hints
-                # Empty list clears hints; NOT_GIVEN/None also treated as clear
-                # since we only reach this branch when the user set the field.
-                if hints is None or isinstance(hints, _NotGiven):
-                    message["language_hints"] = []
-                else:
-                    message["language_hints"] = _prepare_language_hints(hints)
-
-        logger.debug(f"{self}: sending Configure message: {message}")
-        await self._transport_send_json(message)
-
-    def can_generate_metrics(self) -> bool:
-        """Check if this service can generate processing metrics.
-
-        Returns:
-            True, as Deepgram Flux service supports metrics generation.
-        """
-        return True
-
-    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
-        """Apply a settings delta.
-
-        Configure-able fields (keyterm, eot_threshold, eager_eot_threshold,
-        eot_timeout_ms, language_hints) are sent to Deepgram via a Configure
-        message. Other fields are stored but cannot be applied to the active
-        connection.
-        """
-        changed = await super()._update_settings(delta)
-
-        if not changed:
-            return changed
-
-        configure_fields = changed.keys() & self._CONFIGURE_FIELDS
-        if configure_fields and self._transport_is_active():
-            await self._send_configure(configure_fields)
-
-        self._warn_unhandled_updated_settings(changed.keys() - self._CONFIGURE_FIELDS)
-
-        return changed
-
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -446,6 +397,69 @@ class DeepgramFluxSTTBase(STTService):
     ):
         """Handle a transcription result with tracing."""
         pass
+
+    async def _send_configure(self, fields: set[str]):
+        """Send a Configure control message to update settings mid-stream.
+
+        Builds a Configure JSON message containing only the fields that changed
+        and sends it over the existing connection.
+
+        Args:
+            fields: Set of changed field names to include in the message.
+        """
+        message: dict[str, Any] = {"type": "Configure"}
+
+        if "keyterm" in fields:
+            message["keyterms"] = self._settings.keyterm
+
+        thresholds: dict[str, Any] = {}
+        if "eot_threshold" in fields:
+            thresholds["eot_threshold"] = self._settings.eot_threshold
+        if "eager_eot_threshold" in fields:
+            thresholds["eager_eot_threshold"] = self._settings.eager_eot_threshold
+        if "eot_timeout_ms" in fields:
+            thresholds["eot_timeout_ms"] = self._settings.eot_timeout_ms
+        if thresholds:
+            message["thresholds"] = thresholds
+
+        if "language_hints" in fields:
+            if self._settings.model != self._MULTILINGUAL_MODEL:
+                logger.warning(
+                    f"language_hints only supported on {self._MULTILINGUAL_MODEL}; "
+                    f"skipping Configure update for model {self._settings.model!r}"
+                )
+            else:
+                hints = self._settings.language_hints
+                # Empty list clears hints; NOT_GIVEN/None also treated as clear
+                # since we only reach this branch when the user set the field.
+                if hints is None or isinstance(hints, _NotGiven):
+                    message["language_hints"] = []
+                else:
+                    message["language_hints"] = _prepare_language_hints(hints)
+
+        logger.debug(f"{self}: sending Configure message: {message}")
+        await self._transport_send_json(message)
+
+    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
+        """Apply a settings delta.
+
+        Configure-able fields (keyterm, eot_threshold, eager_eot_threshold,
+        eot_timeout_ms, language_hints) are sent to Deepgram via a Configure
+        message. Other fields are stored but cannot be applied to the active
+        connection.
+        """
+        changed = await super()._update_settings(delta)
+
+        if not changed:
+            return changed
+
+        configure_fields = changed.keys() & self._CONFIGURE_FIELDS
+        if configure_fields and self._transport_is_active():
+            await self._send_configure(configure_fields)
+
+        self._warn_unhandled_updated_settings(changed.keys() - self._CONFIGURE_FIELDS)
+
+        return changed
 
     # ------------------------------------------------------------------
     # Message handling

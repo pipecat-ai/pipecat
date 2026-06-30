@@ -214,16 +214,28 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         analyzer, _ = self._create_analyzer(model_download_dir=custom)
         self.assertEqual(analyzer._model_download_dir, custom)
 
-    def test_pending_vad_params_stored(self):
-        """Constructor stashes optional VAD knobs for later application."""
-        analyzer, _ = self._create_analyzer(
-            speech_hold_duration=0.08,
-            minimum_speech_duration=0.05,
-            sensitivity=0.7,
-        )
-        self.assertEqual(analyzer._pending_speech_hold_duration, 0.08)
-        self.assertEqual(analyzer._pending_minimum_speech_duration, 0.05)
-        self.assertEqual(analyzer._pending_sensitivity, 0.7)
+    def test_legacy_vad_params_warn_and_are_ignored(self):
+        """The released SDK-side VAD knobs are accepted but deprecated/ignored."""
+        for param, value in (
+            ("speech_hold_duration", 0.08),
+            ("minimum_speech_duration", 0.05),
+            ("sensitivity", 0.7),
+        ):
+            # assertWarnsRegex also pins the message to the specific param name,
+            # so a regression that warns with the wrong param name is caught.
+            with self.assertWarnsRegex(DeprecationWarning, param):
+                analyzer, _ = self._create_analyzer(**{param: value})
+            # Accepted-but-ignored: not stashed anywhere on the instance.
+            self.assertFalse(hasattr(analyzer, f"_pending_{param}"))
+
+    def test_no_deprecation_warning_without_legacy_params(self):
+        """Constructing without the legacy params emits no DeprecationWarning."""
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            analyzer, _ = self._create_analyzer()  # must not raise
+            self.assertIsNotNone(analyzer)
 
     def test_construction_eagerly_loads_model_via_model_id(self):
         """__init__ downloads and loads the model so cold-start happens off-hot-path."""
@@ -441,23 +453,47 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         analyzer, _ = self._create_analyzer()
         self.assertEqual(analyzer.voice_confidence(b"\x00" * 320), 0.0)
 
-    def test_voice_confidence_reports_speech(self):
-        """When VAD says speech, return 1.0."""
+    def test_voice_confidence_returns_raw_probability(self):
+        """voice_confidence returns the model's raw probability verbatim.
+
+        Pipecat's VADParams.confidence (not the SDK) decides speech, so the
+        analyzer must surface the continuous value rather than a 0/1 boolean.
+        """
         analyzer, _ = self._create_analyzer()
         self._initialize_at(analyzer, 16000)
-        self.mock_processor.vad_ctx.speech_detected = True
+        self.mock_processor.vad_ctx.raw_probability = 0.42
         # 10 ms at 16 kHz int16 → 320 bytes.
         confidence = analyzer.voice_confidence(b"\x00" * 320)
-        self.assertEqual(confidence, 1.0)
+        self.assertAlmostEqual(confidence, 0.42)
         self.assertEqual(len(self.mock_processor.process_calls), 1)
         self.assertEqual(self.mock_processor.process_calls[0].shape, (1, 160))
 
-    def test_voice_confidence_reports_silence(self):
-        """When VAD says no speech, return 0.0."""
+    def test_voice_confidence_reports_high_and_low(self):
+        """High raw probability ≈ speech, low ≈ silence — both pass through."""
         analyzer, _ = self._create_analyzer()
         self._initialize_at(analyzer, 16000)
-        self.mock_processor.vad_ctx.speech_detected = False
+        self.mock_processor.vad_ctx.raw_probability = 0.97
+        self.assertAlmostEqual(analyzer.voice_confidence(b"\x00" * 320), 0.97)
+        self.mock_processor.vad_ctx.raw_probability = 0.01
+        self.assertAlmostEqual(analyzer.voice_confidence(b"\x00" * 320), 0.01)
+
+    def test_voice_confidence_clamps_out_of_range(self):
+        """Probabilities outside [0.0, 1.0] are clamped to the VADAnalyzer range."""
+        analyzer, _ = self._create_analyzer()
+        self._initialize_at(analyzer, 16000)
+        self.mock_processor.vad_ctx.raw_probability = 1.5
+        self.assertEqual(analyzer.voice_confidence(b"\x00" * 320), 1.0)
+        self.mock_processor.vad_ctx.raw_probability = -0.2
         self.assertEqual(analyzer.voice_confidence(b"\x00" * 320), 0.0)
+
+    def test_voice_confidence_passes_through_exact_boundaries(self):
+        """The in-range boundaries 0.0 and 1.0 pass through unchanged (not clamped away)."""
+        analyzer, _ = self._create_analyzer()
+        self._initialize_at(analyzer, 16000)
+        self.mock_processor.vad_ctx.raw_probability = 0.0
+        self.assertEqual(analyzer.voice_confidence(b"\x00" * 320), 0.0)
+        self.mock_processor.vad_ctx.raw_probability = 1.0
+        self.assertEqual(analyzer.voice_confidence(b"\x00" * 320), 1.0)
 
     def test_voice_confidence_swallows_sdk_errors(self):
         """Exceptions from processor.process() return 0.0 (pipeline stays alive)."""
@@ -466,12 +502,12 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         self.mock_processor.process = MagicMock(side_effect=RuntimeError("boom"))
         self.assertEqual(analyzer.voice_confidence(b"\x00" * 320), 0.0)
 
-    def test_voice_confidence_swallows_is_speech_detected_errors(self):
-        """is_speech_detected() raising after process() succeeds returns 0.0
+    def test_voice_confidence_swallows_raw_probability_errors(self):
+        """raw_vad_probability() raising after process() succeeds returns 0.0
         and re-arms the error latch (distinct path from process() failure)."""
         analyzer, _ = self._create_analyzer()
         self._initialize_at(analyzer, 16000)
-        # process() succeeds; the failure happens in is_speech_detected().
+        # process() succeeds; the failure happens in raw_vad_probability().
         self.mock_processor.vad_ctx.raise_on_detect = True
         self.assertEqual(analyzer.voice_confidence(b"\x00" * 320), 0.0)
         self.assertTrue(analyzer._inference_error_logged)
@@ -529,54 +565,6 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
             mock_config_cls.return_value = MagicMock()
             analyzer.set_sample_rate(16000)
         self.assertFalse(analyzer._buffer_size_warning_logged)
-
-    # --- VAD parameters ------------------------------------------------------
-
-    def test_vad_params_applied_to_vad_context(self):
-        """Constructor-supplied tuning knobs are pushed to VadContext."""
-        analyzer, _ = self._create_analyzer(
-            speech_hold_duration=0.08,
-            minimum_speech_duration=0.05,
-            sensitivity=0.7,
-        )
-        self._initialize_at(analyzer, 16000)
-        params = self.mock_processor.vad_ctx.parameters_set
-        self.assertEqual(len(params), 3)
-        self.assertEqual([v for _, v in params], [0.08, 0.05, 0.7])
-
-    def test_vad_parameter_first_failure_does_not_drop_subsequent(self):
-        """Per-parameter try/except means one failure doesn't silently drop others."""
-        analyzer, _ = self._create_analyzer(
-            speech_hold_duration=0.08,
-            minimum_speech_duration=0.05,
-            sensitivity=0.7,
-        )
-        self._initialize_at(analyzer, 16000)
-        # Configure VadContext to fail on the first parameter only.
-        call_log = []
-
-        def selective_set(param, value):
-            call_log.append((param, value))
-            if len(call_log) == 1:
-                raise RuntimeError("first param rejected")
-
-        analyzer._vad_ctx.set_parameter = selective_set
-        analyzer._apply_vad_parameters()
-        # All three params should have been attempted despite the first failure.
-        self.assertEqual(len(call_log), 3)
-
-    def test_vad_parameter_application_swallows_errors(self):
-        """A failing set_parameter call is logged, not re-raised."""
-        analyzer, _ = self._create_analyzer(sensitivity=0.7)
-        self._initialize_at(analyzer, 16000)
-        analyzer._vad_ctx.set_parameter = MagicMock(side_effect=RuntimeError("boom"))
-        analyzer._apply_vad_parameters()  # must not raise
-
-    def test_apply_vad_parameters_noop_without_context(self):
-        """_apply_vad_parameters returns early when there is no VadContext."""
-        analyzer, _ = self._create_analyzer(sensitivity=0.7)
-        analyzer._vad_ctx = None
-        analyzer._apply_vad_parameters()  # must not raise
 
     # --- Cleanup -------------------------------------------------------------
 

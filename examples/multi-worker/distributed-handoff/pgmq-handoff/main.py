@@ -33,6 +33,7 @@ from pgmq.async_queue import PGMQueue
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
 from pipecat.bus.network.pgmq import PgmqBus
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -47,7 +48,6 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.transports.websocket.server import WebsocketServerParams
 from pipecat.workers.llm import LLMWorkerActivationArgs
 from pipecat.workers.runner import WorkerRunner
 
@@ -56,7 +56,7 @@ load_dotenv(override=True)
 MAIN_NAME = "acme"
 
 transport_params = {
-    "eval": lambda: WebsocketServerParams(
+    "eval": lambda: EvalTransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),

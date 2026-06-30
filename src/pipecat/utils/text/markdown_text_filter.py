@@ -77,8 +77,26 @@ class MarkdownTextFilter(BaseTextFilter):
             The filtered text with Markdown formatting removed or converted.
         """
         if self._settings.enable_text_filter:
+            # Strip markdown headers to plain text before the newline collapse
+            # below. md.convert can't recognize a header once the collapse
+            # injects a leading space, so we normalize headers ourselves.
+            # First, drop blank lines before a header (keeping the marker) so
+            # the collapse doesn't turn them into a leading space.
+            filtered_text = re.sub(r"\n\s*\n(#{1,6}[ \t])", r"\n\1", text)
+            # Then strip the leading marker and any "closed" trailing marker
+            # (e.g. ## Title ##), leaving just the header text. The trailing
+            # marker's surrounding spaces are absorbed only when the marker is
+            # present, so genuine trailing whitespace (needed for word-by-word
+            # streaming) is preserved on open headers.
+            filtered_text = re.sub(
+                r"^#{1,6}[ \t]+(.*?)(?:[ \t]+#+[ \t]*)?$",
+                r"\1",
+                filtered_text,
+                flags=re.MULTILINE,
+            )
+
             # Remove newlines and replace with a space only when there's no text before or after
-            filtered_text = re.sub(r"^\s*\n", " ", text, flags=re.MULTILINE)
+            filtered_text = re.sub(r"^\s*\n", " ", filtered_text, flags=re.MULTILINE)
 
             # Remove backticks from inline code, but not from code blocks
             filtered_text = re.sub(r"(?<!`)`([^`\n]+)`(?!`)", r"\1", filtered_text)

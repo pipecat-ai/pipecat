@@ -23,7 +23,10 @@ from typing import Any
 from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
+from typing_extensions import override
 
+from pipecat.adapters.schemas.direct_function import DirectFunction
+from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.frames.frames import (
@@ -424,7 +427,7 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
         system_instruction: str | None = None,
-        tools: list[dict] | ToolsSchema | None = None,
+        tools: ToolsSchema | list[FunctionSchema | DirectFunction] | list[dict] | None = None,
         params: InputParams | None = None,
         settings: Settings | None = None,
         inference_on_context_initialization: bool = True,
@@ -452,7 +455,10 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             start_video_paused: Whether to start with video input paused. Defaults to False.
             system_instruction: System prompt for the model. Defaults to None.
-            tools: Tools/functions available to the model. Defaults to None.
+            tools: Tools available to the model: a ``ToolsSchema``, a plain list of
+                direct functions and/or ``FunctionSchema`` objects (handlers
+                auto-register), or a list of provider-native tool dicts. Defaults
+                to None.
             params: Configuration parameters for the model.
 
                 .. deprecated:: 0.0.105
@@ -556,6 +562,12 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
         self._last_sent_time = 0
 
         self._system_instruction_from_init = self._settings.system_instruction
+        # Accept a plain list of standard tools as a convenience; normalize it to a
+        # ToolsSchema so the rest of the service has a single form to handle.
+        # Provider-native tool lists (dicts) pass through unchanged.
+        if isinstance(tools, list):
+            normalized = LLMContext._normalize_and_validate_tools(tools, allow_provider_tools=True)
+            tools = normalized if isinstance(normalized, (ToolsSchema, list)) else None
         self._tools_from_init = tools
         self._inference_on_context_initialization = inference_on_context_initialization
         self._needs_initial_turn_complete_message = False
@@ -847,6 +859,11 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             pass
         else:
             await self.push_frame(frame, direction)
+
+    @override
+    def _service_tools(self) -> "ToolsSchema | list[Any] | None":
+        """Return the tools configured via ``tools=`` at construction, if any."""
+        return self._tools_from_init
 
     async def _handle_context(self, context: LLMContext):
         if not self._context:
@@ -1187,6 +1204,7 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
                 tools = params["tools"]
             else:
                 system_instruction = self._system_instruction_from_init
+            # Context-provided tools take precedence; fall back to the service's own tools.
             if not tools:
                 tools = adapter.from_standard_tools(self._tools_from_init)
             if system_instruction:

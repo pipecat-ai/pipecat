@@ -13,7 +13,7 @@ Two layers:
 - :class:`TestEvalsHarnessIntegration` runs scenarios via :meth:`EvalSession.from_scenario` against a fake
   RTVI WebSocket server that replies to ``client-ready``/``send-text`` with
   scripted RTVI server messages — exercising the handshake, send/receive, event
-  matching, and reset paths without a real bot pipeline.
+  matching, and context paths without a real bot pipeline.
 """
 
 import json
@@ -66,6 +66,23 @@ class TestTranslate(unittest.TestCase):
         )
         self.assertEqual(s._text_buffer, [])
         self.assertEqual(len(s._tts_audio), 0)
+        self.assertTrue(s._queue.empty())
+
+    def test_discard_preserves_user_transcription(self):
+        # A DTMF keypress emits its user_transcription right before the turn-start
+        # interruption. The discard must keep it (it's the turn's input) while
+        # still dropping the bot's interrupted output.
+        s = _session(bot_audio=True)
+        s._queue.put_nowait({"type": "llm_response", "text": "greeting"})
+        s._queue.put_nowait({"type": "user_transcription", "transcript": "DTMF: 1#"})
+        self.assertEqual(
+            s._translate({"type": "user-started-speaking"}),
+            [{"type": "user_started_speaking"}],
+        )
+        # The bot output is gone; the user transcription survives, still queued.
+        self.assertEqual(
+            s._queue.get_nowait(), {"type": "user_transcription", "transcript": "DTMF: 1#"}
+        )
         self.assertTrue(s._queue.empty())
 
     def test_user_transcription_final_only(self):
@@ -268,6 +285,37 @@ class TestRequiredReportLevel(unittest.TestCase):
         )
 
 
+class TestNeedsVadEvents(unittest.TestCase):
+    """The harness enables raw VAD events only when a scenario references them."""
+
+    def _needs(self, turn: EvalTurn) -> bool:
+        scenario = EvalScenario(name="t", turns=[turn])
+        return EvalSession(scenario, "ws://localhost:0")._needs_vad_events()
+
+    def test_false_without_vad_events(self):
+        self.assertFalse(
+            self._needs(EvalTurn(user="x", expect=[EvalExpectation(event="response")]))
+        )
+
+    def test_true_when_expected(self):
+        self.assertTrue(
+            self._needs(
+                EvalTurn(user="x", expect=[EvalExpectation(event="vad_user_started_speaking")])
+            )
+        )
+
+    def test_true_when_used_as_send_after_anchor(self):
+        self.assertTrue(
+            self._needs(
+                EvalTurn(
+                    user="x",
+                    expect=[EvalExpectation(event="response")],
+                    send_after=EvalSendAfter(event="vad_user_stopped_speaking", delay_ms=2000),
+                )
+            )
+        )
+
+
 class TestConnectURL(unittest.TestCase):
     """The harness signals skip-TTS via the connect URL in text mode."""
 
@@ -365,6 +413,24 @@ class TestAudioSender(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(sent), 2)  # 2s -> two ~1s slices
         self.assertEqual(b"".join(chunk for chunk, _ in sent), b"\x01\x02" * 16000 * 2)
         self.assertTrue(all(rate == 16000 for _, rate in sent))
+
+
+class TestDTMFSender(unittest.IsolatedAsyncioTestCase):
+    """A dtmf turn sends one RTVI ``dtmf`` message per key."""
+
+    async def test_send_user_dtmf_one_message_per_key(self):
+        s = _session()
+        sent: list[RTVI.Message] = []
+
+        async def fake_send(message):
+            sent.append(message)
+
+        s._send = fake_send
+        await s._send_user_dtmf("12#")
+
+        self.assertEqual(len(sent), 3)
+        self.assertTrue(all(m.type == "dtmf" for m in sent))
+        self.assertEqual([m.data["button"] for m in sent], ["1", "2", "#"])
 
 
 def _free_port() -> int:
@@ -654,42 +720,43 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("kokoro boom" in line for line in result.debug_log))
         self.assertTrue(any("Traceback" in line for line in result.debug_log))
 
-    async def test_reset_sends_eval_reset_message(self):
+    async def test_context_sends_eval_context_message(self):
         self.server.on_text("hi", _rtvi("bot-llm-started"), _rtvi("bot-llm-stopped"))
         scenario = EvalScenario(
-            name="reset",
+            name="context",
             turns=[
                 EvalTurn(user="hi", expect=[EvalExpectation(event="llm_started", within_ms=2000)])
             ],
-            reset=[{"role": "system", "content": "be terse"}],
+            context=[{"role": "system", "content": "be terse"}],
         )
         result = await EvalSession.from_scenario(scenario, self.server.url).run()
         self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
-        resets = [
+        context_messages = [
             m
             for m in self.server.received
-            if m.get("type") == "client-message" and m["data"].get("t") == "eval-reset"
+            if m.get("type") == "client-message" and m["data"].get("t") == "eval-context"
         ]
-        self.assertEqual(len(resets), 1)
+        self.assertEqual(len(context_messages), 1)
         self.assertEqual(
-            resets[0]["data"]["d"]["messages"], [{"role": "system", "content": "be terse"}]
+            context_messages[0]["data"]["d"]["messages"],
+            [{"role": "system", "content": "be terse"}],
         )
 
-    async def test_no_reset_when_not_requested(self):
+    async def test_no_eval_context_message_when_empty(self):
         self.server.on_text("hi", _rtvi("bot-llm-started"), _rtvi("bot-llm-stopped"))
         scenario = EvalScenario(
-            name="noreset",
+            name="nocontext",
             turns=[
                 EvalTurn(user="hi", expect=[EvalExpectation(event="llm_started", within_ms=2000)])
             ],
         )
         await EvalSession.from_scenario(scenario, self.server.url).run()
-        resets = [
+        context_messages = [
             m
             for m in self.server.received
-            if m.get("type") == "client-message" and m["data"].get("t") == "eval-reset"
+            if m.get("type") == "client-message" and m["data"].get("t") == "eval-context"
         ]
-        self.assertEqual(resets, [])
+        self.assertEqual(context_messages, [])
 
 
 if __name__ == "__main__":

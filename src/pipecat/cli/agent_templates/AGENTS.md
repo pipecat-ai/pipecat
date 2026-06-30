@@ -25,23 +25,22 @@ Always begin from the deterministic CLI scaffold. It gives you a known-good stru
 uv tool install "pipecat-ai[cli]"   # provides the `pipecat` (alias `pc`) command
 ```
 
-> ⚠️ **Agents: scaffold non-interactively** — bare `pipecat create` opens an interactive wizard that **hangs an automated run**. Pass every choice as flags (or `--config`):
+> ⚠️ **Agents: scaffold non-interactively** — bare `pipecat init` (no scaffold flags) opens an interactive wizard that **hangs an automated run**. Pass your choices as flags (or `--config`):
 
 ```bash
-# Headless: --name (or --config) switches to non-interactive mode.
+# Headless: any scaffold flag (--bot-type, a service, or --config) switches off the wizard.
+# Run it in the project directory you're already in; `.` scaffolds in place, name from the dir.
 # The service values below are EXAMPLES — map the user's actual choices, don't copy these.
-pipecat create --name mybot \
+pipecat init . \
   --transport smallwebrtc --mode cascade \
   --stt deepgram_stt --llm openai_llm --tts cartesia_tts \
   --eval                             # eval transport + starter scenarios, for verification (§6)
 #   • Don't hand-write flags from memory — discover them:
-#       pipecat create --help          # available flags
-#       pipecat create --list-options  # valid service/transport VALUES
+#       pipecat init --help          # available flags
+#       pipecat init --list-options  # valid service/transport VALUES
 #   • --dry-run prints the resolved config as JSON; --config project.json drives it from a file.
 #   • --transport is repeatable — pass each transport you want (production + a local-dev one, §2).
 #   • --bot-type is inferred from --transport (telephony if any telephony transport, else web) — omit it.
-
-# Humans (interactive wizard): `pipecat create quickstart` (defaults) or `pipecat create`.
 ```
 
 **Choose *with* the user, not for them.** Map their requirements to the real options and confirm transport / services / mode / deployment (§7) before scaffolding — don't silently pick or guess. Mode affects testing speed — **cascade (STT→LLM→TTS)** gets the fast text-mode eval loop (§6); **realtime (speech-to-speech)** is tested in audio mode — but both run headless, so pick the mode the use case needs.
@@ -100,7 +99,7 @@ You have live sources for current truth — never substitute your memory. Use th
    ```bash
    uvx pipecat-ai-context-hub search-docs "turn detection"       # learn a concept
    uvx pipecat-ai-context-hub check-deprecation PipelineTask     # the reflex check; <1s
-   uvx pipecat-ai-context-hub search-api "WebsocketServerParams"
+   uvx pipecat-ai-context-hub search-api "EvalTransportParams"
    uvx pipecat-ai-context-hub search-examples "twilio bot" --domain backend
    uvx pipecat-ai-context-hub status                             # index health / freshness
    ```
@@ -195,14 +194,14 @@ Core concepts:
 
 A voice app can't be eyeballed like a web page — but you don't need a live call to test it. Pipecat ships a **behavioral eval harness** (`pipecat.evals`): scripted YAML scenarios drive your *running bot* and assert on what it does — deterministic checks (substring, function name/args, latency) plus an optional LLM **judge** for natural-language criteria — exercising the whole pipeline (STT→LLM→TTS, turns, context, tools, interruptions) end to end.
 
-> **Deep reference:** the **Pipecat Evals docs** are the authoritative spec — look them up via your Pipecat MCP (§3): **Overview**, **Writing Scenarios** (the schema + the two modality axes), **Using the Library** (the Python API), **Agent Self-Improvement** (the closed-loop workflow this section describes). For working examples, copy the **scaffolded starters in `server/evals/`** rather than writing YAML from scratch. `pipecat eval` is a **built-in command** of `pipecat-ai[cli]`; run it from the **bot's own environment**.
+> **Deep reference:** the **Pipecat Evals docs** are the authoritative spec — look them up via your Pipecat MCP (§3): **Overview**, **Writing Scenarios** (the schema + the two modality axes), **Using the Library** (the Python API), **Agent Self-Improvement** (the closed-loop workflow this section describes). For working examples, copy the **scaffolded starters in `server/evals/`** rather than writing YAML from scratch. The eval harness ships in the `pipecat-ai[evals]` extra (the `pipecat eval` command plus the local Kokoro/Moonshine speech models); scaffolding with `--eval` adds it, so run evals from the **bot's own environment**.
 
-**Make your bot eval-able.** Scaffold with `pipecat create --eval` (headless) — pass it whenever you scaffold a bot you intend to test. The generated bot has the `eval` transport entry, eval dependencies in its env, and **runnable starter scenarios in `server/evals/`**: `starter_text.yaml` (the fast inner loop; cascade only) and `starter_audio.yaml` (the full round trip). They pass against the freshly scaffolded bot, so run them *first* to prove the loop, then edit them to match the bot you're building and copy them to grow the suite. For an **existing** bot, add the transport entry by hand (a one-time change; RTVI is already on by default for `PipelineWorker`, so that's the only edit):
+**Make your bot eval-able.** Scaffold with `pipecat init . --eval` (headless) — pass it whenever you scaffold a bot you intend to test. The generated bot has the `eval` transport entry, eval dependencies in its env, and **runnable starter scenarios in `server/evals/`**: `starter_text.yaml` (the fast inner loop; cascade only) and `starter_audio.yaml` (the full round trip). They pass against the freshly scaffolded bot, so run them *first* to prove the loop, then edit them to match the bot you're building and copy them to grow the suite. For an **existing** bot, add the transport entry by hand (a one-time change; RTVI is already on by default for `PipelineWorker`, so that's the only edit):
 ```python
-from pipecat.transports.websocket.server import WebsocketServerParams
+from pipecat.evals.transport import EvalTransportParams
 
 transport_params = {
-    "eval": lambda: WebsocketServerParams(audio_in_enabled=True, audio_out_enabled=True),
+    "eval": lambda: EvalTransportParams(audio_in_enabled=True, audio_out_enabled=True),
     # ... your real transports (smallwebrtc, daily, …) stay as-is
 }
 ```
@@ -212,7 +211,7 @@ The dev runner wraps this in the eval transport + serializer when you pass `-t e
 - **Logs** — the bot logs to stdout (loguru). However you run it, keep the output durable and greppable — e.g. `uv run bot.py -t eval 2>&1 | tee /tmp/pipecat-output.txt` — so when a scenario fails you can grep the file for the traceback instead of re-running. If your harness captures background-process output natively, that works too.
 - **Clean boot** — `uv run bot.py -t eval` boots the bot as a headless eval WebSocket server (default `ws://localhost:7860`). No exceptions + pipeline assembled is your fastest "did I wire it right" signal.
 
-**The eval loop (where you live).** Boot the bot (`uv run bot.py -t eval`), then drive a scenario against it from a second terminal. The bot serves that one eval session and exits when the run finishes, so boot it fresh for each run as you iterate (or use `pipecat eval suite` to spawn a fresh bot per scenario from a manifest). Start in **text mode** (the default), the fast inner loop. A minimal scenario:
+**The eval loop (where you live).** Boot the bot (`uv run bot.py -t eval`), then drive a scenario against it from a second terminal. The eval transport keeps the bot alive between runs, so boot it once and drive scenario after scenario as you iterate — no re-boot per run. Start in **text mode** (the default), the fast inner loop. A minimal scenario:
 ```yaml
 name: capital_of_germany
 turns:
@@ -229,7 +228,9 @@ turns:
 ```bash
 uv run pipecat eval run my_scenario.yaml -v
 ```
-Text mode **bypasses STT, VAD, and TTS** (the `user:` turn is sent as text), so assert on what the bot *produced* (`response`, `function_call`), not on `user_*_speaking` events. Prefer the modality-agnostic `response` event — it resolves to the LLM text in text mode and to the bot's transcribed audio in audio mode. Exit code is non-zero if any non-skipped scenario fails. When a run fails in a confusing way, re-run with `-d` to also write `<scenario>.debug.log` — the harness's full logs for the eval STT, TTS, and LLM judge.
+Text mode **bypasses STT, VAD, and TTS** (the `user:` turn is sent as text), so assert on what the bot *produced* (`response`, `function_call`), not on `user_*_speaking` events. Prefer the modality-agnostic `response` event — it resolves to the LLM text in text mode and to the bot's transcribed audio in audio mode. Exit code is non-zero if any non-skipped scenario fails. When a run fails in a confusing way, re-run with `-d` to also write `<scenario>.debug.log` — the harness's full logs for the eval STT, TTS, and LLM judge. Route run output to `eval-runs/` with `--logs-dir eval-runs` (and `--record-dir eval-runs` for `-a` recordings); `pipecat eval suite` writes runs to a timestamped `eval-runs/<timestamp>/`.
+
+**One bot serves many runs.** Because the bot stays up between runs, its context carries over — give a scenario a top-level `context:` (a list of LLM messages) to start that run from a known context, or boot fresh / use `pipecat eval suite` (a fresh bot per scenario from a manifest) when you want each run fully isolated. Its `on_client_disconnected` handler (which usually cancels the pipeline) also won't fire during a normal eval; to exercise that path — cleanup, or a goodbye on hang-up — pass `--trigger-disconnect` to `pipecat eval run`, or set `trigger_disconnect: true` on a single scenario. If the handler cancels the pipeline the bot exits, so treat that as a terminal run.
 
 **Escalate to audio mode** for the full round trip. Set `user: {modality: audio, speech: {service: kokoro, voice: af_heart}}` and the harness synthesizes the user's speech, so the bot's **real VAD + STT** run; set `judge: {modality: audio}` (with a `transcription:` block) so the bot **speaks** and the harness transcribes that audio into the `response` event. Kokoro (user TTS) and Moonshine (bot transcription) run **locally with no API key** — audio mode is slower but free. Add `-a` to save the conversation to `<record-dir>/<scenario>.wav` for a human to listen back and confirm it sounds right.
 
@@ -239,7 +240,7 @@ Text mode **bypasses STT, VAD, and TTS** (the `user:` turn is sent as text), so 
 |---|---|
 | correctness depends on how real speech transcribes (numbers, names, accents, homophones) | text skips STT — it never sees a transcript |
 | turn-taking / end-of-turn / VAD timing matters | text skips VAD |
-| you assert `user_started_speaking` / `user_stopped_speaking` / `user_transcription` / `tts_response` | these events **only fire in audio mode** |
+| you assert `user_started_speaking` / `user_stopped_speaking` / `tts_response` | these events **only fire in audio mode** (`user_transcription` fires in both modes — STT in audio, DTMF aggregator in text) |
 | TTS intelligibility / pronunciation matters | needs `judge: {modality: audio}` so you judge the transcription of real speech (`response`) |
 | final pre-ship / CI confidence pass over the real round trip | text never exercises the real STT/VAD/TTS round trip |
 

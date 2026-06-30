@@ -30,6 +30,7 @@ from websockets.protocol import State
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.direct_function import DirectFunction, DirectFunctionWrapper
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.frames.frames import (
     CancelFrame,
@@ -1069,6 +1070,31 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             "step is unnecessary when the handler is on the FunctionSchema."
         )
 
+    def _service_tools(self) -> ToolsSchema | list[Any] | None:
+        """Return the service's own configured tools, if any.
+
+        Used by the auto-registration mechanism. Tools normally reach a service
+        through the ``LLMContext`` on each inference. Some services (the realtime
+        services) also accept tools configured directly on the service (e.g. via a
+        constructor argument) as an alternative; they override this to return those
+        tools verbatim, in whatever form they hold them — a ``ToolsSchema`` or a
+        provider-native tool list. When the context advertises no tools,
+        :meth:`_sync_registered_tool_handlers` normalizes the result and registers
+        handlers for any standard tools it contains; provider-native tools carry no
+        handlers, so they contribute nothing to register.
+
+        Note:
+            A service that overrides this **must follow the auto-registration
+            mechanism's preference rules: context tools, then service-configured
+            tools**.
+
+        Returns:
+            The service's configured tools verbatim (e.g. a ``ToolsSchema`` or a
+            provider-native tool list), or ``None`` when there are none (the
+            default).
+        """
+        return None
+
     def _sync_registered_tool_handlers(self, tools: Any) -> None:
         """Sync the registered handlers with the handlers advertised in ``tools``.
 
@@ -1082,6 +1108,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         carries the current tool set on each inference). Realtime services that
         support runtime tool changes also call it from their own ``LLMSetToolsFrame``
         handling, since they run continuously and don't get a context frame per turn.
+        When the context advertises no tools, handlers fall back to
+        :meth:`_service_tools` (the service's own configured tools).
 
         Explicit registrations (``register_function`` / ``register_direct_function``),
         the catch-all handler, and built-in tools are never pruned.
@@ -1096,6 +1124,17 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         normalized = (
             LLMContext._normalize_and_validate_tools(tools) if tools is not None else NOT_GIVEN
         )
+        # No context tools? Fall back to the service's own configured tools.
+        # Those may be provider-native (already formatted, carrying no handlers);
+        # only standard tools (gathered into a ToolsSchema) contribute handlers.
+        if not is_given(normalized):
+            service_tools = self._service_tools()
+            if service_tools is not None:
+                service_tools = LLMContext._normalize_and_validate_tools(
+                    service_tools, allow_provider_tools=True
+                )
+                if isinstance(service_tools, ToolsSchema):
+                    normalized = service_tools
         self._register_advertised_tool_handlers(normalized)
         advertised: set[str | None] = set()
         if is_given(normalized):
@@ -1461,17 +1500,18 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         Distinguishes two cases:
 
         - **Developer error:** the tool is advertised to the LLM but no handler
-          was registered (likely a missed ``register_function`` call). Logged
-          at error level since this almost always indicates a bug.
+          was wired up (a ``FunctionSchema`` must've been provided with neither
+          ``handler`` nor accompanying ``register_function`` call). Logged at
+          error level since this almost always indicates a bug.
         - **Hallucination:** the tool is not in the currently advertised tool
           set. Logged at warning level since this is model behavior the
           application can do little about beyond returning a terminal result.
         """
         if function_name in self._advertised_tool_names(context):
             logger.error(
-                f"{self}: tool '{function_name}' is advertised to the LLM "
-                f"but has no registered handler — did you forget to call "
-                f"register_function()?"
+                f"{self}: tool '{function_name}' is advertised to the LLM but has "
+                f"no handler — set FunctionSchema.handler (recommended) or call "
+                f"register_function()."
             )
         else:
             logger.warning(

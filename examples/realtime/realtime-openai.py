@@ -12,6 +12,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame, LLMSetToolsFrame
 from pipecat.observers.loggers.transcription_log_observer import TranscriptionLogObserver
 from pipecat.pipeline.pipeline import Pipeline
@@ -38,7 +39,6 @@ from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.transports.websocket.server import WebsocketServerParams
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy
 from pipecat.workers.runner import WorkerRunner
 
@@ -88,7 +88,7 @@ async def get_restaurant_recommendation(params: FunctionCallParams, location: st
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
-    "eval": lambda: WebsocketServerParams(
+    "eval": lambda: EvalTransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -139,17 +139,11 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
                         noise_reduction=InputAudioNoiseReduction(type="near_field"),
                     )
                 ),
-                # In this example we provide tools through the context, but you could
-                # alternatively provide them here.
+                # you could choose to pass tools here rather than via context
                 # tools=[get_current_weather, get_restaurant_recommendation],
             ),
         ),
     )
-
-    # Direct functions listed in the context are registered with the LLM
-    # automatically — no separate register_function() call needed. get_news is
-    # not advertised initially; its handler is registered automatically when it's
-    # added at runtime via the LLMSetToolsFrame below.
 
     # Create a standard OpenAI LLM context object using the normal messages format. The
     # OpenAIRealtimeLLMService will convert this internally to messages that the

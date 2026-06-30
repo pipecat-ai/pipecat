@@ -13,6 +13,7 @@ on:
       - "src/pipecat/turns/**"
       - "src/pipecat/observers/**"
       - "src/pipecat/pipeline/**"
+      - "src/pipecat/flows/**"
   workflow_dispatch:
     inputs:
       pr_number:
@@ -32,6 +33,17 @@ jobs:
       pull-requests: read
       id-token: write
     steps:
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.DOCS_BOT_APP_ID }}
+          private-key: ${{ secrets.DOCS_BOT_PRIVATE_KEY }}
+          owner: pipecat-ai
+          repositories: |
+            pipecat
+            docs
+
       - name: Checkout pipecat
         uses: actions/checkout@v4
         with:
@@ -41,7 +53,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: pipecat-ai/docs
-          token: ${{ secrets.DOCS_SYNC_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           path: _docs
 
       - name: Resolve PR number
@@ -53,10 +65,35 @@ jobs:
             echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Determine assignee
+        id: assignee
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          PR_AUTHOR=$(gh pr view ${{ steps.pr.outputs.number }} \
+            --repo pipecat-ai/pipecat --json author --jq '.author.login')
+
+          # Assign the PR author only if they're a maintainer (== member of the
+          # pipecat-ai org). Org members all have at least read access to the docs
+          # repo, so they're assignable there; the assignees probe guards against
+          # future access changes. Otherwise leave the PR unassigned for triage.
+          ASSIGNEE=""
+          if gh api "orgs/pipecat-ai/members/$PR_AUTHOR" --silent 2>/dev/null \
+            && gh api "repos/pipecat-ai/docs/assignees/$PR_AUTHOR" --silent 2>/dev/null; then
+            ASSIGNEE="$PR_AUTHOR"
+          fi
+
+          echo "login=$ASSIGNEE" >> "$GITHUB_OUTPUT"
+          if [ -n "$ASSIGNEE" ]; then
+            echo "Docs PR will be assigned to: $ASSIGNEE"
+          else
+            echo "PR author is not an org member; docs PR will be left unassigned."
+          fi
+
       - name: Update documentation
         uses: anthropics/claude-code-action@v1
         env:
-          DOCS_SYNC_TOKEN: ${{ secrets.DOCS_SYNC_TOKEN }}
+          DOCS_TOKEN: ${{ steps.app-token.outputs.token }}
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -111,7 +148,7 @@ jobs:
             ```bash
             cd _docs
             git push -u origin docs/pr-${{ steps.pr.outputs.number }}
-            GH_TOKEN=$DOCS_SYNC_TOKEN gh pr create \
+            GH_TOKEN=$DOCS_TOKEN gh pr create \
               --repo pipecat-ai/docs \
               --label auto-docs \
               --label pipecat \
@@ -141,8 +178,28 @@ jobs:
             - Only modify files inside `./_docs/` — never modify pipecat source code
             - Follow the conservative editing rules from SKILL.md Step 6
             - Read each doc page fully before editing (SKILL.md Guidelines)
-            - Use `GH_TOKEN=$DOCS_SYNC_TOKEN` for all `gh` commands targeting pipecat-ai/docs
+            - Use `GH_TOKEN=$DOCS_TOKEN` for all `gh` commands targeting pipecat-ai/docs
           claude_args: |
             --model claude-sonnet-4-5-20250929
             --max-turns 30
             --allowedTools "Read,Write,Edit,Glob,Grep,Bash"
+
+      - name: Assign docs PR
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          ASSIGNEE="${{ steps.assignee.outputs.login }}"
+          if [ -z "$ASSIGNEE" ]; then
+            echo "No assignee resolved; leaving docs PR unassigned."
+            exit 0
+          fi
+          PR_URL=$(gh pr list --repo pipecat-ai/docs \
+            --head docs/pr-${{ steps.pr.outputs.number }} \
+            --state open --json url --jq '.[0].url')
+          if [ -z "$PR_URL" ]; then
+            echo "No open docs PR for branch docs/pr-${{ steps.pr.outputs.number }}; nothing to assign."
+            exit 0
+          fi
+          gh pr edit "$PR_URL" --add-assignee "$ASSIGNEE"
+          echo "Assigned $PR_URL to $ASSIGNEE"

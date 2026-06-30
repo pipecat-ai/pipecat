@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterruptionFrame,
+    LLMContextAssistantTurnFrame,
     ServiceSwitcherRequestMetadataFrame,
     StartFrame,
     STTMetadataFrame,
@@ -275,6 +276,18 @@ class STTService(AIService):
         """
         return Language(language)
 
+    async def _process_assistant_turn(self, text: str) -> None:
+        """Called when the assistant's turn completes with the aggregated reply text.
+
+        Override in subclasses to react to each completed bot reply — for
+        example, to feed the text to a provider-side context carryover API.
+        The default implementation is a no-op.
+
+        Args:
+            text: The assistant's aggregated spoken text for this turn.
+        """
+        pass
+
     @abstractmethod
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Run speech-to-text on the provided audio data.
@@ -389,14 +402,7 @@ class STTService(AIService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartFrame):
-            # Push StartFrame first, then metadata so downstream receives them in order
-            await self.push_frame(frame, direction)
-            await self._push_stt_metadata()
-        elif isinstance(frame, ServiceSwitcherRequestMetadataFrame):
-            await self._push_stt_metadata()
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, AudioRawFrame):
+        if isinstance(frame, AudioRawFrame):
             # In this service we accumulate audio internally and at the end we
             # push a TextFrame. We also push audio downstream in case someone
             # else needs it.
@@ -434,6 +440,9 @@ class STTService(AIService):
             logger.debug(f"STT service {'muted' if frame.mute else 'unmuted'}")
         elif isinstance(frame, InterruptionFrame):
             await self._reset_stt_ttfb_state()
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, LLMContextAssistantTurnFrame):
+            await self._process_assistant_turn(frame.text)
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
@@ -478,18 +487,23 @@ class STTService(AIService):
         """
         return True
 
-    async def _push_stt_metadata(self):
-        """Push STT metadata frame for downstream processors (e.g., turn strategies)."""
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Build the STT metadata frame broadcast at start.
+
+        Overrides :meth:`AIService.service_metadata_frame` to return an
+        :class:`~pipecat.frames.frames.STTMetadataFrame` carrying the service's TTFS
+        P99 latency. A service that does its own server-side end-of-turn detection
+        overrides this (calling ``super()``) to set ``user_turn_strategies`` on the
+        returned frame.
+        """
         if not self.supports_ttfs:
-            await self.broadcast_frame(
-                STTMetadataFrame, service_name=self.name, ttfs_p99_latency=0.0
-            )
-            return
-        ttfs = self._ttfs_p99_latency
-        if ttfs is None:
-            ttfs = DEFAULT_TTFS_P99
-            logger.warning(f"{self.name}: ttfs_p99_latency not set, using default {ttfs}s")
-        await self.broadcast_frame(STTMetadataFrame, service_name=self.name, ttfs_p99_latency=ttfs)
+            ttfs = 0.0
+        else:
+            ttfs = self._ttfs_p99_latency
+            if ttfs is None:
+                ttfs = DEFAULT_TTFS_P99
+                logger.warning(f"{self.name}: ttfs_p99_latency not set, using default {ttfs}s")
+        return STTMetadataFrame(service_name=self.name, ttfs_p99_latency=ttfs)
 
     async def _cancel_ttfb_timeout(self):
         """Cancel any pending TTFB timeout task."""

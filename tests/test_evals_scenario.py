@@ -231,6 +231,67 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertIsNone(s.turns[0].user)
         self.assertEqual(s.turns[0].expect[0].event, "llm_response")
 
+    def test_dtmf_turn_parsed(self):
+        s = EvalScenario.load(
+            _write(
+                """
+                name: dtmf
+                turns:
+                  - dtmf: "123#"
+                    expect:
+                      - event: user_transcription
+                        text_contains: "DTMF: 123#"
+                """
+            )
+        )
+        self.assertEqual(s.turns[0].dtmf, "123#")
+        self.assertIsNone(s.turns[0].user)
+
+    def test_dtmf_unquoted_int_normalized(self):
+        """An unquoted digit sequence parses as int; it's coerced to a string."""
+        s = EvalScenario.load(_write("name: dtmf\nturns: [{dtmf: 123}]\n"))
+        self.assertEqual(s.turns[0].dtmf, "123")
+
+    def test_dtmf_unquoted_leading_zero_preserved(self):
+        """A leading zero must stay literal digits, not be read as YAML octal.
+
+        YAML 1.1 would otherwise parse `012` as octal 10, silently sending the
+        wrong keys; the scenario loader resolves only plain decimal as int.
+        """
+        for seq in ("012", "010", "007", "0420", "000"):
+            s = EvalScenario.load(_write(f"name: dtmf\nturns: [{{dtmf: {seq}}}]\n"))
+            self.assertEqual(s.turns[0].dtmf, seq)
+
+    def test_dtmf_unquoted_hex_rejected(self):
+        """A hex-looking token isn't read as a number; `x` fails validation."""
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load(_write("name: bad\nturns: [{dtmf: 0x10}]\n"))
+        self.assertIn("invalid keypad entry", str(cm.exception))
+
+    def test_dtmf_invalid_entry_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load(_write('name: bad\nturns: [{dtmf: "1A"}]\n'))
+        self.assertIn("invalid keypad entry", str(cm.exception))
+
+    def test_dtmf_and_user_mutually_exclusive(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load(_write('name: bad\nturns: [{user: hi, dtmf: "1"}]\n'))
+        self.assertIn("one or the other", str(cm.exception))
+
+    def test_send_after_allowed_on_dtmf_turn(self):
+        s = EvalScenario.load(
+            _write(
+                """
+                name: bargein
+                turns:
+                  - dtmf: "0"
+                    send_after: {event: llm_started, delay_ms: 300}
+                """
+            )
+        )
+        assert s.turns[0].send_after is not None
+        self.assertEqual(s.turns[0].send_after.event, "llm_started")
+
     def test_judge_eval_preserved(self):
         s = EvalScenario.load(
             _write(
@@ -302,9 +363,42 @@ class TestEvalsScenarioParser(unittest.TestCase):
             )
         self.assertIn("non-negative", str(cm.exception))
 
-    def test_missing_expect_rejected(self):
+    def test_send_after_without_event_is_pure_delay(self):
+        s = EvalScenario.load(
+            _write(
+                """
+                name: paced
+                turns:
+                  - user: "first"
+                    expect: [{event: llm_started}]
+                  - user: "second"
+                    send_after: {delay_ms: 500}
+                    expect: [{event: llm_started}]
+                """
+            )
+        )
+        assert s.turns[1].send_after is not None
+        self.assertIsNone(s.turns[1].send_after.event)
+        self.assertEqual(s.turns[1].send_after.delay_ms, 500)
+
+    def test_send_after_without_event_or_delay_rejected(self):
         with self.assertRaises(ValueError) as cm:
-            EvalScenario.load(_write("name: bad\nturns: [{user: hi}]\n"))
+            EvalScenario.load(
+                _write(
+                    "name: bad\n"
+                    "turns: [{user: hi, send_after: {delay_ms: 0}, expect: [{event: x}]}]\n"
+                )
+            )
+        self.assertIn("positive 'delay_ms:'", str(cm.exception))
+
+    def test_missing_expect_defaults_to_empty(self):
+        """A turn without `expect:` just sends/waits (e.g. paced keypresses)."""
+        s = EvalScenario.load(_write("name: ok\nturns: [{user: hi}]\n"))
+        self.assertEqual(s.turns[0].expect, [])
+
+    def test_expect_non_list_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load(_write("name: bad\nturns: [{user: hi, expect: nope}]\n"))
         self.assertIn("expect", str(cm.exception))
 
     def test_expectation_missing_event_rejected(self):
@@ -361,18 +455,18 @@ class TestEvalsScenarioParser(unittest.TestCase):
             )
         self.assertIn("image", str(cm.exception))
 
-    def test_reset_defaults_to_empty(self):
+    def test_context_defaults_to_empty(self):
         s = EvalScenario.load(
             _write("name: e\nturns: [{user: hi, expect: [{event: user_stopped_speaking}]}]\n")
         )
-        self.assertEqual(s.reset, [])
+        self.assertEqual(s.context, [])
 
-    def test_reset_parsed_as_list(self):
+    def test_context_parsed_as_list(self):
         s = EvalScenario.load(
             _write(
                 """
-                name: with_reset
-                reset:
+                name: with_context
+                context:
                   - role: system
                     content: "You are a helpful assistant."
                 turns:
@@ -381,16 +475,18 @@ class TestEvalsScenarioParser(unittest.TestCase):
                 """
             )
         )
-        self.assertEqual(len(s.reset), 1)
-        self.assertEqual(s.reset[0]["role"], "system")
-        self.assertEqual(s.reset[0]["content"], "You are a helpful assistant.")
+        self.assertEqual(len(s.context), 1)
+        self.assertEqual(s.context[0]["role"], "system")
+        self.assertEqual(s.context[0]["content"], "You are a helpful assistant.")
 
-    def test_reset_non_list_rejected(self):
+    def test_context_non_list_rejected(self):
         with self.assertRaises(ValueError) as cm:
             EvalScenario.load(
-                _write("name: bad\nreset: not_a_list\nturns: [{user: hi, expect: [{event: x}]}]\n")
+                _write(
+                    "name: bad\ncontext: not_a_list\nturns: [{user: hi, expect: [{event: x}]}]\n"
+                )
             )
-        self.assertIn("'reset:'", str(cm.exception))
+        self.assertIn("'context:'", str(cm.exception))
 
     def test_include_resolves_judge_and_user_blocks(self):
         # `judge: !include ...` / `user: !include ...` let scenarios share config.

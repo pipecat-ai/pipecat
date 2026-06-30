@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -28,7 +28,6 @@ from pipecat.services.ultravox.llm import OneShotInputParams, UltravoxRealtimeLL
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.transports.websocket.server import WebsocketServerParams
 from pipecat.workers.runner import WorkerRunner
 
 # Load environment variables
@@ -38,7 +37,7 @@ load_dotenv(override=True)
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
-    "eval": lambda: WebsocketServerParams(
+    "eval": lambda: EvalTransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -164,6 +163,7 @@ There is also a secret menu that changes daily. If the user asks about it, use t
             },
         },
         required=[],
+        handler=get_secret_menu,
     )
 
     llm = UltravoxRealtimeLLMService(
@@ -174,10 +174,8 @@ There is also a secret menu that changes daily. If the user asks about it, use t
             max_duration=datetime.timedelta(minutes=3),
             output_medium="text",
         ),
-        one_shot_selected_tools=ToolsSchema(standard_tools=[secret_menu_function]),
+        one_shot_selected_tools=[secret_menu_function],
     )
-
-    llm.register_function("get_secret_menu", get_secret_menu)
 
     tts = InworldTTSService(
         api_key=os.getenv("INWORLD_API_KEY", ""),
