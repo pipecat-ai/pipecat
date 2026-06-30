@@ -783,6 +783,53 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         except asyncio.CancelledError:
             assert error_received
 
+    async def test_heartbeat_timeout_event_handler(self):
+        """on_heartbeat_timeout fires when heartbeat frames cannot reach the sink."""
+        pipeline = Pipeline([FrameFilter(types=())])
+        worker = PipelineWorker(
+            pipeline,
+            params=PipelineParams(
+                enable_heartbeats=True,
+                heartbeats_period_secs=0.05,
+                heartbeats_monitor_secs=0.1,
+            ),
+        )
+
+        heartbeat_timeout = False
+
+        @worker.event_handler("on_heartbeat_timeout")
+        async def on_heartbeat_timeout(worker: PipelineWorker):
+            nonlocal heartbeat_timeout
+            heartbeat_timeout = True
+            await worker.cancel()
+
+        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
+        assert heartbeat_timeout
+
+    async def test_heartbeat_timeout_fires_repeatedly(self):
+        """on_heartbeat_timeout keeps firing every heartbeats_monitor_secs while stalled."""
+        pipeline = Pipeline([FrameFilter(types=())])
+        worker = PipelineWorker(
+            pipeline,
+            params=PipelineParams(
+                enable_heartbeats=True,
+                heartbeats_period_secs=0.05,
+                heartbeats_monitor_secs=0.1,
+            ),
+        )
+
+        timeout_count = 0
+
+        @worker.event_handler("on_heartbeat_timeout")
+        async def on_heartbeat_timeout(worker: PipelineWorker):
+            nonlocal timeout_count
+            timeout_count += 1
+            if timeout_count >= 2:
+                await worker.cancel()
+
+        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
+        assert timeout_count >= 2
+
 
 if __name__ == "__main__":
     unittest.main()
