@@ -15,8 +15,8 @@ from pipecat.frames.frames import AggregationType
 
 # ISO dates: 2023-05-10
 _ISO_DATE_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
-# US dates: 05/10/2023 or 05-10-2023 (guarded: not matched by ISO because ISO has 4-digit year first)
-_US_DATE_RE = re.compile(r"\b(\d{1,2})[/](\d{1,2})[/](\d{4})\b")
+# US dates: 05/10/2023 or 05-10-2023 (not matched by ISO because ISO has 4-digit year first)
+_US_DATE_RE = re.compile(r"\b(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})\b")
 
 _ORDINAL_SUFFIXES = {1: "st", 2: "nd", 3: "rd"}
 
@@ -52,7 +52,7 @@ def _us_replace(match: re.Match) -> str:
 async def normalize_dates(text: str, aggregation_type: str | AggregationType) -> str:
     """Expand date expressions to their spoken form.
 
-    Handles ISO format (``YYYY-MM-DD``) and US format (``MM/DD/YYYY``).
+    Handles ISO format (``YYYY-MM-DD``) and US format (``MM/DD/YYYY`` or ``MM-DD-YYYY``).
 
     Args:
         text: Input text possibly containing date expressions.

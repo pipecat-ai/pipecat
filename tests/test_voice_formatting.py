@@ -293,6 +293,11 @@ class TestNormalizeDates(unittest.IsolatedAsyncioTestCase):
         self.assertIn("May 10th", result)
         self.assertNotIn("05/10/2023", result)
 
+    async def test_us_date_dash(self):
+        result = await normalize_dates("Meeting on 05-10-2023", "*")
+        self.assertIn("May 10th", result)
+        self.assertNotIn("05-10-2023", result)
+
     async def test_invalid_date_unchanged(self):
         # An out-of-range month/day makes datetime() raise, so the text passes
         # through unchanged — checked for both the ISO and US replacement paths.
