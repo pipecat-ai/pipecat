@@ -153,16 +153,12 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         [get_current_weather, get_restaurant_recommendation],
     )
 
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-        context,
-        # OpenAI Realtime drives the conversation server-side and emits its
-        # own UserStarted/StoppedSpeakingFrame from server VAD events, so
-        # local VAD on the aggregator is unnecessary. realtime_service_mode
-        # decouples context writes from turn frames and transcript-bound
-        # turn-end. See `realtime-openai-locally-driven-turns.py` for the
-        # variant that disables server VAD and drives turn detection locally.
-        realtime_service_mode=True,
-    )
+    # OpenAI Realtime drives the conversation server-side and emits its own
+    # UserStarted/StoppedSpeakingFrame from server VAD events, so local VAD on
+    # the aggregator is unnecessary and realtime-service mode is auto-detected.
+    # See `realtime-openai-locally-driven-turns.py` for the variant that
+    # disables server VAD and drives turn detection locally.
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
