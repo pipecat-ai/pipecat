@@ -1041,6 +1041,20 @@ class InterruptionFrame(SystemFrame):
 
 
 @dataclass
+class BotOutputAudioPauseFrame(SystemFrame):
+    """Frame requesting output audio playback to pause without clearing buffers."""
+
+    pass
+
+
+@dataclass
+class BotOutputAudioResumeFrame(SystemFrame):
+    """Frame requesting paused output audio playback to resume."""
+
+    pass
+
+
+@dataclass
 class UserStartedSpeakingFrame(SystemFrame):
     """Frame indicating that the user turn has started.
 

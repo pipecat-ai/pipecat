@@ -25,6 +25,8 @@ from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.audio.utils import create_stream_resampler, is_silence
 from pipecat.frames.frames import (
     AssistantImageRawFrame,
+    BotOutputAudioPauseFrame,
+    BotOutputAudioResumeFrame,
     BotSpeakingFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -340,6 +342,10 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, InterruptionFrame):
             await self.push_frame(frame, direction)
             await self._handle_frame(frame)
+        elif isinstance(frame, (BotOutputAudioPauseFrame, BotOutputAudioResumeFrame)):
+            logger.debug(f"{self} Received {frame.__class__.__name__}")
+            await self.push_frame(frame, direction)
+            await self._handle_frame(frame)
         elif isinstance(frame, OutputTransportMessageUrgentFrame):
             await self.send_message(frame)
         elif isinstance(frame, OutputDTMFUrgentFrame):
@@ -363,6 +369,10 @@ class BaseOutputTransport(FrameProcessor):
 
         if isinstance(frame, InterruptionFrame):
             await sender.handle_interruptions(frame)
+        elif isinstance(frame, BotOutputAudioPauseFrame):
+            await sender.handle_audio_pause(frame)
+        elif isinstance(frame, BotOutputAudioResumeFrame):
+            await sender.handle_audio_resume(frame)
         elif isinstance(frame, OutputAudioRawFrame):
             await sender.handle_audio_frame(frame)
         elif isinstance(frame, (OutputImageRawFrame, SpriteFrame)):
@@ -446,6 +456,9 @@ class BaseOutputTransport(FrameProcessor):
             self._audio_task: asyncio.Task | None = None
             self._video_task: asyncio.Task | None = None
             self._clock_task: asyncio.Task | None = None
+            self._audio_paused = False
+            self._audio_resume_event = asyncio.Event()
+            self._audio_resume_event.set()
 
             # If timestamps are equal, use this count to preserve the insertion order
             self._clock_queue_counter = itertools.count()
@@ -503,6 +516,12 @@ class BaseOutputTransport(FrameProcessor):
             await self._clock_queue.put((float("inf"), next(self._clock_queue_counter), frame))
             await self._audio_queue.put(frame)
 
+            # If output audio is paused, the audio task is blocked waiting to
+            # resume and will never read the EndFrame we just enqueued. Resume
+            # so the queue can drain to the EndFrame; otherwise the
+            # `await self._audio_task` below would block shutdown forever.
+            await self.handle_audio_resume(BotOutputAudioResumeFrame())
+
             # At this point we have enqueued an EndFrame and we need to wait for
             # that EndFrame to be processed by the audio and clock tasks. We
             # also need to wait for these tasks before cancelling the video task
@@ -540,6 +559,8 @@ class BaseOutputTransport(FrameProcessor):
             Args:
                 _: The start interruption frame (unused).
             """
+            await self.handle_audio_resume(BotOutputAudioResumeFrame())
+
             # Cancel tasks.
             await self._cancel_clock_task()
             await self._cancel_video_task()
@@ -562,6 +583,28 @@ class BaseOutputTransport(FrameProcessor):
 
             # Let's send a bot stopped speaking if we have to.
             await self._bot_stopped_speaking()
+
+        async def handle_audio_pause(self, _: BotOutputAudioPauseFrame):
+            """Pause audio playback while preserving queued output frames."""
+            if self._audio_paused:
+                return
+
+            logger.debug(
+                f"Bot{f' [{self._destination}]' if self._destination else ''} output audio paused"
+            )
+            self._audio_paused = True
+            self._audio_resume_event.clear()
+
+        async def handle_audio_resume(self, _: BotOutputAudioResumeFrame):
+            """Resume paused audio playback."""
+            if not self._audio_paused:
+                return
+
+            logger.debug(
+                f"Bot{f' [{self._destination}]' if self._destination else ''} output audio resumed"
+            )
+            self._audio_paused = False
+            self._audio_resume_event.set()
 
         async def handle_audio_frame(self, frame: OutputAudioRawFrame):
             """Handle incoming audio frames by buffering and chunking.
@@ -765,14 +808,27 @@ class BaseOutputTransport(FrameProcessor):
             """
 
             async def without_mixer(vad_stop_secs: float) -> AsyncGenerator[Frame, None]:
+                pending_frame: Frame | None = None
                 while True:
+                    while self._audio_paused:
+                        await self._audio_resume_event.wait()
+
                     try:
-                        frame = await asyncio.wait_for(
-                            self._audio_queue.get(), timeout=vad_stop_secs
-                        )
+                        if pending_frame:
+                            frame = pending_frame
+                            pending_frame = None
+                        else:
+                            frame = await asyncio.wait_for(
+                                self._audio_queue.get(), timeout=vad_stop_secs
+                            )
+                            if self._audio_paused:
+                                pending_frame = frame
+                                continue
                         yield frame
                         self._audio_queue.task_done()
                     except TimeoutError:
+                        if self._audio_paused:
+                            continue
                         # Fallback: notify the bot stopped speaking upstream if necessary based on timeout.
                         await self._bot_stopped_speaking()
 
@@ -783,6 +839,16 @@ class BaseOutputTransport(FrameProcessor):
                 last_frame_time = 0
                 silence = b"\x00" * self._audio_chunk_size
                 while True:
+                    if self._audio_paused:
+                        frame = OutputAudioRawFrame(
+                            audio=await mixer.mix(silence),
+                            sample_rate=self._sample_rate,
+                            num_channels=self._params.audio_out_channels,
+                        )
+                        yield frame
+                        await asyncio.sleep(0)
+                        continue
+
                     try:
                         frame = self._audio_queue.get_nowait()
                         if isinstance(frame, OutputAudioRawFrame):
