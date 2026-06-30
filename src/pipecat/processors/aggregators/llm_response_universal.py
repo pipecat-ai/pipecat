@@ -1547,8 +1547,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 await self.push_context_frame(FrameDirection.UPSTREAM)
         elif isinstance(frame, LLMServiceMetadataFrame):
             # Auto-configure realtime mode on the assistant half too — the
-            # broadcast reaches both halves. The user half owns the strategy
-            # mutations and recommendation logging.
+            # broadcast reaches both halves. The assistant only needs the flag
+            # for its trailing flush; the user half owns the strategy mutations.
             if frame.is_realtime_service and self._realtime_service_mode is None:
                 self._realtime_service_mode = True
                 # The mode just auto-enabled: the trailing flush needs the
@@ -2179,10 +2179,6 @@ class LLMContextAggregatorPair:
                 Both halves share this setting; mismatched halves are rejected
                 at ``StartFrame``.
         """
-        # realtime_service_mode stays manually settable (True/False) rather than
-        # being made purely auto-configured: explicit False lets users keep
-        # legacy, pre-realtime behavior if they want it, and it would feel wrong
-        # for a field to be auto-configurable but not also manually configurable.
         user_params = user_params or LLMUserAggregatorParams()
         assistant_params = assistant_params or LLMAssistantAggregatorParams()
         if add_tool_change_messages is not None:
