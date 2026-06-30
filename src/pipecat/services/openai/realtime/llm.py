@@ -38,6 +38,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
+    LLMServiceMetadataFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
     SpeechControlParamsFrame,
@@ -54,7 +55,7 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, RealtimeServiceInfo
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai._constants import OPENAI_REALTIME_WHISPER_MODEL, OPENAI_SAMPLE_RATE
 from pipecat.services.settings import (
     NOT_GIVEN,
@@ -64,6 +65,7 @@ from pipecat.services.settings import (
     is_given,
 )
 from pipecat.transcriptions.language import Language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt
 
@@ -231,10 +233,6 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
     # Overriding the default adapter to use the OpenAIRealtimeLLMAdapter one.
     adapter_class = OpenAIRealtimeLLMAdapter
-
-    # Realtime (speech-to-speech) service. Emits UserStarted/Stopped
-    # speaking frames from server-side VAD events.
-    _realtime_service_info = RealtimeServiceInfo(emits_user_turn_frames=True)
 
     def __init__(
         self,
@@ -536,10 +534,17 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             and session_properties.audio.input.turn_detection is False
         )
 
-    def _emits_user_turn_frames(self) -> bool:
-        # When turn_detection is disabled the server doesn't emit VAD
-        # events, so we don't broadcast UserStarted/StoppedSpeakingFrame.
-        return not self._is_turn_detection_disabled()
+    def service_metadata_frame(self) -> LLMServiceMetadataFrame:
+        """Realtime service; recommends external turn strategies when server-side VAD is active."""
+        # When turn_detection is disabled the server doesn't emit VAD events,
+        # so there are no UserStarted/StoppedSpeakingFrame to drive external strategies.
+        emits_turn_frames = not self._is_turn_detection_disabled()
+        self._warn_if_realtime_service_emits_no_turn_frames(emits_turn_frames)
+        return LLMServiceMetadataFrame(
+            service_name=self.name,
+            is_realtime_service=True,
+            user_turn_strategies=ExternalUserTurnStrategies() if emits_turn_frames else None,
+        )
 
     async def _handle_interruption(self):
         if self._is_turn_detection_disabled():

@@ -44,6 +44,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
+    LLMServiceMetadataFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
     LLMThoughtEndFrame,
@@ -65,7 +66,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMe
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame, LLMSearchResult
 from pipecat.services.google.utils import update_google_client_http_options
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, RealtimeServiceInfo
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
@@ -399,10 +400,11 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
 
-    # Realtime (speech-to-speech) service. Does NOT emit
-    # UserStarted/StoppedSpeakingFrame from server-side turn signals —
-    # the API exposes an `interrupted` event but no turn-start/-end.
-    _realtime_service_info = RealtimeServiceInfo(emits_user_turn_frames=False)
+    def service_metadata_frame(self) -> LLMServiceMetadataFrame:
+        """Realtime service; emits no server-side turn frames, so recommends no external strategies."""
+        # The API exposes an `interrupted` event but no turn-start/-end.
+        self._warn_if_realtime_service_emits_no_turn_frames(emits_turn_frames=False)
+        return LLMServiceMetadataFrame(service_name=self.name, is_realtime_service=True)
 
     @property
     def _is_gemini_3(self) -> bool:

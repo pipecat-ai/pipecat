@@ -40,6 +40,7 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMServiceMetadataFrame,
     LLMTextFrame,
     StartFrame,
     TranscriptionFrame,
@@ -53,7 +54,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, RealtimeServiceInfo
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
 from pipecat.utils.time import time_now_iso8601
 
@@ -187,9 +188,10 @@ class UltravoxRealtimeLLMService(LLMService):
     Settings = UltravoxRealtimeLLMSettings
     _settings: Settings
 
-    # Realtime (speech-to-speech) service. Does NOT emit
-    # UserStarted/StoppedSpeakingFrame from server-side turn signals.
-    _realtime_service_info = RealtimeServiceInfo(emits_user_turn_frames=False)
+    def service_metadata_frame(self) -> LLMServiceMetadataFrame:
+        """Realtime service; emits no server-side turn frames, so recommends no external strategies."""
+        self._warn_if_realtime_service_emits_no_turn_frames(emits_turn_frames=False)
+        return LLMServiceMetadataFrame(service_name=self.name, is_realtime_service=True)
 
     def __init__(
         self,
