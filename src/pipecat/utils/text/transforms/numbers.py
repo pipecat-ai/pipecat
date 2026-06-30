@@ -47,7 +47,10 @@ def expand_numbers(
         whole = int(whole_str)
 
         if digit_cutoff is not None and whole > digit_cutoff:
-            return " ".join(whole_str)
+            result = " ".join(whole_str)
+            if frac_str:
+                result += " point " + " ".join(frac_str)
+            return result
 
         if frac_str:
             words = num2words(float(f"{whole_str}.{frac_str}"), lang="en")

@@ -338,6 +338,20 @@ class TestExpandNumbers(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("9999", result)
         self.assertIn("thousand", result)
 
+    async def test_above_cutoff_decimal_preserves_fraction(self):
+        # Integer part above cutoff → digit-by-digit; fraction must not be dropped.
+        result = await expand_numbers(digit_cutoff=2025)("3000.5 units", "*")
+        self.assertIn("3 0 0 0", result)
+        self.assertIn("point", result)
+        self.assertIn("5", result)
+        self.assertNotIn("3000", result)
+
+    async def test_above_cutoff_multi_digit_fraction(self):
+        result = await expand_numbers(digit_cutoff=2025)("2500.75", "*")
+        self.assertIn("2 5 0 0", result)
+        self.assertIn("point", result)
+        self.assertIn("7 5", result)
+
 
 if __name__ == "__main__":
     unittest.main()
