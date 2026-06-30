@@ -1562,43 +1562,20 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._summarizer.process_frame(frame)
 
     async def _start(self, frame: StartFrame):
-        self._validate_realtime_pairing()
-        if self._summarizer:
-            await self._summarizer.setup(self.task_manager)
-
-    def _validate_realtime_pairing(self):
-        """Validate the realtime-mode wiring set by ``LLMContextAggregatorPair``.
-
-        Realtime mode needs the assistant half to hold a back-reference to
-        the user half so it can flush the user message on
-        ``LLMFullResponseStartFrame``. The pair sets this up; direct
-        construction of the assistant with the private realtime kwargs
-        bypasses that and is not supported.
-
-        Runs at ``StartFrame``. When the mode is auto-configured it's still
-        ``None`` here, so the back-reference is re-checked at the point it flips
-        on (see ``process_frame``); the mismatch check is intentionally not
-        re-run there, since the two halves flip independently off the broadcast.
-        """
         if self._realtime_service_mode:
             self._require_paired_user_aggregator()
-        if (
-            self._paired_user_aggregator is not None
-            and self._realtime_service_mode != self._paired_user_aggregator._realtime_service_mode
-        ):
-            raise RuntimeError(
-                f"{self}: realtime_service_mode mismatch between user and "
-                "assistant halves. Use LLMContextAggregatorPair to construct "
-                "the pair so both halves share the same configuration."
-            )
+        if self._summarizer:
+            await self._summarizer.setup(self.task_manager)
 
     def _require_paired_user_aggregator(self):
         """Raise if realtime mode is active without a paired user aggregator.
 
-        Always satisfied when constructed via ``LLMContextAggregatorPair`` (which
-        wires the back-reference unconditionally); guards unsupported direct
-        construction so the missing flush surfaces loudly instead of silently
-        dropping user messages.
+        Realtime mode needs the assistant half to hold a back-reference to the
+        user half so it can flush the user message on ``LLMFullResponseStartFrame``.
+        The pair wires this unconditionally (so the halves are always configured
+        together); this guards unsupported direct construction, surfacing the
+        missing flush loudly instead of silently dropping user messages. Checked
+        at ``StartFrame`` for an explicit mode and again when the mode auto-enables.
         """
         if self._paired_user_aggregator is None:
             raise RuntimeError(
@@ -2173,8 +2150,7 @@ class LLMContextAggregatorPair:
                 realtime service announces itself via service metadata, and
                 stays off otherwise. ``True`` / ``False`` force it on or off
                 (``False`` keeps legacy pre-realtime context-write behavior).
-                Both halves share this setting; mismatched halves are rejected
-                at ``StartFrame``.
+                Both halves share this setting.
         """
         user_params = user_params or LLMUserAggregatorParams()
         assistant_params = assistant_params or LLMAssistantAggregatorParams()

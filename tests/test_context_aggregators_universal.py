@@ -2198,38 +2198,16 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         # Mutation re-applied after the second broadcast (not skipped by the guard).
         self.assertFalse(strategies.stop[0].wait_for_transcript)
 
-    async def test_realtime_mode_assistant_requires_paired_user_aggregator(self):
-        # Direct construction of the assistant half with realtime mode
-        # set but no paired user half raises at StartFrame validation.
-        # (We call the validation directly so the error isn't swallowed
-        # by the pipeline's exception handler.)
+    async def test_realtime_mode_requires_paired_user_aggregator(self):
+        # Realtime mode needs the assistant's back-reference to the user half to
+        # flush user messages. Constructing the assistant directly (bypassing the
+        # pair) leaves it unpaired; the same check runs at StartFrame for an
+        # explicit mode and at the auto-enable flip. (Called directly so the error
+        # isn't swallowed by the pipeline's exception handler.)
         context = LLMContext()
         assistant = LLMAssistantAggregator(context, _realtime_service_mode=True)
         with self.assertRaises(RuntimeError):
-            assistant._validate_realtime_pairing()
-
-    async def test_realtime_auto_enable_requires_paired_user_aggregator(self):
-        # Auto mode: when a realtime service flips the mode on, a missing pairing
-        # (unsupported direct construction) is caught instead of silently dropping
-        # the user-message flush — the check the auto-enable flip performs.
-        context = LLMContext()
-        assistant = LLMAssistantAggregator(context)  # defaults: mode=None, no pairing
-        assistant._realtime_service_mode = True  # simulate the auto-enable flip
-        with self.assertRaises(RuntimeError):
             assistant._require_paired_user_aggregator()
-
-    async def test_realtime_mode_assistant_rejects_mismatched_halves(self):
-        # If a user code path constructs halves with mismatched configs
-        # and wires them up by hand, assistant validation catches it.
-        context = LLMContext()
-        user = LLMUserAggregator(context, _realtime_service_mode=True)
-        assistant = LLMAssistantAggregator(
-            context,
-            _realtime_service_mode=False,
-            _paired_user_aggregator=user,
-        )
-        with self.assertRaises(RuntimeError):
-            assistant._validate_realtime_pairing()
 
 
 if __name__ == "__main__":
