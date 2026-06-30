@@ -42,7 +42,7 @@ dependencies = [
     "websockets>=13.1",
     "pyyaml>=6,<7",
     "pyyaml-include>=1.4,<2",
-    "num2words>=0.5.13",
+    "num2words>=0.5.14",
     # Required by LocalSmartTurnAnalyzerV3
     # Inlined here instead of using a self-referential extra for Poetry compatibility.
     "onnxruntime~=1.24.3",

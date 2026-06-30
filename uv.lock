@@ -4660,7 +4660,7 @@ requires-dist = [
     { name = "mlx-whisper", marker = "extra == 'mlx-whisper'", specifier = "~=0.4.2" },
     { name = "moonshine-voice", marker = "extra == 'moonshine'", specifier = ">=0.0.62" },
     { name = "nltk", specifier = ">=3.9.4,<4" },
-    { name = "num2words", specifier = ">=0.5.13" },
+    { name = "num2words", specifier = ">=0.5.14" },
     { name = "numba", specifier = ">=0.61.2,<1" },
     { name = "numpy", specifier = ">=1.26.4,<3" },
     { name = "nvidia-riva-client", marker = "extra == 'nvidia'", specifier = ">=2.25.1,<3" },
