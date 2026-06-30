@@ -8,7 +8,10 @@ import unittest
 
 from pipecat.utils.text.transforms._alnum_utils import normalize
 from pipecat.utils.text.transforms.acronyms import normalize_acronyms
+from pipecat.utils.text.transforms.currency import expand_currency
+from pipecat.utils.text.transforms.dates import normalize_dates
 from pipecat.utils.text.transforms.email import email_to_speech
+from pipecat.utils.text.transforms.numbers import expand_numbers
 from pipecat.utils.text.transforms.percentages import expand_percentages
 from pipecat.utils.text.transforms.phone import expand_phone_numbers
 from pipecat.utils.text.transforms.replacements import replace_text
@@ -237,6 +240,103 @@ class TestVoiceFormatter(unittest.IsolatedAsyncioTestCase):
         text = "Hello world"
         result = await formatter(text, "*")
         self.assertEqual(result, text)
+
+    async def test_expand_numbers_enabled(self):
+        formatter = VoiceFormatter(expand_numbers=True, number_digit_cutoff=2025)
+        self.assertIn("forty-two", await formatter("Room 42", "*"))
+
+
+class TestExpandCurrency(unittest.IsolatedAsyncioTestCase):
+    async def test_dollars_and_cents(self):
+        result = await expand_currency("Your balance is $42.50", "*")
+        self.assertIn("forty-two dollars", result)
+        self.assertIn("fifty cents", result)
+        self.assertNotIn("$", result)
+
+    async def test_singular_unit(self):
+        # "$1" -> "one dollar" (singular), not "one dollars".
+        self.assertEqual(await expand_currency("$1", "*"), "one dollar")
+
+    async def test_singular_subunit(self):
+        # "£1.01" -> singular pound + singular penny.
+        result = await expand_currency("£1.01", "*")
+        self.assertIn("one pound", result)
+        self.assertIn("one penny", result)
+
+    async def test_zero_cents_omitted(self):
+        # A ".00" fraction must not produce "and zero cents".
+        result = await expand_currency("$5.00", "*")
+        self.assertIn("five dollars", result)
+        self.assertNotIn("cent", result)
+
+    async def test_subunit_less_currency_drops_fraction(self):
+        # Yen has no subunit, so the fractional part is dropped.
+        result = await expand_currency("¥500.50", "*")
+        self.assertIn("five hundred yen", result)
+        self.assertNotIn("cent", result)
+
+    async def test_thousands_separator(self):
+        result = await expand_currency("$1,000", "*")
+        self.assertIn("one thousand dollars", result)
+        self.assertNotIn("1,000", result)
+
+
+class TestNormalizeDates(unittest.IsolatedAsyncioTestCase):
+    async def test_iso_date(self):
+        result = await normalize_dates("Meeting on 2023-05-10", "*")
+        self.assertIn("May 10th", result)
+        self.assertIn("twenty-three", result)  # year expanded to words
+        self.assertNotIn("2023-05-10", result)
+
+    async def test_us_date_slash(self):
+        result = await normalize_dates("Meeting on 05/10/2023", "*")
+        self.assertIn("May 10th", result)
+        self.assertNotIn("05/10/2023", result)
+
+    async def test_invalid_date_unchanged(self):
+        # An out-of-range month/day makes datetime() raise, so the text passes
+        # through unchanged — checked for both the ISO and US replacement paths.
+        iso = "Order 2023-13-45 shipped"
+        self.assertEqual(await normalize_dates(iso, "*"), iso)
+        us = "Due 13/45/2023 now"
+        self.assertEqual(await normalize_dates(us, "*"), us)
+
+    async def test_ordinal_teens_use_th(self):
+        # 11/12/13 take the "th" suffix, not st/nd/rd.
+        self.assertIn("11th", await normalize_dates("2023-05-11", "*"))
+        self.assertIn("12th", await normalize_dates("2023-05-12", "*"))
+        self.assertIn("13th", await normalize_dates("2023-05-13", "*"))
+
+    async def test_ordinal_suffixes(self):
+        self.assertIn("1st", await normalize_dates("2023-05-01", "*"))
+        self.assertIn("21st", await normalize_dates("2023-05-21", "*"))
+        self.assertIn("2nd", await normalize_dates("2023-05-02", "*"))
+        self.assertIn("3rd", await normalize_dates("2023-05-03", "*"))
+
+
+class TestExpandNumbers(unittest.IsolatedAsyncioTestCase):
+    async def test_below_cutoff_expands_to_words(self):
+        result = await expand_numbers(digit_cutoff=2025)("Room 42", "*")
+        self.assertIn("forty-two", result)
+
+    async def test_above_cutoff_read_digit_by_digit(self):
+        result = await expand_numbers(digit_cutoff=2025)("opens in 2026", "*")
+        self.assertIn("2 0 2 6", result)
+
+    async def test_cutoff_is_inclusive(self):
+        # The cutoff uses `>` not `>=`, so a number equal to it is still expanded.
+        result = await expand_numbers(digit_cutoff=2025)("2025", "*")
+        self.assertIn("thousand", result)
+        self.assertNotIn("2 0 2 5", result)
+
+    async def test_decimal_expands(self):
+        result = await expand_numbers(digit_cutoff=None)("3.5", "*")
+        self.assertIn("three point five", result)
+
+    async def test_none_cutoff_expands_all(self):
+        result = await expand_numbers(digit_cutoff=None)("9999", "*")
+        self.assertNotIn("9999", result)
+        self.assertIn("thousand", result)
 
 
 if __name__ == "__main__":
