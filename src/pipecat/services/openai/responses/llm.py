@@ -46,6 +46,7 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import (
+    BaseModelT,
     FunctionCallFromLLM,
     LLMService,
     WebsocketLLMService,
@@ -306,6 +307,49 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         response = await self._client.responses.create(**params)
 
         return response.output_text
+
+    async def run_structured_inference(
+        self,
+        context: LLMContext,
+        output_type: type[BaseModelT],
+        max_tokens: int | None = None,
+        system_instruction: str | None = None,
+    ) -> BaseModelT | None:
+        """Run a one-shot, out-of-band inference returning a validated Pydantic model.
+
+        Always uses the HTTP client regardless of transport variant.
+
+        Args:
+            context: The LLM context containing conversation history.
+            output_type: A Pydantic model class describing the desired output schema.
+            max_tokens: Optional maximum number of tokens to generate.
+            system_instruction: Optional system instruction for this inference.
+
+        Returns:
+            A validated ``output_type`` instance, or None if the model refused.
+        """
+        adapter = self.get_llm_adapter()
+        effective_instruction = system_instruction or assert_given(
+            self._settings.system_instruction
+        )
+        invocation_params = adapter.get_llm_invocation_params(
+            context, system_instruction=effective_instruction
+        )
+
+        params = self._build_response_params(invocation_params)
+
+        # Override for non-streaming
+        params["stream"] = False
+
+        if max_tokens is not None:
+            params["max_output_tokens"] = max_tokens
+
+        params["text_format"] = output_type
+
+        # Parse into the requested Pydantic model
+        response = await self._client.responses.parse(**params)
+
+        return response.output_parsed
 
     def _process_function_calls(
         self,

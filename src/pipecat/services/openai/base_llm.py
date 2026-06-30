@@ -37,7 +37,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.llm_service import BaseModelT, FunctionCallFromLLM, LLMService
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
 from pipecat.services.settings import LLMSettings, _NotGiven, assert_given
 from pipecat.utils.deprecation import deprecated
@@ -407,6 +407,57 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         response = await self._client.chat.completions.create(**params)
 
         return response.choices[0].message.content
+
+    async def run_structured_inference(
+        self,
+        context: LLMContext,
+        output_type: type[BaseModelT],
+        max_tokens: int | None = None,
+        system_instruction: str | None = None,
+    ) -> BaseModelT | None:
+        """Run a one-shot, out-of-band inference returning a validated Pydantic model.
+
+        Args:
+            context: The LLM context containing conversation history.
+            output_type: A Pydantic model class describing the desired output schema.
+            max_tokens: Optional maximum number of tokens to generate. If provided,
+                overrides the service's default max_tokens/max_completion_tokens setting.
+            system_instruction: Optional system instruction to use for this inference.
+                If provided, overrides any system instruction in the context.
+
+        Returns:
+            A validated ``output_type`` instance, or None if the model refused.
+        """
+        effective_instruction = system_instruction or self._settings.system_instruction
+        adapter = self.get_llm_adapter()
+        invocation_params = adapter.get_llm_invocation_params(
+            context,
+            system_instruction=effective_instruction,
+            convert_developer_to_user=not self.supports_developer_role,
+        )
+
+        # Build params using the same method as streaming completions
+        params = self.build_chat_completion_params(invocation_params)
+
+        # The structured-output helper is inherently non-streaming and rejects
+        # the streaming parameters.
+        params.pop("stream", None)
+        params.pop("stream_options", None)
+
+        # Override max_tokens if provided
+        if max_tokens is not None:
+            # Use max_completion_tokens for newer models, fallback to max_tokens
+            if "max_completion_tokens" in params:
+                params["max_completion_tokens"] = max_tokens
+            else:
+                params["max_tokens"] = max_tokens
+
+        params["response_format"] = output_type
+
+        # Parse into the requested Pydantic model
+        response = await self._client.chat.completions.parse(**params)
+
+        return response.choices[0].message.parsed
 
     @traced_llm
     async def _process_context(self, context: LLMContext):

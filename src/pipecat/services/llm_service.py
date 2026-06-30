@@ -24,6 +24,7 @@ from typing import (
 )
 
 from loguru import logger
+from pydantic import BaseModel
 from typing_extensions import TypeVar
 from websockets.exceptions import ConnectionClosed
 from websockets.protocol import State
@@ -249,6 +250,10 @@ class FunctionCallRunnerItem:
 # matching the pre-generic behavior of `get_llm_adapter()`.
 TAdapter = TypeVar("TAdapter", bound=BaseLLMAdapter, default=BaseLLMAdapter)
 
+# Bound for `run_structured_inference()`'s output model, so the returned instance
+# is typed as the exact Pydantic model class the caller passed in.
+BaseModelT = TypeVar("BaseModelT", bound=BaseModel)
+
 
 class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]):
     """Base class for all LLM services.
@@ -421,6 +426,34 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             The LLM's response as a string, or None if no response is generated.
         """
         raise NotImplementedError(f"run_inference() not supported by {self.__class__.__name__}")
+
+    async def run_structured_inference(
+        self,
+        context: LLMContext,
+        output_type: type[BaseModelT],
+        max_tokens: int | None = None,
+        system_instruction: str | None = None,
+    ) -> BaseModelT | None:
+        """Run a one-shot, out-of-band inference returning a validated Pydantic model.
+
+        Structured-output sibling of :meth:`run_inference`. Must be implemented by
+        subclasses whose provider supports structured output.
+
+        Args:
+            context: The LLM context containing conversation history.
+            output_type: A Pydantic model class describing the desired output schema.
+            max_tokens: Optional maximum number of tokens to generate. If provided,
+                overrides the service's default max_tokens/max_completion_tokens setting.
+            system_instruction: Optional system instruction to use for this inference.
+                If provided, overrides any system instruction in the context.
+
+        Returns:
+            A validated ``output_type`` instance, or None if no structured response
+            is produced (e.g. a provider refusal).
+        """
+        raise NotImplementedError(
+            f"run_structured_inference() not supported by {self.__class__.__name__}"
+        )
 
     def _emits_user_turn_frames(self) -> bool:
         """Whether this instance emits server-driven user-speaking turn frames at runtime.
