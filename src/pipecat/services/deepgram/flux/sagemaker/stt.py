@@ -44,8 +44,10 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
     EagerEndOfTurn, TurnResumed).
 
     Unlike the Nova-based SageMaker STT service, Flux handles turn detection
-    natively, so no external VAD is needed for turn boundaries. Use
-    ``ExternalUserTurnStrategies`` in your pipeline.
+    natively, so no external VAD is needed for turn boundaries. The service
+    requests ``ExternalUserTurnStrategies`` automatically (at start, via the
+    ``STTMetadataFrame`` it broadcasts); pass your own ``user_turn_strategies`` only to
+    override that.
 
     Requirements:
 

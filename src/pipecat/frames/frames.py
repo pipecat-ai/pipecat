@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage, NotGiven
     from pipecat.processors.frame_processor import FrameProcessor
     from pipecat.services.settings import ServiceSettings
+    from pipecat.turns.user_turn_strategies import UserTurnStrategies
     from pipecat.utils.context.llm_context_summarization import LLMContextSummaryConfig
     from pipecat.utils.tracing.tracing_context import TracingContext
 
@@ -1485,9 +1486,15 @@ class ServiceMetadataFrame(SystemFrame):
 
     Parameters:
         service_name: The name of the service broadcasting this metadata.
+        user_turn_strategies: User turn strategies the service recommends, e.g.
+            ``ExternalUserTurnStrategies`` for a service that does its own
+            server-side end-of-turn detection. The user aggregator applies them
+            unless the user passed their own ``user_turn_strategies``, which always
+            wins. ``None`` leaves the defaults in place.
     """
 
     service_name: str
+    user_turn_strategies: UserTurnStrategies | None = field(default=None, kw_only=True)
 
 
 @dataclass

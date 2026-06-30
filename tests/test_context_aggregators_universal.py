@@ -37,6 +37,7 @@ from pipecat.frames.frames import (
     RealtimeServiceMetadataFrame,
     SpeechControlParamsFrame,
     StartFrame,
+    STTMetadataFrame,
     TextFrame,
     TranscriptionFrame,
     TranslationFrame,
@@ -78,6 +79,7 @@ from pipecat.turns.user_stop import (
     SpeechTimeoutUserTurnStopStrategy,
 )
 from pipecat.turns.user_turn_strategies import (
+    ExternalUserTurnStrategies,
     FilterIncompleteUserTurnStrategies,
     UserTurnStrategies,
 )
@@ -320,6 +322,44 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
         self.assertTrue(should_stop)
         self.assertEqual(stop_message.content, "Hello!")
+
+    async def test_service_requested_turn_strategies_applied(self):
+        """An STTMetadataFrame swaps the defaults when the user set none."""
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(context)  # no user_turn_strategies
+
+        frame = STTMetadataFrame(
+            service_name="some-stt",
+            ttfs_p99_latency=0.0,
+            user_turn_strategies=ExternalUserTurnStrategies(),
+        )
+        await run_test(Pipeline([user_aggregator]), frames_to_send=[frame])
+
+        strategies = user_aggregator._user_turn_controller._user_turn_strategies
+        self.assertTrue(any(isinstance(s, ExternalUserTurnStartStrategy) for s in strategies.start))
+        self.assertTrue(any(isinstance(s, ExternalUserTurnStopStrategy) for s in strategies.stop))
+
+    async def test_user_strategies_override_service_request(self):
+        """A user-provided strategy wins; the service's request is ignored."""
+        existing_stop = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(stop=[existing_stop])
+            ),
+        )
+
+        frame = STTMetadataFrame(
+            service_name="some-stt",
+            ttfs_p99_latency=0.0,
+            user_turn_strategies=ExternalUserTurnStrategies(),
+        )
+        await run_test(Pipeline([user_aggregator]), frames_to_send=[frame])
+
+        strategies = user_aggregator._user_turn_controller._user_turn_strategies
+        self.assertEqual(strategies.stop, [existing_stop])
+        self.assertFalse(any(isinstance(s, ExternalUserTurnStopStrategy) for s in strategies.stop))
 
     async def test_user_turn_stop_timeout_no_transcription(self):
         context = LLMContext()

@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -39,6 +40,7 @@ from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import ASSEMBLYAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -528,6 +530,21 @@ class AssemblyAISTTService(WebsocketSTTService):
             True if metrics generation is supported.
         """
         return True
+
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Request external turn strategies in AssemblyAI's turn-detection mode.
+
+        With ``vad_force_turn_endpoint=False`` AssemblyAI's model decides turn
+        endings and emits ``UserStarted/StoppedSpeakingFrame``, so the user
+        aggregator defers to those rather than running local VAD/smart-turn. In the
+        default Pipecat mode (``vad_force_turn_endpoint=True``) the STT emits no turn
+        frames, so the defaults are left in place. Applied unless the user passed
+        their own ``user_turn_strategies``.
+        """
+        frame = super().service_metadata_frame()
+        if not self._vad_force_turn_endpoint:
+            frame.user_turn_strategies = ExternalUserTurnStrategies()
+        return frame
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply a settings delta and apply the changes to the live session.

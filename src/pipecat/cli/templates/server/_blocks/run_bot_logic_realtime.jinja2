@@ -35,7 +35,7 @@
 {{ ("video = " ~ service_configs[video_service]) | indent(indent_level, first=True) }}
 {% endif %}
 
-{{ helpers.setup_context(external_turn_detection) | indent(indent_level, first=True) }}
+{{ helpers.setup_context() | indent(indent_level, first=True) }}
 
 {{ helpers.setup_feature_processors(recording, transcription, bot_type) | indent(indent_level, first=True) }}
 
