@@ -540,6 +540,15 @@ class SonioxTTSService(WebsocketTTSService):
                 await self._connect()
 
             try:
+                # Ensure the stream's config (the Soniox "start message") was
+                # sent on the *current* connection. _send_config is idempotent
+                # (gated by _configured_contexts), so this is a no-op when the
+                # eager pre-open already configured the stream. It matters after
+                # a reconnect: _disconnect_websocket clears _configured_contexts,
+                # so without this the stream would be unknown to the new
+                # connection and Soniox rejects the text with a 400
+                # "stream not found. Send a start message first." error.
+                await self._send_config(context_id)
                 text_msg = {"text": text, "text_end": False, "stream_id": context_id}
                 await self._get_websocket().send(json.dumps(text_msg))
                 await self.start_tts_usage_metrics(text)
