@@ -4,12 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Free, low-latency web search for pipecat agents via remote MCP.
+"""Free, low-latency web search for Pipecat agents via remote MCP.
 
 Thin wrapper around :class:`~pipecat.services.mcp_service.MCPClient` that
 connects to a hosted MCP server powered by `Keenable AI <https://keenable.ai>`_.
 Tool schemas and implementations live server-side, so updates ship instantly
-without a pipecat release.
+without a Pipecat release.
 
 No API key is required — keyless requests use ``pro`` mode. Set
 ``KEENABLE_API_KEY`` (or pass ``api_key=``) for higher rate limits and the
@@ -27,15 +27,27 @@ Example::
 from __future__ import annotations
 
 import os
-from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
+
+from pipecat import version as pipecat_version
 
 if TYPE_CHECKING:
     from pipecat.adapters.schemas.tools_schema import ToolsSchema
     from pipecat.pipeline.llm_switcher import LLMSwitcher
     from pipecat.services.llm_service import FunctionCallParams, LLMService
+
+try:
+    from mcp.client.session_group import StreamableHttpParameters
+
+    from pipecat.services.mcp_service import MCPClient
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error(
+        'In order to use Keenable web search, you need to `uv add "pipecat-ai[keenable]"`.'
+    )
+    raise ImportError(f"Missing module: {e}") from e
 
 _MCP_URL = "https://api.keenable.ai/mcp"
 API_KEY_ENV_VAR = "KEENABLE_API_KEY"
@@ -45,27 +57,6 @@ VALID_SEARCH_MODES = ("pro", "realtime")
 # Tools that accept a search ``mode`` argument. The server selects pro/realtime
 # per call, so the configured mode is injected into these calls' arguments.
 MODE_AWARE_TOOLS = ("search_web_pages",)
-
-
-def _pipecat_version() -> str:
-    """Best-effort pipecat version for the User-Agent header."""
-    try:
-        return version("pipecat-ai")
-    except PackageNotFoundError:
-        return "unknown"
-
-
-def _import_mcp_deps():
-    """Lazy-import MCP dependencies. Raises with a clear message if missing."""
-    try:
-        from mcp.client.session_group import StreamableHttpParameters
-
-        from pipecat.services.mcp_service import MCPClient
-    except ModuleNotFoundError as e:
-        raise ImportError(
-            "Web search requires the 'mcp' package. Install it with: pip install 'mcp>=1.11.0'"
-        ) from e
-    return MCPClient, StreamableHttpParameters
 
 
 class KeenableWebSearch:
@@ -127,10 +118,10 @@ class KeenableWebSearch:
                 mode = env_mode
 
         self._mode = mode
-        self._mcp: Any = None  # MCPClient instance (lazy import)
+        self._mcp: Any = None  # MCPClient instance
 
     def _build_headers(self) -> dict[str, str]:
-        headers = {"User-Agent": f"pipecat/{_pipecat_version()}"}
+        headers = {"User-Agent": f"pipecat/{pipecat_version()}"}
         if self._api_key:
             headers["X-API-Key"] = self._api_key
         return headers
@@ -143,8 +134,6 @@ class KeenableWebSearch:
         """
         if self._mcp is not None:
             return
-
-        MCPClient, StreamableHttpParameters = _import_mcp_deps()
 
         self._mcp = MCPClient(
             server_params=StreamableHttpParameters(
