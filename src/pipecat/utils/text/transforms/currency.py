@@ -8,6 +8,8 @@
 
 import re
 
+from num2words import num2words
+
 from pipecat.frames.frames import AggregationType
 
 # Maps currency symbol to (singular, plural, cents_singular, cents_plural)
@@ -23,12 +25,7 @@ _CURRENCY_RE = re.compile(r"([€£¥₹\$])\s*(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{
 
 
 def _amount_to_words(n: float, singular: str, plural: str) -> str:
-    try:
-        from num2words import num2words
-
-        words = num2words(n, lang="en")
-    except ImportError:
-        words = str(int(n))
+    words = num2words(n, lang="en")
     unit = singular if n == 1 else plural
     return f"{words} {unit}"
 
@@ -54,10 +51,6 @@ def _currency_match(match: re.Match) -> str:
 
 async def expand_currency(text: str, aggregation_type: str | AggregationType) -> str:
     """Expand currency amounts to their spoken form.
-
-    Requires the ``num2words`` package for numeric word conversion
-    (``pip install pipecat-ai[voice-formatting]``). Falls back to keeping numeric
-    digits when the package is not installed.
 
     Args:
         text: Input text possibly containing currency expressions.

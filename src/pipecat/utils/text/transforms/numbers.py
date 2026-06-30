@@ -9,6 +9,8 @@
 import re
 from collections.abc import Callable
 
+from num2words import num2words
+
 from pipecat.frames.frames import AggregationType
 
 # Matches integers and decimals, with optional thousand separators.
@@ -24,9 +26,6 @@ def expand_numbers(
     (e.g. ``"2026"`` → ``"2 0 2 6"``). Numbers at or below the cutoff are
     expanded as quantities (e.g. ``"42"`` → ``"forty two"``). Pass ``None``
     to expand all numbers as words regardless of magnitude.
-
-    Requires the ``num2words`` package
-    (``pip install pipecat-ai[voice-formatting]``).
 
     Args:
         digit_cutoff: Numbers larger than this value are read digit-by-digit.
@@ -50,15 +49,10 @@ def expand_numbers(
         if digit_cutoff is not None and whole > digit_cutoff:
             return " ".join(whole_str)
 
-        try:
-            from num2words import num2words
-
-            if frac_str:
-                words = num2words(float(f"{whole_str}.{frac_str}"), lang="en")
-            else:
-                words = num2words(whole, lang="en")
-        except ImportError:
-            words = whole_str
+        if frac_str:
+            words = num2words(float(f"{whole_str}.{frac_str}"), lang="en")
+        else:
+            words = num2words(whole, lang="en")
 
         return words
 

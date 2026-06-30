@@ -34,7 +34,6 @@ Run against a Daily room:
 
 Requires:
     pip install pipecat-ai[cartesia,deepgram,openai,silero,daily]
-    pip install pipecat-ai[voice-formatting]   # for num2words
 """
 
 import os

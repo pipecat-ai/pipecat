@@ -9,6 +9,8 @@
 import re
 from datetime import datetime
 
+from num2words import num2words
+
 from pipecat.frames.frames import AggregationType
 
 # ISO dates: 2023-05-10
@@ -25,12 +27,7 @@ def _ordinal(n: int) -> str:
 
 
 def _date_to_spoken(dt: datetime) -> str:
-    try:
-        from num2words import num2words
-
-        year_words = num2words(dt.year, lang="en")
-    except ImportError:
-        year_words = str(dt.year)
+    year_words = num2words(dt.year, lang="en")
     month = dt.strftime("%B")
     day = _ordinal(dt.day)
     return f"{month} {day}, {year_words}"
@@ -55,8 +52,7 @@ def _us_replace(match: re.Match) -> str:
 async def normalize_dates(text: str, aggregation_type: str | AggregationType) -> str:
     """Expand date expressions to their spoken form.
 
-    Handles ISO format (``YYYY-MM-DD``) and US format (``MM/DD/YYYY``). Year words
-    require the ``num2words`` package (``pip install pipecat-ai[voice-formatting]``).
+    Handles ISO format (``YYYY-MM-DD``) and US format (``MM/DD/YYYY``).
 
     Args:
         text: Input text possibly containing date expressions.
