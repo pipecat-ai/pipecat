@@ -10,7 +10,13 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from pipecat.services.keenable.search import (
+import pytest
+
+# MCP is an optional dependency (the `keenable` extra); skip the whole module if
+# it isn't installed.
+pytest.importorskip("mcp")
+
+from pipecat.services.keenable.search import (  # noqa: E402
     _SERVER_FETCH_TOOL,
     _SERVER_SEARCH_TOOL,
     KeenableWebSearch,
