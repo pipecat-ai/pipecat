@@ -8,79 +8,245 @@ Produce a written self-review of the changes on the current local branch.
 
 This skill exists between the two other review skills in this repo:
 
-- `cleanup` reviews the branch and directly *applies* readability/docstring/pattern fixes in one pass, with no independent validation.
-- `code-review` reviews a **GitHub PR** with a multi-agent pipeline (parallel specialists + a validation pass per issue) and posts inline PR comments.
+- `cleanup` reviews the branch and directly *applies* readability, docstring, and repository-pattern fixes in one pass, with no independent validation.
+- `code-review` reviews a **GitHub PR** with a multi-agent pipeline (parallel specialists followed by independent validation) and posts inline PR comments.
 
-`local-review` borrows `code-review`'s multi-agent-plus-validation architecture (for high signal / low false-positive rate) but points it at the **local branch diff** instead of a PR, expands categories to match `cleanup`'s concerns (style, performance, docstrings) alongside bugs, and never edits code or talks to GitHub — it only writes a markdown report to `.local_review.md` at the repo root for you to act on yourself.
+`local-review` borrows `code-review`'s multi-agent architecture but points it at the **local branch diff** instead of a PR. It expands the review to cover correctness, performance, repository conventions, and docstrings while remaining strictly read-only: it never edits reviewed code, commits changes, or interacts with GitHub. It writes its findings to `.local_review.md` for the developer to review.
 
-**Agent assumptions (applies to all agents and subagents):** all tools are functional and will work without error — do not test tools or make exploratory calls. Only call a tool if it's required to complete the task.
+**Agent assumptions (applies to all reviewers and validators):** all tools are functional and will work without error. Do not test tools or make exploratory calls. Only invoke a tool when it is required to complete the task.
+
+## Review philosophy
+
+Review the code as though you are the final approving reviewer.
+
+Prefer missing a questionable issue over reporting a false positive.
+
+Only report findings that you are confident an experienced reviewer would raise because they are:
+
+- a correctness bug,
+- a concrete performance regression,
+- a documented repository convention violation, or
+- a docstring issue required by `AGENTS.md` or `CLAUDE.md`.
+
+Do **not** report:
+
+- speculative or hypothetical bugs,
+- future maintainability concerns,
+- missing tests,
+- subjective style preferences,
+- issues a formatter or linter would already catch,
+- or concerns outside the scope of the current diff unless explicitly required by repository guidance.
+
+## Severity
+
+Assign every finding one of these levels, and use it consistently across reviewers and validators:
+
+- **High** — will produce incorrect behavior, a crash, or a security issue; or violates a hard/unambiguous repository rule.
+- **Medium** — a real but non-catastrophic issue: a concrete performance regression, or a violation of an established repository convention that isn't safety-critical.
+- **Low** — a docstring or minor convention issue with no behavioral impact.
 
 ## Steps
 
-1. **Scope the diff.** Determine what "the current branch's changes" means:
-   - `git merge-base main HEAD` (fall back to `origin/main` if `main` doesn't exist locally) to find the base.
-   - Committed changes: `git diff <base>...HEAD`.
-   - Working tree changes: `git diff` (unstaged) and `git diff --cached` (staged).
-   - New files: `git status --porcelain` for untracked files, then read their contents — they're part of the branch's work even though `git diff` won't show them.
+### 1. Scope the review
 
-   If there is no diff at all (clean branch, nothing ahead of base), stop and tell the user there's nothing to review.
+Determine what "the current branch's changes" means.
 
-2. **Gather context**, without spinning up subagents for it (this is cheap, do it directly):
-   - List of changed files, grouped by kind (services, examples, tests, processors, other).
-   - Every `CLAUDE.md`/`AGENTS.md` that shares a path with a changed file or its parent directories.
-   - A one-paragraph read of the diff to understand intent (what is this branch trying to do) — this gets passed to every reviewer agent below so they can tell "intentional" from "bug."
+- Compute the merge base using `git merge-base main HEAD`.
+- If `main` does not exist locally, fall back to `origin/main`.
+- If neither can be resolved, stop and ask the user which branch should be used as the comparison base.
 
-3. **Launch 5 specialist agents in parallel**, each given: the full diff, the one-paragraph intent summary, and the relevant `CLAUDE.md`/`AGENTS.md` paths (content, not just paths). Each returns a list of issues (file, line range, description, suggested fix). Instruct every agent that CLAUDE.md/AGENTS.md text takes precedence over general judgment when the two conflict.
+Record the resolved base commit SHA — every reviewer in step 3 must scope its diff to this exact SHA so all five agree on what "the diff" is.
 
-   - **Agent 1 — Opus bug agent (diff-only).** Scan strictly the diff for obvious correctness bugs: wrong logic, off-by-one, unhandled cases visible in the diff itself, without reading outside context.
-   - **Agent 2 — Opus bug agent (contextual).** Look for problems in the introduced code that require repo context to see: broken assumptions about callers, misuse of framework primitives (e.g. `self.create_task` vs raw `asyncio.create_task`, frame push direction, uninterruptible frame handling), security issues.
-   - **Agent 3 — Sonnet style/CLAUDE.md agent.** Check Pipecat pattern consistency per `AGENTS.md` and `cleanup`'s known patterns: correct service base-class inheritance, constructor conventions, frame emission direction, metrics hooks (`can_generate_metrics`, TTFB/TTFA), deprecation-marker conventions, dataclass-vs-Pydantic usage, example structure (`examples/07-interruptible.py` as reference). Only flag things a specific CLAUDE.md/AGENTS.md rule or an established repo pattern actually covers — cite the rule.
-   - **Agent 4 — Sonnet performance agent.** Conservative, non-hypothetical performance issues introduced by the diff: inefficient loops/repeated work, wrong data structure, blocking calls in async code, redundant I/O. Skip anything that's a pre-existing pattern the diff didn't touch.
-   - **Agent 5 — Sonnet docstring agent.** Google-style docstring completeness/correctness per `AGENTS.md`'s docstring conventions: missing `Args:`/`Parameters:`/`Returns:` sections on new or changed public classes/methods, wrong style for dataclass vs Pydantic, deprecation directives missing the `.. deprecated::` block or not leading with the replacement reference.
+Collect:
 
-   **High-signal bar for all 5 agents** (same bar as `code-review`): flag only issues you're confident are real — code that will fail to run/parse, will definitely produce wrong results, a performance regression with a concrete trigger, or a docstring/style rule you can quote and point at. Do not flag style nitpicks a linter would catch, subjective preferences, or anything that depends on inputs/state you can't verify from the diff.
+- committed changes using `git diff <base>...HEAD`
+- unstaged changes using `git diff`
+- staged changes using `git diff --cached`
+- untracked files via `git status --porcelain`, reading their contents since they are part of the branch even though they do not appear in `git diff`
 
-4. **Validate every flagged issue** with a fresh subagent per issue (Opus for Agent 1/2 bug findings, Sonnet for Agent 3/4/5 findings), passing the intent summary and the specific issue. The validator's only job: confirm with high confidence that the issue is real by checking the actual code (not just trusting the description). Drop anything that doesn't validate.
+If there are no committed, staged, unstaged, or untracked changes, stop and tell the user there is nothing to review.
 
-   Apply this shared false-positive filter (do NOT flag / validate away):
-   - Pre-existing issues untouched by this diff.
-   - Something that looks like a bug but is actually correct.
-   - Pedantic nitpicks a senior engineer wouldn't raise.
-   - Issues a linter/formatter would already catch.
-   - General code-quality or test-coverage concerns not required by CLAUDE.md/AGENTS.md.
-   - Issues explicitly silenced in code (e.g. a lint-ignore comment).
+### 2. Gather context
 
-5. **Write `.local_review.md`** at the repo root (overwrite if it exists), with this structure:
+Do this directly without launching reviewer agents.
 
-   ```markdown
-   # Local Review — <branch name>
+- Build the list of changed files, grouped by kind (services, examples, tests, processors, other).
+- For every changed file, locate all applicable `AGENTS.md` and `CLAUDE.md` files in its directory hierarchy (nearest first) and collect their contents.
+- Read enough of the diff to produce a one-paragraph summary describing the intent of the branch. This summary will be passed to every reviewer so they can distinguish intentional behavior from defects.
 
-   Reviewed <base>..HEAD plus uncommitted changes, generated <date>.
+### 3. Launch five Sonnet reviewer agents in parallel
 
-   ## Summary
-   <1-3 sentence read of what the branch does>
+Each reviewer receives:
 
-   ## Bugs & Correctness
-   - [ ] `path/to/file.py:123` — <description>. Suggested fix: <fix or "see below">
+- the branch intent summary,
+- the applicable `AGENTS.md` / `CLAUDE.md` contents,
+- the complete list of changed files,
+- the resolved base commit SHA from step 1, with instructions to reproduce the exact same diff scope themselves (`git diff <base>...HEAD`, plus staged, unstaged, and untracked changes) — every reviewer must review identically-scoped changes.
 
-   ## Performance
-   - [ ] ...
+Reviewers should inspect only the portions of the diff relevant to their specialty. They may read additional repository context only when necessary to investigate or confirm a suspected issue.
 
-   ## Pipecat Style / CLAUDE.md Alignment
-   - [ ] `path/to/file.py:45` — <description>. Rule: <quoted CLAUDE.md/AGENTS.md line, with path>
+Repository instructions from `AGENTS.md` and `CLAUDE.md` always take precedence over general engineering judgment when the two conflict.
 
-   ## Docstrings
-   - [ ] ...
-   ```
+#### Reviewer 1 — Correctness (local)
 
-   Omit any section with zero validated findings rather than leaving it empty. If nothing validated in any category, still write the file with just the Summary and a one-line "No issues found" note.
+Review only the changed code and its immediate surrounding context.
 
-6. **Make sure `.local_review.md` is gitignored.** If `.gitignore` doesn't already have an entry for it, add one (under a `# Local review output` comment) so the report never gets committed or shows up in `git status` noise.
+Look for obvious correctness bugs introduced by the diff, including:
 
-7. Report back to the user in the chat: a short summary of counts per category and the path to the file. Do not paste the full report into the chat — the user reads `.local_review.md` directly.
+- incorrect logic,
+- off-by-one errors,
+- broken conditions,
+- missing cases,
+- parse or runtime errors,
+- incorrect async usage visible locally.
+
+Do not inspect unrelated repository code.
+
+#### Reviewer 2 — Correctness (contextual)
+
+Inspect additional repository code only when necessary.
+
+Look for correctness issues that require repository context, such as:
+
+- broken assumptions about callers or callees,
+- misuse of framework primitives,
+- incorrect processor behavior,
+- incorrect task creation,
+- frame direction mistakes,
+- security issues,
+- violations of framework invariants.
+
+#### Reviewer 3 — Repository conventions
+
+Review the diff against documented repository conventions from `AGENTS.md` and `CLAUDE.md`, including framework usage, inheritance, constructors, metrics hooks, frame handling, dataclass/Pydantic conventions, deprecation conventions, example structure, and other documented project practices.
+
+Only report findings covered by an explicit documented rule or a well-established repository pattern.
+
+Every finding must quote the relevant rule.
+
+#### Reviewer 4 — Performance
+
+Look for concrete performance regressions introduced by the diff, such as:
+
+- unnecessary repeated work,
+- inefficient algorithms,
+- blocking operations in async code,
+- redundant I/O,
+- avoidable allocations,
+- incorrect data structure choices.
+
+Ignore pre-existing patterns that the diff did not modify.
+
+#### Reviewer 5 — Docstrings
+
+Review new and modified public APIs for compliance with repository docstring conventions.
+
+Look for:
+
+- missing required sections,
+- incorrect Google-style formatting,
+- incorrect dataclass vs. Pydantic documentation,
+- missing or malformed deprecation directives,
+- inaccurate documentation caused by the current diff.
+
+Only report issues required by `AGENTS.md` or `CLAUDE.md`.
+
+### 4. Independently validate every finding
+
+Every finding must undergo an independent Sonnet validation pass before being included in the report.
+
+Validators should verify the actual code rather than trusting the original reviewer's description.
+
+Discard findings that are:
+
+- speculative,
+- subjective,
+- duplicates,
+- pre-existing and untouched by the diff,
+- already intentionally suppressed,
+- automatically handled by formatting or linting,
+- or cannot be confirmed with high confidence.
+
+### 5. Deduplicate findings
+
+Merge duplicate or overlapping findings before writing the report.
+
+If multiple reviewers identify the same underlying issue, report it only once using the clearest explanation.
+
+### 6. Write `.local_review.md`
+
+Overwrite the file if it already exists.
+
+Use the following structure:
+
+```markdown
+# Local Review — <branch name>
+
+Reviewed <base>..HEAD plus uncommitted changes, generated <date>.
+
+## Summary
+
+<1–3 sentence summary describing the branch>
+
+## Bugs & Correctness
+
+- [ ] **High** — `path/to/file.py:123`
+
+  Description.
+
+  Suggested fix: ...
+
+## Performance
+
+- [ ] **Medium** — `path/to/file.py:87`
+
+  Description.
+
+  Suggested fix: ...
+
+## Repository Conventions
+
+- [ ] **Low** — `path/to/file.py:45`
+
+  Description.
+
+  Rule:
+
+  > "<quoted rule>"
+
+  Source: `path/to/AGENTS.md`
+
+## Docstrings
+
+- [ ] **Low** — `path/to/file.py:91`
+
+  Description.
+
+  Suggested fix: ...
+```
+
+Omit any section with zero validated findings.
+
+If no findings remain after validation, still write the report containing:
+
+- the Summary, and
+- a single line stating **"No issues found."**
+
+### 7. Report completion
+
+Respond in chat with:
+
+- the number of findings in each category,
+- the location of `.local_review.md`.
+
+Do **not** paste the report into chat.
+
+If `.local_review.md` is not ignored by Git, suggest adding it to `.gitignore`, but do not modify the repository.
 
 ## Notes
 
-- This skill never edits reviewed code and never touches GitHub — it is strictly read + report.
-- Re-running overwrites `.local_review.md`, so it's safe to invoke repeatedly as you iterate on the branch.
-- If `main`/`origin/main` can't be resolved as a base, ask the user which branch to diff against rather than guessing.
+- This skill never edits reviewed code.
+- This skill never commits changes.
+- This skill never interacts with GitHub.
+- The only file it writes is `.local_review.md`.
+- Re-running the skill overwrites the report, making it safe to use repeatedly while iterating on a branch.
