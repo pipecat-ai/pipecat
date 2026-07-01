@@ -387,6 +387,23 @@ class TestProcessWordForcesComplete(unittest.TestCase):
         result = seq.process_word("world", pts=50, context_id="ctx2")
         self.assertTrue(any(f is skipped for f in result))
 
+    def test_whitespace_slot_force_complete_skips_emission(self):
+        """When a whitespace-only slot is force-completed, get_word_for_frame()
+        returns an empty string for it, so no frame should be emitted for that
+        slot."""
+        seq = _seq()
+        seq.register_spoken(_spoken_frame(" "), "ctx1", _tracker(" "), True)
+        seq.register_spoken(_spoken_frame("World"), "ctx2", _tracker("World"), True)
+
+        # Word for ctx2 arrives, forcing ctx1 (whitespace) to complete
+        result = seq.process_word("World", pts=10, context_id="ctx2")
+        word_frames = [f for f in result if isinstance(f, TTSTextFrame)]
+
+        # Should only emit ONE frame with ctx2, not a duplicate with ctx1
+        self.assertEqual(len(word_frames), 1)
+        self.assertEqual(word_frames[0].text, "World")
+        self.assertEqual(word_frames[0].context_id, "ctx2")
+
 
 # ---------------------------------------------------------------------------
 # force_complete
