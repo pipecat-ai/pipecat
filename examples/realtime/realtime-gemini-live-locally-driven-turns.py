@@ -103,7 +103,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        realtime_service_mode=True,
         user_params=LLMUserAggregatorParams(
             # stop_secs is intentionally longer than Pipecat's 0.2s default:
             # manual-VAD mode seems to do a bit better when end-of-speech is

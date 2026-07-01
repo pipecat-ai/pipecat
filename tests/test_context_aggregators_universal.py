@@ -29,12 +29,12 @@ from pipecat.frames.frames import (
     LLMMessagesTransformFrame,
     LLMMessagesUpdateFrame,
     LLMRunFrame,
+    LLMServiceMetadataFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
-    RealtimeServiceMetadataFrame,
     SpeechControlParamsFrame,
     StartFrame,
     STTMetadataFrame,
@@ -1884,7 +1884,7 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
     def _build_pair(
         self,
         *,
-        realtime_service_mode: bool = False,
+        realtime_service_mode: bool | None = None,
         user_params: LLMUserAggregatorParams | None = None,
     ) -> tuple[LLMContext, LLMContextAggregatorPair]:
         context = LLMContext()
@@ -1905,17 +1905,20 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(pair.user()._realtime_service_mode)
         self.assertTrue(pair.assistant()._realtime_service_mode)
 
-    async def test_pair_omits_realtime_wiring_when_unset(self):
+    async def test_pair_defaults_to_auto_mode(self):
+        # Default: realtime_service_mode is auto-configured (None), and the
+        # assistant→user back-reference is always wired so it's ready if a
+        # realtime service later auto-enables the mode.
         _, pair = self._build_pair()
-        self.assertIsNone(pair.assistant()._paired_user_aggregator)
-        self.assertFalse(pair.user()._realtime_service_mode)
-        self.assertFalse(pair.assistant()._realtime_service_mode)
+        self.assertIs(pair.assistant()._paired_user_aggregator, pair.user())
+        self.assertIsNone(pair.user()._realtime_service_mode)
+        self.assertIsNone(pair.assistant()._realtime_service_mode)
 
     async def test_realtime_strategy_mutations_with_defaults(self):
-        # At __init__ time only the mutations apply (drop the
-        # transcription start strategy, flip wait_for_transcript on
-        # default stops). The external-strategy replacement is deferred
-        # to the RealtimeServiceMetadataFrame handler.
+        # With realtime_service_mode explicitly enabled, the init-time
+        # mutations apply (drop the transcription start strategy, flip
+        # wait_for_transcript on default stops). No metadata frame has
+        # arrived, so no service-recommended external strategies are installed.
         _, pair = self._build_pair(realtime_service_mode=True)
         strategies = pair.user()._user_turn_controller._user_turn_strategies
         for s in strategies.start:
@@ -1931,14 +1934,16 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
             if hasattr(s, "wait_for_transcript"):
                 self.assertFalse(s.wait_for_transcript)
 
-    async def test_realtime_metadata_replaces_defaults_when_service_emits_turn_frames(self):
-        # When the service advertises emits_user_turn_frames=True and
-        # the user didn't pass custom strategies, the handler swaps the
-        # defaults out for ExternalUserTurnStart/StopStrategy.
+    async def test_realtime_metadata_applies_recommended_external_strategies(self):
+        # A realtime service recommending ExternalUserTurnStrategies (and no
+        # custom user strategies) installs them, then realtime mode mutates
+        # them (wait_for_transcript=False).
         _, pair = self._build_pair(realtime_service_mode=True)
         frames_to_send = [
-            RealtimeServiceMetadataFrame(
-                service_name="FakeRealtimeLLM", emits_user_turn_frames=True
+            LLMServiceMetadataFrame(
+                service_name="FakeRealtimeLLM",
+                is_realtime_service=True,
+                user_turn_strategies=ExternalUserTurnStrategies(),
             ),
         ]
         await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
@@ -1947,18 +1952,16 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(strategies.start[0], ExternalUserTurnStartStrategy)
         self.assertEqual(len(strategies.stop), 1)
         self.assertIsInstance(strategies.stop[0], ExternalUserTurnStopStrategy)
-        # Realtime-mode mutation is reapplied to the new stop strategy.
+        # Realtime-mode mutation is applied to the recommended stop strategy.
         self.assertFalse(strategies.stop[0].wait_for_transcript)
 
-    async def test_realtime_metadata_keeps_defaults_when_service_does_not_emit_turn_frames(self):
-        # Services advertising emits_user_turn_frames=False keep the
-        # default strategies so locally-driven turns (e.g. local VAD)
-        # can fire on_user_turn_* events.
+    async def test_realtime_metadata_keeps_defaults_when_service_recommends_nothing(self):
+        # A realtime service that recommends no strategies (e.g. one that
+        # doesn't emit its own turn frames) keeps the default strategies so
+        # locally-driven turns (e.g. local VAD) can fire on_user_turn_* events.
         _, pair = self._build_pair(realtime_service_mode=True)
         frames_to_send = [
-            RealtimeServiceMetadataFrame(
-                service_name="FakeRealtimeLLM", emits_user_turn_frames=False
-            ),
+            LLMServiceMetadataFrame(service_name="FakeRealtimeLLM", is_realtime_service=True),
         ]
         await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
         strategies = pair.user()._user_turn_controller._user_turn_strategies
@@ -1969,8 +1972,8 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(isinstance(s, VADUserTurnStartStrategy) for s in strategies.start))
 
     async def test_realtime_metadata_keeps_custom_strategies(self):
-        # Custom user_turn_strategies opts out of the swap — explicit
-        # user choice wins, regardless of what the service advertises.
+        # Custom user_turn_strategies opts out of the recommendation — explicit
+        # user choice wins, regardless of what the service recommends.
         custom = UserTurnStrategies(
             start=[VADUserTurnStartStrategy()],
             stop=[SpeechTimeoutUserTurnStopStrategy()],
@@ -1980,8 +1983,10 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
             user_params=LLMUserAggregatorParams(user_turn_strategies=custom),
         )
         frames_to_send = [
-            RealtimeServiceMetadataFrame(
-                service_name="FakeRealtimeLLM", emits_user_turn_frames=True
+            LLMServiceMetadataFrame(
+                service_name="FakeRealtimeLLM",
+                is_realtime_service=True,
+                user_turn_strategies=ExternalUserTurnStrategies(),
             ),
         ]
         await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
@@ -2113,58 +2118,96 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(stop_messages), 1)
         self.assertIsNone(stop_messages[0].content)
 
-    async def test_realtime_metadata_recommendation_log_when_unconfigured(self):
-        # Cascade pair receiving a RealtimeServiceMetadataFrame logs the
-        # one-time recommendation. The user half records the fact via
-        # _realtime_recommendation_logged.
+    async def test_realtime_metadata_auto_enables_mode_when_unset(self):
+        # Default (auto) pair: a realtime service announcing itself flips both
+        # halves into realtime mode with no manual opt-in, and mutates the
+        # default strategies for realtime use.
         _, pair = self._build_pair()
         user = pair.user()
 
         frames_to_send = [
-            RealtimeServiceMetadataFrame(
-                service_name="FakeRealtimeLLM", emits_user_turn_frames=False
-            ),
+            LLMServiceMetadataFrame(service_name="FakeRealtimeLLM", is_realtime_service=True),
         ]
         await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
-        self.assertTrue(user._realtime_recommendation_logged)
+        self.assertTrue(user._realtime_service_mode)
+        self.assertTrue(pair.assistant()._realtime_service_mode)
+        self.assertTrue(user._realtime_metadata_handled)
+        strategies = user._user_turn_controller._user_turn_strategies
+        for s in strategies.start:
+            self.assertNotIsInstance(s, TranscriptionUserTurnStartStrategy)
+        for s in strategies.stop:
+            if hasattr(s, "wait_for_transcript"):
+                self.assertFalse(s.wait_for_transcript)
 
-    async def test_realtime_metadata_no_log_when_configured(self):
-        # When realtime mode is opted in, the metadata frame is consumed
-        # without firing the recommendation log (we still flag the
-        # one-shot bookkeeping).
+    async def test_realtime_metadata_handled_when_explicitly_enabled(self):
+        # With realtime mode explicitly enabled, the metadata frame is processed
+        # and the one-shot guard is set.
         _, pair = self._build_pair(realtime_service_mode=True)
         user = pair.user()
 
         frames_to_send = [
-            RealtimeServiceMetadataFrame(
-                service_name="FakeRealtimeLLM", emits_user_turn_frames=False
+            LLMServiceMetadataFrame(service_name="FakeRealtimeLLM", is_realtime_service=True),
+        ]
+        await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
+        self.assertTrue(user._realtime_metadata_handled)
+
+    async def test_external_recommendation_applies_with_realtime_mode_disabled(self):
+        # The external-strategy recommendation is decoupled from
+        # realtime_service_mode: a service recommending ExternalUserTurnStrategies
+        # gets them applied even when realtime mode is explicitly disabled. They
+        # are NOT realtime-mutated (wait_for_transcript keeps its default), since
+        # realtime mode is off.
+        _, pair = self._build_pair(realtime_service_mode=False)
+        frames_to_send = [
+            LLMServiceMetadataFrame(
+                service_name="FakeRealtimeLLM",
+                is_realtime_service=True,
+                user_turn_strategies=ExternalUserTurnStrategies(),
             ),
         ]
         await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
-        self.assertTrue(user._realtime_recommendation_logged)
+        self.assertFalse(pair.user()._realtime_service_mode)
+        strategies = pair.user()._user_turn_controller._user_turn_strategies
+        self.assertIsInstance(strategies.start[0], ExternalUserTurnStartStrategy)
+        self.assertIsInstance(strategies.stop[0], ExternalUserTurnStopStrategy)
+        # Not realtime-mutated: wait_for_transcript keeps its default (True).
+        self.assertTrue(strategies.stop[0].wait_for_transcript)
 
-    async def test_realtime_mode_assistant_requires_paired_user_aggregator(self):
-        # Direct construction of the assistant half with realtime mode
-        # set but no paired user half raises at StartFrame validation.
-        # (We call the validation directly so the error isn't swallowed
-        # by the pipeline's exception handler.)
+    async def test_realtime_metadata_reapplies_mutation_on_rebroadcast(self):
+        # Regression: a second metadata broadcast (e.g. a ServiceSwitcher switch)
+        # re-adopts a fresh recommendation, so the realtime mutation must re-run.
+        # The one-shot guard governs only auto-enable/logging, not strategy install.
+        # (No-double-registration is covered at the controller level in
+        # test_user_turn_controller.py, since handlers are torn down at session end.)
+        _, pair = self._build_pair(realtime_service_mode=True)
+        frames_to_send = [
+            LLMServiceMetadataFrame(
+                service_name="FakeRealtimeLLM",
+                is_realtime_service=True,
+                user_turn_strategies=ExternalUserTurnStrategies(),
+            ),
+            LLMServiceMetadataFrame(
+                service_name="FakeRealtimeLLM",
+                is_realtime_service=True,
+                user_turn_strategies=ExternalUserTurnStrategies(),
+            ),
+        ]
+        await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
+        strategies = pair.user()._user_turn_controller.user_turn_strategies
+        self.assertIsInstance(strategies.stop[0], ExternalUserTurnStopStrategy)
+        # Mutation re-applied after the second broadcast (not skipped by the guard).
+        self.assertFalse(strategies.stop[0].wait_for_transcript)
+
+    async def test_realtime_mode_requires_paired_user_aggregator(self):
+        # Realtime mode needs the assistant's back-reference to the user half to
+        # flush user messages. Constructing the assistant directly (bypassing the
+        # pair) leaves it unpaired; the same check runs at StartFrame for an
+        # explicit mode and at the auto-enable flip. (Called directly so the error
+        # isn't swallowed by the pipeline's exception handler.)
         context = LLMContext()
         assistant = LLMAssistantAggregator(context, _realtime_service_mode=True)
         with self.assertRaises(RuntimeError):
-            assistant._validate_realtime_pairing()
-
-    async def test_realtime_mode_assistant_rejects_mismatched_halves(self):
-        # If a user code path constructs halves with mismatched configs
-        # and wires them up by hand, assistant validation catches it.
-        context = LLMContext()
-        user = LLMUserAggregator(context, _realtime_service_mode=True)
-        assistant = LLMAssistantAggregator(
-            context,
-            _realtime_service_mode=False,
-            _paired_user_aggregator=user,
-        )
-        with self.assertRaises(RuntimeError):
-            assistant._validate_realtime_pairing()
+            assistant._require_paired_user_aggregator()
 
 
 if __name__ == "__main__":

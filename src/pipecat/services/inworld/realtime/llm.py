@@ -38,6 +38,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
+    LLMServiceMetadataFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
     StartFrame,
@@ -53,7 +54,7 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, RealtimeServiceInfo
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
@@ -61,6 +62,7 @@ from pipecat.services.settings import (
     assert_given,
     is_given,
 )
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 
 from . import events
@@ -197,11 +199,10 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     transcription.
 
     Emits ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame`` from
-    Inworld's server-side VAD events. Pair with
-    ``LLMContextAggregatorPair(..., realtime_service_mode=True)``
-    so context writes are decoupled from those frames. If you wire local
-    VAD (``LLMUserAggregatorParams.vad_analyzer``) on top of this
-    service, disable Inworld's server-side turn detection first via
+    Inworld's server-side VAD events. ``LLMContextAggregatorPair`` auto-detects
+    this realtime service and decouples context writes from those frames. If
+    you wire local VAD (``LLMUserAggregatorParams.vad_analyzer``) on top of
+    this service, disable Inworld's server-side turn detection first via
     ``turn_detection=None`` (manual mode); otherwise both sources
     broadcast duplicate user-turn frames. See
     ``examples/realtime/realtime-inworld-locally-driven-turns.py``.
@@ -249,10 +250,6 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     _settings: Settings
 
     adapter_class = InworldRealtimeLLMAdapter
-
-    # Realtime (speech-to-speech) service. Emits UserStarted/Stopped
-    # speaking frames from server-side VAD events.
-    _realtime_service_info = RealtimeServiceInfo(emits_user_turn_frames=True)
 
     # Target ~60ms audio chunks when sending to Inworld (16-bit mono).
     _AUDIO_CHUNK_TARGET_MS = 60
@@ -436,10 +433,16 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             and session_properties.audio.input.turn_detection is None
         )
 
-    def _emits_user_turn_frames(self) -> bool:
-        # In manual mode the server doesn't emit VAD events, so we
-        # don't broadcast UserStarted/StoppedSpeakingFrame.
-        return not self._is_manual_turn_detection()
+    def service_metadata_frame(self) -> LLMServiceMetadataFrame:
+        """Realtime service; recommends external turn strategies when server-side VAD is active."""
+        # In manual mode the server doesn't emit VAD events, so there are no turn frames.
+        emits_turn_frames = not self._is_manual_turn_detection()
+        self._warn_if_realtime_service_emits_no_turn_frames(emits_turn_frames)
+        return LLMServiceMetadataFrame(
+            service_name=self.name,
+            is_realtime_service=True,
+            user_turn_strategies=ExternalUserTurnStrategies() if emits_turn_frames else None,
+        )
 
     async def _handle_interruption(self):
         """Handle user interruption of assistant speech.

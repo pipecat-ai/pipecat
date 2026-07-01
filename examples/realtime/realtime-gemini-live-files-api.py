@@ -176,7 +176,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # )
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        realtime_service_mode=True,
         # user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 

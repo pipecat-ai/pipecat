@@ -156,10 +156,9 @@ Always be helpful and proactive in offering assistance.""",
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         # Drive turn detection locally via SileroVAD wired into the user
-        # aggregator. realtime_service_mode keeps context-write semantics
-        # correct and (by default) drops the transcript wait on turn-end so
-        # local VAD can drive turn boundaries on the latency critical path.
-        realtime_service_mode=True,
+        # aggregator. Realtime-service mode is auto-detected and (by default)
+        # drops the transcript wait on turn-end, so local VAD can drive turn
+        # boundaries on the latency critical path.
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 

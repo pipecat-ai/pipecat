@@ -180,12 +180,11 @@ There is also a secret menu that changes daily. If the user asks about it, use t
     # Ultravox drives the conversation server-side.
     #
     # It does not, however, emit turn frames (UserStartedSpeakingFrame,
-    # UserStoppedSpeakingFrame). realtime_service_mode ensures that context
-    # aggregation will work without those frames, but you can add supplemental
-    # local turn frames for consumption by other pipeline processors that
-    # expect them (like RTVI), or to trigger on_user_turn_* events. WARNING:
-    # you should consider supplemental local turn frames approximate, as they
-    # may not always align with server turns.
+    # UserStoppedSpeakingFrame). Context aggregation works without those
+    # frames, but you can add supplemental local turn frames for consumption
+    # by other pipeline processors that expect them (like RTVI), or to trigger
+    # on_user_turn_* events. WARNING: you should consider supplemental local
+    # turn frames approximate, as they may not always align with server turns.
     #
     # To enable supplemental local turn frames, uncomment the SileroVADAnalyzer
     # and related imports below and the `user_params=` argument further down.
@@ -200,7 +199,6 @@ There is also a secret menu that changes daily. If the user asks about it, use t
     # from pipecat.turns.user_stop import BaseUserTurnStopStrategy
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        realtime_service_mode=True,
         # user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 

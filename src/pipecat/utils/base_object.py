@@ -205,6 +205,21 @@ class BaseObject(ABC):
         else:
             logger.warning(f"{self}: event handler {event_name} not registered")
 
+    def remove_event_handler(self, event_name: str, handler):
+        """Remove a previously added event handler.
+
+        No-op if the event isn't registered or the handler was never added.
+
+        Args:
+            event_name: The name of the event the handler was added for.
+            handler: The handler to remove.
+        """
+        if event_name in self._event_handlers:
+            try:
+                self._event_handlers[event_name].handlers.remove(handler)
+            except ValueError:
+                pass
+
     def _register_event_handler(self, event_name: str, sync: bool = False):
         """Register an event handler type.
 

@@ -42,6 +42,7 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMServiceMetadataFrame,
     LLMTextFrame,
     StartFrame,
     TranscriptionFrame,
@@ -59,7 +60,7 @@ from pipecat.services.aws.nova_sonic.session_continuation import (
     SessionContinuationHelper,
     SessionContinuationParams,
 )
-from pipecat.services.llm_service import LLMService, RealtimeServiceInfo
+from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
@@ -253,9 +254,9 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
     so pipeline processors that depend on those frames — RTVI client
     speech events, ``TurnTrackingObserver``, ``AudioBufferProcessor`` turn
     recording, ``UserIdleController``, user mute strategies, voicemail
-    detector — won't activate with the default server-VAD-only setup. Pair
-    with ``LLMContextAggregatorPair(..., realtime_service_mode=True)``
-    so context writes are correct anyway. To produce the turn frames
+    detector — won't activate with the default server-VAD-only setup.
+    ``LLMContextAggregatorPair`` auto-detects this realtime service so context
+    writes are correct anyway. To produce the turn frames
     locally, wire ``vad_analyzer=SileroVADAnalyzer()`` (or similar) into
     ``LLMUserAggregatorParams``; locally-generated turn boundaries are a
     heuristic and may not match Nova Sonic's server-side turn decisions.
@@ -267,9 +268,10 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
     # Override the default adapter to use the AWSNovaSonicLLMAdapter one
     adapter_class = AWSNovaSonicLLMAdapter
 
-    # Realtime (speech-to-speech) service. Does NOT emit
-    # UserStarted/StoppedSpeakingFrame from server-side turn signals.
-    _realtime_service_info = RealtimeServiceInfo(emits_user_turn_frames=False)
+    def service_metadata_frame(self) -> LLMServiceMetadataFrame:
+        """Realtime service; emits no server-side turn frames, so recommends no external strategies."""
+        self._warn_if_realtime_service_emits_no_turn_frames(emits_turn_frames=False)
+        return LLMServiceMetadataFrame(service_name=self.name, is_realtime_service=True)
 
     def __init__(
         self,

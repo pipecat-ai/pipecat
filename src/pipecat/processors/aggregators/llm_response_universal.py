@@ -51,12 +51,12 @@ from pipecat.frames.frames import (
     LLMMessagesTransformFrame,
     LLMMessagesUpdateFrame,
     LLMRunFrame,
+    LLMServiceMetadataFrame,
     LLMSetToolChoiceFrame,
     LLMSetToolsFrame,
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
-    RealtimeServiceMetadataFrame,
     ServiceMetadataFrame,
     StartFrame,
     STTMetadataFrame,
@@ -624,7 +624,7 @@ class LLMUserAggregator(LLMContextAggregator):
         context: LLMContext,
         *,
         params: LLMUserAggregatorParams | None = None,
-        _realtime_service_mode: bool = False,
+        _realtime_service_mode: bool | None = None,
         **kwargs,
     ):
         """Initialize the user context aggregator.
@@ -633,9 +633,9 @@ class LLMUserAggregator(LLMContextAggregator):
             context: The LLM context for conversation storage.
             params: Configuration parameters for aggregation behavior.
             _realtime_service_mode: Pair-internal. Realtime-mode flag
-                propagated from ``LLMContextAggregatorPair``. Not
-                intended for direct use — construct the aggregators via
-                the pair.
+                propagated from ``LLMContextAggregatorPair`` (``None`` =
+                auto-configure from service metadata). Not intended for
+                direct use — construct the aggregators via the pair.
             **kwargs: Additional arguments.
         """
         params = params or LLMUserAggregatorParams()
@@ -656,9 +656,10 @@ class LLMUserAggregator(LLMContextAggregator):
         self._register_event_handler("on_user_mute_started")
         self._register_event_handler("on_user_mute_stopped")
 
-        # Realtime-mode wiring. Default (False) preserves cascade
-        # behavior: context writes happen on turn frames, turn-stop
-        # strategies wait for transcripts. True flips both behaviors.
+        # Realtime-mode wiring. None (the default) means auto-configure from
+        # service metadata: cascade behavior until a realtime service announces
+        # itself, at which point _handle_llm_service_metadata flips this to True.
+        # Explicit True/False force the mode on or off (legacy context writes).
         self._realtime_service_mode = _realtime_service_mode
 
         user_turn_strategies = self._params.user_turn_strategies or UserTurnStrategies()
@@ -674,17 +675,16 @@ class LLMUserAggregator(LLMContextAggregator):
             )
             self._params.user_turn_strategies = user_turn_strategies
 
-        # Realtime-mode mutation: drop the transcription-based start
-        # strategy and flip the wait_for_transcript flag on stop
-        # strategies that expose it, so turn-stop fires as soon as VAD /
-        # the turn analyzer / external frames report end-of-speech.
+        # Realtime-mode strategy mutation: drop the transcription-based start
+        # strategy and flip wait_for_transcript on stop strategies that expose
+        # it, so turn-stop fires as soon as VAD / the turn analyzer / external
+        # frames report end-of-speech.
         #
-        # The other realtime-mode strategy hook — swapping defaults out
-        # for external strategies when the realtime service emits its
-        # own turn frames — runs later in
-        # ``_handle_realtime_service_metadata`` (we need the broadcast
-        # to know whether the service is emitting turn frames at
-        # start time).
+        # This only runs here when realtime mode was explicitly enabled. When
+        # it's auto-configured (the default — _realtime_service_mode is None
+        # until a realtime service announces itself), the mutation is deferred
+        # to _handle_llm_service_metadata, which also applies it on top of any
+        # service-recommended external strategies.
         if self._realtime_service_mode:
             self._apply_realtime_mode_strategy_mutations(
                 user_turn_strategies,
@@ -693,9 +693,9 @@ class LLMUserAggregator(LLMContextAggregator):
 
         self._user_is_muted = False
         self._user_turn_start_timestamp = ""
-        # Tracks whether the realtime-mode recommendation log has already
-        # fired for this session — see _handle_realtime_service_metadata.
-        self._realtime_recommendation_logged = False
+        # One-shot guard: whether the first realtime LLM service metadata frame
+        # has been handled this session — see _handle_llm_service_metadata.
+        self._realtime_metadata_handled = False
         # Realtime-mode deferred-flush state. Realtime mode treats the
         # assistant response start as the "user turn ended" signal for
         # context-writing purposes, then waits up to this many seconds
@@ -902,7 +902,7 @@ class LLMUserAggregator(LLMContextAggregator):
 
         flipped: list[str] = []
         for s in user_turn_strategies.stop or []:
-            if hasattr(s, "wait_for_transcript"):
+            if getattr(s, "wait_for_transcript", False):
                 try:
                     s.wait_for_transcript = False
                     flipped.append(s.__class__.__name__)
@@ -914,7 +914,7 @@ class LLMUserAggregator(LLMContextAggregator):
             return
 
         msg = (
-            f"{self}: realtime_service_mode=True — mutated turn strategies: "
+            f"{self}: realtime mode — mutated turn strategies: "
             f"dropped {dropped or 'no'} start strategy(ies); set "
             f"wait_for_transcript=False on {flipped or 'no'} stop strategy(ies)."
         )
@@ -924,26 +924,28 @@ class LLMUserAggregator(LLMContextAggregator):
             logger.debug(msg)
 
     async def _handle_service_metadata(self, frame: ServiceMetadataFrame):
-        """Dispatch a service metadata frame to its specific handler."""
+        """Dispatch a service metadata frame.
+
+        Any service may recommend user turn strategies via the base
+        ``user_turn_strategies`` field, so apply that first — regardless of
+        service type or realtime mode — then run type-specific handling.
+        """
+        await self._handle_service_user_turn_strategies(
+            frame.service_name, frame.user_turn_strategies
+        )
         if isinstance(frame, STTMetadataFrame):
             await self._handle_stt_metadata(frame)
-        elif isinstance(frame, RealtimeServiceMetadataFrame):
-            await self._handle_realtime_service_metadata(frame)
+        elif isinstance(frame, LLMServiceMetadataFrame):
+            await self._handle_llm_service_metadata(frame)
 
     async def _handle_stt_metadata(self, frame: STTMetadataFrame):
         """Handle an ``STTMetadataFrame`` broadcast by an STT service at start.
 
         Captures the STT TTFS P99 so the realtime-mode deferred handoff flush can
-        size itself to the real transcript-arrival latency, and applies any user
-        turn strategies the service recommends. The recommendation is honored only
-        when the user did not pass their own ``user_turn_strategies``, which always
-        wins. Applied via the controller so it takes effect even though the
-        strategies were already built at init.
+        size itself to the real transcript-arrival latency. Any recommended user
+        turn strategies were already applied by ``_handle_service_metadata``.
         """
         self._ttfs_p99_latency = frame.ttfs_p99_latency
-        await self._handle_service_user_turn_strategies(
-            frame.service_name, frame.user_turn_strategies
-        )
 
     async def _handle_service_user_turn_strategies(
         self, service_name: str, user_turn_strategies: UserTurnStrategies | None
@@ -951,8 +953,8 @@ class LLMUserAggregator(LLMContextAggregator):
         """Apply user turn strategies a service recommends via its metadata frame.
 
         Honored only when the user did not pass their own ``user_turn_strategies``,
-        which always wins. Applied via the controller so it takes effect even though
-        the strategies were already built at init.
+        which always wins. ``update_strategies`` is idempotent, so this is safe to
+        re-run on a later broadcast (e.g. a ServiceSwitcher switch).
         """
         if user_turn_strategies is None:
             return
@@ -967,63 +969,44 @@ class LLMUserAggregator(LLMContextAggregator):
         logger.debug(f"{self}: applying user turn strategies recommended by `{service_name}`.")
         await self._user_turn_controller.update_strategies(user_turn_strategies)
 
-    async def _handle_realtime_service_metadata(self, frame: RealtimeServiceMetadataFrame):
-        """Handle a ``RealtimeServiceMetadataFrame`` broadcast by a realtime LLM service.
+    async def _handle_llm_service_metadata(self, frame: LLMServiceMetadataFrame):
+        """Handle an ``LLMServiceMetadataFrame`` broadcast by an LLM service.
 
-        When ``realtime_service_mode`` is not enabled, log a one-time WARNING
-        recommendation pointing the user at the option and warning about the
-        timing change on ``on_user_turn_stopped``. When it is enabled, log
-        a confirming debug message and — if the service advertises
-        ``emits_user_turn_frames=True`` and the user didn't pass custom
-        ``user_turn_strategies`` — swap the default turn strategies for
-        ``ExternalUserTurnStart/StopStrategy`` so ``on_user_turn_*`` events
-        fire from the server-emitted ``UserStarted/StoppedSpeakingFrame``.
-        Fires at most once per session.
+        Non-realtime services need no configuration. For a realtime service,
+        auto-configure ``realtime_service_mode`` (once) when the user left it unset
+        (``None``); an explicit ``True``/``False`` is honored as-is (``False`` opts
+        out silently). When the mode is active, strip transcript dependence from
+        the active strategies — including any external strategies
+        ``_handle_service_metadata`` just adopted.
+
+        The strategy mutation re-runs on every broadcast (so a re-adopted
+        recommendation is re-mutated, e.g. after a ServiceSwitcher switch); only
+        the auto-configuration + log is one-shot. ``update_strategies`` is
+        idempotent, so re-applying is safe.
         """
-        if self._realtime_recommendation_logged:
+        if not frame.is_realtime_service:
             return
-        self._realtime_recommendation_logged = True
+
+        # Auto-configure + log once per session.
+        if not self._realtime_metadata_handled:
+            self._realtime_metadata_handled = True
+            if self._realtime_service_mode is None:
+                self._realtime_service_mode = True
+                logger.debug(
+                    f"{self}: detected realtime service `{frame.service_name}`; "
+                    "auto-enabled realtime_service_mode."
+                )
 
         if not self._realtime_service_mode:
-            logger.warning(
-                f"{self}: detected realtime service `{frame.service_name}` in the "
-                "pipeline. For correct context-write semantics with realtime "
-                "services, consider passing "
-                "realtime_service_mode=True to LLMContextAggregatorPair. "
-                "Note: this changes when user messages are written to context "
-                "— they're written when the assistant response starts rather "
-                "than when the user-turn-end frame fires. Subscribe to "
-                "`on_user_turn_message_added` instead of `on_user_turn_stopped` to "
-                "handle new user messages."
-            )
+            # Explicitly disabled — honor it silently; the user opted out.
             return
 
-        logger.debug(
-            f"{self}: detected realtime service `{frame.service_name}`; "
-            "realtime_service_mode is enabled."
+        strategies = self._user_turn_controller.user_turn_strategies
+        self._apply_realtime_mode_strategy_mutations(
+            strategies,
+            are_user_provided_custom_strategies=self._params.user_turn_strategies is not None,
         )
-
-        # Realtime-mode strategy swap. Only kicks in when (a) the
-        # service advertises that it emits its own
-        # UserStarted/StoppedSpeakingFrame and (b) the user didn't
-        # pass custom strategies — explicit user choice wins, and
-        # services that don't emit their own turn frames need to keep
-        # the default strategies so locally-driven turns (e.g. local
-        # VAD) can fire on_user_turn_* events.
-        if frame.emits_user_turn_frames and self._params.user_turn_strategies is None:
-            new_strategies = UserTurnStrategies(
-                start=[ExternalUserTurnStartStrategy()],
-                stop=[ExternalUserTurnStopStrategy()],
-            )
-            self._apply_realtime_mode_strategy_mutations(
-                new_strategies, are_user_provided_custom_strategies=False
-            )
-            await self._user_turn_controller.update_strategies(new_strategies)
-            logger.debug(
-                f"{self}: replaced default turn strategies with "
-                f"ExternalUserTurnStart/StopStrategy for realtime service "
-                f"`{frame.service_name}` (emits_user_turn_frames=True)."
-            )
+        await self._user_turn_controller.update_strategies(strategies)
 
     async def _realtime_handoff_flush(self) -> None:
         """Commit the user message in realtime mode, allowing for late transcripts.
@@ -1383,7 +1366,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         context: LLMContext,
         *,
         params: LLMAssistantAggregatorParams | None = None,
-        _realtime_service_mode: bool = False,
+        _realtime_service_mode: bool | None = None,
         _paired_user_aggregator: "LLMUserAggregator | None" = None,
         **kwargs,
     ):
@@ -1393,9 +1376,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
             context: The OpenAI LLM context for conversation storage.
             params: Configuration parameters for aggregation behavior.
             _realtime_service_mode: Pair-internal. Realtime-mode flag
-                propagated from ``LLMContextAggregatorPair``. Not
-                intended for direct use — construct the aggregators via
-                the pair.
+                propagated from ``LLMContextAggregatorPair`` (``None`` =
+                auto-configure from service metadata). Not intended for
+                direct use — construct the aggregators via the pair.
             _paired_user_aggregator: Pair-internal. Back-reference to
                 the paired ``LLMUserAggregator``. The assistant flushes
                 it on ``LLMFullResponseStartFrame`` so the user message
@@ -1411,7 +1394,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         )
         self._params = params
 
-        # Realtime-mode wiring. Default (False) preserves cascade behavior.
+        # Realtime-mode wiring. None (the default) auto-configures from service
+        # metadata, mirroring the user half (see LLMUserAggregator.__init__).
         self._realtime_service_mode = _realtime_service_mode
         self._paired_user_aggregator = _paired_user_aggregator
 
@@ -1558,9 +1542,17 @@ class LLMAssistantAggregator(LLMContextAggregator):
             if self._push_context_on_bot_stopped_speaking and not self._user_speaking:
                 logger.debug(f"{self}: Bot stopped speaking — pushing deferred context frame!")
                 await self.push_context_frame(FrameDirection.UPSTREAM)
-        elif isinstance(frame, RealtimeServiceMetadataFrame):
-            # The user half logs the realtime-mode recommendation; the
-            # assistant half just passes the frame through.
+        elif isinstance(frame, LLMServiceMetadataFrame):
+            # Auto-configure realtime mode on the assistant half too — the
+            # broadcast reaches both halves. The assistant only needs the flag
+            # for its trailing flush; the user half owns the strategy mutations.
+            if frame.is_realtime_service and self._realtime_service_mode is None:
+                self._realtime_service_mode = True
+                # The mode just auto-enabled: the trailing flush needs the
+                # back-reference to the user half (always wired by the pair —
+                # this surfaces unsupported direct construction instead of
+                # silently dropping user messages).
+                self._require_paired_user_aggregator()
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
@@ -1570,33 +1562,28 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._summarizer.process_frame(frame)
 
     async def _start(self, frame: StartFrame):
-        self._validate_realtime_pairing()
+        if self._realtime_service_mode:
+            self._require_paired_user_aggregator()
         if self._summarizer:
             await self._summarizer.setup(self.task_manager)
 
-    def _validate_realtime_pairing(self):
-        """Validate the realtime-mode wiring set by ``LLMContextAggregatorPair``.
+    def _require_paired_user_aggregator(self):
+        """Raise if realtime mode is active without a paired user aggregator.
 
-        Realtime mode needs the assistant half to hold a back-reference to
-        the user half so it can flush the user message on
-        ``LLMFullResponseStartFrame``. The pair sets this up; direct
-        construction of the assistant with the private realtime kwargs
-        bypasses that and is not supported.
+        Realtime mode needs the assistant half to hold a back-reference to the
+        user half so it can flush the user message on ``LLMFullResponseStartFrame``.
+        The pair wires this unconditionally (so the halves are always configured
+        together); this guards unsupported direct construction, surfacing the
+        missing flush loudly instead of silently dropping user messages. Checked
+        at ``StartFrame`` for an explicit mode and again when the mode auto-enables.
         """
-        if self._realtime_service_mode and self._paired_user_aggregator is None:
+        if self._paired_user_aggregator is None:
             raise RuntimeError(
                 f"{self}: realtime_service_mode is enabled but this assistant "
-                "aggregator has no paired user aggregator. Construct the pair "
-                "via LLMContextAggregatorPair(context, realtime_service_mode=True)."
-            )
-        if (
-            self._paired_user_aggregator is not None
-            and self._realtime_service_mode != self._paired_user_aggregator._realtime_service_mode
-        ):
-            raise RuntimeError(
-                f"{self}: realtime_service_mode mismatch between user and "
-                "assistant halves. Use LLMContextAggregatorPair to construct "
-                "the pair so both halves share the same configuration."
+                "aggregator has no paired user aggregator. Build both aggregators "
+                "with LLMContextAggregatorPair(context) rather than constructing "
+                "them individually, so realtime mode is configured once and shared "
+                "across both halves."
             )
 
     async def push_aggregation(self) -> str:
@@ -2136,7 +2123,7 @@ class LLMContextAggregatorPair:
         user_params: LLMUserAggregatorParams | None = None,
         assistant_params: LLMAssistantAggregatorParams | None = None,
         add_tool_change_messages: bool | None = None,
-        realtime_service_mode: bool = False,
+        realtime_service_mode: bool | None = None,
     ):
         """Initialize the LLM context aggregator pair.
 
@@ -2154,14 +2141,16 @@ class LLMContextAggregatorPair:
                 announcement is added exactly once (the second aggregator's
                 diff is empty by the time it sees the frame). Leave as
                 ``None`` to respect per-params settings.
-            realtime_service_mode: When ``True``, configures the pair for
-                use with a realtime (speech-to-speech) LLM service.
-                Context writes become trailing — driven by the content
-                stream itself (transcripts, ``LLMFullResponseStartFrame``)
-                rather than turn frames — and turn-end strategies stop
-                waiting for transcripts. Both halves share this setting
-                via a private channel; mismatched halves are rejected at
-                ``StartFrame``. Defaults to ``False`` (cascade behavior).
+            realtime_service_mode: Configures the pair for use with a realtime
+                (speech-to-speech) LLM service. When enabled, context writes
+                become trailing — driven by the content stream itself
+                (transcripts, ``LLMFullResponseStartFrame``) rather than turn
+                frames — and turn-end strategies stop waiting for transcripts.
+                ``None`` (the default) auto-configures: the mode turns on when a
+                realtime service announces itself via service metadata, and
+                stays off otherwise. ``True`` / ``False`` force it on or off
+                (``False`` keeps legacy pre-realtime context-write behavior).
+                Both halves share this setting.
         """
         user_params = user_params or LLMUserAggregatorParams()
         assistant_params = assistant_params or LLMAssistantAggregatorParams()
@@ -2174,20 +2163,20 @@ class LLMContextAggregatorPair:
             params=user_params,
             _realtime_service_mode=realtime_service_mode,
         )
+        # Wire the assistant→user back-reference unconditionally: realtime mode
+        # may be auto-configured later (realtime_service_mode=None), so the
+        # reference must already exist when it flips on. Realtime mode treats the
+        # assistant response start as the user turn's end signal — the assistant
+        # half triggers a (possibly deferred) flush of the user half so the user
+        # message lands in context before the assistant turn starts. The user
+        # side has nothing to flush back, and the behavior stays gated on the
+        # resolved realtime flag, so this reference is inert in cascade mode.
         self._assistant = LLMAssistantAggregator(
             context,
             params=assistant_params,
             _realtime_service_mode=realtime_service_mode,
+            _paired_user_aggregator=self._user,
         )
-        # Cross-half wiring is one-way and only needed in realtime mode.
-        # Realtime mode treats the assistant response start as the user
-        # turn's end signal: the assistant half triggers a (possibly
-        # deferred) flush of the user half so the user message lands in
-        # context before the assistant turn starts. The user side has
-        # nothing to flush back — the assistant writes its own message
-        # when its response ends, just like cascade mode does.
-        if realtime_service_mode:
-            self._assistant._paired_user_aggregator = self._user
 
     def user(self) -> LLMUserAggregator:
         """Get the user context aggregator.

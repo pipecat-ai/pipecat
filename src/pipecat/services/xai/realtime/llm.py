@@ -37,6 +37,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
+    LLMServiceMetadataFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
     StartFrame,
@@ -52,7 +53,7 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, RealtimeServiceInfo
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
@@ -60,6 +61,7 @@ from pipecat.services.settings import (
     assert_given,
     is_given,
 )
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 
 from . import events
@@ -192,11 +194,10 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         - Server-side VAD (Voice Activity Detection)
 
     Emits ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame`` from
-    Grok's server-side VAD events. Pair with
-    ``LLMContextAggregatorPair(..., realtime_service_mode=True)``
-    so context writes are decoupled from those frames. If you wire local
-    VAD (``LLMUserAggregatorParams.vad_analyzer``) on top of this
-    service, disable Grok's server-side turn detection first via
+    Grok's server-side VAD events. ``LLMContextAggregatorPair`` auto-detects
+    this realtime service and decouples context writes from those frames. If
+    you wire local VAD (``LLMUserAggregatorParams.vad_analyzer``) on top of
+    this service, disable Grok's server-side turn detection first via
     ``turn_detection=None`` (manual mode); otherwise both sources
     broadcast duplicate user-turn frames. See
     ``examples/realtime/realtime-grok-locally-driven-turns.py``.
@@ -207,10 +208,6 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
 
     # Use the Grok-specific adapter
     adapter_class = GrokRealtimeLLMAdapter
-
-    # Realtime (speech-to-speech) service. Emits UserStarted/Stopped
-    # speaking frames from server-side VAD events.
-    _realtime_service_info = RealtimeServiceInfo(emits_user_turn_frames=True)
 
     def __init__(
         self,
@@ -374,10 +371,15 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             return session_properties.turn_detection.type == "server_vad"
         return False
 
-    def _emits_user_turn_frames(self) -> bool:
-        # Without server-side VAD the service stays silent on user
-        # turn frames, so the broadcast advertises False.
-        return self._is_turn_detection_enabled()
+    def service_metadata_frame(self) -> LLMServiceMetadataFrame:
+        """Realtime service; recommends external turn strategies when server-side VAD is active."""
+        emits_turn_frames = self._is_turn_detection_enabled()
+        self._warn_if_realtime_service_emits_no_turn_frames(emits_turn_frames)
+        return LLMServiceMetadataFrame(
+            service_name=self.name,
+            is_realtime_service=True,
+            user_turn_strategies=ExternalUserTurnStrategies() if emits_turn_frames else None,
+        )
 
     async def _handle_interruption(self):
         """Handle user interruption of assistant speech."""

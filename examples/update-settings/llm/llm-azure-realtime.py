@@ -71,7 +71,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(messages)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        realtime_service_mode=True,
     )
 
     pipeline = Pipeline(
