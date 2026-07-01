@@ -55,7 +55,7 @@ Determine what "the current branch's changes" means.
 - If `main` does not exist locally, fall back to `origin/main`.
 - If neither can be resolved, stop and ask the user which branch should be used as the comparison base.
 
-Record the resolved base commit SHA — every reviewer in step 3 must scope its diff to this exact SHA so all five agree on what "the diff" is.
+Record the resolved base commit SHA — every reviewer in step 3 must scope its diff to this exact SHA so all three agree on what "the diff" is.
 
 Collect:
 
@@ -74,7 +74,7 @@ Do this directly without launching reviewer agents.
 - For every changed file, locate all applicable `AGENTS.md` and `CLAUDE.md` files in its directory hierarchy (nearest first) and collect their contents.
 - Read enough of the diff to produce a one-paragraph summary describing the intent of the branch. This summary will be passed to every reviewer so they can distinguish intentional behavior from defects.
 
-### 3. Launch five Sonnet reviewer agents in parallel
+### 3. Launch three Sonnet reviewer agents in parallel
 
 Each reviewer receives:
 
@@ -87,11 +87,9 @@ Reviewers should inspect only the portions of the diff relevant to their special
 
 Repository instructions from `AGENTS.md` and `CLAUDE.md` always take precedence over general engineering judgment when the two conflict.
 
-#### Reviewer 1 — Correctness (local)
+#### Reviewer 1 — Correctness
 
-Review only the changed code and its immediate surrounding context.
-
-Look for obvious correctness bugs introduced by the diff, including:
+Start with the changed code and its immediate surrounding context. Look for obvious correctness bugs introduced by the diff, including:
 
 - incorrect logic,
 - off-by-one errors,
@@ -100,13 +98,7 @@ Look for obvious correctness bugs introduced by the diff, including:
 - parse or runtime errors,
 - incorrect async usage visible locally.
 
-Do not inspect unrelated repository code.
-
-#### Reviewer 2 — Correctness (contextual)
-
-Inspect additional repository code only when necessary.
-
-Look for correctness issues that require repository context, such as:
+Then, only where a locally-visible issue is suspected but needs confirmation, inspect additional repository context to check for issues such as:
 
 - broken assumptions about callers or callees,
 - misuse of framework primitives,
@@ -116,15 +108,17 @@ Look for correctness issues that require repository context, such as:
 - security issues,
 - violations of framework invariants.
 
-#### Reviewer 3 — Repository conventions
+Do not go looking for contextual issues that have no local symptom in the diff — that's out of scope for this reviewer.
 
-Review the diff against documented repository conventions from `AGENTS.md` and `CLAUDE.md`, including framework usage, inheritance, constructors, metrics hooks, frame handling, dataclass/Pydantic conventions, deprecation conventions, example structure, and other documented project practices.
+#### Reviewer 2 — Repository Conventions & Docstrings
+
+Review the diff against documented repository conventions from `AGENTS.md` and `CLAUDE.md`, including framework usage, inheritance, constructors, metrics hooks, frame handling, dataclass/Pydantic conventions, deprecation conventions, example structure, and other documented project practices — and, as part of the same pass, review new and modified public APIs for compliance with the repository's documented docstring conventions (missing required sections, incorrect Google-style formatting, incorrect dataclass vs. Pydantic documentation, missing or malformed deprecation directives, inaccurate documentation caused by the current diff).
 
 Only report findings covered by an explicit documented rule or a well-established repository pattern.
 
 Every finding must quote the relevant rule.
 
-#### Reviewer 4 — Performance
+#### Reviewer 3 — Performance
 
 Look for concrete performance regressions introduced by the diff, such as:
 
@@ -137,25 +131,11 @@ Look for concrete performance regressions introduced by the diff, such as:
 
 Ignore pre-existing patterns that the diff did not modify.
 
-#### Reviewer 5 — Docstrings
-
-Review new and modified public APIs for compliance with repository docstring conventions.
-
-Look for:
-
-- missing required sections,
-- incorrect Google-style formatting,
-- incorrect dataclass vs. Pydantic documentation,
-- missing or malformed deprecation directives,
-- inaccurate documentation caused by the current diff.
-
-Only report issues required by `AGENTS.md` or `CLAUDE.md`.
-
 ### 4. Independently validate every finding
 
-Every finding must undergo an independent Sonnet validation pass before being included in the report.
+Findings must be validated before being included in the report, but validation is batched per reviewer rather than launched per finding, to avoid re-loading the same context once per issue: launch one independent Sonnet validator per reviewer from step 3 (so at most three validator agents, run in parallel), and give each validator the full list of findings from its corresponding reviewer plus the same base SHA / diff-scoping instructions from step 3. Each validator checks every finding it receives against the actual code in a single pass.
 
-Validators should verify the actual code rather than trusting the original reviewer's description.
+Validators must verify the actual code rather than trusting the original reviewer's description, and must judge each finding independently — one bad finding in the batch should not affect judgment of the others.
 
 Discard findings that are:
 
@@ -204,7 +184,7 @@ Reviewed <base>..HEAD plus uncommitted changes, generated <date>.
 
   Suggested fix: ...
 
-## Repository Conventions
+## Repository Conventions & Docstrings
 
 - [ ] **Low** — `path/to/file.py:45`
 
@@ -215,14 +195,6 @@ Reviewed <base>..HEAD plus uncommitted changes, generated <date>.
   > "<quoted rule>"
 
   Source: `path/to/AGENTS.md`
-
-## Docstrings
-
-- [ ] **Low** — `path/to/file.py:91`
-
-  Description.
-
-  Suggested fix: ...
 ```
 
 Omit any section with zero validated findings.
