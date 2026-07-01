@@ -4,14 +4,7 @@ description: Multi-agent review of the current branch's local changes (uncommitt
 disable-model-invocation: true
 ---
 
-Produce a written self-review of the changes on the current local branch.
-
-This skill exists between the two other review skills in this repo:
-
-- `cleanup` reviews the branch and directly *applies* readability, docstring, and repository-pattern fixes in one pass, with no independent validation.
-- `code-review` reviews a **GitHub PR** with a multi-agent pipeline (parallel specialists followed by independent validation) and posts inline PR comments.
-
-`local-review` borrows `code-review`'s multi-agent architecture but points it at the **local branch diff** instead of a PR. It expands the review to cover correctness, performance, repository conventions, and docstrings while remaining strictly read-only: it never edits reviewed code, commits changes, or interacts with GitHub. It writes its findings to `.local_review.md` for the developer to review.
+Runs a multi-agent review of the current branch's local changes and writes findings to `.local_review.md`. Read-only — it never edits code, commits, or touches GitHub.
 
 **Agent assumptions (applies to all reviewers and validators):** all tools are functional and will work without error. Do not test tools or make exploratory calls. Only invoke a tool when it is required to complete the task.
 
