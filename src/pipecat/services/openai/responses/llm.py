@@ -13,7 +13,7 @@ import os
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from loguru import logger
@@ -26,9 +26,12 @@ from openai.types.responses import (
     ResponseFunctionToolCall,
     ResponseOutputItemAddedEvent,
     ResponseOutputItemDoneEvent,
+    ResponseReasoningItem,
+    ResponseReasoningSummaryTextDeltaEvent,
     ResponseStreamEvent,
     ResponseTextDeltaEvent,
 )
+from pydantic import BaseModel
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import ConnectionClosed
 
@@ -41,6 +44,10 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMessagesAppendFrame,
+    LLMThoughtEndFrame,
+    LLMThoughtStartFrame,
+    LLMThoughtTextFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -52,7 +59,7 @@ from pipecat.services.llm_service import (
     WebsocketReconnectedError,
 )
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
-from pipecat.services.settings import LLMSettings, _NotGiven, assert_given
+from pipecat.services.settings import LLMSettings, _NotGiven, assert_given, is_given
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 # ---------------------------------------------------------------------------
@@ -83,12 +90,39 @@ class _ConnectionLimitReachedError(_RetryableError):
 # ---------------------------------------------------------------------------
 
 
+class OpenAIResponsesReasoningConfig(BaseModel):
+    """Reasoning configuration for reasoning-capable OpenAI Responses models.
+
+    Reasoning models (e.g. ``gpt-5.4-mini``, ``gpt-5.5``, the o-series) think
+    before responding. This controls how much they think and whether a
+    human-readable summary of that thinking is returned.
+
+    Parameters:
+        effort: How much reasoning effort the model applies. ``None`` (the
+            default) leaves the field unset, so the model's own default applies.
+            ``"none"`` disables reasoning for latency-sensitive use.
+        summary: Verbosity of the reasoning summary to return. ``None`` (the
+            default) requests no summary. Any summary is surfaced via thought
+            frames (the ``on_assistant_thought`` event); the encrypted reasoning
+            itself is preserved across turns regardless of this setting.
+    """
+
+    # ``| str`` for forward compatibility: if OpenAI adds new levels, users can
+    # pass the new string without waiting for a Pipecat release.
+    effort: Literal["none", "minimal", "low", "medium", "high", "xhigh"] | str | None = None
+    summary: Literal["auto", "concise", "detailed"] | str | None = None
+
+
 @dataclass
 class OpenAIResponsesLLMSettings(LLMSettings):
     """Settings for OpenAI Responses API LLM services.
 
     Parameters:
         max_completion_tokens: Maximum completion tokens to generate.
+        reasoning: Reasoning configuration for reasoning-capable models. ``None``
+            (the default) leaves reasoning unconfigured — the service disables it
+            by default on models that would otherwise reason, to keep latency low
+            for real-time use.
     """
 
     # Override inherited LLMSettings fields to also accept openai's NotGiven
@@ -101,6 +135,24 @@ class OpenAIResponsesLLMSettings(LLMSettings):
     max_completion_tokens: int | _NotGiven | OpenAINotGiven = field(
         default_factory=lambda: _NOT_GIVEN
     )
+    reasoning: OpenAIResponsesReasoningConfig | None | _NotGiven = field(
+        default_factory=lambda: _NOT_GIVEN
+    )
+
+    @classmethod
+    def from_mapping(cls, settings: Mapping[str, Any]) -> "OpenAIResponsesLLMSettings":
+        """Convert a plain mapping to settings, coercing a ``reasoning`` dict.
+
+        Args:
+            settings: Mapping of setting names to values.
+
+        Returns:
+            A settings instance with any ``reasoning`` dict coerced to a config.
+        """
+        instance = super().from_mapping(settings)
+        if is_given(instance.reasoning) and isinstance(instance.reasoning, dict):
+            instance.reasoning = OpenAIResponsesReasoningConfig(**instance.reasoning)
+        return instance
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +170,8 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
     Settings = OpenAIResponsesLLMSettings
     _settings: Settings
+
+    ReasoningConfig = OpenAIResponsesReasoningConfig
 
     adapter_class = OpenAIResponsesLLMAdapter
 
@@ -156,6 +210,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             top_k=None,
             max_tokens=None,
             max_completion_tokens=NOT_GIVEN,
+            reasoning=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
             extra={},
@@ -264,6 +319,21 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         if tools is not None and not isinstance(tools, type(NOT_GIVEN)):
             params["tools"] = tools
 
+        # Reasoning
+        reasoning = assert_given(self._settings.reasoning)
+        reasoning_params = reasoning.model_dump(exclude_none=True) if reasoning else {}
+        if reasoning_params:
+            params["reasoning"] = reasoning_params
+            # store=False (always, here) means the server keeps no reasoning
+            # state, so reasoning items must be sent back on later turns. Ask for
+            # the encrypted reasoning so the adapter can round-trip it. See the
+            # class docstrings.
+            params["include"] = ["reasoning.encrypted_content"]
+        else:
+            # No reasoning configured: default it off on models that would
+            # otherwise reason, to keep latency low for real-time use.
+            self._maybe_disable_reasoning(params)
+
         # Extra settings
         params.update(self._settings.extra)
 
@@ -339,6 +409,72 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
                 )
             )
         return fc_list
+
+    # -- reasoning ------------------------------------------------------------
+
+    def _maybe_disable_reasoning(self, params: dict):
+        """Default reasoning off on models that would otherwise reason.
+
+        Some reasoning-capable models (e.g. ``gpt-5.5``) reason by default, which
+        adds latency ill-suited to real-time voice. When the caller hasn't
+        configured ``reasoning``, request ``effort="none"`` for models known to
+        support it, so selecting such a model doesn't silently enable reasoning.
+        Models that don't accept ``"none"`` (the o-series, ``gpt-5-chat``) or
+        don't reason at all (``gpt-4.1``) are left untouched. Mirrors Gemini's
+        ``_maybe_unset_thinking_budget``.
+
+        Args:
+            params: The response params dict (modified in place).
+        """
+        model = assert_given(self._settings.model)
+        if not model or not self._model_supports_reasoning_none(model):
+            return
+        params["reasoning"] = {"effort": "none"}
+
+    @staticmethod
+    def _model_supports_reasoning_none(model: str) -> bool:
+        """Whether a model accepts ``reasoning.effort="none"``.
+
+        The ``gpt-5.x`` reasoning family accepts it (e.g. ``gpt-5.4-mini``,
+        ``gpt-5.5``); the ``gpt-5-chat`` non-reasoning variant and the o-series
+        do not.
+
+        Args:
+            model: The model identifier.
+
+        Returns:
+            True if ``reasoning.effort="none"`` is a valid value for the model.
+        """
+        return model.startswith("gpt-5") and "chat" not in model
+
+    async def _append_reasoning_message(
+        self, item_id: str | None, summary: list[dict], encrypted_content: str | None
+    ):
+        """Persist a reasoning item so it round-trips on the next request.
+
+        With ``store=False`` the server keeps no reasoning state, so the
+        encrypted reasoning must be sent back with later requests. Store it as an
+        LLM-specific message the adapter re-emits as a Responses reasoning input
+        item — positioned, by append order, before the assistant message or
+        function call it produced.
+
+        Args:
+            item_id: The reasoning item id.
+            summary: The reasoning summary parts (``summary_text`` dicts).
+            encrypted_content: The encrypted reasoning payload.
+        """
+        if not encrypted_content:
+            # Nothing to round-trip (e.g. reasoning disabled / effort="none").
+            return
+        message = {
+            "type": "reasoning",
+            "id": item_id,
+            "summary": summary,
+            "encrypted_content": encrypted_content,
+        }
+        await self.push_frame(
+            LLMMessagesAppendFrame([self.get_llm_adapter().create_llm_specific_message(message)])
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -574,6 +710,13 @@ class OpenAIResponsesLLMService(
                 if input_item.get("type") != "function_call" or input_item.get(
                     "call_id"
                 ) != output_item.get("call_id"):
+                    return False
+            elif output_type == "reasoning":
+                # Reasoning items round-trip via an LLMSpecificMessage; match by
+                # the server-assigned id so the optimization can skip them too.
+                if input_item.get("type") != "reasoning" or input_item.get("id") != output_item.get(
+                    "id"
+                ):
                     return False
             else:
                 # Unknown output type — can't confirm match
@@ -825,6 +968,7 @@ class OpenAIResponsesLLMService(
         """
         function_calls: dict[str, dict[str, str]] = {}
         current_arguments: dict[str, str] = {}
+        reasoning_summary_open = False
 
         while True:
             event = await self._ws_recv()
@@ -838,6 +982,13 @@ class OpenAIResponsesLLMService(
             if event_type == "response.output_text.delta":
                 await self.stop_ttfb_metrics()
                 await self._push_llm_text(event.get("delta", ""))
+
+            elif event_type == "response.reasoning_summary_text.delta":
+                await self.stop_ttfb_metrics()
+                if not reasoning_summary_open:
+                    await self.push_frame(LLMThoughtStartFrame())
+                    reasoning_summary_open = True
+                await self.push_frame(LLMThoughtTextFrame(text=event.get("delta", "")))
 
             elif event_type == "response.output_item.added":
                 await self.stop_ttfb_metrics()
@@ -869,6 +1020,18 @@ class OpenAIResponsesLLMService(
                         function_calls[item_id]["name"] = item.get("name", "")
                         function_calls[item_id]["call_id"] = item.get("call_id", "")
                         function_calls[item_id]["arguments"] = item.get("arguments", "")
+                elif item.get("type") == "reasoning":
+                    if reasoning_summary_open:
+                        await self.push_frame(LLMThoughtEndFrame())
+                        reasoning_summary_open = False
+                    await self._append_reasoning_message(
+                        item.get("id"),
+                        [
+                            {"type": "summary_text", "text": s.get("text", "")}
+                            for s in (item.get("summary") or [])
+                        ],
+                        item.get("encrypted_content"),
+                    )
 
             elif event_type == "response.completed":
                 response = event.get("response", {})
@@ -1001,6 +1164,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
         # Track function calls across stream events
         function_calls: dict[str, dict[str, str]] = {}  # item_id -> {name, call_id, arguments}
         current_arguments: dict[str, str] = {}  # item_id -> accumulated arguments
+        reasoning_summary_open = False
 
         # Ensure stream and its async iterator are closed on cancellation/exception
         # to prevent socket leaks and uvloop crashes. Closing the iterator first
@@ -1028,6 +1192,13 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                 if isinstance(event, ResponseTextDeltaEvent):
                     await self.stop_ttfb_metrics()
                     await self._push_llm_text(event.delta)
+
+                elif isinstance(event, ResponseReasoningSummaryTextDeltaEvent):
+                    await self.stop_ttfb_metrics()
+                    if not reasoning_summary_open:
+                        await self.push_frame(LLMThoughtStartFrame())
+                        reasoning_summary_open = True
+                    await self.push_frame(LLMThoughtTextFrame(text=event.delta))
 
                 elif isinstance(event, ResponseOutputItemAddedEvent):
                     await self.stop_ttfb_metrics()
@@ -1059,6 +1230,18 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                             function_calls[item_id]["name"] = item.name
                             function_calls[item_id]["call_id"] = item.call_id
                             function_calls[item_id]["arguments"] = item.arguments
+                    elif isinstance(item, ResponseReasoningItem):
+                        if reasoning_summary_open:
+                            await self.push_frame(LLMThoughtEndFrame())
+                            reasoning_summary_open = False
+                        await self._append_reasoning_message(
+                            item.id,
+                            [
+                                {"type": "summary_text", "text": s.text}
+                                for s in (item.summary or [])
+                            ],
+                            item.encrypted_content,
+                        )
 
                 elif isinstance(event, ResponseCompletedEvent):
                     response = event.response
@@ -1100,4 +1283,5 @@ __all__ = [
     "OpenAIResponsesLLMService",
     "OpenAIResponsesHttpLLMService",
     "OpenAIResponsesLLMSettings",
+    "OpenAIResponsesReasoningConfig",
 ]
