@@ -1386,7 +1386,7 @@ class ElevenLabsHttpTTSService(TTSService):
         }
 
         # Include previous text as context if available
-        if self._previous_text:
+        if self._previous_text and model_id != "eleven_v3":
             payload["previous_text"] = self._previous_text
 
         if self._voice_settings:
