@@ -44,6 +44,7 @@ async def main():
                 audio_in_enabled=True,
                 audio_out_enabled=True,
                 microphone_out_enabled=False,
+                audio_out_faster_than_realtime=True,
             ),
         )
 
