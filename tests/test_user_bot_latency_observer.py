@@ -7,6 +7,7 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     InterruptionFrame,
     MetricsFrame,
+    UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -316,6 +317,82 @@ class TestUserBotLatencyObserver(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(breakdowns), 1)
         self.assertIsNone(breakdowns[0].user_turn_secs)
+
+    async def test_latency_measured_without_vad(self):
+        """Test latency is measured from UserStoppedSpeakingFrame when no VAD frame precedes it.
+
+        Covers server-side-VAD STTs (e.g. Deepgram Flux with
+        ExternalUserTurnStrategies) that emit a plain UserStoppedSpeakingFrame
+        rather than a VADUserStoppedSpeakingFrame.
+        """
+        observer = UserBotLatencyObserver()
+        processor = IdentityFilter()
+
+        latencies = []
+        breakdowns = []
+
+        @observer.event_handler("on_latency_measured")
+        async def on_latency(obs, latency_seconds):
+            latencies.append(latency_seconds)
+
+        @observer.event_handler("on_latency_breakdown")
+        async def on_breakdown(obs, breakdown):
+            breakdowns.append(breakdown)
+
+        frames_to_send = [
+            UserStartedSpeakingFrame(),
+            UserStoppedSpeakingFrame(),
+            BotStartedSpeakingFrame(),
+        ]
+
+        expected_down_frames = [
+            UserStartedSpeakingFrame,
+            UserStoppedSpeakingFrame,
+            BotStartedSpeakingFrame,
+        ]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+            observers=[observer],
+        )
+
+        self.assertEqual(len(latencies), 1)
+        self.assertGreater(latencies[0], 0)
+        self.assertLess(latencies[0], 1.0)
+        # No VAD frame means the true turn duration is unknown.
+        self.assertEqual(len(breakdowns), 1)
+        self.assertIsNone(breakdowns[0].user_turn_secs)
+
+    async def test_user_started_resets_measurement(self):
+        """Test that UserStartedSpeakingFrame resets state for the next turn."""
+        observer = UserBotLatencyObserver()
+        processor = IdentityFilter()
+
+        latencies = []
+
+        @observer.event_handler("on_latency_measured")
+        async def on_latency(obs, latency_seconds):
+            latencies.append(latency_seconds)
+
+        # Two full external-turn cycles produce two separate measurements.
+        frames_to_send = [
+            UserStartedSpeakingFrame(),
+            UserStoppedSpeakingFrame(),
+            BotStartedSpeakingFrame(),
+            UserStartedSpeakingFrame(),
+            UserStoppedSpeakingFrame(),
+            BotStartedSpeakingFrame(),
+        ]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            observers=[observer],
+        )
+
+        self.assertEqual(len(latencies), 2)
 
     async def test_no_measurement_without_user_stop(self):
         """Test that BotStartedSpeaking without prior user stop emits nothing."""

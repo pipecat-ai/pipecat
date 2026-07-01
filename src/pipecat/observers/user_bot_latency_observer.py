@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     InterruptionFrame,
     MetricsFrame,
+    UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -143,10 +144,19 @@ class LatencyBreakdown(BaseModel):
 class UserBotLatencyObserver(BaseObserver):
     """Observer that tracks user-to-bot response latency.
 
-    Measures the time between when a user stops speaking (VADUserStoppedSpeakingFrame)
-    and when the bot starts speaking (BotStartedSpeakingFrame). Emits events when
-    latency is measured, allowing consumers to log, trace, or otherwise process
-    the latency data.
+    Measures the time between when a user stops speaking and when the bot starts
+    speaking (``BotStartedSpeakingFrame``). Emits events when latency is measured,
+    allowing consumers to log, trace, or otherwise process the latency data.
+
+    The user-stop reference is taken from ``VADUserStoppedSpeakingFrame`` when a
+    VAD analyzer is present (its ``stop_secs`` silence window is subtracted to
+    recover the actual moment the user fell silent). When no VAD frame precedes
+    the turn — e.g. server-side-VAD STTs like Deepgram Flux driven by
+    ``ExternalUserTurnStrategies`` — it falls back to the ``UserStoppedSpeakingFrame``
+    turn-release time. Because the STT has already completed its endpointing by
+    the time that frame arrives, the fallback excludes the endpointing wait and
+    reads lower than VAD-derived latency (which includes it), so the two are not
+    directly comparable.
 
     When ``enable_metrics=True`` in pipeline params, also collects per-service
     latency breakdown (TTFB, text aggregation) and emits an
@@ -233,8 +243,11 @@ class UserBotLatencyObserver(BaseObserver):
             return
 
         # Track speech and pipeline events for latency
-        if isinstance(data.frame, VADUserStartedSpeakingFrame):
-            # Reset when user starts speaking
+        if isinstance(data.frame, (VADUserStartedSpeakingFrame, UserStartedSpeakingFrame)):
+            # Reset when user starts speaking. Both the VAD frame and the
+            # generic turn-start frame are handled so setups without a VAD
+            # analyzer (e.g. server-side-VAD STTs like Deepgram Flux with
+            # ExternalUserTurnStrategies) still reset per turn.
             self._user_stopped_time = None
             self._user_turn_start_time = None
             self._user_turn = None
@@ -249,11 +262,23 @@ class UserBotLatencyObserver(BaseObserver):
             self._user_stopped_time = data.frame.timestamp - data.frame.stop_secs
             self._user_turn_start_time = self._user_stopped_time
         elif isinstance(data.frame, UserStoppedSpeakingFrame):
-            # Measure the user turn duration: from actual user silence to
-            # turn release. Includes VAD silence detection, STT finalization,
-            # and any turn analyzer wait.
             if self._user_stopped_time is not None:
+                # A VAD frame recorded the actual silence start; measure the
+                # user turn duration from there to turn release. Includes VAD
+                # silence detection, STT finalization, and any turn analyzer wait.
                 self._user_turn = time.time() - self._user_stopped_time
+            else:
+                # No VAD frame preceded this turn (e.g. server-side-VAD STTs
+                # like Deepgram Flux with ExternalUserTurnStrategies). Fall back
+                # to turn-release time so on_latency_measured still fires. Note:
+                # by the time this frame arrives the STT has already done its
+                # own endpointing, so — unlike the VAD path, which recovers the
+                # actual silence instant by subtracting stop_secs — this
+                # measurement excludes the endpointing wait and reads lower.
+                # The two are therefore not directly comparable. The actual
+                # silence instant is unknown, so user_turn_secs is left unset.
+                self._user_stopped_time = time.time()
+                self._user_turn_start_time = self._user_stopped_time
         elif isinstance(data.frame, InterruptionFrame):
             # Discard stale metrics from cancelled LLM/TTS cycles
             self._reset_accumulators()
