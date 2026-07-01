@@ -388,9 +388,9 @@ class TestProcessWordForcesComplete(unittest.TestCase):
         self.assertTrue(any(f is skipped for f in result))
 
     def test_whitespace_slot_force_complete_skips_emission(self):
-        """When a whitespace-only slot is force-completed, no frame should be
-        emitted for it — get_word_for_frame() returns "" for that slot, so the
-        `or word` fallback must not substitute the incoming word instead."""
+        """When a whitespace-only slot is force-completed, get_word_for_frame()
+        returns an empty string for it, so no frame should be emitted for that
+        slot."""
         seq = _seq()
         seq.register_spoken(_spoken_frame(" "), "ctx1", _tracker(" "), True)
         seq.register_spoken(_spoken_frame("World"), "ctx2", _tracker("World"), True)
