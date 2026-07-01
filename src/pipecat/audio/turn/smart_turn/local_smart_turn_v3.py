@@ -10,6 +10,7 @@ This module provides a smart turn analyzer that uses an ONNX model for
 local end-of-turn detection without requiring network connectivity.
 """
 
+import threading
 from typing import Any
 
 import numpy as np
@@ -24,12 +25,74 @@ from pipecat.utils.env import env_truthy
 # The Whisper-based ONNX model expects 16 kHz audio input.
 _MODEL_SAMPLE_RATE = 16000
 
+# Process-wide cache of ONNX inference sessions, keyed by (model_path, cpu_count).
+# The model weights are immutable and ONNX Runtime's Run() is thread-safe for
+# concurrent calls on a CPU-EP session, so a single session can back every
+# analyzer instance of the same configuration instead of loading the weights
+# (~30 MB RSS) once per instance. All mutable analyzer state lives on the
+# instance, never on the session.
+_session_cache: dict[tuple[str, int], ort.InferenceSession] = {}
+_session_cache_lock = threading.Lock()
+
+
+def _resolve_bundled_model_path() -> str:
+    """Resolve the filesystem path to the bundled smart-turn-v3 ONNX model."""
+    model_name = "smart-turn-v3.2-cpu.onnx"
+    package_path = "pipecat.audio.turn.smart_turn.data"
+
+    try:
+        import importlib_resources as impresources
+
+        return str(impresources.files(package_path).joinpath(model_name))
+    except BaseException:
+        from importlib import resources as impresources
+
+        try:
+            with impresources.path(package_path, model_name) as f:
+                return str(f)
+        except BaseException:
+            return str(impresources.files(package_path).joinpath(model_name))
+
+
+def _get_cached_session(model_path: str, cpu_count: int) -> ort.InferenceSession:
+    """Return a shared ONNX session for the given model path and thread count.
+
+    Sessions are built once per (model_path, cpu_count) and reused across all
+    analyzer instances of that configuration.
+    """
+    key = (model_path, cpu_count)
+    session = _session_cache.get(key)
+    if session is None:
+        with _session_cache_lock:
+            session = _session_cache.get(key)
+            if session is None:
+                logger.debug(f"Loading Local Smart Turn v3.x model from {model_path}...")
+                so = ort.SessionOptions()
+                so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+                so.inter_op_num_threads = 1
+                so.intra_op_num_threads = cpu_count
+                so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+                session = ort.InferenceSession(model_path, sess_options=so)
+                _session_cache[key] = session
+                logger.debug("Loaded Local Smart Turn v3.x")
+    return session
+
+
+def _reset_session_cache_for_tests() -> None:
+    """Clear the shared session cache. Test-only."""
+    with _session_cache_lock:
+        _session_cache.clear()
+
 
 class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
     """Local turn analyzer using the smart-turn-v3 ONNX model.
 
     Provides end-of-turn detection using locally-stored ONNX model,
     enabling offline operation without network dependencies.
+
+    The underlying ONNX inference session is shared process-wide across all
+    instances using the same model path and ``cpu_count`` (see
+    ``_get_cached_session``), so the model weights are loaded only once.
     """
 
     def __init__(self, *, smart_turn_model_path: str | None = None, cpu_count: int = 1, **kwargs):
@@ -46,36 +109,11 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         self._log_data = env_truthy("PIPECAT_SMART_TURN_LOG_DATA", default=False)
 
         if not smart_turn_model_path:
-            # Load bundled model
-            model_name = "smart-turn-v3.2-cpu.onnx"
-            package_path = "pipecat.audio.turn.smart_turn.data"
+            smart_turn_model_path = _resolve_bundled_model_path()
 
-            try:
-                import importlib_resources as impresources
-
-                smart_turn_model_path = str(impresources.files(package_path).joinpath(model_name))
-            except BaseException:
-                from importlib import resources as impresources
-
-                try:
-                    with impresources.path(package_path, model_name) as f:
-                        smart_turn_model_path = f
-                except BaseException:
-                    smart_turn_model_path = str(
-                        impresources.files(package_path).joinpath(model_name)
-                    )
-
-        logger.debug(f"Loading Local Smart Turn v3.x model from {smart_turn_model_path}...")
-
-        so = ort.SessionOptions()
-        so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-        so.inter_op_num_threads = 1
-        so.intra_op_num_threads = cpu_count
-        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-
-        self._session = ort.InferenceSession(smart_turn_model_path, sess_options=so)
-
-        logger.debug("Loaded Local Smart Turn v3.x")
+        # Reuse a process-wide session shared across all analyzer instances of
+        # the same (model path, cpu_count) configuration.
+        self._session = _get_cached_session(str(smart_turn_model_path), cpu_count)
 
     def _write_audio_to_wav(
         self, audio_array: np.ndarray, sample_rate: int = _MODEL_SAMPLE_RATE, suffix: str = ""
