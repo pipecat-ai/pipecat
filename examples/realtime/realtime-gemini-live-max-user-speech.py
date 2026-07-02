@@ -24,14 +24,34 @@ How it works:
 - ``MaxUserSpeechController`` sits between the user aggregator and the LLM. It
   starts a timer when the user starts speaking and, if they are still going when
   ``max_speech_secs`` elapses, it (optionally) injects a short interjection
-  prompt and pushes a ``UserStoppedSpeakingFrame`` downstream. The service sends
-  ``activity_end`` and the model answers what it heard so far.
+  prompt and pushes a ``UserStoppedSpeakingFrame`` *upstream*, to the user
+  aggregator. The aggregator's ``ForcedUserTurnStopStrategy`` picks it up,
+  closes the turn properly (resetting the turn state and stop strategies), and
+  broadcasts the real ``UserStoppedSpeakingFrame`` back downstream; the service
+  maps that to ``activity_end`` and the model answers what it heard so far.
+
+  Direction matters here. An earlier version of this example pushed the forced
+  stop *downstream*, straight at the LLM. That ended Gemini's turn but left the
+  aggregator's turn open, so the user's NEXT utterance never opened a new turn
+  (no ``activity_start``) and the model ignored it until the turn-stop
+  strategies eventually timed out. Closing the turn at the aggregator keeps the
+  whole pipeline in sync.
+
+  The timer intentionally does NOT reset on a mid-turn ``UserStoppedSpeaking`` /
+  ``UserStartedSpeaking`` pair (a turn detector calling an early stop while the
+  user rambles on). It stays armed until the bot actually takes the turn
+  (``BotStartedSpeakingFrame``), so pauses can't be used to dodge the cap. If
+  the timer fires while no user turn is open, it does nothing.
 
 - ``MuteUntilBotDoneUserMuteStrategy`` closes the gap right after a forced
   cutoff. The user is usually still talking when the cap fires, and that
   trailing speech can take the turn straight back before the bot responds. The
-  controller fires ``on_max_speech_forced`` when it cuts the turn; that mutes
-  the user until the next ``BotStoppedSpeakingFrame``, so the bot gets to speak.
+  controller fires ``on_max_speech_forced`` when it cuts the turn; that *arms*
+  the mute, which engages when the forced ``UserStoppedSpeakingFrame`` reaches
+  the aggregator and holds until the next ``BotStoppedSpeakingFrame``, so the
+  bot gets to speak. Arming (instead of muting immediately) matters: a muted
+  aggregator drops incoming ``UserStoppedSpeakingFrame``, so muting the moment
+  the cap trips could swallow the very frame that closes the turn.
 
 Caveat: the interjection prompt is sent as realtime text inside the still-open
 activity window, just before it closes. Gemini Live incorporating mid-turn text
@@ -52,10 +72,12 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     Frame,
     InputTextRawFrame,
@@ -78,11 +100,39 @@ from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService, Gemini
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_mute.base_user_mute_strategy import BaseUserMuteStrategy
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
+
+
+class ForcedUserTurnStopStrategy(BaseUserTurnStopStrategy):
+    """Close the user turn when a ``UserStoppedSpeakingFrame`` arrives at the aggregator.
+
+    ``MaxUserSpeechController`` pushes its forced stop *upstream*; this strategy
+    is what receives it inside the user aggregator and ends the turn properly
+    (state reset, real ``UserStoppedSpeakingFrame`` broadcast, ``activity_end``
+    at the service). The aggregator's own broadcasts never re-enter it, so the
+    only ``UserStoppedSpeakingFrame`` this ever sees is a forced one.
+
+    Why not the built-in ``ExternalUserTurnStopStrategy``? That strategy is made
+    for pipelines where an external component drives BOTH turn edges: it never
+    sees a turn start here, so its watchdog concludes the user is silent and
+    closes every turn moments after it opens. It also suppresses the
+    ``UserStoppedSpeakingFrame`` broadcast (its external emitter already sent
+    one downstream), which in this topology is the frame Gemini needs.
+    """
+
+    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+        """Trigger the turn stop on a received (forced) ``UserStoppedSpeakingFrame``."""
+        if isinstance(frame, UserStoppedSpeakingFrame):
+            await self.trigger_user_turn_stopped()
+        return ProcessFrameResult.CONTINUE
 
 
 class MaxUserSpeechController(FrameProcessor):
@@ -104,8 +154,9 @@ class MaxUserSpeechController(FrameProcessor):
         """Initialize the controller.
 
         Args:
-            max_speech_secs: How long a single user turn may run before the bot
-                takes over.
+            max_speech_secs: How long the user may keep the turn before the bot
+                takes over. Measured from the first turn start, and NOT reset by
+                mid-turn stop/start pairs; only the bot speaking resets it.
             interjection: Optional steering prompt sent to the model right before
                 the turn is force-ended. ``None`` just ends the turn.
         """
@@ -113,7 +164,7 @@ class MaxUserSpeechController(FrameProcessor):
         self._max_speech_secs = max_speech_secs
         self._interjection = interjection
         self._timer: asyncio.Task | None = None
-        self._forced = False
+        self._user_turn_open = False
         self._register_event_handler("on_max_speech_forced")
 
     async def cleanup(self):
@@ -126,23 +177,25 @@ class MaxUserSpeechController(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, UserStartedSpeakingFrame):
-            self._forced = False
-            await self._start_timer()
-            await self.push_frame(frame, direction)
+            self._user_turn_open = True
+            # Arm the timer only if it isn't already running: a stop/start pair
+            # inside what the user perceives as one turn (e.g. a turn detector
+            # calling an early stop mid-ramble) must not reset the cap.
+            if self._timer is None:
+                self._start_timer()
         elif isinstance(frame, UserStoppedSpeakingFrame):
+            # This is the aggregator's real turn stop (on a forced cutoff it is
+            # the round trip of the stop we pushed upstream). Let it through so
+            # the service sends its activity_end. The timer stays armed: if the
+            # user grabs the turn back before the bot speaks, the cap still
+            # applies to the combined turn.
+            self._user_turn_open = False
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            # The bot took the turn: the cap did its job (or wasn't needed).
             await self._cancel_timer()
-            if self._forced:
-                # We already ended this turn ourselves. Drop the aggregator's
-                # real stop so the LLM sees a single, balanced start/stop pair
-                # (and the service doesn't send a second activity_end).
-                self._forced = False
-                return
-            await self.push_frame(frame, direction)
-        else:
-            await self.push_frame(frame, direction)
+        await self.push_frame(frame, direction)
 
-    async def _start_timer(self):
-        await self._cancel_timer()
+    def _start_timer(self):
         self._timer = self.create_task(self._expire())
 
     async def _cancel_timer(self):
@@ -153,12 +206,20 @@ class MaxUserSpeechController(FrameProcessor):
     async def _expire(self):
         await asyncio.sleep(self._max_speech_secs)
         self._timer = None
+        if not self._user_turn_open:
+            # Nobody is mid-turn (e.g. the bot never spoke after a normal stop,
+            # so the timer was never cancelled). Forcing a stop now would send
+            # the service an unpaired activity_end; just disarm.
+            return
         logger.info(f"User spoke past {self._max_speech_secs}s; handing the turn to the bot")
-        self._forced = True
         await self._call_event_handler("on_max_speech_forced")
         if self._interjection:
             await self.push_frame(InputTextRawFrame(text=self._interjection))
-        await self.push_frame(UserStoppedSpeakingFrame())
+        # Send the stop UPSTREAM so the user aggregator (via its
+        # ForcedUserTurnStopStrategy) closes the turn for the whole pipeline.
+        # It then broadcasts the real UserStoppedSpeakingFrame downstream, which
+        # passes back through here on its way to the service (activity_end).
+        await self.push_frame(UserStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
 
 
 class MuteUntilBotDoneUserMuteStrategy(BaseUserMuteStrategy):
@@ -171,6 +232,13 @@ class MuteUntilBotDoneUserMuteStrategy(BaseUserMuteStrategy):
     ``MaxUserSpeechController``'s ``on_max_speech_forced`` event) and the user
     stays muted until the next ``BotStoppedSpeakingFrame``.
 
+    The call *arms* the mute rather than engaging it: the mute engages when the
+    forced ``UserStoppedSpeakingFrame`` reaches the aggregator, and applies from
+    the frame after it. That ordering is deliberate. A muted aggregator drops
+    incoming ``UserStoppedSpeakingFrame``, so muting immediately at cap time
+    races the controller's upstream stop against the next audio frame; if audio
+    wins, the mute swallows the stop and the turn never closes.
+
     While muted, the user aggregator drops the user's audio, VAD, and
     transcription frames, so the trailing speech can't reopen the turn. (One
     side effect: the dropped ``TranscriptionFrame`` means the cut-off tail of
@@ -180,14 +248,15 @@ class MuteUntilBotDoneUserMuteStrategy(BaseUserMuteStrategy):
     def __init__(self):
         """Initialize the strategy unmuted."""
         super().__init__()
+        self._armed = False
         self._muted = False
 
     def mute_until_bot_done(self):
-        """Start muting; cleared on the next ``BotStoppedSpeakingFrame``."""
-        self._muted = True
+        """Arm the mute: it engages on the forced ``UserStoppedSpeakingFrame``."""
+        self._armed = True
 
     async def process_frame(self, frame: Frame) -> bool:
-        """Mute until the bot stops speaking.
+        """Mute from the forced turn stop until the bot stops speaking.
 
         Args:
             frame: The frame to be processed.
@@ -196,7 +265,13 @@ class MuteUntilBotDoneUserMuteStrategy(BaseUserMuteStrategy):
             Whether the user should be muted right now.
         """
         await super().process_frame(frame)
-        if self._muted and isinstance(frame, BotStoppedSpeakingFrame):
+        if self._armed and isinstance(frame, UserStoppedSpeakingFrame):
+            # The forced stop reached the aggregator. The aggregator applies the
+            # new mute state starting with the NEXT frame, so this stop still
+            # closes the turn before the mute engages.
+            self._armed = False
+            self._muted = True
+        elif self._muted and isinstance(frame, BotStoppedSpeakingFrame):
             self._muted = False
         return self._muted
 
@@ -308,6 +383,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             # bit more silence.
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
             user_mute_strategies=[mute_until_bot_done],
+            user_turn_strategies=UserTurnStrategies(
+                stop=[
+                    # The default stop strategy, restated because listing any
+                    # stop strategy replaces the defaults.
+                    TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3()),
+                    # Lets MaxUserSpeechController end the turn: it pushes a
+                    # UserStoppedSpeakingFrame upstream and this strategy closes
+                    # the turn at the aggregator when that frame arrives.
+                    ForcedUserTurnStopStrategy(),
+                ],
+            ),
         ),
     )
 

@@ -26,3 +26,14 @@ turns:
     expect:
       - event: response
         eval: "the bot speaks up and responds or politely interjects, rather than staying silent. For example, it jumps in, takes its turn, or starts answering the user"
+
+  # The turn AFTER a forced cutoff. A forced stop that only reaches the LLM (and
+  # not the user aggregator) leaves the aggregator's turn open, so this next
+  # utterance never opens a Gemini activity window and the bot stays silent.
+  # This turn fails on that desync and passes once the forced stop closes the
+  # turn at the aggregator too.
+  - user: >-
+      Okay, quick question then, what should I prioritize first?
+    expect:
+      - event: response
+        eval: "the bot gives a substantive answer to the user's question (some suggestion, recommendation, or a direct follow-up about priorities), rather than staying silent or talking about something unrelated"
