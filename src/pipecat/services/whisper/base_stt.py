@@ -13,6 +13,7 @@ interface, including language mapping, metrics generation, and error handling.
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 
+import httpx
 from loguru import logger
 from openai import AsyncOpenAI
 from openai.types.audio import Transcription
@@ -134,6 +135,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
         model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
+        http_client: httpx.AsyncClient | None = None,
         language: Language | None = None,
         prompt: str | None = None,
         temperature: float | None = None,
@@ -154,6 +156,9 @@ class BaseWhisperSTTService(SegmentedSTTService):
 
             api_key: Service API key. Defaults to None.
             base_url: Service API base URL. Defaults to None.
+            http_client: Custom ``httpx.AsyncClient`` for API requests, e.g. to configure
+                explicit timeouts or connection limits. If None, uses the OpenAI SDK's
+                default client.
             language: Language of the audio input.
 
                 .. deprecated:: 0.0.105
@@ -220,12 +225,17 @@ class BaseWhisperSTTService(SegmentedSTTService):
             settings=default_settings,
             **kwargs,
         )
-        self._client = self._create_client(api_key, base_url)
+        self._client = self._create_client(api_key, base_url, http_client)
         self._include_prob_metrics = include_prob_metrics
         self._push_empty_transcripts = push_empty_transcripts
 
-    def _create_client(self, api_key: str | None, base_url: str | None):
-        return AsyncOpenAI(api_key=api_key, base_url=base_url)
+    def _create_client(
+        self,
+        api_key: str | None,
+        base_url: str | None,
+        http_client: httpx.AsyncClient | None = None,
+    ):
+        return AsyncOpenAI(api_key=api_key, base_url=base_url, http_client=http_client)
 
     def can_generate_metrics(self) -> bool:
         """Whether this service can generate processing metrics.
