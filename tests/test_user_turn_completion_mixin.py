@@ -12,9 +12,10 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMMarkerFrame,
     LLMTextFrame,
+    UserStartedSpeakingFrame,
     UserTurnInferenceCompletedFrame,
 )
-from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_completion_mixin import (
@@ -166,6 +167,73 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         self.assertFalse(processor._turn_complete_found)
         self.assertEqual(processor._turn_text_buffer, "")
         self.assertFalse(processor._turn_suppressed)
+
+    async def test_only_one_completion_spoken_per_user_turn(self):
+        """Only one ✓ response is spoken per user turn.
+
+        Within a single user turn the turn-completion gating can run several
+        inferences, each emitting ✓. ``_turn_reset`` clears the per-response
+        ``_turn_complete_found`` between them, so the per-user-turn latch is
+        what stops the same response from being spoken repeatedly. The latch
+        must survive ``LLMFullResponseEndFrame`` and reset only when a new user
+        turn starts.
+        """
+        processor = MockProcessor()
+
+        # First inference of the user turn: ✓ is spoken.
+        first_frames = []
+        processor.push_frame = AsyncMock(
+            side_effect=lambda f, *args, **kwargs: first_frames.append(f)
+        )
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} How can I help?")
+        self.assertEqual(
+            [f.text for f in first_frames if isinstance(f, LLMTextFrame)],
+            ["How can I help?"],
+        )
+        self.assertTrue(processor._user_turn_response_spoken)
+
+        # End the first response. _turn_reset clears per-response state, but the
+        # per-user-turn latch must survive.
+        del processor.push_frame
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", AsyncMock()):
+            await processor.push_frame(LLMFullResponseEndFrame())
+        self.assertFalse(processor._turn_complete_found)
+        self.assertFalse(processor._turn_suppressed)
+        self.assertTrue(processor._user_turn_response_spoken)
+
+        # Second inference in the SAME user turn (no UserStartedSpeaking in
+        # between): the duplicate ✓ must NOT be spoken or re-broadcast.
+        dup_frames = []
+        processor.push_frame = AsyncMock(
+            side_effect=lambda f, *args, **kwargs: dup_frames.append(f)
+        )
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} How can I help?")
+        self.assertEqual([f for f in dup_frames if isinstance(f, LLMTextFrame)], [])
+        self.assertEqual(
+            [f for f in dup_frames if isinstance(f, UserTurnInferenceCompletedFrame)], []
+        )
+
+        # End the duplicate response (resets _turn_suppressed; latch persists).
+        del processor.push_frame
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", AsyncMock()):
+            await processor.push_frame(LLMFullResponseEndFrame())
+        self.assertTrue(processor._user_turn_response_spoken)
+
+        # A new user turn resets the latch.
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            await processor.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+        self.assertFalse(processor._user_turn_response_spoken)
+
+        # Next turn's first ✓ is spoken again.
+        next_frames = []
+        processor.push_frame = AsyncMock(
+            side_effect=lambda f, *args, **kwargs: next_frames.append(f)
+        )
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Anything else?")
+        self.assertEqual(
+            [f.text for f in next_frames if isinstance(f, LLMTextFrame)],
+            ["Anything else?"],
+        )
 
 
 class MockLLMService(LLMService):
