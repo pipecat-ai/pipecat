@@ -95,7 +95,6 @@ class ServiceDefinition:
 FEATURE_DEFINITIONS: dict[str, list[str]] = {
     "recording": [
         "AudioBufferProcessor",
-        "AudioBufferStartRecordingFrame",
         "datetime",
         "io",
         "wave",
