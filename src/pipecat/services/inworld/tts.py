@@ -1044,7 +1044,10 @@ class InworldTTSService(WebsocketTTSService):
                     logger.debug(f"{self}: Context {ctx_id} not found.")
                     continue
                 lower_error_msg = error_msg.lower()
-                if "context_id is required" in lower_error_msg or "no open context" in lower_error_msg:
+                if (
+                    "context_id is required" in lower_error_msg
+                    or "no open context" in lower_error_msg
+                ):
                     logger.debug(f"{self}: Contextless message rejected (benign): {error_msg}")
                     continue
 
@@ -1113,7 +1116,10 @@ class InworldTTSService(WebsocketTTSService):
                             "contextId": context_id,
                         }
                         logger.trace(f"Sending keepalive for context {context_id}")
-                        await self._websocket.send(json.dumps(keepalive_message))
+                    else:
+                        keepalive_message = {"send_text": {"text": ""}}
+                        logger.trace("Sending keepalive without context")
+                    await self._websocket.send(json.dumps(keepalive_message))
             except websockets.ConnectionClosed as e:
                 logger.warning(f"{self} keepalive error: {e}")
                 break
