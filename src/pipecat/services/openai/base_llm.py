@@ -412,6 +412,18 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
         params = self.build_chat_completion_params(params_from_context)
 
+        # Force-tool only on the FIRST completion of a turn. tool_choice="required"
+        # (a per-node routing backstop) lives in settings.extra, so it persists
+        # across re-prompts — meaning the follow-up completion *after* a tool
+        # result is ALSO compelled to call a tool, and so on, spinning a routing
+        # node through 3 dispatches/turn (set_caller_gender / transitions re-fired
+        # every round → huge latency + stuck call). Once this turn has already
+        # produced one tool call, downgrade "required" → "auto" so the follow-up
+        # can answer in text and END the turn. The first completion still honors
+        # "required" (the forced transition), so reliability is unchanged.
+        if self._tool_call_rounds_this_turn >= 1 and params.get("tool_choice") == "required":
+            params["tool_choice"] = "auto"
+
         # Tool-call loop guard: once a single user turn has triggered the max
         # number of consecutive tool-call rounds, disable tools for the
         # follow-up completion so the model is forced to answer in plain text.
