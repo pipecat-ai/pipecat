@@ -122,7 +122,8 @@ class FunASRSTTService(SegmentedSTTService):
         self._device = device
 
         model = assert_given(self._settings.model)
-        model = model.value if hasattr(model, "value") else str(model)
+        if model is None:
+            raise ValueError("FunASR model must be specified")
 
         logger.debug(f"Loading FunASR model {model}...")
         self._model = AutoModel(model=model, device=device, disable_update=True)
