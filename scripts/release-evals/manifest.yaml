@@ -274,3 +274,12 @@ suite:
   #
   - bot: video-avatar/video-avatar-tavus-video-service.py
     scenarios: [capital_question]
+
+  #
+  # Web search: the bot answers a current-events question by calling Keenable's
+  # search tool, and reads a specific URL with its page-fetch tool.
+  #
+  - bot: features/features-keenable-web-search.py
+    scenarios:
+      - keenable_web_search
+      - keenable_fetch_page
