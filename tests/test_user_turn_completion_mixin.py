@@ -13,6 +13,7 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMarkerFrame,
     LLMTextFrame,
+    UserStartedSpeakingFrame,
     UserTurnInferenceCompletedFrame,
     VADUserStartedSpeakingFrame,
 )
@@ -211,6 +212,59 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
             await processor.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
 
         processor._cancel_incomplete_timeout.assert_awaited_once()
+
+    async def test_only_first_completion_voiced_per_user_turn(self):
+        """A second ✓ inference within the same user turn is not voiced again.
+
+        The acoustic detector can trigger several inferences per user turn, each
+        producing its own ✓; only the first should be spoken.
+        """
+        processor = MockProcessor()
+
+        pushed_frames = []
+        processor.push_frame = AsyncMock(
+            side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)
+        )
+
+        # First inference: ✓ is voiced.
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} How are you?")
+        # End of that response resets per-response state but not the per-turn latch.
+        await processor._turn_reset()
+
+        text_before = [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)]
+        self.assertEqual(text_before, ["How are you?"])
+
+        # Second inference in the same user turn: identical ✓ must be dropped.
+        pushed_frames.clear()
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} How are you?")
+        self.assertEqual([f for f in pushed_frames if isinstance(f, LLMTextFrame)], [])
+        completed = [f for f in pushed_frames if isinstance(f, UserTurnInferenceCompletedFrame)]
+        self.assertEqual(completed, [])
+
+    async def test_voiced_response_keeps_streaming_after_latch(self):
+        """The response that set the latch keeps streaming its own continuation."""
+        processor = MockProcessor()
+
+        pushed_frames = []
+        processor.push_frame = AsyncMock(
+            side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)
+        )
+
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Hello")
+        await processor._push_turn_text(" there!")
+
+        text = [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)]
+        self.assertEqual(text, ["Hello", " there!"])
+
+    async def test_new_user_turn_resets_completion_latch(self):
+        """UserStartedSpeakingFrame lets the next user turn voice a completion again."""
+        processor = MockProcessor()
+        processor._user_turn_completion_voiced = True
+
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            await processor.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+        self.assertFalse(processor._user_turn_completion_voiced)
 
 
 class MockLLMService(LLMService):

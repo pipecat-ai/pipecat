@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMRunFrame,
     LLMTextFrame,
+    UserStartedSpeakingFrame,
     UserTurnInferenceCompletedFrame,
     VADUserStartedSpeakingFrame,
 )
@@ -253,6 +254,13 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         # for this turn. Prevents double-broadcast when ✓ and a tool call
         # both occur in the same turn.
         self._turn_completion_broadcasted = False
+        # True once a ✓ has been voiced for the current *user* turn. Scoped to
+        # the user turn (reset on UserStartedSpeakingFrame / InterruptionFrame),
+        # unlike the per-response flags above (reset every LLMFullResponseEnd).
+        # The acoustic detector can trigger several inferences within one user
+        # turn, each independently producing a ✓; this latch ensures only the
+        # first is spoken, so the bot does not repeat the same response.
+        self._user_turn_completion_voiced = False
 
         # Timeout handling
         self._user_turn_completion_config = UserTurnCompletionConfig()
@@ -381,6 +389,10 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         if isinstance(frame, InterruptionFrame):
             await self._cancel_incomplete_timeout()
             await self._turn_reset()
+            self._user_turn_completion_voiced = False
+        elif isinstance(frame, UserStartedSpeakingFrame):
+            # A new user turn begins, so allow one fresh spoken completion.
+            self._user_turn_completion_voiced = False
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             # The user resumed speaking within the same open turn. A new turn's
             # InterruptionFrame does not fire for a resume inside an already-open
@@ -438,6 +450,14 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         Args:
             text: The text content from the LLM to push.
         """
+        # One spoken completion per user turn: once a ✓ has been voiced this
+        # user turn, drop text from any later inference (the acoustic detector
+        # can trigger several within one turn). ``_turn_marker is None`` scopes
+        # this to *fresh* responses — the response that produced the voiced ✓
+        # keeps streaming, since by then its marker is COMPLETE.
+        if self._user_turn_completion_voiced and self._turn_marker is None:
+            return
+
         # If we've already detected incomplete, suppress all remaining text.
         # This is a safety mechanism in case the LLM disobeys the prompt and outputs
         # additional text after the marker (e.g., "○ Please continue...").
@@ -489,6 +509,11 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         # Check for ✓ (COMPLETE) marker - user's turn was complete, respond normally
         if USER_TURN_COMPLETE_MARKER in self._turn_text_buffer:
             logger.debug(f"COMPLETE ({USER_TURN_COMPLETE_MARKER}) detected, pushing buffered text")
+
+            # Latch: this user turn now has its one spoken completion. Later
+            # duplicate inferences within the same turn are dropped by the guard
+            # at the top of this method.
+            self._user_turn_completion_voiced = True
 
             # Any pending incomplete timeout was already cancelled when this
             # response's LLMFullResponseStartFrame arrived (see ``push_frame``).
