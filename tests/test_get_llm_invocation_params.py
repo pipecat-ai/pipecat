@@ -2001,6 +2001,52 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["input"][0]["role"], "user")
         self.assertEqual(params["input"][1]["type"], "function_call")
 
+    def test_reasoning_message_becomes_reasoning_item(self):
+        """A persisted reasoning message converts to a Responses reasoning item."""
+        reasoning_msg = self.adapter.create_llm_specific_message(
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "summary": [{"type": "summary_text", "text": "Let me think."}],
+                "encrypted_content": "ENCRYPTED",
+            }
+        )
+        context = LLMContext(messages=[reasoning_msg])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(
+            params["input"][0],
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "summary": [{"type": "summary_text", "text": "Let me think."}],
+                "encrypted_content": "ENCRYPTED",
+            },
+        )
+
+    def test_reasoning_precedes_assistant_message(self):
+        """Reasoning round-trips positioned before the assistant reply it produced."""
+        reasoning_msg = self.adapter.create_llm_specific_message(
+            {"type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "ENCRYPTED"}
+        )
+        context = LLMContext(messages=[reasoning_msg, {"role": "assistant", "content": "Hello!"}])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["input"][0]["type"], "reasoning")
+        self.assertEqual(params["input"][1]["role"], "assistant")
+
+    def test_reasoning_without_encrypted_content_omits_field(self):
+        """encrypted_content is optional; omit it rather than send null."""
+        reasoning_msg = self.adapter.create_llm_specific_message(
+            {"type": "reasoning", "id": "rs_2", "summary": []}
+        )
+        context = LLMContext(messages=[reasoning_msg])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["input"][0]["type"], "reasoning")
+        self.assertEqual(params["input"][0]["id"], "rs_2")
+        self.assertNotIn("encrypted_content", params["input"][0])
+
     def test_id_for_llm_specific_messages(self):
         """Adapter identifier is 'openai_responses'."""
         self.assertEqual(self.adapter.id_for_llm_specific_messages, "openai_responses")

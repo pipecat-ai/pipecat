@@ -747,13 +747,6 @@ class TestReasoningConfig:
         c = OpenAIResponsesLLMService.ReasoningConfig(effort="ultra")
         assert c.effort == "ultra"
 
-    def test_settings_coerces_reasoning_dict(self):
-        settings = OpenAIResponsesLLMService.Settings.from_mapping(
-            {"reasoning": {"effort": "medium"}}
-        )
-        assert isinstance(settings.reasoning, OpenAIResponsesLLMService.ReasoningConfig)
-        assert settings.reasoning.effort == "medium"
-
 
 class TestReasoningParams:
     def _params(self, service):

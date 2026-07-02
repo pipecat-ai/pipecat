@@ -59,7 +59,7 @@ from pipecat.services.llm_service import (
     WebsocketReconnectedError,
 )
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
-from pipecat.services.settings import LLMSettings, _NotGiven, assert_given, is_given
+from pipecat.services.settings import LLMSettings, _NotGiven, assert_given
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 # ---------------------------------------------------------------------------
@@ -93,9 +93,9 @@ class _ConnectionLimitReachedError(_RetryableError):
 class OpenAIResponsesReasoningConfig(BaseModel):
     """Reasoning configuration for reasoning-capable OpenAI Responses models.
 
-    Reasoning models (e.g. ``gpt-5.4-mini``, ``gpt-5.5``, the o-series) think
-    before responding. This controls how much they think and whether a
-    human-readable summary of that thinking is returned.
+    Reasoning models (e.g. ``gpt-5.4``, ``gpt-5.5``, the o-series) use internal
+    reasoning tokens before producing a response. This controls how much
+    reasoning they do and whether a human-readable summary of it is returned.
 
     Parameters:
         effort: How much reasoning effort the model applies. ``None`` (the
@@ -138,21 +138,6 @@ class OpenAIResponsesLLMSettings(LLMSettings):
     reasoning: OpenAIResponsesReasoningConfig | None | _NotGiven = field(
         default_factory=lambda: _NOT_GIVEN
     )
-
-    @classmethod
-    def from_mapping(cls, settings: Mapping[str, Any]) -> "OpenAIResponsesLLMSettings":
-        """Convert a plain mapping to settings, coercing a ``reasoning`` dict.
-
-        Args:
-            settings: Mapping of setting names to values.
-
-        Returns:
-            A settings instance with any ``reasoning`` dict coerced to a config.
-        """
-        instance = super().from_mapping(settings)
-        if is_given(instance.reasoning) and isinstance(instance.reasoning, dict):
-            instance.reasoning = OpenAIResponsesReasoningConfig(**instance.reasoning)
-        return instance
 
 
 # ---------------------------------------------------------------------------
@@ -324,10 +309,8 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         reasoning_params = reasoning.model_dump(exclude_none=True) if reasoning else {}
         if reasoning_params:
             params["reasoning"] = reasoning_params
-            # store=False (always, here) means the server keeps no reasoning
-            # state, so reasoning items must be sent back on later turns. Ask for
-            # the encrypted reasoning so the adapter can round-trip it. See the
-            # class docstrings.
+            # Ask for the encrypted reasoning so it can be sent back on later
+            # turns, preserving reasoning context across the conversation.
             params["include"] = ["reasoning.encrypted_content"]
         else:
             # No reasoning configured: default it off on models that would
@@ -415,12 +398,11 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
     def _maybe_disable_reasoning(self, params: dict):
         """Default reasoning off on models that would otherwise reason.
 
-        Some reasoning-capable models (e.g. ``gpt-5.5``) reason by default, which
-        adds latency ill-suited to real-time voice. When the caller hasn't
-        configured ``reasoning``, request ``effort="none"`` for models known to
-        support it, so selecting such a model doesn't silently enable reasoning.
-        Models that don't accept ``"none"`` (the o-series, ``gpt-5-chat``) or
-        don't reason at all (``gpt-4.1``) are left untouched. Mirrors Gemini's
+        Reasoning-capable models (including our default, ``gpt-5.4``) can spend
+        reasoning tokens before responding, adding latency ill-suited to
+        real-time voice. When the caller hasn't configured ``reasoning``, request
+        ``effort="none"`` for models known to support it, so reasoning stays off
+        unless it is explicitly opted into. Mirrors Gemini's
         ``_maybe_unset_thinking_budget``.
 
         Args:
@@ -435,7 +417,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
     def _model_supports_reasoning_none(model: str) -> bool:
         """Whether a model accepts ``reasoning.effort="none"``.
 
-        The ``gpt-5.x`` reasoning family accepts it (e.g. ``gpt-5.4-mini``,
+        The ``gpt-5.x`` reasoning family accepts it (e.g. ``gpt-5.4``,
         ``gpt-5.5``); the ``gpt-5-chat`` non-reasoning variant and the o-series
         do not.
 
@@ -452,11 +434,10 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
     ):
         """Persist a reasoning item so it round-trips on the next request.
 
-        With ``store=False`` the server keeps no reasoning state, so the
-        encrypted reasoning must be sent back with later requests. Store it as an
-        LLM-specific message the adapter re-emits as a Responses reasoning input
-        item — positioned, by append order, before the assistant message or
-        function call it produced.
+        The encrypted reasoning is sent back on later requests to preserve
+        reasoning context. Store it as an LLM-specific message the adapter
+        re-emits as a Responses reasoning input item — positioned, by append
+        order, before the assistant message or function call it produced.
 
         Args:
             item_id: The reasoning item id.

@@ -225,9 +225,9 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
     def _from_specific_message(self, message: LLMSpecificMessage) -> ResponseInputItemParam:
         """Convert an OpenAI-Responses-specific message to an input item.
 
-        Reasoning messages — persisted mid-stream so the model's prior thinking
-        round-trips when ``store=False`` — become Responses ``reasoning`` input
-        items. Anything else is assumed to already be in Responses input shape.
+        Reasoning messages — persisted so the model's prior reasoning round-trips
+        on later turns — become Responses ``reasoning`` input items. Anything
+        else is assumed to already be in Responses input shape.
 
         Args:
             message: The LLM-specific message from the context.
