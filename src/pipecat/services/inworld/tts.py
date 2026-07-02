@@ -1107,10 +1107,7 @@ class InworldTTSService(WebsocketTTSService):
                             "contextId": context_id,
                         }
                         logger.trace(f"Sending keepalive for context {context_id}")
-                    else:
-                        keepalive_message = {"send_text": {"text": ""}}
-                        logger.trace("Sending keepalive without context")
-                    await self._websocket.send(json.dumps(keepalive_message))
+                        await self._websocket.send(json.dumps(keepalive_message))
             except websockets.ConnectionClosed as e:
                 logger.warning(f"{self} keepalive error: {e}")
                 break
