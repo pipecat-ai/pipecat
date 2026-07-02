@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     LLMRunFrame,
     LLMTextFrame,
     UserTurnInferenceCompletedFrame,
+    VADUserStartedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -380,6 +381,14 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         if isinstance(frame, InterruptionFrame):
             await self._cancel_incomplete_timeout()
             await self._turn_reset()
+        elif isinstance(frame, VADUserStartedSpeakingFrame):
+            # The user resumed speaking within the same open turn. A new turn's
+            # InterruptionFrame does not fire for a resume inside an already-open
+            # turn, so an armed ○/◐ re-prompt timeout would otherwise expire and
+            # nudge (talking over) a user who is speaking again. Cancel it here.
+            # Turn state is left intact: the ○/◐ response already ended and reset
+            # it, and the next inference re-arms a fresh timer if still needed.
+            await self._cancel_incomplete_timeout()
 
         # Pass frame to parent
         await super().process_frame(frame, direction)

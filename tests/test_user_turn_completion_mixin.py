@@ -14,8 +14,9 @@ from pipecat.frames.frames import (
     LLMMarkerFrame,
     LLMTextFrame,
     UserTurnInferenceCompletedFrame,
+    VADUserStartedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_completion_mixin import (
@@ -192,6 +193,22 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         del processor.push_frame  # restore the mixin override
         with unittest.mock.patch.object(FrameProcessor, "push_frame", AsyncMock()):
             await processor.push_frame(LLMFullResponseStartFrame())
+
+        processor._cancel_incomplete_timeout.assert_awaited_once()
+
+    async def test_vad_resume_cancels_pending_incomplete_timeout(self):
+        """The user resuming speech mid-turn cancels the pending re-prompt timeout.
+
+        A resume inside an already-open turn produces a VADUserStartedSpeakingFrame
+        but no InterruptionFrame, so the incomplete (○/◐) re-prompt timeout would
+        otherwise expire and talk over the user.
+        """
+        processor = MockProcessor()
+        processor._incomplete_timeout_task = object()
+        processor._cancel_incomplete_timeout = AsyncMock()
+
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            await processor.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
 
         processor._cancel_incomplete_timeout.assert_awaited_once()
 
