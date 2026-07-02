@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     LLMRunFrame,
     LLMTextFrame,
     UserTurnInferenceCompletedFrame,
+    VADUserStartedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -336,8 +337,9 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         Call this at the end of each LLM response to clear buffered text and reset state.
         If no marker was found, pushes the buffered text to avoid losing content.
 
-        Note: This does NOT cancel pending incomplete timeouts. Timeouts are only
-        cancelled on InterruptionFrame (when user speaks).
+        Note: This does NOT cancel pending incomplete timeouts. Timeouts are
+        cancelled on InterruptionFrame (a new user turn) and on
+        VADUserStartedSpeakingFrame (the user resuming speech within the turn).
         """
         # Check if no marker was found in this response
         marker_found = self._turn_suppressed or self._turn_complete_found
@@ -367,6 +369,17 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         if isinstance(frame, InterruptionFrame):
             await self._cancel_incomplete_timeout()
             await self._turn_reset()
+        elif isinstance(frame, VADUserStartedSpeakingFrame):
+            # The user resumed speaking within the same (still-open) user turn.
+            # Cancel any pending incomplete (○/◐) re-prompt so it can't fire a
+            # stale, forced-✓ nudge over the user mid-utterance. An
+            # InterruptionFrame cancels otherwise, but that only fires on a NEW
+            # turn — not on resumption inside an already-open turn — so without
+            # this the timer runs to expiry even though the user is talking
+            # again. Turn state is intentionally left intact (unlike the
+            # InterruptionFrame branch): the next inference re-arms a fresh
+            # timeout from the latest pause.
+            await self._cancel_incomplete_timeout()
 
         # Pass frame to parent
         await super().process_frame(frame, direction)
