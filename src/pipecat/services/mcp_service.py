@@ -44,23 +44,29 @@ class MCPClient(BaseObject):
     automatic tool registration and schema conversion.
 
     The client maintains a persistent connection to the MCP server, opened on
-    the first call to :meth:`tools` (or ahead of time via :meth:`start`) and
-    released with :meth:`close`. The tool schemas returned by :meth:`tools`
-    carry their call handlers, so the LLM service registers them automatically
-    when they are advertised through an ``LLMContext``::
+    the first call to :meth:`tools` (or ahead of time via :meth:`start`). The
+    tool schemas returned by :meth:`tools` carry their call handlers, so the
+    LLM service registers them automatically when they are advertised through
+    an ``LLMContext``, and closes the connection when the pipeline is torn
+    down::
 
         mcp = MCPClient(server_params=...)
         context = LLMContext(messages=[...], tools=await mcp.tools())
-        ...
-        await mcp.close()  # e.g. from an on_client_disconnected handler
 
-    :meth:`start` and :meth:`close` may be called from different tasks — the
-    session is owned by a dedicated internal task. Scoping the client with
-    ``async with MCPClient(...)`` is also supported.
+    Call :meth:`close` only to release the connection earlier than pipeline
+    teardown (e.g. from an ``on_client_disconnected`` handler). :meth:`start`
+    and :meth:`close` may be called from different tasks — the session is owned
+    by a dedicated internal task. Scoping the client with ``async with
+    MCPClient(...)`` is also supported.
 
     Raises:
         TypeError: If server_params is not a supported parameter type.
     """
+
+    # Ask the LLM service to close() this client when the service is cleaned up
+    # at pipeline teardown, so the connection is released without the developer
+    # wiring close() manually.
+    _pipecat_close_on_teardown = True
 
     def __init__(
         self,
@@ -179,8 +185,11 @@ class MCPClient(BaseObject):
     async def close(self) -> None:
         """Close the persistent MCP connection.
 
-        Safe to call multiple times, without having called start(), and from a
-        different task than the one that called start().
+        Called automatically at pipeline teardown once the client's tools have
+        been registered with an LLM service; call it directly only to release
+        the connection earlier (e.g. on client disconnect). Safe to call
+        multiple times, without having called start(), and from a different
+        task than the one that called start().
         """
         if self._session_task is None:
             return
@@ -205,8 +214,8 @@ class MCPClient(BaseObject):
 
             context = LLMContext(messages=[...], tools=await mcp.tools())
 
-        Call :meth:`close` when the session ends (e.g. from a transport
-        ``on_client_disconnected`` handler).
+        The connection is closed automatically at pipeline teardown; call
+        :meth:`close` only to release it earlier.
 
         Returns:
             A ToolsSchema containing the available tools with handlers attached.

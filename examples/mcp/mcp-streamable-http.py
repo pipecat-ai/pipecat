@@ -134,7 +134,6 @@ Just respond with short sentences when you are carrying out tool calls.
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-        await mcp.close()
         await worker.cancel()
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
