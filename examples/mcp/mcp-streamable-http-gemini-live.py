@@ -68,72 +68,70 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Enable Github Copilot on your GitHub account. Free tier is ok. (https://github.com/settings/copilot)
     # Generate a personal access token. It must be a Fine-grained token, classic tokens are not supported. (https://github.com/settings/personal-access-tokens)
     # Set permissions you want to use (eg. "all repositories", "profile: read/write", etc)
-    async with MCPClient(
+    mcp = MCPClient(
         server_params=StreamableHttpParameters(
             url="https://api.githubcopilot.com/mcp/",
             headers={"Authorization": f"Bearer {os.getenv('GITHUB_PERSONAL_ACCESS_TOKEN')}"},
         )
-    ) as mcp:
-        tools = await mcp.get_tools_schema()
+    )
 
-        llm = GeminiLiveLLMService(
-            api_key=os.environ["GOOGLE_API_KEY"],
-            system_instruction=system,
-            tools=tools,
-        )
+    llm = GeminiLiveLLMService(
+        api_key=os.environ["GOOGLE_API_KEY"],
+        system_instruction=system,
+        tools=await mcp.tools(),
+    )
 
-        await mcp.register_tools_schema(tools, llm)
+    context = LLMContext([{"role": "user", "content": "Please introduce yourself."}])
+    # Gemini Live doesn't emit user-turn frames. Server-side VAD is
+    # enabled by default; to surface turn frames (for RTVI speech
+    # events, turn observers, etc.) uncomment the local-VAD imports
+    # + `user_params=` below. See realtime-gemini-live.py for the
+    # full discussion.
+    #
+    # from pipecat.audio.vad.silero import SileroVADAnalyzer
+    # from pipecat.processors.aggregators.llm_response_universal import (
+    #     LLMUserAggregatorParams,
+    # )
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        # user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
 
-        context = LLMContext([{"role": "user", "content": "Please introduce yourself."}])
-        # Gemini Live doesn't emit user-turn frames. Server-side VAD is
-        # enabled by default; to surface turn frames (for RTVI speech
-        # events, turn observers, etc.) uncomment the local-VAD imports
-        # + `user_params=` below. See realtime-gemini-live.py for the
-        # full discussion.
-        #
-        # from pipecat.audio.vad.silero import SileroVADAnalyzer
-        # from pipecat.processors.aggregators.llm_response_universal import (
-        #     LLMUserAggregatorParams,
-        # )
-        user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-            context,
-            # user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
-        )
+    pipeline = Pipeline(
+        [
+            transport.input(),  # Transport user input
+            user_aggregator,  # User spoken responses
+            llm,  # LLM
+            transport.output(),  # Transport bot output
+            assistant_aggregator,  # Assistant spoken responses and tool context
+        ]
+    )
 
-        pipeline = Pipeline(
-            [
-                transport.input(),  # Transport user input
-                user_aggregator,  # User spoken responses
-                llm,  # LLM
-                transport.output(),  # Transport bot output
-                assistant_aggregator,  # Assistant spoken responses and tool context
-            ]
-        )
+    worker = PipelineWorker(
+        pipeline,
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+    )
 
-        worker = PipelineWorker(
-            pipeline,
-            params=PipelineParams(
-                enable_metrics=True,
-                enable_usage_metrics=True,
-            ),
-            idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-        )
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected: {client}")
+        # Kick off the conversation.
+        await worker.queue_frames([LLMRunFrame()])
 
-        @transport.event_handler("on_client_connected")
-        async def on_client_connected(transport, client):
-            logger.info(f"Client connected: {client}")
-            # Kick off the conversation.
-            await worker.queue_frames([LLMRunFrame()])
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"Client disconnected")
+        await mcp.close()
+        await worker.cancel()
 
-        @transport.event_handler("on_client_disconnected")
-        async def on_client_disconnected(transport, client):
-            logger.info(f"Client disconnected")
-            await worker.cancel()
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
-        runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-        await runner.add_workers(worker)
-        await runner.run()
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 async def bot(runner_args: RunnerArguments):
