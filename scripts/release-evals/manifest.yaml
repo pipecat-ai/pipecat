@@ -355,3 +355,10 @@ suite:
   - bot: flows/llm_switching.py
     scenarios: [llm_switching]
 
+  # Web search: the bot answers a current-events question by calling Keenable's
+  # search tool, and reads a specific URL with its page-fetch tool.
+  #
+  - bot: features/features-keenable-web-search.py
+    scenarios:
+      - keenable_web_search
+      - keenable_fetch_page

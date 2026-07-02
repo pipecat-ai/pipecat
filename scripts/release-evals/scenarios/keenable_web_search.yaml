@@ -1,0 +1,21 @@
+name: keenable_web_search
+
+# Text, end to end: ask for current news, which the model can only answer by
+# searching the web. Tests that the bot invokes Keenable's search_web_pages tool and
+# speaks a grounded answer.
+
+judge: !include judge_text.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "What's in the news today?"
+    expect:
+      - event: function_call
+        calls:
+          - name: search_web_pages
+      - event: response
+        eval: "the response shares one or more current news headlines or news topics, rather than refusing or saying it cannot access up-to-date information"
