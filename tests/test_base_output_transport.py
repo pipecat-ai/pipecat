@@ -87,6 +87,20 @@ class TestBaseOutputTransportInterruptions(unittest.IsolatedAsyncioTestCase):
         finally:
             await transport.cancel(CancelFrame())
 
+    async def test_interruption_resets_send_clock(self):
+        transport = await self._make_transport(mixer=None)
+        try:
+            # Pretend a send lead is buffered ahead of real time.
+            transport._next_send_time = 9999.0
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
+            # The clock is reset so the lead is abandoned (not drained) on
+            # interruption; telephony serializers clear the playout buffer.
+            self.assertEqual(transport._next_send_time, 0)
+        finally:
+            await transport.cancel(CancelFrame())
+
     async def test_interruption_without_mixer_recreates_audio_task(self):
         transport = await self._make_transport(mixer=None)
         try:
