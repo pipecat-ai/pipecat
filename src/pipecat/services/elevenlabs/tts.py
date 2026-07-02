@@ -62,6 +62,11 @@ ELEVENLABS_MULTILINGUAL_MODELS = {
     "eleven_turbo_v2_5",
 }
 
+# Models that reject the previous_text/next_text context parameters
+ELEVENLABS_CONTEXT_UNSUPPORTED_MODELS = {
+    "eleven_v3",
+}
+
 
 def language_to_elevenlabs_language(language: Language) -> str:
     """Convert a Language enum to ElevenLabs language code.
@@ -1385,8 +1390,8 @@ class ElevenLabsHttpTTSService(TTSService):
             "model_id": model_id,
         }
 
-        # Include previous text as context if available
-        if self._previous_text and model_id != "eleven_v3":
+        # Include previous text as context when the model supports it
+        if self._previous_text and model_id not in ELEVENLABS_CONTEXT_UNSUPPORTED_MODELS:
             payload["previous_text"] = self._previous_text
 
         if self._voice_settings:
