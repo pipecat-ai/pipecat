@@ -266,3 +266,9 @@ suite:
   #
   - bot: features/features-dtmf-menu.py
     scenarios: [dtmf_menu]
+
+  #
+  # Video avatar services
+  #
+  - bot: video-avatar/video-avatar-tavus-video-service.py
+    scenarios: [capital_question]

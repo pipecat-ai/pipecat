@@ -443,8 +443,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             frame: End frame signaling service stop.
         """
         await super().stop(frame)
-        await self.cancel_task(self._word_processor_task)
-        self._word_processor_task = None
+        await self._stop_tasks()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the Azure TTS service.
@@ -453,8 +452,18 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             frame: Cancel frame signaling service cancellation.
         """
         await super().cancel(frame)
-        await self.cancel_task(self._word_processor_task)
-        self._word_processor_task = None
+        await self._stop_tasks()
+
+    async def cleanup(self):
+        """Clean up the Azure TTS service."""
+        await super().cleanup()
+        await self._stop_tasks()
+
+    async def _stop_tasks(self):
+        """Cancel the word processor task. Idempotent."""
+        if self._word_processor_task:
+            await self.cancel_task(self._word_processor_task)
+            self._word_processor_task = None
 
     def _is_cjk_language(self) -> bool:
         """Check if the configured language is CJK (Chinese, Japanese, Korean).

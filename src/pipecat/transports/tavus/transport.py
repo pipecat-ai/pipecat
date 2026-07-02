@@ -288,6 +288,7 @@ class TavusTransportClient:
 
     async def cleanup(self):
         """Cleanup client resources."""
+        await self._end_conversation()
         try:
             await self._client.cleanup()
         except Exception as e:
@@ -332,8 +333,19 @@ class TavusTransportClient:
     async def stop(self):
         """Stop the client and end the conversation."""
         await self._client.leave()
-        await self._api.end_conversation(self._conversation_id)
+        await self._end_conversation()
+
+    async def _end_conversation(self):
+        """End the Tavus conversation if one is active.
+
+        Idempotent so it can run from both ``stop()`` and ``cleanup()`` without
+        ending the conversation twice.
+        """
+        if self._conversation_id is None:
+            return
+        conversation_id = self._conversation_id
         self._conversation_id = None
+        await self._api.end_conversation(conversation_id)
 
     async def capture_participant_video(
         self,

@@ -152,13 +152,13 @@ class SingleClientWebsocketServerInputTransport(BaseInputTransport):
             frame: The end frame signaling transport shutdown.
         """
         await super().stop(frame)
+        # Signal the server loop to exit and drain it gracefully before
+        # cancelling whatever is left.
         self._stop_server_event.set()
-        if self._monitor_task:
-            await self.cancel_task(self._monitor_task)
-            self._monitor_task = None
         if self._server_task:
             await self._server_task
             self._server_task = None
+        await self._stop_tasks()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the WebSocket server and stop all processing.
@@ -167,17 +167,22 @@ class SingleClientWebsocketServerInputTransport(BaseInputTransport):
             frame: The cancel frame signaling immediate cancellation.
         """
         await super().cancel(frame)
+        await self._stop_tasks()
+
+    async def cleanup(self):
+        """Release input transport resources at teardown."""
+        await super().cleanup()
+        await self._stop_tasks()
+        await self._transport.cleanup()
+
+    async def _stop_tasks(self):
+        """Cancel the server and monitor tasks. Idempotent."""
         if self._monitor_task:
             await self.cancel_task(self._monitor_task)
             self._monitor_task = None
         if self._server_task:
             await self.cancel_task(self._server_task)
             self._server_task = None
-
-    async def cleanup(self):
-        """Cleanup resources and parent transport."""
-        await super().cleanup()
-        await self._transport.cleanup()
 
     async def _server_task_handler(self):
         """Handle WebSocket server startup and client connections."""

@@ -515,6 +515,11 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         await super().cancel(frame)
         await self._disconnect()
 
+    async def cleanup(self):
+        """Release realtime LLM resources at teardown."""
+        await super().cleanup()
+        await self._disconnect()
+
     #
     # speech and interruption handling
     #

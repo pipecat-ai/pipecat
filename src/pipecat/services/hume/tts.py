@@ -219,8 +219,7 @@ class HumeTTSService(TTSService):
             frame: The end frame.
         """
         await super().stop(frame)
-        if hasattr(self, "_http_client") and self._http_client:
-            await self._http_client.aclose()
+        await self._close_client()
 
     async def cancel(self, frame: CancelFrame) -> None:
         """Cancel the service and cleanup resources.
@@ -229,8 +228,18 @@ class HumeTTSService(TTSService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
-        if hasattr(self, "_http_client") and self._http_client:
+        await self._close_client()
+
+    async def cleanup(self) -> None:
+        """Release resources at pipeline teardown."""
+        await super().cleanup()
+        await self._close_client()
+
+    async def _close_client(self) -> None:
+        """Close the Hume HTTP client. Idempotent."""
+        if self._http_client:
             await self._http_client.aclose()
+            self._http_client = None
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame and handle state changes.

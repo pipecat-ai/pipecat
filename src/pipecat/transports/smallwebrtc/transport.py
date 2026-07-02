@@ -643,6 +643,18 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         if self._receive_video_task:
             await self.cancel_task(self._receive_video_task)
             self._receive_video_task = None
+        if self._receive_screen_video_task:
+            await self.cancel_task(self._receive_screen_video_task)
+            self._receive_screen_video_task = None
+
+    async def _teardown(self):
+        """Cancel receive tasks and disconnect the WebRTC client.
+
+        Idempotent so it can run from ``stop()``, ``cancel()``, and
+        ``cleanup()`` without duplicating work.
+        """
+        await self._stop_tasks()
+        await self._client.disconnect()
 
     async def stop(self, frame: EndFrame):
         """Stop the input transport and disconnect from WebRTC.
@@ -651,8 +663,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             frame: The end frame signaling transport shutdown.
         """
         await super().stop(frame)
-        await self._stop_tasks()
-        await self._client.disconnect()
+        await self._teardown()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the input transport and disconnect immediately.
@@ -661,8 +672,12 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             frame: The cancel frame signaling immediate cancellation.
         """
         await super().cancel(frame)
-        await self._stop_tasks()
-        await self._client.disconnect()
+        await self._teardown()
+
+    async def cleanup(self):
+        """Release resources during teardown."""
+        await super().cleanup()
+        await self._teardown()
 
     async def _receive_audio(self):
         """Background task for receiving audio frames from WebRTC."""
@@ -837,6 +852,14 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
         await self._client.connect()
         await self.set_transport_ready(frame)
 
+    async def _teardown(self):
+        """Disconnect the WebRTC client.
+
+        Idempotent so it can run from ``stop()``, ``cancel()``, and
+        ``cleanup()`` without duplicating work.
+        """
+        await self._client.disconnect()
+
     async def stop(self, frame: EndFrame):
         """Stop the output transport and disconnect from WebRTC.
 
@@ -844,7 +867,7 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
             frame: The end frame signaling transport shutdown.
         """
         await super().stop(frame)
-        await self._client.disconnect()
+        await self._teardown()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the output transport and disconnect immediately.
@@ -853,7 +876,12 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
             frame: The cancel frame signaling immediate cancellation.
         """
         await super().cancel(frame)
-        await self._client.disconnect()
+        await self._teardown()
+
+    async def cleanup(self):
+        """Release resources during teardown."""
+        await super().cleanup()
+        await self._teardown()
 
     async def send_message(
         self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame

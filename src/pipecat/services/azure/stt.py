@@ -291,6 +291,11 @@ class AzureSTTService(STTService):
         await super().cancel(frame)
         await self._disconnect()
 
+    async def cleanup(self):
+        """Release resources at pipeline teardown."""
+        await super().cleanup()
+        await self._disconnect()
+
     async def _connect(self):
         """Initialize the Azure speech recognizer and begin continuous recognition."""
         if self._audio_stream:

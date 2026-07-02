@@ -381,6 +381,11 @@ class DeepgramFluxSTTBase(STTService):
         await super().cancel(frame)
         await self._disconnect()
 
+    async def cleanup(self):
+        """Release Deepgram Flux STT resources at teardown."""
+        await super().cleanup()
+        await self._disconnect()
+
     async def start_metrics(self):
         """Start TTFB and processing metrics collection."""
         # TTFB (Time To First Byte) metrics are currently disabled for Deepgram Flux.
