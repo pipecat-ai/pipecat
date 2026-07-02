@@ -63,6 +63,7 @@ class AudioBufferProcessor(FrameProcessor):
         num_channels: int = 1,
         buffer_size: int = 0,
         enable_turn_audio: bool = False,
+        auto_start_recording: bool = False,
         **kwargs,
     ):
         """Initialize the audio buffer processor.
@@ -72,6 +73,9 @@ class AudioBufferProcessor(FrameProcessor):
             num_channels: Number of channels (1 for mono, 2 for stereo). Defaults to 1.
             buffer_size: Size of buffer before triggering events. 0 for no buffering.
             enable_turn_audio: Whether turn audio event handlers should be triggered.
+            auto_start_recording: Whether to start recording automatically when
+                the pipeline starts, without requiring a call to
+                :meth:`start_recording` or an ``AudioBufferStartRecordingFrame``.
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
@@ -81,6 +85,7 @@ class AudioBufferProcessor(FrameProcessor):
         self._num_channels = num_channels
         self._buffer_size = buffer_size
         self._enable_turn_audio = enable_turn_audio
+        self._auto_start_recording = auto_start_recording
 
         self._user_audio_buffer = bytearray()
         self._bot_audio_buffer = bytearray()
@@ -189,6 +194,8 @@ class AudioBufferProcessor(FrameProcessor):
         # Update output sample rate if necessary.
         if isinstance(frame, StartFrame):
             self._update_sample_rate(frame)
+            if self._auto_start_recording:
+                await self.start_recording()
 
         if isinstance(frame, AudioBufferStartRecordingFrame):
             await self.start_recording()

@@ -36,7 +36,9 @@ class _PassthroughResampler:
         return audio
 
 
-async def _make_processor(*, buffer_size: int = 0, start: bool = True) -> AudioBufferProcessor:
+async def _make_processor(
+    *, buffer_size: int = 0, start: bool = True, auto_start: bool = False
+) -> AudioBufferProcessor:
     """Create a processor ready to record.
 
     Calls setup() and sends a StartFrame through the public process_frame path so that
@@ -46,7 +48,12 @@ async def _make_processor(*, buffer_size: int = 0, start: bool = True) -> AudioB
     When ``start`` is True the processor starts recording before returning; pass
     ``start=False`` to leave recording off (e.g. to test frame-driven start).
     """
-    processor = AudioBufferProcessor(sample_rate=16000, num_channels=2, buffer_size=buffer_size)
+    processor = AudioBufferProcessor(
+        sample_rate=16000,
+        num_channels=2,
+        buffer_size=buffer_size,
+        auto_start_recording=auto_start,
+    )
     processor._input_resampler = _PassthroughResampler()
     processor._output_resampler = _PassthroughResampler()
 
@@ -860,6 +867,46 @@ class TestRecordingControlFrames(unittest.IsolatedAsyncioTestCase):
                 AudioBufferStopRecordingFrame,
             ],
         )
+
+
+class TestAutoStartRecording(unittest.IsolatedAsyncioTestCase):
+    """Tests for the auto_start_recording constructor option.
+
+    With auto_start_recording=True the processor starts recording as soon as
+    it handles the StartFrame, without an explicit start_recording() call or
+    an AudioBufferStartRecordingFrame.
+    """
+
+    async def test_auto_start_begins_recording_on_start_frame(self):
+        """Recording is active right after pipeline start; audio is buffered."""
+        p = await _make_processor(start=False, auto_start=True)
+        self.assertTrue(p._recording)
+
+        audio = struct.pack("<hh", 1000, -1000)
+        await p.process_frame(
+            InputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        user_track, _ = await _capture_track_audio(p)
+        self.assertEqual(user_track, audio)
+        await p.cleanup()
+
+    async def test_auto_start_disabled_by_default(self):
+        """Without the option, the StartFrame does not begin recording."""
+        p = await _make_processor(start=False)
+        self.assertFalse(p._recording)
+        await p.cleanup()
+
+    async def test_auto_start_fires_started_event(self):
+        """on_recording_started fires when auto-start kicks in."""
+        p = AudioBufferProcessor(sample_rate=16000, auto_start_recording=True)
+
+        fired = asyncio.Event()
+        p.add_event_handler("on_recording_started", lambda _: fired.set())
+
+        await run_test(p, frames_to_send=[], expected_down_frames=[])
+        await asyncio.wait_for(fired.wait(), timeout=1)
 
 
 class TestRecordingLifecycleEvents(unittest.IsolatedAsyncioTestCase):

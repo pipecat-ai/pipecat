@@ -52,7 +52,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.frames.frames import AudioBufferStartRecordingFrame, LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -129,8 +129,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    # Create audio buffer processor
-    audiobuffer = AudioBufferProcessor()
+    # Create audio buffer processor. Recording starts automatically when the
+    # pipeline starts; alternatively, push an AudioBufferStartRecordingFrame or
+    # call start_recording() to start it on demand.
+    audiobuffer = AudioBufferProcessor(auto_start_recording=True)
 
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
@@ -163,8 +165,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        # Start recording and kick off the conversation
-        await worker.queue_frames([AudioBufferStartRecordingFrame(), LLMRunFrame()])
+        # Kick off the conversation
+        context.add_message(
+            {"role": "developer", "content": "Please introduce yourself to the user."}
+        )
+        await worker.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

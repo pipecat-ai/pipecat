@@ -15,7 +15,7 @@ from loguru import logger
 from pipecat.audio.filters.aic_filter import AICFilter
 from pipecat.audio.vad.aic_quail_vad import AICQuailVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.frames.frames import AudioBufferStartRecordingFrame, LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -107,6 +107,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     audiobuffer = AudioBufferProcessor(
         num_channels=2,  # 1 for mono, 2 for stereo (user left, bot right)
         enable_turn_audio=False,  # Enable per-turn audio recording
+        auto_start_recording=True,  # Start recording automatically when the pipeline starts
     )
 
     pipeline = Pipeline(
@@ -138,8 +139,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}
         )
-        # Start recording audio and kick off the conversation
-        await worker.queue_frames([AudioBufferStartRecordingFrame(), LLMRunFrame()])
+        await worker.queue_frames([LLMRunFrame()])
 
     @audiobuffer.event_handler("on_audio_data")
     async def on_audio_data(buffer, audio, sample_rate, num_channels):
