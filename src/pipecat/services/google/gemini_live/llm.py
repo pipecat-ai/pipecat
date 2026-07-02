@@ -1579,7 +1579,33 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             return
 
         adapter = self.get_llm_adapter()
-        messages = adapter.get_llm_invocation_params(self._context).get("messages", [])
+        # Pass ``system_instruction=`` for parity with the ``_handle_context``
+        # call site (llm.py earlier in this file) — but ONLY when we're
+        # about to trigger inference. The Gemini adapter synthesises a
+        # placeholder user turn in ``messages`` when a
+        # ``system_instruction`` is provided alongside an otherwise-empty
+        # context; if we call ``get_llm_invocation_params`` here without
+        # the kwarg the placeholder is not produced, ``messages`` is empty,
+        # the early-return below fires, and ``send_client_content`` is
+        # never called — the model never generates its initial response
+        # and bots configured with
+        # ``inference_on_context_initialization=True`` +
+        # ``system_instruction`` (but no seeded messages) stay silent on
+        # connect. Passing the kwarg only when
+        # ``_inference_on_context_initialization`` is set preserves the
+        # ``False`` path (empty context → seed nothing → no
+        # ``send_client_content`` call → wait for real user turn).
+        wants_initial_inference = (
+            self._inference_on_context_initialization or for_reconnect
+        )
+        messages = adapter.get_llm_invocation_params(
+            self._context,
+            system_instruction=(
+                self._system_instruction_from_init
+                if wants_initial_inference
+                else None
+            ),
+        ).get("messages", [])
         if not messages:
             # No messages to seed convo with, so we're ready for realtime input right away
             self._ready_for_realtime_input = True
