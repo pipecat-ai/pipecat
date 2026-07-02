@@ -330,6 +330,68 @@ class TestDeprecatedRegistrationApi(MCPClientTestBase):
         await client.close()
 
 
+class TestAutoCloseOnCleanup(MCPClientTestBase):
+    """LLMService.cleanup() closes clients whose handlers were registered."""
+
+    async def test_cleanup_closes_registered_client(self):
+        client, session, record = self._make_client([_tool("tool_a")])
+        tools_schema = await client.tools()
+        service = LLMService()
+        service._sync_registered_tool_handlers(tools_schema)
+        await service.cleanup()
+        self.assertEqual(record.get("exits"), 1)
+
+    async def test_cleanup_twice_is_safe(self):
+        client, session, record = self._make_client([_tool("tool_a")])
+        service = LLMService()
+        service._sync_registered_tool_handlers(await client.tools())
+        await service.cleanup()
+        await service.cleanup()
+        self.assertEqual(record.get("exits"), 1)
+
+    async def test_two_services_sharing_client_close_idempotently(self):
+        # e.g. two LLMs behind a switcher advertising the same context tools.
+        client, session, record = self._make_client([_tool("tool_a")])
+        tools_schema = await client.tools()
+        service_a, service_b = LLMService(), LLMService()
+        service_a._sync_registered_tool_handlers(tools_schema)
+        service_b._sync_registered_tool_handlers(tools_schema)
+        await service_a.cleanup()
+        await service_b.cleanup()
+        self.assertEqual(record.get("exits"), 1)
+
+    async def test_no_close_when_handlers_never_registered(self):
+        # Known gap: a connected client the LLM service never learned about
+        # (no inference ran) is not auto-closed.
+        client, session, record = self._make_client([_tool("tool_a")])
+        await client.tools()
+        service = LLMService()
+        await service.cleanup()
+        self.assertIsNone(record.get("exits"))
+        await client.close()
+        self.assertEqual(record.get("exits"), 1)
+
+    async def test_deprecated_register_tools_path_also_auto_closes(self):
+        client, session, record = self._make_client([_tool("tool_a")])
+        await client.start()
+        service = LLMService()
+        with self.assertWarns(DeprecationWarning):
+            await client.register_tools(service)
+        await service.cleanup()
+        self.assertEqual(record.get("exits"), 1)
+
+    async def test_client_survives_tool_pruning_until_cleanup(self):
+        # De-advertising a tool prunes its handler but must not close the
+        # session mid-conversation; the close happens at teardown.
+        client, session, record = self._make_client([_tool("tool_a")])
+        service = LLMService()
+        service._sync_registered_tool_handlers(await client.tools())
+        service._sync_registered_tool_handlers([])  # tool set replaced
+        self.assertIsNone(record.get("exits"))
+        await service.cleanup()
+        self.assertEqual(record.get("exits"), 1)
+
+
 class TestLLMAutoRegistration(MCPClientTestBase):
     """End-to-end with a real LLMService: tools() auto-registers, old path doesn't warn."""
 
