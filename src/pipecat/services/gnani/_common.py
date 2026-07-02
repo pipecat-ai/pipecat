@@ -4,25 +4,31 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Shared constants and helpers for Gnani Vachana Pipecat services.
+"""Shared constants and helpers re-exported from ``pipecat-gnani``.
 
-Re-exports from the ``pipecat-gnani`` package. All constants, language maps,
-and helper functions originate there to keep a single source of truth.
-
-API docs: https://docs.gnani.ai/api/introduction/introduction
+All constants, language maps, and helper functions originate in
+``pipecat_gnani._common``; this module keeps them accessible under
+``pipecat.services.gnani._common`` for backward compatibility.
 """
 
-from pipecat_gnani._common import (
+from pipecat_gnani._common import (  # noqa: F401
     GNANI_STT_REST_URL,
     GNANI_STT_WS_URL,
     GNANI_TTS_REST_URL,
     GNANI_TTS_SSE_URL,
     GNANI_TTS_WS_URL,
+    STREAM_CHUNK_BYTES,
+    STREAM_SUPPORTED_LANGUAGES,
     STT_FORMAT_TRANSCRIBE,
     STT_FORMAT_VERBATIM,
     STT_LANGUAGE_MAP,
     STT_SUPPORTED_FORMATS,
     STT_SUPPORTED_SAMPLE_RATES,
+    STT_SUPPORTED_LANGUAGES,
+    SUPPORTED_BITRATES,
+    SUPPORTED_CONTAINERS,
+    SUPPORTED_ENCODINGS,
+    SUPPORTED_MODELS,
     SUPPORTED_VOICES,
     TTS_LANGUAGE_MAP,
     TTS_SUPPORTED_SAMPLE_RATES,
@@ -37,11 +43,18 @@ __all__ = [
     "GNANI_TTS_REST_URL",
     "GNANI_TTS_SSE_URL",
     "GNANI_TTS_WS_URL",
+    "STREAM_CHUNK_BYTES",
+    "STREAM_SUPPORTED_LANGUAGES",
     "STT_FORMAT_TRANSCRIBE",
     "STT_FORMAT_VERBATIM",
     "STT_LANGUAGE_MAP",
     "STT_SUPPORTED_FORMATS",
     "STT_SUPPORTED_SAMPLE_RATES",
+    "STT_SUPPORTED_LANGUAGES",
+    "SUPPORTED_BITRATES",
+    "SUPPORTED_CONTAINERS",
+    "SUPPORTED_ENCODINGS",
+    "SUPPORTED_MODELS",
     "SUPPORTED_VOICES",
     "TTS_LANGUAGE_MAP",
     "TTS_SUPPORTED_SAMPLE_RATES",

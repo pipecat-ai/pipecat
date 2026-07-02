@@ -11,7 +11,7 @@
 
   **Features:**
   - Support for 12 Indian languages (Assamese, Bengali, English-India, Gujarati, Hindi, Kannada, Malayalam, Marathi, Odia, Punjabi, Tamil, Telugu)
-  - 6 voices: Karan, Simran, Nara, Riya, Viraj, Raju
+  - 10 voices: Karan, Simran, Nara, Riya, Viraj, Raju, Pranav, Kaveri, Shubhra, Deepak
   - Dynamic language switching via `set_language()`
   - Built-in metrics (TTFB and processing time)
   - Traced transcription (`@traced_stt`) and synthesis (`@traced_tts`)

@@ -6,17 +6,22 @@
 
 """Gnani Vachana speech AI service integrations for Pipecat.
 
-This module re-exports services from the ``pipecat-gnani`` package so that
-they are available under the ``pipecat.services.gnani`` namespace.
+Re-exports services from the ``pipecat-gnani`` package under the
+``pipecat.services.gnani`` namespace.
 
-STT Services:
-- GnaniHttpSTTService: REST-based file transcription (requires VAD)
-- GnaniSTTService: WebSocket streaming speech-to-text with VAD
+STT services:
 
-TTS Services:
-- GnaniHttpTTSService: REST-based text-to-speech
-- GnaniSSETTSService: SSE streaming text-to-speech (lower latency)
-- GnaniTTSService: WebSocket streaming text-to-speech with interruption handling
+- GnaniHttpSTTService — REST-based file transcription (requires VAD)
+- GnaniSTTService — WebSocket streaming speech-to-text with VAD
+
+TTS services:
+
+- GnaniHttpTTSService — REST-based text-to-speech
+- GnaniSSETTSService — SSE streaming text-to-speech (lower latency)
+- GnaniTTSService — WebSocket streaming synthesis with interruption handling
+
+Voices: Karan (default), Simran, Nara, Riya, Viraj, Raju, Pranav, Kaveri,
+Shubhra, Deepak.
 
 API docs: https://docs.gnani.ai/api/introduction/introduction
 """
@@ -40,15 +45,15 @@ from pipecat_gnani import (
 __all__ = [
     "GnaniHttpSTTService",
     "GnaniHttpSTTSettings",
-    "GnaniSTTService",
-    "GnaniSTTSettings",
     "GnaniHttpTTSService",
     "GnaniHttpTTSSettings",
     "GnaniSSETTSService",
     "GnaniSSETTSSettings",
+    "GnaniSTTService",
+    "GnaniSTTSettings",
     "GnaniTTSService",
     "GnaniTTSSettings",
-    "SUPPORTED_VOICES",
-    "STT_FORMAT_VERBATIM",
     "STT_FORMAT_TRANSCRIBE",
+    "STT_FORMAT_VERBATIM",
+    "SUPPORTED_VOICES",
 ]

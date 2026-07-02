@@ -7,6 +7,7 @@
 
 import os
 
+import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -23,8 +24,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.gnani.stt import GnaniSTTService
+from pipecat.services.gnani.tts import GnaniHttpTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -58,16 +59,20 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot with Gnani STT")
 
+    gnani_api_key = os.getenv("GNANI_API_KEY")
+
     stt = GnaniSTTService(
-        api_key=os.getenv("GNANI_API_KEY"),
+        api_key=gnani_api_key,
         settings=GnaniSTTService.Settings(
             language=Language.EN_IN,
         ),
     )
 
-    tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",
+    tts = GnaniHttpTTSService(
+        api_key=gnani_api_key,
+        aiohttp_session=aiohttp.ClientSession(),
+        voice_id="Karan",
+        sample_rate=16000,
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
