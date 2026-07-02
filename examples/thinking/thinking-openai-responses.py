@@ -70,12 +70,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAIResponsesLLMService.Settings(
             # The default model (gpt-5.4) is reasoning-capable. Turn reasoning on
-            # with an effort level, and set summary="auto" to surface a readable
-            # summary of the model's reasoning (logged via on_assistant_thought
-            # below); note some models require a verified OpenAI organization to
-            # receive summaries.
+            # with an effort level and set summary="auto" to surface a readable
+            # summary of the model's thinking (logged via on_assistant_thought
+            # below). We use "medium" here so a summary reliably appears: at the
+            # service default of "low", the model reasons only when a turn calls
+            # for it, so ordinary prompts often produce no summary at all. Note
+            # that some models require a verified OpenAI organization to return
+            # summaries.
             reasoning=OpenAIResponsesLLMService.ReasoningConfig(
-                effort="low",
+                effort="medium",
                 summary="auto",
             ),
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",

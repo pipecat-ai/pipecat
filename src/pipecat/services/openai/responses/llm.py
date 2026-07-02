@@ -99,8 +99,10 @@ class OpenAIResponsesReasoningConfig(BaseModel):
 
     Parameters:
         effort: How much reasoning effort the model applies. ``None`` (the
-            default) leaves the field unset, so the model's own default applies.
-            ``"none"`` disables reasoning for latency-sensitive use.
+            default) leaves the field unset, so the model's own default applies;
+            ``"none"`` disables reasoning for latency-sensitive use. At lower
+            efforts (e.g. ``"low"``) the model reasons only when a turn calls for
+            it, so simple prompts may produce no summary at all.
         summary: Verbosity of the reasoning summary to return. ``None`` (the
             default) requests no summary. Any summary is surfaced via thought
             frames (the ``on_assistant_thought`` event); the encrypted reasoning
