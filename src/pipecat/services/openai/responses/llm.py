@@ -120,9 +120,9 @@ class OpenAIResponsesLLMSettings(LLMSettings):
     Parameters:
         max_completion_tokens: Maximum completion tokens to generate.
         reasoning: Reasoning configuration for reasoning-capable models. ``None``
-            (the default) leaves reasoning unconfigured — the service applies a
-            low reasoning effort by default on models that would otherwise
-            reason, to keep latency low for real-time use.
+            (the default) leaves reasoning unconfigured — the service then applies
+            a low reasoning effort to the gpt-5.x series (including the default
+            model) and leaves other models at their provider default.
     """
 
     # Override inherited LLMSettings fields to also accept openai's NotGiven
@@ -313,9 +313,8 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             # turns, preserving reasoning context across the conversation.
             params["include"] = ["reasoning.encrypted_content"]
         else:
-            # No reasoning configured: apply a low default on models that would
-            # otherwise reason, to keep latency low for real-time use.
-            self._apply_default_reasoning(params)
+            # No reasoning configured: apply the low default (gpt-5.x series only).
+            self._maybe_apply_default_reasoning(params)
 
         # Extra settings
         params.update(self._settings.extra)
@@ -395,38 +394,26 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
     # -- reasoning ------------------------------------------------------------
 
-    def _apply_default_reasoning(self, params: dict):
-        """Apply a low default reasoning effort on models that would otherwise reason.
+    def _maybe_apply_default_reasoning(self, params: dict):
+        """Default the gpt-5.x series to a low reasoning effort.
 
-        Reasoning-capable models (including our default, ``gpt-5.4``) can spend
-        significant reasoning effort, adding latency ill-suited to real-time
-        voice. When the caller hasn't configured ``reasoning``, request a low
-        effort for models known to accept it — keeping latency down while
-        retaining some reasoning. Mirrors Gemini's ``_maybe_unset_thinking_budget``.
+        The gpt-5.x series is the first "mainline" OpenAI series to support
+        reasoning (gpt-4.x and earlier don't reason at all). When the caller
+        hasn't configured ``reasoning``, request a low effort for it — this
+        includes the default model, ``gpt-5.4`` — keeping latency low for
+        real-time voice while retaining some reasoning. Every other model is left
+        to the provider's own default: the reasoning-only o-series reasons at its
+        own default (and doesn't uniformly accept ``effort="low"`` anyway — e.g.
+        ``o1-mini``), and non-reasoning models don't reason at all. Mirrors
+        Gemini's ``_maybe_unset_thinking_budget``.
 
         Args:
             params: The response params dict (modified in place).
         """
         model = assert_given(self._settings.model)
-        if not model or not self._model_supports_default_reasoning(model):
-            return
-        params["reasoning"] = {"effort": "low"}
-
-    @staticmethod
-    def _model_supports_default_reasoning(model: str) -> bool:
-        """Whether a default reasoning effort should be applied to the model.
-
-        The ``gpt-5.x`` reasoning family accepts a reasoning effort (e.g.
-        ``gpt-5.4``, ``gpt-5.5``); ``gpt-4.1`` rejects the ``reasoning`` param,
-        and ``gpt-5-chat`` and the o-series are left to their own defaults.
-
-        Args:
-            model: The model identifier.
-
-        Returns:
-            True if a low default reasoning effort should be applied.
-        """
-        return model.startswith("gpt-5") and "chat" not in model
+        # ``gpt-5-chat`` is a non-reasoning variant of the series, so exclude it.
+        if model and model.startswith("gpt-5") and "chat" not in model:
+            params["reasoning"] = {"effort": "low"}
 
     async def _append_reasoning_message(
         self, item_id: str | None, summary: list[dict], encrypted_content: str | None
