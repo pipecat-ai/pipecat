@@ -120,9 +120,9 @@ class OpenAIResponsesLLMSettings(LLMSettings):
     Parameters:
         max_completion_tokens: Maximum completion tokens to generate.
         reasoning: Reasoning configuration for reasoning-capable models. ``None``
-            (the default) leaves reasoning unconfigured — the service disables it
-            by default on models that would otherwise reason, to keep latency low
-            for real-time use.
+            (the default) leaves reasoning unconfigured — the service applies a
+            low reasoning effort by default on models that would otherwise
+            reason, to keep latency low for real-time use.
     """
 
     # Override inherited LLMSettings fields to also accept openai's NotGiven
@@ -313,9 +313,9 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             # turns, preserving reasoning context across the conversation.
             params["include"] = ["reasoning.encrypted_content"]
         else:
-            # No reasoning configured: default it off on models that would
+            # No reasoning configured: apply a low default on models that would
             # otherwise reason, to keep latency low for real-time use.
-            self._maybe_disable_reasoning(params)
+            self._apply_default_reasoning(params)
 
         # Extra settings
         params.update(self._settings.extra)
@@ -395,37 +395,36 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
     # -- reasoning ------------------------------------------------------------
 
-    def _maybe_disable_reasoning(self, params: dict):
-        """Default reasoning off on models that would otherwise reason.
+    def _apply_default_reasoning(self, params: dict):
+        """Apply a low default reasoning effort on models that would otherwise reason.
 
         Reasoning-capable models (including our default, ``gpt-5.4``) can spend
-        reasoning tokens before responding, adding latency ill-suited to
-        real-time voice. When the caller hasn't configured ``reasoning``, request
-        ``effort="none"`` for models known to support it, so reasoning stays off
-        unless it is explicitly opted into. Mirrors Gemini's
-        ``_maybe_unset_thinking_budget``.
+        significant reasoning effort, adding latency ill-suited to real-time
+        voice. When the caller hasn't configured ``reasoning``, request a low
+        effort for models known to accept it — keeping latency down while
+        retaining some reasoning. Mirrors Gemini's ``_maybe_unset_thinking_budget``.
 
         Args:
             params: The response params dict (modified in place).
         """
         model = assert_given(self._settings.model)
-        if not model or not self._model_supports_reasoning_none(model):
+        if not model or not self._model_supports_default_reasoning(model):
             return
-        params["reasoning"] = {"effort": "none"}
+        params["reasoning"] = {"effort": "low"}
 
     @staticmethod
-    def _model_supports_reasoning_none(model: str) -> bool:
-        """Whether a model accepts ``reasoning.effort="none"``.
+    def _model_supports_default_reasoning(model: str) -> bool:
+        """Whether a default reasoning effort should be applied to the model.
 
-        The ``gpt-5.x`` reasoning family accepts it (e.g. ``gpt-5.4``,
-        ``gpt-5.5``); the ``gpt-5-chat`` non-reasoning variant and the o-series
-        do not.
+        The ``gpt-5.x`` reasoning family accepts a reasoning effort (e.g.
+        ``gpt-5.4``, ``gpt-5.5``); ``gpt-4.1`` rejects the ``reasoning`` param,
+        and ``gpt-5-chat`` and the o-series are left to their own defaults.
 
         Args:
             model: The model identifier.
 
         Returns:
-            True if ``reasoning.effort="none"`` is a valid value for the model.
+            True if a low default reasoning effort should be applied.
         """
         return model.startswith("gpt-5") and "chat" not in model
 
