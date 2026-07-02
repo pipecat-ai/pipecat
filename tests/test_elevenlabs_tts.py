@@ -8,6 +8,7 @@
 
 import json
 import unittest
+import unittest.mock
 from typing import Any
 
 import pytest
@@ -16,6 +17,8 @@ from websockets.protocol import State
 from pipecat.services.elevenlabs.tts import (
     ElevenLabsHttpTTSService,
     ElevenLabsTTSService,
+    PronunciationDictionaryLocator,
+    _resolve_prefer_normalized,
     _select_alignment,
     _strip_utterance_leading_spaces,
     _word_timestamps_include_inter_frame_spaces,
@@ -237,6 +240,102 @@ def test_select_alignment_returns_none_when_both_missing():
         )
         is None
     )
+
+
+def test_resolve_prefer_normalized_defaults_to_dictionary_presence():
+    locator = PronunciationDictionaryLocator(
+        pronunciation_dictionary_id="dict_id", version_id="version_id"
+    )
+    assert _resolve_prefer_normalized(None, None) is False
+    assert _resolve_prefer_normalized(None, []) is False
+    assert _resolve_prefer_normalized(None, [locator]) is True
+
+
+def test_resolve_prefer_normalized_explicit_override_wins():
+    locator = PronunciationDictionaryLocator(
+        pronunciation_dictionary_id="dict_id", version_id="version_id"
+    )
+    # Opt out: keep original alignment text even with a dictionary configured.
+    assert _resolve_prefer_normalized(False, [locator]) is False
+    # Opt in: prefer normalized even without a dictionary.
+    assert _resolve_prefer_normalized(True, None) is True
+
+
+def test_prefer_normalized_resolved_at_init():
+    locator = PronunciationDictionaryLocator(
+        pronunciation_dictionary_id="dict_id", version_id="version_id"
+    )
+    assert ElevenLabsTTSService(api_key="test-key")._prefer_normalized is False
+    assert (
+        ElevenLabsTTSService(
+            api_key="test-key", pronunciation_dictionary_locators=[locator]
+        )._prefer_normalized
+        is True
+    )
+    assert (
+        ElevenLabsTTSService(
+            api_key="test-key",
+            pronunciation_dictionary_locators=[locator],
+            prefer_normalized_alignment=False,
+        )._prefer_normalized
+        is False
+    )
+    assert (
+        ElevenLabsTTSService(
+            api_key="test-key", prefer_normalized_alignment=True
+        )._prefer_normalized
+        is True
+    )
+
+
+def test_prefer_normalized_via_deprecated_input_params():
+    locator = PronunciationDictionaryLocator(
+        pronunciation_dictionary_id="dict_id", version_id="version_id"
+    )
+    with pytest.warns(DeprecationWarning):
+        service = ElevenLabsTTSService(
+            api_key="test-key",
+            params=ElevenLabsTTSService.InputParams(
+                pronunciation_dictionary_locators=[locator],
+                prefer_normalized_alignment=False,
+            ),
+        )
+    assert service._prefer_normalized is False
+
+
+def test_http_service_prefer_normalized_resolved_at_init():
+    locator = PronunciationDictionaryLocator(
+        pronunciation_dictionary_id="dict_id", version_id="version_id"
+    )
+    session = unittest.mock.MagicMock()
+    assert (
+        ElevenLabsHttpTTSService(api_key="test-key", aiohttp_session=session)._prefer_normalized
+        is False
+    )
+    assert (
+        ElevenLabsHttpTTSService(
+            api_key="test-key",
+            aiohttp_session=session,
+            pronunciation_dictionary_locators=[locator],
+        )._prefer_normalized
+        is True
+    )
+    assert (
+        ElevenLabsHttpTTSService(
+            api_key="test-key",
+            aiohttp_session=session,
+            pronunciation_dictionary_locators=[locator],
+            prefer_normalized_alignment=False,
+        )._prefer_normalized
+        is False
+    )
+    with pytest.warns(DeprecationWarning):
+        service = ElevenLabsHttpTTSService(
+            api_key="test-key",
+            aiohttp_session=session,
+            params=ElevenLabsHttpTTSService.InputParams(prefer_normalized_alignment=True),
+        )
+    assert service._prefer_normalized is True
 
 
 def test_select_alignment_works_with_http_field_names():
