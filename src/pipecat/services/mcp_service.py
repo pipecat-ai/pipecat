@@ -6,6 +6,7 @@
 
 """MCP (Model Context Protocol) client for integrating external tools with LLMs."""
 
+import asyncio
 import json
 from collections.abc import Callable
 from contextlib import AsyncExitStack
@@ -18,6 +19,7 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.pipeline.llm_switcher import LLMSwitcher
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.deprecation import deprecated
 
 try:
     from mcp import ClientSession, StdioServerParameters
@@ -41,11 +43,20 @@ class MCPClient(BaseObject):
     to LLMs. Supports stdio, SSE, and streamable HTTP server connections with
     automatic tool registration and schema conversion.
 
-    The client maintains a persistent connection to the MCP server. It must
-    be used as an async context manager or explicitly started and closed::
+    The client maintains a persistent connection to the MCP server, opened on
+    the first call to :meth:`tools` (or ahead of time via :meth:`start`) and
+    released with :meth:`close`. The tool schemas returned by :meth:`tools`
+    carry their call handlers, so the LLM service registers them automatically
+    when they are advertised through an ``LLMContext``::
 
-        async with MCPClient(server_params=...) as mcp:
-            tools = await mcp.register_tools(llm)
+        mcp = MCPClient(server_params=...)
+        context = LLMContext(messages=[...], tools=await mcp.tools())
+        ...
+        await mcp.close()  # e.g. from an on_client_disconnected handler
+
+    :meth:`start` and :meth:`close` may be called from different tasks — the
+    session is owned by a dedicated internal task. Scoping the client with
+    ``async with MCPClient(...)`` is also supported.
 
     Raises:
         TypeError: If server_params is not a supported parameter type.
@@ -56,6 +67,7 @@ class MCPClient(BaseObject):
         server_params: ServerParameters,
         tools_filter: list[str] | None = None,
         tools_output_filters: dict[str, Callable[[Any], Any]] | None = None,
+        tools_arguments: dict[str, dict[str, Any]] | None = None,
         **kwargs,
     ):
         """Initialize the MCP client with server parameters.
@@ -65,14 +77,26 @@ class MCPClient(BaseObject):
             tools_filter: Optional list of tool names to register. If None, all tools are registered.
             tools_output_filters: Optional dict mapping tool names to filter functions that process tool outputs.
                                   Each filter function receives the raw tool output (any type) and returns the processed output (any type).
+            tools_arguments: Optional dict mapping tool names to fixed arguments that are
+                             merged into every call of that tool (overriding any
+                             model-supplied values). The fixed parameter names are removed
+                             from the advertised tool schema so the LLM never sees them.
             **kwargs: Additional arguments passed to the parent BaseObject.
         """
         super().__init__(**kwargs)
         self._server_params = server_params
         self._tools_filter = tools_filter
         self._tools_output_filters = tools_output_filters or {}
+        self._tools_arguments = tools_arguments or {}
         self._exit_stack: AsyncExitStack | None = None
         self._active_session: ClientSession | None = None
+        # The MCP session is anyio-task-bound: it must be opened and closed in the
+        # same task. start() and close() can be called from different tasks, so a
+        # dedicated owner task (_run_session) holds the session open and tears it
+        # down on signal.
+        self._session_task: asyncio.Task | None = None
+        self._closing: asyncio.Event | None = None
+        self._start_lock = asyncio.Lock()
 
         if not isinstance(
             server_params,
@@ -86,9 +110,9 @@ class MCPClient(BaseObject):
     async def start(self) -> None:
         """Start a persistent connection to the MCP server.
 
-        Opens the transport and initializes the MCP session. The session
-        is reused for all subsequent tool calls and schema requests until
-        close() is called.
+        Opens the transport and initializes the MCP session. The session is
+        reused for all subsequent tool calls and schema requests until close()
+        is called. Idempotent, and called automatically by :meth:`tools`.
 
         Can also be used via async context manager::
 
@@ -98,8 +122,27 @@ class MCPClient(BaseObject):
         if self._active_session:
             return
 
-        # We manage the exit stack manually (not via `async with`) so we can
-        # clean up partial resources on failure before assigning to self.
+        async with self._start_lock:
+            if self._active_session:
+                return
+            self._closing = asyncio.Event()
+            ready: asyncio.Future = asyncio.get_running_loop().create_future()
+            self._session_task = asyncio.create_task(
+                self._run_session(ready, self._closing), name=f"{self}::session"
+            )
+            try:
+                await ready  # resolves once connected; re-raises a connect failure
+            except Exception:
+                self._session_task = None  # let a later call retry cleanly
+                raise
+
+    async def _run_session(self, ready: asyncio.Future, closing: asyncio.Event) -> None:
+        """Own the MCP session for its whole lifetime, in a single task.
+
+        Opens the connection, signals ``ready``, then holds the session open
+        until :meth:`close` sets the closing event — so open and close happen
+        in the same task, as the anyio-based MCP transports require.
+        """
         exit_stack = AsyncExitStack()
         await exit_stack.__aenter__()
 
@@ -118,23 +161,33 @@ class MCPClient(BaseObject):
 
             session = await exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
             await session.initialize()
-
-            self._exit_stack = exit_stack
-            self._active_session = session
-
-        except Exception:
+        except Exception as e:
             await exit_stack.aclose()
-            raise
+            ready.set_exception(e)
+            return
+
+        self._exit_stack = exit_stack
+        self._active_session = session
+        ready.set_result(None)
+        try:
+            await closing.wait()
+        finally:
+            self._active_session = None
+            self._exit_stack = None
+            await exit_stack.aclose()
 
     async def close(self) -> None:
         """Close the persistent MCP connection.
 
-        Safe to call multiple times or without having called start().
+        Safe to call multiple times, without having called start(), and from a
+        different task than the one that called start().
         """
-        self._active_session = None
-        if self._exit_stack:
-            await self._exit_stack.aclose()
-            self._exit_stack = None
+        if self._session_task is None:
+            return
+        task, self._session_task = self._session_task, None
+        if self._closing is not None:
+            self._closing.set()
+        await task
 
     async def __aenter__(self):
         await self.start()
@@ -143,14 +196,38 @@ class MCPClient(BaseObject):
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
 
+    async def tools(self) -> ToolsSchema:
+        """Get the available MCP tools, ready for LLM auto-registration.
+
+        Starts the server connection if needed, then returns a ToolsSchema
+        whose function schemas carry their call handlers, so the LLM service
+        registers them automatically when the context advertises its tools::
+
+            context = LLMContext(messages=[...], tools=await mcp.tools())
+
+        Call :meth:`close` when the session ends (e.g. from a transport
+        ``on_client_disconnected`` handler).
+
+        Returns:
+            A ToolsSchema containing the available tools with handlers attached.
+        """
+        await self.start()
+        session = self._ensure_connected()
+        return await self._list_tools_helper(session, attach_handlers=True)
+
+    @deprecated(
+        "`MCPClient.register_tools` is deprecated since 1.5.0 and will be removed in 2.0.0. "
+        "Use `MCPClient.tools` instead."
+    )
     async def register_tools(self, llm: LLMService | LLMSwitcher) -> ToolsSchema:
         """Register all available MCP tools with an LLM service.
 
+        .. deprecated:: 1.5.0
+            Use :meth:`tools` instead — pass its result to ``LLMContext(tools=...)``
+            and the handlers register automatically. Will be removed in 2.0.0.
+
         Discovers available tools from the active session, converts their
         schemas to Pipecat format, and registers them with the LLM service.
-
-        This is the equivalent of calling get_tools_schema() followed by
-        register_tools_schema().
 
         Args:
             llm: The Pipecat LLM service to register tools with.
@@ -158,8 +235,10 @@ class MCPClient(BaseObject):
         Returns:
             A ToolsSchema containing all successfully registered tools.
         """
-        tools_schema = await self.get_tools_schema()
-        await self.register_tools_schema(tools_schema, llm)
+        session = self._ensure_connected()
+        tools_schema = await self._list_tools_helper(session)
+        for function_schema in tools_schema.standard_tools:
+            llm.register_function(function_schema.name, self._tool_wrapper)
         return tools_schema
 
     def _ensure_connected(self) -> ClientSession:
@@ -171,22 +250,36 @@ class MCPClient(BaseObject):
             )
         return self._active_session
 
+    @deprecated(
+        "`MCPClient.get_tools_schema` is deprecated since 1.5.0 and will be removed in 2.0.0. "
+        "Use `MCPClient.tools` instead."
+    )
     async def get_tools_schema(self) -> ToolsSchema:
         """Get the schema of all available MCP tools without registering them.
+
+        .. deprecated:: 1.5.0
+            Use :meth:`tools` instead. Will be removed in 2.0.0.
 
         Requires the client to be started via start() or async with.
 
         Returns:
-            A ToolsSchema containing all available tools. This can be used for
-            subsequent registration using register_tools_schema().
+            A ToolsSchema containing all available tools.
         """
         session = self._ensure_connected()
         return await self._list_tools_helper(session)
 
+    @deprecated(
+        "`MCPClient.register_tools_schema` is deprecated since 1.5.0 and will be removed in "
+        "2.0.0. Use `MCPClient.tools` instead."
+    )
     async def register_tools_schema(
         self, tools_schema: ToolsSchema, llm: LLMService | LLMSwitcher
     ) -> None:
-        """Register the MCP tools (previously obtained from get_tools_schema()) with the LLM service.
+        """Register previously obtained MCP tools with the LLM service.
+
+        .. deprecated:: 1.5.0
+            Use :meth:`tools` instead — its schemas carry handlers that
+            register automatically. Will be removed in 2.0.0.
 
         Args:
             tools_schema: The ToolsSchema to register with the LLM service.
@@ -196,13 +289,18 @@ class MCPClient(BaseObject):
             llm.register_function(function_schema.name, self._tool_wrapper)
 
     def _convert_mcp_schema_to_pipecat(
-        self, tool_name: str, tool_schema: dict[str, Any]
+        self,
+        tool_name: str,
+        tool_schema: dict[str, Any],
+        handler: Callable | None = None,
     ) -> FunctionSchema:
         """Convert an mcp tool schema to Pipecat's FunctionSchema format.
 
         Args:
             tool_name: The name of the tool
             tool_schema: The mcp tool schema
+            handler: Optional call handler to attach for LLM auto-registration.
+
         Returns:
             A FunctionSchema instance
         """
@@ -212,11 +310,18 @@ class MCPClient(BaseObject):
         properties = tool_schema["input_schema"].get("properties", {})
         required = tool_schema["input_schema"].get("required", [])
 
+        fixed = self._tools_arguments.get(tool_name)
+        if fixed:
+            # Fixed arguments are injected on every call, so hide them from the model.
+            properties = {k: v for k, v in properties.items() if k not in fixed}
+            required = [r for r in required if r not in fixed]
+
         schema = FunctionSchema(
             name=tool_name,
             description=tool_schema["description"],
             properties=properties,
             required=required,
+            handler=handler,
         )
 
         logger.trace(f"Converted schema: {json.dumps(schema.to_default_dict(), indent=2)}")
@@ -235,7 +340,35 @@ class MCPClient(BaseObject):
             params.result_callback,
         )
 
+    async def call_tool(self, function_name: str, arguments: dict[str, Any] | None) -> str:
+        """Call an MCP tool by name and return its text result.
+
+        Requires the client to be started (via :meth:`start`, :meth:`tools`, or
+        ``async with``). Useful for callers that invoke a known tool directly
+        rather than through LLM function-call registration. Configured
+        ``tools_arguments`` are applied here too.
+
+        Args:
+            function_name: The MCP tool to call.
+            arguments: Arguments to pass to the tool.
+
+        Returns:
+            The tool's text output with any configured output filter applied, or
+            a fallback message when the call yields no text.
+        """
+        session = self._ensure_connected()
+        return await self._call_tool_text(session, function_name, arguments)
+
     async def _call_tool(self, session, function_name, arguments, result_callback):
+        response = await self._call_tool_text(session, function_name, arguments)
+        await result_callback(response)
+
+    async def _call_tool_text(self, session, function_name, arguments) -> str:
+        fixed = self._tools_arguments.get(function_name)
+        if fixed:
+            # Fixed arguments win over model-supplied values.
+            arguments = {**(arguments or {}), **fixed}
+
         logger.debug(f"Calling mcp tool '{function_name}'")
         results = None
         try:
@@ -273,13 +406,21 @@ class MCPClient(BaseObject):
         else:
             response = "Sorry, could not call the mcp tool"
 
-        await result_callback(response)
+        return response
 
-    async def _list_tools_helper(self, session):
+    async def _list_tools_helper(self, session, attach_handlers: bool = False):
         available_tools = await session.list_tools()
         tool_schemas: list[FunctionSchema] = []
 
         logger.debug(f"Found {len(available_tools.tools)} available tools")
+
+        available_names = {tool.name for tool in available_tools.tools}
+        unknown = [name for name in self._tools_arguments if name not in available_names]
+        if unknown:
+            logger.warning(
+                f"{self} tools_arguments configured for tool(s) the server does not "
+                f"advertise: {', '.join(unknown)}"
+            )
 
         for tool in available_tools.tools:
             tool_name = tool.name
@@ -297,6 +438,7 @@ class MCPClient(BaseObject):
                 function_schema = self._convert_mcp_schema_to_pipecat(
                     tool_name,
                     {"description": tool.description, "input_schema": tool.inputSchema},
+                    handler=self._tool_wrapper if attach_handlers else None,
                 )
 
                 # Add to list of schemas

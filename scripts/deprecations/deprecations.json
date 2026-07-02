@@ -2269,6 +2269,39 @@
       "location": "pipecat/services/lmnt/tts.py"
     },
     {
+      "subject": "MCPClient.get_tools_schema",
+      "module": "pipecat.services.mcp_service",
+      "kind": "method",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "MCPClient.tools",
+      "message": "`MCPClient.get_tools_schema` is deprecated since 1.5.0 and will be removed in 2.0.0. Use `MCPClient.tools` instead.",
+      "location": "pipecat/services/mcp_service.py"
+    },
+    {
+      "subject": "MCPClient.register_tools",
+      "module": "pipecat.services.mcp_service",
+      "kind": "method",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "MCPClient.tools",
+      "message": "`MCPClient.register_tools` is deprecated since 1.5.0 and will be removed in 2.0.0. Use `MCPClient.tools` instead.",
+      "location": "pipecat/services/mcp_service.py"
+    },
+    {
+      "subject": "MCPClient.register_tools_schema",
+      "module": "pipecat.services.mcp_service",
+      "kind": "method",
+      "deprecated_in": "1.5.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "MCPClient.tools",
+      "message": "`MCPClient.register_tools_schema` is deprecated since 1.5.0 and will be removed in 2.0.0. Use `MCPClient.tools` instead.",
+      "location": "pipecat/services/mcp_service.py"
+    },
+    {
       "subject": "Mem0MemoryService.InputParams.api_version",
       "module": "pipecat.services.mem0.memory",
       "kind": "parameter",
