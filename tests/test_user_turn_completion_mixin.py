@@ -13,8 +13,10 @@ from pipecat.frames.frames import (
     LLMMarkerFrame,
     LLMTextFrame,
     UserTurnInferenceCompletedFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_completion_mixin import (
@@ -166,6 +168,59 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         self.assertFalse(processor._turn_complete_found)
         self.assertEqual(processor._turn_text_buffer, "")
         self.assertFalse(processor._turn_suppressed)
+
+    async def test_process_frame_tracks_live_vad_state(self):
+        """VAD speaking frames flip the live ``_user_speaking`` flag."""
+        processor = MockProcessor()
+
+        # Patch the FrameProcessor-level handler so no live pipeline is needed;
+        # the mixin's own VAD tracking runs before the super() call.
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            self.assertFalse(processor._user_speaking)
+            await processor.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+            self.assertTrue(processor._user_speaking)
+            await processor.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+            self.assertFalse(processor._user_speaking)
+
+    async def test_complete_marker_suppressed_while_user_speaking(self):
+        """A ✓ that resolves while the user is speaking is suppressed.
+
+        Covers the LLM-marker path of #4707: the spoken response is pushed by
+        ``_push_turn_text`` itself, so the VAD re-validation must live here and
+        not only in the stop strategy. While the user is speaking the stale
+        response is dropped, no completion is broadcast, and the turn stays
+        open; once the user is silent the next inference responds normally.
+        """
+        processor = MockProcessor()
+
+        pushed_frames = []
+        processor.push_frame = AsyncMock(
+            side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)
+        )
+
+        # User has resumed speaking by the time the ✓ inference lands.
+        processor._user_speaking = True
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Hello there!")
+
+        # Nothing reaches TTS, no completion is broadcast, and the turn is not
+        # marked complete — it stays open for re-evaluation.
+        self.assertEqual([f for f in pushed_frames if isinstance(f, LLMTextFrame)], [])
+        self.assertEqual(
+            [f for f in pushed_frames if isinstance(f, UserTurnInferenceCompletedFrame)],
+            [],
+        )
+        self.assertFalse(processor._turn_complete_found)
+
+        # User goes silent; the response ends and the next inference re-evaluates
+        # the now-valid ✓ and responds normally.
+        processor._user_speaking = False
+        await processor._turn_reset()
+        pushed_frames.clear()
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Hello there!")
+
+        text_frames = [f for f in pushed_frames if isinstance(f, LLMTextFrame)]
+        self.assertEqual(len(text_frames), 1)
+        self.assertEqual(text_frames[0].text, "Hello there!")
 
 
 class MockLLMService(LLMService):

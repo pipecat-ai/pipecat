@@ -14,10 +14,15 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    UserTurnInferenceCompletedFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.turns.user_stop import ExternalUserTurnStopStrategy, SpeechTimeoutUserTurnStopStrategy
+from pipecat.turns.user_stop import (
+    ExternalUserTurnCompletionStopStrategy,
+    ExternalUserTurnStopStrategy,
+    SpeechTimeoutUserTurnStopStrategy,
+)
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
 AGGREGATION_TIMEOUT = 0.1
@@ -783,6 +788,68 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.process_frame(UserStoppedSpeakingFrame())
         self.assertTrue(should_start)
+
+
+class TestExternalUserTurnCompletionStopStrategy(unittest.IsolatedAsyncioTestCase):
+    async def test_finalizes_when_user_not_speaking(self):
+        """A completion frame finalizes the turn when the user is silent."""
+        strategy = ExternalUserTurnCompletionStopStrategy()
+
+        finalized = 0
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal finalized
+            finalized += 1
+
+        await strategy.process_frame(UserTurnInferenceCompletedFrame())
+        self.assertEqual(finalized, 1)
+
+    async def test_does_not_finalize_while_user_speaking(self):
+        """A stale ✓ that resolves after the user resumes must not finalize the turn.
+
+        Reproduces issue #4707 (talk-over): the LLM ✓ arrives with some
+        latency, so the user may have resumed speaking in that window. The
+        external finalizer must re-validate against live VAD instead of
+        finalizing unconditionally, otherwise the bot speaks over the user.
+        """
+        strategy = ExternalUserTurnCompletionStopStrategy()
+
+        finalized = 0
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal finalized
+            finalized += 1
+
+        # User resumes speaking before the (now stale) ✓ resolves.
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+
+        # Stale completion arrives while the user is acoustically speaking.
+        await strategy.process_frame(UserTurnInferenceCompletedFrame())
+
+        # Turn must stay open: no finalization while the user is speaking.
+        self.assertEqual(finalized, 0)
+
+    async def test_finalizes_after_user_stops_speaking_again(self):
+        """Once the user stops again, a later completion frame finalizes normally."""
+        strategy = ExternalUserTurnCompletionStopStrategy()
+
+        finalized = 0
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal finalized
+            finalized += 1
+
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        await strategy.process_frame(UserTurnInferenceCompletedFrame())
+        self.assertEqual(finalized, 0)
+
+        # User stops; a fresh completion now finalizes.
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+        await strategy.process_frame(UserTurnInferenceCompletedFrame())
+        self.assertEqual(finalized, 1)
 
 
 if __name__ == "__main__":
