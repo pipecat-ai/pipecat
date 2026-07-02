@@ -146,7 +146,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         default_settings = self.Settings(
-            model="gpt-4.1",
+            model="gpt-5.4",
             system_instruction=None,
             frequency_penalty=None,
             presence_penalty=None,
@@ -370,7 +370,7 @@ class OpenAIResponsesLLMService(
         llm = OpenAIResponsesLLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
             settings=OpenAIResponsesLLMService.Settings(
-                model="gpt-4.1",
+                model="gpt-5.4",
                 system_instruction="You are a helpful assistant.",
             ),
         )
@@ -949,7 +949,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
         llm = OpenAIResponsesHttpLLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
             settings=OpenAIResponsesHttpLLMService.Settings(
-                model="gpt-4.1",
+                model="gpt-5.4",
                 system_instruction="You are a helpful assistant.",
             ),
         )
