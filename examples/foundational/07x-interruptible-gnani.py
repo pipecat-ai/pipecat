@@ -4,17 +4,19 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
+
 import os
 
+import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.evals.transport import EvalTransportParams
-from pipecat.frames.frames import LLMRunFrame, STTUpdateSettingsFrame
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -22,75 +24,91 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.gladia.stt import GladiaSTTService
+from pipecat.services.gnani.stt import GnaniSTTService
+from pipecat.services.gnani.tts import GnaniHttpTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.workers.runner import WorkerRunner
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
+
 transport_params = {
-    "eval": lambda: EvalTransportParams(
-        audio_in_enabled=True,
-        audio_out_enabled=True,
-    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
 }
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot with Gnani STT")
 
-    stt = GladiaSTTService(api_key=os.environ["GLADIA_API_KEY"])
+    gnani_api_key = os.getenv("GNANI_API_KEY")
 
-    tts = CartesiaTTSService(
-        api_key=os.environ["CARTESIA_API_KEY"],
-        settings=CartesiaTTSService.Settings(
-            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+    stt = GnaniSTTService(
+        api_key=gnani_api_key,
+        settings=GnaniSTTService.Settings(
+            language=Language.EN_IN,
         ),
     )
 
-    llm = OpenAILLMService(
-        api_key=os.environ["OPENAI_API_KEY"],
-        settings=OpenAILLMService.Settings(
-            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
-        ),
+    tts = GnaniHttpTTSService(
+        api_key=gnani_api_key,
+        aiohttp_session=aiohttp.ClientSession(),
+        voice_id="Karan",
+        sample_rate=16000,
     )
 
-    context = LLMContext()
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a friendly AI assistant. Respond naturally and keep "
+            "your answers conversational. Your output will be spoken aloud, "
+            "so avoid special characters that can't easily be spoken.",
+        },
+    ]
+
+    context = LLMContext(messages)
+    context_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        user_params=LLMUserAggregatorParams(
+            user_turn_strategies=UserTurnStrategies(
+                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())],
+            ),
+        ),
     )
 
     pipeline = Pipeline(
         [
             transport.input(),
             stt,
-            user_aggregator,
+            context_aggregator.user(),
             llm,
             tts,
             transport.output(),
-            assistant_aggregator,
+            context_aggregator.assistant(),
         ]
     )
 
-    worker = PipelineWorker(
+    task = PipelineTask(
         pipeline,
         params=PipelineParams(
             enable_metrics=True,
@@ -101,27 +119,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
-        context.add_message(
-            {"role": "developer", "content": "Please introduce yourself to the user."}
-        )
-        await worker.queue_frames([LLMRunFrame()])
-
-        await asyncio.sleep(10)
-        logger.info("Updating Gladia STT settings: language=es")
-        await worker.queue_frame(
-            STTUpdateSettingsFrame(delta=GladiaSTTService.Settings(language=Language.ES))
-        )
+        logger.info("Client connected")
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
-        await worker.cancel()
+        logger.info("Client disconnected")
+        await task.cancel()
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.add_workers(worker)
-    await runner.run()
+    await runner.run(task)
 
 
 async def bot(runner_args: RunnerArguments):
