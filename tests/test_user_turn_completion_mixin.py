@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     LLMMarkerFrame,
     LLMTextFrame,
     UserTurnInferenceCompletedFrame,
@@ -22,6 +23,7 @@ from pipecat.turns.user_turn_completion_mixin import (
     USER_TURN_COMPLETION_INSTRUCTIONS,
     USER_TURN_INCOMPLETE_LONG_MARKER,
     USER_TURN_INCOMPLETE_SHORT_MARKER,
+    TurnMarker,
     UserTurnCompletionConfig,
     UserTurnCompletionLLMServiceMixin,
 )
@@ -142,16 +144,16 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         self.assertEqual(len(marker_frames), 1)
 
     async def test_turn_state_reset_after_llm_full_response_end_frame(self):
-        """Test that _turn_complete_found is reset when LLMFullResponseEndFrame is pushed."""
+        """Test that the turn marker is reset when LLMFullResponseEndFrame is pushed."""
         processor = MockProcessor()
 
         # Mock push_frame on the instance so _push_turn_text can call it without
         # a live pipeline, but keep _turn_reset as the real implementation.
         processor.push_frame = AsyncMock()
 
-        # Simulate first LLM response: complete marker sets _turn_complete_found = True
+        # Simulate first LLM response: complete marker sets the marker to COMPLETE
         await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Hello!")
-        self.assertTrue(processor._turn_complete_found)
+        self.assertEqual(processor._turn_marker, TurnMarker.COMPLETE)
 
         # Restore the real push_frame so the mixin override runs, then call it
         # with LLMFullResponseEndFrame as the LLM service would.
@@ -162,10 +164,36 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
             end_frame = LLMFullResponseEndFrame()
             await processor.push_frame(end_frame)
 
-        # _turn_complete_found must now be False — ready for the next response
-        self.assertFalse(processor._turn_complete_found)
+        # The marker must now be cleared — ready for the next response
+        self.assertIsNone(processor._turn_marker)
         self.assertEqual(processor._turn_text_buffer, "")
-        self.assertFalse(processor._turn_suppressed)
+
+    async def test_new_response_cancels_pending_incomplete_timeout(self):
+        """A new LLM response starting must cancel a pending incomplete timeout.
+
+        This closes the race where the timeout fires at the same time a new
+        (completed) inference arrives: whichever response starts first cancels
+        the timeout before its text is parsed, so only one inference runs.
+        """
+        processor = MockProcessor()
+
+        # Arm an incomplete timeout via an ○ marker.
+        processor.push_frame = AsyncMock()
+        processor._start_incomplete_timeout = AsyncMock()
+        await processor._push_turn_text(USER_TURN_INCOMPLETE_SHORT_MARKER)
+        self.assertEqual(processor._turn_marker, TurnMarker.INCOMPLETE)
+
+        # Simulate a live pending timeout task.
+        processor._incomplete_timeout_task = object()
+        processor._cancel_incomplete_timeout = AsyncMock()
+
+        # A new response begins (either the user's completed turn or the
+        # timeout's own re-prompt): the pending timeout must be cancelled.
+        del processor.push_frame  # restore the mixin override
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", AsyncMock()):
+            await processor.push_frame(LLMFullResponseStartFrame())
+
+        processor._cancel_incomplete_timeout.assert_awaited_once()
 
 
 class MockLLMService(LLMService):
