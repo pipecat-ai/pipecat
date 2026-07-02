@@ -4,7 +4,7 @@ Reusable event handlers for different transport types
 #}
 
 {# Standard event handlers for web/telephony #}
-{% macro standard_handlers(recording=False, bot_type='telephony') %}
+{% macro standard_handlers(bot_type='telephony') %}
 {% if bot_type == 'web' %}
 @worker.rtvi.event_handler("on_client_ready")
 async def on_client_ready(rtvi):
@@ -16,10 +16,6 @@ async def on_client_ready(rtvi):
 @transport.event_handler("on_client_connected")
 async def on_client_connected(transport, client):
     logger.info("Client connected")
-    {% if recording %}
-    # Start recording audio
-    await audio_buffer.start_recording()
-    {% endif %}
     {% if bot_type != 'web' %}
     # Kick off the conversation
     context.add_message({"role": "developer", "content": "Start by concisely introducing yourself."})
@@ -33,14 +29,10 @@ async def on_client_disconnected(transport, client):
 {% endmacro %}
 
 {# Daily PSTN dial-in event handlers #}
-{% macro daily_pstn_dialin_handlers(recording=False) %}
+{% macro daily_pstn_dialin_handlers() %}
 @transport.event_handler("on_first_participant_joined")
 async def on_first_participant_joined(transport, participant):
     logger.debug(f"First participant joined: {participant['id']}")
-    {% if recording %}
-    # Start recording audio
-    await audio_buffer.start_recording()
-    {% endif %}
     # Kick off the conversation
     context.add_message({"role": "developer", "content": "Start by concisely introducing yourself."})
     await worker.queue_frames([LLMRunFrame()])
@@ -57,7 +49,7 @@ async def on_dialin_error(transport, data):
 {% endmacro %}
 
 {# Dial-out call handlers shared by Daily PSTN and Twilio + Daily SIP dial-out #}
-{% macro _dialout_call_handlers(recording=False) %}
+{% macro _dialout_call_handlers() %}
 @transport.event_handler("on_joined")
 async def on_joined(transport, data):
     await dialout_manager.attempt_dialout()
@@ -66,10 +58,6 @@ async def on_joined(transport, data):
 async def on_dialout_answered(transport, data):
     logger.debug(f"Dial-out answered: {data}")
     dialout_manager.mark_successful()
-    {% if recording %}
-    # Start recording audio
-    await audio_buffer.start_recording()
-    {% endif %}
 
 @transport.event_handler("on_dialout_error")
 async def on_dialout_error(transport, data: Any):
@@ -85,15 +73,15 @@ async def on_dialout_error(transport, data: Any):
 {# Daily PSTN dial-out event handlers. With guarded=True the bot also supports
    local runs (webrtc/eval): the dial-out machinery is only set up when the
    request carried dial-out settings, and the bot stays silent otherwise. #}
-{% macro daily_pstn_dialout_handlers(recording=False, guarded=False) %}
+{% macro daily_pstn_dialout_handlers(guarded=False) %}
 {% if guarded %}
 if dialout_settings:
     # Production flow: place the outbound call once the bot has joined the room.
     dialout_manager = DialoutManager(transport, dialout_settings)
 
-{{ _dialout_call_handlers(recording) | indent(4, first=True) }}
+{{ _dialout_call_handlers() | indent(4, first=True) }}
 {% else %}
-{{ _dialout_call_handlers(recording) }}
+{{ _dialout_call_handlers() }}
 {% endif %}
 
 @transport.event_handler("on_client_disconnected")
@@ -129,7 +117,7 @@ async def on_dialin_error(transport, data):
 {# Twilio + Daily SIP dial-in event handlers. With guarded=True the bot also
    supports local runs (webrtc/eval): the Twilio call forwarding only happens
    when the request carried the SIP call details. #}
-{% macro twilio_daily_sip_dialin_handlers(recording=False, guarded=False) %}
+{% macro twilio_daily_sip_dialin_handlers(guarded=False) %}
 {% if guarded %}
 if request:
     # Production flow: forward the Twilio call to the Daily SIP endpoint.
@@ -141,10 +129,6 @@ if request:
 @transport.event_handler("on_client_connected")
 async def on_client_connected(transport, client):
     logger.info("Client connected")
-    {% if recording %}
-    # Start recording audio
-    await audio_buffer.start_recording()
-    {% endif %}
     context.add_message({"role": "developer", "content": "Start by concisely introducing yourself."})
     await worker.queue_frames([LLMRunFrame()])
 
@@ -155,8 +139,8 @@ async def on_client_disconnected(transport, client):
 {% endmacro %}
 
 {# Twilio + Daily SIP dial-out event handlers (same as Daily PSTN dial-out) #}
-{% macro twilio_daily_sip_dialout_handlers(recording=False, guarded=False) %}
-{{ daily_pstn_dialout_handlers(recording, guarded) -}}
+{% macro twilio_daily_sip_dialout_handlers(guarded=False) %}
+{{ daily_pstn_dialout_handlers(guarded) -}}
 {% endmacro %}
 
 {# Transcription event handler (feature-based) #}
