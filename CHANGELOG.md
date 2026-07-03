@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- towncrier release notes start -->
 
+## [Unreleased]
+
+### Added
+
+- Added `mute_mic_during_bot_speech` parameter to `GeminiLiveLLMService` and
+  `GeminiLiveVertexLLMService`. When set to `True`, audio input is automatically
+  paused while the bot is speaking and resumed when the bot stops or the user
+  interrupts. This prevents bot audio from bleeding into Gemini's realtime input
+  stream, which would inflate the audio context size and increase TTFB over long
+  multi-turn conversations. Defaults to `False` for backwards compatibility.
+
 ## [1.4.0] - 2026-06-16
 
 ### Added

@@ -59,6 +59,7 @@ from pipecat.frames.frames import (
     TTSTextFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
@@ -428,6 +429,7 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
         voice_id: str = "Charon",
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
+        mute_mic_during_bot_speech: bool = False,
         system_instruction: str | None = None,
         tools: ToolsSchema | list[FunctionSchema | DirectFunction] | list[dict] | None = None,
         params: InputParams | None = None,
@@ -456,6 +458,11 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
 
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             start_video_paused: Whether to start with video input paused. Defaults to False.
+            mute_mic_during_bot_speech: When True, automatically pauses audio input while
+                the bot is speaking and resumes it when the bot stops or the user interrupts.
+                Prevents bot audio from bleeding into Gemini's realtime input stream, which
+                would inflate the audio context and increase TTFB over long conversations.
+                Defaults to False to preserve backwards compatibility.
             system_instruction: System prompt for the model. Defaults to None.
             tools: Tools available to the model: a ``ToolsSchema``, a plain list of
                 direct functions and/or ``FunctionSchema`` objects (handlers
@@ -576,6 +583,7 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
 
         self._audio_input_paused = start_audio_paused
         self._video_input_paused = start_video_paused
+        self._mute_mic_during_bot_speech = mute_mic_during_bot_speech
         self._ready_for_realtime_input = False
         self._context = None
         self._api_key = api_key
@@ -845,10 +853,23 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             await self._handle_user_stopped_speaking(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotStartedSpeakingFrame):
-            # Ignore this frame. Use the serverContent API message instead
+            # Ignore this frame for turn management. Use the serverContent API message instead.
+            # When mute_mic_during_bot_speech is enabled, pause audio input to prevent bot
+            # audio from bleeding into Gemini's input stream and inflating audio context.
+            if self._mute_mic_during_bot_speech:
+                self.set_audio_input_paused(True)
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotStoppedSpeakingFrame):
-            # ignore this frame. Use the serverContent.turnComplete API message
+            # Ignore this frame for turn management. Use the serverContent.turnComplete API message.
+            # When mute_mic_during_bot_speech is enabled, resume audio input after bot finishes.
+            if self._mute_mic_during_bot_speech:
+                self.set_audio_input_paused(False)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, VADUserStartedSpeakingFrame):
+            # When the user interrupts mid-response, open the mic immediately so Gemini
+            # hears the start of their speech without delay.
+            if self._mute_mic_during_bot_speech:
+                self.set_audio_input_paused(False)
             await self.push_frame(frame, direction)
         elif isinstance(frame, SpeechControlParamsFrame):
             self._handle_speech_control_params(frame)

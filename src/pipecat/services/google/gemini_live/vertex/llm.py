@@ -68,6 +68,7 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
         voice_id: str = "Charon",
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
+        mute_mic_during_bot_speech: bool = False,
         system_instruction: str | None = None,
         tools: list[dict] | ToolsSchema | None = None,
         params: InputParams | None = None,
@@ -98,6 +99,11 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
 
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             start_video_paused: Whether to start with video input paused. Defaults to False.
+            mute_mic_during_bot_speech: When True, automatically pauses audio input while
+                the bot is speaking and resumes it when the bot stops or the user interrupts.
+                Prevents bot audio from bleeding into Gemini's realtime input stream, which
+                would inflate the audio context and increase TTFB over long conversations.
+                Defaults to False to preserve backwards compatibility.
             system_instruction: System prompt for the model. Defaults to None.
             tools: Tools/functions available to the model. Defaults to None.
             params: Configuration parameters for the model along with Vertex AI
@@ -212,6 +218,7 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
             api_key="dummy",
             start_audio_paused=start_audio_paused,
             start_video_paused=start_video_paused,
+            mute_mic_during_bot_speech=mute_mic_during_bot_speech,
             system_instruction=system_instruction,
             tools=tools,
             settings=default_settings,
