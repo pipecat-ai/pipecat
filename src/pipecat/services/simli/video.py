@@ -197,6 +197,11 @@ class SimliVideoService(AIService):
         await super().cancel(frame)
         await self._stop_connection()
 
+    async def cleanup(self):
+        """Clean up the Simli video service."""
+        await super().cleanup()
+        await self._stop_connection()
+
     async def _start_connection(self):
         """Start the connection to Simli service and begin processing tasks."""
         try:
@@ -303,8 +308,13 @@ class SimliVideoService(AIService):
         await self.push_frame(frame, direction)
 
     async def _stop_connection(self):
-        """Stop the Simli client and cancel processing tasks."""
-        await self._simli_client.stop()
+        """Stop the Simli client and cancel processing tasks.
+
+        Idempotent so it can run from stop(), cancel(), and cleanup().
+        """
+        if self._initialized:
+            await self._simli_client.stop()
+            self._initialized = False
         if self._audio_task:
             await self.cancel_task(self._audio_task)
             self._audio_task = None

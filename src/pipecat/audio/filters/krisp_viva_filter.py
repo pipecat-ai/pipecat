@@ -123,6 +123,7 @@ class KrispVivaFilter(BaseAudioFilter):
 
             self._session = None
             self._tts_detector = None
+            self._sdk_acquired = False
             self._samples_per_frame = None
             self._noise_suppression_level = noise_suppression_level
             self._frame_duration_ms = frame_duration
@@ -238,6 +239,7 @@ class KrispVivaFilter(BaseAudioFilter):
         try:
             # Acquire SDK reference (will initialize on first call)
             KrispVivaSDKManager.acquire(api_key=self._api_key)
+            self._sdk_acquired = True
             self._session = self._create_session(sample_rate, self._frame_duration_ms)
 
             if self._tts_model_path:
@@ -256,13 +258,19 @@ class KrispVivaFilter(BaseAudioFilter):
             raise RuntimeError(f"Failed to create Krisp processing session: {e}") from e
 
     async def stop(self):
-        """Clean up the Krisp processor when stopping."""
+        """Release the Krisp processor and its SDK reference.
+
+        The SDK release is guarded so repeated calls do not over-decrement the
+        shared reference count.
+        """
         try:
             self._session = None
             self._tts_detector = None
             self._tts_detection_active = False
             self._audio_buffer.clear()
-            KrispVivaSDKManager.release()
+            if self._sdk_acquired:
+                self._sdk_acquired = False
+                KrispVivaSDKManager.release()
         except Exception as e:
             logger.error(f"Error in stop: {e}", exc_info=True)
             raise RuntimeError(f"Failed to stop Krisp processor: {e}") from e

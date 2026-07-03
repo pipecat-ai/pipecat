@@ -20,6 +20,8 @@ from websockets.protocol import State
 
 from pipecat.frames.frames import (
     AudioRawFrame,
+    CancelFrame,
+    EndFrame,
     ErrorFrame,
     Frame,
     InterruptionFrame,
@@ -869,6 +871,33 @@ class WebsocketSTTService(STTService, WebsocketService):
         """
         STTService.__init__(self, **kwargs)
         WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
+
+    async def stop(self, frame: EndFrame):
+        """Stop the websocket STT service on a graceful end.
+
+        Args:
+            frame: The end frame.
+        """
+        await super().stop(frame)
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the websocket STT service immediately.
+
+        Disconnecting here is the prompt teardown: the websocket receive loop
+        runs independently and keeps reading transcripts from the provider until
+        the socket is closed.
+
+        Args:
+            frame: The cancel frame.
+        """
+        await super().cancel(frame)
+        await self._disconnect()
+
+    async def cleanup(self):
+        """Release websocket STT resources at teardown."""
+        await super().cleanup()
+        await self._disconnect()
 
     async def _connect(self):
         """Connect and start keepalive task if enabled."""

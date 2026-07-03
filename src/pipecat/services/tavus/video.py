@@ -129,10 +129,11 @@ class TavusVideoService(AIService):
         await self._client.setup(setup)
 
     async def cleanup(self):
-        """Clean up the service and release resources."""
+        """Release resources at teardown."""
         await super().cleanup()
-        await self._client.cleanup()
-        self._client = None
+        if self._client:
+            await self._client.cleanup()
+            self._client = None
 
     async def _on_joined(self, data):
         """Handle bot joined the Daily room."""
@@ -217,8 +218,7 @@ class TavusVideoService(AIService):
             frame: The end frame.
         """
         await super().stop(frame)
-        await self._end_conversation()
-        await self._client.cancel_send_task()
+        await self._teardown()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the Tavus video service.
@@ -227,8 +227,7 @@ class TavusVideoService(AIService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
-        await self._end_conversation()
-        await self._client.cancel_send_task()
+        await self._teardown()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames through the service.
@@ -264,6 +263,11 @@ class TavusVideoService(AIService):
         await self._client.cancel_send_task()
         await self._client.send_interrupt_message()
         await self._client.start_send_task()
+
+    async def _teardown(self):
+        """Gracefully ends the Tavus conversation and cancels the send task."""
+        await self._end_conversation()
+        await self._client.cancel_send_task()
 
     async def _end_conversation(self):
         """End the current conversation and reset state."""

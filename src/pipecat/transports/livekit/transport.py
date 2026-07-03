@@ -296,6 +296,9 @@ class LiveKitTransportClient:
             await self._callbacks.on_before_disconnect()
             await self.room.disconnect()
             self._connected = False
+            # Close any remaining per-participant streams and cancel their
+            # producer tasks so they do not outlive the connection.
+            await self._close_all_streams()
             logger.info(f"Disconnected from {self._room_name}")
             await self._callbacks.on_disconnected()
 
@@ -583,6 +586,16 @@ class LiveKitTransportClient:
         if task is not None and not task.done():
             task.cancel()
 
+    async def _close_all_streams(self) -> None:
+        """Close every per-participant audio/video stream and cancel its task.
+
+        Idempotent: no-op when no streams are registered.
+        """
+        for participant_id in list(self._audio_streams.keys()):
+            await self._close_audio_stream(participant_id)
+        for participant_id in list(self._video_streams.keys()):
+            await self._close_video_stream(participant_id)
+
     async def _async_on_data_received(self, data: rtc.DataPacket):
         """Handle data received events."""
         await self._callbacks.on_data_received(data.data, data.participant.sid)
@@ -694,11 +707,7 @@ class LiveKitInputTransport(BaseInputTransport):
             frame: The end frame signaling transport shutdown.
         """
         await super().stop(frame)
-        await self._client.disconnect()
-        if self._audio_in_task:
-            await self.cancel_task(self._audio_in_task)
-        if self._video_in_task:
-            await self.cancel_task(self._video_in_task)
+        await self._teardown()
         logger.info("LiveKitInputTransport stopped")
 
     async def cancel(self, frame: CancelFrame):
@@ -708,11 +717,7 @@ class LiveKitInputTransport(BaseInputTransport):
             frame: The cancel frame signaling immediate cancellation.
         """
         await super().cancel(frame)
-        await self._client.disconnect()
-        if self._audio_in_task and self._params.audio_in_enabled:
-            await self.cancel_task(self._audio_in_task)
-        if self._video_in_task and self._params.video_in_enabled:
-            await self.cancel_task(self._video_in_task)
+        await self._teardown()
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the input transport with shared client setup.
@@ -724,9 +729,24 @@ class LiveKitInputTransport(BaseInputTransport):
         await self._client.setup(setup)
 
     async def cleanup(self):
-        """Cleanup input transport and shared resources."""
+        """Release input transport resources at teardown."""
         await super().cleanup()
+        await self._teardown()
         await self._transport.cleanup()
+
+    async def _teardown(self):
+        """Disconnect the client and cancel the media input tasks.
+
+        Single idempotent teardown body shared by ``stop``, ``cancel`` and
+        ``cleanup``.
+        """
+        await self._client.disconnect()
+        if self._audio_in_task:
+            await self.cancel_task(self._audio_in_task)
+            self._audio_in_task = None
+        if self._video_in_task:
+            await self.cancel_task(self._video_in_task)
+            self._video_in_task = None
 
     async def push_app_message(self, message: Any, sender: str):
         """Push an application message as an urgent transport frame.
@@ -905,8 +925,9 @@ class LiveKitOutputTransport(BaseOutputTransport):
         await self._client.setup(setup)
 
     async def cleanup(self):
-        """Cleanup output transport and shared resources."""
+        """Release output transport resources at teardown."""
         await super().cleanup()
+        await self._client.disconnect()
         await self._transport.cleanup()
 
     async def send_message(

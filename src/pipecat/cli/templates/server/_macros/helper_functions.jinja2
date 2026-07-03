@@ -32,8 +32,8 @@ user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
 {# Feature processors setup #}
 {% macro setup_feature_processors(recording, transcription, bot_type) %}
 {% if recording %}
-# Audio recording
-audio_buffer = AudioBufferProcessor()
+# Audio recording, started automatically when the pipeline starts
+audio_buffer = AudioBufferProcessor(auto_start_recording=True)
 {% endif %}
 
 {% endmacro %}

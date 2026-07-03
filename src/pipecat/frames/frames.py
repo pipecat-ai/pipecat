@@ -2212,6 +2212,16 @@ class FilterEnableFrame(FilterControlFrame):
 
 
 @dataclass
+class AudioBufferStartRecordingFrame(ControlFrame, UninterruptibleFrame):
+    """Frame instructing audio buffer processors to start recording."""
+
+
+@dataclass
+class AudioBufferStopRecordingFrame(ControlFrame, UninterruptibleFrame):
+    """Frame instructing audio buffer processors to stop recording and flush."""
+
+
+@dataclass
 class MixerControlFrame(ControlFrame):
     """Base control frame for audio mixer operations."""
 

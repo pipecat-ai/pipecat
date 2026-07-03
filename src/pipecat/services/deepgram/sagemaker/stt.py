@@ -257,6 +257,11 @@ class DeepgramSageMakerSTTService(STTService):
         await super().cancel(frame)
         await self._disconnect()
 
+    async def cleanup(self):
+        """Clean up the Deepgram SageMaker STT service."""
+        await super().cleanup()
+        await self._disconnect()
+
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Send audio data to Deepgram for transcription.
 

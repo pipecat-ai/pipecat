@@ -251,6 +251,11 @@ class RTVIProcessor(FrameProcessor):
         else:
             await self.push_frame(frame, direction)
 
+    async def cleanup(self):
+        """Release resources held by the processor."""
+        await super().cleanup()
+        await self._cancel_tasks()
+
     async def _start(self, frame: StartFrame):
         """Start the RTVI processor tasks."""
         if not self._message_task:

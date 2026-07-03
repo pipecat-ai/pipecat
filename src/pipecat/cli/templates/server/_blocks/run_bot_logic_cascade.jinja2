@@ -80,15 +80,15 @@
    with a local transport (webrtc/eval), guarded=True wraps the call-specific
    handlers so a local run skips the telephony machinery. #}
 {% if 'daily_pstn_dialin' in transports %}
-{{ handlers.daily_pstn_dialin_handlers(recording) | indent(indent_level, first=True) }}
+{{ handlers.daily_pstn_dialin_handlers() | indent(indent_level, first=True) }}
 {% elif 'daily_pstn_dialout' in transports %}
-{{ handlers.daily_pstn_dialout_handlers(recording, guarded=has_local_transport) | indent(indent_level, first=True) }}
+{{ handlers.daily_pstn_dialout_handlers(guarded=has_local_transport) | indent(indent_level, first=True) }}
 {% elif 'twilio_daily_sip_dialin' in transports %}
-{{ handlers.twilio_daily_sip_dialin_handlers(recording, guarded=has_local_transport) | indent(indent_level, first=True) }}
+{{ handlers.twilio_daily_sip_dialin_handlers(guarded=has_local_transport) | indent(indent_level, first=True) }}
 {% elif 'twilio_daily_sip_dialout' in transports %}
-{{ handlers.twilio_daily_sip_dialout_handlers(recording, guarded=has_local_transport) | indent(indent_level, first=True) }}
+{{ handlers.twilio_daily_sip_dialout_handlers(guarded=has_local_transport) | indent(indent_level, first=True) }}
 {% else %}
-{{ handlers.standard_handlers(recording, bot_type) | indent(indent_level, first=True) }}
+{{ handlers.standard_handlers(bot_type) | indent(indent_level, first=True) }}
 {% endif %}
 
 {# Feature-specific event handlers #}

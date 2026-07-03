@@ -129,8 +129,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    # Create audio buffer processor
-    audiobuffer = AudioBufferProcessor()
+    # Create audio buffer processor. Recording starts automatically when the
+    # pipeline starts; alternatively, push an AudioBufferStartRecordingFrame or
+    # call start_recording() to start it on demand.
+    audiobuffer = AudioBufferProcessor(auto_start_recording=True)
 
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
@@ -163,15 +165,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        # Start recording audio
-        await audiobuffer.start_recording()
-        # Start conversation - empty prompt to let LLM follow system instructions
+        # Kick off the conversation
+        context.add_message(
+            {"role": "developer", "content": "Please introduce yourself to the user."}
+        )
         await worker.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await worker.cancel()
+
+    @audiobuffer.event_handler("on_recording_started")
+    async def on_recording_started(buffer):
+        logger.info(f"Recording started")
+
+    @audiobuffer.event_handler("on_recording_stopped")
+    async def on_recording_stopped(buffer):
+        logger.info(f"Recording stopped")
 
     # Handler for merged audio
     @audiobuffer.event_handler("on_audio_data")

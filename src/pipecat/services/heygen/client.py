@@ -151,6 +151,8 @@ class HeyGenClient:
 
         self._heyGen_session: StandardSessionResponse | None = None
         self._websocket = None
+        self._receive_task = None
+        self._livekit_room = None
         self._task_manager: BaseTaskManager | None = None
         self._params = params
         self._in_sample_rate = 0
@@ -216,19 +218,23 @@ class HeyGenClient:
             await self.cleanup()
 
     async def cleanup(self) -> None:
-        """Cleanup client resources.
-
-        Closes the active HeyGen session and resets internal state.
-        """
+        """Cleanup client resources."""
         try:
-            if self._heyGen_session is not None:
-                await self._api.close_session(self._heyGen_session.session_id)
-                self._heyGen_session = None
-                self._connected = False
+            if self._keep_alive_task and self._task_manager:
+                await self._task_manager.cancel_task(self._keep_alive_task)
+                self._keep_alive_task = None
+
+            await self._ws_disconnect()
+            await self._livekit_disconnect()
 
             if self._event_task and self._task_manager:
                 await self._task_manager.cancel_task(self._event_task)
                 self._event_task = None
+
+            if self._heyGen_session is not None:
+                await self._api.close_session(self._heyGen_session.session_id)
+                self._heyGen_session = None
+                self._connected = False
         except Exception as e:
             logger.error(f"Exception during cleanup: {e}")
 
@@ -258,14 +264,9 @@ class HeyGenClient:
     async def stop(self) -> None:
         """Stop the client and terminate all connections.
 
-        Disconnects from WebSocket and LiveKit endpoints, and performs cleanup.
+        Delegates to the idempotent :meth:`cleanup`.
         """
-        logger.debug(f"HeyGenVideoService stopping")
-        if self._keep_alive_task:
-            await self._task_manager.cancel_task(self._keep_alive_task)
-            self._keep_alive_task = None
-        await self._ws_disconnect()
-        await self._livekit_disconnect()
+        logger.debug("HeyGenVideoService stopping")
         await self.cleanup()
 
     # websocket connection methods
@@ -322,6 +323,9 @@ class HeyGenClient:
         """Disconnect from HeyGen websocket endpoint."""
         try:
             self._connected = False
+            if self._receive_task and self._task_manager:
+                await self._task_manager.cancel_task(self._receive_task)
+                self._receive_task = None
             if self._websocket:
                 await self._websocket.close()
         except Exception as e:

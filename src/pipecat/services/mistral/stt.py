@@ -170,6 +170,11 @@ class MistralSTTService(STTService):
         await super().cancel(frame)
         await self._disconnect()
 
+    async def cleanup(self):
+        """Clean up resources, closing the connection and cancelling tasks."""
+        await super().cleanup()
+        await self._disconnect()
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and handle speech events.
 

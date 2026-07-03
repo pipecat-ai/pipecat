@@ -514,8 +514,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
             frame: The end frame triggering service shutdown.
         """
         await super().stop(frame)
-        self._wants_connection = False
-        await self._disconnect()
+        await self._teardown()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the service and close connections.
@@ -524,6 +523,20 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
             frame: The cancel frame triggering service cancellation.
         """
         await super().cancel(frame)
+        await self._teardown()
+
+    async def cleanup(self):
+        """Release AWS Nova Sonic resources at teardown."""
+        await super().cleanup()
+        await self._teardown()
+
+    async def _teardown(self):
+        """Stop wanting a connection and disconnect (idempotent).
+
+        Shared by ``stop``/``cancel``/``cleanup``. Distinct from
+        :meth:`_disconnect`, which leaves ``_wants_connection`` untouched so
+        ``reset_conversation`` can disconnect and reconnect.
+        """
         self._wants_connection = False
         await self._disconnect()
 

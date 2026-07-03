@@ -543,7 +543,12 @@ class FrameProcessor(BaseObject):
             await self._metrics.setup(self.task_manager)
 
     async def cleanup(self):
-        """Clean up processor resources."""
+        """Release this processor's resources at teardown.
+
+        This base implementation cancels only the processor's internal
+        input/process tasks; tasks created via :meth:`create_task` are released
+        by an override.
+        """
         await super().cleanup()
         await self.__cancel_input_task()
         await self.__cancel_process_task()

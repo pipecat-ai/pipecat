@@ -1886,8 +1886,9 @@ class DailyInputTransport(BaseInputTransport):
         await self._client.setup(setup)
 
     async def cleanup(self):
-        """Cleanup input transport and shared resources."""
+        """Release input transport resources at teardown."""
         await super().cleanup()
+        await self._stop_audio_in_task()
         await self._client.cleanup()
         await self._transport.cleanup()
 
@@ -1925,12 +1926,7 @@ class DailyInputTransport(BaseInputTransport):
         """
         # Parent stop.
         await super().stop(frame)
-        # Leave the room.
-        await self._client.leave()
-        # Stop audio thread.
-        if self._audio_in_task:
-            await self.cancel_task(self._audio_in_task)
-            self._audio_in_task = None
+        await self._teardown()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the input transport and leave the Daily room.
@@ -1938,11 +1934,24 @@ class DailyInputTransport(BaseInputTransport):
         Args:
             frame: The cancel frame signaling immediate cancellation.
         """
-        # Parent stop.
+        # Parent cancel.
         await super().cancel(frame)
+        await self._teardown()
+
+    async def _teardown(self):
+        """Leave the room and stop the audio-in task.
+
+        Shared by stop() and cancel(). The room leave is balanced against join()
+        via the client's leave counter, so it stays out of cleanup(); the
+        audio-in task cancel is also reached from cleanup().
+        """
         # Leave the room.
         await self._client.leave()
         # Stop audio thread.
+        await self._stop_audio_in_task()
+
+    async def _stop_audio_in_task(self):
+        """Cancel the audio-in task if running. Idempotent."""
         if self._audio_in_task:
             await self.cancel_task(self._audio_in_task)
             self._audio_in_task = None
@@ -2181,8 +2190,7 @@ class DailyOutputTransport(BaseOutputTransport):
         """
         # Parent stop.
         await super().stop(frame)
-        # Leave the room.
-        await self._client.leave()
+        await self._teardown()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the output transport and leave the Daily room.
@@ -2190,9 +2198,17 @@ class DailyOutputTransport(BaseOutputTransport):
         Args:
             frame: The cancel frame signaling immediate cancellation.
         """
-        # Parent stop.
+        # Parent cancel.
         await super().cancel(frame)
-        # Leave the room.
+        await self._teardown()
+
+    async def _teardown(self):
+        """Leave the room.
+
+        Shared by stop() and cancel(). The room leave is balanced against join()
+        via the client's leave counter, so it stays out of cleanup(), which
+        releases the shared client through its own teardown.
+        """
         await self._client.leave()
 
     async def send_message(

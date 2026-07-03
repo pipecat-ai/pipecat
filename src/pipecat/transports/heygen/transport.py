@@ -88,9 +88,9 @@ class HeyGenInputTransport(BaseInputTransport):
         await self._client.setup(setup)
 
     async def cleanup(self):
-        """Cleanup input transport resources."""
+        """Release input transport resources."""
         await super().cleanup()
-        await self._client.cleanup()
+        await self._client.stop()
 
     async def start(self, frame: StartFrame):
         """Start the input transport.
@@ -186,9 +186,9 @@ class HeyGenOutputTransport(BaseOutputTransport):
         await self._client.setup(setup)
 
     async def cleanup(self):
-        """Cleanup output transport resources."""
+        """Release output transport resources."""
         await super().cleanup()
-        await self._client.cleanup()
+        await self._client.stop()
 
     async def start(self, frame: StartFrame):
         """Start the output transport.

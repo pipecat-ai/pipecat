@@ -61,6 +61,8 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-fish.py
     scenarios: [capital_question]
+  - bot: voice/voice-funasr.py
+    scenarios: [capital_question]
   - bot: voice/voice-gladia.py
     scenarios: [capital_question]
   - bot: voice/voice-gladia-vad.py
@@ -266,3 +268,9 @@ suite:
   #
   - bot: features/features-dtmf-menu.py
     scenarios: [dtmf_menu]
+
+  #
+  # Video avatar services
+  #
+  - bot: video-avatar/video-avatar-tavus-video-service.py
+    scenarios: [capital_question]

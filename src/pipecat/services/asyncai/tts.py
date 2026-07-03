@@ -21,8 +21,6 @@ from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
-    CancelFrame,
-    EndFrame,
     ErrorFrame,
     Frame,
     StartFrame,
@@ -253,24 +251,6 @@ class AsyncAITTSService(WebsocketTTSService):
         await super().start(frame)
         self._output_sample_rate = self.sample_rate
         await self._connect()
-
-    async def stop(self, frame: EndFrame):
-        """Stop the Async TTS service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the Async TTS service.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._disconnect()
 
     async def _connect(self):
         await super()._connect()

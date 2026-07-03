@@ -333,6 +333,16 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
+    async def _teardown(self):
+        """Cancel the receive/monitor tasks and disconnect the client.
+
+        Idempotent and shared by ``stop()``, ``cancel()``, and ``cleanup()`` so
+        the independent receive loop is always stopped and the WebSocket always
+        disconnected, regardless of which teardown hook runs.
+        """
+        await self._stop_tasks()
+        await self._client.disconnect()
+
     async def stop(self, frame: EndFrame):
         """Stop the input transport and cleanup resources.
 
@@ -340,8 +350,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
             frame: The end frame signaling transport shutdown.
         """
         await super().stop(frame)
-        await self._stop_tasks()
-        await self._client.disconnect()
+        await self._teardown()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the input transport and stop all processing.
@@ -350,12 +359,12 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
             frame: The cancel frame signaling immediate cancellation.
         """
         await super().cancel(frame)
-        await self._stop_tasks()
-        await self._client.disconnect()
+        await self._teardown()
 
     async def cleanup(self):
         """Clean up transport resources."""
         await super().cleanup()
+        await self._teardown()
         await self._transport.cleanup()
 
     async def _receive_messages(self):
@@ -485,6 +494,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
     async def cleanup(self):
         """Clean up transport resources."""
         await super().cleanup()
+        await self._client.disconnect()
         await self._transport.cleanup()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

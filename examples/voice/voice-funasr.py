@@ -5,15 +5,12 @@
 #
 
 
-import datetime
 import os
-import wave
 
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.filters.aic_filter import AICFilter
-from pipecat.audio.vad.aic_quail_vad import AICQuailVADAnalyzer
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -23,11 +20,10 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.funasr.stt import FunASRSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -36,44 +32,22 @@ from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
-
-def _create_aic_filter() -> AICFilter:
-    license_key = os.environ["AIC_SDK_LICENSE"]
-
-    return AICFilter(
-        license_key=license_key,
-        model_id="quail-vf-2.2-l-16khz",
-        enhancement_level=0.8,
-    )
-
-
-aic_filter = _create_aic_filter()
-aic_vad_analyzer = AICQuailVADAnalyzer(
-    license_key=os.environ["AIC_SDK_LICENSE"],
-)
-
-# We use lambdas to defer transport parameter creation until the transport
-# type is selected at runtime.
 transport_params = {
     "eval": lambda: EvalTransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        audio_in_filter=aic_filter,
     ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        audio_in_filter=aic_filter,
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        audio_in_filter=aic_filter,
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        audio_in_filter=aic_filter,
     ),
 }
 
@@ -81,7 +55,7 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
+    stt = FunASRSTTService()
 
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
@@ -100,29 +74,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=aic_vad_analyzer),
-    )
-
-    # Create audio buffer processor so we can hear the audio fitler results.
-    audiobuffer = AudioBufferProcessor(
-        num_channels=2,  # 1 for mono, 2 for stereo (user left, bot right)
-        enable_turn_audio=False,  # Enable per-turn audio recording
-        auto_start_recording=True,  # Start recording automatically when the pipeline starts
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            stt,  # STT
+            stt,
             user_aggregator,  # User responses
             llm,  # LLM
             tts,  # TTS
             transport.output(),  # Transport bot output
-            audiobuffer,  # write audio data to a file
             assistant_aggregator,  # Assistant spoken responses
         ]
     )
-
     worker = PipelineWorker(
         pipeline,
         params=PipelineParams(
@@ -140,21 +105,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             {"role": "developer", "content": "Please introduce yourself to the user."}
         )
         await worker.queue_frames([LLMRunFrame()])
-
-    @audiobuffer.event_handler("on_audio_data")
-    async def on_audio_data(buffer, audio, sample_rate, num_channels):
-        # Save or process the composite audio
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"./conversation_{timestamp}.wav"
-
-        # Create the WAV file
-        with wave.open(filename, "wb") as wf:
-            wf.setnchannels(num_channels)
-            wf.setsampwidth(2)  # 16-bit audio
-            wf.setframerate(sample_rate)
-            wf.writeframes(audio)
-
-        logger.info(f"Saved recording to {filename}")
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

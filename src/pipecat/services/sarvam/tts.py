@@ -52,8 +52,6 @@ from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
-    CancelFrame,
-    EndFrame,
     ErrorFrame,
     Frame,
     StartFrame,
@@ -1018,24 +1016,6 @@ class SarvamTTSService(InterruptibleTTSService):
         # WebSocket API expects sample rate as string
         self._speech_sample_rate = str(self.sample_rate)
         await self._connect()
-
-    async def stop(self, frame: EndFrame):
-        """Stop the Sarvam TTS service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the Sarvam TTS service.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._disconnect()
 
     async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio synthesis by sending flush command."""

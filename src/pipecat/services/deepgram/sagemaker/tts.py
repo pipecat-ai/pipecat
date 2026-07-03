@@ -162,6 +162,11 @@ class DeepgramSageMakerTTSService(TTSService):
         await super().cancel(frame)
         await self._disconnect()
 
+    async def cleanup(self):
+        """Clean up the Deepgram SageMaker TTS service."""
+        await super().cleanup()
+        await self._disconnect()
+
     async def _connect(self):
         """Connect to the SageMaker endpoint and start the BiDi session.
 

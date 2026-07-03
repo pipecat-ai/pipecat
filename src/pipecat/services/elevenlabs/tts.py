@@ -30,8 +30,6 @@ from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
-    CancelFrame,
-    EndFrame,
     ErrorFrame,
     Frame,
     InterruptionFrame,
@@ -60,6 +58,11 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 ELEVENLABS_MULTILINGUAL_MODELS = {
     "eleven_flash_v2_5",
     "eleven_turbo_v2_5",
+}
+
+# Models that reject the previous_text/next_text context parameters
+ELEVENLABS_CONTEXT_UNSUPPORTED_MODELS = {
+    "eleven_v3",
 }
 
 
@@ -697,24 +700,6 @@ class ElevenLabsTTSService(WebsocketTTSService):
         await super().start(frame)
         self._output_format = output_format_from_sample_rate(self.sample_rate)
         await self._connect()
-
-    async def stop(self, frame: EndFrame):
-        """Stop the ElevenLabs TTS service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the ElevenLabs TTS service.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._disconnect()
 
     async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio and finalize the current context.
@@ -1385,9 +1370,10 @@ class ElevenLabsHttpTTSService(TTSService):
             "model_id": model_id,
         }
 
-        # Include previous text as context if available. eleven_v3 rejects
-        # previous_text/next_text ("unsupported_model"), so never send it for v3.
-        if self._previous_text and model_id != "eleven_v3":
+        # Include previous text as context when the model supports it. Some
+        # models (e.g. eleven_v3) reject previous_text/next_text
+        # ("unsupported_model"), so never send it for those.
+        if self._previous_text and model_id not in ELEVENLABS_CONTEXT_UNSUPPORTED_MODELS:
             payload["previous_text"] = self._previous_text
 
         if self._voice_settings:

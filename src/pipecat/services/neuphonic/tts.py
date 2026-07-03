@@ -24,8 +24,6 @@ from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
-    CancelFrame,
-    EndFrame,
     ErrorFrame,
     Frame,
     StartFrame,
@@ -232,24 +230,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
         """
         await super().start(frame)
         await self._connect()
-
-    async def stop(self, frame: EndFrame):
-        """Stop the Neuphonic TTS service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the Neuphonic TTS service.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._disconnect()
 
     async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio synthesis by sending stop command."""

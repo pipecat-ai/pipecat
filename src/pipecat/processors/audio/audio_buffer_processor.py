@@ -16,6 +16,8 @@ import time
 
 from pipecat.audio.utils import create_stream_resampler, interleave_stereo_audio, is_silence, mix_audio
 from pipecat.frames.frames import (
+    AudioBufferStartRecordingFrame,
+    AudioBufferStopRecordingFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -47,6 +49,8 @@ class AudioBufferProcessor(FrameProcessor):
     - on_bot_utterance: Triggered when a bot voice segment ends, providing the
       spoken text and its byte-accurate [start_ms, end_ms] span (and per-word
       spans) measured against the recorded audio timeline
+    - on_recording_started: Triggered when recording starts (state transitions to active)
+    - on_recording_stopped: Triggered after recording stops and the final audio has been emitted
 
     Audio handling:
 
@@ -64,6 +68,7 @@ class AudioBufferProcessor(FrameProcessor):
         num_channels: int = 1,
         buffer_size: int = 0,
         enable_turn_audio: bool = False,
+        auto_start_recording: bool = False,
         **kwargs,
     ):
         """Initialize the audio buffer processor.
@@ -73,6 +78,9 @@ class AudioBufferProcessor(FrameProcessor):
             num_channels: Number of channels (1 for mono, 2 for stereo). Defaults to 1.
             buffer_size: Size of buffer before triggering events. 0 for no buffering.
             enable_turn_audio: Whether turn audio event handlers should be triggered.
+            auto_start_recording: Whether to start recording automatically when
+                the pipeline starts, without requiring a call to
+                :meth:`start_recording` or an ``AudioBufferStartRecordingFrame``.
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
@@ -82,6 +90,7 @@ class AudioBufferProcessor(FrameProcessor):
         self._num_channels = num_channels
         self._buffer_size = buffer_size
         self._enable_turn_audio = enable_turn_audio
+        self._auto_start_recording = auto_start_recording
 
         self._user_audio_buffer = bytearray()
         self._bot_audio_buffer = bytearray()
@@ -124,6 +133,8 @@ class AudioBufferProcessor(FrameProcessor):
         self._register_event_handler("on_user_turn_audio_data")
         self._register_event_handler("on_bot_turn_audio_data")
         self._register_event_handler("on_bot_utterance")
+        self._register_event_handler("on_recording_started")
+        self._register_event_handler("on_recording_stopped")
 
     @property
     def sample_rate(self) -> int:
@@ -174,22 +185,32 @@ class AudioBufferProcessor(FrameProcessor):
     async def start_recording(self):
         """Start recording audio from both user and bot.
 
-        Initializes recording state and resets audio buffers.
+        Initializes recording state, resets audio buffers and triggers the
+        ``on_recording_started`` event. Does nothing when recording is already
+        active.
         """
+        if self._recording:
+            return
         self._recording = True
         self._reset_recording()
+        await self._call_event_handler("on_recording_started")
 
     async def stop_recording(self):
         """Stop recording and trigger final audio data handlers.
 
-        Calls audio handlers with any remaining buffered audio before stopping.
+        Calls audio handlers with any remaining buffered audio before stopping,
+        then triggers the ``on_recording_stopped`` event. Does nothing when
+        recording is not active.
         """
+        if not self._recording:
+            return
         # Close any in-progress bot utterance (call ended mid-speech) before the
         # final flush resets the buffers and the byte counters.
         await self._finalize_bot_utterance()
         await self._call_on_audio_data_handler()
         self._reset_recording()
         self._recording = False
+        await self._call_event_handler("on_recording_stopped")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming audio frames and manage audio buffers.
@@ -203,6 +224,13 @@ class AudioBufferProcessor(FrameProcessor):
         # Update output sample rate if necessary.
         if isinstance(frame, StartFrame):
             self._update_sample_rate(frame)
+            if self._auto_start_recording:
+                await self.start_recording()
+
+        if isinstance(frame, AudioBufferStartRecordingFrame):
+            await self.start_recording()
+        elif isinstance(frame, AudioBufferStopRecordingFrame):
+            await self.stop_recording()
 
         if self._recording:
             await self._process_recording(frame)
