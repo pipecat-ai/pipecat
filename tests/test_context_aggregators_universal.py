@@ -1180,6 +1180,69 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         )
         assert json.loads(context.messages[-1]["content"]) == {"conditions": "Sunny"}
 
+    async def test_parallel_function_calls_run_llm_once_when_sibling_lags(self):
+        """Regression test for #4908: a fast sibling's result must not run
+        the LLM early just because a slower sibling hasn't reached
+        FunctionCallInProgressFrame yet. Both calls share a group_id (as
+        happens with group_parallel_tools=True), and call A's full
+        in-progress/result cycle completes -- with the pipeline fully
+        draining in between, so the "another result queued" dedup can't
+        mask the bug -- before call B even announces in-progress."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        group_id = "group-1"
+        frames_to_send = [
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        context=context, tool_call_id="A", function_name="set_field", arguments={}
+                    ),
+                    FunctionCallFromLLM(
+                        context=context,
+                        tool_call_id="B",
+                        function_name="slow_validate",
+                        arguments={},
+                    ),
+                ]
+            ),
+            FunctionCallInProgressFrame(
+                function_name="set_field",
+                tool_call_id="A",
+                arguments={},
+                cancel_on_interruption=True,
+                group_id=group_id,
+            ),
+            FunctionCallResultFrame(
+                function_name="set_field",
+                tool_call_id="A",
+                arguments={},
+                result={"ok": True},
+            ),
+            # Let the pipeline fully drain A's result before B announces.
+            SleepFrame(sleep=0.05),
+            FunctionCallInProgressFrame(
+                function_name="slow_validate",
+                tool_call_id="B",
+                arguments={},
+                cancel_on_interruption=True,
+                group_id=group_id,
+            ),
+            FunctionCallResultFrame(
+                function_name="slow_validate",
+                tool_call_id="B",
+                arguments={},
+                result={"ok": True},
+            ),
+        ]
+        expected_down_frames = []
+        expected_up_frames = [LLMContextFrame]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+            expected_up_frames=expected_up_frames,
+        )
+
     async def test_function_call_on_context_updated(self):
         context_updated = False
 
