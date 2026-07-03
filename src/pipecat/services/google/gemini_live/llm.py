@@ -712,11 +712,6 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def cleanup(self):
-        """Release resources at pipeline teardown."""
-        await super().cleanup()
-        await self._disconnect()
-
     #
     # speech and interruption handling
     #
