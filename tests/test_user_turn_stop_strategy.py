@@ -14,10 +14,15 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    UserTurnInferenceCompletedFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.turns.user_stop import ExternalUserTurnStopStrategy, SpeechTimeoutUserTurnStopStrategy
+from pipecat.turns.user_stop import (
+    ExternalUserTurnCompletionStopStrategy,
+    ExternalUserTurnStopStrategy,
+    SpeechTimeoutUserTurnStopStrategy,
+)
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
 AGGREGATION_TIMEOUT = 0.1
@@ -783,6 +788,36 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.process_frame(UserStoppedSpeakingFrame())
         self.assertTrue(should_start)
+
+
+class TestExternalUserTurnCompletionStopStrategy(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.task_manager = TaskManager()
+        self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
+
+    async def _create_strategy(self):
+        strategy = ExternalUserTurnCompletionStopStrategy()
+        await strategy.setup(self.task_manager)
+        return strategy
+
+    async def test_finalizes_on_completion(self):
+        """The strategy fires on_user_turn_stopped on UserTurnInferenceCompletedFrame.
+
+        The stale-completion-while-speaking gate lives in the controller (which
+        holds the authoritative user-speaking state), not in this strategy; see
+        test_user_turn_controller.py.
+        """
+        strategy = await self._create_strategy()
+
+        finalized = False
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal finalized
+            finalized = True
+
+        await strategy.process_frame(UserTurnInferenceCompletedFrame())
+        self.assertTrue(finalized)
 
 
 if __name__ == "__main__":

@@ -34,6 +34,14 @@ class ExternalUserTurnCompletionStopStrategy(BaseUserTurnStopStrategy):
     instead, which additionally pushes the ``LLMUpdateSettingsFrame``
     that enables the marker protocol on the LLM.
 
+    A completion resolves with some latency (e.g. the LLM ``✓`` arrives
+    after the inference finishes), so the user may have resumed speaking
+    in the meantime. The controller drops a finalization that arrives
+    while the user is speaking, so a stale completion does not end the
+    turn (and talk over the user); the turn stays open for the next
+    inference to re-evaluate. That check lives in the controller, which
+    holds the authoritative user-speaking state.
+
     If the producer never emits ``UserTurnInferenceCompletedFrame``, the
     controller's ``user_turn_stop_timeout`` watchdog finalizes the
     turn after no activity. Tune that timeout if your producer can

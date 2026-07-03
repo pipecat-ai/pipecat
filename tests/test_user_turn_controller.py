@@ -12,6 +12,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    UserTurnInferenceCompletedFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -19,7 +20,11 @@ from pipecat.turns.user_start import VADUserTurnStartStrategy
 from pipecat.turns.user_start.min_words_user_turn_start_strategy import (
     MinWordsUserTurnStartStrategy,
 )
-from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy, deferred
+from pipecat.turns.user_stop import (
+    ExternalUserTurnCompletionStopStrategy,
+    SpeechTimeoutUserTurnStopStrategy,
+    deferred,
+)
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
@@ -32,6 +37,43 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.task_manager = TaskManager()
         self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
+
+    async def test_completion_dropped_while_user_speaking(self):
+        """A completion arriving while the user speaks must not stop the turn.
+
+        External completions (e.g. an LLM ✓) resolve with latency, so the user
+        may have resumed speaking. The controller drops the finalization while
+        the user is speaking and finalizes once they fall silent.
+        """
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[VADUserTurnStartStrategy()],
+                stop=[ExternalUserTurnCompletionStopStrategy()],
+            ),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(self.task_manager)
+
+        stopped = False
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            nonlocal stopped
+            stopped = True
+
+        # Start a turn; the user is now speaking.
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+
+        # A completion resolving while the user still speaks is stale: dropped.
+        await controller.process_frame(UserTurnInferenceCompletedFrame())
+        self.assertFalse(stopped)
+
+        # Once the user stops, a fresh completion finalizes the turn.
+        await controller.process_frame(VADUserStoppedSpeakingFrame())
+        await controller.process_frame(UserTurnInferenceCompletedFrame())
+        self.assertTrue(stopped)
+
+        await controller.cleanup()
 
     async def test_default_user_turn_strategies(self):
         controller = UserTurnController(
