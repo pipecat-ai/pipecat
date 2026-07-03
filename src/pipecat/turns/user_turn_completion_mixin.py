@@ -254,12 +254,17 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         # for this turn. Prevents double-broadcast when ✓ and a tool call
         # both occur in the same turn.
         self._turn_completion_broadcasted = False
-        # True once a ✓ has been voiced for the current *user* turn. Scoped to
-        # the user turn (reset on UserStartedSpeakingFrame / InterruptionFrame),
-        # unlike the per-response flags above (reset every LLMFullResponseEnd).
-        # The acoustic detector can trigger several inferences within one user
-        # turn, each independently producing a ✓; this latch ensures only the
-        # first is spoken, so the bot does not repeat the same response.
+        # True once a ✓ has been voiced since the user last started speaking.
+        # Reset on UserStartedSpeakingFrame / InterruptionFrame (new turn) and
+        # on VADUserStartedSpeakingFrame (resumed mid-turn), unlike the
+        # per-response flags above (reset every LLMFullResponseEnd). The
+        # acoustic detector can trigger several inferences within one user
+        # turn, each independently producing a ✓; this latch voices at most
+        # one per speaking segment, so the bot does not immediately repeat
+        # itself. It is not a per-turn guarantee: resetting on a mid-turn
+        # resume is required so a completion stale-dropped by the controller
+        # (see UserTurnController._trigger_user_turn_stop) doesn't
+        # permanently silence the turn.
         self._user_turn_completion_voiced = False
 
         # Timeout handling
@@ -396,11 +401,19 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             # The user resumed speaking within the same open turn. A new turn's
             # InterruptionFrame does not fire for a resume inside an already-open
-            # turn, so an armed ○/◐ re-prompt timeout would otherwise expire and
-            # nudge (talking over) a user who is speaking again. Cancel it here.
-            # Turn state is left intact: the ○/◐ response already ended and reset
-            # it, and the next inference re-arms a fresh timer if still needed.
+            # turn, so two things that normally reset on a fresh turn need
+            # handling here instead:
+            #
+            # 1. An armed ○/◐ re-prompt timeout would otherwise expire and
+            #    nudge (talking over) a user who is speaking again. Cancel it.
+            #    The ○/◐ response already ended and reset the per-response
+            #    state; the next inference re-arms a fresh timer if needed.
             await self._cancel_incomplete_timeout()
+            # 2. Allow one fresh spoken completion: resetting on a mid-turn
+            #    resume is required so a completion stale-dropped by the
+            #    controller (see UserTurnController._trigger_user_turn_stop)
+            #    doesn't permanently silence the turn.
+            self._user_turn_completion_voiced = False
 
         # Pass frame to parent
         await super().process_frame(frame, direction)

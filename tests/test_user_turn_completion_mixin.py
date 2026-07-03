@@ -217,7 +217,9 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         """A second ✓ inference within the same user turn is not voiced again.
 
         The acoustic detector can trigger several inferences per user turn, each
-        producing its own ✓; only the first should be spoken.
+        producing its own ✓; only the first should be spoken. This holds as long
+        as the user hasn't resumed speaking in between — a VADUserStartedSpeakingFrame
+        resets the latch instead (see test_resumed_speech_does_not_permanently_silence_the_turn).
         """
         processor = MockProcessor()
 
@@ -265,6 +267,59 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
             await processor.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
 
         self.assertFalse(processor._user_turn_completion_voiced)
+
+    async def test_vad_resume_resets_completion_latch(self):
+        """VADUserStartedSpeakingFrame lets the same open turn voice a completion again.
+
+        A resume inside an already-open turn produces no UserStartedSpeakingFrame
+        (the controller only fires that for a genuinely new turn), so without this
+        reset the latch would stay tripped for the rest of the turn. Since the
+        controller drops any in-flight completion as stale once the user resumes
+        (see UserTurnController._trigger_user_turn_stop), voicing it would only
+        repeat/talk over the user anyway — so the next ✓, for the turn the user is
+        now continuing, should get to speak instead.
+        """
+        processor = MockProcessor()
+        processor._user_turn_completion_voiced = True
+
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            await processor.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+        self.assertFalse(processor._user_turn_completion_voiced)
+
+    async def test_resumed_speech_does_not_permanently_silence_the_turn(self):
+        """Regression test for the confirmed double-inference-fix interaction bug.
+
+        Sequence: a first ✓ is voiced mid-turn (latch set); the user resumes
+        speaking within the same still-open turn (no UserStartedSpeakingFrame
+        fires, since the controller only emits that for a brand new turn); a
+        second, legitimate ✓ then arrives once the user pauses again. Without
+        resetting the latch on the resume, the second response would be
+        silently dropped and the bot would never reply.
+        """
+        processor = MockProcessor()
+
+        pushed_frames = []
+        processor.push_frame = AsyncMock(
+            side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)
+        )
+
+        # First (premature) inference: LLM says ✓, voiced, latch set.
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} First answer")
+        await processor._turn_reset()
+        self.assertTrue(processor._user_turn_completion_voiced)
+
+        # The user resumes speaking within the same still-open turn (no new
+        # UserStartedSpeakingFrame, since the turn never closed).
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            await processor.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+        # A second, legitimate inference completes once the user pauses again.
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Second answer")
+        await processor._turn_reset()
+
+        texts = [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)]
+        self.assertEqual(texts, ["First answer", "Second answer"])
 
 
 class MockLLMService(LLMService):
