@@ -162,7 +162,6 @@ class SonioxTTSService(WebsocketTTSService):
         audio_format: str = "pcm_s16le",
         settings: Settings | None = None,
         text_aggregation_mode: TextAggregationMode | None = None,
-        return_timestamps: bool = True,
         **kwargs,
     ):
         """Initialize the Soniox TTS service.
@@ -180,10 +179,6 @@ class SonioxTTSService(WebsocketTTSService):
                 deprecated parameters, ``settings`` values take precedence.
             text_aggregation_mode: How to aggregate incoming text before
                 synthesis. Defaults to ``TextAggregationMode.SENTENCE``.
-            return_timestamps: Request character-level timestamps from Soniox and
-                emit timestamp-aligned ``TTSTextFrame``s, so the conversation
-                context reflects only what was actually spoken on interruption.
-                When ``False``, the full text of each sentence is pushed up front.
             **kwargs: Additional arguments passed to the parent service.
         """
         # Initialize default_settings
@@ -200,9 +195,9 @@ class SonioxTTSService(WebsocketTTSService):
 
         super().__init__(
             text_aggregation_mode=text_aggregation_mode,
-            # With timestamps we emit word-aligned TTSTextFrames as audio plays;
-            # without them the base class pushes each sentence's text up front.
-            push_text_frames=not return_timestamps,
+            # We emit word-aligned TTSTextFrames from Soniox timestamps as audio
+            # plays, so the base class must not push each sentence's text up front.
+            push_text_frames=False,
             # We push TTSStoppedFrame ourselves when Soniox sends `terminated`.
             push_stop_frames=False,
             # Let the base class create audio contexts and emit TTSStartedFrame.
@@ -215,7 +210,6 @@ class SonioxTTSService(WebsocketTTSService):
 
         self._api_key = api_key
         self._url = url
-        self._return_timestamps = return_timestamps
 
         # Init-only audio format (not runtime-updatable).
         self._audio_format = audio_format
@@ -448,8 +442,8 @@ class SonioxTTSService(WebsocketTTSService):
             config["language"] = s.language
         if s.speed is not None:
             config["speed"] = s.speed
-        if self._return_timestamps:
-            config["return_timestamps"] = True
+        # Character-level timestamps drive the word-aligned TTSTextFrames.
+        config["return_timestamps"] = True
         if self._audio_format.startswith("pcm_"):
             config["sample_rate"] = self.sample_rate
         return config
