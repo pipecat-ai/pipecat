@@ -318,6 +318,15 @@ class UserTurnController(BaseObject):
         if not self._user_turn:
             return
 
+        # Never finalize while the user is audibly speaking. A stop strategy can
+        # finalize on a latent signal (e.g. an LLM ✓ that resolves after the
+        # user resumed), which is stale by the time it arrives. Keep the turn
+        # open so the next inference re-evaluates; the watchdog still finalizes
+        # if the user then falls silent. Detector strategies only finalize once
+        # the user has stopped, so this is a no-op for them.
+        if self._user_speaking:
+            return
+
         self._user_turn = False
         self._user_turn_stop_timeout_event.set()
 
