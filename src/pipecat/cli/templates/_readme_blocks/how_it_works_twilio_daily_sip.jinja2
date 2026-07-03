@@ -1,0 +1,24 @@
+## How It Works
+
+{% if twilio_daily_sip_mode == 'dial-in' %}
+1. Twilio receives an incoming call to your phone number
+2. Twilio calls your webhook server (`/call` endpoint in `server.py`)
+3. The server creates a Daily room with SIP capabilities
+4. The server starts the bot process with the room details (locally or via Pipecat Cloud)
+5. The caller is put on hold with music (a US ringtone in this example)
+6. The bot joins the Daily room and signals readiness
+7. Twilio forwards the call to Daily's SIP endpoint
+8. The caller and the bot are connected, and the bot handles the conversation
+
+{% elif twilio_daily_sip_mode == 'dial-out' %}
+1. The server receives a dial-out request with the SIP URI to call
+2. The server creates a Daily room with SIP capabilities
+3. The server starts the bot process (locally or via Pipecat Cloud based on ENV)
+4. The bot joins the room and initiates the dial-out to the specified SIP URI
+5. Twilio receives the SIP request and processes it via configured TwiML
+6. Twilio rings the number found within the SIP URI
+7. The bot automatically retries on failure (up to 5 attempts)
+8. When the call is answered, the bot conducts the conversation
+
+{% endif %}
+

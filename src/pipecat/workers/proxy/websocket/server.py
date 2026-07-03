@@ -21,7 +21,7 @@ try:
     from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use WebSocketProxyServer, you need to `pip install starlette`.")
+    logger.error("In order to use WebSocketProxyServer, you need to `uv add starlette`.")
     raise ImportError(f"Missing module: {e}") from e
 
 

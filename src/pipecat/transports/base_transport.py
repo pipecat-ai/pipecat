@@ -58,8 +58,8 @@ class TransportParams(BaseModel):
 
             .. deprecated:: 1.1.0
                 Use provider-specific settings instead (e.g.,
-                ``DailyParams.camera_out_send_settings``). This parameter will
-                be removed in 2.0.0.
+                ``DailyParams.camera_out_send_settings``).
+                Will be removed in 2.0.0.
 
         video_out_framerate: Video output frame rate in FPS.
         video_out_color_format: Video output color format string.

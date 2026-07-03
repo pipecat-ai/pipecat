@@ -22,6 +22,7 @@ Quick Links
    Audio <api/pipecat.audio>
    Clocks <api/pipecat.clocks>
    Extensions <api/pipecat.extensions>
+   Flows <api/pipecat.flows>
    Frames <api/pipecat.frames>
    Metrics <api/pipecat.metrics>
    Observers <api/pipecat.observers>

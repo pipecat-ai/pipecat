@@ -1,0 +1,46 @@
+name: starter_text
+
+# Starter eval scenario for {{ project_name }} — text mode (the fast inner loop).
+#
+# Text mode (the default) bypasses VAD, STT, and TTS: each `user:` turn is sent
+# as text and the judge reads the LLM's text output. Use it to test the bot's
+# *decisions* — prompt adherence, function calls, multi-turn context — on every
+# edit. For the audio path itself, see starter_audio.yaml.
+#
+# Run it (two terminals, both in server/):
+#
+#   uv run bot.py -t eval                                # 1: the bot, headless
+#   uv run pipecat eval run evals/starter_text.yaml -v   # 2: this scenario
+#
+# The bot stays up across runs, so leave it running and re-run evals as you edit.
+#
+# `eval:` criteria are scored by a judge LLM — by default a local Ollama
+# (`ollama pull gemma2:9b`). To judge with OpenAI instead (prefer a different
+# key/provider than the bot uses, so concurrent calls don't throttle each other):
+#
+#   judge:
+#     eval:
+#       service: openai
+#       model: gpt-4.1
+#
+# As your bot takes shape, update these turns to match it, and copy this file to
+# add scenarios. Besides `eval:` you can assert substrings (`text_contains:`),
+# latency (`within_ms:`), and tool use:
+#
+#   - user: "What's the weather in Paris?"
+#     expect:
+#       - event: function_call
+#         calls:
+#           - name: get_current_weather
+
+turns:
+  # The bot speaks first on connect. A turn with no `user:` just waits for and
+  # asserts on events — here, the greeting — so we don't barge into it.
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation (a greeting, an introduction, or an offer to help)"
+
+  - user: "What can you help me with?"
+    expect:
+      - event: response
+        eval: "the bot answers, describing what it can do or offering to help"

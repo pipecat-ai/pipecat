@@ -8,7 +8,7 @@
 
 Importing in: ``tests/test_aic_filter.py``, ``tests/test_aic_vad.py``,
 ``tests/test_aic_quail_vad.py``. Keep behavior aligned with the live
-``aic_sdk`` 2.3.0 surface so the suite stays representative.
+``aic_sdk`` 2.5.0 surface so the suite stays representative.
 """
 
 from typing import Any
@@ -22,10 +22,15 @@ class MockVadContext:
     def __init__(
         self,
         speech_detected: bool = False,
+        raw_probability: float = 0.0,
         raise_on_detect: bool = False,
         raise_on_set_param: bool = False,
     ) -> None:
         self.speech_detected = speech_detected
+        self.raw_probability = raw_probability
+        # raise_on_detect drives both query paths so error tests can target
+        # whichever the code under test calls (is_speech_detected /
+        # raw_vad_probability).
         self.raise_on_detect = raise_on_detect
         self.raise_on_set_param = raise_on_set_param
         self.parameters_set: list[tuple] = []
@@ -34,6 +39,11 @@ class MockVadContext:
         if self.raise_on_detect:
             raise RuntimeError("VAD error")
         return self.speech_detected
+
+    def raw_vad_probability(self) -> float:
+        if self.raise_on_detect:
+            raise RuntimeError("VAD error")
+        return self.raw_probability
 
     def set_parameter(self, param: Any, value: float) -> None:
         if self.raise_on_set_param:

@@ -47,3 +47,14 @@ jobs:
       - name: Type check (pyright)
         id: pyright
         run: uv run pyright
+
+      - name: CLI registry drift check
+        id: registry-drift
+        # Regenerate the CLI's service registry against the source and fail if it drifted.
+        # This runs here because regenerating _configs.py introspects constructor
+        # signatures and needs the service SDKs, which this job already installs via
+        # --all-extras. Catches both import-path and constructor-signature drift, and
+        # backstops commits made with --no-verify or without the pre-commit hook.
+        run: |
+          uv run scripts/cli/update_registry.py
+          git diff --exit-code src/pipecat/cli/registry/_imports.py src/pipecat/cli/registry/_configs.py

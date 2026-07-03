@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.extensions.voicemail.voicemail_detector import VoicemailDetector
 from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -34,6 +35,10 @@ load_dotenv(override=True)
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -126,7 +131,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         # NOTE: A common pattern is to end pipeline after the voicemail is left.
         # Uncomment the following line to end the pipeline after leaving the voicemail.
-        # await processor.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+        # await processor.push_frame(EndWorkerFrame())
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 

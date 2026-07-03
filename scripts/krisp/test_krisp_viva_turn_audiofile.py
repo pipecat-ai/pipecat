@@ -10,7 +10,7 @@ Usage:
     python test_krisp_viva_turn_audiofile.py input.wav --frame-duration 20
 
 Requirements:
-    pip install soundfile numpy pipecat-ai[krisp]
+    uv add soundfile numpy "pipecat-ai[krisp]"
     Set KRISP_VIVA_TURN_MODEL_PATH environment variable to point to your .kef model file
 """
 
@@ -27,7 +27,7 @@ try:
     from audio_file_utils import read_audio_file
 except ImportError as e:
     print(f"Error: Missing required dependencies: {e}")
-    print("Install with: pip install soundfile numpy")
+    print("Install with: uv add soundfile numpy")
     sys.exit(1)
 
 # Add src directory to Python path for development environment
@@ -43,7 +43,7 @@ try:
     from pipecat.audio.turn.krisp_viva_turn import KrispTurnParams, KrispVivaTurn
 except ImportError as e:
     print(f"Error: Could not import Krisp VIVA turn analyzer: {e}")
-    print("Make sure pipecat-ai is installed: pip install pipecat-ai[krisp]")
+    print('Make sure pipecat-ai is installed: uv add "pipecat-ai[krisp]"')
     sys.exit(1)
 
 

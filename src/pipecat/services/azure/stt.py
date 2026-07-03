@@ -48,7 +48,7 @@ try:
     from azure.cognitiveservices.speech.dialog import AudioConfig
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Azure, you need to `pip install pipecat-ai[azure]`.")
+    logger.error('In order to use Azure, you need to `uv add "pipecat-ai[azure]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 
@@ -93,6 +93,7 @@ class AzureSTTService(STTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AzureSTTService.Settings(language=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             private_endpoint: Private endpoint for STT behind firewall.

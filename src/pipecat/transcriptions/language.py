@@ -118,6 +118,7 @@ class Language(StrEnum):
     # German
     DE = "de"
     DE_AT = "de-AT"
+    DE_BE = "de-BE"
     DE_CH = "de-CH"
     DE_DE = "de-DE"
 

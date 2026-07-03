@@ -1421,10 +1421,21 @@ def traced_openai_realtime(operation: str) -> Callable:
                                 try:
                                     context_tools = getattr(self._context, "tools", None)
                                     if context_tools and not operation_attrs.get("tools"):
-                                        operation_attrs["tools"] = context_tools
-                                        operation_attrs["tools_serialized"] = json.dumps(
-                                            context_tools
-                                        )
+                                        tools = None
+                                        if hasattr(self, "get_llm_adapter"):
+                                            adapter = self.get_llm_adapter()
+                                            tools = adapter.from_standard_tools(context_tools)
+
+                                        if tools is not None and tools is not NOT_GIVEN:
+                                            operation_attrs["tools"] = tools
+                                            try:
+                                                operation_attrs["tools_serialized"] = json.dumps(
+                                                    tools
+                                                )
+                                            except Exception as e:
+                                                logging.warning(
+                                                    f"Error serializing OpenAI Realtime tools: {e}"
+                                                )
                                 except Exception as e:
                                     logger.warning(f"Error extracting context tools: {e}")
 

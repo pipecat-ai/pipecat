@@ -1,0 +1,23 @@
+name: describe_image
+
+# Text modality: the user asks the bot to look at what they're showing. The bot
+# calls its vision function (which pushes a UserImageRequestFrame); the eval
+# transport serves the image registered for this turn as a UserImageRawFrame.
+# Exercises the function-call -> user-image -> describe flow of the *-video bots.
+
+judge: !include judge_text.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "What do you see in my camera?"
+    image: ../assets/cat.jpg
+    expect:
+      - event: function_call
+        calls:
+          - name: fetch_user_image
+      - event: response
+        eval: "the response says the image shows a cat"

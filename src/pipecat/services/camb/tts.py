@@ -34,6 +34,7 @@ from pipecat.frames.frames import (
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 # Model-specific sample rates
@@ -185,11 +186,16 @@ class CambTTSService(TTSService):
     Settings = CambTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`CambTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `CambTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Camb.ai TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``settings=CambTTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language for synthesis (BCP-47 format). Defaults to English.
@@ -225,11 +231,13 @@ class CambTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=CambTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             model: TTS model to use. Options: "mars-flash" (fast), "mars-pro" (high quality).
 
                 .. deprecated:: 0.0.105
                     Use ``settings=CambTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             timeout: Request timeout in seconds. Defaults to 60.0 (minimum recommended
                 by Camb.ai).
@@ -238,6 +246,7 @@ class CambTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=CambTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

@@ -40,6 +40,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
 from pipecat.services.settings import LLMSettings, _NotGiven, assert_given, is_given
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -47,7 +48,7 @@ try:
     from anthropic import NotGiven as AnthropicNotGiven
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Anthropic, you need to `pip install pipecat-ai[anthropic]`.")
+    logger.error('In order to use Anthropic, you need to `uv add "pipecat-ai[anthropic]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 
@@ -122,12 +123,16 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
     # Backward compatibility: ThinkingConfig used to be defined inline here.
     ThinkingConfig = AnthropicThinkingConfig
 
+    @deprecated(
+        "`AnthropicLLMService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `AnthropicLLMService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Anthropic model inference.
 
         .. deprecated:: 0.0.105
             Use ``AnthropicLLMService.Settings`` instead. Pass settings directly via the
-            ``settings`` parameter of :class:`AnthropicLLMService`.
+            ``settings`` parameter of :class:`AnthropicLLMService`. Will be removed in 2.0.0.
 
         Parameters:
             enable_prompt_caching: Whether to enable the prompt caching feature.
@@ -172,11 +177,13 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AnthropicLLMService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             params: Optional model parameters for inference.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AnthropicLLMService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings for this service.  When both
                 deprecated parameters and *settings* are provided, *settings*

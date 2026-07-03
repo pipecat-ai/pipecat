@@ -52,6 +52,7 @@ from pipecat.services.settings import (
     assert_given,
     is_given,
 )
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 # Suppress gRPC fork warnings
@@ -70,7 +71,7 @@ try:
     genai._api_client.READ_BUFFER_SIZE = 5 * 1024 * 1024
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Google AI, you need to `pip install pipecat-ai[google]`.")
+    logger.error('In order to use Google AI, you need to `uv add "pipecat-ai[google]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 
@@ -146,11 +147,16 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
     # Backward compatibility: ThinkingConfig used to be defined inline here.
     ThinkingConfig = GoogleThinkingConfig
 
+    @deprecated(
+        "`GoogleLLMService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `GoogleLLMService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Google AI models.
 
         .. deprecated:: 0.0.105
             Use ``settings=GoogleLLMService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             max_tokens: Maximum number of tokens to generate.
@@ -194,11 +200,13 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GoogleLLMService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             params: Optional model parameters for inference.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GoogleLLMService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings for this service.  When both
                 deprecated parameters and *settings* are provided, *settings*
@@ -207,6 +215,8 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GoogleLLMService.Settings(system_instruction=...)`` instead.
+                    Will be removed in 2.0.0.
+
             tools: List of available tools/functions.
             tool_config: Configuration for tool usage.
             http_options: HTTP options for the client.

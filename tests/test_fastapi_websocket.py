@@ -5,14 +5,20 @@
 #
 
 import asyncio
+import contextlib
+import io
+import time
 import unittest
 from unittest.mock import AsyncMock, PropertyMock
 
+from loguru import logger
 from starlette.websockets import WebSocketState
 
 from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketCallbacks,
     FastAPIWebsocketClient,
+    FastAPIWebsocketParams,
+    FastAPIWebsocketTransport,
     _WebSocketMessageIterator,
 )
 
@@ -200,6 +206,124 @@ class TestSendDisconnectRace(unittest.IsolatedAsyncioTestCase):
         await client.send("text data")
 
         self.assertFalse(client.is_closing)
+
+
+class TestDisconnectCloseTimeout(unittest.IsolatedAsyncioTestCase):
+    """Tests for issue #4528.
+
+    ``disconnect()`` must not block indefinitely on a half-closed peer that
+    never acknowledges the WebSocket close handshake (e.g. a telephony call
+    already torn down on the provider's side). The close should be bounded by
+    ``ws_close_timeout`` so pipeline shutdown can proceed.
+    """
+
+    def _make_client(self, mock_ws, ws_close_timeout=0.5):
+        callbacks = FastAPIWebsocketCallbacks(
+            on_client_connected=AsyncMock(),
+            on_client_disconnected=AsyncMock(),
+            on_session_timeout=AsyncMock(),
+        )
+        client = FastAPIWebsocketClient(mock_ws, callbacks, ws_close_timeout=ws_close_timeout)
+        # setup() bumps the leave counter to 1; disconnect() decrements to 0
+        # and then performs the close.
+        client._leave_counter = 1
+        return client, callbacks
+
+    @contextlib.contextmanager
+    def _capture_logs(self, level):
+        """Capture loguru output (pipecat uses loguru, not stdlib logging)."""
+        sink = io.StringIO()
+        handler_id = logger.add(sink, level=level, format="{message}")
+        try:
+            yield sink
+        finally:
+            logger.remove(handler_id)
+
+    async def test_disconnect_bounded_when_close_hangs(self):
+        """disconnect() returns within ws_close_timeout if close() never completes."""
+        never = asyncio.Event()
+
+        async def hanging_close():
+            await never.wait()  # peer never ACKs the close handshake
+
+        mock_ws = AsyncMock()
+        type(mock_ws).client_state = PropertyMock(return_value=WebSocketState.CONNECTED)
+        mock_ws.close = hanging_close
+
+        client, _ = self._make_client(mock_ws, ws_close_timeout=0.1)
+
+        start = time.monotonic()
+        with self._capture_logs("DEBUG") as logs:
+            # wait_for is the regression guard: against the old unbounded code
+            # disconnect() never returns, so this fails fast with TimeoutError
+            # instead of hanging CI on the ~10s ASGI close-handshake timeout.
+            await asyncio.wait_for(client.disconnect(), timeout=5.0)
+        elapsed = time.monotonic() - start
+
+        self.assertLess(elapsed, 2.0)
+        self.assertTrue(client.is_closing)
+        self.assertIn("WebSocket close exceeded", logs.getvalue())
+
+        # The close task outlives the timeout; cancel it to clean up.
+        client._close_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await client._close_task
+
+    async def test_disconnect_completes_when_close_succeeds(self):
+        """Happy path: a peer that ACKs the close lets disconnect() finish fast."""
+        mock_ws = AsyncMock()
+        type(mock_ws).client_state = PropertyMock(return_value=WebSocketState.CONNECTED)
+        mock_ws.close = AsyncMock()
+
+        client, _ = self._make_client(mock_ws, ws_close_timeout=5.0)
+
+        await client.disconnect()
+        await asyncio.sleep(0)  # let the done callback run
+
+        mock_ws.close.assert_awaited_once()
+        self.assertTrue(client.is_closing)
+        self.assertTrue(client._close_task.done())
+
+    async def test_disconnect_noop_when_other_holders_remain(self):
+        """disconnect() only closes once the last holder leaves."""
+        mock_ws = AsyncMock()
+        type(mock_ws).client_state = PropertyMock(return_value=WebSocketState.CONNECTED)
+        mock_ws.close = AsyncMock()
+
+        client, _ = self._make_client(mock_ws)
+        client._leave_counter = 2  # input + output both hold the client
+
+        await client.disconnect()  # one leaves; one holder remains
+
+        mock_ws.close.assert_not_called()
+        self.assertFalse(client.is_closing)
+
+    async def test_close_error_is_logged_not_raised(self):
+        """An exception from close() is swallowed (logged), not propagated."""
+        mock_ws = AsyncMock()
+        type(mock_ws).client_state = PropertyMock(return_value=WebSocketState.CONNECTED)
+        mock_ws.close = AsyncMock(side_effect=RuntimeError("already closed"))
+
+        client, _ = self._make_client(mock_ws, ws_close_timeout=5.0)
+
+        with self._capture_logs("ERROR") as logs:
+            await client.disconnect()  # must not raise
+            # The done callback runs via call_soon (not synchronously), so yield
+            # once to let it consume and log the exception before we assert.
+            await asyncio.sleep(0)
+
+        self.assertTrue(client._close_task.done())
+        self.assertIsInstance(client._close_task.exception(), RuntimeError)
+        self.assertIn("exception while closing the websocket", logs.getvalue())
+
+    async def test_transport_passes_ws_close_timeout_to_client(self):
+        """The transport wires params.ws_close_timeout through to its client."""
+        mock_ws = AsyncMock()
+        params = FastAPIWebsocketParams(ws_close_timeout=1.25)
+
+        transport = FastAPIWebsocketTransport(mock_ws, params)
+
+        self.assertEqual(transport._client._ws_close_timeout, 1.25)
 
 
 if __name__ == "__main__":

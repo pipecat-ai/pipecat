@@ -53,9 +53,10 @@ from dotenv import load_dotenv
 from loguru import logger
 from sensor import SensorReader, SensorStats
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusJobRequestMessage
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -79,6 +80,10 @@ load_dotenv(override=True)
 
 
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -161,20 +166,13 @@ def build_sensor_controller() -> PipelineWorker:
             ),
         ),
     )
-    llm.register_direct_function(get_current_reading)
-    llm.register_direct_function(get_stats)
-    llm.register_direct_function(set_target_temperature)
-    llm.register_direct_function(set_response_rate)
-
     context = LLMContext(
-        tools=ToolsSchema(
-            standard_tools=[
-                get_current_reading,
-                get_stats,
-                set_target_temperature,
-                set_response_rate,
-            ]
-        )
+        tools=[
+            get_current_reading,
+            get_stats,
+            set_target_temperature,
+            set_response_rate,
+        ]
     )
     aggregators = LLMContextAggregatorPair(context)
 
@@ -238,6 +236,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
+    @tool_options(timeout_secs=60)
     async def ask_controller(params: FunctionCallParams, question: str):
         """Ask the temperature sensor controller anything about the sensor.
 
@@ -266,9 +265,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             ),
         ),
     )
-    llm.register_direct_function(ask_controller, timeout_secs=60)
-
-    context = LLMContext(tools=ToolsSchema(standard_tools=[ask_controller]))
+    context = LLMContext(tools=[ask_controller])
     aggregators = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

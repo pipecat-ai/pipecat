@@ -27,6 +27,12 @@ uv run pytest tests/test_name.py::test_function_name
 # Preview changelog
 uv run towncrier build --draft --version Unreleased
 
+# Run a behavioral eval scenario against a running bot (bot started with `-t eval`)
+pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860
+
+# Run the full release-eval suite (spawns bots from a manifest, runs scenarios in parallel)
+pipecat eval suite scripts/release-evals/manifest.yaml -p <bot-pattern> -s <scenario>
+
 # Lint and format check
 uv run ruff check
 uv run ruff format --check
@@ -67,7 +73,7 @@ All data flows as **Frame** objects through a pipeline of **FrameProcessors**:
 
 - **Serializers** (`src/pipecat/serializers/`): Convert frames to/from wire formats for WebSocket transports. `FrameSerializer` base class defines `serialize()` and `deserialize()`. Telephony serializers (Twilio, Plivo, Vonage, Telnyx, Exotel, Genesys) handle provider-specific protocols and audio encoding (e.g., μ-law).
 
-- **RTVI** (`src/pipecat/processors/frameworks/rtvi.py`): Real-Time Voice Interface protocol bridging clients and the pipeline. `RTVIProcessor` handles incoming client messages (text input, audio, function call results). `RTVIObserver` converts pipeline frames to outgoing messages: user/bot speaking events, transcriptions, LLM/TTS lifecycle, function calls, metrics, and audio levels.
+- **RTVI** (`src/pipecat/processors/frameworks/rtvi.py`): Real-Time Voice Interface protocol bridging clients and the pipeline. `RTVIProcessor` handles incoming client messages (text input, audio, DTMF keypresses, function call results). `RTVIObserver` converts pipeline frames to outgoing messages: user/bot speaking events, transcriptions, LLM/TTS lifecycle, function calls, metrics, and audio levels.
 
 - **Observers** (`src/pipecat/observers/`): Monitor frame flow without modifying the pipeline. Passed to `PipelineWorker` via the `observers` parameter. Implement `on_process_frame()` and `on_push_frame()` callbacks.
 
@@ -87,14 +93,14 @@ Runnable examples live in `examples/multi-worker/` (local handoff, distributed h
 
 ### Important Patterns
 
-- **Context Aggregation**: `LLMContext` accumulates messages for LLM calls; `UserResponse` aggregates user input
+- **Context Aggregation**: `LLMContext` accumulates messages for LLM calls; the aggregators created by `LLMContextAggregatorPair` keep it updated with user and assistant turns
 
 - **Turn Management**: Turn management is done through `LLMUserAggregator` and
   `LLMAssistantAggregator`, created with `LLMContextAggregatorPair`
 
 - **User turn strategies**: Detection of when the user starts and stops speaking is done via user turn start/stop strategies. They push `UserStartedSpeakingFrame` and `UserStoppedSpeakingFrame` respectively.
 
-- **Interruptions**: Interruptions are usually triggered by a user turn start strategy (e.g. `VADUserTurnStartStrategy`) but they can be triggered by other processors as well, in which case the user turn start strategies don't need to. An `InterruptionFrame` carries an optional `asyncio.Event` that is set when the frame reaches the pipeline sink. If a processor stops an `InterruptionFrame` from propagating downstream (i.e., doesn't push it), it **must** call `frame.complete()` to avoid stalling `push_interruption_task_frame_and_wait()` callers.
+- **Interruptions**: Interruptions are usually triggered by a user turn start strategy (e.g. `VADUserTurnStartStrategy`), but any processor can trigger one by calling `await self.broadcast_interruption()`, which broadcasts an `InterruptionFrame` both upstream and downstream. The old `push_interruption_task_frame_and_wait()` is deprecated and delegates to `broadcast_interruption()`.
 
 - **Uninterruptible Frames**: These are frames that will not be removed from internal queues even if there's an interruption. For example, `EndFrame` and `StopFrame`.
 
@@ -122,11 +128,16 @@ Runnable examples live in `examples/multi-worker/` (local handoff, distributed h
 | `src/pipecat/observers/`   | Pipeline observers for monitoring frame flow       |
 | `src/pipecat/audio/`       | VAD, filters, mixers, turn detection, DTMF         |
 | `src/pipecat/turns/`       | User turn management                               |
+| `src/pipecat/adapters/`    | LLM provider adapters (context/tools conversion)   |
+| `src/pipecat/runner/`      | Development runner (multi-transport bot hosting)   |
+| `src/pipecat/cli/`         | `pipecat` CLI (`init`, `eval`)                     |
+| `src/pipecat/evals/`       | Behavioral eval framework (run via `pipecat eval`) |
+| `src/pipecat/metrics/`     | Metrics data models                                |
 
 ## Code Style
 
 - **Docstrings**: Google-style. Classes describe purpose; `__init__` has `Args:` section; dataclasses use `Parameters:` section.
-- **Deprecations**: Use the `.. deprecated:: <version>` Sphinx directive in docstrings (never inline tags like `[DEPRECATED]`), and pair it with a runtime `warnings.warn(..., DeprecationWarning)` at the call site. See `CONTRIBUTING.md` for full conventions.
+- **Deprecations**: Every deprecation needs a `.. deprecated:: <version>` directive in the docstring (never inline `[DEPRECATED]` tags) — it's the registry's source of truth. Its body must **lead with the replacement as the first reference** — `Use :class:`X` instead.` / `Moved to :mod:`X`.` / `Merged into :class:`X`.` — or state `No replacement.` explicitly; **never lead with a contextual reference** (the deprecated thing itself, a `DeprecationWarning`, or a related-but-not-replacement API), and don't rely on incidental words like "no longer" to signal no-replacement. Prefer Sphinx roles (`:class:`/`:meth:`/`:func:`/`:attr:`/`:mod:`) over plain backticks, but use a backtick when a role wouldn't resolve (aliases like `Service.Settings`, usage idioms, parameters). For the runtime warning: **classes, functions, methods, and properties** use the PEP 702 `@deprecated` decorator from `pipecat.utils.deprecation` with a string-literal message matching the canonical template — `` `Subject` is deprecated since X.Y.Z and will be removed in A.B.C. Use `Replacement` instead. `` — where the removal is a concrete version (e.g. `2.0.0`, never "a future release") and the tail is `No replacement.` when nothing replaces it. Parameters, module moves, and behavior/value changes can't use the decorator — call `warnings.warn(..., DeprecationWarning)` by hand. Enforced by `tests/test_deprecation_markers.py`; full conventions in `CONTRIBUTING.md`.
 - **Linting**: Ruff (line length 100). Pre-commit hooks enforce formatting.
 - **Type hints**: Required for complex async code.
 - **Dataclass vs Pydantic**: Use `@dataclass` for frames and internal pipeline data (high-frequency, no validation needed). Use Pydantic `BaseModel` for configuration, parameters, metrics, and external API data (benefits from validation and serialization). Specifically:
@@ -178,6 +189,13 @@ class MyParams(BaseModel):
     old_setting: str | None = None
 ```
 
+## Writing for Future Readers
+
+This applies to everything that documents the code — comments, docstrings, commit messages, changelog entries, PR descriptions. Write for a future reader of the codebase, NOT for whoever is reviewing and collaborating on the work right now.
+
+- **Leave the current moment out of it.** Detail that feels important while making a change — alternatives considered and not taken, what the code used to do, shorthand that only made sense while the work was in progress — usually isn't worth a future reader's time, and may not even make sense to them. Include it only when they genuinely need it to understand the code as it stands.
+- **Match the weight of the prose to the code.** Keep it general, high-level, and concise. Reserve long comments for architecturally salient pieces, genuinely tricky sections, or decisions non-obvious enough that a reader would otherwise be puzzled. Routine code needs a short note or none at all.
+
 ## Service Implementation
 
 When adding a new service:
@@ -192,4 +210,13 @@ When adding a new service:
 
 ## Testing
 
-Test utilities live in `src/pipecat/tests/utils.py`. Use `run_test()` to send frames through a pipeline and assert expected output frames in each direction. Use `SleepFrame(sleep=N)` to add delays between frames.
+**Unit tests.** Test utilities live in `src/pipecat/tests/utils.py`. Use `run_test()` to send frames through a pipeline and assert expected output frames in each direction. Use `SleepFrame(sleep=N)` to add delays between frames.
+
+**Behavioral evals.** `pipecat.evals` (`src/pipecat/evals/`) is a behavioral eval framework that drives a *real bot* end-to-end and asserts on its behavior — use it to confirm a feature works (interruptions, function calls, vision, multi-turn, transcription, DTMF) rather than only checking frame plumbing. The harness connects to a bot's **eval transport** as an RTVI client, plays scripted user turns (synthesizing audio in audio mode), and checks each expectation (latency, `text_contains`, an expected `function_call`, or an LLM judge of the bot's reply).
+
+A scenario is a YAML file of `turns` with `expect:` assertions; scenarios are reusable across bots. To confirm a behavior while developing:
+
+1. Run the bot with its eval transport: `python bot.py -t eval --port 7860`
+2. Run a scenario against it: `pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860 -v`
+
+For many bots at once, `pipecat eval suite <manifest.yaml>` spawns each bot and runs its scenarios in parallel. Reusable scenarios and the pre-release validation manifest live in `scripts/release-evals/` — see its `README.md` for the full workflow (prerequisites: a local Ollama judge `gemma2:9b`, plus Kokoro/Moonshine for audio mode) and the `pipecat.evals.scenario` module docstring for the complete scenario file format.

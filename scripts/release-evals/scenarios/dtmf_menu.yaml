@@ -1,0 +1,31 @@
+name: dtmf_menu
+
+# DTMF: the caller drives a keypad phone menu (IVR) entirely with DTMF tones, no
+# speech. Each `dtmf:` turn presses keys that the bot's DTMFAggregator turns into
+# a "DTMF: ..." transcription, which (via the default transcription-based
+# turn-start strategy) drives a full user turn the LLM responds to.
+
+judge: !include judge_text.yaml
+
+turns:
+  # The bot greets the caller and reads the menu on connect.
+  - expect:
+      - event: response
+        eval: "presents a keypad menu, mentioning pressing 1 and pressing 2"
+
+  # Press 1: business hours.
+  - dtmf: "1#"
+    expect:
+      - event: user_transcription
+        text_contains: "DTMF: 1#"
+      - event: response
+        eval: "states the business hours (open 9 AM to 5 PM, Monday through Friday)"
+
+  # Press 2: office location. No '#' terminator here, so the aggregator flushes
+  # on its idle timeout instead (turn 1 covers the '#' immediate flush).
+  - dtmf: "2"
+    expect:
+      - event: user_transcription
+        text_contains: "DTMF: 2"
+      - event: response
+        eval: "gives the office location (123 Main Street)"

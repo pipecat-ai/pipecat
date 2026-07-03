@@ -47,7 +47,6 @@ def _model_manager_ref_count(manager, key: str) -> int:
 from tests.aic_mocks import (  # noqa: E402
     MockModel,
     MockProcessorContext,
-    MockVadContext,
 )
 from tests.aic_mocks import (
     MockProcessorAsync as MockProcessor,

@@ -28,7 +28,7 @@ from pipecat.workers.base_worker import BaseWorker
 try:
     from pipecat.bus.network.pgmq import PgmqBus
 except Exception:
-    raise unittest.SkipTest("pgmq extra not installed (`pip install pipecat-ai[pgmq]`)")
+    raise unittest.SkipTest('pgmq extra not installed (`uv add "pipecat-ai[pgmq]"`)')
 
 _sub_counter = itertools.count()
 

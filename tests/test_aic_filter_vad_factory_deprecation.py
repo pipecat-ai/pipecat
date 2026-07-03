@@ -38,7 +38,7 @@ class TestAICFilterCreateVADAnalyzerDeprecation(unittest.TestCase):
         self.assertEqual(len(deprecations), 1)
         self.assertIn("create_vad_analyzer", str(deprecations[0].message))
         self.assertIn("AICQuailVADAnalyzer", str(deprecations[0].message))
-        self.assertIn("Pipecat 1.6.0", str(deprecations[0].message))
+        self.assertIn("1.6.0", str(deprecations[0].message))
 
 
 if __name__ == "__main__":

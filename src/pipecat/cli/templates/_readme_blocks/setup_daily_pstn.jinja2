@@ -1,0 +1,128 @@
+## Setup
+
+1. Create a virtual environment and install dependencies
+
+   ```bash
+   uv sync
+   ```
+
+2. Set up environment variables
+
+   Copy the example file and fill in your API keys:
+
+    ```bash
+    cp .env.example .env
+    # Edit .env with your API keys
+    ```
+
+3. Buy a phone number
+
+   Instructions on how to do that can be found at this [docs link:](https://docs.daily.co/reference/rest-api/phone-numbers/buy-phone-number)
+
+{% if daily_pstn_mode == 'dial-in' %}
+4. Set up the dial-in config
+
+   Instructions on how to do that can be found at this [docs link](https://docs.daily.co/reference/rest-api/domainDialinConfig).
+
+   The `room_creation_api` should point to your webhook endpoint. For local testing with ngrok, this will be:
+
+   ```
+   https://your-ngrok-url.ngrok.io/daily-dialin-webhook
+   ```
+
+   > Tip: If you're using Pipecat Cloud, you can purchase a number using the Pipecat Cloud dashboard (Settings > Telephony).
+{% else %}
+4. Request dial-out enablement
+
+   For compliance reasons, to enable dial-out for your Daily account, you must request enablement via the form. You can find out more about dial-out, and the form at the [link here](https://docs.daily.co/guides/products/dial-in-dial-out#main)
+
+{% endif %}
+{% if daily_pstn_mode == 'dial-out' %}
+## Environment Configuration
+
+The bot supports two deployment modes controlled by the `ENV` variable:
+
+### Local Development (`ENV=local`)
+
+- Uses your local server for handling dial-out requests and starting the bot
+- Default configuration for development and testing
+
+### Production (`ENV=production`)
+
+- Bot is deployed to Pipecat Cloud; requires `PIPECAT_API_KEY` and `PIPECAT_AGENT_NAME`
+- Set these when deploying to production environments
+- Your FastAPI server runs either locally or deployed to your infrastructure
+
+{% endif %}
+
+## Run the Bot Locally
+
+{% if daily_pstn_mode == 'dial-in' %}
+You'll need two terminal windows open:
+
+1. Terminal 1: Start the webhook server:
+
+   ```bash
+   uv run server.py
+   ```
+
+2. Terminal 2: Start an ngrok tunnel to expose the FastAPI server running on server.py
+
+   ```bash
+   ngrok http 7860
+   ```
+
+   Important: Make sure that this URL matches the `room_creation_api` URL for your phone number.
+
+   > Tip: Use the `--subdomain` for a reusable ngrok link.
+
+3. Configure your Daily phone number
+
+   Set your phone number's `room_creation_api` webhook to:
+
+   ```
+   https://your-ngrok-url.ngrok.io/daily-dialin-webhook
+   ```
+
+   Instructions: [Daily Dial-in Config Docs](https://docs.daily.co/reference/rest-api/domainDialinConfig)
+
+   > If you're using Pipecat Cloud, you can configure your phone number's webhook in the Pipecat Cloud dashboard (Settings > Telephony).
+
+4. Call your bot!
+
+   Call the number you configured to talk to your bot.
+{% else %}
+You'll need two terminal windows open:
+
+1. **Terminal 1**: Start the webhook server:
+
+   ```bash
+   uv run server.py
+   ```
+
+   This runs on port 8080 and handles dial-out requests.
+
+2. **Terminal 2**: Start the bot server:
+
+   ```bash
+   uv run bot.py -t daily
+   ```
+
+   This runs on port 7860 and handles the bot logic.
+
+3. **Test the dial-out functionality**
+
+   With both servers running, send a dial-out request:
+
+   ```bash
+   curl -X POST "http://localhost:8080/dialout" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "dialout_settings": {
+         "phone_number": "+1234567890"
+       }
+     }'
+   ```
+
+   The server will create a room, start the bot, and the bot will call the specified number. Answer the call to speak with the bot.
+{% endif %}

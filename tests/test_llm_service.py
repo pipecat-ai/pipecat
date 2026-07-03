@@ -6,7 +6,7 @@
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -17,8 +17,11 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
+    LLMContextFrame,
+    LLMSetToolsFrame,
 )
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
@@ -391,3 +394,23 @@ class TestAppendSystemInstruction(unittest.IsolatedAsyncioTestCase):
         # Disabling recomposes back to base + guide.
         service._teardown_async_tool_cancellation()
         self.assertEqual(service._settings.system_instruction, "APP\n\nGUIDE")
+
+
+class TestProcessFrameToolWiring(unittest.IsolatedAsyncioTestCase):
+    """process_frame syncs handlers from the context frame's advertised tools."""
+
+    async def test_context_frame_syncs_registered_direct_functions(self):
+        service = MockLLMService()
+        service._sync_registered_tool_handlers = Mock()
+        ctx = LLMContext(tools=NOT_GIVEN)
+        await service.process_frame(LLMContextFrame(context=ctx), FrameDirection.DOWNSTREAM)
+        service._sync_registered_tool_handlers.assert_called_once_with(ctx.tools)
+
+    async def test_base_service_does_not_handle_set_tools_frame(self):
+        # The base service syncs handlers only from the context frame. An
+        # LLMSetToolsFrame is a pure aggregator concern here; only realtime
+        # services that run continuously handle it for handler sync.
+        service = MockLLMService()
+        service._sync_registered_tool_handlers = Mock()
+        await service.process_frame(LLMSetToolsFrame(tools=NOT_GIVEN), FrameDirection.DOWNSTREAM)
+        service._sync_registered_tool_handlers.assert_not_called()

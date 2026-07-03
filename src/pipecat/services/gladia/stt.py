@@ -18,7 +18,10 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import aiohttp
+import websockets
 from loguru import logger
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
@@ -27,6 +30,7 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     TranslationFrame,
     UserStartedSpeakingFrame,
@@ -43,17 +47,9 @@ from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_
 from pipecat.services.stt_latency import GLADIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-
-try:
-    import websockets
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Gladia, you need to `pip install pipecat-ai[gladia]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 
 def language_to_gladia_language(language: Language) -> str:
@@ -250,12 +246,14 @@ class GladiaSTTService(WebsocketSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GladiaSTTService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             params: Additional configuration parameters for Gladia service.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GladiaSTTService.Settings(...)`` for runtime-updatable
                     fields and direct init parameters for encoding/bit_depth/channels.
+                    Will be removed in 2.0.0.
 
             max_buffer_size: Maximum size of audio buffer in bytes. Defaults to 20MB.
             should_interrupt: Determine whether the bot should be interrupted when
@@ -356,6 +354,19 @@ class GladiaSTTService(WebsocketSTTService):
             True, indicating this service supports metrics generation.
         """
         return True
+
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Request external turn strategies when Gladia's VAD drives endpointing.
+
+        With ``enable_vad`` set, Gladia detects end of utterance server-side and
+        emits ``UserStarted/StoppedSpeakingFrame``, so the user aggregator defers to
+        those rather than running local VAD/smart-turn. Without it the defaults are
+        left in place. Applied unless the user passed their own ``user_turn_strategies``.
+        """
+        frame = super().service_metadata_frame()
+        if self._settings.enable_vad:
+            frame.user_turn_strategies = ExternalUserTurnStrategies()
+        return frame
 
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert pipecat Language enum to Gladia's language code.

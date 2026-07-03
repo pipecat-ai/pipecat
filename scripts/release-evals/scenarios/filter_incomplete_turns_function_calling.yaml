@@ -1,0 +1,42 @@
+name: filter_incomplete_turns_function_calling
+
+# Audio modality. Like filter_incomplete_turns, but the completed thought is a
+# weather question that requires a tool call. The user trails off mid-question
+# ("What's the weather in... hmmmm") and finishes it after a pause; the bot's
+# incomplete-turn detection must hold the turn open and call get_current_weather
+# only once the location is actually given.
+#
+# The completion turn is anchored on the raw VAD stop signal
+# (vad_user_stopped_speaking): the turn-level user_stopped_speaking is deferred
+# while the turn is held open, but the VAD signal still fires on the pause.
+
+user: !include user_audio.yaml
+
+judge: !include judge_audio.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking.
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, or an offer to help)"
+
+  # The user trails off mid-question. VAD detects the pause, but the bot should
+  # mark the turn incomplete and not call the tool yet (the location is missing).
+  - user: "What's the weather in... hmmm"
+    expect:
+      - event: vad_user_stopped_speaking
+
+  # ~3s later (under the 5s incomplete-short timeout), the user supplies the
+  # location. Now the turn completes and the bot calls the weather tool.
+  - user: "in Los Angeles, California?"
+    send_after:
+      event: vad_user_stopped_speaking
+      delay_ms: 3000
+    expect:
+      # Name only: the stub ignores location and the LLM phrases it
+      # unpredictably, so asserting args would be flaky.
+      - event: function_call
+        calls:
+          - name: get_current_weather
+      - event: response
+        eval: "the response reports the current weather for Los Angeles, mentioning the city and its conditions or temperature"

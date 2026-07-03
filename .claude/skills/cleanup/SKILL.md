@@ -143,7 +143,7 @@ class InputParams(BaseModel):
 - Frame emission patterns
 - Metrics support:
   - `can_generate_metrics()`
-  - TTFB metrics
+  - TTFB and TTFA metrics
   - Usage metrics
 - Alignment with similar existing services
 
@@ -178,7 +178,9 @@ class ExampleTTSService(TTSService):
             await self.start_ttfb_metrics()
             yield TTSStartedFrame()
             # ... processing ...
-            yield TTSAudioRawFrame(...)
+            frame = TTSAudioRawFrame(...)
+            await self.process_ttfa_metrics(frame)
+            yield frame
         finally:
             await self.stop_ttfb_metrics()
 ```
@@ -285,7 +287,7 @@ class NewTTSService(TTSService):
     - Text-to-speech synthesis
     - Streaming PCM audio
     - Voice customization
-    - TTFB metrics
+    - TTFB and TTFA metrics
     """
 
     def __init__(self, *, api_key: str, voice: str, **kwargs):

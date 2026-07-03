@@ -195,8 +195,6 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._timeout_task = self.task_manager.create_task(
             self._timeout_handler(timeout), f"{self}::_timeout_handler"
         )
-        # Make sure the task is scheduled.
-        await asyncio.sleep(0)
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         """Handle user transcription."""
@@ -228,8 +226,6 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             self._timeout_task = self.task_manager.create_task(
                 self._timeout_handler(timeout), f"{self}::_timeout_handler"
             )
-            # Make sure the task is scheduled.
-            await asyncio.sleep(0)
 
     async def _handle_prediction_result(self, result: MetricsData | None):
         """Handle a prediction result event from the turn analyzer."""

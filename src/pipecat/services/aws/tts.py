@@ -26,14 +26,15 @@ from pipecat.services.aws.utils import resolve_credentials
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
-    import aioboto3
+    import aiobotocore.session
     from botocore.exceptions import BotoCoreError, ClientError
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use AWS services, you need to `pip install pipecat-ai[aws]`.")
+    logger.error('In order to use AWS services, you need to `uv add "pipecat-ai[aws]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 
@@ -153,11 +154,16 @@ class AWSPollyTTSService(TTSService):
     Settings = AWSPollyTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`AWSPollyTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `AWSPollyTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for AWS Polly TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``AWSPollyTTSService.Settings`` directly via the ``settings`` parameter instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             engine: TTS engine to use ('standard', 'neural', etc.).
@@ -192,7 +198,7 @@ class AWSPollyTTSService(TTSService):
 
         Args:
             api_key: AWS secret access key. If None, falls back to environment
-                variables and the default boto3 credential chain (instance
+                variables and the default botocore credential chain (instance
                 profiles, IRSA, ECS task roles, SSO, etc.).
             aws_access_key_id: AWS access key ID. Same fallback behaviour as
                 ``api_key``.
@@ -202,12 +208,14 @@ class AWSPollyTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSPollyTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate. If None, uses service default.
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSPollyTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -253,7 +261,7 @@ class AWSPollyTTSService(TTSService):
             **kwargs,
         )
 
-        # Resolve credentials using the shared chain (explicit → env → boto3).
+        # Resolve credentials using the shared chain (explicit → env → botocore).
         self._aws_params = resolve_credentials(
             aws_access_key_id=aws_access_key_id,
             aws_secret_access_key=api_key,
@@ -261,7 +269,7 @@ class AWSPollyTTSService(TTSService):
             region=region,
         ).to_boto_kwargs()
 
-        self._aws_session = aioboto3.Session()
+        self._aws_session = aiobotocore.session.get_session()
 
         self._resampler = create_stream_resampler()
 
@@ -348,13 +356,11 @@ class AWSPollyTTSService(TTSService):
             # Filter out None values
             filtered_params = {k: v for k, v in params.items() if v is not None}
 
-            # aioboto3's `client()` is an async context manager but its stubs
-            # don't advertise `__aenter__` / `__aexit__` to pyright.
-            async with self._aws_session.client(  # pyright: ignore[reportGeneralTypeIssues]
+            async with self._aws_session.create_client(  # pyright: ignore[reportGeneralTypeIssues]
                 "polly",
                 **self._aws_params,  # pyright: ignore[reportArgumentType]
             ) as polly:
-                response = await polly.synthesize_speech(**filtered_params)
+                response = await polly.synthesize_speech(**filtered_params)  # pyright: ignore[reportGeneralTypeIssues]
                 if "AudioStream" in response:
                     # Get the streaming body and read it
                     stream = response["AudioStream"]

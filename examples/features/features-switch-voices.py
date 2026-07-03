@@ -10,9 +10,8 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import Frame, LLMRunFrame
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
@@ -75,8 +74,13 @@ class SwitchVoices(ParallelPipeline):
     def current_voice(self):
         return self._current_voice
 
-    async def switch_voice(self, params: FunctionCallParams):
-        self._current_voice = params.arguments["voice"]
+    async def switch_voice(self, params: FunctionCallParams, voice: str):
+        """Switch your voice only when the user asks you to.
+
+        Args:
+            voice: The voice the user wants you to use.
+        """
+        self._current_voice = voice
         await params.result_callback(
             {
                 "voice": f"You are now using your {self.current_voice} voice. Your responses should now be as if you were a {self.current_voice}."
@@ -96,6 +100,10 @@ class SwitchVoices(ParallelPipeline):
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -124,22 +132,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative and helpful way. You can do the following voices: 'News Lady', 'British Lady' and 'Barbershop Man'.",
         ),
     )
-    llm.register_function("switch_voice", tts.switch_voice)
-
-    switch_voice_function = FunctionSchema(
-        name="switch_voice",
-        description="Switch your voice only when the user asks you to",
-        properties={
-            "voice": {
-                "type": "string",
-                "description": "The voice the user wants you to use",
-            },
-        },
-        required=["voice"],
-    )
-    tools = ToolsSchema(standard_tools=[switch_voice_function])
-
-    context = LLMContext(tools=tools)
+    context = LLMContext(tools=[tts.switch_voice])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

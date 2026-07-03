@@ -112,24 +112,23 @@ def _try_instantiate(cls):
     return cls(**kwargs)
 
 
-def _discover_service_classes():
-    """Return concrete service classes that can be instantiated with dummy args."""
-    result = []
-    for cls in sorted(_all_subclasses(AIService), key=lambda c: c.__qualname__):
+def _concrete_service_classes():
+    """Return concrete (non-abstract) service classes under pipecat.services.
+
+    Pure class-hierarchy walk with no instantiation, so collection stays fast.
+    Construction happens inside the test, which skips services that can't be
+    built with dummy args (e.g. those that need real credentials).
+    """
+    return [
+        cls
+        for cls in sorted(_all_subclasses(AIService), key=lambda c: c.__qualname__)
         # Skip abstract base classes defined in framework modules.
-        if cls.__module__ in _BASE_MODULES:
-            continue
-        try:
-            svc = _try_instantiate(cls)
-        except Exception:
-            continue
-        if hasattr(svc, "_settings"):
-            result.append(cls)
-    return result
+        if cls.__module__ not in _BASE_MODULES
+    ]
 
 
-ALL_SERVICE_CLASSES = _discover_service_classes()
-assert ALL_SERVICE_CLASSES, "No service classes could be instantiated"
+ALL_SERVICE_CLASSES = _concrete_service_classes()
+assert ALL_SERVICE_CLASSES, "No service classes discovered"
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +169,9 @@ def test_service_settings_complete(service_cls):
     try:
         svc = _try_instantiate(service_cls)
     except Exception:
-        pytest.skip("Cannot re-instantiate (environment issue)")
+        pytest.skip("Cannot instantiate with dummy args (needs real args or credentials)")
+    if not hasattr(svc, "_settings"):
+        pytest.skip("Service has no _settings")
     for f in fields(svc._settings):
         if f.name == "extra":
             continue

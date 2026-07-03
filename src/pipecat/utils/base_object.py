@@ -16,6 +16,7 @@ import inspect
 import traceback
 from abc import ABC
 from collections.abc import Coroutine
+from contextvars import Context
 from dataclasses import dataclass
 from typing import Any
 
@@ -52,16 +53,24 @@ class BaseObject(ABC):
     classes in the framework should inherit from this base class.
     """
 
-    def __init__(self, *, name: str | None = None, **kwargs):
+    def __init__(
+        self,
+        *,
+        name: str | None = None,
+        task_manager: BaseTaskManager | None = None,
+        **kwargs,
+    ):
         """Initialize the base object.
 
         Args:
             name: Optional custom name for the object. If not provided,
                 generates a name using the class name and instance count.
+            task_manager: Optional task manager for handling asyncio tasks.
             **kwargs: Additional arguments passed to parent class.
         """
         self._id: int = obj_id()
         self._name = name or f"{self.__class__.__name__}#{obj_count(self)}"
+        self._task_manager = task_manager
 
         # Registered event handlers.
         self._event_handlers: dict[str, EventHandler] = {}
@@ -70,10 +79,6 @@ class BaseObject(ABC):
         # automatically removed from the set. When we cleanup we wait for all
         # event tasks still being executed.
         self._event_tasks = set()
-
-        # Task manager. Populated by setup(); accessing the task_manager
-        # property before setup raises.
-        self._task_manager: BaseTaskManager | None = None
 
     @property
     def id(self) -> int:
@@ -123,12 +128,18 @@ class BaseObject(ABC):
         """
         self._task_manager = task_manager
 
-    def create_task(self, coroutine: Coroutine, name: str | None = None) -> asyncio.Task:
+    def create_task(
+        self,
+        coroutine: Coroutine,
+        name: str | None = None,
+        context: Context | None = None,
+    ) -> asyncio.Task:
         """Create a new task managed by this object's task manager.
 
         Args:
             coroutine: The coroutine to run in the task.
             name: Optional name for the task.
+            context: Optional context manager to use when creating the task.
 
         Returns:
             The created asyncio task.
@@ -138,7 +149,7 @@ class BaseObject(ABC):
             # name for any other awaitable subtype.
             cr_code = getattr(coroutine, "cr_code", None)
             name = getattr(cr_code, "co_name", "task")
-        return self.task_manager.create_task(coroutine, f"{self}::{name}")
+        return self.task_manager.create_task(coroutine, f"{self}::{name}", context)
 
     async def cancel_task(self, task: asyncio.Task, timeout: float | None = 1.0):
         """Cancel a task managed by this object's task manager.
@@ -193,6 +204,21 @@ class BaseObject(ABC):
             self._event_handlers[event_name].handlers.append(handler)
         else:
             logger.warning(f"{self}: event handler {event_name} not registered")
+
+    def remove_event_handler(self, event_name: str, handler):
+        """Remove a previously added event handler.
+
+        No-op if the event isn't registered or the handler was never added.
+
+        Args:
+            event_name: The name of the event the handler was added for.
+            handler: The handler to remove.
+        """
+        if event_name in self._event_handlers:
+            try:
+                self._event_handlers[event_name].handlers.remove(handler)
+            except ValueError:
+                pass
 
     def _register_event_handler(self, event_name: str, sync: bool = False):
         """Register an event handler type.

@@ -1,0 +1,70 @@
+### Setting Up Telnyx
+
+#### 2. Purchase a Phone Number
+
+If you haven't already, purchase a number from Telnyx:
+
+- Log in to the [Telnyx Portal](https://portal.telnyx.com/)
+- [Buy a number](https://portal.telnyx.com/#/numbers/buy-numbers)
+
+#### 3. Create a TeXML Bin
+
+A TeXML Bin contains the XML that tells Telnyx how to handle incoming calls.
+
+1. Go to your [TeXML Bin configuration page](https://portal.telnyx.com/#/call-control/texml-bin)
+2. Click **Create new TeXML Bin**
+3. In the "Name" field, provide a name
+4. Leave the "URL" field blank
+5. In the "Content" field, add the TeXML:
+
+    **For Local Development:**
+
+    ```xml
+    <?xml version="1.0" encoding="UTF-8"?>
+    <Response>
+      <Connect>
+        <Stream url="wss://your-url.ngrok.io/ws" bidirectionalMode="rtp"></Stream>
+      </Connect>
+      <Pause length="40"/>
+    </Response>
+    ```
+
+    Replace `your-url.ngrok.io` with your ngrok URL.
+
+    **For Pipecat Cloud:**
+
+    ```xml
+    <?xml version="1.0" encoding="UTF-8"?>
+    <Response>
+      <Connect>
+        <Stream url="wss://api.pipecat.daily.co/ws/telnyx?serviceHost=AGENT_NAME.ORGANIZATION_NAME" bidirectionalMode="rtp"></Stream>
+      </Connect>
+      <Pause length="40"/>
+    </Response>
+    ```
+
+    Replace:
+    - `AGENT_NAME` with the name of the agent you deployed to Pipecat Cloud
+    - `ORGANIZATION_NAME` with the name of your Pipecat Cloud organization
+
+6. Click **Save**
+
+#### 3. Create a TeXML Application
+
+1. Go to your [TeXML configuration page](https://portal.telnyx.com/#/call-control/texml)
+2. Create a new TeXML app (if one doesn't exist already):
+   - Add an application name
+   - Under Webhooks, select **POST** as the "Voice Method"
+   - Select **TeXML Bin URL** under Webhook URL Method
+   - Select the TeXML Bin you created in the previous step
+   - Click **Create** to save
+
+   > Note: You'll see subsequent pages to set up SIP and Outbound - both are not required, so just skip them.
+
+#### 4. Assign TeXML Application to Your Number
+
+1. Navigate to [Manage Numbers](https://portal.telnyx.com/#/numbers/my-numbers)
+2. Click the pencil icon next to your phone number
+3. Select the TeXML application you just created
+4. Click **Save**
+

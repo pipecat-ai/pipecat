@@ -1,0 +1,176 @@
+## Setup
+
+1. Create a virtual environment and install dependencies
+
+   ```bash
+   uv sync
+   ```
+
+2. Set up environment variables
+
+   Copy the example file and fill in your API keys:
+
+    ```bash
+    cp .env.example .env
+    # Edit .env with your API keys
+    ```
+
+{% if twilio_daily_sip_mode == 'dial-in' %}
+3. Configure your Twilio webhook
+
+In the Twilio console:
+
+- Go to your phone number's configuration
+- Set the webhook for "A call comes in" to your server's URL + "/call"
+- For local testing, you can use ngrok to expose your local server
+
+```bash
+ngrok http 8080
+# Then use the provided URL (e.g., https://abc123.ngrok.io/call) in Twilio
+```
+{% else %}
+3. Create a TwiML Bin
+
+   Visit this link to create your [TwiML Bin](https://www.twilio.com/docs/serverless/twiml-bins)
+
+   - Login to the account that has your purchased Twilio phone number
+   - Press the plus button on the TwiML Bin dashboard to write a new TwiML that Twilio will host for you
+   - Give it a friendly name. For example "daily sip uri twiml bin"
+   - For the TWIML code, use something like:
+
+   ```xml
+   <?xml version="1.0" encoding="UTF-8"?>
+   <Response>
+     <Dial answerOnBridge="true" callerId="+1234567890">{{ '{{' }}#e164{{ '}}' }}{{ '{{' }}To{{ '}}' }}{{ '{{' }}/e164{{ '}}' }}</Dial>
+   </Response>
+   ```
+
+   - callerId must be a valid number that you own on [Twilio](https://console.twilio.com/us1/develop/phone-numbers/manage/incoming)
+   - answerOnBridge="true|false". Setting to "true" waits until the call is answered before establishing the connection  
+   - Save the file. We will use this when creating the SIP domain
+
+4. Create and configure a SIP domain
+
+   This allows Daily to make outbound calls through Twilio.
+
+   **Create the SIP Domain:**
+
+   - Go to [Twilio Console > Voice > SIP Domains](https://console.twilio.com/us1/develop/voice/manage/sip-domains)
+   - Click the **+** button to create a new domain
+   - **Domain Name**: Choose something like `daily.sip.twilio.com`
+   - **Friendly Name**: `Daily SIP Domain`
+
+   **Configure Authentication (Allow all traffic):**
+
+   - Under "Voice Authentication", click **+** next to "IP Access Control Lists"
+   - Create **first ACL**:
+     - **Friendly Name**: `Allow All - Part 1`
+     - **CIDR**: `0.0.0.0/1` (covers 0.0.0.0 to 127.255.255.255)
+   - Create **second ACL**:
+     - **Friendly Name**: `Allow All - Part 2`
+     - **CIDR**: `128.0.0.0/1` (covers 128.0.0.0 to 255.255.255.255)
+   - Make sure both ACLs are selected in the dropdown
+
+   **Configure Call Handling:**
+
+   - Under "Call Control Configuration":
+     - **Configure with**: `TwiML Bins`
+     - **A call comes in**: Select your TwiML bin from step 3
+   - Click **Save**
+
+   > **Why these settings?** The IP ranges allow Daily's servers to connect from anywhere, and the TwiML bin tells Twilio how to handle the calls.
+{% endif %}
+
+## Environment Configuration
+
+The bot supports two deployment modes controlled by the `ENV` variable:
+
+### Local Development (`ENV=local`)
+
+{% if twilio_daily_sip_mode == 'dial-in' %}
+- Uses your local server or ngrok URL for handling the webhook and starting the bot
+- Default configuration for development and testing
+{% else %}
+- Uses your local server for handling dial-out requests and starting the bot
+- Default configuration for development and testing
+{% endif %}
+
+### Production (`ENV=production`)
+
+- Bot is deployed to Pipecat Cloud; requires `PIPECAT_API_KEY` and `PIPECAT_AGENT_NAME`
+- Set these when deploying to production environments
+- Your FastAPI server runs either locally or deployed to your infrastructure
+
+## Run the Bot Locally
+
+{% if twilio_daily_sip_mode == 'dial-in' %}
+You'll need three terminal windows open:
+
+1. Terminal 1: Start the webhook server:
+
+   ```bash
+   uv run server.py
+   ```
+
+2. Terminal 2: Start an ngrok tunnel to expose the FastAPI server running on server.py
+
+   ```bash
+   ngrok http 8080
+   ```
+
+   Important: Make sure that this URL matches the webhook URL configured in your Twilio phone number settings.
+
+   > Tip: Use the `--subdomain` flag for a reusable ngrok link.
+
+3. Terminal 3: Run your bot:
+
+   ```bash
+   uv run bot.py -t daily
+   ```
+
+   > The bot.py file includes a FastAPI server. This emulates the Pipecat Cloud service, and is as if you're running with `min_agents=1`.
+
+4. Call your bot!
+
+   Call the Twilio number you configured to talk to your bot.
+{% else %}
+You'll need two terminal windows open:
+
+1. **Terminal 1**: Start the webhook server:
+
+   ```bash
+   uv run server.py
+   ```
+
+   This runs on port 8080 and handles dial-out requests.
+
+2. **Terminal 2**: Start the bot server:
+
+   ```bash
+   uv run bot.py -t daily
+   ```
+
+   This runs on port 7860 and handles the bot logic.
+
+3. **Test the dial-out functionality**
+
+   With both servers running, send a dial-out request:
+
+   ```bash
+   curl -X POST "http://localhost:8080/dialout" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "dialout_settings": {
+         "sip_uri": "sip:+1234567890@daily.sip.twilio.com"
+       }
+     }'
+   ```
+
+   Replace:
+
+   - The phone number (starting with +1) with the phone number you want to call
+   - `daily.sip.twilio.com` with the SIP domain you configured in step 4
+
+   The server will create a room, start the bot, and the bot will dial out to the provided SIP URI. Answer the call to speak with the bot.
+{% endif %}
+

@@ -197,9 +197,19 @@ class WhatsAppClient:
 
         Args:
             request: The webhook request from WhatsApp containing call events
-            connection_callback: Optional callback function to invoke when a new
-                               WebRTC connection is established. The callback
-                               receives the SmallWebRTCConnection instance.
+            connection_callback: Optional callback invoked when a new WebRTC
+                               connection is established. Accepts two signatures:
+                               ``(connection, call)`` — preferred, receives the
+                               SmallWebRTCConnection and the WhatsAppConnectCall
+                               with caller metadata; or the legacy
+                               ``(connection,)`` signature.
+
+                               .. deprecated:: 1.4.0
+                                   The single-argument ``(connection,)`` signature is
+                                   deprecated. Use ``(connection, call: WhatsAppConnectCall)``
+                                   instead.
+                                   Will be removed in 2.0.0.
+
             raw_body: Optional bytes containing the raw request body.
             sha256_signature: Optional X-Hub-Signature-256 header value from the request.
 

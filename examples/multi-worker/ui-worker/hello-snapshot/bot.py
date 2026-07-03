@@ -55,8 +55,9 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.job_context import JobError
 from pipecat.pipeline.pipeline import Pipeline
@@ -83,6 +84,10 @@ load_dotenv(override=True)
 MAIN_NAME = "main"
 
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -168,6 +173,7 @@ class HelloWorker(UIWorker):
         await params.result_callback(None)
 
 
+@tool_options(cancel_on_interruption=False, timeout_secs=60)
 async def answer_about_screen(params: FunctionCallParams, query: str):
     """Ask the screen-aware UI layer to answer about the current page.
 
@@ -204,9 +210,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(system_instruction=VOICE_PROMPT),
     )
-    llm.register_direct_function(answer_about_screen, cancel_on_interruption=False, timeout_secs=60)
 
-    context = LLMContext(tools=ToolsSchema(standard_tools=[answer_about_screen]))
+    context = LLMContext(tools=[answer_about_screen])
     aggregators = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

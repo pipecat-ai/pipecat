@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
 from pipecat.services.openai._constants import OPENAI_SAMPLE_RATE
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
 from pipecat.services.tts_service import TTSService
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 ValidVoice = Literal[
@@ -86,11 +87,16 @@ class OpenAITTSService(TTSService):
     Settings = OpenAITTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`OpenAITTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `OpenAITTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for OpenAI TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``settings=OpenAITTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             instructions: Instructions to guide voice synthesis behavior.
@@ -123,27 +129,32 @@ class OpenAITTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAITTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             model: TTS model to use. Defaults to "gpt-4o-mini-tts".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAITTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Output audio sample rate in Hz. If None, uses OpenAI's default 24kHz.
             instructions: Optional instructions to guide voice synthesis behavior.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAITTSService.Settings(instructions=...)`` instead.
+                    Will be removed in 2.0.0.
 
             speed: Voice speed control (0.25 to 4.0, default 1.0).
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAITTSService.Settings(speed=...)`` instead.
+                    Will be removed in 2.0.0.
 
             params: Optional synthesis controls (acting instructions, speed, ...).
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAITTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

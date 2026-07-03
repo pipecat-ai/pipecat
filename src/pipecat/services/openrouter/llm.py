@@ -57,6 +57,7 @@ class OpenRouterLLMService(OpenAILLMService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenRouterLLMService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             base_url: The base URL for OpenRouter API. Defaults to "https://openrouter.ai/api/v1".
             settings: Runtime-updatable settings. When provided alongside deprecated

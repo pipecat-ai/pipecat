@@ -13,5 +13,5 @@ from pipecat.audio.resamplers.resampy_resampler import ResampyResampler
 
 def test_resampy_resampler_emits_deprecation_warning():
     """Test that instantiating ResampyResampler emits a DeprecationWarning."""
-    with pytest.warns(DeprecationWarning, match="ResampyResampler is deprecated"):
+    with pytest.warns(DeprecationWarning, match="`ResampyResampler` is deprecated"):
         ResampyResampler()

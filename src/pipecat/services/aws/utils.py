@@ -20,7 +20,6 @@ import os
 import struct
 import urllib.parse
 from dataclasses import dataclass
-from typing import Any
 
 from loguru import logger
 
@@ -35,7 +34,7 @@ class AWSCredentials:
     region: str
 
     def to_boto_kwargs(self) -> dict[str, str | None]:
-        """Return credentials as kwargs accepted by ``boto3``/``aioboto3`` clients."""
+        """Return credentials as kwargs accepted by ``botocore``-compatible clients."""
         return {
             "aws_access_key_id": self.access_key,
             "aws_secret_access_key": self.secret_key,
@@ -57,10 +56,10 @@ def resolve_credentials(
     1. Explicit parameters
     2. Environment variables (``AWS_ACCESS_KEY_ID``, ``AWS_SECRET_ACCESS_KEY``,
        ``AWS_SESSION_TOKEN``, ``AWS_REGION``)
-    3. Default boto3/botocore credential chain (instance profiles, IRSA,
+    3. Default botocore credential chain (instance profiles, IRSA,
        ECS task roles, SSO, credential files, etc.)
 
-    The boto3 fallback (step 3) is only attempted when *both* access key and
+    The botocore fallback (step 3) is only attempted when *both* access key and
     secret key are still unresolved after steps 1-2.  This avoids replacing
     explicitly provided credentials with ambient ones.
 
@@ -80,14 +79,15 @@ def resolve_credentials(
     session_token = aws_session_token or os.getenv("AWS_SESSION_TOKEN")
     resolved_region = region or os.getenv("AWS_REGION", "us-east-1")
 
-    # Fall back to the boto3 credential provider chain (pod roles, IRSA,
+    # Fall back to the botocore credential provider chain (pod roles, IRSA,
     # instance profiles, SSO, credential files, etc.) when explicit
     # credentials were not supplied.
     if not access_key and not secret_key:
         try:
-            import boto3
+            import botocore.session
 
-            session = boto3.Session(region_name=resolved_region)
+            session = botocore.session.Session()
+            session.set_config_variable("region", resolved_region)
             creds = session.get_credentials()
             if creds:
                 frozen = creds.get_frozen_credentials()
@@ -96,11 +96,11 @@ def resolve_credentials(
                 session_token = session_token or frozen.token
         except ImportError:
             logger.debug(
-                "boto3 not available for credential chain fallback; "
+                "botocore not available for credential chain fallback; "
                 "install pipecat-ai[aws] for full credential support."
             )
         except Exception as e:
-            logger.warning(f"Failed to resolve AWS credentials via boto3 chain: {e}")
+            logger.warning(f"Failed to resolve AWS credentials via botocore chain: {e}")
 
     return AWSCredentials(
         access_key=access_key,

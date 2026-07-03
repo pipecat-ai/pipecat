@@ -30,7 +30,7 @@ try:
     from mistralai.client import Mistral
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Mistral TTS, you need to `pip install pipecat-ai[mistral]`.")
+    logger.error('In order to use Mistral TTS, you need to `uv add "pipecat-ai[mistral]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 

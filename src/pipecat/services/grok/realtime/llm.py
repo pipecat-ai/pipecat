@@ -7,8 +7,8 @@
 """Grok Realtime LLM service.
 
 .. deprecated:: 0.0.108
-    This module is deprecated. Please use GrokRealtimeLLMService from
-    pipecat.services.xai.realtime.llm instead.
+    Use :mod:`pipecat.services.xai.realtime.llm` instead.
+    Will be removed in 2.0.0.
 """
 
 import warnings

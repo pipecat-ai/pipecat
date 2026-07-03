@@ -283,3 +283,96 @@ def is_silence(pcm_bytes: bytes) -> bool:
 
     # If max value is lower than SPEAKING_THRESHOLD, consider it as silence
     return max_value <= SPEAKING_THRESHOLD
+
+
+def detect_speech_onset(
+    pcm_bytes: bytes,
+    sample_rate: int,
+    num_channels: int = 1,
+    *,
+    frame_ms: float = 10.0,
+    hop_ms: float = 1.0,
+    threshold_db: float = -40.0,
+    min_voiced_ms: float = 50.0,
+) -> int | None:
+    """Detect the first sample of sustained audible speech in PCM audio.
+
+    Measures short-time RMS energy: the signal is downmixed to mono, scanned
+    with a ``frame_ms`` window hopping every ``hop_ms``, and each window's RMS
+    is computed with its mean removed (a DC offset carries no energy). Onset is
+    the start of the first run of windows whose RMS stays above ``threshold_db``
+    for at least ``min_voiced_ms``.
+
+    Working on energy rather than per-sample amplitude rejects noise-floor blips
+    (a lone loud sample averages out over the window), and the minimum-duration
+    requirement rejects brief transients. ``hop_ms`` sets the onset resolution.
+
+    Operates on a growing buffer as audio streams in: returns None until enough
+    audio has arrived to confirm an onset, at which point the caller stops
+    feeding it.
+
+    Args:
+        pcm_bytes: Raw PCM audio data (16-bit signed integers).
+        sample_rate: Sample rate of the audio in Hz.
+        num_channels: Number of interleaved audio channels (downmixed to mono).
+        frame_ms: Analysis window length in milliseconds.
+        hop_ms: Step between windows in milliseconds (the onset resolution).
+        threshold_db: Energy gate in dBFS; windows quieter than this are silence.
+            Sits above typical TTS noise-floor padding and below voiced onset.
+        min_voiced_ms: Minimum duration the energy must stay above the gate for
+            an onset to count.
+
+    Returns:
+        The per-channel sample index of speech onset, or None if no sustained
+        onset is present yet.
+    """
+    if sample_rate <= 0:
+        return None
+
+    samples = np.frombuffer(pcm_bytes, dtype=np.int16)
+    if samples.size == 0:
+        return None
+
+    # Downmix to a mono signal normalized to [-1, 1], keeping the sign so that
+    # mean-removed RMS measures energy correctly.
+    if num_channels > 1:
+        usable = samples.size - (samples.size % num_channels)
+        mono = samples[:usable].reshape(-1, num_channels).mean(axis=1).astype(np.float32)
+    else:
+        mono = samples.astype(np.float32)
+    mono /= 32768.0
+
+    n = mono.size
+    frame = max(1, round(sample_rate * frame_ms / 1000))
+    hop = max(1, round(sample_rate * hop_ms / 1000))
+    if n < frame:
+        # Not enough audio for even one window; wait for more.
+        return None
+
+    gate = 10.0 ** (threshold_db / 20.0)  # normalized RMS gate (-40 dBFS = 0.01)
+
+    # Edge-pad so each window stays centered on its hop position and a constant
+    # start isn't read as a step (which would carry energy).
+    pad = frame // 2
+    padded = np.pad(mono, pad, mode="edge")
+    windows = np.lib.stride_tricks.sliding_window_view(padded, frame)[::hop]
+    rms = np.sqrt(np.mean((windows - windows.mean(axis=1, keepdims=True)) ** 2, axis=1))
+
+    active = rms > gate
+    if not active.any():
+        return None
+
+    # Onset is the start of the first run of active windows lasting at least
+    # min_voiced_ms. A window spreads a lone sample across ~frame_ms, so
+    # min_voiced_ms must exceed frame_ms to tell a real onset from a blip.
+    min_windows = max(1, round(min_voiced_ms / hop_ms))
+    run = 0
+    for i, is_active in enumerate(active):
+        if is_active:
+            run += 1
+            if run >= min_windows:
+                return int((i - min_windows + 1) * hop)
+        else:
+            run = 0
+
+    return None

@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from loguru import logger
 from PIL import Image
 
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import UserImageRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -28,6 +29,10 @@ load_dotenv(override=True)
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_out_enabled=True,
     ),
@@ -51,6 +56,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     pipeline = Pipeline(
         [
+            transport.input(),  # Transport user input
             vision,  # Vision
             tts,  # TTS
             transport.output(),  # Transport bot output

@@ -1,6 +1,6 @@
 # pgmq-handoff
 
-Same shape as the [Redis handoff](../redis-handoff/), but the bus is backed by [PGMQ](https://github.com/tembo-io/pgmq) on a shared Postgres database (e.g. Supabase). Requires `pip install pipecat-ai[pgmq]`.
+Same shape as the [Redis handoff](../redis-handoff/), but the bus is backed by [PGMQ](https://github.com/tembo-io/pgmq) on a shared Postgres database (e.g. Supabase). Requires `uv add "pipecat-ai[pgmq]"`.
 
 See the [top-level multi-worker README](../../README.md) for shared environment variables.
 

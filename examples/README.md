@@ -4,7 +4,7 @@ This directory contains examples showing how to build voice and multimodal agent
 
 ## Setup
 
-1. Follow the [README](https://github.com/pipecat-ai/pipecat/blob/main/README.md#%EF%B8%8F-contributing-to-the-framework) steps to get your local environment configured.
+1. Follow the [README](https://github.com/pipecat-ai/pipecat/blob/main/README.md#%EF%B8%8F-developing-pipecat) steps to get your local environment configured.
 
    > **Run from root directory**: Make sure you are running the steps from the root directory.
 
@@ -60,6 +60,10 @@ uv run getting-started/06-voice-agent.py -t twilio -x NGROK_HOST_NAME
 ### [`getting-started/`](./getting-started/)
 
 Progressive introduction to Pipecat, from minimal TTS to a full voice agent with function calling.
+
+### [`flows/`](./flows/)
+
+Structured conversations with [Pipecat Flows](../src/pipecat/flows): predefined and dynamic conversation paths with state management, across multiple LLM providers.
 
 ### [`voice/`](./voice/)
 
@@ -131,7 +135,7 @@ Retrieval-augmented generation, grounding, and long-term memory (Mem0, Gemini).
 
 ### [`features/`](./features/)
 
-Miscellaneous features: wake phrases, live translation, service switching, voice switching, and more.
+Miscellaneous features: wake phrases, live translation, service switching, voice switching, DTMF keypad menus, and more.
 
 ## Advanced Usage
 

@@ -86,7 +86,7 @@ async def run_setup_hook(
                 warnings.warn(
                     f"setup file {path} defines '{deprecated_function_name}'; "
                     f"rename it to '{function_name}'. The old name will be removed "
-                    f"in a future release.",
+                    f"in 2.0.0.",
                     DeprecationWarning,
                     stacklevel=2,
                 )

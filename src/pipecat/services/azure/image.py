@@ -64,6 +64,7 @@ class AzureImageGenServiceREST(ImageGenService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AzureImageGenServiceREST.Settings(image_size=...)`` instead.
+                    Will be removed in 2.0.0.
 
             api_key: Azure OpenAI API key for authentication.
             endpoint: Azure OpenAI endpoint URL.
@@ -71,6 +72,7 @@ class AzureImageGenServiceREST(ImageGenService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AzureImageGenServiceREST.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             aiohttp_session: Shared aiohttp session for HTTP requests.
             api_version: Azure API version string. Defaults to "2023-06-01-preview".
@@ -156,6 +158,6 @@ class AzureImageGenServiceREST(ImageGenService):
                 image_stream = io.BytesIO(await response.content.read())
                 image = Image.open(image_stream)
                 frame = URLImageRawFrame(
-                    url=image_url, image=image.tobytes(), size=image.size, format=image.format
+                    url=image_url, image=image.tobytes(), size=image.size, format=image.mode
                 )
                 yield frame

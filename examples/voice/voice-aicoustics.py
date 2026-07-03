@@ -14,6 +14,7 @@ from loguru import logger
 
 from pipecat.audio.filters.aic_filter import AICFilter
 from pipecat.audio.vad.aic_quail_vad import AICQuailVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -41,7 +42,7 @@ def _create_aic_filter() -> AICFilter:
 
     return AICFilter(
         license_key=license_key,
-        model_id="quail-vf-2.1-l-16khz",
+        model_id="quail-vf-2.2-l-16khz",
         enhancement_level=0.8,
     )
 
@@ -54,6 +55,11 @@ aic_vad_analyzer = AICQuailVADAnalyzer(
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        audio_in_filter=aic_filter,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,

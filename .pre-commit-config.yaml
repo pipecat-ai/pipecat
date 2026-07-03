@@ -11,3 +11,45 @@ repos:
         entry: uv run ruff format
         language: system
         types: [python]
+      # Keep the CLI's service registry in sync with the source. The imports hook
+      # regenerates _imports.py (AST-based, no service SDKs needed) when a service
+      # module or the metadata changes; if the result differs, the commit aborts so
+      # you review + re-stage the regenerated file (same auto-fix flow as ruff above).
+      # NOTE: _configs.py is NOT regenerated here — it introspects constructor
+      # signatures and needs the full service SDKs (uv sync --all-extras), so signature
+      # drift is caught by the CI drift-check, not pre-commit.
+      - id: pipecat-cli-registry-imports
+        name: regenerate CLI service imports (_imports.py)
+        entry: uv run python scripts/cli/imports/update_imports.py
+        language: system
+        pass_filenames: false
+        files: ^(src/pipecat/(services|transports|serializers)/.*\.py|src/pipecat/cli/registry/service_metadata\.py)$
+      - id: pipecat-cli-registry-check
+        name: check CLI service registry completeness
+        entry: uv run python scripts/cli/check_registry.py
+        language: system
+        pass_filenames: false
+        files: ^src/pipecat/cli/registry/.*\.py$
+      # Keep the deprecation registry (scripts/deprecations/deprecations.json) in
+      # sync with the source. Regenerates it from the .. deprecated:: directives
+      # and @deprecated decorators (AST-based, refuses on malformed markers); if
+      # the result differs, the commit aborts so you review + re-stage — the same
+      # auto-fix flow as the CLI registry imports hook above. The CI drift check
+      # (tests.yaml) is the backstop for commits made with --no-verify.
+      - id: pipecat-deprecation-registry
+        name: regenerate deprecation registry (deprecations.json)
+        entry: uv run python scripts/deprecations/generate.py
+        language: system
+        pass_filenames: false
+        files: ^(src/pipecat/.*\.py|scripts/deprecations/.*)$
+      # Audit deprecation markers: every @deprecated message matches the canonical
+      # template (subject/version/replacement consistent), every `.. deprecated::`
+      # directive parses with a removal version, and the registry is up to date.
+      # AST-based and whole-tree, so runs once when any relevant file changes.
+      # Same check CI runs (tests.yaml), reused here for fast local feedback.
+      - id: pipecat-deprecation-markers
+        name: check deprecation markers
+        entry: uv run pytest tests/test_deprecation_markers.py -q
+        language: system
+        pass_filenames: false
+        files: ^(src/pipecat/.*\.py|scripts/deprecations/.*|tests/test_deprecation_markers\.py)$

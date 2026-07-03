@@ -25,7 +25,7 @@ from pipecat.workers.base_worker import BaseWorker
 try:
     from pipecat.bus.network.redis import RedisBus
 except Exception:
-    raise unittest.SkipTest("redis extra not installed (`pip install pipecat-ai[redis]`)")
+    raise unittest.SkipTest('redis extra not installed (`uv add "pipecat-ai[redis]"`)')
 
 _sub_counter = itertools.count()
 

@@ -28,13 +28,14 @@ from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.image_service import ImageGenService
 from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven, assert_given
+from pipecat.utils.deprecation import deprecated
 
 try:
     import google.genai as genai
     from google.genai import types
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Google AI, you need to `pip install pipecat-ai[google]`.")
+    logger.error('In order to use Google AI, you need to `uv add "pipecat-ai[google]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 
@@ -63,11 +64,16 @@ class GoogleImageGenService(ImageGenService):
     Settings = GoogleImageGenSettings
     _settings: Settings
 
+    @deprecated(
+        "`GoogleImageGenService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `GoogleImageGenService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Configuration parameters for Google image generation.
 
         .. deprecated:: 0.0.105
             Use ``settings=GoogleImageGenService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             number_of_images: Number of images to generate (1-8). Defaults to 1.
@@ -96,6 +102,7 @@ class GoogleImageGenService(ImageGenService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GoogleImageGenService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             http_options: HTTP options for the client.
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -181,7 +188,7 @@ class GoogleImageGenService(ImageGenService):
                     url=None,  # Google doesn't provide URLs, only image data
                     image=image.tobytes(),
                     size=image.size,
-                    format=image.format,
+                    format=image.mode,
                 )
                 yield frame
 

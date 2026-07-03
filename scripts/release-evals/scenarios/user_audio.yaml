@@ -1,0 +1,5 @@
+modality: audio
+speech:
+  service: kokoro
+  voice: af_heart
+  sample_rate: 16000

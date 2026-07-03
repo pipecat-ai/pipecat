@@ -71,6 +71,28 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(TRANSCRIPTION_TIMEOUT + 0.1)
         self.assertTrue(should_stop)
 
+    async def test_update_strategies_does_not_accumulate_event_handlers(self):
+        # Regression: re-applying strategies (e.g. realtime mode re-installing the
+        # same instances, or repeated metadata broadcasts) must not accumulate
+        # duplicate controller event handlers on the strategy instances —
+        # _cleanup_strategies removes what _setup_strategies added.
+        start = VADUserTurnStartStrategy()
+        stop = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(start=[start], stop=[stop])
+        )
+        await controller.setup(self.task_manager)
+
+        # Re-apply the same strategy instances several times.
+        for _ in range(3):
+            await controller.update_strategies(UserTurnStrategies(start=[start], stop=[stop]))
+
+        for strategy in (start, stop):
+            for name, handler in strategy._event_handlers.items():
+                self.assertLessEqual(
+                    len(handler.handlers), 1, f"{name} double-registered on {strategy}"
+                )
+
     async def test_inference_triggered_fires_alongside_stopped(self):
         """Default strategies fire both inference-triggered and stopped, in order."""
         controller = UserTurnController(

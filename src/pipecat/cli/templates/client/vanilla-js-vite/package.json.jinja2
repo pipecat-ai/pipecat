@@ -1,0 +1,31 @@
+{
+  "name": "{{ project_name }}",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@pipecat-ai/client-js": "^1.12.0"
+{%- for transport in transports -%}
+{%- if transport.value == 'daily' %},
+    "@pipecat-ai/daily-transport": "^1.6.7"
+{%- elif transport.value == 'smallwebrtc' %},
+    "@pipecat-ai/small-webrtc-transport": "^1.10.5"
+{%- elif transport.value == 'websocket' %},
+    "@pipecat-ai/websocket-transport": "^1.7.0",
+    "protobufjs": "^7.5.7"
+{%- endif %}
+{%- endfor %}
+  },
+  "devDependencies": {
+    "vite": "^8.0.16"
+  }
+
+
+
+
+}

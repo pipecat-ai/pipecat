@@ -13,7 +13,7 @@ of conversation flows.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from loguru import logger
 from opentelemetry.context import Context

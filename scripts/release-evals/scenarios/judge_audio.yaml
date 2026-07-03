@@ -1,0 +1,7 @@
+modality: audio
+eval:
+  service: ollama
+  model: gemma2:9b
+transcription:
+  service: moonshine
+  model: small-streaming

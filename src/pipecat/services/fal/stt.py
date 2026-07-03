@@ -24,6 +24,7 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import FAL_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -161,11 +162,16 @@ class FalSTTService(SegmentedSTTService):
     Settings = FalSTTSettings
     _settings: Settings
 
+    @deprecated(
+        "`FalSTTService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `FalSTTService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Configuration parameters for Fal's Wizper API.
 
         .. deprecated:: 0.0.105
             Use ``settings=FalSTTService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language of the audio input. Defaults to English.
@@ -209,6 +215,7 @@ class FalSTTService(SegmentedSTTService):
                 .. deprecated:: 0.0.105
                     Use ``settings=FalSTTService.Settings(...)`` for model/language and
                     direct init parameters for task/chunk_level/version instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

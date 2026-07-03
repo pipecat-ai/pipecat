@@ -1,0 +1,37 @@
+name: filter_incomplete_turns
+
+# Audio modality. The user trails off mid-thought ("Let me think about it...")
+# and the bot's incomplete-turn detection should hold the turn open instead of
+# responding. After a short pause the user finishes the sentence; only then
+# should the bot answer — to the *complete* thought, not the trailing fragment.
+#
+# We anchor the completion off the raw VAD stop signal (vad_user_stopped_speaking):
+# the turn-level user_stopped_speaking is deliberately deferred while the turn is
+# held open, so it can't be used here, but the VAD signal still fires on the pause.
+
+user: !include user_audio.yaml
+
+judge: !include judge_audio.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting/question before speaking.
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, or a question inviting the user to respond)"
+
+  # The user trails off mid-thought. VAD detects the pause (vad_user_stopped_speaking
+  # fires), but the bot should mark the turn incomplete and keep it open rather than
+  # respond.
+  - user: "Let me think about it, hmmm"
+    expect:
+      - event: vad_user_stopped_speaking
+
+  # ~3s later (under the 5s incomplete-short timeout), the user finishes the
+  # thought. Now the turn completes and the bot should respond to the whole answer.
+  - user: "I think I'd go to Japan, to see the temples and try the food."
+    send_after:
+      event: vad_user_stopped_speaking
+      delay_ms: 3000
+    expect:
+      - event: response
+        eval: "the response engages with the user's answer about visiting Japan (acknowledging or responding to it), rather than asking the user to continue or finish their thought"

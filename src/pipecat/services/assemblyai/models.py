@@ -15,6 +15,8 @@ from typing import Literal
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from pipecat.utils.deprecation import deprecated
+
 
 class Word(BaseModel):
     """Represents a single word in a transcription with timing and confidence.
@@ -121,11 +123,15 @@ class TerminationMessage(BaseMessage):
 AnyMessage = BeginMessage | TurnMessage | SpeechStartedMessage | TerminationMessage
 
 
+@deprecated(
+    "`AssemblyAIConnectionParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+    "Use `AssemblyAISTTService.Settings` instead."
+)
 class AssemblyAIConnectionParams(BaseModel):
     """Configuration parameters for AssemblyAI WebSocket connection.
 
     .. deprecated:: 0.0.105
-        Use ``settings=AssemblyAISTTService.Settings(foo=...)`` instead.
+        Use ``settings=AssemblyAISTTService.Settings(foo=...)`` instead. Will be removed in 2.0.0.
 
     Parameters:
         sample_rate: Audio sample rate in Hz. Defaults to 16000.
@@ -135,8 +141,8 @@ class AssemblyAIConnectionParams(BaseModel):
         min_end_of_turn_silence_when_confident: DEPRECATED. Use min_turn_silence instead.
         max_turn_silence: Maximum silence duration before forcing end-of-turn.
         keyterms_prompt: List of key terms to guide transcription. Will be JSON serialized before sending.
-        prompt: Optional text prompt to guide the transcription. Only used when speech_model is "u3-rt-pro".
-        speech_model: Select between English, multilingual, and u3-rt-pro models. Defaults to "u3-rt-pro".
+        prompt: Optional text prompt to guide the transcription. Only used when speech_model is "universal-3-5-pro".
+        speech_model: Select between English, multilingual, and Universal-3.5 Pro models. Defaults to "universal-3-5-pro".
         language_detection: Enable automatic language detection. Only applicable to
             universal-streaming-multilingual. When enabled, Turn messages include
             language_code and language_confidence fields. Defaults to None (not sent).
@@ -165,8 +171,12 @@ class AssemblyAIConnectionParams(BaseModel):
     keyterms_prompt: list[str] | None = None
     prompt: str | None = None
     speech_model: Literal[
-        "universal-streaming-english", "universal-streaming-multilingual", "u3-rt-pro"
-    ] = "u3-rt-pro"
+        "universal-streaming-english",
+        "universal-streaming-multilingual",
+        "u3-rt-pro",
+        "u3-rt-pro-beta-1",
+        "universal-3-5-pro",
+    ] = "universal-3-5-pro"
     language_detection: bool | None = None
     format_turns: bool = True
     speaker_labels: bool | None = None
@@ -178,7 +188,7 @@ class AssemblyAIConnectionParams(BaseModel):
         if self.min_end_of_turn_silence_when_confident is not None:
             logger.warning(
                 "The 'min_end_of_turn_silence_when_confident' parameter is deprecated and will be "
-                "removed in a future version. Please use 'min_turn_silence' instead."
+                "removed in 2.0.0. Please use 'min_turn_silence' instead."
             )
             # If min_turn_silence is not set, use the deprecated value
             if self.min_turn_silence is None:

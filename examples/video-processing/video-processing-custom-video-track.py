@@ -22,6 +22,7 @@ import time
 import numpy as np
 from loguru import logger
 
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -43,6 +44,10 @@ HEIGHT = 240
 FPS = 30
 
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         video_out_enabled=True,
         video_out_width=WIDTH,

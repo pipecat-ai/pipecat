@@ -1,0 +1,65 @@
+{#
+Transport Setup Macro
+Builds the transport_params dict and the create_transport() call. Shared by the
+unified bot() path (cascade and realtime) and the local-testing fallback of the
+Daily PSTN / Twilio + Daily SIP scenarios — the {% if %} conditions emit only
+the entries relevant to the selected transports.
+#}
+{% macro transport_params(transports, enable_krisp, enable_eval, video_input, video_output) %}
+transport_params = {
+    {% if 'daily' in transports or 'daily_pstn_dialin' in transports %}
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        {% if enable_krisp %}audio_in_filter=krisp_filter,{% endif %}
+        audio_out_enabled=True,
+        {% if video_input %}video_in_enabled=True,{% endif %}
+        {% if video_output %}
+        video_out_enabled=True,
+        video_out_is_live=True,
+        video_out_width=1024,
+        video_out_height=768,
+        {% endif %}
+    ),
+    {% endif %}
+    {% if 'smallwebrtc' in transports %}
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        {% if enable_krisp %}audio_in_filter=krisp_filter,{% endif %}
+        audio_out_enabled=True,
+        {% if video_input %}video_in_enabled=True,{% endif %}
+        {% if video_output %}
+        video_out_is_live=True,
+        video_out_width=1024,
+        video_out_height=768,
+        {% endif %}
+    ),
+    {% endif %}
+    {% if 'websocket' in transports %}
+    "websocket": lambda: FastAPIWebsocketParams(
+        audio_in_enabled=True,
+        {% if enable_krisp %}audio_in_filter=krisp_filter,{% endif %}
+        audio_out_enabled=True,
+        add_wav_header=False,
+        serializer=ProtobufFrameSerializer(),
+    ),
+    {% endif %}
+    {% for provider in ['twilio', 'telnyx', 'plivo', 'exotel'] if provider in transports %}
+    # create_transport sets the {{ provider }} serializer and add_wav_header automatically.
+    "{{ provider }}": lambda: FastAPIWebsocketParams(
+        audio_in_enabled=True,
+        {% if enable_krisp %}audio_in_filter=krisp_filter,{% endif %}
+        audio_out_enabled=True,
+    ),
+    {% endfor %}
+    {% if enable_eval %}
+    # Behavioral evals: run with `-t eval` to drive this bot via `pipecat eval`.
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        {% if video_input %}video_in_enabled=True,{% endif %}
+    ),
+    {% endif %}
+}
+
+transport = await create_transport(runner_args, transport_params)
+{% endmacro %}

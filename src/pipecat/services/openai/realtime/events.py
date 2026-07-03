@@ -10,9 +10,12 @@ import json
 import uuid
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from pipecat.adapters.schemas.direct_function import DirectFunction
+from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.openai._constants import OPENAI_REALTIME_WHISPER_MODEL, OPENAI_SAMPLE_RATE
 
 #
@@ -213,10 +216,12 @@ class SessionProperties(BaseModel):
     output_modalities: list[Literal["text", "audio"]] | None = None
     instructions: str | None = None
     audio: AudioConfiguration | None = None
-    # Tools can only be ToolsSchema when provided by the user, in either the
-    # OpenAIRealtimeLLMService constructor or through LLMUpdateSettingsFrame.
-    # We'll never serialize/deserialize ToolsSchema when talking to the server.
-    tools: ToolsSchema | list[dict] | None = None
+    # Tools provided by the user (via the service constructor or
+    # LLMUpdateSettingsFrame) may be a ToolsSchema or a plain list of standard
+    # tools (the validator below normalizes that to a ToolsSchema); a list of
+    # provider-native tool dicts passes through. ToolsSchema is never
+    # serialized/deserialized when talking to the server.
+    tools: ToolsSchema | list[FunctionSchema | DirectFunction] | list[dict] | None = None
     tool_choice: Literal["auto", "none", "required"] | None = None
     max_output_tokens: int | Literal["inf"] | None = None
     tracing: Literal["auto"] | dict | None = None
@@ -224,6 +229,18 @@ class SessionProperties(BaseModel):
     expires_at: int | None = None
     include: list[str] | None = None
     reasoning: Reasoning | None = None
+
+    @field_validator("tools", mode="before")
+    @classmethod
+    def _normalize_tools(cls, v):
+        """Wrap a plain list of standard tools in a ``ToolsSchema``.
+
+        Provider-native tool lists (dicts) pass through unchanged.
+        """
+        if isinstance(v, list):
+            normalized = LLMContext._normalize_and_validate_tools(v, allow_provider_tools=True)
+            return normalized if isinstance(normalized, (ToolsSchema, list)) else None
+        return v
 
 
 #

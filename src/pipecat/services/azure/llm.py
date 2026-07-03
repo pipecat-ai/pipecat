@@ -50,6 +50,7 @@ class AzureLLMService(OpenAILLMService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AzureLLMService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             api_version: Azure API version. Defaults to "2024-09-01-preview".
             settings: Runtime-updatable settings. When provided alongside deprecated

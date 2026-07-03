@@ -45,7 +45,7 @@ try:
     from websockets.exceptions import ConnectionClosedOK
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use HeyGen, you need to `pip install pipecat-ai[heygen]`.")
+    logger.error('In order to use HeyGen, you need to `uv add "pipecat-ai[heygen]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 HEY_GEN_SAMPLE_RATE = 24000

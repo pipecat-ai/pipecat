@@ -29,9 +29,8 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.observers.loggers.transcription_log_observer import (
     TranscriptionLogObserver,
@@ -67,43 +66,29 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
-async def fetch_weather_from_api(params: FunctionCallParams):
-    temperature = (
-        random.randint(60, 85)
-        if params.arguments["format"] == "fahrenheit"
-        else random.randint(15, 30)
-    )
+async def get_current_weather(params: FunctionCallParams, location: str, format: str):
+    """Get the current weather.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+        format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
+    """
+    temperature = random.randint(60, 85) if format == "fahrenheit" else random.randint(15, 30)
     await params.result_callback(
         {
             "conditions": "nice",
             "temperature": temperature,
-            "format": params.arguments["format"],
+            "format": format,
             "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
         }
     )
 
 
-weather_function = FunctionSchema(
-    name="get_current_weather",
-    description="Get the current weather",
-    properties={
-        "location": {
-            "type": "string",
-            "description": "The city and state, e.g. San Francisco, CA",
-        },
-        "format": {
-            "type": "string",
-            "enum": ["celsius", "fahrenheit"],
-            "description": "The temperature unit to use.",
-        },
-    },
-    required=["location", "format"],
-)
-
-tools = ToolsSchema(standard_tools=[weather_function])
-
-
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -162,20 +147,18 @@ Always be helpful and proactive in offering assistance.""",
 
     # Note: function calling requires a paid Inworld account and a
     # function-calling-capable model
-    llm.register_function("get_current_weather", fetch_weather_from_api)
 
     context = LLMContext(
         [{"role": "developer", "content": "Say hello and introduce yourself!"}],
-        tools,
+        [get_current_weather],
     )
 
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         # Drive turn detection locally via SileroVAD wired into the user
-        # aggregator. realtime_service_mode keeps context-write semantics
-        # correct and (by default) drops the transcript wait on turn-end so
-        # local VAD can drive turn boundaries on the latency critical path.
-        realtime_service_mode=True,
+        # aggregator. Realtime-service mode is auto-detected and (by default)
+        # drops the transcript wait on turn-end, so local VAD can drive turn
+        # boundaries on the latency critical path.
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 

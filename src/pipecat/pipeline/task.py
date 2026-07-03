@@ -9,7 +9,7 @@
 .. deprecated:: 1.3.0
     Import from :mod:`pipecat.pipeline.worker` instead. Constructing
     :class:`PipelineTask` directly is also deprecated; use
-    :class:`PipelineWorker`.
+    :class:`PipelineWorker`. Will be removed in 2.0.0.
 """
 
 from pipecat.pipeline.worker import (

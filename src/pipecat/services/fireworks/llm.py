@@ -49,6 +49,7 @@ class FireworksLLMService(OpenAILLMService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=FireworksLLMService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             base_url: The base URL for Fireworks API. Defaults to "https://api.fireworks.ai/inference/v1".
             settings: Runtime-updatable settings. When provided alongside deprecated

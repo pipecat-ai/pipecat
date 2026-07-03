@@ -21,12 +21,14 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputImageRawFrame,
+    InputTransportStartAudioStreamingFrame,
     StartFrame,
     StopFrame,
     SystemFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
+from pipecat.utils.deprecation import deprecated
 
 AUDIO_INPUT_TIMEOUT_SECS = 0.5
 
@@ -82,10 +84,26 @@ class BaseInputTransport(FrameProcessor):
         logger.debug(f"Enabling audio on start. {enabled}")
         self._params.audio_in_stream_on_start = enabled
 
+    @deprecated(
+        "`BaseInputTransport.start_audio_in_streaming` is deprecated since 1.4.0 and will be "
+        "removed in 2.0.0. Use `InputTransportStartAudioStreamingFrame` instead."
+    )
     async def start_audio_in_streaming(self):
         """Start audio input streaming.
 
+        .. deprecated:: 1.4.0
+            Push an :class:`~pipecat.frames.frames.InputTransportStartAudioStreamingFrame`
+            downstream instead of calling this directly. Subclasses should
+            override :meth:`_start_audio_in_streaming`.
+            Will be removed in 2.0.0.
+        """
+        await self._start_audio_in_streaming()
+
+    async def _start_audio_in_streaming(self):
+        """Start audio input streaming.
+
         Override in subclasses to implement transport-specific audio streaming.
+        Triggered by an ``InputTransportStartAudioStreamingFrame``.
         """
         pass
 
@@ -198,10 +216,17 @@ class BaseInputTransport(FrameProcessor):
         elif isinstance(frame, CancelFrame):
             await self.cancel(frame)
             await self.push_frame(frame, direction)
+        # Audio pushed in from upstream (e.g. by RTVIProcessor) is fed through
+        # the same VAD/processing path as audio captured from the source,
+        # rather than forwarded as a plain system frame.
+        elif isinstance(frame, InputAudioRawFrame):
+            await self.push_audio_frame(frame)
         # All other system frames
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
         # Control frames
+        elif isinstance(frame, InputTransportStartAudioStreamingFrame):
+            await self._start_audio_in_streaming()
         elif isinstance(frame, EndFrame):
             # Push EndFrame before stop(), because stop() waits on the task to
             # finish and the task finishes when EndFrame is processed.

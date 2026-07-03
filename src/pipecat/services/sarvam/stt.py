@@ -43,6 +43,7 @@ from pipecat.services.settings import (
 from pipecat.services.stt_latency import SARVAM_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -52,7 +53,7 @@ try:
     from sarvamai.core.events import EventType
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Sarvam, you need to `pip install pipecat-ai[sarvam]`.")
+    logger.error('In order to use Sarvam, you need to `uv add "pipecat-ai[sarvam]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 
@@ -216,11 +217,16 @@ class SarvamSTTService(STTService):
     Settings = SarvamSTTSettings
     _settings: Settings
 
+    @deprecated(
+        "`SarvamSTTService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `SarvamSTTService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Configuration parameters for Sarvam STT service.
 
         .. deprecated:: 0.0.105
             Use ``settings=SarvamSTTService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Target language for transcription.
@@ -264,6 +270,7 @@ class SarvamSTTService(STTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamSTTService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             mode: Mode of operation. Options: transcribe, translate, verbatim,
                 translit, codemix. Only applicable to models that support it
@@ -274,6 +281,7 @@ class SarvamSTTService(STTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamSTTService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -519,28 +527,22 @@ class SarvamSTTService(STTService):
 
         return changed
 
+    @deprecated(
+        "`SarvamSTTService.set_prompt` is deprecated since 0.0.104 and will be removed in 2.0.0. "
+        "Use `STTUpdateSettingsFrame(SarvamSTTService.Settings(prompt=...))` instead."
+    )
     async def set_prompt(self, prompt: str | None):
         """Set the transcription/translation prompt and reconnect.
 
         .. deprecated:: 0.0.104
             Use ``STTUpdateSettingsFrame(SarvamSTTService.Settings(prompt=...))`` instead.
+            Will be removed in 2.0.0.
 
         Args:
             prompt: Prompt text to guide transcription/translation style/context.
                    Pass None to clear/disable prompt.
                    Only applicable to models that support prompts.
         """
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                f"{self.__class__.__name__}.set_prompt() is deprecated. "
-                "Use STTUpdateSettingsFrame(self.Settings(prompt=...)) instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
         if not self._config.supports_prompt:
             if prompt is not None:
                 raise ValueError(

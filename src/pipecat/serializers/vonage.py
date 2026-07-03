@@ -78,8 +78,12 @@ class VonageFrameSerializer(FrameSerializer):
         self._vonage_sample_rate = self._params.vonage_sample_rate
         self._sample_rate = 0  # Pipeline input rate
 
-        self._input_resampler = create_stream_resampler()
-        self._output_resampler = create_stream_resampler()
+        self._input_resampler = create_stream_resampler(
+            clear_after_secs=self._params.resampler_clear_after_secs
+        )
+        self._output_resampler = create_stream_resampler(
+            clear_after_secs=self._params.resampler_clear_after_secs
+        )
         self._hangup_attempted = False
 
     async def setup(self, frame: StartFrame):

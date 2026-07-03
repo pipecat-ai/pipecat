@@ -28,6 +28,7 @@ from pipecat.services.azure.common import language_to_azure_language
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
 from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -41,7 +42,7 @@ try:
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Azure, you need to `pip install pipecat-ai[azure]`.")
+    logger.error('In order to use Azure, you need to `uv add "pipecat-ai[azure]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 
@@ -110,11 +111,16 @@ class AzureBaseTTSService:
         "'": "&apos;",
     }
 
+    @deprecated(
+        "`AzureBaseTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `AzureBaseTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Azure TTS voice configuration.
 
         .. deprecated:: 0.0.105
             Use ``settings=AzureBaseTTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             emphasis: Emphasis level for speech ("strong", "moderate", "reduced").
@@ -271,12 +277,14 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AzureTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             params: Voice and synthesis parameters configuration.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AzureTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -284,6 +292,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
 
                 .. deprecated:: 0.0.104
                     Use ``text_aggregation_mode`` instead.
+                    Will be removed in 2.0.0.
 
             text_aggregation_mode: How to aggregate text before synthesis.
             **kwargs: Additional arguments passed to parent WordTTSService.
@@ -481,7 +490,10 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
     def _emit_pending_word(self):
         """Emit the currently buffered word if one exists."""
         if self._last_word is not None:
-            self._word_boundary_queue.put_nowait((self._last_word, self._last_timestamp))
+            asyncio.run_coroutine_threadsafe(
+                self._word_boundary_queue.put((self._last_word, self._last_timestamp)),
+                self.get_event_loop(),
+            )
             self._last_word = None
             self._last_timestamp = None
 
@@ -535,7 +547,10 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
 
         # Regular word: emit previous, store current
         if self._last_word is not None:
-            self._word_boundary_queue.put_nowait((self._last_word, self._last_timestamp))
+            asyncio.run_coroutine_threadsafe(
+                self._word_boundary_queue.put((self._last_word, self._last_timestamp)),
+                self.get_event_loop(),
+            )
         self._last_word = word
         self._last_timestamp = timestamp
 
@@ -572,7 +587,9 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             evt: Synthesis event containing audio data.
         """
         if evt.result and evt.result.audio_data:
-            self._audio_queue.put_nowait(evt.result.audio_data)
+            asyncio.run_coroutine_threadsafe(
+                self._audio_queue.put(evt.result.audio_data), self.get_event_loop()
+            )
 
     def _handle_completed(self, evt):
         """Handle synthesis completion.
@@ -586,7 +603,10 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
 
         # Flush any pending word before completing
         if self._last_word is not None:
-            self._word_boundary_queue.put_nowait((self._last_word, self._last_timestamp))
+            asyncio.run_coroutine_threadsafe(
+                self._word_boundary_queue.put((self._last_word, self._last_timestamp)),
+                self.get_event_loop(),
+            )
             self._last_word = None
             self._last_timestamp = None
 
@@ -594,7 +614,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         # task drains all pending words before signaling audio stream completion.
         # Without this, the last word's TTSTextFrame may arrive after
         # TTSStoppedFrame, causing it to be missed by observers and the UI.
-        self._word_boundary_queue.put_nowait(None)
+        asyncio.run_coroutine_threadsafe(self._word_boundary_queue.put(None), self.get_event_loop())
 
     def _handle_canceled(self, evt):
         """Handle synthesis cancellation.
@@ -606,13 +626,15 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         # User cancellation (from interruption) is expected, not an error
         if reason == CancellationReason.CancelledByUser:
             logger.debug(f"{self}: Speech synthesis canceled by user (interruption)")
-            self._audio_queue.put_nowait(None)
+            asyncio.run_coroutine_threadsafe(self._audio_queue.put(None), self.get_event_loop())
         else:
             details = evt.result.cancellation_details
             error_msg = f"Azure TTS synthesis canceled: {reason}"
             if details.error_details:
                 error_msg += f" - {details.error_details}"
-            self._audio_queue.put_nowait(Exception(error_msg))
+            asyncio.run_coroutine_threadsafe(
+                self._audio_queue.put(Exception(error_msg)), self.get_event_loop()
+            )
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame and handle state changes.
@@ -781,12 +803,14 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AzureHttpTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             params: Voice and synthesis parameters configuration.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AzureHttpTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

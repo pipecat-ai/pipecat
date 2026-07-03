@@ -14,7 +14,7 @@ TracingContext, ensuring concurrent pipelines do not interfere with each other.
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from opentelemetry.context import Context

@@ -175,7 +175,7 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
                         "Migrate to ToolsSchema to enable built-in tool support. "
                         "Use ToolsSchema(custom_tools=...) as an escape hatch for any "
                         "provider-specific tools that don't fit the standard schema.",
-                        DeprecationWarning,
+                        UserWarning,
                         stacklevel=2,
                     )
                 # Fall through and return the original tools unchanged.

@@ -1,0 +1,62 @@
+{# Daily PSTN dial-out bot entry point. In the production flow server.py already
+   created the room, so the room URL/token and dial-out settings arrive in the
+   request body (AgentRequest) and the transport is built by hand. When a local
+   transport (webrtc) or evals are enabled, requests without a room URL fall back
+   to the unified create_transport path so the bot can be tested locally.
+   (Dial-in always goes through the unified create_transport path.) #}
+{% set has_local_transport = 'smallwebrtc' in transports or 'daily' in transports or enable_eval %}
+{% if has_local_transport %}
+    try:
+        # A request body with a room URL means a real call: server.py created the
+        # room and passed it along with the dial-out settings.
+        if isinstance(runner_args.body, dict) and "room_url" in runner_args.body:
+            request = AgentRequest.model_validate(runner_args.body)
+
+            transport = DailyTransport(
+                request.room_url,
+                request.token,
+                "Daily PSTN Bot",
+                params=DailyParams(
+                    api_key=os.getenv("DAILY_API_KEY"),
+                    audio_in_enabled=True,
+                    {% if enable_krisp %}
+                    audio_in_filter=krisp_filter,
+                    {% endif %}
+                    audio_out_enabled=True,
+                ),
+            )
+        else:
+            # Local testing: no call to handle, so create_transport builds the
+            # transport for the local run instead{% if enable_eval %} (e.g. `pipecat eval` with
+            # `-t eval`){% endif %}. No outbound call is placed in this mode.
+{{ transport_setup.transport_params(transports, enable_krisp, enable_eval, video_input, video_output) | indent(12, first=True) }}
+
+        await run_bot(transport, runner_args)
+
+    except Exception as e:
+        logger.error(f"Error running bot: {e}")
+        raise e
+{% else %}
+    try:
+        request = AgentRequest.model_validate(runner_args.body)
+
+        transport = DailyTransport(
+            request.room_url,
+            request.token,
+            "Daily PSTN Bot",
+            params=DailyParams(
+                api_key=os.getenv("DAILY_API_KEY"),
+                audio_in_enabled=True,
+                {% if enable_krisp %}
+                audio_in_filter=krisp_filter,
+                {% endif %}
+                audio_out_enabled=True,
+            ),
+        )
+
+        await run_bot(transport, runner_args)
+
+    except Exception as e:
+        logger.error(f"Error running bot: {e}")
+        raise e
+{% endif %}

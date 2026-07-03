@@ -125,6 +125,7 @@ def import_core_modules():
     """Import core pipecat modules for autodoc to discover."""
     core_modules = [
         "pipecat",
+        "pipecat.flows",
         "pipecat.frames",
         "pipecat.pipeline",
         "pipecat.processors",

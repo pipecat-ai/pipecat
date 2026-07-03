@@ -20,6 +20,7 @@ from pipecat.metrics.metrics import (
     MetricsData,
     ProcessingMetricsData,
     SmartTurnMetricsData,
+    TTFAMetricsData,
     TTFBMetricsData,
     TTSUsageMetricsData,
     TurnMetricsData,
@@ -33,6 +34,7 @@ class MetricsLogObserver(BaseObserver):
     Monitors and logs all MetricsFrame instances, including:
 
     - TTFBMetricsData (Time To First Byte)
+    - TTFAMetricsData (Time To First Audio)
     - ProcessingMetricsData (General processing time)
     - LLMUsageMetricsData (Token usage statistics)
     - TTSUsageMetricsData (Text-to-Speech character counts)
@@ -143,6 +145,11 @@ class MetricsLogObserver(BaseObserver):
         if isinstance(metrics_data, TTFBMetricsData):
             logger.debug(
                 f"📊 {processor_info} TTFB{model_info}: {metrics_data.value}s at {time_sec:.3f}s"
+            )
+        elif isinstance(metrics_data, TTFAMetricsData):
+            logger.debug(
+                f"📊 {processor_info} TTFA{model_info}: {metrics_data.ttfa}s "
+                f"({metrics_data.leading_silence}s leading silence) at {time_sec:.3f}s"
             )
         elif isinstance(metrics_data, ProcessingMetricsData):
             logger.debug(

@@ -20,6 +20,8 @@ from typing import Any
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -33,15 +35,8 @@ from pipecat.frames.frames import (
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Neuphonic, you need to `pip install pipecat-ai[neuphonic]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 
 def language_to_neuphonic_lang_code(language: Language) -> str:
@@ -94,11 +89,16 @@ class NeuphonicTTSService(InterruptibleTTSService):
     Settings = NeuphonicTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`NeuphonicTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `NeuphonicTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Neuphonic TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``settings=NeuphonicTTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language for synthesis. Defaults to English.
@@ -130,6 +130,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=NeuphonicTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             url: WebSocket URL for the Neuphonic API.
             sample_rate: Audio sample rate in Hz. Defaults to 22050.
@@ -138,6 +139,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=NeuphonicTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -145,6 +147,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
 
                 .. deprecated:: 0.0.104
                     Use ``text_aggregation_mode`` instead.
+                    Will be removed in 2.0.0.
 
             text_aggregation_mode: How to aggregate text before synthesis.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService.
@@ -413,11 +416,16 @@ class NeuphonicHttpTTSService(TTSService):
     Settings = NeuphonicTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`NeuphonicHttpTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `NeuphonicHttpTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Neuphonic HTTP TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``settings=NeuphonicHttpTTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language for synthesis. Defaults to English.
@@ -448,6 +456,7 @@ class NeuphonicHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=NeuphonicHttpTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             aiohttp_session: Shared aiohttp session for HTTP requests.
             url: Base URL for the Neuphonic HTTP API.
@@ -457,6 +466,7 @@ class NeuphonicHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=NeuphonicHttpTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

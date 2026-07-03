@@ -10,14 +10,17 @@ This module provides an audio resampler that uses the resampy library
 for high-quality audio sample rate conversion.
 """
 
-import warnings
-
 import numpy as np
 import resampy
 
 from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
+from pipecat.utils.deprecation import deprecated
 
 
+@deprecated(
+    "`ResampyResampler` is deprecated since 1.2.0 and will be removed in 2.0.0. Use "
+    "`SOXRAudioResampler`, `create_file_resampler()`, or `create_stream_resampler()` instead."
+)
 class ResampyResampler(BaseAudioResampler):
     """Audio resampler implementation using the resampy library.
 
@@ -25,9 +28,8 @@ class ResampyResampler(BaseAudioResampler):
     for high-quality audio resampling with good performance characteristics.
 
     .. deprecated:: 1.2.0
-        ResampyResampler is deprecated and will be removed in Pipecat 2.0.
-        Use SOXRAudioResampler, create_file_resampler(), or create_stream_resampler()
-        instead.
+        Use :class:`SOXRAudioResampler`, :func:`create_file_resampler()`,
+        or :func:`create_stream_resampler()` instead. Will be removed in 2.0.0.
     """
 
     def __init__(self, **kwargs):
@@ -36,15 +38,7 @@ class ResampyResampler(BaseAudioResampler):
         Args:
             **kwargs: Additional keyword arguments (currently unused).
         """
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "ResampyResampler is deprecated and will be removed in Pipecat 2.0. "
-                "Use SOXRAudioResampler, create_file_resampler(), or "
-                "create_stream_resampler() instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+        pass
 
     async def resample(self, audio: bytes, in_rate: int, out_rate: int) -> bytes:
         """Resample audio data using resampy library.

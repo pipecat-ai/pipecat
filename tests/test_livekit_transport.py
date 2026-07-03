@@ -120,5 +120,163 @@ class TestLiveKitVideoStreamMemoryLeak(unittest.IsolatedAsyncioTestCase):
         client._callbacks.on_video_track_subscribed.assert_called_once()
 
 
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitAudioStreamLeakOnUnsubscribe(unittest.IsolatedAsyncioTestCase):
+    """Regression tests for AudioStream leak on track unsubscribe.
+
+    The bug: ``_async_on_track_subscribed`` creates an owned ``rtc.AudioStream``
+    plus a ``_process_audio_stream`` task feeding the shared ``_audio_queue``,
+    but only saves the track. ``_async_on_track_unsubscribed`` never closes the
+    stream or cancels the task. Per livekit-rtc ``audio_stream.py``, an owned
+    ``AudioStream._run`` loops over the FFI queue and exits only on a native
+    ``eos`` event emitted by ``aclose()`` → ``_ffi_handle.dispose()``. So when a
+    participant republishes their mic (e.g. mute/unmute), the previous stream
+    keeps pushing frames forever; N republishes → N concurrent producers
+    interleave audio into the shared queue and downstream STT receives garbage.
+
+    The fix: store ``(stream, task)`` per ``participant.sid`` in
+    ``_audio_streams`` on subscribe, then ``aclose()`` + cancel on unsubscribe
+    and again on a re-subscribe for the same sid (to handle missed unsubscribe).
+    Symmetric for video.
+    """
+
+    def _create_client(self, video_in_enabled: bool = False) -> LiveKitTransportClient:
+        params = LiveKitParams(video_in_enabled=video_in_enabled)
+        callbacks = LiveKitCallbacks(
+            on_connected=AsyncMock(),
+            on_disconnected=AsyncMock(),
+            on_before_disconnect=AsyncMock(),
+            on_participant_connected=AsyncMock(),
+            on_participant_disconnected=AsyncMock(),
+            on_audio_track_subscribed=AsyncMock(),
+            on_audio_track_unsubscribed=AsyncMock(),
+            on_video_track_subscribed=AsyncMock(),
+            on_video_track_unsubscribed=AsyncMock(),
+            on_data_received=AsyncMock(),
+            on_first_participant_joined=AsyncMock(),
+        )
+        client = LiveKitTransportClient(
+            url="wss://test.livekit.cloud",
+            token="test-token",
+            room_name="test-room",
+            params=params,
+            callbacks=callbacks,
+            transport_name="test-transport",
+        )
+        client._task_manager = MagicMock()
+
+        # Return a real (mockable) Task so the cleanup path can call ``.done()``
+        # and ``.cancel()`` on it without blowing up.
+        def _make_task(coro, name):
+            coro.close()  # we never run the producer in the unit test
+            t = MagicMock()
+            t.done.return_value = False
+            t.cancel = MagicMock()
+            return t
+
+        client._task_manager.create_task.side_effect = _make_task
+        return client
+
+    def _audio_track(self, sid: str = "audio-track-1", participant_sid: str = "p-1"):
+        track = MagicMock()
+        track.kind = rtc.TrackKind.KIND_AUDIO
+        track.sid = sid
+        publication = MagicMock()
+        publication.sid = sid
+        participant = MagicMock()
+        participant.sid = participant_sid
+        participant.identity = "user"
+        return track, publication, participant
+
+    def _video_track(self, sid: str = "video-track-1", participant_sid: str = "p-1"):
+        track = MagicMock()
+        track.kind = rtc.TrackKind.KIND_VIDEO
+        track.sid = sid
+        publication = MagicMock()
+        publication.sid = sid
+        participant = MagicMock()
+        participant.sid = participant_sid
+        participant.identity = "user"
+        return track, publication, participant
+
+    async def test_audio_stream_registered_on_subscribe(self):
+        """Subscribing an audio track registers ``(stream, task)`` for the sid."""
+        client = self._create_client()
+        track, pub, participant = self._audio_track()
+
+        mock_stream = MagicMock()
+        mock_stream.aclose = AsyncMock()
+        with patch.object(rtc, "AudioStream", return_value=mock_stream):
+            await client._async_on_track_subscribed(track, pub, participant)
+
+        self.assertIn(participant.sid, client._audio_streams)
+        stream, task = client._audio_streams[participant.sid]
+        self.assertIs(stream, mock_stream)
+        self.assertIsNotNone(task)
+
+    async def test_audio_stream_closed_and_task_cancelled_on_unsubscribe(self):
+        """Unsubscribing closes the stream, cancels the task, clears the registry."""
+        client = self._create_client()
+        track, pub, participant = self._audio_track()
+
+        mock_stream = MagicMock()
+        mock_stream.aclose = AsyncMock()
+        with patch.object(rtc, "AudioStream", return_value=mock_stream):
+            await client._async_on_track_subscribed(track, pub, participant)
+        _, task = client._audio_streams[participant.sid]
+
+        await client._async_on_track_unsubscribed(track, pub, participant)
+
+        mock_stream.aclose.assert_awaited_once()
+        task.cancel.assert_called_once()
+        self.assertNotIn(participant.sid, client._audio_streams)
+        client._callbacks.on_audio_track_unsubscribed.assert_called_once()
+
+    async def test_resubscribe_closes_previous_audio_stream(self):
+        """Re-subscribing the same sid (mic republish) closes the prior stream."""
+        client = self._create_client()
+        track, pub, participant = self._audio_track()
+
+        first = MagicMock()
+        first.aclose = AsyncMock()
+        second = MagicMock()
+        second.aclose = AsyncMock()
+
+        with patch.object(rtc, "AudioStream", return_value=first):
+            await client._async_on_track_subscribed(track, pub, participant)
+        first_task = client._audio_streams[participant.sid][1]
+
+        # Republish without an explicit unsubscribe in between.
+        with patch.object(rtc, "AudioStream", return_value=second):
+            await client._async_on_track_subscribed(track, pub, participant)
+
+        first.aclose.assert_awaited_once()
+        first_task.cancel.assert_called_once()
+        self.assertIs(client._audio_streams[participant.sid][0], second)
+
+    async def test_unsubscribe_without_subscribe_is_noop(self):
+        """Unsubscribe for an unknown sid does not raise."""
+        client = self._create_client()
+        track, pub, participant = self._audio_track()
+        # No subscribe before this call.
+        await client._async_on_track_unsubscribed(track, pub, participant)
+        client._callbacks.on_audio_track_unsubscribed.assert_called_once()
+
+    async def test_video_stream_closed_on_unsubscribe(self):
+        """Symmetric behaviour for video when ``video_in_enabled=True``."""
+        client = self._create_client(video_in_enabled=True)
+        track, pub, participant = self._video_track()
+
+        mock_stream = MagicMock()
+        mock_stream.aclose = AsyncMock()
+        with patch.object(rtc, "VideoStream", return_value=mock_stream):
+            await client._async_on_track_subscribed(track, pub, participant)
+        self.assertIn(participant.sid, client._video_streams)
+
+        await client._async_on_track_unsubscribed(track, pub, participant)
+        mock_stream.aclose.assert_awaited_once()
+        self.assertNotIn(participant.sid, client._video_streams)
+
+
 if __name__ == "__main__":
     unittest.main()

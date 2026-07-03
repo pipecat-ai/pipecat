@@ -287,8 +287,6 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             self._incomplete_timeout_handler(incomplete_type, timeout),
             f"_incomplete_timeout_{incomplete_type}",
         )
-        # Make sure the task is scheduled.
-        await asyncio.sleep(0)
 
     async def _cancel_incomplete_timeout(self):
         """Cancel any pending incomplete timeout task."""

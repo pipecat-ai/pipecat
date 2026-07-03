@@ -53,17 +53,19 @@ class ToolsSchema:
 
         def _map_standard_tools(tools):
             schemas = []
+            direct_functions = []
             for tool in tools:
                 if isinstance(tool, FunctionSchema):
                     schemas.append(tool)
                 elif callable(tool):
                     wrapper = DirectFunctionWrapper(tool)
                     schemas.append(wrapper.to_function_schema())
+                    direct_functions.append(wrapper)
                 else:
                     raise TypeError(f"Unsupported tool type: {type(tool)}")
-            return schemas
+            return schemas, direct_functions
 
-        self._standard_tools = _map_standard_tools(standard_tools)
+        self._standard_tools, self._direct_functions = _map_standard_tools(standard_tools)
         self._custom_tools = custom_tools
 
     @property
@@ -74,6 +76,19 @@ class ToolsSchema:
             List of tools following the FunctionSchema format.
         """
         return self._standard_tools
+
+    @property
+    def direct_functions(self) -> list[DirectFunctionWrapper]:
+        """Get the wrappers for standard tools that were given as direct functions.
+
+        These retain a reference to the original callable, allowing the LLM
+        service to register their handlers automatically. Standard tools given
+        as ``FunctionSchema`` objects (advertise-only) are not included.
+
+        Returns:
+            List of ``DirectFunctionWrapper`` for the callable standard tools.
+        """
+        return self._direct_functions
 
     @property
     def custom_tools(self) -> dict[AdapterType, list[dict[str, Any]]] | None:

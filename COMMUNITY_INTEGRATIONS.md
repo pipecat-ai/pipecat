@@ -40,24 +40,41 @@ Your repository must contain these components:
 
 Join our Discord: https://discord.gg/pipecat
 
-### Step 4: Submit for Listing
+### Step 4: Submit Your Documentation
 
-Submit a pull request to add your integration to our [Community Integrations documentation page](https://docs.pipecat.ai/server/services/community-integrations).
+Community integrations are documented alongside the core services on the [Supported Services page](https://docs.pipecat.ai/api-reference/server/services/supported-services), with a `Community` maintainer badge and their own service page. Submitting your docs means two things: a row on the Supported Services page and a dedicated service page.
 
 **To submit:**
 
 1. Fork the [Pipecat docs repository](https://github.com/pipecat-ai/docs)
-2. Edit the file `server/services/community-integrations.mdx`
-3. Add your integration to the appropriate service category table with:
-   - Service name
-   - Link to your repository
-   - Maintainer GitHub username(s)
-4. Include a link to your demo video (approx 30-60 seconds) in your PR description showing:
+2. **Add a row to the Supported Services page.** Edit `api-reference/server/services/supported-services.mdx` and add your integration to the appropriate category table:
+   - **Service** — your service name, linked to your new service page (see next step)
+   - **Setup** — the install command (e.g. `uv add pipecat-yourservice`)
+   - **Maintainer** — `Community`
+3. **Add a service page.** Create `api-reference/server/services/<category>/<your-service>.mdx`. The easiest path is to copy an existing community page (e.g. `image-generation/replicate.mdx`) and adapt it. Each page should include:
+   - The **community-maintained badge** at the top, via the shared snippet:
+     ```mdx
+     import { CommunityMaintained } from "/snippets/community-maintained.mdx";
+
+     <CommunityMaintained
+       maintainer="your-github-username"
+       maintainerUrl="https://github.com/your-github-username"
+       repo="https://github.com/your-org/pipecat-yourservice"
+     />
+     ```
+   - A short **overview** describing what the integration does (you can adapt the intro from your README)
+   - **Installation** — your install command
+   - **Prerequisites** — required accounts, API keys, and environment variables
+   - **Configuration** — constructor parameters and runtime `Settings`
+   - A minimal **usage** example showing the service in a pipeline
+   - A **compatibility** note with the last tested Pipecat version
+4. **Register the page in navigation.** Add the page path to `docs.json` under the matching `navigation` group, and add a redirect entry following the existing pattern.
+5. Include a link to your demo video (approx 30-60 seconds) in your PR description showing:
    - Core functionality of your integration
    - Handling of an interruption (if applicable to service type)
-5. Submit your pull request
+6. Submit your pull request
 
-Once your PR is submitted, post in the `#community-integrations` Discord channel to let us know.
+Keep your service page lightweight: it should point readers to your repository as the source of truth, not duplicate your full README. Once your PR is submitted, post in the `#community-integrations` Discord channel to let us know.
 
 ## Integration Patterns and Examples
 
@@ -391,6 +408,37 @@ async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
     return changed
 ```
 
+### Service Metadata
+
+A service can describe itself to the rest of the pipeline **at start** by overriding `service_metadata_frame()`. The service broadcasts the returned frame (a `ServiceMetadataFrame` or subtype) right after the `StartFrame`, and processors that care read it to **auto-configure themselves** — so users get correct behavior without wiring it by hand.
+
+Service metadata is a small, growing surface: only a few fields exist today, but the frame types are meant to gain more as more of the framework becomes self-configuring.
+
+The base `ServiceMetadataFrame` carries:
+
+- `service_name` — the broadcasting service's name.
+- `user_turn_strategies` — turn strategies the service recommends. A service that does its own **server-side end-of-turn detection** returns `ExternalUserTurnStrategies()` here; the user aggregator then defers to the service's turn frames instead of running local VAD/smart-turn. The recommendation applies **unless the user passed their own `user_turn_strategies`**, which always wins. `None` leaves the defaults in place.
+
+Subtypes add fields for their service kind:
+
+- **`STTMetadataFrame`** — `ttfs_p99_latency`, the 99th-percentile time from end-of-speech to final transcript, which turn strategies use to tune their timing.
+- **`LLMServiceMetadataFrame`** — `is_realtime_service`, flagging a realtime (speech-to-speech) LLM so the context aggregator auto-enables realtime mode.
+
+The base `STTService` and `LLMService` already return a sensible frame, so most services need nothing here. Override `service_metadata_frame()` — calling `super()` and adjusting the frame — only when your service has something extra to declare, e.g. an STT that detects turns server-side:
+
+```python
+from pipecat.frames.frames import STTMetadataFrame
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+
+def service_metadata_frame(self) -> STTMetadataFrame:
+    # This service defines turn boundaries server-side and emits
+    # UserStarted/StoppedSpeakingFrame, so recommend external turn
+    # strategies; the user aggregator defers to those over local VAD.
+    frame = super().service_metadata_frame()
+    frame.user_turn_strategies = ExternalUserTurnStrategies()
+    return frame
+```
+
 ### Sample Rate Handling
 
 Sample rates are set via PipelineParams and passed to each frame processor at initialization. The pattern is to _not_ set the sample rate value in the constructor of a given service. Instead, use the `start()` method to initialize sample rates from the frame:
@@ -448,7 +496,8 @@ except Exception as e:
 ### Testing
 
 - Your foundational example serves as a valuable integration-level test
-- Unit tests are nice to have. As the Pipecat teams provides better guidance, we will encourage unit testing more
+- Use the behavioral eval harness (`pipecat eval run`) to test your foundational example end-to-end; [see the docs](https://docs.pipecat.ai/pipecat/evals/overview) for more details
+- Unit tests are nice to have
 
 ## Disclaimer
 
