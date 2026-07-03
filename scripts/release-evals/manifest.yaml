@@ -127,6 +127,8 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-soniox.py
     scenarios: [capital_question]
+  - bot: voice/voice-soniox-turn-detection.py
+    scenarios: [capital_question]
   - bot: voice/voice-speechmatics.py
     scenarios: [capital_question]
   - bot: voice/voice-speechmatics-vad.py
