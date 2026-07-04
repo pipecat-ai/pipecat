@@ -236,7 +236,6 @@ class SimliVideoService(AIService):
 
     async def _consume_and_process_video(self):
         """Consume video frames from Simli and convert them to output frames."""
-        await self._pipecat_resampler_event.wait()
         video_iterator = self._simli_client.getVideoStreamIterator(targetFormat="rgb24")
         async for video_frame in video_iterator:
             # Process the video frame
