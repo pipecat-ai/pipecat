@@ -969,10 +969,10 @@ class AssemblyAISTTService(WebsocketSTTService):
         if self._vad_force_turn_endpoint:
             return  # Pipecat mode: handled by aggregator
 
-        await self.start_processing_metrics()
         await self.broadcast_frame(UserStartedSpeakingFrame)
         if self._should_interrupt:
             await self.broadcast_interruption()
+        await self.start_processing_metrics()
         self._user_speaking = True
 
     async def _handle_termination(self, message: TerminationMessage):
