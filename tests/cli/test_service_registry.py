@@ -1,8 +1,14 @@
 """Tests for service registry integrity and completeness."""
 
+import tomllib
+from pathlib import Path
+
 import pytest
 
 from pipecat.cli.registry import ServiceLoader, ServiceRegistry
+
+# tests/cli/ -> tests/ -> repo root
+PYPROJECT_PATH = Path(__file__).parent.parent.parent / "pyproject.toml"
 
 
 class TestServiceRegistryIntegrity:
@@ -43,6 +49,42 @@ class TestServiceRegistryIntegrity:
             # If package has brackets, extras should be extracted
             if "[" in package:
                 assert len(extras) > 0, f"Failed to extract extras from {package}"
+
+    def test_package_extras_are_defined_in_pyproject(self):
+        """Verify every declared package extra actually exists in pyproject.toml.
+
+        ``pipecat init`` turns each service's ``package`` string into a
+        ``pipecat-ai[<extra>]`` dependency in the generated project. If an extra
+        is not defined in ``[project.optional-dependencies]``, that generated
+        dependency references an unknown extra and pip warns and silently skips
+        it (strict resolvers error), so the extras must stay in sync.
+        """
+        from pipecat.cli.registry import extract_package_extra
+
+        with open(PYPROJECT_PATH, "rb") as f:
+            pyproject = tomllib.load(f)
+        defined_extras = set(pyproject["project"]["optional-dependencies"])
+
+        all_services = []
+        all_services.extend(ServiceRegistry.WEBRTC_TRANSPORTS)
+        all_services.extend(ServiceRegistry.TELEPHONY_TRANSPORTS)
+        all_services.extend(ServiceRegistry.STT_SERVICES)
+        all_services.extend(ServiceRegistry.LLM_SERVICES)
+        all_services.extend(ServiceRegistry.TTS_SERVICES)
+        all_services.extend(ServiceRegistry.REALTIME_SERVICES)
+        all_services.extend(ServiceRegistry.VIDEO_SERVICES)
+
+        missing = {
+            extra
+            for service in all_services
+            for extra in extract_package_extra(service.package)
+            if extra not in defined_extras
+        }
+
+        assert not missing, (
+            "Service packages reference extras missing from "
+            f"[project.optional-dependencies]: {', '.join(sorted(missing))}"
+        )
 
 
 class TestServiceLoader:
