@@ -461,6 +461,9 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         accumulated_text = ""
 
         text_generated_signal = False
+        media_generated_signal = False
+        last_finish_reason = None
+        block_reason = None
 
         # Reset pending function calls when processing a new context
         self._pending_function_calls = []
@@ -486,6 +489,14 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                     cache_read_input_tokens = chunk.usage_metadata.cached_content_token_count or 0
                     reasoning_tokens = chunk.usage_metadata.thoughts_token_count or 0
 
+                if chunk.prompt_feedback and chunk.prompt_feedback.block_reason:
+                    block_reason = chunk.prompt_feedback.block_reason
+                    logger.warning(
+                        f"{self}: Google blocked the prompt: "
+                        f"block_reason={block_reason} "
+                        f"block_reason_message={chunk.prompt_feedback.block_reason_message!r}"
+                    )
+
                 if not chunk.candidates:
                     continue
 
@@ -496,12 +507,17 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                             if hasattr(candidate.finish_reason, "value")
                             else candidate.finish_reason
                         )
+                        last_finish_reason = finish_reason
                         finish_message = (
                             f" finish_message={candidate.finish_message!r}"
                             if candidate.finish_message
                             else ""
                         )
-                        logger.debug(
+                        # Abnormal terminations (SAFETY, MALFORMED_FUNCTION_CALL,
+                        # RECITATION, ...) usually mean the bot produced nothing —
+                        # keep them visible at prod log level.
+                        log = logger.debug if str(finish_reason) == "STOP" else logger.warning
+                        log(
                             f"{self}: Google generation stopped with "
                             f"finish_reason={finish_reason}{finish_message}"
                         )
@@ -537,6 +553,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                                 )
                             elif part.inline_data and part.inline_data.data:
                                 # Here we assume that inline_data is an image.
+                                media_generated_signal = True
                                 image = Image.open(io.BytesIO(part.inline_data.data))
                                 await self.push_frame(
                                     AssistantImageRawFrame(
@@ -652,8 +669,29 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                 else:
                     logger.debug(f"{self}: Executing {len(function_calls)} function calls")
                     await self.run_function_calls(function_calls)
+
+            # The stream completed but yielded nothing the user can hear — no
+            # text, no function call, no media (e.g. a safety block, a
+            # MALFORMED_FUNCTION_CALL, or an empty-candidates response). Left
+            # alone this is dead air: nothing downstream ever fires. Surface a
+            # non-fatal error so the application layer can retry the turn.
+            if not (text_generated_signal or function_calls or media_generated_signal):
+                logger.warning(
+                    f"{self}: Google completion produced no output "
+                    f"(finish_reason={last_finish_reason}, block_reason={block_reason})"
+                )
+                await self.push_error(
+                    error_msg=(
+                        f"LLM completion produced no output "
+                        f"(finish_reason={last_finish_reason}, block_reason={block_reason})"
+                    )
+                )
         except DeadlineExceeded:
+            # Surface the timeout as a non-fatal error so the application layer
+            # can retry the turn; the event stays for service-level listeners.
+            logger.warning(f"{self}: Google completion deadline exceeded (request timeout)")
             await self._call_event_handler("on_completion_timeout")
+            await self.push_error(error_msg="LLM completion deadline exceeded (request timeout)")
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
