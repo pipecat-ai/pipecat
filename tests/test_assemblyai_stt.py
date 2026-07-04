@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from loguru import logger
 
+from pipecat.frames.frames import UserStartedSpeakingFrame
 from pipecat.services.assemblyai.stt import AssemblyAISTTService, is_u3_pro_model
 
 
@@ -612,6 +613,34 @@ def test__process_assistant_turn_noop_when_carryover_disabled():
     asyncio.run(service._process_assistant_turn("Hello."))
 
     assert sent == []
+
+
+def test_speech_started_starts_metrics_after_interruption():
+    # broadcast_interruption() stops all metrics, so processing metrics must
+    # start after it or they would be stopped immediately.
+    service = AssemblyAISTTService(api_key="test-key", vad_force_turn_endpoint=False)
+    events = []
+
+    async def fake_broadcast_frame(frame_cls, **kwargs):
+        events.append(("broadcast", frame_cls))
+
+    async def fake_broadcast_interruption():
+        events.append(("interruption", None))
+
+    async def fake_start_processing_metrics():
+        events.append(("start_metrics", None))
+
+    service.broadcast_frame = fake_broadcast_frame
+    service.broadcast_interruption = fake_broadcast_interruption
+    service.start_processing_metrics = fake_start_processing_metrics
+
+    asyncio.run(service._handle_speech_started(None))
+
+    assert events == [
+        ("broadcast", UserStartedSpeakingFrame),
+        ("interruption", None),
+        ("start_metrics", None),
+    ]
 
 
 if __name__ == "__main__":
