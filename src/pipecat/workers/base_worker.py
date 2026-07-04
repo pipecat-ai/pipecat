@@ -1040,6 +1040,7 @@ class BaseWorker(BaseObject, BusSubscriber):
                 data=data,
             )
         )
+        self._active_jobs.pop(job_id, None)
 
     async def _register_ready(self) -> None:
         """Register this worker as ready in the shared registry.
