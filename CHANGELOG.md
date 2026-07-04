@@ -579,6 +579,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the interruption broadcast.
   (PR [#4949](https://github.com/pipecat-ai/pipecat/pull/4949))
 
+- Fixed `RimeTTSService` intermittently going silent for the rest of the
+  session when metrics are enabled. Rime's websocket may split a 16-bit sample
+  across audio chunks, and the resulting odd-length audio frames crashed the
+  TTS playback task; dangling bytes are now carried over to the next chunk so
+  frames always contain whole samples.
+  (PR [#4952](https://github.com/pipecat-ai/pipecat/pull/4952))
+
 ## [1.4.0] - 2026-06-16
 
 ### Added
