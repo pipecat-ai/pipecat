@@ -20,6 +20,24 @@ _US_DATE_RE = re.compile(r"\b(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})\b")
 
 _ORDINAL_SUFFIXES = {1: "st", 2: "nd", 3: "rd"}
 
+# Indexed by month - 1. Hardcoded rather than derived from strftime("%B"), which
+# renders the month in the process's LC_TIME locale and would produce a
+# mixed-language result alongside the English year and ordinal suffix.
+_MONTH_NAMES = (
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
+
 
 def _ordinal(n: int) -> str:
     suffix = _ORDINAL_SUFFIXES.get(n % 10 if n % 100 not in (11, 12, 13) else 0, "th")
@@ -28,7 +46,7 @@ def _ordinal(n: int) -> str:
 
 def _date_to_spoken(dt: datetime) -> str:
     year_words = num2words(dt.year, lang="en")
-    month = dt.strftime("%B")
+    month = _MONTH_NAMES[dt.month - 1]
     day = _ordinal(dt.day)
     return f"{month} {day}, {year_words}"
 
