@@ -97,6 +97,14 @@ class ActionManager:
         self._flow_manager = flow_manager
         self._ongoing_actions_count = 0
         self._ongoing_actions_finished_event = asyncio.Event()
+        # Initial state must match the ``_ongoing_actions_count == 0`` invariant:
+        # the event indicates "no ongoing actions are still running", which is
+        # trivially true right after construction. Without this ``.set()``,
+        # ``asyncio.Event()`` defaults to unset — an ``await event.wait()``
+        # invoked BEFORE the first ``_enqueue_action`` call would block
+        # indefinitely, breaking the "count = 0 ↔ event set" invariant and any
+        # caller (e.g. teardown) that relies on it at startup.
+        self._ongoing_actions_finished_event.set()
         self._deferred_post_actions: list[ActionConfig] = []
         self._showed_deprecation_warning_for_legacy_action_handler = False
 
