@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import locale
 import unittest
 
 from pipecat.utils.text.transforms._alnum_utils import normalize
@@ -348,6 +349,21 @@ class TestNormalizeDates(unittest.IsolatedAsyncioTestCase):
         self.assertIn("21st", await normalize_dates("2023-05-21", "*"))
         self.assertIn("2nd", await normalize_dates("2023-05-02", "*"))
         self.assertIn("3rd", await normalize_dates("2023-05-03", "*"))
+
+    async def test_month_is_english_under_non_english_locale(self):
+        # The month must stay English even when LC_TIME is a non-English locale,
+        # to match the hardcoded-English year and ordinal suffix.
+        saved = locale.setlocale(locale.LC_TIME)
+        try:
+            locale.setlocale(locale.LC_TIME, "de_DE.UTF-8")
+        except locale.Error:
+            self.skipTest("de_DE.UTF-8 locale not available")
+        try:
+            result = await normalize_dates("Meeting on 2023-05-10", "*")
+        finally:
+            locale.setlocale(locale.LC_TIME, saved)
+        self.assertIn("May 10th", result)
+        self.assertNotIn("Mai", result)
 
 
 class TestExpandNumbers(unittest.IsolatedAsyncioTestCase):
