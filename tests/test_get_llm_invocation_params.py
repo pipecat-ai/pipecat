@@ -761,6 +761,26 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(assistant_msg["role"], "assistant")
         self.assertEqual(assistant_msg["content"], "I'm doing well, thank you!")
 
+    def test_malformed_image_url_raises_instead_of_dropping_context(self):
+        """A malformed data URL should surface an error, not silently drop the
+        entire conversation. Previously the broad except returned empty messages,
+        so the LLM ran with no context at all."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "user", "content": "important earlier context"},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "look at this"},
+                    # No comma, so url.split(",")[1] raises during conversion.
+                    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64"}},
+                ],
+            },
+        ]
+        context = LLMContext(messages=messages)
+
+        with self.assertRaises(IndexError):
+            self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
     def test_llm_specific_message_filtering(self):
         """Test that Anthropic-specific messages are included and others are filtered out."""
         # Create anthropic-specific message content

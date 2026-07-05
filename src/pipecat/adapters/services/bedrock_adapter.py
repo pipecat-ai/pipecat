@@ -134,7 +134,11 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         try:
             messages = [self._from_universal_context_message(m) for m in remaining]
         except Exception as e:
+            # Re-raise instead of swallowing: returning an empty message list here
+            # silently drops the entire conversation context (see Gemini adapter,
+            # which lets these errors propagate).
             logger.error(f"Error mapping messages: {e}")
+            raise
 
         # Convert any subsequent "system"/"developer"-role messages to "user"-role
         # messages, as AWS Bedrock doesn't support system or developer input messages.
