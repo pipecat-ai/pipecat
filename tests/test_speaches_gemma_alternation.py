@@ -262,5 +262,157 @@ class TestGemmaAlternationNormalizer(unittest.TestCase):
                 self.assertIn(body[i], ("user", "assistant"))
 
 
+is_template_valid = _mod._is_template_valid
+normalize_preserving_tools = _mod.normalize_preserving_tools
+
+
+def _call(name="transition_to_2", call_id="c1"):
+    return {
+        "id": call_id,
+        "type": "function",
+        "function": {"name": name, "arguments": "{}"},
+    }
+
+
+class TestTemplateValidator(unittest.TestCase):
+    """_is_template_valid mirrors the gemma3 pythonic template: tool messages
+    and assistant-with-tool_calls turns are exempt from alternation."""
+
+    def test_structured_tool_history_is_valid_as_is(self):
+        msgs = [
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": None, "tool_calls": [_call()]},
+            {"role": "tool", "content": '{"status": "done"}', "tool_call_id": "c1"},
+            {"role": "assistant", "content": "next question"},
+            {"role": "user", "content": "answer"},
+        ]
+        self.assertTrue(is_template_valid(msgs))
+
+    def test_tool_without_id_is_invalid(self):
+        msgs = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "", "tool_calls": [_call()]},
+            {"role": "tool", "content": "r"},
+        ]
+        self.assertFalse(is_template_valid(msgs))
+
+    def test_leading_plain_assistant_is_invalid(self):
+        msgs = [
+            {"role": "assistant", "content": "greeting"},
+            {"role": "user", "content": "hi"},
+        ]
+        self.assertFalse(is_template_valid(msgs))
+
+    def test_same_role_plain_pair_across_tools_is_invalid(self):
+        msgs = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "", "tool_calls": [_call()]},
+            {"role": "tool", "content": "r", "tool_call_id": "c1"},
+            {"role": "user", "content": "again"},
+        ]
+        self.assertFalse(is_template_valid(msgs))
+
+
+class TestNormalizePreservingTools(unittest.TestCase):
+    """The structure-preserving pass keeps tool_calls / tool results intact —
+    flattening them into assistant text teaches the model to SPEAK the call
+    syntax and invented result JSON (observed live: run 4, workflow 2)."""
+
+    def test_greeting_dropped_tools_preserved(self):
+        msgs = [
+            {"role": "system", "content": "s"},
+            {"role": "assistant", "content": "greeting"},
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": None, "tool_calls": [_call()]},
+            {"role": "tool", "content": '{"status": "done"}', "tool_call_id": "c1"},
+            {"role": "assistant", "content": "next"},
+        ]
+        out = normalize_preserving_tools(msgs)
+        self.assertTrue(is_template_valid(out))
+        # tool_calls survived structurally — no [func()] text in any content
+        calls = [m for m in out if m.get("tool_calls")]
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["tool_calls"][0]["function"]["name"], "transition_to_2")
+        self.assertEqual(calls[0]["content"], "")  # None coerced for the template
+        tools = [m for m in out if m.get("role") == "tool"]
+        self.assertEqual(len(tools), 1)
+        self.assertNotIn("greeting", str(out))
+        for m in out:
+            if m.get("role") == "assistant" and not m.get("tool_calls"):
+                self.assertNotIn("transition_to_2", m["content"] or "")
+                self.assertNotIn('{"status"', m["content"] or "")
+
+    def test_user_pair_across_tools_gets_filler_assistant(self):
+        msgs = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "", "tool_calls": [_call()]},
+            {"role": "tool", "content": "r", "tool_call_id": "c1"},
+            {"role": "user", "content": "again"},
+        ]
+        out = normalize_preserving_tools(msgs)
+        self.assertTrue(is_template_valid(out))
+        self.assertEqual([m["content"] for m in out if m["role"] == "user"], ["hi", "again"])
+
+    def test_adjacent_same_role_plain_turns_merge(self):
+        msgs = [
+            {"role": "user", "content": "u1"},
+            {"role": "user", "content": "u2"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "assistant", "content": "a2"},
+        ]
+        out = normalize_preserving_tools(msgs)
+        self.assertTrue(is_template_valid(out))
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out[0]["content"], "u1\nu2")
+        self.assertEqual(out[1]["content"], "a1\na2")
+
+    def test_tool_result_without_id_folds_to_assistant_text(self):
+        msgs = [
+            {"role": "user", "content": "hi"},
+            {"role": "tool", "content": "orphan result"},
+        ]
+        out = normalize_preserving_tools(msgs)
+        self.assertTrue(is_template_valid(out))
+        self.assertEqual(out[-1]["role"], "assistant")
+        self.assertIn("orphan result", out[-1]["content"])
+
+    def test_input_never_mutated(self):
+        msgs = [
+            {"role": "assistant", "content": "greeting"},
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": None, "tool_calls": [_call()]},
+        ]
+        import copy
+
+        snapshot = copy.deepcopy(msgs)
+        normalize_preserving_tools(msgs)
+        self.assertEqual(msgs, snapshot)
+
+    def test_fuzz_output_always_valid_or_flattenable(self):
+        import itertools
+
+        samples = [
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "u1"},
+            {"role": "user", "content": "u2"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "assistant", "content": None, "tool_calls": [_call()]},
+            {"role": "tool", "content": "tr", "tool_call_id": "c1"},
+            {"role": "tool", "content": "orphan"},
+            {"role": "developer", "content": "dev"},
+        ]
+        for combo in itertools.permutations(samples, 4):
+            out = normalize_preserving_tools(list(combo))
+            if not is_template_valid(out):
+                # The service falls back to the legacy flattener — that output
+                # must always be template-valid.
+                flat = normalize_for_gemma(list(combo))
+                self.assertTrue(
+                    is_template_valid(flat),
+                    f"flatten fallback invalid for {[(m['role']) for m in combo]}",
+                )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

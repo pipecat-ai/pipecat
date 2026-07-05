@@ -158,6 +158,140 @@ def normalize_for_gemma(messages: list) -> list:
     return out
 
 
+def _is_template_valid(messages: list) -> bool:
+    """Return True if ``messages`` satisfies the gemma3 pythonic tool template.
+
+    The template validates alternation over the PLAIN turns only — ``tool``
+    messages and assistant turns carrying ``tool_calls`` are exempt — and the
+    remaining plain turns must go user/assistant/user/... starting with user.
+    Mirroring it exactly lets structured tool history pass through untouched,
+    so the model sees its past calls in the trained ``[func(args)]`` rendering
+    instead of a flattened text imitation it then copies into speech.
+    """
+    body = messages
+    if body and isinstance(body[0], dict) and body[0].get("role") == "system":
+        body = body[1:]
+    expected = "user"
+    for msg in body:
+        if not isinstance(msg, dict):
+            return False
+        role = msg.get("role")
+        if role == "tool":
+            if not msg.get("tool_call_id"):
+                return False  # wire format requires the id; normalize instead
+            continue
+        if role == "assistant" and msg.get("tool_calls"):
+            continue
+        if role not in ("user", "assistant"):
+            return False  # developer / function / system mid-convo
+        if role != expected:
+            return False
+        if not isinstance(msg.get("content"), str):
+            return False  # multimodal/None plain content — normalize to text
+        expected = "assistant" if expected == "user" else "user"
+    return True
+
+
+def normalize_preserving_tools(messages: list) -> list:
+    """Alternation-fix a history WITHOUT flattening structured tool exchanges.
+
+    The gemma3 pythonic tool template natively renders assistant ``tool_calls``
+    (as ``[func(args)]``) and ``tool`` results (as ``<tool_response>`` blocks),
+    and exempts both from its alternation rule — so they pass through as-is.
+    Only the plain user/assistant turns are repaired: consecutive same-role
+    plain turns merge, leading plain-assistant turns (before the first user)
+    drop, and a same-role plain pair separated by tool traffic gains an empty
+    opposite-role turn (renders as an empty model/user block — harmless).
+
+    Flattening tool history into assistant text (the legacy
+    :func:`normalize_for_gemma`) is actively harmful with the tool template:
+    the model reads ``[func()] {"status": ...}`` as its own SPOKEN turns and
+    starts emitting call syntax and invented result JSON in real replies.
+    The input list is never mutated. May still produce a template-invalid
+    shape in exotic cases — callers re-validate and fall back to the flattener.
+    """
+    system_msgs: list = []
+    body = messages
+    if body and isinstance(body[0], dict) and body[0].get("role") == "system":
+        system_msgs = [dict(body[0])]
+        body = body[1:]
+
+    out: list = []
+    last_plain_role: Optional[str] = None
+    seen_user = False
+
+    def _last_is_plain(role: str) -> bool:
+        return (
+            bool(out)
+            and out[-1].get("role") == role
+            and not out[-1].get("tool_calls")
+            and out[-1].get("role") != "tool"
+        )
+
+    for msg in body:
+        if not isinstance(msg, dict):
+            continue
+        role = msg.get("role")
+
+        if role == "assistant" and msg.get("tool_calls"):
+            m = dict(msg)
+            if not isinstance(m.get("content"), str):
+                # The template raises on non-string content; None is common on
+                # pure tool-call turns.
+                m["content"] = _stringify_content(m.get("content"))
+            out.append(m)
+            continue
+
+        if role in ("tool", "developer", "function"):
+            if role == "tool" and msg.get("tool_call_id"):
+                out.append(dict(msg))
+            else:
+                # No id to correlate — fold the result into an assistant turn
+                # (legacy behavior) rather than send an invalid tool message.
+                text = _stringify_content(msg.get("content"))
+                if text:
+                    if _last_is_plain("assistant"):
+                        out[-1]["content"] = f"{out[-1]['content']}\n{text}"
+                    else:
+                        out.append({"role": "assistant", "content": text})
+                        last_plain_role = "assistant"
+            continue
+
+        if role == "system":
+            # Mid-conversation system message — Gemma has no such role; carry
+            # it as assistant context.
+            text = _stringify_content(msg.get("content"))
+            if text:
+                if _last_is_plain("assistant"):
+                    out[-1]["content"] = f"{out[-1]['content']}\n{text}"
+                else:
+                    out.append({"role": "assistant", "content": text})
+                    last_plain_role = "assistant"
+            continue
+
+        # Plain user / assistant turn.
+        text = _stringify_content(msg.get("content"))
+        if not text:
+            continue
+        norm_role = "assistant" if role == "assistant" else "user"
+        if norm_role == "assistant" and not seen_user:
+            continue  # leading assistant (greeting) — template needs user first
+        if norm_role == "user":
+            seen_user = True
+        if _last_is_plain(norm_role):
+            out[-1]["content"] = f"{out[-1]['content']}\n{text}"
+            continue
+        if last_plain_role == norm_role:
+            # Same plain role again but separated by tool traffic — insert an
+            # empty opposite-role turn to keep the template's alternation.
+            filler = "assistant" if norm_role == "user" else "user"
+            out.append({"role": filler, "content": ""})
+        out.append({"role": norm_role, "content": text})
+        last_plain_role = norm_role
+
+    return system_msgs + out
+
+
 def _is_already_alternating(messages: list) -> bool:
     """Return True if ``messages`` already satisfies Gemma's alternation rule.
 
@@ -238,12 +372,15 @@ class SpeachesLLMService(OpenAILLMService):
         params = super().build_chat_completion_params(params_from_context)
         messages = params.get("messages")
         if isinstance(messages, list) and len(messages) > 1:
-            if not _is_already_alternating(messages):
-                normalized = normalize_for_gemma(messages)
+            if not _is_template_valid(messages):
+                normalized = normalize_preserving_tools(messages)
+                if not _is_template_valid(normalized):
+                    # Exotic shape the structure-preserving pass couldn't fix —
+                    # flatten everything (legacy) rather than risk a 400.
+                    normalized = normalize_for_gemma(messages)
                 logger.debug(
-                    f"{self}: normalized non-alternating history "
-                    f"({len(messages)} → {len(normalized)} msgs) for strict Gemma "
-                    f"role alternation"
+                    f"{self}: normalized history for the Gemma tool template "
+                    f"({len(messages)} → {len(normalized)} msgs)"
                 )
                 params["messages"] = normalized
         return params
