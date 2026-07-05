@@ -1022,6 +1022,8 @@ class BaseWorker(BaseObject, BusSubscriber):
     async def send_job_stream_end(self, job_id: str, data: dict | None = None) -> None:
         """End the current stream and mark this worker's job as complete.
 
+        After sending, the job is removed from the set of active jobs.
+
         Args:
             job_id: The identifier of the job being streamed.
             data: Optional final metadata.
@@ -1040,6 +1042,7 @@ class BaseWorker(BaseObject, BusSubscriber):
                 data=data,
             )
         )
+        self._active_jobs.pop(job_id, None)
 
     async def _register_ready(self) -> None:
         """Register this worker as ready in the shared registry.
