@@ -353,6 +353,7 @@ class TestNormalizeDates(unittest.IsolatedAsyncioTestCase):
     async def test_month_is_english_under_non_english_locale(self):
         # The month must stay English even when LC_TIME is a non-English locale,
         # to match the hardcoded-English year and ordinal suffix.
+        saved = locale.setlocale(locale.LC_TIME)
         try:
             locale.setlocale(locale.LC_TIME, "de_DE.UTF-8")
         except locale.Error:
@@ -360,7 +361,7 @@ class TestNormalizeDates(unittest.IsolatedAsyncioTestCase):
         try:
             result = await normalize_dates("Meeting on 2023-05-10", "*")
         finally:
-            locale.setlocale(locale.LC_TIME, "C")
+            locale.setlocale(locale.LC_TIME, saved)
         self.assertIn("May 10th", result)
         self.assertNotIn("Mai", result)
 
