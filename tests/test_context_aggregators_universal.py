@@ -49,6 +49,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -1214,6 +1215,67 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         )
         assert json.loads(context.messages[-1]["content"]) == {"conditions": "Sunny"}
         assert context_updated
+
+    async def test_function_call_result_before_llm_response_end_defers_context_push(self):
+        """A fast tool result mid-response defers the upstream LLM re-run.
+
+        When a function call result arrives before the LLM response has finished
+        streaming, the assistant text is still being aggregated. The upstream
+        LLMContextFrame that re-runs inference must be deferred until the response
+        ends and the assistant message is committed to context, so the re-run
+        sees the full assistant turn instead of racing ahead of it.
+        """
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        # Snapshot the context messages at the moment each upstream LLMContextFrame
+        # is pushed, so we can assert the assistant text was committed first.
+        upstream_context_snapshots = []
+
+        class CaptureObserver(BaseObserver):
+            async def on_push_frame(self, data: FramePushed):
+                if (
+                    data.source is aggregator
+                    and data.direction == FrameDirection.UPSTREAM
+                    and isinstance(data.frame, LLMContextFrame)
+                ):
+                    upstream_context_snapshots.append(list(context.messages))
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            # Partial assistant text streamed before the tool call resolves.
+            LLMTextFrame("Let me check that for you."),
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                cancel_on_interruption=True,
+            ),
+            # Fast tool result lands before the LLM response has finished.
+            FunctionCallResultFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                result={"conditions": "Sunny"},
+            ),
+            SleepFrame(),
+            # Response finishes: the deferred upstream re-run should fire now.
+            LLMFullResponseEndFrame(),
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            observers=[CaptureObserver()],
+        )
+
+        # Exactly one upstream re-run, and it happened only after the assistant
+        # text was committed to context (i.e. deferred to LLMFullResponseEndFrame).
+        assert len(upstream_context_snapshots) == 1
+        snapshot = upstream_context_snapshots[0]
+        assert any(
+            m.get("role") == "assistant" and m.get("content") == "Let me check that for you."
+            for m in snapshot
+        )
 
     async def test_thought(self):
         context = LLMContext()
