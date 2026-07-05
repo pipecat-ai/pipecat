@@ -751,8 +751,10 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             )
 
             # If text was generated, defer function calls until after TTS plays
-            # Otherwise, execute them immediately
-            if text_generated_signal:
+            # Otherwise, execute them immediately. Whitespace-only content never
+            # reaches TTS, so no BotStoppedSpeakingFrame would ever flush the
+            # deferred calls — treat it as no text and run them now.
+            if text_generated_signal and content_buffer.strip():
                 self._pending_function_calls = function_calls
                 logger.debug(
                     f"{self}: Deferring {len(function_calls)} function calls until after TTS"
