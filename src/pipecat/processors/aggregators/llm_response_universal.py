@@ -1603,7 +1603,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if not self._aggregation:
             return ""
 
-        should_push_context = (self._push_context_on_llm_full_response_ended == True)
+        should_push_context = self._push_context_on_llm_full_response_ended == True
 
         aggregation = self.aggregation_string()
         await self.reset()
