@@ -46,6 +46,22 @@ All examples support multiple LLM providers (OpenAI, Anthropic, Google Gemini, A
 
 The examples define their functions as "direct functions" — async functions whose schema is derived from the signature and docstring — which is the recommended pattern. `food_ordering_advanced_functionschema.py` shows the alternative `FlowsFunctionSchema` approach.
 
+## Evals
+
+Most of these examples are covered by behavioral evals that drive the bot
+end-to-end and assert on which Flows functions fire and what the bot says back.
+The scenarios live in [`scripts/release-evals/`](../../scripts/release-evals/)
+alongside the rest of the release eval suite — see the Flows section of its
+README. To run just the flows bots:
+
+```bash
+scripts/release-evals/run.sh -p flows
+```
+
+Or iterate on a single bot: run it with `-t eval`, then drive one scenario
+against it with
+`pipecat eval run scripts/release-evals/scenarios/<name>.yaml -v`.
+
 ## Learn more
 
 See the [Pipecat Flows guide](https://docs.pipecat.ai/guides/features/pipecat-flows) for a full walkthrough of nodes, functions, context strategies, and actions.

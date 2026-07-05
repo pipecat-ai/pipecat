@@ -276,3 +276,28 @@ suite:
   #
   - bot: video-avatar/video-avatar-tavus-video-service.py
     scenarios: [capital_question]
+
+  #
+  # Flows: structured-conversation examples (examples/flows/). Text-only
+  # scenarios asserting on node transitions, function calls, and context
+  # strategies. The bots pick their LLM from $LLM_PROVIDER (default
+  # openai_responses; hello_world always uses Google).
+  #
+  - bot: flows/hello_world.py
+    scenarios: [hello_world]
+  - bot: flows/food_ordering.py
+    scenarios: [food_ordering_pizza]
+  - bot: flows/food_ordering_advanced_functionschema.py
+    scenarios: [food_ordering_sushi]
+  - bot: flows/multi_worker_handoff.py
+    scenarios: [multi_worker_handoff]
+  - bot: flows/patient_intake.py
+    scenarios: [patient_intake]
+  - bot: flows/restaurant_reservation.py
+    scenarios: [restaurant_reservation_available, restaurant_reservation_no_availability]
+  - bot: flows/insurance_quote.py
+    scenarios: [insurance_quote]
+  # Constructs and switches between OpenAI, Google, and Anthropic, so all
+  # three API keys must be set.
+  - bot: flows/llm_switching.py
+    scenarios: [llm_switching]

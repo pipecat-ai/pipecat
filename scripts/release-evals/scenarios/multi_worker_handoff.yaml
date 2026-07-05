@@ -1,0 +1,41 @@
+name: multi_worker_handoff
+
+judge: !include judge_text.yaml
+
+turns:
+  - expect:
+      - event: response
+        eval: "the bot greets the user and offers to answer questions or book a table"
+
+  - user: "I'd like to book a table."
+    expect:
+      - event: function_call
+        calls:
+          - name: transfer_to_reservation
+      - event: response
+        eval: "the bot asks how many people are in their party"
+
+  - user: "There will be two of us."
+    expect:
+      - event: function_call
+        calls:
+          - name: collect_party_size
+            args: { size: 2 }
+      - event: response
+        eval: "the bot asks what time they would like to dine"
+
+  - user: "We'd like to come at six PM."
+    expect:
+      - event: function_call
+        calls:
+          - name: check_availability
+      - event: response
+        eval: "the bot confirms a reservation is available at the requested time"
+
+  # Terminal turn — assert the function call only: end_conversation tears the
+  # pipeline down before the farewell llm_response reaches the harness.
+  - user: "No, that's all, thank you."
+    expect:
+      - event: function_call
+        calls:
+          - name: end_reservation
