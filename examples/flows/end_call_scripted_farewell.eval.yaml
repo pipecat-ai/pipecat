@@ -1,0 +1,41 @@
+name: end_call_scripted_farewell
+
+# Audio, end to end: the user asks to end the call. Tests that the bot invokes
+# end_call and speaks a single scripted farewell (spoken by the end node's
+# end_conversation pre-action, not by a second LLM completion).
+#
+# Audio modality matters here: the farewell is spoken via TTSSpeakFrame, which
+# never appears as LLM text, so a text-mode scenario could not observe it.
+#
+# Run the bot:  uv run examples/flows/end_call_scripted_farewell.py -t eval --port 7860
+# Run the eval: uv run pipecat eval run examples/flows/end_call_scripted_farewell.eval.yaml --bot-url ws://localhost:7860 -v
+
+user:
+  modality: audio
+  speech:
+    service: kokoro
+    voice: af_heart
+    sample_rate: 16000
+
+judge:
+  modality: audio
+  eval:
+    service: openai
+    model: gpt-4o-mini
+  transcription:
+    service: moonshine
+    model: small-streaming
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, or an offer to help)"
+
+  - user: "Actually, I'm all set. Please end the call now."
+    expect:
+      - event: function_call
+        calls:
+          - name: end_call
+      - event: response
+        eval: "the response is a short farewell or goodbye, said exactly once (it must not contain two separate goodbye messages)"

@@ -146,12 +146,26 @@ class SingleClientWebsocketServerInputTransport(BaseInputTransport):
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
-        """Stop the WebSocket server and cleanup resources.
+        """Stop the input side of the transport.
 
         Args:
             frame: The end frame signaling transport shutdown.
         """
         await super().stop(frame)
+        # Don't tear the server down here: the output side shares the client
+        # connection and may still have frames to flush (e.g. a goodbye spoken
+        # by the TTS after this EndFrame passed the input). The output
+        # transport calls `stop_server()` once the EndFrame reaches it, after
+        # all pending audio has been written. `cleanup()` is the backstop for
+        # pipelines without our output transport.
+
+    async def stop_server(self):
+        """Gracefully shut down the WebSocket server.
+
+        Called by the output transport once the EndFrame reaches it, i.e.
+        after all pending output (like a farewell message) has been written to
+        the shared client connection.
+        """
         # Signal the server loop to exit and drain it gracefully before
         # cancelling whatever is left.
         self._stop_server_event.set()
@@ -343,6 +357,12 @@ class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
         """
         await super().stop(frame)
         await self._write_frame(frame)
+        # All pending output has been written; now the shared server (owned by
+        # the input transport) can shut down gracefully. The input defers this
+        # to us because it sees the EndFrame before downstream processors have
+        # flushed (e.g. a farewell spoken by the TTS after the EndFrame passed
+        # the input).
+        await self._transport.input().stop_server()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the output transport and send cancellation frame.
