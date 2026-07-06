@@ -64,7 +64,7 @@ class LemonSliceApi:
             daily_room_url: Daily room URL to use for the session.
             daily_token: Daily token for authenticating with the room.
             connection_properties: Additional connection properties to pass to the session.
-            extra_properties: Additional top-level keys to merge into the payload.
+            extra_properties: Additional properties to pass to the session.
             api_url: LemonSlice API URL override.
 
         Returns:
@@ -80,9 +80,7 @@ class LemonSliceApi:
         if len(given_sources) == 0:
             raise ValueError("Provide exactly one of agent_id, agent_image_url, or agent_image")
         if len(given_sources) > 1:
-            raise ValueError(
-                "Provide exactly one of agent_id, agent_image_url, or agent_image, not multiple"
-            )
+            raise ValueError("Provide exactly one of agent_id, agent_image_url, or agent_image")
 
         logger.debug(
             f"Creating LemonSlice session: agent_id={agent_id}, "
