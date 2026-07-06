@@ -123,6 +123,13 @@ class SingleClientWebsocketServerInputTransport(BaseInputTransport):
 
         self._stop_server_event = asyncio.Event()
 
+        # The server is shared by the input and output transports. It is drained
+        # only once both sides have released it (see `release_server`), so output
+        # still being flushed after the EndFrame passed the input — e.g. a
+        # goodbye spoken by the TTS via Flows' `end_conversation` action — isn't
+        # cut off. Mirrors the leave-counter used by the FastAPI/Daily transports.
+        self._server_refs = 0
+
         # Whether we have seen a StartFrame already.
         self._initialized = False
 
@@ -143,15 +150,42 @@ class SingleClientWebsocketServerInputTransport(BaseInputTransport):
             await self._params.serializer.setup(frame)
         if not self._server_task:
             self._server_task = self.create_task(self._server_task_handler())
+        # The input side now holds the server; the output side registers its own
+        # hold in its start().
+        self._server_refs += 1
         await self.set_transport_ready(frame)
 
+    def acquire_server(self):
+        """Register a hold on the shared WebSocket server.
+
+        Called by the output transport when it starts, so the server stays up
+        until both the input and output sides have released it.
+        """
+        self._server_refs += 1
+
     async def stop(self, frame: EndFrame):
-        """Stop the WebSocket server and cleanup resources.
+        """Stop the input side and release its hold on the server.
 
         Args:
             frame: The end frame signaling transport shutdown.
         """
         await super().stop(frame)
+        # Release our hold, but don't tear the server down while the output side
+        # still holds it: it may have frames left to flush (e.g. a goodbye spoken
+        # by the TTS after this EndFrame passed the input). Whichever side is last
+        # drives the drain.
+        await self.release_server()
+
+    async def release_server(self):
+        """Release one hold on the shared server, draining it once none remain.
+
+        Called by the input transport when its EndFrame arrives and by the
+        output transport once it has flushed all pending output. The last
+        release drives the graceful drain.
+        """
+        self._server_refs -= 1
+        if self._server_refs > 0:
+            return
         # Signal the server loop to exit and drain it gracefully before
         # cancelling whatever is left.
         self._stop_server_event.set()
@@ -333,16 +367,24 @@ class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
         if self._params.serializer:
             await self._params.serializer.setup(frame)
         self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
+        # Register the output side's hold on the shared server (owned by the
+        # input transport), so it stays up until this side has flushed.
+        self._transport.input().acquire_server()
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
-        """Stop the output transport and send final frame.
+        """Stop the output transport, flushing final output before releasing the server.
 
         Args:
             frame: The end frame signaling transport shutdown.
         """
         await super().stop(frame)
         await self._write_frame(frame)
+        # All pending output has been written; release our hold on the shared
+        # server. Since the input released its hold as soon as the EndFrame
+        # passed it, this last release drives the graceful drain — the client
+        # connection stays open until the goodbye has been sent.
+        await self._transport.input().release_server()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the output transport and send cancellation frame.
