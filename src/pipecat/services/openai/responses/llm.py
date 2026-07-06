@@ -93,9 +93,16 @@ class _ConnectionLimitReachedError(_RetryableError):
 class OpenAIResponsesReasoningConfig(BaseModel):
     """Reasoning configuration for reasoning-capable OpenAI Responses models.
 
-    Reasoning models (e.g. ``gpt-5.4``, ``gpt-5.5``, the o-series) use internal
-    reasoning tokens before producing a response. This controls how much
-    reasoning they do and whether a human-readable summary of it is returned.
+    Only reasoning-capable models use this — the gpt-5.x series and the o-series.
+    The service's default model, ``gpt-4.1``, does not reason, so this config has
+    no effect there; select a reasoning-capable model to use it. See OpenAI's
+    reasoning guide (https://platform.openai.com/docs/guides/reasoning) and model
+    list (https://platform.openai.com/docs/models) to choose one and to check
+    which effort levels it accepts.
+
+    Reasoning models use internal reasoning tokens before producing a response.
+    This controls how much reasoning they do and whether a human-readable summary
+    of it is returned.
 
     Parameters:
         effort: How much reasoning effort the model applies. ``None`` (the
@@ -122,9 +129,10 @@ class OpenAIResponsesLLMSettings(LLMSettings):
     Parameters:
         max_completion_tokens: Maximum completion tokens to generate.
         reasoning: Reasoning configuration for reasoning-capable models. ``None``
-            (the default) leaves reasoning unconfigured — the service then applies
-            a low reasoning effort to the gpt-5.x series (including the default
-            model) and leaves other models at their provider default.
+            (the default) leaves reasoning unconfigured — the service then disables
+            reasoning by default on the gpt-5.x series (``effort="none"``) to keep
+            latency low for real-time voice, and leaves every other model at its
+            provider default. The default model, ``gpt-4.1``, does not reason.
     """
 
     # Override inherited LLMSettings fields to also accept openai's NotGiven
@@ -187,7 +195,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         default_settings = self.Settings(
-            model="gpt-5.4",
+            model="gpt-4.1",
             system_instruction=None,
             frequency_penalty=None,
             presence_penalty=None,
@@ -315,8 +323,9 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             # turns, preserving reasoning context across the conversation.
             params["include"] = ["reasoning.encrypted_content"]
         else:
-            # No reasoning configured: apply the low default (gpt-5.x series only).
-            self._maybe_apply_default_reasoning(params)
+            # No reasoning configured: disable it by default on the gpt-5.x series
+            # for real-time latency (see the helper).
+            self._maybe_disable_reasoning(params)
 
         # Extra settings
         params.update(self._settings.extra)
@@ -396,18 +405,19 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
     # -- reasoning ------------------------------------------------------------
 
-    def _maybe_apply_default_reasoning(self, params: dict):
-        """Default the gpt-5.x series to a low reasoning effort.
+    def _maybe_disable_reasoning(self, params: dict):
+        """Disable reasoning by default on the gpt-5.x series for real-time voice.
 
-        The gpt-5.x series is the first "mainline" OpenAI series to support
-        reasoning (gpt-4.x and earlier don't reason at all). When the caller
-        hasn't configured ``reasoning``, request a low effort for it — this
-        includes the default model, ``gpt-5.4`` — keeping latency low for
-        real-time voice while retaining some reasoning. Every other model is left
-        to the provider's own default: the reasoning-only o-series reasons at its
-        own default (and doesn't uniformly accept ``effort="low"`` anyway — e.g.
-        ``o1-mini``), and non-reasoning models don't reason at all. Mirrors
-        Gemini's ``_maybe_unset_thinking_budget``.
+        When the caller hasn't configured ``reasoning``, request ``effort="none"``
+        for the gpt-5.x series — the first "mainline" OpenAI series to accept a
+        ``"none"`` effort. This only ever *lowers* reasoning for latency: it's a
+        no-op for models like ``gpt-5.4`` that already default to ``none``, and it
+        disables reasoning for models like ``gpt-5.5`` that otherwise default to a
+        real effort. Every other model is left at the provider default: the
+        reasoning-first o-series doesn't accept ``effort="none"`` (and choosing one
+        is a deliberate decision to reason), and gpt-4.x and earlier don't reason
+        at all. Mirrors Gemini's ``_maybe_unset_thinking_budget``, which disables
+        or minimizes thinking on its latency-sensitive models.
 
         Args:
             params: The response params dict (modified in place).
@@ -415,7 +425,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         model = assert_given(self._settings.model)
         # ``gpt-5-chat`` is a non-reasoning variant of the series, so exclude it.
         if model and model.startswith("gpt-5") and "chat" not in model:
-            params["reasoning"] = {"effort": "low"}
+            params["reasoning"] = {"effort": "none"}
 
     async def _append_reasoning_message(
         self, item_id: str | None, summary: list[dict], encrypted_content: str | None
@@ -475,7 +485,6 @@ class OpenAIResponsesLLMService(
         llm = OpenAIResponsesLLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
             settings=OpenAIResponsesLLMService.Settings(
-                model="gpt-5.4",
                 system_instruction="You are a helpful assistant.",
             ),
         )
@@ -1081,7 +1090,6 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
         llm = OpenAIResponsesHttpLLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
             settings=OpenAIResponsesHttpLLMService.Settings(
-                model="gpt-5.4",
                 system_instruction="You are a helpful assistant.",
             ),
         )

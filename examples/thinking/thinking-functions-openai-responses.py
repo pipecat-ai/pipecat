@@ -89,14 +89,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = OpenAIResponsesLLMService(
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAIResponsesLLMService.Settings(
-            # The default model (gpt-5.4) is reasoning-capable. Turn reasoning on
-            # with an effort level and set summary="auto" to surface a readable
-            # summary of the model's thinking (logged via on_assistant_thought
-            # below). We use "medium" here so a summary reliably appears: at the
-            # service default of "low", the model reasons only when a turn calls
-            # for it, so ordinary prompts often produce no summary at all. Note
-            # that some models require a verified OpenAI organization to return
-            # summaries.
+            # The default model (gpt-4.1) does not reason, so this example selects
+            # a reasoning-capable model. See OpenAI's reasoning guide
+            # (https://platform.openai.com/docs/guides/reasoning) for which models
+            # reason and which effort levels they accept. Set an effort level and
+            # summary="auto" to surface a readable summary of the model's thinking
+            # (logged via on_assistant_thought below). We use "medium" so a summary
+            # reliably appears: at lower efforts the model reasons only when a turn
+            # calls for it, so ordinary prompts often produce no summary. Note that
+            # some models require a verified OpenAI organization to return summaries.
+            model="gpt-5.4",
             reasoning=OpenAIResponsesLLMService.ReasoningConfig(
                 effort="medium",
                 summary="auto",

@@ -752,25 +752,35 @@ class TestReasoningParams:
     def _params(self, service):
         return service._build_response_params({"input": []})
 
-    def test_default_applies_low_reasoning_on_supported_model(self):
-        """The default model (gpt-5.4) gets a low reasoning effort applied."""
+    def test_default_model_gets_no_reasoning(self):
+        """The default model (gpt-4.1) does not reason, so no reasoning param is set."""
         service = _make_service()
-        params = self._params(service)
-        assert params["reasoning"] == {"effort": "low"}
-        assert "include" not in params
-
-    def test_no_reasoning_param_on_non_supporting_model(self):
-        """A model outside the gpt-5.x reasoning family is left untouched."""
-        service = _make_service(settings=OpenAIResponsesLLMService.Settings(model="gpt-4.1"))
         params = self._params(service)
         assert "reasoning" not in params
         assert "include" not in params
 
+    def test_gpt5_series_disabled_by_default(self):
+        """gpt-5.x models default to effort="none" for real-time latency."""
+        for model in ("gpt-5.4", "gpt-5.5"):
+            service = _make_service(settings=OpenAIResponsesLLMService.Settings(model=model))
+            params = self._params(service)
+            assert params["reasoning"] == {"effort": "none"}, model
+            assert "include" not in params
+
+    def test_gpt5_chat_variant_left_untouched(self):
+        """The non-reasoning gpt-5-chat variant is excluded from the default-off logic."""
+        service = _make_service(
+            settings=OpenAIResponsesLLMService.Settings(model="gpt-5-chat-latest")
+        )
+        params = self._params(service)
+        assert "reasoning" not in params
+
     def test_explicit_reasoning_overrides_default(self):
-        """An explicit config is honored as-is (not replaced by the low default)."""
+        """An explicit config is honored as-is (not replaced by the none default)."""
         service = _make_service(
             settings=OpenAIResponsesLLMService.Settings(
-                reasoning=OpenAIResponsesLLMService.ReasoningConfig(effort="high", summary="auto")
+                model="gpt-5.5",
+                reasoning=OpenAIResponsesLLMService.ReasoningConfig(effort="high", summary="auto"),
             )
         )
         params = self._params(service)
@@ -778,14 +788,15 @@ class TestReasoningParams:
         assert params["include"] == ["reasoning.encrypted_content"]
 
     def test_empty_reasoning_config_falls_back_to_default(self):
-        """An all-unset config is treated as unconfigured (low default applied)."""
+        """An all-unset config is treated as unconfigured (none default on gpt-5.x)."""
         service = _make_service(
             settings=OpenAIResponsesLLMService.Settings(
-                reasoning=OpenAIResponsesLLMService.ReasoningConfig()
+                model="gpt-5.5",
+                reasoning=OpenAIResponsesLLMService.ReasoningConfig(),
             )
         )
         params = self._params(service)
-        assert params["reasoning"] == {"effort": "low"}
+        assert params["reasoning"] == {"effort": "none"}
         assert "include" not in params
 
 
