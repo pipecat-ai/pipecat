@@ -142,7 +142,8 @@ class TestGoodbyeFlushedBeforeClose(unittest.IsolatedAsyncioTestCase):
         runner = WorkerRunner()
         await runner.add_workers(worker)
         run_task = asyncio.create_task(runner.run())
-
+        self.addAsyncCleanup(runner.cancel)
+        self.addCleanup(run_task.cancel)
         # Connect a client, retrying until the server is listening.
         client = None
         for _ in range(50):
