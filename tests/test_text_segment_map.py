@@ -256,10 +256,10 @@ class TestTextSegmentMapTokenChangingReplacements(unittest.TestCase):
         self.assertTrue(seg.is_transformed)
 
     def test_acronym_letter_spacing_is_flagged_transformed(self):
-        # "NASA" -> "N A S A": same alnum content, but letter-spacing splits one
-        # word into four -- the same word-count change as splitting replacements.
-        smap = TextSegmentMap("N A S A launched", "NASA launched")
-        seg = next(s for s in smap._segments if s.original == "NASA")
+        # "API" -> "A P I": same alnum content, but letter-spacing splits one
+        # word into three -- the same word-count change as splitting replacements.
+        smap = TextSegmentMap("A P I launched", "API launched")
+        seg = next(s for s in smap._segments if s.original == "API")
         self.assertTrue(seg.is_transformed)
 
 

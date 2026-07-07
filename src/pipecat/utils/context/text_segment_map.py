@@ -36,7 +36,7 @@ class TextSegment:
         This holds either when the alphanumeric content differs between original
         and TTS sides, or when a replacement changed the segment's word count
         (e.g. splitting ``"BODYPUMP"`` into ``"body pump"``, or letter-spacing an
-        acronym like ``"NASA"`` into ``"N A S A"``). Word-splitting replacements
+        acronym like ``"API"`` into ``"A P I"``). Word-splitting replacements
         can normalize to the same alphanumeric content on both sides, but the
         proportional advance still breaks: it would consume alnum chars from a
         single contiguous original token using word boundaries that only exist
