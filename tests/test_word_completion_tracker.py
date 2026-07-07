@@ -1960,5 +1960,119 @@ class TestWordCompletionTrackerTransformAtEndOfUtterance(unittest.TestCase):
         self.assertTrue(tracker.is_complete)
 
 
+class TestWordCompletionTrackerTokenChangingReplacements(unittest.TestCase):
+    """Whether get_llm_consumed() preserves the original text when a replacement
+    changes tokenization or case instead of falling back to the spoken word.
+
+    ``text_transforms``/``text_filters`` replacements that change tokenization
+    (splitting one word into several) or change only case are misclassified by
+    ``TextSegmentMap`` as unchanged text (see ``TestTextSegmentMapTokenChangingReplacements``
+    in ``test_text_segment_map.py``). The per-word span validation in
+    ``add_word_and_check_complete`` is also case-sensitive, so even segments the
+    segment map gets right can still be discarded. Either failure causes
+    ``get_llm_consumed()`` to return None, and callers then fall back to the raw
+    spoken word instead of the original LLM text -- corrupting the conversation
+    context. Single-word-to-single-word replacements that change the normalized
+    alnum length (e.g. "leisure" -> "lezher") are unaffected and are included
+    here as passing control cases.
+    """
+
+    def test_word_splitting_replacement_leaks_spoken_words_into_context(self):
+        # "BODYPUMP" -> "body pump": audio is correct, but each spoken word
+        # should still map back to the original "BODYPUMP" span, not be discarded.
+        sentence = "Try BODYPUMP on Monday morning."
+        tts_text = "Try body pump on Monday morning."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+
+        tracker.add_word_and_check_complete("Try")
+        tracker.add_word_and_check_complete("body")
+        self.assertIsNotNone(
+            tracker.get_llm_consumed(),
+            "the word-split replacement must not discard the original span",
+        )
+        tracker.add_word_and_check_complete("pump")
+        self.assertIsNotNone(tracker.get_llm_consumed())
+        for word in ["on", "Monday", "morning."]:
+            tracker.add_word_and_check_complete(word)
+        self.assertTrue(tracker.is_complete)
+
+    def test_case_only_replacement_is_not_discarded(self):
+        # "SQL" -> "sql": audio is correct, only case differs. The span should
+        # still validate instead of being discarded by the case-sensitive check.
+        sentence = "Contact SQL support today."
+        tts_text = "Contact sql support today."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+
+        tracker.add_word_and_check_complete("Contact")
+        tracker.add_word_and_check_complete("sql")
+        self.assertIsNotNone(
+            tracker.get_llm_consumed(),
+            "a case-only replacement must not be discarded by case-sensitive validation",
+        )
+        tracker.add_word_and_check_complete("support")
+        tracker.add_word_and_check_complete("today.")
+        self.assertTrue(tracker.is_complete)
+
+    def test_hyphenated_single_token_replacement_is_not_discarded(self):
+        # "BODYPUMP" -> "body-pump": single token on both sides, only case+shape differ.
+        sentence = "Try BODYPUMP on Monday morning."
+        tts_text = "Try body-pump on Monday morning."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+
+        tracker.add_word_and_check_complete("Try")
+        tracker.add_word_and_check_complete("body-pump")
+        self.assertIsNotNone(tracker.get_llm_consumed())
+
+    def test_accumulated_llm_text_matches_original_despite_split(self):
+        """Even though per-word spans are discarded today, the cursor still ends up
+        past the full original sentence once the frame completes."""
+        sentence = "Try BODYPUMP on Monday morning."
+        tts_text = "Try body pump on Monday morning."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+        for word in tts_text.split():
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_accumulated_llm_text(), sentence)
+
+    def test_single_word_case_change_with_different_length_still_works(self):
+        """Control case: "HIIT" -> "hit" differs in alnum length, so it already
+        takes the atomic transformed-segment path and is unaffected by this bug."""
+        sentence = "We run HIIT classes on Tuesday."
+        tts_text = "We run hit classes on Tuesday."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+        for word in ["We", "run", "hit"]:
+            tracker.add_word_and_check_complete(word)
+        self.assertIn("HIIT", tracker.get_llm_consumed())
+        for word in ["classes", "on", "Tuesday."]:
+            tracker.add_word_and_check_complete(word)
+        self.assertTrue(tracker.is_complete)
+
+    def test_single_word_pronunciation_replacement_still_works(self):
+        """Control case from the issue: "leisure" -> "lezher" (1-to-1, different
+        length) maps back correctly today."""
+        sentence = "The leisure centre opens at six."
+        tts_text = "The lezher centre opens at six."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+        for word in ["The", "lezher"]:
+            tracker.add_word_and_check_complete(word)
+        self.assertIn("leisure", tracker.get_llm_consumed())
+
+    def test_inline_ipa_tag_does_not_shift_next_word_boundary(self):
+        """Minor finding: an inline IPA substitution ("leisure" -> "<<l|ɛ|ʒ|ə|r>>")
+        must not corrupt the word boundary of the following word."""
+        sentence = "The leisure centre opens at six."
+        tts_text = "The <<l|ɛ|ʒ|ə|r>> centre opens at six."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+
+        tracker.add_word_and_check_complete("The")
+        tracker.add_word_and_check_complete("<<l|ɛ|ʒ|ə|r>>")
+        tracker.add_word_and_check_complete("centre")
+        self.assertEqual(
+            tracker.get_llm_consumed(),
+            "centre",
+            "the word following an inline IPA substitution must keep its own span, "
+            "not have letters stolen from it",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

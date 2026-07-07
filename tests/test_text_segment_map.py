@@ -198,5 +198,60 @@ class TestTextSegmentMapEqualTexts(unittest.TestCase):
         self.assertFalse(smap.in_transformed_segment)
 
 
+class TestTextSegmentMapTokenChangingReplacements(unittest.TestCase):
+    """Whether segments are flagged as transformed when a replacement only
+    changes case or splits one word into several.
+
+    ``is_transformed`` compares ``normalize()`` output, which lowercases and
+    strips whitespace. A replacement that only changes case or splits one word
+    into several therefore normalizes identically on both sides and is
+    (incorrectly) reported as unchanged, even though the original text cannot
+    be recovered by proportional alnum-count advancement alone.
+    """
+
+    def test_word_splitting_replacement_should_be_flagged_transformed(self):
+        # "BODYPUMP" -> "body pump": same alnum content, different tokenization.
+        smap = TextSegmentMap(
+            "Try body pump on Monday morning.",
+            "Try BODYPUMP on Monday morning.",
+        )
+        seg = next(s for s in smap._segments if s.original == "BODYPUMP")
+        self.assertTrue(
+            seg.is_transformed,
+            "a replacement that splits one word into several must be treated as transformed",
+        )
+
+    def test_case_only_replacement_should_be_flagged_transformed(self):
+        # "SQL" -> "sql": same alnum content, only case differs.
+        smap = TextSegmentMap(
+            "Contact sql support today.",
+            "Contact SQL support today.",
+        )
+        seg = next(s for s in smap._segments if s.original == "SQL")
+        self.assertTrue(
+            seg.is_transformed,
+            "a case-only replacement must be treated as transformed",
+        )
+
+    def test_hyphenated_single_token_replacement_should_be_flagged_transformed(self):
+        # "BODYPUMP" -> "body-pump": stays a single token, but was still replaced.
+        smap = TextSegmentMap(
+            "Try body-pump on Monday morning.",
+            "Try BODYPUMP on Monday morning.",
+        )
+        seg = next(s for s in smap._segments if s.original == "BODYPUMP")
+        self.assertTrue(seg.is_transformed)
+
+    def test_different_length_replacement_is_already_flagged_transformed(self):
+        # Control case: "HIIT" -> "hit" differs in alnum length, so it already
+        # takes the transformed/atomic path (this one passes today).
+        smap = TextSegmentMap(
+            "We run hit classes on Tuesday.",
+            "We run HIIT classes on Tuesday.",
+        )
+        seg = next(s for s in smap._segments if s.original == "HIIT")
+        self.assertTrue(seg.is_transformed)
+
+
 if __name__ == "__main__":
     unittest.main()
