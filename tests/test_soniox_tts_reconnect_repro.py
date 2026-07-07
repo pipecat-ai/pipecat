@@ -35,10 +35,12 @@ import asyncio
 import base64
 import json
 import unittest
+from collections.abc import Callable
 from typing import Any
 
 import websockets
 from websockets.asyncio.server import serve as websocket_serve
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     EndFrame,
@@ -78,6 +80,10 @@ class MockSonioxTTSServer:
         self.connection_count = 0
         self.peak_connections = 0
         self.not_found_errors: list[str] = []
+        # Soniox rejects a second config for a stream_id already opened on the
+        # same connection. Set if that ever happens, so the test can assert the
+        # fix stays a no-op on the happy path instead of blindly re-sending.
+        self.duplicate_configs: list[str] = []
         self._active_ws: Any = None
         self._server: Any = None
         self.port: int = 0
@@ -105,6 +111,8 @@ class MockSonioxTTSServer:
                 if "api_key" in data:
                     stream_id = data.get("stream_id")
                     if stream_id:
+                        if stream_id in configured:
+                            self.duplicate_configs.append(stream_id)
                         configured.add(stream_id)
                     continue
 
@@ -204,7 +212,7 @@ class FrameCollector(FrameProcessor):
 class TestSonioxTTSReconnectRepro(unittest.IsolatedAsyncioTestCase):
     """Reproduce the "stream not found" bug after a mid-turn reconnect."""
 
-    async def _wait_for(self, predicate, timeout: float = 5.0) -> bool:
+    async def _wait_for(self, predicate: Callable[[], bool], timeout: float = 5.0) -> bool:
         loop = asyncio.get_event_loop()
         deadline = loop.time() + timeout
         while loop.time() < deadline:
@@ -218,9 +226,15 @@ class TestSonioxTTSReconnectRepro(unittest.IsolatedAsyncioTestCase):
 
         Turn 1 synthesizes normally on the initial connection (proves the
         service + mock work).  Then the server drops the socket right after
-        turn 2's stream is pre-opened; the framework reconnects.  Turn 2's text
-        must still be synthesized — with the bug it instead hits Soniox's 400
-        "stream not found" because ``run_tts`` never re-sent the config.
+        turn 2's stream is pre-opened; the framework reconnects.  Turn 2 is a
+        multi-sentence turn — every sentence must still be synthesized on the
+        reconnected socket.  With the bug the whole turn instead hits Soniox's
+        400 "stream not found" because ``run_tts`` never re-sent the config.
+
+        Also asserts the fix stays idempotent: the server must never receive a
+        second config for a stream already opened on the same connection (real
+        Soniox rejects duplicate config), which is what the ``_configured_contexts``
+        gating in ``_send_config`` guarantees.
         """
         server = MockSonioxTTSServer()
         await server.start()
@@ -274,17 +288,33 @@ class TestSonioxTTSReconnectRepro(unittest.IsolatedAsyncioTestCase):
                 lambda: server.connection_count > first_conn and tts._websocket is not None
             )
             self.assertTrue(reconnected, "Service did not reconnect after the socket drop.")
-            await asyncio.sleep(0.1)  # let the new connection settle
+            await self._wait_for(
+                lambda: tts._websocket is not None and tts._websocket.state is State.OPEN
+            )
 
             # Now the turn's text is synthesized — on the reconnected socket.
-            await task.queue_frame(TextFrame("Vai varat šo summu samaksāt tuvākajā laikā?"))
+            # Two sentences → run_tts is called once per sentence, so the second
+            # call exercises the idempotent no-op path after the first
+            # re-configures the stream. The trailing space after the first
+            # sentence gives the aggregator the whitespace it needs to treat "?"
+            # as a boundary and emit two sentences rather than one concatenated.
+            sentences = [
+                "Vai varat šo summu samaksāt tuvākajā laikā? ",
+                "Paldies, uz redzēšanos!",
+            ]
+            for sentence in sentences:
+                await task.queue_frame(TextFrame(sentence))
             await task.queue_frame(LLMFullResponseEndFrame())
+            # The service pushes error frames upstream (toward the task), not
+            # down to the collector, so the mock's server-side record of the
+            # 400s it sent is the reliable signal that Soniox rejected the text.
             await self._wait_for(
-                lambda: audio_count() > 0 or len(collector.errors) > 0, timeout=3.0
+                lambda: audio_count() >= len(sentences) or len(server.not_found_errors) > 0,
+                timeout=3.0,
             )
-            await asyncio.sleep(0.1)
+            result["sentences_turn2"] = len(sentences)
             result["audio_turn2"] = audio_count()
-            result["errors_turn2"] = [str(e.error) for e in collector.errors]
+            result["not_found"] = list(server.not_found_errors)
 
             await task.queue_frame(EndFrame())
 
@@ -294,28 +324,40 @@ class TestSonioxTTSReconnectRepro(unittest.IsolatedAsyncioTestCase):
         finally:
             await server.stop()
 
+        # Guard against a truncated run (outer timeout) surfacing as a
+        # misleading "no audio" failure below.
+        for key in ("audio_turn1", "audio_turn2", "sentences_turn2", "not_found"):
+            self.assertIn(key, result, f"drive() did not complete; missing {key!r}.")
+
         # Sanity: the service reconnected and synthesis worked before the drop.
         self.assertGreaterEqual(
             server.peak_connections, 2, "Expected a reconnect (>= 2 server connections)."
         )
         self.assertGreater(
-            result.get("audio_turn1", 0), 0, "Turn 1 should synthesize on the initial connection."
+            result["audio_turn1"], 0, "Turn 1 should synthesize on the initial connection."
         )
-
-        not_found = [e for e in result.get("errors_turn2", []) if "not found" in e]
 
         # The bug: text was streamed to a stream the reconnected socket never
-        # opened, so Soniox rejected it and the turn produced no audio.
+        # opened, so Soniox rejected it with a 400 and the turn produced no audio.
         self.assertEqual(
-            not_found,
+            result["not_found"],
             [],
             f"run_tts streamed text without (re)sending the stream config after "
-            f"reconnect; Soniox rejected it: {not_found}",
+            f"reconnect; Soniox rejected it: {result['not_found']}",
         )
-        self.assertGreater(
-            result.get("audio_turn2", 0),
-            0,
-            f"Turn 2 produced no audio after the reconnect. Errors: {result.get('errors_turn2')}.",
+        # Every sentence of the reconnected turn must be synthesized.
+        self.assertGreaterEqual(
+            result["audio_turn2"],
+            result["sentences_turn2"],
+            f"Turn 2 lost audio after the reconnect: {result['audio_turn2']} audio frames "
+            f"for {result['sentences_turn2']} sentences. Rejected: {result['not_found']}.",
+        )
+        # The fix must stay idempotent: never re-send config for a stream already
+        # opened on the same connection (real Soniox rejects duplicate config).
+        self.assertEqual(
+            server.duplicate_configs,
+            [],
+            f"run_tts re-sent config for an already-open stream: {server.duplicate_configs}.",
         )
 
 
