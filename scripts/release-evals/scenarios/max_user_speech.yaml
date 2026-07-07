@@ -1,0 +1,39 @@
+name: max_user_speech
+
+# Audio modality. The user launches into a long, rambling monologue with no
+# natural pause for a turn detector to split on. The bot caps how long a single
+# user turn can run (MaxUserSpeechController, max_speech_secs=6) and takes its
+# turn instead of waiting silently. We judge that the bot speaks up rather than
+# staying quiet through the whole monologue.
+
+user: !include user_audio.yaml
+
+judge: !include judge_audio.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, or an offer to help)"
+
+  # One long run-on turn with no natural stopping point, so the only way the bot
+  # responds is the max-speech cap firing.
+  - user: >-
+      So I was thinking about my whole weekend and honestly there is just so much
+      going on that I am not even sure where to begin but let me try to walk you
+      through all of it slowly because it really has been such a lot lately and I
+      keep meaning to sit down and organize everything but I never quite get to it
+    expect:
+      - event: response
+        eval: "the bot speaks up and responds or politely interjects, rather than staying silent. For example, it jumps in, takes its turn, or starts answering the user"
+
+  # The turn AFTER a forced cutoff. A forced stop that only reaches the LLM (and
+  # not the user aggregator) leaves the aggregator's turn open, so this next
+  # utterance never opens a Gemini activity window and the bot stays silent.
+  # This turn fails on that desync and passes once the forced stop closes the
+  # turn at the aggregator too.
+  - user: >-
+      Okay, quick question then, what should I prioritize first?
+    expect:
+      - event: response
+        eval: "the bot gives a substantive answer to the user's question (some suggestion, recommendation, or a direct follow-up about priorities), rather than staying silent or talking about something unrelated"

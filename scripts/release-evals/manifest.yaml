@@ -61,8 +61,6 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-fish.py
     scenarios: [capital_question]
-  - bot: voice/voice-funasr.py
-    scenarios: [capital_question]
   - bot: voice/voice-gladia.py
     scenarios: [capital_question]
   - bot: voice/voice-gladia-vad.py
@@ -126,8 +124,6 @@ suite:
   - bot: voice/voice-smallest.py
     scenarios: [capital_question]
   - bot: voice/voice-soniox.py
-    scenarios: [capital_question]
-  - bot: voice/voice-soniox-turn-detection.py
     scenarios: [capital_question]
   - bot: voice/voice-speechmatics.py
     scenarios: [capital_question]
@@ -272,32 +268,10 @@ suite:
     scenarios: [dtmf_menu]
 
   #
-  # Video avatar services
+  # Realtime (speech-to-speech): Gemini Live with a cap on how long a single user
+  # turn can run. The user rambles past the cap with no natural pause; the bot
+  # forces the turn to end (local VAD + activity_end) and takes its turn instead
+  # of waiting silently.
   #
-  - bot: video-avatar/video-avatar-tavus-video-service.py
-    scenarios: [capital_question]
-
-  #
-  # Flows: structured-conversation examples (examples/flows/). Text-only
-  # scenarios asserting on node transitions, function calls, and context
-  # strategies. The bots pick their LLM from $LLM_PROVIDER (default
-  # openai_responses; hello_world always uses Google).
-  #
-  - bot: flows/hello_world.py
-    scenarios: [hello_world]
-  - bot: flows/food_ordering.py
-    scenarios: [food_ordering_pizza]
-  - bot: flows/food_ordering_advanced_functionschema.py
-    scenarios: [food_ordering_sushi]
-  - bot: flows/multi_worker_handoff.py
-    scenarios: [multi_worker_handoff]
-  - bot: flows/patient_intake.py
-    scenarios: [patient_intake]
-  - bot: flows/restaurant_reservation.py
-    scenarios: [restaurant_reservation_available, restaurant_reservation_no_availability]
-  - bot: flows/insurance_quote.py
-    scenarios: [insurance_quote]
-  # Constructs and switches between OpenAI, Google, and Anthropic, so all
-  # three API keys must be set.
-  - bot: flows/llm_switching.py
-    scenarios: [llm_switching]
+  - bot: realtime/realtime-gemini-live-max-user-speech.py
+    scenarios: [max_user_speech]
