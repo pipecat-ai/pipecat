@@ -26,6 +26,7 @@ from openai.types.responses import (
     ResponseFunctionToolCall,
     ResponseOutputItemAddedEvent,
     ResponseOutputItemDoneEvent,
+    ResponseOutputMessage,
     ResponseStreamEvent,
     ResponseTextDeltaEvent,
 )
@@ -89,6 +90,14 @@ class OpenAIResponsesLLMSettings(LLMSettings):
 
     Parameters:
         max_completion_tokens: Maximum completion tokens to generate.
+        deduplicate_output_messages: When ``True``, forward text only from the
+            first ``message`` output item in a response. This works around an
+            OpenAI Responses API bug where a single response can carry multiple
+            ``message`` items with identical content (causing the reply to be
+            spoken twice). Defaults to ``False`` to avoid dropping content from
+            responses that legitimately contain multiple distinct ``message``
+            items (e.g. a gpt-5.4+ ``commentary`` message followed by a
+            ``final_answer`` message in the same response).
     """
 
     # Override inherited LLMSettings fields to also accept openai's NotGiven
@@ -101,6 +110,7 @@ class OpenAIResponsesLLMSettings(LLMSettings):
     max_completion_tokens: int | _NotGiven | OpenAINotGiven = field(
         default_factory=lambda: _NOT_GIVEN
     )
+    deduplicate_output_messages: bool | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +168,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             max_completion_tokens=NOT_GIVEN,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
+            deduplicate_output_messages=False,
             extra={},
         )
 
@@ -831,6 +842,11 @@ class OpenAIResponsesLLMService(
         function_calls: dict[str, dict[str, str]] = {}
         current_arguments: dict[str, str] = {}
 
+        # When deduplicating, remember the first message output item so text
+        # deltas from any later message item can be dropped (see Settings).
+        first_message_output_index: int | None = None
+        deduplicate = self._settings.deduplicate_output_messages
+
         while True:
             event = await self._ws_recv()
             event_type = event.get("type")
@@ -841,13 +857,27 @@ class OpenAIResponsesLLMService(
                 continue
 
             if event_type == "response.output_text.delta":
+                if (
+                    deduplicate
+                    and first_message_output_index is not None
+                    and event.get("output_index") != first_message_output_index
+                ):
+                    continue
                 await self.stop_ttfb_metrics()
                 await self._push_llm_text(event.get("delta", ""))
 
             elif event_type == "response.output_item.added":
                 await self.stop_ttfb_metrics()
                 item = event.get("item", {})
-                if item.get("type") == "function_call":
+                if item.get("type") == "message":
+                    if first_message_output_index is None:
+                        first_message_output_index = event.get("output_index")
+                    elif deduplicate:
+                        logger.warning(
+                            f"{self}: Dropping duplicate message output item "
+                            f"(output_index={event.get('output_index')})"
+                        )
+                elif item.get("type") == "function_call":
                     item_id = item.get("id", "")
                     function_calls[item_id] = {
                         "name": item.get("name", ""),
@@ -1007,6 +1037,11 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
         function_calls: dict[str, dict[str, str]] = {}  # item_id -> {name, call_id, arguments}
         current_arguments: dict[str, str] = {}  # item_id -> accumulated arguments
 
+        # When deduplicating, remember the first message output item so text
+        # deltas from any later message item can be dropped (see Settings).
+        first_message_output_index: int | None = None
+        deduplicate = self._settings.deduplicate_output_messages
+
         # Ensure stream and its async iterator are closed on cancellation/exception
         # to prevent socket leaks and uvloop crashes. Closing the iterator first
         # cascades cleanup through nested async generators (httpx/httpcore internals),
@@ -1031,13 +1066,27 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
         async with _closing(stream) as event_iter:
             async for event in event_iter:
                 if isinstance(event, ResponseTextDeltaEvent):
+                    if (
+                        deduplicate
+                        and first_message_output_index is not None
+                        and event.output_index != first_message_output_index
+                    ):
+                        continue
                     await self.stop_ttfb_metrics()
                     await self._push_llm_text(event.delta)
 
                 elif isinstance(event, ResponseOutputItemAddedEvent):
                     await self.stop_ttfb_metrics()
                     item = event.item
-                    if isinstance(item, ResponseFunctionToolCall):
+                    if isinstance(item, ResponseOutputMessage):
+                        if first_message_output_index is None:
+                            first_message_output_index = event.output_index
+                        elif deduplicate:
+                            logger.warning(
+                                f"{self}: Dropping duplicate message output item "
+                                f"(output_index={event.output_index})"
+                            )
+                    elif isinstance(item, ResponseFunctionToolCall):
                         item_id = item.id or ""
                         function_calls[item_id] = {
                             "name": item.name,

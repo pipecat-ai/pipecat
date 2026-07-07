@@ -393,6 +393,76 @@ class TestReceiveResponseEventsText:
 
 
 # ---------------------------------------------------------------------------
+# _receive_response_events — duplicate message item handling
+# ---------------------------------------------------------------------------
+
+
+class TestReceiveResponseEventsDeduplication:
+    """The Responses API can emit multiple message items with identical text.
+
+    With ``deduplicate_output_messages`` enabled, only text from the first
+    message item is forwarded; otherwise every delta is forwarded (default).
+    """
+
+    @staticmethod
+    def _duplicate_events():
+        return (
+            {"type": "response.output_item.added", "output_index": 0, "item": {"type": "message"}},
+            {"type": "response.output_text.delta", "output_index": 0, "delta": "Hello"},
+            {"type": "response.output_item.added", "output_index": 1, "item": {"type": "message"}},
+            {"type": "response.output_text.delta", "output_index": 1, "delta": "Hello"},
+            {"type": "response.completed", "response": {"id": "resp_1", "model": "gpt-4.1"}},
+        )
+
+    @pytest.mark.asyncio
+    async def test_duplicate_messages_dropped_when_enabled(self):
+        service = _make_service()
+        service._settings.deduplicate_output_messages = True
+        service._push_llm_text = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+
+        service._websocket = _ws_events(*self._duplicate_events())
+        await service._receive_response_events(MagicMock(spec=LLMContext), [])
+
+        service._push_llm_text.assert_awaited_once_with("Hello")
+
+    @pytest.mark.asyncio
+    async def test_duplicate_messages_kept_when_disabled(self):
+        # Default behavior: forward every delta, including the duplicate.
+        service = _make_service()
+        service._push_llm_text = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+
+        service._websocket = _ws_events(*self._duplicate_events())
+        await service._receive_response_events(MagicMock(spec=LLMContext), [])
+
+        assert service._push_llm_text.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_single_message_streams_all_deltas_when_enabled(self):
+        # A normal single-message response must not lose any text.
+        service = _make_service()
+        service._settings.deduplicate_output_messages = True
+        service._push_llm_text = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+
+        service._websocket = _ws_events(
+            {"type": "response.output_item.added", "output_index": 0, "item": {"type": "message"}},
+            {"type": "response.output_text.delta", "output_index": 0, "delta": "Hello"},
+            {"type": "response.output_text.delta", "output_index": 0, "delta": " world"},
+            {"type": "response.completed", "response": {"id": "resp_1", "model": "gpt-4.1"}},
+        )
+        await service._receive_response_events(MagicMock(spec=LLMContext), [])
+
+        assert service._push_llm_text.await_count == 2
+        service._push_llm_text.assert_any_await("Hello")
+        service._push_llm_text.assert_any_await(" world")
+
+
+# ---------------------------------------------------------------------------
 # _receive_response_events — function calls
 # ---------------------------------------------------------------------------
 

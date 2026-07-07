@@ -9,7 +9,15 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from openai.types.responses import ResponseCompletedEvent
+from openai.types.responses import (
+    ResponseCompletedEvent,
+    ResponseFunctionCallArgumentsDeltaEvent,
+    ResponseFunctionCallArgumentsDoneEvent,
+    ResponseFunctionToolCall,
+    ResponseOutputItemAddedEvent,
+    ResponseOutputMessage,
+    ResponseTextDeltaEvent,
+)
 from openai.types.responses.response_usage import (
     InputTokensDetails,
     OutputTokensDetails,
@@ -66,6 +74,50 @@ def _completed_event(usage):
     response.model = "gpt-4.1"
     event = MagicMock(spec=ResponseCompletedEvent)
     event.response = response
+    return event
+
+
+def _message_item_added(output_index):
+    """Build a ResponseOutputItemAddedEvent for a message item at the index."""
+    event = MagicMock(spec=ResponseOutputItemAddedEvent)
+    event.output_index = output_index
+    event.item = MagicMock(spec=ResponseOutputMessage)
+    return event
+
+
+def _text_delta(output_index, delta):
+    """Build a ResponseTextDeltaEvent for the given output item and text."""
+    event = MagicMock(spec=ResponseTextDeltaEvent)
+    event.output_index = output_index
+    event.delta = delta
+    return event
+
+
+def _function_call_item_added(item_id, name, call_id):
+    """Build a ResponseOutputItemAddedEvent carrying a function tool call."""
+    item = MagicMock(spec=ResponseFunctionToolCall)
+    item.id = item_id
+    item.name = name
+    item.call_id = call_id
+    event = MagicMock(spec=ResponseOutputItemAddedEvent)
+    event.output_index = 0
+    event.item = item
+    return event
+
+
+def _function_call_args_delta(item_id, delta):
+    """Build a ResponseFunctionCallArgumentsDeltaEvent."""
+    event = MagicMock(spec=ResponseFunctionCallArgumentsDeltaEvent)
+    event.item_id = item_id
+    event.delta = delta
+    return event
+
+
+def _function_call_args_done(item_id, arguments):
+    """Build a ResponseFunctionCallArgumentsDoneEvent."""
+    event = MagicMock(spec=ResponseFunctionCallArgumentsDoneEvent)
+    event.item_id = item_id
+    event.arguments = arguments
     return event
 
 
@@ -174,3 +226,91 @@ class TestHttpTokenUsageMetrics:
         assert tokens.total_tokens == 0
         assert tokens.cache_read_input_tokens == 0
         assert tokens.reasoning_tokens == 0
+
+
+# ---------------------------------------------------------------------------
+# _process_context — duplicate message item handling
+# ---------------------------------------------------------------------------
+
+
+class TestHttpMessageDeduplication:
+    """The Responses API can emit multiple message items with identical text.
+
+    With ``deduplicate_output_messages`` enabled, only text from the first
+    message item is forwarded; otherwise every delta is forwarded (default).
+    """
+
+    @pytest.mark.asyncio
+    async def test_duplicate_messages_dropped_when_enabled(self):
+        service = _make_service()
+        service._settings.deduplicate_output_messages = True
+
+        await _run(
+            service,
+            _message_item_added(0),
+            _text_delta(0, "Hello"),
+            _message_item_added(1),
+            _text_delta(1, "Hello"),
+        )
+
+        service._push_llm_text.assert_awaited_once_with("Hello")
+
+    @pytest.mark.asyncio
+    async def test_duplicate_messages_kept_when_disabled(self):
+        # Default behavior: forward every delta, including the duplicate.
+        service = _make_service()
+
+        await _run(
+            service,
+            _message_item_added(0),
+            _text_delta(0, "Hello"),
+            _message_item_added(1),
+            _text_delta(1, "Hello"),
+        )
+
+        assert service._push_llm_text.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_single_message_streams_all_deltas_when_enabled(self):
+        # A normal single-message response must not lose any text.
+        service = _make_service()
+        service._settings.deduplicate_output_messages = True
+
+        await _run(
+            service,
+            _message_item_added(0),
+            _text_delta(0, "Hello"),
+            _text_delta(0, " world"),
+        )
+
+        assert service._push_llm_text.await_count == 2
+        service._push_llm_text.assert_any_await("Hello")
+        service._push_llm_text.assert_any_await(" world")
+
+
+# ---------------------------------------------------------------------------
+# _process_context — function calls
+# ---------------------------------------------------------------------------
+
+
+class TestHttpFunctionCalls:
+    @pytest.mark.asyncio
+    async def test_function_call_sequence(self):
+        """A streamed function call is accumulated and dispatched."""
+        service = _make_service()
+        service.run_function_calls = AsyncMock()
+
+        await _run(
+            service,
+            _function_call_item_added("fc_1", "get_weather", "call_1"),
+            _function_call_args_delta("fc_1", '{"loc'),
+            _function_call_args_delta("fc_1", 'ation": "SF"}'),
+            _function_call_args_done("fc_1", '{"location": "SF"}'),
+        )
+
+        service.run_function_calls.assert_awaited_once()
+        fc_list = service.run_function_calls.call_args[0][0]
+        assert len(fc_list) == 1
+        assert fc_list[0].function_name == "get_weather"
+        assert fc_list[0].tool_call_id == "call_1"
+        assert fc_list[0].arguments == {"location": "SF"}
