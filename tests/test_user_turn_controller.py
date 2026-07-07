@@ -6,6 +6,7 @@
 
 import asyncio
 import unittest
+from unittest.mock import MagicMock
 
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -23,6 +24,7 @@ from pipecat.turns.user_start.min_words_user_turn_start_strategy import (
 from pipecat.turns.user_stop import (
     ExternalUserTurnCompletionStopStrategy,
     SpeechTimeoutUserTurnStopStrategy,
+    TurnAnalyzerUserTurnStopStrategy,
     deferred,
 )
 from pipecat.turns.user_turn_controller import UserTurnController
@@ -390,6 +392,90 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         # Wait for user_speech_timeout to elapse — should get turn 2 stop
         await asyncio.sleep(TRANSCRIPTION_TIMEOUT + 0.1)
         self.assertEqual(stop_count, 2)
+
+    async def test_user_turn_finalized_called_on_strategy_stop(self):
+        """user_turn_finalized() runs when a stop strategy ends the turn, never at start.
+
+        Unlike reset(), which runs at both turn start and turn stop, the
+        finalized hook must only fire on turn end so strategies can drop
+        state that must not survive an externally-ended turn (e.g. a turn
+        analyzer's buffered speech).
+        """
+        finalized = 0
+
+        class SpyStopStrategy(SpeechTimeoutUserTurnStopStrategy):
+            async def user_turn_finalized(self):
+                nonlocal finalized
+                await super().user_turn_finalized()
+                finalized += 1
+
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[VADUserTurnStartStrategy()],
+                stop=[SpyStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)],
+            ),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(self.task_manager)
+
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+        self.assertEqual(finalized, 0)
+
+        await controller.process_frame(
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now")
+        )
+        await controller.process_frame(VADUserStoppedSpeakingFrame())
+        await asyncio.sleep(TRANSCRIPTION_TIMEOUT + 0.1)
+        self.assertEqual(finalized, 1)
+
+        await controller.cleanup()
+
+    async def test_user_turn_finalized_called_on_watchdog_stop(self):
+        """user_turn_finalized() also runs when the stop watchdog ends the turn."""
+        finalized = 0
+
+        class SpyNeverStopStrategy(ExternalUserTurnCompletionStopStrategy):
+            async def user_turn_finalized(self):
+                nonlocal finalized
+                await super().user_turn_finalized()
+                finalized += 1
+
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[VADUserTurnStartStrategy()],
+                stop=[SpyNeverStopStrategy()],
+            ),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(self.task_manager)
+
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+        await controller.process_frame(VADUserStoppedSpeakingFrame())
+        self.assertEqual(finalized, 0)
+
+        # No completion ever arrives; the watchdog finalizes the turn.
+        await asyncio.sleep(USER_TURN_STOP_TIMEOUT + 0.1)
+        self.assertEqual(finalized, 1)
+
+        await controller.cleanup()
+
+    async def test_turn_analyzer_cleared_on_user_turn_finalized(self):
+        """TurnAnalyzerUserTurnStopStrategy clears its analyzer when the turn ends."""
+        analyzer = MagicMock()
+        strategy = TurnAnalyzerUserTurnStopStrategy(turn_analyzer=analyzer)
+
+        await strategy.user_turn_finalized()
+
+        analyzer.clear.assert_called_once()
+
+    async def test_deferred_forwards_user_turn_finalized(self):
+        """The deferred() wrapper forwards the finalized hook to its inner strategy."""
+        analyzer = MagicMock()
+        strategy = deferred(TurnAnalyzerUserTurnStopStrategy(turn_analyzer=analyzer))
+
+        await strategy.user_turn_finalized()
+
+        analyzer.clear.assert_called_once()
 
 
 if __name__ == "__main__":

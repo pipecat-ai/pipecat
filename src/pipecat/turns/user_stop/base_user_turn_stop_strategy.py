@@ -82,6 +82,15 @@ class BaseUserTurnStopStrategy(BaseObject):
         """Reset the strategy to its initial state."""
         pass
 
+    async def user_turn_finalized(self):
+        """Called by the controller after a user turn has ended.
+
+        Runs on every turn end, regardless of which strategy (or the stop
+        watchdog timeout) ended it, and never at turn start. Override to drop
+        state that must not survive an externally-ended turn.
+        """
+        pass
+
     async def process_frame(self, frame: Frame) -> ProcessFrameResult | None:
         """Process an incoming frame to decide whether the user stopped speaking.
 

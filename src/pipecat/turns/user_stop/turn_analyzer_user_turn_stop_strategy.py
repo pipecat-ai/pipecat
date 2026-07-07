@@ -107,6 +107,19 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self.task_manager.cancel_task(self._timeout_task)
             self._timeout_task = None
 
+    async def user_turn_finalized(self):
+        """The turn ended, possibly not via this strategy.
+
+        Drop the analyzer's buffered speech state so a stale silence timer
+        can't fire a phantom end-of-turn after an externally-ended turn (for
+        example a forced stop while a mute strategy held audio back). The
+        analyzer already clears itself on its own COMPLETE, so this is a
+        no-op on the normal path; the pre-speech buffer refills continuously
+        before the next turn starts.
+        """
+        await super().user_turn_finalized()
+        self._turn_analyzer.clear()
+
     async def setup(self, task_manager: BaseTaskManager):
         """Initialize the strategy with the given task manager.
 
