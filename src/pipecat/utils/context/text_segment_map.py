@@ -203,52 +203,63 @@ class TextSegmentMap:
             n_alnum: Number of TTS alphanumeric characters to consume.
         """
         self._last_completed = None
-        remaining = n_alnum
-        # True only for the segment that was already pending when this call
-        # started — lets a zero-budget segment (e.g. a substitution whose TTS
-        # side normalizes to no alnum content, such as an inline IPA tag)
-        # complete on the call meant for it, without letting a *later* call's
-        # leftover zero budget cascade into completing the *next* segment too.
-        is_first_segment_this_call = True
 
-        while self._seg_idx < len(self._segments):
+        # A segment can require zero TTS alnum chars (e.g. an inline IPA tag
+        # that normalizes to no alnum content). Such a segment never has
+        # anything for the loop below to consume, so it can only complete
+        # here, once -- typically on the very call whose own word normalizes
+        # to zero chars too (n_alnum == 0).
+        if self._seg_idx < len(self._segments):
+            seg = self._segments[self._seg_idx]
+            if seg.tts_alnum_count - self._seg_consumed == 0:
+                self._complete_or_advance_segment(consume=0)
+
+        remaining = n_alnum
+        while remaining > 0 and self._seg_idx < len(self._segments):
             seg = self._segments[self._seg_idx]
             available = seg.tts_alnum_count - self._seg_consumed
-            if remaining <= 0 and not (is_first_segment_this_call and available == 0):
-                break
-            consume = min(remaining, available) if remaining > 0 else 0
-            self._seg_consumed += consume
+            consume = min(remaining, available)
             remaining -= consume
-            is_first_segment_this_call = False
+            self._complete_or_advance_segment(consume)
 
-            if self._seg_consumed == seg.tts_alnum_count:
-                if seg.is_transformed:
-                    # Transformed: snap user_facing_pos to the end of the original
-                    # pattern and jump llm_pos by the full original_alnum_count from
-                    # where it was held during the segment.
-                    self._user_facing_pos = seg.original_end
-                    self._llm_pos = advance_by_alnums(
-                        self._llm_text, self._llm_pos, seg.original_alnum_count
-                    )
-                else:
-                    # Unchanged: advance both cursors proportionally for the final
-                    # call (same as the in-progress path). Using advance_by_alnums
-                    # instead of seg.original_end avoids overshooting when a segment
-                    # ends with trailing whitespace (e.g. " 1111 1111 ").
-                    self._user_facing_pos = advance_by_alnums(
-                        self._original_text, self._user_facing_pos, consume
-                    )
-                    self._llm_pos = advance_by_alnums(self._llm_text, self._llm_pos, consume)
-                self._last_completed = seg
-                self._seg_idx += 1
-                self._seg_consumed = 0
-            elif not seg.is_transformed:
-                # Unchanged segment in progress: advance both cursors proportionally.
+    def _complete_or_advance_segment(self, consume: int) -> None:
+        """Apply *consume* alnum chars to the segment at the current index.
+
+        Completes and advances to the next segment if its budget is now fully
+        spent; otherwise advances an in-progress unchanged segment's cursors
+        proportionally (a transformed segment in progress just holds).
+        """
+        seg = self._segments[self._seg_idx]
+        self._seg_consumed += consume
+
+        if self._seg_consumed == seg.tts_alnum_count:
+            if seg.is_transformed:
+                # Transformed: snap user_facing_pos to the end of the original
+                # pattern and jump llm_pos by the full original_alnum_count from
+                # where it was held during the segment.
+                self._user_facing_pos = seg.original_end
+                self._llm_pos = advance_by_alnums(
+                    self._llm_text, self._llm_pos, seg.original_alnum_count
+                )
+            else:
+                # Unchanged: advance both cursors proportionally for the final
+                # call (same as the in-progress path). Using advance_by_alnums
+                # instead of seg.original_end avoids overshooting when a segment
+                # ends with trailing whitespace (e.g. " 1111 1111 ").
                 self._user_facing_pos = advance_by_alnums(
                     self._original_text, self._user_facing_pos, consume
                 )
                 self._llm_pos = advance_by_alnums(self._llm_text, self._llm_pos, consume)
-            # else: transformed segment in progress — hold both cursors.
+            self._last_completed = seg
+            self._seg_idx += 1
+            self._seg_consumed = 0
+        elif not seg.is_transformed:
+            # Unchanged segment in progress: advance both cursors proportionally.
+            self._user_facing_pos = advance_by_alnums(
+                self._original_text, self._user_facing_pos, consume
+            )
+            self._llm_pos = advance_by_alnums(self._llm_text, self._llm_pos, consume)
+        # else: transformed segment in progress — hold both cursors.
 
     @property
     def user_facing_pos(self) -> int:
