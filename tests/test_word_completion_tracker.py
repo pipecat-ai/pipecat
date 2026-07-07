@@ -1964,51 +1964,50 @@ class TestWordCompletionTrackerTokenChangingReplacements(unittest.TestCase):
     """Whether get_llm_consumed() preserves the original text when a replacement
     changes tokenization or case instead of falling back to the spoken word.
 
-    ``text_transforms``/``text_filters`` replacements that change tokenization
-    (splitting one word into several) or change only case are misclassified by
-    ``TextSegmentMap`` as unchanged text (see ``TestTextSegmentMapTokenChangingReplacements``
-    in ``test_text_segment_map.py``). The per-word span validation in
-    ``add_word_and_check_complete`` is also case-sensitive, so even segments the
-    segment map gets right can still be discarded. Either failure causes
-    ``get_llm_consumed()`` to return None, and callers then fall back to the raw
-    spoken word instead of the original LLM text -- corrupting the conversation
-    context. Single-word-to-single-word replacements that change the normalized
-    alnum length (e.g. "leisure" -> "lezher") are unaffected and are included
-    here as passing control cases.
+    A replacement that splits one word into several (e.g. ``"BODYPUMP"`` ->
+    ``"body pump"``) is tracked as a transformed segment: intermediate words
+    are suppressed (``get_llm_consumed()`` returns None, mirroring how
+    currency expansion already behaves) and the word that completes the
+    segment carries the full original text. A replacement that only changes
+    case or the connector between words (e.g. ``"SQL"`` -> ``"sql"``, or
+    ``"BODYPUMP"`` -> ``"body-pump"``) keeps proportional, per-word tracking,
+    but is validated case- and connector-insensitively so it isn't discarded.
+    Single-word-to-single-word replacements that change the normalized alnum
+    length (e.g. "leisure" -> "lezher") are unaffected and are included here as
+    passing control cases.
     """
 
-    def test_word_splitting_replacement_leaks_spoken_words_into_context(self):
-        # "BODYPUMP" -> "body pump": audio is correct, but each spoken word
-        # should still map back to the original "BODYPUMP" span, not be discarded.
+    def test_word_splitting_replacement_commits_original_on_completion(self):
+        # "BODYPUMP" -> "body pump": audio is correct; the segment is tracked
+        # atomically, so "body" is suppressed and "pump" carries the full
+        # original word, matching how currency expansion already behaves.
         sentence = "Try BODYPUMP on Monday morning."
         tts_text = "Try body pump on Monday morning."
         tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
 
         tracker.add_word_and_check_complete("Try")
         tracker.add_word_and_check_complete("body")
-        self.assertIsNotNone(
-            tracker.get_llm_consumed(),
-            "the word-split replacement must not discard the original span",
-        )
+        self.assertIsNone(tracker.get_llm_consumed())  # suppressed mid-transform
+        self.assertTrue(tracker.suppress_in_context())
+
         tracker.add_word_and_check_complete("pump")
-        self.assertIsNotNone(tracker.get_llm_consumed())
+        self.assertEqual(tracker.get_llm_consumed(), "BODYPUMP")
+        self.assertFalse(tracker.suppress_in_context())
+
         for word in ["on", "Monday", "morning."]:
             tracker.add_word_and_check_complete(word)
         self.assertTrue(tracker.is_complete)
 
     def test_case_only_replacement_is_not_discarded(self):
-        # "SQL" -> "sql": audio is correct, only case differs. The span should
-        # still validate instead of being discarded by the case-sensitive check.
+        # "SQL" -> "sql": same single-token structure, only case differs. The
+        # span-containment check is case-insensitive, so it validates.
         sentence = "Contact SQL support today."
         tts_text = "Contact sql support today."
         tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
 
         tracker.add_word_and_check_complete("Contact")
         tracker.add_word_and_check_complete("sql")
-        self.assertIsNotNone(
-            tracker.get_llm_consumed(),
-            "a case-only replacement must not be discarded by case-sensitive validation",
-        )
+        self.assertEqual(tracker.get_llm_consumed(), "SQL")
         tracker.add_word_and_check_complete("support")
         tracker.add_word_and_check_complete("today.")
         self.assertTrue(tracker.is_complete)
@@ -2021,11 +2020,11 @@ class TestWordCompletionTrackerTokenChangingReplacements(unittest.TestCase):
 
         tracker.add_word_and_check_complete("Try")
         tracker.add_word_and_check_complete("body-pump")
-        self.assertIsNotNone(tracker.get_llm_consumed())
+        self.assertEqual(tracker.get_llm_consumed(), "BODYPUMP")
 
     def test_accumulated_llm_text_matches_original_despite_split(self):
-        """Even though per-word spans are discarded today, the cursor still ends up
-        past the full original sentence once the frame completes."""
+        """The cursor ends up past the full original sentence once the frame
+        completes, even though the replacement split one word into two."""
         sentence = "Try BODYPUMP on Monday morning."
         tts_text = "Try body pump on Monday morning."
         tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
@@ -2034,8 +2033,8 @@ class TestWordCompletionTrackerTokenChangingReplacements(unittest.TestCase):
         self.assertEqual(tracker.get_accumulated_llm_text(), sentence)
 
     def test_single_word_case_change_with_different_length_still_works(self):
-        """Control case: "HIIT" -> "hit" differs in alnum length, so it already
-        takes the atomic transformed-segment path and is unaffected by this bug."""
+        """Control case: "HIIT" -> "hit" differs in alnum length, so it takes
+        the atomic transformed-segment path regardless of case."""
         sentence = "We run HIIT classes on Tuesday."
         tts_text = "We run hit classes on Tuesday."
         tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
@@ -2047,8 +2046,8 @@ class TestWordCompletionTrackerTokenChangingReplacements(unittest.TestCase):
         self.assertTrue(tracker.is_complete)
 
     def test_single_word_pronunciation_replacement_still_works(self):
-        """Control case from the issue: "leisure" -> "lezher" (1-to-1, different
-        length) maps back correctly today."""
+        """Control case: a 1-to-1 respelling ("leisure" -> "lezher") that
+        differs in alnum length maps back to the original word correctly."""
         sentence = "The leisure centre opens at six."
         tts_text = "The lezher centre opens at six."
         tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
@@ -2057,8 +2056,10 @@ class TestWordCompletionTrackerTokenChangingReplacements(unittest.TestCase):
         self.assertIn("leisure", tracker.get_llm_consumed())
 
     def test_inline_ipa_tag_does_not_shift_next_word_boundary(self):
-        """Minor finding: an inline IPA substitution ("leisure" -> "<<l|ɛ|ʒ|ə|r>>")
-        must not corrupt the word boundary of the following word."""
+        """An inline IPA substitution ("leisure" -> "<<l|ɛ|ʒ|ə|r>>") normalizes
+        to no alnum content on the TTS side, since normalize()'s tag-stripping
+        regex treats the double angle brackets as a single (malformed) tag.
+        That must not corrupt the word boundary of the following word."""
         sentence = "The leisure centre opens at six."
         tts_text = "The <<l|ɛ|ʒ|ə|r>> centre opens at six."
         tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)

@@ -31,8 +31,20 @@ class TextSegment:
 
     @property
     def is_transformed(self) -> bool:
-        """True when the alphanumeric content differs between original and TTS sides."""
-        return normalize(self.original) != normalize(self.tts)
+        """True when this segment cannot be tracked by proportional char advancement.
+
+        This holds either when the alphanumeric content differs between original
+        and TTS sides, or when a replacement changed the segment's word count
+        (e.g. splitting ``"BODYPUMP"`` into ``"body pump"``, or letter-spacing an
+        acronym like ``"NASA"`` into ``"N A S A"``). Word-splitting replacements
+        can normalize to the same alphanumeric content on both sides, but the
+        proportional advance still breaks: it would consume alnum chars from a
+        single contiguous original token using word boundaries that only exist
+        on the TTS side, landing mid-word instead of at a real boundary.
+        """
+        if normalize(self.original) != normalize(self.tts):
+            return True
+        return len(self.original.split()) != len(self.tts.split())
 
     @property
     def tts_alnum_count(self) -> int:
@@ -192,13 +204,22 @@ class TextSegmentMap:
         """
         self._last_completed = None
         remaining = n_alnum
+        # True only for the segment that was already pending when this call
+        # started — lets a zero-budget segment (e.g. a substitution whose TTS
+        # side normalizes to no alnum content, such as an inline IPA tag)
+        # complete on the call meant for it, without letting a *later* call's
+        # leftover zero budget cascade into completing the *next* segment too.
+        is_first_segment_this_call = True
 
-        while remaining > 0 and self._seg_idx < len(self._segments):
+        while self._seg_idx < len(self._segments):
             seg = self._segments[self._seg_idx]
             available = seg.tts_alnum_count - self._seg_consumed
-            consume = min(remaining, available)
+            if remaining <= 0 and not (is_first_segment_this_call and available == 0):
+                break
+            consume = min(remaining, available) if remaining > 0 else 0
             self._seg_consumed += consume
             remaining -= consume
+            is_first_segment_this_call = False
 
             if self._seg_consumed == seg.tts_alnum_count:
                 if seg.is_transformed:
