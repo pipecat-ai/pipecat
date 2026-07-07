@@ -31,7 +31,6 @@ from pipecat.services.dograh.mps_billing import (
     MPS_BILLING_VERSION_KEY,
     MPS_BILLING_VERSION_V2,
     get_correlation_id,
-    uses_mps_billing_v2,
 )
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TextAggregationMode, WebsocketTTSService
@@ -193,12 +192,6 @@ class DograhTTSService(WebsocketTTSService):
             start_metadata=self._start_metadata,
         )
 
-    def _uses_mps_billing_v2(self) -> bool:
-        return uses_mps_billing_v2(
-            explicit_correlation_id=self._correlation_id,
-            start_metadata=self._start_metadata,
-        )
-
     async def _connect_websocket(self):
         """Establish the websocket connection to Dograh TTS service."""
         try:
@@ -231,8 +224,7 @@ class DograhTTSService(WebsocketTTSService):
             correlation_id = self._get_correlation_id()
             if correlation_id:
                 config_msg["correlation_id"] = correlation_id
-                if self._uses_mps_billing_v2():
-                    config_msg[MPS_BILLING_VERSION_KEY] = MPS_BILLING_VERSION_V2
+                config_msg[MPS_BILLING_VERSION_KEY] = MPS_BILLING_VERSION_V2
 
             await ws.send(json.dumps(config_msg))
 
@@ -473,8 +465,7 @@ class DograhTTSService(WebsocketTTSService):
                     correlation_id = self._get_correlation_id()
                     if correlation_id:
                         context_msg["correlation_id"] = correlation_id
-                        if self._uses_mps_billing_v2():
-                            context_msg[MPS_BILLING_VERSION_KEY] = MPS_BILLING_VERSION_V2
+                        context_msg[MPS_BILLING_VERSION_KEY] = MPS_BILLING_VERSION_V2
 
                     await self._get_websocket().send(json.dumps(context_msg))
                     self._remote_initialized_context_ids.add(context_id)

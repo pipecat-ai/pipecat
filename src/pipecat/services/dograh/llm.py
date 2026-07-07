@@ -17,7 +17,6 @@ from pipecat.services.dograh.mps_billing import (
     MPS_BILLING_VERSION_KEY,
     MPS_BILLING_VERSION_V2,
     get_correlation_id,
-    uses_mps_billing_v2,
 )
 from pipecat.services.openai.base_llm import OpenAILLMInvocationParams, OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
@@ -89,12 +88,6 @@ class DograhLLMService(OpenAILLMService):
             start_metadata=self._start_metadata,
         )
 
-    def _uses_mps_billing_v2(self) -> bool:
-        return uses_mps_billing_v2(
-            explicit_correlation_id=self._correlation_id,
-            start_metadata=self._start_metadata,
-        )
-
     def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
         """Build parameters for chat completion request with workflow_run_id.
 
@@ -118,8 +111,7 @@ class DograhLLMService(OpenAILLMService):
                 params["metadata"] = {}
 
             params["metadata"]["correlation_id"] = correlation_id
-            if self._uses_mps_billing_v2():
-                params["metadata"][MPS_BILLING_VERSION_KEY] = MPS_BILLING_VERSION_V2
+            params["metadata"][MPS_BILLING_VERSION_KEY] = MPS_BILLING_VERSION_V2
 
         return params
 

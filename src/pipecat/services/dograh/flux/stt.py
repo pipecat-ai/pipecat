@@ -29,7 +29,6 @@ from pipecat.services.dograh.mps_billing import (
     MPS_BILLING_VERSION_KEY,
     MPS_BILLING_VERSION_V2,
     get_correlation_id,
-    uses_mps_billing_v2,
 )
 from pipecat.services.websocket_service import WebsocketService
 
@@ -159,20 +158,13 @@ class DograhFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             start_metadata=self._start_metadata,
         )
 
-    def _uses_mps_billing_v2(self) -> bool:
-        return uses_mps_billing_v2(
-            explicit_correlation_id=self._correlation_id,
-            start_metadata=self._start_metadata,
-        )
-
     def _build_dograh_query_string(self) -> str:
         """Append MPS billing/correlation params to the inherited Flux query."""
         query = self._build_query_string()
         correlation_id = self._get_correlation_id()
         if correlation_id:
             query += "&" + urlencode({"correlation_id": correlation_id})
-            if self._uses_mps_billing_v2():
-                query += "&" + urlencode({MPS_BILLING_VERSION_KEY: MPS_BILLING_VERSION_V2})
+            query += "&" + urlencode({MPS_BILLING_VERSION_KEY: MPS_BILLING_VERSION_V2})
         return query
 
     # ------------------------------------------------------------------

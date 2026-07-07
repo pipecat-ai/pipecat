@@ -31,7 +31,6 @@ from pipecat.services.dograh.mps_billing import (
     MPS_BILLING_VERSION_KEY,
     MPS_BILLING_VERSION_V2,
     get_correlation_id,
-    uses_mps_billing_v2,
 )
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import DOGRAH_TTFS_P99
@@ -154,12 +153,6 @@ class DograhSTTService(STTService, WebsocketService):
             start_metadata=self._start_metadata,
         )
 
-    def _uses_mps_billing_v2(self) -> bool:
-        return uses_mps_billing_v2(
-            explicit_correlation_id=self._correlation_id,
-            start_metadata=self._start_metadata,
-        )
-
     async def _connect_websocket(self):
         """Connect to the WebSocket endpoint."""
         try:
@@ -193,8 +186,7 @@ class DograhSTTService(STTService, WebsocketService):
             correlation_id = self._get_correlation_id()
             if correlation_id:
                 config_msg["correlation_id"] = correlation_id
-                if self._uses_mps_billing_v2():
-                    config_msg[MPS_BILLING_VERSION_KEY] = MPS_BILLING_VERSION_V2
+                config_msg[MPS_BILLING_VERSION_KEY] = MPS_BILLING_VERSION_V2
 
             await ws.send(json.dumps(config_msg))
 
