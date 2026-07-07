@@ -13,7 +13,6 @@ with configurable session timeouts and WAV header generation.
 
 import asyncio
 import io
-import time
 import typing
 import wave
 from collections.abc import Awaitable, Callable
@@ -425,14 +424,6 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         self._client = client
         self._params = params
 
-        # write_audio_frame() is called quickly, as soon as we get audio
-        # (e.g. from the TTS), and since this is just a network connection we
-        # would be sending it to quickly. Instead, we want to block to emulate
-        # an audio device, this is what the send interval is. It will be
-        # computed on StartFrame.
-        self._send_interval = 0
-        self._next_send_time = 0
-
         # Buffer for optional protocol-level audio packetization.
         # Some serializers may emit arbitrarily sized raw PCM payloads, while
         # certain downstream transports or media endpoints require audio to be
@@ -460,7 +451,6 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         await self._client.setup(frame)
         if self._params.serializer:
             await self._params.serializer.setup(frame)
-        self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
@@ -504,7 +494,6 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
                 self._audio_send_buffer.clear()
 
             await self._write_frame(frame)
-            self._next_send_time = 0
 
     async def send_message(
         self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
@@ -584,17 +573,6 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
                 await self._client.send(payload)
         except Exception as e:
             logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
-
-    async def _write_audio_sleep(self):
-        """Simulate audio playback timing with appropriate delays."""
-        # Simulate a clock.
-        current_time = time.monotonic()
-        sleep_duration = max(0, self._next_send_time - current_time)
-        await asyncio.sleep(sleep_duration)
-        if sleep_duration == 0:
-            self._next_send_time = time.monotonic() + self._send_interval
-        else:
-            self._next_send_time += self._send_interval
 
 
 class FastAPIWebsocketTransport(BaseTransport):

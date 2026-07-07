@@ -13,7 +13,6 @@ frame serialization, and connection management.
 
 import asyncio
 import io
-import time
 import wave
 from collections.abc import Awaitable, Callable
 
@@ -345,14 +344,6 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         self._session = session
         self._params = params
 
-        # write_audio_frame() is called quickly, as soon as we get audio
-        # (e.g. from the TTS), and since this is just a network connection we
-        # would be sending it to quickly. Instead, we want to block to emulate
-        # an audio device, this is what the send interval is. It will be
-        # computed on StartFrame.
-        self._send_interval = 0
-        self._next_send_time = 0
-
         # Whether we have seen a StartFrame already.
         self._initialized = False
 
@@ -378,7 +369,6 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
 
         self._initialized = True
 
-        self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
         if self._params.serializer:
             await self._params.serializer.setup(frame)
         await self._session.connect()
@@ -468,17 +458,6 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         payload = await self._params.serializer.serialize(frame)
         if payload:
             await self._session.send(payload)
-
-    async def _write_audio_sleep(self):
-        """Simulate audio playback timing with sleep delays."""
-        # Simulate a clock.
-        current_time = time.monotonic()
-        sleep_duration = max(0, self._next_send_time - current_time)
-        await asyncio.sleep(sleep_duration)
-        if sleep_duration == 0:
-            self._next_send_time = time.monotonic() + self._send_interval
-        else:
-            self._next_send_time += self._send_interval
 
 
 class WebsocketClientTransport(BaseTransport):
