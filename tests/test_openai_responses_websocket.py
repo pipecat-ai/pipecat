@@ -723,3 +723,159 @@ class TestConnectionLifecycle:
 
         with pytest.raises(ConnectionError):
             await service._ensure_connected()
+
+
+# ---------------------------------------------------------------------------
+# store setting
+# ---------------------------------------------------------------------------
+
+
+class TestStoreSetting:
+    def test_store_false_by_default(self):
+        service = _make_service()
+        from pipecat.adapters.services.open_ai_responses_adapter import (
+            OpenAIResponsesLLMInvocationParams,
+        )
+
+        invocation_params: OpenAIResponsesLLMInvocationParams = {"input": []}
+        params = service._build_response_params(invocation_params)
+        assert params["store"] is False
+
+    def test_store_true_when_configured(self):
+        service = _make_service(settings=OpenAIResponsesLLMService.Settings(store=True))
+        from pipecat.adapters.services.open_ai_responses_adapter import (
+            OpenAIResponsesLLMInvocationParams,
+        )
+
+        invocation_params: OpenAIResponsesLLMInvocationParams = {"input": []}
+        params = service._build_response_params(invocation_params)
+        assert params["store"] is True
+
+
+# ---------------------------------------------------------------------------
+# delete_responses_on_close
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteResponsesOnClose:
+    @pytest.mark.asyncio
+    async def test_response_ids_collected_when_delete_on_close(self):
+        """Response IDs are appended to _all_response_ids when the feature is enabled."""
+        service = _make_service(
+            delete_responses_on_close=True,
+            settings=OpenAIResponsesLLMService.Settings(store=True),
+        )
+        service._push_llm_text = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+        service.run_function_calls = AsyncMock()
+
+        ws = _ws_events(
+            {"type": "response.completed", "response": {"id": "resp_abc", "model": "gpt-4.1", "usage": None}},
+        )
+        service._websocket = ws
+
+        context = MagicMock(spec=LLMContext)
+        await service._receive_response_events(context, [])
+
+        assert "resp_abc" in service._all_response_ids
+
+    @pytest.mark.asyncio
+    async def test_response_ids_not_collected_when_disabled(self):
+        """Response IDs are NOT collected when delete_responses_on_close=False."""
+        service = _make_service()  # default: delete_responses_on_close=False
+        service._push_llm_text = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+        service.run_function_calls = AsyncMock()
+
+        ws = _ws_events(
+            {"type": "response.completed", "response": {"id": "resp_xyz", "model": "gpt-4.1", "usage": None}},
+        )
+        service._websocket = ws
+
+        context = MagicMock(spec=LLMContext)
+        await service._receive_response_events(context, [])
+
+        assert service._all_response_ids == []
+
+    @pytest.mark.asyncio
+    async def test_delete_called_on_disconnect_when_store_true(self):
+        """_client.responses.delete() is called for each collected ID on disconnect."""
+        service = _make_service(
+            delete_responses_on_close=True,
+            settings=OpenAIResponsesLLMService.Settings(store=True),
+        )
+        service._all_response_ids = ["resp_1", "resp_2"]
+        service._client.responses.delete = AsyncMock()
+
+        mock_ws = AsyncMock()
+        service._websocket = mock_ws
+
+        await service._disconnect_websocket()
+
+        assert service._client.responses.delete.call_count == 2
+        deleted_ids = {call.args[0] for call in service._client.responses.delete.call_args_list}
+        assert deleted_ids == {"resp_1", "resp_2"}
+        assert service._all_response_ids == []
+
+    @pytest.mark.asyncio
+    async def test_delete_not_called_when_store_false(self):
+        """No deletion API call is made when store=False (nothing persisted server-side)."""
+        service = _make_service(
+            delete_responses_on_close=True,
+            # store defaults to False
+        )
+        service._all_response_ids = ["resp_1"]
+        service._client.responses.delete = AsyncMock()
+
+        mock_ws = AsyncMock()
+        service._websocket = mock_ws
+
+        await service._disconnect_websocket()
+
+        service._client.responses.delete.assert_not_called()
+        assert service._all_response_ids == []
+
+    @pytest.mark.asyncio
+    async def test_delete_not_called_when_feature_disabled(self):
+        """No deletion when delete_responses_on_close=False (the default)."""
+        service = _make_service(settings=OpenAIResponsesLLMService.Settings(store=True))
+        service._all_response_ids = ["resp_1"]
+        service._client.responses.delete = AsyncMock()
+
+        mock_ws = AsyncMock()
+        service._websocket = mock_ws
+
+        await service._disconnect_websocket()
+
+        service._client.responses.delete.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ids_survive_reconnect(self):
+        """_all_response_ids persists across _clear_previous_response_state calls."""
+        service = _make_service(
+            delete_responses_on_close=True,
+            settings=OpenAIResponsesLLMService.Settings(store=True),
+        )
+        service._all_response_ids = ["resp_pre_reconnect"]
+        service._clear_previous_response_state()
+
+        assert "resp_pre_reconnect" in service._all_response_ids
+
+    @pytest.mark.asyncio
+    async def test_deletion_failure_does_not_propagate(self):
+        """A failing delete call is logged as a warning, not raised."""
+        service = _make_service(
+            delete_responses_on_close=True,
+            settings=OpenAIResponsesLLMService.Settings(store=True),
+        )
+        service._all_response_ids = ["resp_bad"]
+        service._client.responses.delete = AsyncMock(side_effect=Exception("network error"))
+
+        mock_ws = AsyncMock()
+        service._websocket = mock_ws
+
+        # Should not raise
+        await service._disconnect_websocket()
+        assert service._all_response_ids == []
