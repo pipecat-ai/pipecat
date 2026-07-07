@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -130,9 +131,9 @@ class OpenAIResponsesLLMSettings(LLMSettings):
         max_completion_tokens: Maximum completion tokens to generate.
         reasoning: Reasoning configuration for reasoning-capable models. ``None``
             (the default) leaves reasoning unconfigured — the service then disables
-            reasoning by default on the gpt-5.x series (``effort="none"``) to keep
-            latency low for real-time voice, and leaves every other model at its
-            provider default. The default model, ``gpt-4.1``, does not reason.
+            reasoning by default for whatever models possible, to keep latency low
+            for real-time voice. Note that the default model, ``gpt-4.1``, does
+            not reason.
     """
 
     # Override inherited LLMSettings fields to also accept openai's NotGiven
@@ -148,6 +149,43 @@ class OpenAIResponsesLLMSettings(LLMSettings):
     reasoning: OpenAIResponsesReasoningConfig | None | _NotGiven = field(
         default_factory=lambda: _NOT_GIVEN
     )
+
+
+# ---------------------------------------------------------------------------
+# Model classification
+# ---------------------------------------------------------------------------
+
+
+def _is_o_series(model: str) -> bool:
+    """Whether the model is an o-series reasoning model (o1, o3, o4-mini, ...)."""
+    return bool(re.match(r"o\d", model.lower()))
+
+
+def _model_supports_reasoning(model: str) -> bool | None:
+    """Classify whether an OpenAI model supports reasoning.
+
+    Assumes that future (beyond gpt-5.x) mainline gpt series models will also
+    support reasoning. This can be revisited if OpenAI changes their model lineup
+    or reasoning support in the future.
+
+    Args:
+        model: The model name (e.g. ``"gpt-5.4"``, ``"o3"``, ``"gpt-4.1"``).
+
+    Returns:
+        ``True`` for reasoning-capable models — the o-series and the mainline gpt
+        series from gpt-5 onward. ``False`` for models known *not* to reason:
+        gpt-4.x and earlier, and the ``gpt-5-chat`` non-reasoning variant.
+        ``None`` when the model is unrecognized and we can't tell either way.
+    """
+    model = model.lower()
+    if _is_o_series(model):
+        return True
+    # Mainline gpt series: reasons from gpt-5 onward. ``gpt-5-chat`` is the
+    # non-reasoning variant of the series.
+    match = re.match(r"gpt-(\d+)", model)
+    if match:
+        return int(match.group(1)) >= 5 and "chat" not in model
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +262,9 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         # variant connects via raw websockets and needs the key explicitly.
         self._api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self._service_tier = service_tier
+        # Tracks the model we've already warned about (reasoning configured on a
+        # non-reasoning model) so we log it once per model rather than per turn.
+        self._reasoning_unsupported_warned_for: str | None = None
         self._client = self._create_client(
             api_key=api_key,
             base_url=base_url,
@@ -322,6 +363,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             # Ask for the encrypted reasoning so it can be sent back on later
             # turns, preserving reasoning context across the conversation.
             params["include"] = ["reasoning.encrypted_content"]
+            self._warn_if_reasoning_unsupported()
         else:
             # No reasoning configured: disable it by default on the gpt-5.x series
             # for real-time latency (see the helper).
@@ -406,26 +448,49 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
     # -- reasoning ------------------------------------------------------------
 
     def _maybe_disable_reasoning(self, params: dict):
-        """Disable reasoning by default on the gpt-5.x series for real-time voice.
+        """Disable reasoning by default on the mainline gpt series for real-time voice.
 
         When the caller hasn't configured ``reasoning``, request ``effort="none"``
-        for the gpt-5.x series — the first "mainline" OpenAI series to accept a
-        ``"none"`` effort. This only ever *lowers* reasoning for latency: it's a
-        no-op for models like ``gpt-5.4`` that already default to ``none``, and it
-        disables reasoning for models like ``gpt-5.5`` that otherwise default to a
-        real effort. Every other model is left at the provider default: the
-        reasoning-first o-series doesn't accept ``effort="none"`` (and choosing one
-        is a deliberate decision to reason), and gpt-4.x and earlier don't reason
-        at all. Mirrors Gemini's ``_maybe_unset_thinking_budget``, which disables
-        or minimizes thinking on its latency-sensitive models.
+        for whatever models possible. Note that this is a no-op for models like
+        ``gpt-5.4`` that already default to ``none``. Some models are left at the
+        provider default: the reasoning-first o-series doesn't accept
+        ``effort="none"`` (and choosing one is a deliberate decision to reason),
+        and gpt-4.x and earlier don't reason at all. Mirrors Gemini's
+        ``_maybe_unset_thinking_budget``, which disables or minimizes thinking on
+        its latency-sensitive models.
 
         Args:
             params: The response params dict (modified in place).
         """
         model = assert_given(self._settings.model)
-        # ``gpt-5-chat`` is a non-reasoning variant of the series, so exclude it.
-        if model and model.startswith("gpt-5") and "chat" not in model:
+        # Lower reasoning only for models that reason *and* accept effort="none".
+        # The o-series reasons but rejects "none" (and choosing it is a deliberate
+        # decision to reason), so exclude it.
+        if model and _model_supports_reasoning(model) and not _is_o_series(model):
             params["reasoning"] = {"effort": "none"}
+
+    def _warn_if_reasoning_unsupported(self):
+        """Log a clear error when reasoning is configured on a model that can't use it.
+
+        The raw API error in this case ("Encrypted content is not supported with
+        this model") is cryptic, so surface an actionable one instead. Only fires
+        for models *known* not to reason; unrecognized models are left alone.
+        Logs once per model rather than on every turn.
+        """
+        model = assert_given(self._settings.model)
+        if not model or _model_supports_reasoning(model) is not False:
+            # No model, reasoning-capable, or unrecognized — say nothing.
+            return
+        if model == self._reasoning_unsupported_warned_for:
+            return
+        self._reasoning_unsupported_warned_for = model
+        logger.error(
+            f"{self}: `reasoning` is configured but model '{model}' does not support "
+            "reasoning, so requests will fail. Reasoning is supported only by "
+            "reasoning-capable models — the gpt-5.x series and the o-series; see "
+            "OpenAI's reasoning guide (https://platform.openai.com/docs/guides/reasoning). "
+            "Remove the `reasoning` setting or select a reasoning-capable model."
+        )
 
     async def _append_reasoning_message(
         self, item_id: str | None, summary: list[dict], encrypted_content: str | None

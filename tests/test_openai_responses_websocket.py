@@ -20,7 +20,10 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
+from pipecat.services.openai.responses.llm import (
+    OpenAIResponsesLLMService,
+    _model_supports_reasoning,
+)
 
 
 def _make_service(**kwargs):
@@ -760,12 +763,19 @@ class TestReasoningParams:
         assert "include" not in params
 
     def test_gpt5_series_disabled_by_default(self):
-        """gpt-5.x models default to effort="none" for real-time latency."""
-        for model in ("gpt-5.4", "gpt-5.5"):
+        """Mainline gpt models from gpt-5 onward default to effort="none"."""
+        # gpt-6.x stands in for a future mainline series we assume will reason.
+        for model in ("gpt-5.4", "gpt-5.5", "gpt-6", "gpt-6.2"):
             service = _make_service(settings=OpenAIResponsesLLMService.Settings(model=model))
             params = self._params(service)
             assert params["reasoning"] == {"effort": "none"}, model
             assert "include" not in params
+
+    def test_o_series_left_untouched(self):
+        """The o-series reasons but rejects effort="none", so leave it at the default."""
+        service = _make_service(settings=OpenAIResponsesLLMService.Settings(model="o3"))
+        params = self._params(service)
+        assert "reasoning" not in params
 
     def test_gpt5_chat_variant_left_untouched(self):
         """The non-reasoning gpt-5-chat variant is excluded from the default-off logic."""
@@ -798,6 +808,62 @@ class TestReasoningParams:
         params = self._params(service)
         assert params["reasoning"] == {"effort": "none"}
         assert "include" not in params
+
+
+class TestModelSupportsReasoning:
+    def test_reasoning_capable_models(self):
+        """The o-series and the mainline gpt series from gpt-5 onward reason."""
+        for model in ("gpt-5", "gpt-5.4", "gpt-5.5", "gpt-6", "gpt-7.1", "o1", "o3", "o4-mini"):
+            assert _model_supports_reasoning(model) is True, model
+
+    def test_known_non_reasoning_models(self):
+        """gpt-4.x and earlier, plus the gpt-5-chat variant, don't reason."""
+        for model in ("gpt-4.1", "gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo", "gpt-5-chat-latest"):
+            assert _model_supports_reasoning(model) is False, model
+
+    def test_unrecognized_models_are_unknown(self):
+        """An unrecognized model returns None so callers can leave it alone."""
+        for model in ("some-custom-model", "llama-3", "mistral-large"):
+            assert _model_supports_reasoning(model) is None, model
+
+
+class TestReasoningUnsupportedWarning:
+    """Reasoning configured on a model that can't use it should log a clear error."""
+
+    def _service_with_reasoning(self, model):
+        return _make_service(
+            settings=OpenAIResponsesLLMService.Settings(
+                model=model,
+                reasoning=OpenAIResponsesLLMService.ReasoningConfig(effort="high"),
+            )
+        )
+
+    def test_warns_on_known_non_reasoning_model(self):
+        service = self._service_with_reasoning("gpt-4.1")
+        with patch("pipecat.services.openai.responses.llm.logger") as mock_logger:
+            service._build_response_params({"input": []})
+        assert mock_logger.error.call_count == 1
+        assert "does not support reasoning" in mock_logger.error.call_args.args[0]
+
+    def test_warns_once_per_model(self):
+        service = self._service_with_reasoning("gpt-4.1")
+        with patch("pipecat.services.openai.responses.llm.logger") as mock_logger:
+            service._build_response_params({"input": []})
+            service._build_response_params({"input": []})
+        assert mock_logger.error.call_count == 1
+
+    def test_no_warning_on_reasoning_capable_model(self):
+        service = self._service_with_reasoning("gpt-5.5")
+        with patch("pipecat.services.openai.responses.llm.logger") as mock_logger:
+            service._build_response_params({"input": []})
+        mock_logger.error.assert_not_called()
+
+    def test_no_warning_on_unrecognized_model(self):
+        """We can't be sure an unrecognized model lacks reasoning, so stay quiet."""
+        service = self._service_with_reasoning("some-custom-model")
+        with patch("pipecat.services.openai.responses.llm.logger") as mock_logger:
+            service._build_response_params({"input": []})
+        mock_logger.error.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
