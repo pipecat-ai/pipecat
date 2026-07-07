@@ -393,8 +393,8 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(TRANSCRIPTION_TIMEOUT + 0.1)
         self.assertEqual(stop_count, 2)
 
-    async def test_user_turn_finalized_called_on_strategy_stop(self):
-        """user_turn_finalized() runs when a stop strategy ends the turn, never at start.
+    async def test_user_turn_ended_called_on_strategy_stop(self):
+        """user_turn_ended() runs when a stop strategy ends the turn, never at start.
 
         Unlike reset(), which runs at both turn start and turn stop, the
         finalized hook must only fire on turn end so strategies can drop
@@ -404,9 +404,9 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         finalized = 0
 
         class SpyStopStrategy(SpeechTimeoutUserTurnStopStrategy):
-            async def user_turn_finalized(self):
+            async def user_turn_ended(self):
                 nonlocal finalized
-                await super().user_turn_finalized()
+                await super().user_turn_ended()
                 finalized += 1
 
         controller = UserTurnController(
@@ -430,14 +430,14 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
 
         await controller.cleanup()
 
-    async def test_user_turn_finalized_called_on_watchdog_stop(self):
-        """user_turn_finalized() also runs when the stop watchdog ends the turn."""
+    async def test_user_turn_ended_called_on_watchdog_stop(self):
+        """user_turn_ended() also runs when the stop watchdog ends the turn."""
         finalized = 0
 
         class SpyNeverStopStrategy(ExternalUserTurnCompletionStopStrategy):
-            async def user_turn_finalized(self):
+            async def user_turn_ended(self):
                 nonlocal finalized
-                await super().user_turn_finalized()
+                await super().user_turn_ended()
                 finalized += 1
 
         controller = UserTurnController(
@@ -459,21 +459,21 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
 
         await controller.cleanup()
 
-    async def test_turn_analyzer_cleared_on_user_turn_finalized(self):
+    async def test_turn_analyzer_cleared_on_user_turn_ended(self):
         """TurnAnalyzerUserTurnStopStrategy clears its analyzer when the turn ends."""
         analyzer = MagicMock()
         strategy = TurnAnalyzerUserTurnStopStrategy(turn_analyzer=analyzer)
 
-        await strategy.user_turn_finalized()
+        await strategy.user_turn_ended()
 
         analyzer.clear.assert_called_once()
 
-    async def test_deferred_forwards_user_turn_finalized(self):
+    async def test_deferred_forwards_user_turn_ended(self):
         """The deferred() wrapper forwards the finalized hook to its inner strategy."""
         analyzer = MagicMock()
         strategy = deferred(TurnAnalyzerUserTurnStopStrategy(turn_analyzer=analyzer))
 
-        await strategy.user_turn_finalized()
+        await strategy.user_turn_ended()
 
         analyzer.clear.assert_called_once()
 

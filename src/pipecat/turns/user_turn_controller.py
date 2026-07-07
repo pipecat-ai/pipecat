@@ -332,12 +332,12 @@ class UserTurnController(BaseObject):
 
         # Reset all user turn stop strategies to start fresh. Also notify them
         # the turn is over: unlike reset() (which also runs at turn start),
-        # user_turn_finalized() only runs here, so strategies can drop state
+        # user_turn_ended() only runs here, so strategies can drop state
         # that must not survive an externally-ended turn (e.g. a turn
         # analyzer's buffered speech).
         for s in self._user_turn_strategies.stop or []:
             await s.reset()
-            await s.user_turn_finalized()
+            await s.user_turn_ended()
 
         await self._call_event_handler("on_user_turn_stopped", strategy, params)
 

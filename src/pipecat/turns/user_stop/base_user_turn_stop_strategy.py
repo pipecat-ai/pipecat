@@ -82,7 +82,7 @@ class BaseUserTurnStopStrategy(BaseObject):
         """Reset the strategy to its initial state."""
         pass
 
-    async def user_turn_finalized(self):
+    async def user_turn_ended(self):
         """Called by the controller after a user turn has ended.
 
         Runs on every turn end, regardless of which strategy (or the stop
