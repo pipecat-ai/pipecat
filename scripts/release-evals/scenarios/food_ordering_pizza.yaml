@@ -1,0 +1,41 @@
+name: food_ordering_pizza
+
+judge: !include judge_text.yaml
+
+turns:
+  - expect:
+      - event: response
+        eval: "the bot greets the user and offers to take a food order"
+
+  - user: "I'd like to order a pizza."
+    expect:
+      - event: function_call
+        calls:
+          - name: choose_pizza
+      - event: response
+        eval: "the bot asks for pizza details such as size and type"
+
+  - user: "A large pepperoni please."
+    expect:
+      - event: function_call
+        calls:
+          - name: select_pizza_order
+            args: { size: large, pizza_type: pepperoni }
+      - event: response
+        eval: "the bot reads back or confirms a large pepperoni pizza order"
+
+  - user: "How long will delivery take?"
+    expect:
+      - event: function_call
+        calls:
+          - name: get_delivery_estimate
+      - event: response
+        eval: "the bot gives a delivery time estimate"
+
+  # Terminal turn — assert the function call only: end_conversation tears the
+  # pipeline down before the farewell llm_response reaches the harness.
+  - user: "That's everything, please confirm my order."
+    expect:
+      - event: function_call
+        calls:
+          - name: complete_order

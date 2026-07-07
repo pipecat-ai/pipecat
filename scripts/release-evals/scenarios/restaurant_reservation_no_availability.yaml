@@ -1,0 +1,41 @@
+name: restaurant_reservation_no_availability
+
+judge: !include judge_text.yaml
+
+turns:
+  - expect:
+      - event: response
+        eval: "the bot greets the customer and asks how many people are in their party"
+
+  - user: "Two people, please."
+    expect:
+      - event: function_call
+        calls:
+          - name: collect_party_size
+            args: { size: 2 }
+      - event: response
+        eval: "the bot asks what time they would like to dine"
+
+  - user: "We'd like to come at seven PM."
+    expect:
+      - event: function_call
+        calls:
+          - name: check_availability
+      - event: response
+        eval: "the bot says the requested time is unavailable and offers alternative times"
+
+  - user: "Okay, let's come at six PM instead."
+    expect:
+      - event: function_call
+        calls:
+          - name: check_availability
+      - event: response
+        eval: "the bot confirms a reservation is available at the new time"
+
+  # Terminal turn — assert the function call only: end_conversation tears the
+  # pipeline down before the farewell llm_response reaches the harness.
+  - user: "No, that's everything, thanks."
+    expect:
+      - event: function_call
+        calls:
+          - name: end_conversation

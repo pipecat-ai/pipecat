@@ -18,7 +18,7 @@ def create_llm(provider: str | None = None, model: str | None = None) -> Any:
     """Create an LLM service instance based on environment configuration.
 
     Args:
-        provider: LLM provider name. If None, uses LLM_PROVIDER env var (defaults to 'openai')
+        provider: LLM provider name. If None, uses LLM_PROVIDER env var (defaults to 'openai_responses')
         model: Model name. If None, uses provider's default model
 
     Returns:
@@ -36,7 +36,7 @@ def create_llm(provider: str | None = None, model: str | None = None) -> Any:
               Optionally set AWS_REGION (defaults to us-west-2)
 
     Usage:
-        # Use default provider (from LLM_PROVIDER env var, defaults to OpenAI)
+        # Use default provider (from LLM_PROVIDER env var, defaults to OpenAI Responses)
         llm = create_llm()
 
         # Use specific provider
