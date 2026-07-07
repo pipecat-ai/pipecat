@@ -274,6 +274,19 @@ class WordCompletionTracker:
         if chars_for_frame > 0:
             self._llm_pos = self._segment_map.llm_pos
 
+        # On completion, snap the tts/user-facing cursors to end-of-text. The
+        # frame's final word may be separated from its terminal punctuation by a
+        # space -- French typography puts one before ? ! : ; ("Comment ça va ?").
+        # advance_by_alnums stops at that space, so the cursor otherwise stalls
+        # just before the punctuation: get_remaining_user_facing_text() never
+        # empties and the segment reports "in-progress" forever, dropping it on
+        # RTVI clients that commit text on the "completed" status. Mirrors the
+        # llm_pos sweep-to-end below; only trailing non-alnum remains once every
+        # expected alnum char has been consumed.
+        if self.is_complete:
+            self._tts_pos = len(self._tts_text)
+            self._user_facing_pos = len(self._user_facing_text)
+
         if self._llm_text is not None:
             if self.is_complete:
                 # Final word: sweep all remaining llm_text from prev_llm_pos so
