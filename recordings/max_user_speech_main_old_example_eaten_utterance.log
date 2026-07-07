@@ -1,0 +1,90 @@
+2026-07-07 14:51:23.779 | INFO     | pipecat:<module>:54 - ᓚᘏᗢ Pipecat 1.5.1.dev6 (Python 3.12.9 (main, Mar 11 2025, 17:41:32) [Clang 20.1.0 ]) ᓚᘏᗢ
+2026-07-07 14:51:25.757 | INFO     | pipecat.runner.run:_run_eval:1323 - Running with eval transport...
+2026-07-07 14:51:25.757 | DEBUG    | pipecat.runner.utils:_get_transport_params:479 - Using transport params for eval
+2026-07-07 14:51:25.757 | INFO     | __main__:run_bot:272 - Starting bot
+2026-07-07 14:51:25.812 | DEBUG    | pipecat.audio.vad.silero:__init__:146 - Loading Silero VAD model...
+2026-07-07 14:51:25.847 | DEBUG    | pipecat.audio.vad.silero:__init__:168 - Loaded Silero VAD
+2026-07-07 14:51:25.848 | DEBUG    | pipecat.audio.turn.smart_turn.local_smart_turn_v3:__init__:68 - Loading Local Smart Turn v3.x model from /Users/jamsea/git/pipecat/src/pipecat/audio/turn/smart_turn/data/smart-turn-v3.2-cpu.onnx...
+2026-07-07 14:51:25.873 | DEBUG    | pipecat.audio.turn.smart_turn.local_smart_turn_v3:__init__:78 - Loaded Local Smart Turn v3.x
+2026-07-07 14:51:25.874 | DEBUG    | pipecat.processors.aggregators.llm_response_universal:_apply_realtime_mode_strategy_mutations:924 - LLMUserAggregator#0: realtime mode — mutated turn strategies: dropped ['TranscriptionUserTurnStartStrategy'] start strategy(ies); set wait_for_transcript=False on ['TurnAnalyzerUserTurnStopStrategy'] stop strategy(ies).
+2026-07-07 14:51:25.874 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking Pipeline#0::Source -> EvalOutputTransport#0
+2026-07-07 14:51:25.875 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking EvalOutputTransport#0 -> AudioBufferProcessor#0
+2026-07-07 14:51:25.875 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking AudioBufferProcessor#0 -> Pipeline#0::Sink
+2026-07-07 14:51:25.875 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking Pipeline#1::Source -> EvalInputTransport#0
+2026-07-07 14:51:25.875 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking EvalInputTransport#0 -> LLMUserAggregator#0
+2026-07-07 14:51:25.875 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking LLMUserAggregator#0 -> UserTranscriptCapture#0
+2026-07-07 14:51:25.875 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking UserTranscriptCapture#0 -> MaxUserSpeechController#0
+2026-07-07 14:51:25.875 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking MaxUserSpeechController#0 -> GeminiLiveLLMService#0
+2026-07-07 14:51:25.875 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking GeminiLiveLLMService#0 -> Pipeline#0
+2026-07-07 14:51:25.875 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking Pipeline#0 -> LLMAssistantAggregator#0
+2026-07-07 14:51:25.875 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking LLMAssistantAggregator#0 -> Pipeline#1::Sink
+2026-07-07 14:51:25.875 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking PipelineWorker#0::Source -> RTVIProcessor#0
+2026-07-07 14:51:25.875 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking RTVIProcessor#0 -> Pipeline#1
+2026-07-07 14:51:25.875 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking Pipeline#1 -> PipelineWorker#0::Sink
+2026-07-07 14:51:25.875 | DEBUG    | pipecat.workers.runner:add_workers:214 - WorkerRunner 'runner-3c72b9ca': added worker 'PipelineWorker#0'
+2026-07-07 14:51:25.875 | DEBUG    | pipecat.workers.runner:run:258 - WorkerRunner 'runner-3c72b9ca': started running
+2026-07-07 14:51:25.877 | DEBUG    | pipecat.workers.runner:_start_worker:414 - WorkerRunner 'runner-3c72b9ca': starting worker 'PipelineWorker#0'
+2026-07-07 14:51:25.877 | DEBUG    | pipecat.pipeline.worker:_wait_for_pipeline_start:965 - PipelineWorker#0: Starting. Waiting for StartFrame#0 to reach the end of the pipeline...
+2026-07-07 14:51:25.878 | DEBUG    | pipecat.audio.vad.vad_analyzer:set_params:155 - Setting VAD params to: confidence=0.7 start_secs=0.2 stop_secs=0.5 min_volume=0.6
+2026-07-07 14:51:25.878 | INFO     | pipecat.transports.websocket.server:_server_task_handler:189 - Starting websocket server on localhost:7900
+2026-07-07 14:51:25.878 | INFO     | pipecat.services.google.gemini_live.llm:_connect:1102 - Connecting to Gemini service
+2026-07-07 14:51:25.879 | WARNING  | pipecat.services.llm_service:_warn_if_realtime_service_emits_no_turn_frames:415 - GeminiLiveLLMService#0 is not emitting turn frames (UserStartedSpeakingFrame/UserStoppedSpeakingFrame) — this service either doesn't support them or isn't configured to emit them. A couple of things to keep in mind:
+  - Other processors in the pipeline (e.g. RTVI) may expect turn frames. You can enable local VAD/turn detection by setting a vad_analyzer in LLMUserAggregatorParams.
+  - Be aware that local turns may NOT perfectly align with the "ground truth" of server-decided turns, so they should be thought of as APPROXIMATE (unless, of course, you've also configured local turn detection to *drive* the realtime service's turns, e.g. by setting vad=GeminiVADParams(disabled=True)).
+2026-07-07 14:51:25.880 | DEBUG    | pipecat.registry.registry:register:132 - Worker 'PipelineWorker#0' ready (local)
+2026-07-07 14:51:25.880 | DEBUG    | pipecat.workers.runner:_send_registry:466 - WorkerRunner 'runner-3c72b9ca': broadcasting registry: ['PipelineWorker#0']
+2026-07-07 14:51:25.880 | DEBUG    | pipecat.workers.base_worker:_maybe_activate:1078 - Worker 'PipelineWorker#0': activated
+2026-07-07 14:51:25.880 | DEBUG    | pipecat.pipeline.worker:_wait_for_pipeline_start:968 - PipelineWorker#0: StartFrame#0 reached the end of the pipeline, pipeline is now ready.
+2026-07-07 14:51:26.058 | INFO     | pipecat.services.google.gemini_live.llm:_connection_task_handler:1256 - Connected to Gemini service
+2026-07-07 14:51:26.126 | INFO     | pipecat.transports.websocket.server:_client_handler:199 - New client connection from ('::1', 56357, 0, 0)
+2026-07-07 14:51:26.127 | INFO     | __main__:on_client_connected:355 - Client connected
+2026-07-07 14:51:26.128 | DEBUG    | pipecat.processors.frameworks.rtvi.processor:_handle_client_ready:385 - Received client-ready: version 2.0.0
+2026-07-07 14:51:26.128 | DEBUG    | pipecat.processors.frameworks.rtvi.processor:_handle_client_ready:422 - Client Details: library='pipecat-evals' library_version=None platform=None platform_version=None platform_details=None
+2026-07-07 14:51:26.129 | DEBUG    | pipecat.services.google.gemini_live.llm:_create_initial_response:1602 - Creating initial response: [Content(
+  parts=[
+    Part(
+      text="You are a friendly assistant on a voice call. Greet the user in one short sentence and invite them to tell you what's on their mind. If you are ever told the user has been talking for a while, politely jump in and take your turn."
+    ),
+  ],
+  role='user'
+)]
+2026-07-07 14:51:27.983 | DEBUG    | pipecat.processors.metrics.frame_processor_metrics:stop_ttfb_metrics:131 - GeminiLiveLLMService#0 TTFB: 1.854s
+2026-07-07 14:51:29.237 | DEBUG    | pipecat.transports.base_output:_bot_started_speaking:672 - Bot started speaking
+2026-07-07 14:51:31.139 | DEBUG    | pipecat.processors.metrics.frame_processor_metrics:start_llm_usage_metrics:240 - GeminiLiveLLMService#0 prompt tokens: 393, completion tokens: 52, reasoning tokens: 247
+2026-07-07 14:51:31.140 | DEBUG    | pipecat.transports.base_output:_handle_frame:766 - Bot stopped speaking based on TTSStoppedFrame
+2026-07-07 14:51:31.141 | DEBUG    | pipecat.transports.base_output:_bot_stopped_speaking:700 - Bot stopped speaking
+2026-07-07 14:51:33.195 | DEBUG    | pipecat.processors.aggregators.llm_response_universal:_on_user_turn_started:1199 - LLMUserAggregator#0: User started speaking (strategy: VADUserTurnStartStrategy#0)
+2026-07-07 14:51:33.195 | DEBUG    | pipecat.processors.frame_processor:broadcast_interruption:742 - LLMUserAggregator#0: broadcasting interruption
+2026-07-07 14:51:37.528 | INFO     | __main__:process_frame:242 - User transcript captured: 'So I was thinking about my whole weekend' (turn started: 2026-07-07T06:51:33.196+00:00, frame pushed: 2026-07-07T06:51:37.528+00:00)
+2026-07-07 14:51:37.539 | DEBUG    | pipecat.services.google.gemini_live.llm:_handle_msg_input_transcription:1952 - [Transcription:user] [.]
+2026-07-07 14:51:37.541 | INFO     | __main__:process_frame:242 - User transcript captured: '.' (turn started: 2026-07-07T06:51:33.196+00:00, frame pushed: 2026-07-07T06:51:37.539+00:00)
+2026-07-07 14:51:39.197 | INFO     | __main__:_expire:156 - User spoke past 6.0s; handing the turn to the bot
+2026-07-07 14:51:39.198 | DEBUG    | pipecat.processors.aggregators.llm_response_universal:_maybe_mute_frame:1100 - LLMUserAggregator#0: user is now muted
+2026-07-07 14:51:40.201 | WARNING  | pipecat.audio.vad.vad_controller:_audio_idle_handler:210 - VADController#0: no audio received while speaking, forcing speech stop
+2026-07-07 14:51:40.884 | INFO     | __main__:process_frame:242 - User transcript captured: " And honestly, there's just so much going on that I am not even sure where to be" (turn started: 2026-07-07T06:51:33.196+00:00, frame pushed: 2026-07-07T06:51:40.884+00:00)
+2026-07-07 14:51:41.295 | DEBUG    | pipecat.processors.metrics.frame_processor_metrics:stop_ttfb_metrics:131 - GeminiLiveLLMService#0 TTFB: 2.098s
+2026-07-07 14:51:41.840 | DEBUG    | pipecat.transports.base_output:_bot_started_speaking:672 - Bot started speaking
+2026-07-07 14:51:49.421 | DEBUG    | pipecat.processors.metrics.frame_processor_metrics:start_llm_usage_metrics:240 - GeminiLiveLLMService#0 prompt tokens: 685, completion tokens: 194, reasoning tokens: 60
+2026-07-07 14:51:49.423 | DEBUG    | pipecat.transports.base_output:_handle_frame:766 - Bot stopped speaking based on TTSStoppedFrame
+2026-07-07 14:51:49.424 | DEBUG    | pipecat.transports.base_output:_bot_stopped_speaking:700 - Bot stopped speaking
+2026-07-07 14:51:49.425 | DEBUG    | pipecat.processors.aggregators.llm_response_universal:_maybe_mute_frame:1100 - LLMUserAggregator#0: user is now unmuted
+2026-07-07 14:51:50.687 | DEBUG    | pipecat.audio.turn.smart_turn.base_smart_turn:analyze_end_of_turn:166 - End of Turn result: EndOfTurnState.INCOMPLETE
+2026-07-07 14:51:50.687 | WARNING  | pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy:_handle_vad_user_stopped_speaking:206 - TurnAnalyzerUserTurnStopStrategy#0: VAD stop_secs (0.5s) differs from the recommended default (0.2s). Built-in p99 latency values assume stop_secs=0.2. Re-run https://github.com/pipecat-ai/stt-benchmark with your settings and pass the TTFS P99 latency result as ttfs_p99_latency to your STT service.
+2026-07-07 14:51:55.020 | DEBUG    | pipecat.audio.turn.smart_turn.base_smart_turn:analyze_end_of_turn:166 - End of Turn result: EndOfTurnState.COMPLETE
+2026-07-07 14:51:55.025 | DEBUG    | pipecat.processors.aggregators.llm_response_universal:_on_user_turn_inference_triggered:1224 - LLMUserAggregator#0: User turn inference triggered (strategy: TurnAnalyzerUserTurnStopStrategy#0) [realtime mode: event-only, no context push]
+2026-07-07 14:51:55.025 | DEBUG    | pipecat.processors.aggregators.llm_response_universal:_on_user_turn_stopped:1256 - LLMUserAggregator#0: User stopped speaking (strategy: TurnAnalyzerUserTurnStopStrategy#0)
+2026-07-07 14:52:51.201 | DEBUG    | pipecat.pipeline.worker:_sink_push_frame:1205 - PipelineWorker#0: received cancel worker frame downstream CancelWorkerFrame#0(reason: None)
+2026-07-07 14:52:51.204 | DEBUG    | pipecat.pipeline.worker:_source_push_frame:1138 - PipelineWorker#0: received cancel worker frame upstream CancelWorkerFrame#1(reason: None)
+2026-07-07 14:52:51.205 | DEBUG    | pipecat.pipeline.worker:_wait_for_pipeline_end:986 - PipelineWorker#0: Closing. Waiting for CancelFrame#0(reason: None) to reach the end of the pipeline...
+2026-07-07 14:52:51.206 | INFO     | pipecat.evals.transport:_write_wav:125 - Eval recording saved: /Users/jamsea/git/pipecat/scripts/release-evals/test-runs/20260707_145123/recordings/realtime_realtime-gemini-live-max-user-speech.py__max_user_speech.wav (4072056 bytes)
+2026-07-07 14:52:51.212 | INFO     | pipecat.transports.websocket.server:_client_handler:257 - Client ('::1', 56357, 0, 0) disconnected
+2026-07-07 14:52:51.213 | INFO     | pipecat.services.google.gemini_live.llm:_disconnect:1372 - Disconnecting from Gemini service
+2026-07-07 14:52:51.242 | DEBUG    | pipecat.pipeline.worker:wait_for_cancel:978 - PipelineWorker#0: CancelFrame#0(reason: None) reached the end of the pipeline.
+2026-07-07 14:52:51.242 | DEBUG    | pipecat.utils.base_object:cleanup:176 - PipelineWorker#0: waiting on event handlers to finish ['on_pipeline_finished']...
+2026-07-07 14:52:51.243 | INFO     | pipecat.services.google.gemini_live.llm:_disconnect:1372 - Disconnecting from Gemini service
+2026-07-07 14:52:51.243 | DEBUG    | pipecat.pipeline.worker:run:711 - Pipeline worker PipelineWorker#0 is finishing...
+2026-07-07 14:52:51.243 | DEBUG    | pipecat.pipeline.worker:run:715 - Pipeline worker PipelineWorker#0 has finished
+2026-07-07 14:52:51.244 | DEBUG    | pipecat.workers.runner:run:301 - WorkerRunner 'runner-3c72b9ca': finished running
+
+🚀 Bot ready! (eval transport on ws://localhost:7900)
+
