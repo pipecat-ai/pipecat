@@ -1038,6 +1038,37 @@ class TestFlowManager(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.mock_task.queue_frames.called)
         mock_llm_run_frame.assert_called_once()
 
+    @patch("pipecat.flows.manager.LLMRunFrame")
+    async def test_no_completion_on_inactive_worker(self, mock_llm_run_frame):
+        """Test that setting a node on a deactivated worker skips the LLM run.
+
+        After a multi-worker handoff (activate_worker(deactivate_self=True)),
+        the handing-off worker may still get a next node from an edge function.
+        Running a completion on it would duplicate the newly activated
+        worker's response.
+        """
+        flow_manager = FlowManager(
+            worker=self.mock_task,
+            llm=self.mock_llm,
+            context_aggregator=self.mock_context_aggregator,
+        )
+        await flow_manager.initialize()
+
+        self.mock_task.active = False
+        self.mock_task.queue_frames.reset_mock()
+        mock_llm_run_frame.reset_mock()
+
+        await flow_manager.set_node_from_config(
+            {
+                "task_messages": [{"role": "developer", "content": "Test"}],
+                "functions": [],
+            },
+        )
+
+        # Context still updates, but no completion is triggered
+        self.assertTrue(self.mock_task.queue_frames.called)
+        mock_llm_run_frame.assert_not_called()
+
     async def test_get_current_context(self):
         """Test getting current conversation context."""
         flow_manager = FlowManager(

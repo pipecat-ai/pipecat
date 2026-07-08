@@ -706,9 +706,13 @@ class FlowManager:
             self._current_node = node_id
             self._current_functions = new_functions
 
-            # Trigger completion with new context
+            # Trigger completion with new context. Skip the run if the worker
+            # is inactive (e.g. it just handed off via
+            # activate_worker(deactivate_self=True)): directly queued frames
+            # bypass the bus activation gate, so running here would produce a
+            # duplicate completion alongside the newly activated worker's.
             respond_immediately = node_config.get("respond_immediately", True)
-            if respond_immediately:
+            if respond_immediately and self._worker.active:
                 await self._worker.queue_frames([LLMRunFrame()])
 
             # Execute post-actions if any
