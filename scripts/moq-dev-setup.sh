@@ -81,7 +81,7 @@ if [[ "${1:-}" == "--cleanup" ]]; then
     fi
   }
   echo "==> Cleaning up working-tree shims..."
-  _cleanup_repo "$PREBUILT_DIR"   client/vite.config.js client/package-lock.json
+  _cleanup_repo "$PREBUILT_DIR"   client/vite.config.js client/package.json client/package-lock.json
   _cleanup_repo "$TRANSPORTS_DIR" package-lock.json
   _cleanup_repo "$VUK_DIR"        package.json pnpm-lock.yaml
   exit 0
@@ -111,15 +111,52 @@ fi
 # --ignore-scripts on the transports repo dodges an unrelated
 # small-webrtc-transport parcel build failure. We only need
 # moq-transport's build, and step 5 does that explicitly.
+#
+# Note on the prebuilt client-js pin: prebuilt's committed package.json
+# declares `^1.11.0`, but the link chain canonicalizes on prebuilt's
+# copy and 1.10.0 is the lowest version that (a) satisfies
+# moq-transport's `~1.10.0` peer and (b) exports `findElementByRef` /
+# `setAboutClient` — required by client-react's compiled dist, which
+# imports them statically. Below we inject an npm `overrides` entry
+# into prebuilt/client/package.json so the whole tree pins to 1.10.0,
+# and it survives every subsequent npm operation (unlike `--no-save`,
+# which is silently unwound by `npm link` reconciling the dep tree).
 # ---------------------------------------------------------------------------
 echo "==> [2/5] Installing Python + JS deps..."
 ( cd "$PIPECAT_DIR" && uv sync \
     --extra moq --extra daily --extra silero --extra deepgram \
     --extra cartesia --extra openai --extra runner )
 ( cd "$TRANSPORTS_DIR"    && npm install --ignore-scripts )
-( cd "$PREBUILT_CLIENT_DIR" && npm install )
+# Prebuilt: pin the client-js declared range down to 1.10.0. Committed
+# package.json says `^1.11.0` which pulls 1.12.0 — too new for
+# voice-ui-kit's 1.8.x-era source (RTVIEvent shadow collisions).
+# `npm pkg set` mutates the declared range in place; this survives
+# step 4's `npm link` chain (unlike `npm install --no-save`, which
+# npm's dep-tree reconciliation silently unwinds). --cleanup stashes
+# prebuilt/client/package.json so the pin doesn't get committed.
+#
+# --legacy-peer-deps bypasses the peer-dep conflicts that surface after
+# the pin: prebuilt also depends on `daily-transport`, `small-webrtc-
+# transport`, `websocket-transport` at versions whose peer client-js is
+# `~1.12.0`. voice-ui-kit dynamically imports transports on demand and
+# we're only exercising MoQ locally, so those transports' peer warnings
+# don't matter here.
+( cd "$PREBUILT_CLIENT_DIR" \
+    && npm pkg set "dependencies[@pipecat-ai/client-js]=1.10.0" \
+    && npm install --legacy-peer-deps )
+# voice-ui-kit's pnpm workspace: `pnpm.overrides[@pipecat-ai/moq-transport]`
+# points at the local moq-transport checkout (unpublished — the install
+# would 404 without it). `pnpm.overrides[@pipecat-ai/client-js]` points
+# at prebuilt's node_modules copy — this is what makes every layer of
+# voice-ui-kit's tsc/dts build resolve to the SAME physical client-js
+# file as prebuilt (and by extension moq-transport, via step 4's link
+# chain into the transports repo). Without it, voice-ui-kit's direct
+# imports, client-react's peer resolution, and moq-transport's Transport
+# all land on different physical paths and tsc rejects the resulting
+# type mismatches with the "protected `_options`" collision.
 ( cd "$VUK_DIR" \
     && npm pkg set "pnpm.overrides[@pipecat-ai/moq-transport]=link:../pipecat-client-web-transports/transports/moq-transport" \
+    && npm pkg set "pnpm.overrides[@pipecat-ai/client-js]=link:../pipecat-prebuilt/client/node_modules/@pipecat-ai/client-js" \
     && pnpm install )
 echo
 
@@ -174,8 +211,8 @@ echo
 #   * voice-ui-kit's tsc/dts step fails with
 #     `Property '_options' is protected but type 'Transport' is not a
 #      class derived from 'Transport'` (linked moq-transport drags in
-#     the transports repo's hoisted client-js@1.10.x, which collides
-#     with voice-ui-kit's pnpm-locked 1.8.x).
+#     the transports repo's hoisted client-js, which collides with
+#     voice-ui-kit's pnpm-locked copy).
 #   * At runtime, the React `PipecatClientProvider` context breaks
 #     across the duplicates.
 # ---------------------------------------------------------------------------
@@ -192,17 +229,29 @@ echo "==> [4/5] Wiring npm link chain..."
 # --ignore-scripts on the transports repo is critical: it's a workspace
 # root and a vanilla `npm link` would trigger every workspace's `prepare`
 # lifecycle and try to rebuild all the other transports.
-( cd "$PREBUILT_CLIENT_DIR" && npm link --ignore-scripts \
+( cd "$PREBUILT_CLIENT_DIR" && npm link --ignore-scripts --legacy-peer-deps \
     @pipecat-ai/moq-transport @pipecat-ai/voice-ui-kit >/dev/null )
-( cd "$TRANSPORTS_DIR"      && npm link --ignore-scripts @pipecat-ai/client-js >/dev/null )
 
-# voice-ui-kit is a pnpm workspace; `npm link` errors against its
-# managed node_modules. Replace the client-js symlink manually.
-mkdir -p "$(dirname "$VUK_CLIENT_JS_LINK")"
-rm -rf "$VUK_CLIENT_JS_LINK"
-ln -s "$PREBUILT_CLIENT_JS_DIR" "$VUK_CLIENT_JS_LINK"
+# Transports repo hoists its own client-js (workspace transports declare
+# it at ^1.12.0). `npm link @pipecat-ai/client-js` here becomes a no-op
+# because the hoisted 1.12.0 already satisfies the peer, and moq-transport
+# would then resolve `Transport` from a different physical path than
+# voice-ui-kit — dts collision. Force the symlink manually.
+rm -rf "$TRANSPORTS_DIR/node_modules/@pipecat-ai/client-js"
+ln -s "$PREBUILT_CLIENT_JS_DIR" "$TRANSPORTS_DIR/node_modules/@pipecat-ai/client-js"
 
-# `npm install` inside transports/moq-transport drops a non-hoisted
+# NOTE: we deliberately do NOT force voice-ui-kit's client-js symlink
+# onto prebuilt's copy. voice-ui-kit's pnpm workspace has client-js
+# 1.8.x from the lockfile, prebuilt's canonical is 1.10.0. Forcing the
+# symlink here makes voice-ui-kit's direct imports and client-react's
+# peer-resolved copy diverge (different physical paths), and tsc's dts
+# build fails with the protected `_options` collision. Letting pnpm's
+# natural resolution stand keeps voice-ui-kit's build internally
+# consistent. Vite's `resolve.dedupe` (step 3) unifies everyone onto
+# prebuilt's copy at bundle time, which is what actually matters for
+# the browser.
+
+# `npm install` inside transports/moq-transport can drop a non-hoisted
 # client-js into moq-transport/node_modules. When tsc resolves
 # MoqTransport's `Transport` import while building voice-ui-kit — which
 # is a consumer of moq-transport via pnpm `link:` — it walks node_modules
@@ -215,7 +264,7 @@ rm -rf "$MOQ_PKG_DIR/node_modules/@pipecat-ai/client-js"
 
 echo "    @pipecat-ai/moq-transport -> $MOQ_PKG_DIR"
 echo "    @pipecat-ai/voice-ui-kit  -> $VUK_PKG_DIR"
-echo "    @pipecat-ai/client-js     -> $PREBUILT_CLIENT_JS_DIR (shared)"
+echo "    @pipecat-ai/client-js     -> $PREBUILT_CLIENT_JS_DIR (pinned to 1.8.0, shared)"
 echo
 
 # ---------------------------------------------------------------------------
@@ -247,7 +296,7 @@ uv run python examples/transports/transports-moq.py \\
 cd $PREBUILT_CLIENT_DIR
 npm run dev
 
-Open the Vite dev URL (NOT http://localhost:7860/client/, which serves
-the published pipecat-ai-prebuilt wheel without MoQ). Pick "MoQ" in the
+Open the Vite dev URL (http://localhost:5173/ NOT http://localhost:7860/client/, 
+which serves the published pipecat-ai-prebuilt wheel without MoQ). Pick "MoQ" in the
 transport dropdown.
 EOF
