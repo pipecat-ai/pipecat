@@ -86,6 +86,19 @@ class _ConnectionLimitReachedError(_RetryableError):
     pass
 
 
+class _EmptyCompletionError(_RetryableError):
+    """Response completed with no visible text and no function call.
+
+    Reasoning-capable models can occasionally spend their entire output
+    budget on an internal reasoning item and produce no message item at
+    all, even with reasoning effort disabled. When that happens nothing
+    reaches the user and no error event is sent by the server — retry
+    with the full context to give the model another chance.
+    """
+
+    pass
+
+
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
@@ -772,6 +785,24 @@ class OpenAIResponsesLLMService(
 
         return True
 
+    @staticmethod
+    def _response_output_has_text(response_output: list) -> bool:
+        """Check whether a response's output array contains visible message text.
+
+        Args:
+            response_output: Raw ``output`` array from a ``response.completed`` event.
+
+        Returns:
+            True if any message item in the output carries non-empty text.
+        """
+        for item in response_output:
+            if item.get("type") != "message":
+                continue
+            content = item.get("content") or []
+            if any(p.get("type") == "output_text" and p.get("text") for p in content):
+                return True
+        return False
+
     def _store_previous_response_state(
         self, response_id: str, full_input: list, response_output: list
     ):
@@ -920,8 +951,8 @@ class OpenAIResponsesLLMService(
         """Run inference over WebSocket with retry and previous_response_id.
 
         Tries once with the ``previous_response_id`` optimization.  On a
-        retriable error (cache miss, connection limit, connection drop),
-        clears state and retries once with the full context.  Transport-level
+        retriable error (cache miss, connection limit, connection drop, empty
+        completion), clears state and retries once with the full context.  Transport-level
         ``ConnectionClosed`` errors are handled transparently by
         ``_ws_send``/``_ws_recv`` (auto-reconnect → ``WebsocketReconnectedError``).
 
@@ -981,6 +1012,9 @@ class OpenAIResponsesLLMService(
             )
             await cleanup()
             await self._try_reconnect(report_error=self._report_error)
+        except _EmptyCompletionError as e:
+            logger.warning(f"{self}: {e} — retrying with full context ({len(full_input)} items)")
+            await cleanup()
         except WebsocketReconnectedError:
             # ConnectionClosed was handled by the base class — connection is
             # fresh, so any connection-local server state is gone.
@@ -1011,12 +1045,21 @@ class OpenAIResponsesLLMService(
         Raises:
             _PreviousResponseNotFoundError: Server couldn't find previous response.
             _ConnectionLimitReachedError: 60-minute connection limit reached.
+            _EmptyCompletionError: Response completed with no text output and no
+                function call.
             WebsocketReconnectedError: Connection was lost and auto-recovered.
             ConnectionClosed: Connection was lost and could not be recovered.
         """
         function_calls: dict[str, dict[str, str]] = {}
         current_arguments: dict[str, str] = {}
         reasoning_summary_open = False
+        text_delta_pushed = False
+        # Reasoning items are buffered and only persisted once the completion
+        # is known to be non-empty. Appending them eagerly would leave an
+        # orphaned reasoning item in the context when an empty completion is
+        # retried — and the API rejects reasoning items that aren't followed
+        # by the output they produced, breaking every subsequent turn.
+        pending_reasoning_items: list[tuple[str | None, list[dict], str | None]] = []
 
         while True:
             event = await self._ws_recv()
@@ -1029,6 +1072,7 @@ class OpenAIResponsesLLMService(
 
             if event_type == "response.output_text.delta":
                 await self.stop_ttfb_metrics()
+                text_delta_pushed = True
                 await self._push_llm_text(event.get("delta", ""))
 
             elif event_type == "response.reasoning_summary_text.delta":
@@ -1072,13 +1116,15 @@ class OpenAIResponsesLLMService(
                     if reasoning_summary_open:
                         await self.push_frame(LLMThoughtEndFrame())
                         reasoning_summary_open = False
-                    await self._append_reasoning_message(
-                        item.get("id"),
-                        [
-                            {"type": "summary_text", "text": s.get("text", "")}
-                            for s in (item.get("summary") or [])
-                        ],
-                        item.get("encrypted_content"),
+                    pending_reasoning_items.append(
+                        (
+                            item.get("id"),
+                            [
+                                {"type": "summary_text", "text": s.get("text", "")}
+                                for s in (item.get("summary") or [])
+                            ],
+                            item.get("encrypted_content"),
+                        )
                     )
 
             elif event_type == "response.completed":
@@ -1098,12 +1144,29 @@ class OpenAIResponsesLLMService(
 
                 self._full_model_name = response.get("model")
 
+                response_output = response.get("output") or []
+                if not (
+                    text_delta_pushed
+                    or function_calls
+                    or self._response_output_has_text(response_output)
+                ):
+                    raise _EmptyCompletionError(
+                        f"Response {response.get('id', '<unknown>')} completed with no "
+                        f"visible text and no function call (reasoning-only or empty turn)"
+                    )
+
+                # The completion produced real output, so it's safe to persist
+                # buffered reasoning items for round-tripping. Still before
+                # LLMFullResponseEndFrame, so they land ahead of the assistant
+                # message in the context.
+                for reasoning_id, summary, encrypted_content in pending_reasoning_items:
+                    await self._append_reasoning_message(reasoning_id, summary, encrypted_content)
+
                 # Store state for next call's previous_response_id optimization.
                 # Include the response output so the hash covers the assistant's
                 # reply — the server already knows it, so we won't resend it.
                 response_id = response.get("id")
                 if response_id:
-                    response_output = response.get("output") or []
                     self._store_previous_response_state(response_id, full_input, response_output)
 
                 break  # Response complete

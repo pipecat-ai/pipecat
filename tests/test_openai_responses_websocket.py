@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from pipecat.frames.frames import (
+    LLMContextFrame,
     LLMMessagesAppendFrame,
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
@@ -22,6 +23,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.responses.llm import (
     OpenAIResponsesLLMService,
+    _EmptyCompletionError,
     _model_supports_reasoning,
 )
 
@@ -391,7 +393,10 @@ class TestReceiveResponseEventsText:
         service._websocket = ws
 
         context = MagicMock(spec=LLMContext)
-        await service._receive_response_events(context, [])
+        # No text/function-call output was produced, so this now raises
+        # _EmptyCompletionError — but usage metrics are recorded before the raise.
+        with pytest.raises(_EmptyCompletionError):
+            await service._receive_response_events(context, [])
 
         tokens = service.start_llm_usage_metrics.call_args[0][0]
         assert tokens.prompt_tokens == 100
@@ -589,6 +594,108 @@ class TestReceiveResponseEventsErrors:
         assert "Internal server error" in service.push_error.call_args.kwargs["error_msg"]
 
 
+class TestReceiveResponseEventsEmptyCompletion:
+    """response.completed with no text and no function call should be retryable."""
+
+    @pytest.mark.asyncio
+    async def test_bare_empty_completion_raises(self):
+        service = _make_service()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+
+        ws = _ws_events(
+            {
+                "type": "response.completed",
+                "response": {
+                    "id": "resp_empty",
+                    "model": "gpt-5.4",
+                    "usage": {
+                        "input_tokens": 100,
+                        "output_tokens": 4,
+                        "total_tokens": 104,
+                        "input_tokens_details": {"cached_tokens": 0},
+                        "output_tokens_details": {"reasoning_tokens": 4},
+                    },
+                },
+            },
+        )
+        service._websocket = ws
+
+        context = MagicMock(spec=LLMContext)
+        with pytest.raises(_EmptyCompletionError):
+            await service._receive_response_events(context, [{"role": "user", "content": "hi"}])
+
+    @pytest.mark.asyncio
+    async def test_empty_completion_does_not_persist_reasoning_item(self):
+        """A reasoning-only empty completion must not append its reasoning item.
+
+        Persisting it would leave an orphaned reasoning item in the context
+        after the retry — the API rejects reasoning items not followed by the
+        output they produced, which would break every subsequent turn.
+        """
+        service = _make_service()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+        service.push_frame = AsyncMock()
+        adapter = MagicMock()
+        service.get_llm_adapter = MagicMock(return_value=adapter)
+
+        ws = _ws_events(
+            {
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "summary": [],
+                    "encrypted_content": "ENCRYPTED",
+                },
+            },
+            {
+                "type": "response.completed",
+                "response": {"id": "resp_empty", "model": "gpt-5.4", "usage": None},
+            },
+        )
+        service._websocket = ws
+
+        context = MagicMock(spec=LLMContext)
+        with pytest.raises(_EmptyCompletionError):
+            await service._receive_response_events(context, [])
+
+        pushed = [c.args[0] for c in service.push_frame.call_args_list]
+        assert not [f for f in pushed if isinstance(f, LLMMessagesAppendFrame)]
+        adapter.create_llm_specific_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_text_content_avoids_empty_error(self):
+        """A response whose output array has real text does not raise."""
+        service = _make_service()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+
+        ws = _ws_events(
+            {
+                "type": "response.completed",
+                "response": {
+                    "id": "resp_1",
+                    "model": "gpt-4.1",
+                    "output": [
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": "Hi there!"}],
+                        }
+                    ],
+                    "usage": None,
+                },
+            },
+        )
+        service._websocket = ws
+
+        context = MagicMock(spec=LLMContext)
+        # Should not raise.
+        await service._receive_response_events(context, [])
+
+
 class TestDrainCancelledResponse:
     @pytest.mark.asyncio
     async def test_drain_discards_events_until_terminal(self):
@@ -713,8 +820,6 @@ class TestConnectionLifecycle:
         context.tool_choice = None
         context.messages = [{"role": "user", "content": "hi"}]
 
-        from pipecat.frames.frames import LLMContextFrame
-
         with pytest.raises(asyncio.CancelledError):
             await service.process_frame(LLMContextFrame(context=context), FrameDirection.DOWNSTREAM)
 
@@ -732,6 +837,99 @@ class TestConnectionLifecycle:
 
         with pytest.raises(ConnectionError):
             await service._ensure_connected()
+
+
+# ---------------------------------------------------------------------------
+# _process_context — empty completion retry
+# ---------------------------------------------------------------------------
+
+
+class TestEmptyCompletionRetry:
+    def _mock_adapter(self, service, full_input):
+        adapter = MagicMock()
+        adapter.get_llm_invocation_params.return_value = {"input": full_input}
+        adapter.get_messages_for_logging.return_value = []
+        service.get_llm_adapter = MagicMock(return_value=adapter)
+        return adapter
+
+    @pytest.mark.asyncio
+    async def test_empty_first_attempt_retries_with_full_context(self):
+        service = _make_service()
+        service.start_ttfb_metrics = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+        service._push_llm_text = AsyncMock()
+
+        full_input = [{"role": "user", "content": "hi"}]
+        self._mock_adapter(service, full_input)
+
+        ws = _ws_events(
+            # First attempt: empty completion.
+            {
+                "type": "response.completed",
+                "response": {"id": "resp_empty", "model": "gpt-5.4", "usage": None},
+            },
+            # Second attempt (full context): a real reply.
+            {"type": "response.output_text.delta", "delta": "Hi there!"},
+            {
+                "type": "response.completed",
+                "response": {
+                    "id": "resp_full",
+                    "model": "gpt-5.4",
+                    "output": [
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": "Hi there!"}],
+                        }
+                    ],
+                    "usage": None,
+                },
+            },
+        )
+        service._websocket = ws
+
+        context = MagicMock(spec=LLMContext)
+        await service._process_context(context)
+
+        assert ws.send.call_count == 2
+        assert service._previous_response_id == "resp_full"
+
+    @pytest.mark.asyncio
+    async def test_both_attempts_empty_surfaces_via_push_error(self):
+        service = _make_service()
+        service.start_ttfb_metrics = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+        service.push_frame = AsyncMock()
+        service.push_error = AsyncMock()
+
+        full_input = [{"role": "user", "content": "hi"}]
+        self._mock_adapter(service, full_input)
+
+        ws = _ws_events(
+            {
+                "type": "response.completed",
+                "response": {"id": "resp_empty_1", "model": "gpt-5.4", "usage": None},
+            },
+            {
+                "type": "response.completed",
+                "response": {"id": "resp_empty_2", "model": "gpt-5.4", "usage": None},
+            },
+        )
+        service._websocket = ws
+
+        context = MagicMock(spec=LLMContext)
+        context.tools = None
+        context.tool_choice = None
+        context.messages = full_input
+        await service.process_frame(LLMContextFrame(context=context), FrameDirection.DOWNSTREAM)
+
+        assert ws.send.call_count == 2
+        service.push_error.assert_called_once()
+        assert isinstance(service.push_error.call_args.kwargs["exception"], _EmptyCompletionError)
 
 
 # ---------------------------------------------------------------------------
@@ -895,6 +1093,7 @@ class TestReceiveResponseEventsReasoning:
                     "encrypted_content": "ENCRYPTED",
                 },
             },
+            {"type": "response.output_text.delta", "delta": "Here's my answer."},
             {
                 "type": "response.completed",
                 "response": {"id": "resp_1", "model": "gpt-5.4-mini", "usage": None},
@@ -946,7 +1145,8 @@ class TestReceiveResponseEventsReasoning:
         service._websocket = ws
 
         context = MagicMock(spec=LLMContext)
-        await service._receive_response_events(context, [])
+        with pytest.raises(_EmptyCompletionError):
+            await service._receive_response_events(context, [])
 
         pushed = [c.args[0] for c in service.push_frame.call_args_list]
         assert not [f for f in pushed if isinstance(f, LLMMessagesAppendFrame)]
