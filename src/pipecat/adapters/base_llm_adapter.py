@@ -36,11 +36,9 @@ class LLMContextConversionError(Exception):
     Adapters that transform context messages into a provider-specific format
     raise this from their conversion routine, wrapping the underlying error
     (preserved as ``__cause__``). Its message identifies the failure as a
-    context-mapping problem, so a malformed message surfaces as its true cause
-    rather than as a misleading downstream API error (e.g. an "at least one
-    message is required" rejection produced by sending an empty message list).
-    The corresponding LLM service catches this and surfaces it in the
-    ``ErrorFrame`` it pushes upstream.
+    context-mapping problem and carries the underlying cause. The corresponding
+    LLM service catches this and surfaces it in the ``ErrorFrame`` it pushes
+    upstream.
     """
 
     def __init__(self, cause: Exception):

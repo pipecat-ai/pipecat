@@ -163,10 +163,9 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             if extracted is not None:
                 system = extracted
 
-        # Convert remaining messages to Anthropic format. A malformed message
-        # is wrapped and re-raised so it surfaces as its real cause instead of
-        # silently emptying the conversation (which would later trip a
-        # misleading "empty messages" API error).
+        # Convert remaining messages to Anthropic format. A conversion failure
+        # (e.g. a malformed message) is wrapped so it surfaces with its
+        # underlying cause.
         try:
             messages = [self._from_universal_context_message(m) for m in remaining]
         except Exception as e:

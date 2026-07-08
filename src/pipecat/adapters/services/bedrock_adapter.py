@@ -129,10 +129,9 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         if remaining and not isinstance(remaining[0], LLMSpecificMessage):
             system = self._extract_initial_system(remaining, system_instruction=system_instruction)
 
-        # Convert remaining messages to Bedrock format. A malformed message
-        # is wrapped and re-raised so it surfaces as its real cause instead of
-        # silently emptying the conversation (which would later trip a
-        # misleading "must start with a user message" API error).
+        # Convert remaining messages to Bedrock format. A conversion failure
+        # (e.g. a malformed message) is wrapped so it surfaces with its
+        # underlying cause.
         try:
             messages = [self._from_universal_context_message(m) for m in remaining]
         except Exception as e:

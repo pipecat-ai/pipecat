@@ -373,7 +373,7 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         self.adapter = GeminiLLMAdapter()
 
     def test_malformed_message_raises_conversion_error(self):
-        """Test that a malformed message raises LLMContextConversionError instead of dropping the conversation."""
+        """Test that a malformed message raises LLMContextConversionError, preserving the underlying cause."""
         # A data URL with no comma has no base64 payload, so the adapter's
         # url.split(",")[1] raises IndexError during conversion.
         malformed_message = {
@@ -754,7 +754,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.adapter = AnthropicLLMAdapter()
 
     def test_malformed_message_raises_conversion_error(self):
-        """Test that a malformed message raises LLMContextConversionError instead of dropping the conversation."""
+        """Test that a malformed message raises LLMContextConversionError, preserving the underlying cause."""
         # A data URL with no comma has no base64 payload, so the adapter's
         # url.split(",")[1] raises IndexError during conversion.
         malformed_message = {
@@ -1140,7 +1140,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         self.adapter = AWSBedrockLLMAdapter()
 
     def test_malformed_message_raises_conversion_error(self):
-        """Test that a malformed message raises LLMContextConversionError instead of dropping the conversation."""
+        """Test that a malformed message raises LLMContextConversionError, preserving the underlying cause."""
         # A data URL with no comma has no base64 payload, so the adapter's
         # url.split(",")[1] raises IndexError during conversion.
         malformed_message = {

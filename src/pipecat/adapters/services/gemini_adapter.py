@@ -264,8 +264,8 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         thought_signature_dicts = []
 
         # Process each message, converting to Google format as needed. A
-        # malformed message is wrapped and re-raised so it surfaces as its real
-        # cause instead of a bare, context-free error.
+        # conversion failure (e.g. a malformed message) is wrapped so it
+        # surfaces with its underlying cause.
         try:
             for message in remaining_messages:
                 # We have a Google-specific message; this may either be a
