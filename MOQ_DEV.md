@@ -18,110 +18,22 @@ React client resolves the local checkouts instead of the published
 versions. Nothing in this doc is meant to survive the packages'
 first published release; it should be deleted once both are on npm.
 
-## The short, (well, less short now) short version
+## The short, short version
 
-Assumes all four repos are cloned as siblings (see §0) and the branch
-names are all `vp-add-moq-transport`.
+Assumes all four repos are cloned as siblings (see §0). From this
+`pipecat/` directory:
 
-from ~/pipecat:
 ```bash
-export MOQ_BRANCH="${MOQ_BRANCH:-vp-add-moq-transport}"
-
-# 1. Pin every repo to $MOQ_BRANCH.
-for repo in . ../pipecat-client-web-transports ../pipecat-prebuilt ../voice-ui-kit; do
-  ( cd "$repo" && git fetch origin "$MOQ_BRANCH" && git checkout "$MOQ_BRANCH" )
-done
-
-# 2. Install Python + JS deps. voice-ui-kit declares `@pipecat-ai/moq-transport`
-#    as a regular dep, but it isn't on npm yet — inject a pnpm override pointing
-#    at the local checkout BEFORE `pnpm install`, otherwise the install 404s.
-uv sync --extra moq --extra daily --extra silero --extra deepgram \
-        --extra cartesia --extra openai --extra runner
-( cd ../pipecat-client-web-transports && npm install --ignore-scripts )
-( cd ../pipecat-prebuilt/client       && npm install )
-( cd ../voice-ui-kit \
-    && npm pkg set "pnpm.overrides[@pipecat-ai/moq-transport]=link:../pipecat-client-web-transports/transports/moq-transport" \
-    && pnpm install )
-
-# 3. Add the Vite dedupe shim to pipecat-prebuilt/client/vite.config.js.
-#    Without this, the linked voice-ui-kit ships its own React + client-js,
-#    Vite resolves two copies, and the browser throws "Invalid hook call".
-#    Deployed builds don't need this because the npm-published voice-ui-kit
-#    resolves everything through the consumer's node_modules.
-( cd ../pipecat-prebuilt && git apply <<'PATCH'
-diff --git a/client/vite.config.js b/client/vite.config.js
---- a/client/vite.config.js
-+++ b/client/vite.config.js
-@@ -5,6 +5,18 @@ export default defineConfig({
-   base: "./", //Use relative paths so it works at any mount path
-   plugins: [react()],
-   publicDir: "public",
-+  resolve: {
-+    // Local-dev only: force every layer through this client's
-+    // node_modules so the linked voice-ui-kit doesn't drag in a
-+    // second React or a second @pipecat-ai/client-js.
-+    dedupe: [
-+      "react",
-+      "react-dom",
-+      "react/jsx-runtime",
-+      "@pipecat-ai/client-js",
-+      "@pipecat-ai/client-react",
-+    ],
-+  },
-   server: {
-     allowedHosts: true, // Allows external connections like ngrok
-     proxy: {
-PATCH
-)
-
-# 4. Link chain: point pipecat-prebuilt at the local moq-transport +
-#    voice-ui-kit, and dedupe `@pipecat-ai/client-js` to a single physical
-#    copy so tsc doesn't see two `Transport` types during voice-ui-kit's
-#    build.
-TRANSPORTS_DIR="$(pwd)/../pipecat-client-web-transports"
-MOQ_PKG_DIR="$TRANSPORTS_DIR/transports/moq-transport"
-PREBUILT_CLIENT_DIR="$(pwd)/../pipecat-prebuilt/client"
-PREBUILT_CLIENT_JS_DIR="$PREBUILT_CLIENT_DIR/node_modules/@pipecat-ai/client-js"
-VUK_PKG_DIR="$(pwd)/../voice-ui-kit/package"
-VUK_CLIENT_JS_LINK="$VUK_PKG_DIR/node_modules/@pipecat-ai/client-js"
-
-# Register the unpublished packages + the canonical client-js globally.
-# --ignore-scripts avoids re-running each package's build/prepare here.
-( cd "$MOQ_PKG_DIR"           && npm link --ignore-scripts )
-( cd "$VUK_PKG_DIR"            && npm link --ignore-scripts )
-( cd "$PREBUILT_CLIENT_JS_DIR" && npm link --ignore-scripts )
-
-# Pull them into the prebuilt client and dedupe client-js into the
-# transports workspace (npm-managed, so `npm link` cooperates).
-# --ignore-scripts on the transports repo is critical: it's a workspace
-# root and a vanilla `npm link` would trigger every workspace's `prepare`
-# lifecycle and try to rebuild all the other transports.
-( cd "$PREBUILT_CLIENT_DIR"    && npm link --ignore-scripts @pipecat-ai/moq-transport @pipecat-ai/voice-ui-kit )
-( cd "$TRANSPORTS_DIR"         && npm link --ignore-scripts @pipecat-ai/client-js )
-
-# voice-ui-kit is a pnpm workspace; `npm link` errors against its
-# managed node_modules. Replace the client-js symlink manually instead.
-mkdir -p "$(dirname "$VUK_CLIENT_JS_LINK")"
-rm -rf "$VUK_CLIENT_JS_LINK"
-ln -s "$PREBUILT_CLIENT_JS_DIR" "$VUK_CLIENT_JS_LINK"
-
-# `npm install` inside transports/moq-transport drops a non-hoisted
-# client-js into moq-transport/node_modules. When tsc resolves
-# MoqTransport's `Transport` import while building voice-ui-kit — which
-# is a consumer of moq-transport via pnpm `link:` — it walks node_modules
-# from moq-transport's real location, finds this local copy FIRST, and
-# ends up resolving to a different physical path than voice-ui-kit's own
-# client-js. Result: two `Transport` types, protected `_options`
-# collision, dts build fails. Delete the local copy so resolution walks
-# up to the deduped root.
-rm -rf "$MOQ_PKG_DIR/node_modules/@pipecat-ai/client-js"
-
-# 5. Build the linked packages so their dist/ reflects local source.
-( cd "$MOQ_PKG_DIR"     && npm run build )
-( cd ../voice-ui-kit    && pnpm -F @pipecat-ai/voice-ui-kit build )
+export MOQ_BRANCH="${MOQ_BRANCH:-vp-add-moq-transport}"   # optional override
+./scripts/moq-dev-setup.sh
 ```
 
-You should now be able to start the bot and the prebuilt client — see §3.
+The script fetches `$MOQ_BRANCH` in every repo, installs deps, injects
+the Vite dedupe + pnpm override shims, wires the `npm link` chain, and
+builds the linked packages. Set `SKIP_CHECKOUT=1` to skip the branch
+fetch/checkout on re-runs.
+
+Once it finishes, jump to §3 to start the bot and the prebuilt client.
 
 ## 0. Layout
 
@@ -146,14 +58,16 @@ All four repos live on the same MoQ development branch — currently
   globally instead: `npm install -g --force pnpm@10.14.0`)
 - `uv` for the Python side
 
-## 2. What the snippet is doing
+## 2. What the setup script does
 
-The block in "The short, short version" is meant to be pasted into a
-terminal sitting in the pipecat repo root. Here's what each step does:
+`scripts/moq-dev-setup.sh` runs five steps in order. Everything below is
+just context for when a step misbehaves — you shouldn't need to run any
+of it by hand.
 
-**Step 1 — check out the MoQ branch.** All four repos need to be on the
-same branch (`$MOQ_BRANCH`, default `vp-add-moq-transport`). Re-run this
-any time you suspect the branches have drifted.
+**Step 1 — check out the MoQ branch.** All four repos are pinned to
+`$MOQ_BRANCH` (default `vp-add-moq-transport`). Pass `SKIP_CHECKOUT=1`
+to skip this step on re-runs when you're iterating without touching
+branches.
 
 **Step 2 — install deps.** The Python extras cover the pipeline in
 `examples/transports/transports-moq.py`: `silero` for VAD, `deepgram`
@@ -274,16 +188,17 @@ transcript, mic device picker, SessionInfo showing "MoQ".
   cleanup is needed.
 - **Re-ran `pnpm install` in voice-ui-kit?** pnpm restores its own
   symlink for `@pipecat-ai/client-js`, undoing the dedupe. Re-run
-  step 4 of the setup snippet before the next `voice-ui-kit` build.
+  `./scripts/moq-dev-setup.sh` before the next `voice-ui-kit` build
+  (safe to re-run — the vite shim step no-ops when already applied).
 
 ## 5. Troubleshooting
 
 | Symptom | Likely cause |
 | --- | --- |
-| Browser console: `Failed to load transport "moq"` | moq-transport isn't linked into prebuilt. Re-run step 4 of the setup snippet. |
+| Browser console: `Failed to load transport "moq"` | moq-transport isn't linked into prebuilt. Re-run step 4 of the setup script. |
 | No **MoQ** entry in the transport dropdown | You're at `http://localhost:7860/client/`, which is the published `pipecat-ai-prebuilt` wheel served by the pipecat runner — it predates our MoQ work. Open the Vite dev server URL instead (usually `http://localhost:5173`); that's what `npm run dev` serves with your local edits. |
-| Vite URL is a blank page, console says `Invalid hook call` / `Cannot read properties of null (reading 'useEffect')` | Two React instances. The linked voice-ui-kit ships its own pnpm-locked React and prebuilt has its own; hooks break across the boundary. Fix is the Vite `resolve.dedupe` block from step 3 of the setup snippet — re-run that step. |
-| `Property '_options' is protected` during voice-ui-kit build | Two copies of `@pipecat-ai/client-js` (1.8.x in voice-ui-kit, 1.10.x hoisted in pipecat-client-web-transports). Re-run steps 4–5 of the setup snippet. If you re-ran `pnpm install` in voice-ui-kit after the setup, run step 4 again — pnpm undoes the dedupe symlink. |
+| Vite URL is a blank page, console says `Invalid hook call` / `Cannot read properties of null (reading 'useEffect')` | Two React instances. The linked voice-ui-kit ships its own pnpm-locked React and prebuilt has its own; hooks break across the boundary. Fix is the Vite `resolve.dedupe` block from step 3 of the setup script — re-run that step. |
+| `Property '_options' is protected` during voice-ui-kit build | Two copies of `@pipecat-ai/client-js` (1.8.x in voice-ui-kit, 1.10.x hoisted in pipecat-client-web-transports). Re-run steps 4–5 of the setup script. If you re-ran `pnpm install` in voice-ui-kit after the setup, run step 4 again — pnpm undoes the dedupe symlink. |
 | `npm install` in pipecat-client-web-transports fails with `@parcel/core: Failed to resolve '@pipecat-ai/client-js' from './lib/media-mgmt/mediaManager.ts'` | The workspace's `prepare` scripts try to build every transport, and `small-webrtc-transport` is broken on this branch independently. Add `--ignore-scripts` to the install command (per the snippet). We only need `moq-transport`'s build, and step 5 does that explicitly. |
 | `git apply` in step 3 fails with `patch does not apply` | The vite.config.js in `pipecat-prebuilt/client` has drifted from what the patch expects. Either update `$MOQ_BRANCH` if it lags behind, or apply the `resolve.dedupe` block by hand. |
 | Browser: "MoqTransport requires `relayUrl`" | `/start` didn't return the `moq` block. Bot probably isn't running with `-t moq`. |
@@ -296,7 +211,7 @@ transcript, mic device picker, SessionInfo showing "MoQ".
 
 ## 6. What the link chain actually does
 
-For when something breaks and the setup snippet's output isn't enough.
+For when something breaks and the setup script's output isn't enough.
 
 ```
 pipecat-prebuilt/client/node_modules/@pipecat-ai/
