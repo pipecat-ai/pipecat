@@ -1,0 +1,48 @@
+name: gemini_vad_max_speech_cap
+
+# Audio modality. Pins down that a max-user-speech cap CANNOT force the turn
+# to the bot while Gemini Live's SERVER VAD drives the conversation. The bot
+# under test (realtime-gemini-live-supplemental-vad-max-speech.py) arms a 6s
+# cap and force-closes the user turn at the aggregator; today that never
+# reaches Gemini (activity_end is only sent when server VAD is disabled), so
+# the bot stays quiet until the monologue audio actually ends. This scenario
+# asserts that current behavior, so it PASSES today. If it ever FAILS (an
+# llm_started inside the 15s window), the service gained a turn-end lever in
+# server-VAD mode: update the bot's docstring, the Gemini Live docs Notes
+# section, and support guidance (T-2384).
+#
+# Timing discriminator: the monologue synthesizes to ~18s of audio. Cap fires
+# at 6s, so a working cap would start inference by ~8-10s from the send;
+# without a lever, Gemini's own response can only come after the clip ends
+# (~19s+). The 12s window sits between those with a few seconds of margin on
+# each side (measured: natural response arrives ~15s on the shorter, 4-line
+# version of this monologue, so do not shrink the text).
+
+user: !include user_audio.yaml
+
+judge: !include judge_audio.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, or an offer to help)"
+
+  # One long run-on turn with no natural stopping point. The cap fires at 6s
+  # and force-closes the turn on the Pipecat side; the assertion is that this
+  # does NOT reach Gemini: no inference starts inside the 15s window. The bot
+  # then answers normally once the audio actually ends, proving the forced
+  # stop didn't wedge the session either.
+  - user: >-
+      So I was thinking about my whole weekend and honestly there is just so much
+      going on that I am not even sure where to begin but let me try to walk you
+      through all of it slowly because it really has been such a lot lately and I
+      keep meaning to sit down and organize everything but I never quite get to it
+      because every single day something new comes up and the list just keeps
+      growing and growing no matter what I do about it
+    expect:
+      - event: llm_started
+        absent: true
+        within_ms: 12000
+      - event: response
+        eval: "the bot speaks up and responds in some way (any acknowledgement of the user's rambling update counts)"

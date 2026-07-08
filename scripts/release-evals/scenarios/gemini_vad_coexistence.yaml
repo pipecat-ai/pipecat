@@ -1,0 +1,58 @@
+name: gemini_vad_coexistence
+
+# Audio modality. Tests that Gemini Live's server-driven turns coexist with a
+# supplemental local Silero VAD in the same pipeline (the RTVI case). The
+# historical failure modes when mixing the two (see support thread T-2384):
+# a user turn answered twice, or the turn after a server-side turn decision
+# getting stalled or dropped. So each user turn asserts three things:
+# the local VAD actually fired (proving the mix is live, not silently off),
+# exactly one bot response arrived, and the follow-up turn still works.
+
+user: !include user_audio.yaml
+
+judge: !include judge_audio.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, or an offer to help)"
+
+  # Turn 1: a normal question. The local VAD must emit its turn signal, the
+  # bot must answer, and it must answer exactly once (a second response within
+  # the quiet window means the two turn signals each triggered an inference).
+  #
+  # We anchor on user_stopped_speaking rather than user_started_speaking: the
+  # supplemental VAD's turn start also raises an interruption, and the harness
+  # discards queued events on interruption, which can eat the started event.
+  - user: >-
+      What is the capital of France?
+    expect:
+      - event: user_stopped_speaking
+      # Judge the LLM text, not the local re-transcription of the bot's audio:
+      # this scenario tests turn management, and the transcriber routinely
+      # mangles proper nouns ("Paris" -> "Karis"), which is not what's under
+      # test. The bot still speaks; the absent check below is audio-level.
+      - event: llm_response
+        eval: "the answer says Paris is the capital of France"
+      # Consume the bot's one spoken response, then assert no second one.
+      - event: response
+      - event: response
+        absent: true
+        within_ms: 15000
+
+  # Turn 2: the turn AFTER a server-decided turn end. If the supplemental VAD
+  # confused turn bookkeeping, this utterance never opens a Gemini activity
+  # window and the bot stays silent (the "next turn eaten" failure), or the
+  # answer is doubled.
+  - user: >-
+      Thanks! And what is the capital of Japan?
+    expect:
+      - event: user_stopped_speaking
+      - event: llm_response
+        eval: "the answer says Tokyo is the capital of Japan"
+      # Consume the bot's one spoken response, then assert no second one.
+      - event: response
+      - event: response
+        absent: true
+        within_ms: 15000

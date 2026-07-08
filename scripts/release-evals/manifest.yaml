@@ -301,3 +301,18 @@ suite:
   # three API keys must be set.
   - bot: flows/llm_switching.py
     scenarios: [llm_switching]
+
+  #
+  # Realtime: speech-to-speech services (examples/realtime/). Audio-mode
+  # scenarios; the service's own turn detection is part of what's under test.
+  #
+  # Gemini Live server-driven turns + supplemental local Silero VAD (the RTVI
+  # mix). Asserts one response per turn and no stalled/dropped follow-up turn.
+  - bot: realtime/realtime-gemini-live-supplemental-vad.py
+    scenarios: [gemini_vad_coexistence]
+  # Negative-behavior pin: a max-user-speech cap cannot force a turn end while
+  # Gemini's server VAD drives (activity_end is only sent with server VAD
+  # disabled). The scenario asserts that, so it passes today; if it FAILS, the
+  # service gained a turn-end lever. See the bot's docstring and T-2384.
+  - bot: realtime/realtime-gemini-live-supplemental-vad-max-speech.py
+    scenarios: [gemini_vad_max_speech_cap]
