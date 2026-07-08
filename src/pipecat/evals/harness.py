@@ -1142,6 +1142,9 @@ class EvalSession:
         deadline = anchor + (budget_ms / 1000.0)
         self._last_match_text = ""
 
+        if expectation.absent:
+            return await self._match_absent(expectation, deadline, budget_ms, turn_idx, exp_idx)
+
         aggregates = expectation.event in ("response", "llm_response", "tts_response") and (
             expectation.text_contains is not None or expectation.eval is not None
         )
@@ -1207,6 +1210,38 @@ class EvalSession:
             # sentences don't run together (e.g. "...that. The weather...").
             aggregate += " "
             last_reason = reason
+
+    async def _match_absent(
+        self,
+        expectation: EvalExpectation,
+        deadline: float,
+        budget_ms: int,
+        turn_idx: int,
+        exp_idx: int,
+    ) -> EvalAssertionFailure | None:
+        """Inverted match: pass when NO event of this type arrives before the deadline.
+
+        The budget is the whole point here — the expectation holds the turn open
+        for ``within_ms`` and succeeds only if the event type stays absent for
+        that entire window. An arriving event fails immediately with its content
+        in the reason, so a duplicate-output regression shows what the bot said.
+        """
+        self._debug(f"match: expecting NO {expectation.event!r} for {budget_ms}ms")
+        try:
+            event = await self._next_matching_event(expectation.event, deadline)
+        except TimeoutError:
+            # The quiet window held: absence confirmed.
+            self._last_match_text = f"no {expectation.event!r} for {budget_ms}ms"
+            return None
+        return EvalAssertionFailure(
+            turn_index=turn_idx,
+            expectation_index=exp_idx,
+            event_name=expectation.event,
+            reason=(
+                f"expected no {expectation.event!r} within {budget_ms}ms, "
+                f"but one arrived: {self._match_summary(event)}"
+            ),
+        )
 
     async def _next_matching_event(self, event_type: str, deadline: float) -> dict:
         """Pop events from the queue until one of ``event_type`` arrives.

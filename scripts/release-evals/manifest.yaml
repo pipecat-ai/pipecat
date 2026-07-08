@@ -290,7 +290,7 @@ suite:
   - bot: flows/food_ordering_advanced_functionschema.py
     scenarios: [food_ordering_sushi]
   - bot: flows/multi_worker_handoff.py
-    scenarios: [multi_worker_handoff]
+    scenarios: [multi_worker_handoff, multi_worker_handoff_no_duplicate]
   - bot: flows/patient_intake.py
     scenarios: [patient_intake]
   - bot: flows/restaurant_reservation.py
@@ -301,3 +301,12 @@ suite:
   # three API keys must be set.
   - bot: flows/llm_switching.py
     scenarios: [llm_switching]
+
+  #
+  # Realtime: speech-to-speech services (examples/realtime/). Audio-mode
+  # scenarios; the service's own turn detection is part of what's under test.
+  #
+  # Gemini Live server-driven turns + supplemental local Silero VAD (the RTVI
+  # mix). Asserts one response per turn and no stalled/dropped follow-up turn.
+  - bot: realtime/realtime-gemini-live-supplemental-vad.py
+    scenarios: [gemini_vad_coexistence]

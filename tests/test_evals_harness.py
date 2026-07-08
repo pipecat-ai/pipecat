@@ -202,6 +202,42 @@ class _FakeJudge:
         return JudgeVerdict(verdict=v, reason=f"({v})", raw_response="")
 
 
+class TestMatchAbsent(unittest.IsolatedAsyncioTestCase):
+    """An ``absent: true`` expectation passes on a quiet window, fails on arrival."""
+
+    async def test_absent_passes_when_no_event_arrives(self):
+        import time
+
+        s = _session()
+        expectation = EvalExpectation(event="llm_response", absent=True)
+        failure = await s._match_and_verify(expectation, time.monotonic(), 100, 0, 0)
+        self.assertIsNone(failure)
+        self.assertIn("no 'llm_response'", s._last_match_text)
+
+    async def test_absent_fails_when_event_arrives(self):
+        import time
+
+        s = _session()
+        s._queue.put_nowait({"type": "llm_response", "text": "I repeat myself"})
+        expectation = EvalExpectation(event="llm_response", absent=True)
+        failure = await s._match_and_verify(expectation, time.monotonic(), 100, 3, 2)
+        self.assertIsNotNone(failure)
+        self.assertEqual(failure.turn_index, 3)
+        self.assertEqual(failure.expectation_index, 2)
+        self.assertIn("I repeat myself", failure.reason)
+
+    async def test_absent_ignores_other_event_types(self):
+        import time
+
+        s = _session()
+        # Unrelated events in the window must not trip the absence check.
+        s._queue.put_nowait({"type": "user_stopped_speaking"})
+        s._queue.put_nowait({"type": "tts_response", "text": "spoken"})
+        expectation = EvalExpectation(event="llm_response", absent=True)
+        failure = await s._match_and_verify(expectation, time.monotonic(), 100, 0, 0)
+        self.assertIsNone(failure)
+
+
 class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
     """The pass/fail/continue decision over accumulated response text."""
 
