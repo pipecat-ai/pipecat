@@ -560,6 +560,16 @@ class ServiceRegistry:
             settings_params=["model", "system_instruction"],
         ),
         ServiceDefinition(
+            value="minimax_llm",
+            label="MiniMax",
+            package="pipecat-ai",
+            class_name=["MiniMaxLLMService"],
+            env_prefix="MINIMAX",
+            include_params=["api_key"],
+            settings_params=["model", "system_instruction"],
+            param_defaults={"model": "MiniMax-M3"},
+        ),
+        ServiceDefinition(
             value="mistral_llm",
             label="Mistral",
             package="pipecat-ai[mistral]",
