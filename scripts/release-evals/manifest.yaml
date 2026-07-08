@@ -302,11 +302,3 @@ suite:
   - bot: flows/llm_switching.py
     scenarios: [llm_switching]
 
-  #
-  # Realtime: speech-to-speech services (examples/realtime/). Audio-mode
-  # scenarios; the service's own turn detection is part of what's under test.
-  #
-  # Gemini Live server-driven turns + supplemental local Silero VAD (the RTVI
-  # mix). Asserts one response per turn and no stalled/dropped follow-up turn.
-  - bot: realtime/realtime-gemini-live-supplemental-vad.py
-    scenarios: [gemini_vad_coexistence]

@@ -682,7 +682,7 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         # An absent expectation matches on event type only: content and call
         # checks describe an event that must arrive, which contradicts absence.
         conflicting = [
-            key for key in ("text_contains", "eval", "calls", "name", "args") if e.get(key)
+            key for key in ("text_contains", "eval", "calls", "name", "args") if key in e
         ]
         if conflicting:
             raise ValueError(
