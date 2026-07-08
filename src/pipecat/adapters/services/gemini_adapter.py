@@ -14,7 +14,7 @@ from typing import Any, TypedDict, cast
 from loguru import logger
 from openai import NotGiven
 
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
@@ -263,40 +263,45 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         tool_call_id_to_name_mapping = {}
         thought_signature_dicts = []
 
-        # Process each message, converting to Google format as needed
-        for message in remaining_messages:
-            # We have a Google-specific message; this may either be a
-            # thought-signature-containing message that we need to handle in a
-            # special way, or a message already in Google format that we can
-            # use directly
-            if isinstance(message, LLMSpecificMessage):
-                if (
-                    isinstance(message.message, dict)
-                    and message.message.get("type") == "thought_signature"
-                ):
-                    thought_signature_dicts.append(message.message)
+        # Process each message, converting to Google format as needed. A
+        # malformed message is wrapped and re-raised so it surfaces as its real
+        # cause instead of a bare, context-free error.
+        try:
+            for message in remaining_messages:
+                # We have a Google-specific message; this may either be a
+                # thought-signature-containing message that we need to handle in a
+                # special way, or a message already in Google format that we can
+                # use directly
+                if isinstance(message, LLMSpecificMessage):
+                    if (
+                        isinstance(message.message, dict)
+                        and message.message.get("type") == "thought_signature"
+                    ):
+                        thought_signature_dicts.append(message.message)
+                        continue
+
+                    # Fall back to assuming that the message is already in Google
+                    # format
+                    messages.append(message.message)
                     continue
 
-                # Fall back to assuming that the message is already in Google
-                # format
-                messages.append(message.message)
-                continue
+                # We have a standard universal context message; convert it to
+                # Google format
+                result = self._from_standard_message(
+                    message,
+                    params=self.MessageConversionParams(
+                        tool_call_id_to_name_mapping=tool_call_id_to_name_mapping,
+                    ),
+                )
 
-            # We have a standard universal context message; convert it to
-            # Google format
-            result = self._from_standard_message(
-                message,
-                params=self.MessageConversionParams(
-                    tool_call_id_to_name_mapping=tool_call_id_to_name_mapping,
-                ),
-            )
+                if result.content:
+                    messages.append(result.content)
 
-            if result.content:
-                messages.append(result.content)
-
-            # Merge tool call ID to name mapping
-            if result.tool_call_id_to_name_mapping:
-                tool_call_id_to_name_mapping.update(result.tool_call_id_to_name_mapping)
+                # Merge tool call ID to name mapping
+                if result.tool_call_id_to_name_mapping:
+                    tool_call_id_to_name_mapping.update(result.tool_call_id_to_name_mapping)
+        except Exception as e:
+            raise LLMContextConversionError(e) from e
 
         # Apply thought signatures to the corresponding messages
         self._apply_thought_signatures_to_messages(thought_signature_dicts, messages)

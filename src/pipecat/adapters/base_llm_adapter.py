@@ -30,6 +30,28 @@ from pipecat.processors.aggregators.llm_context import (
 TLLMInvocationParams = TypeVar("TLLMInvocationParams", bound=Mapping[str, Any])
 
 
+class LLMContextConversionError(Exception):
+    """Raised when converting a universal ``LLMContext`` to a provider's message format fails.
+
+    Adapters that transform context messages into a provider-specific format
+    raise this from their conversion routine, wrapping the underlying error
+    (preserved as ``__cause__``). Its message identifies the failure as a
+    context-mapping problem, so a malformed message surfaces as its true cause
+    rather than as a misleading downstream API error (e.g. an "at least one
+    message is required" rejection produced by sending an empty message list).
+    The corresponding LLM service catches this and surfaces it in the
+    ``ErrorFrame`` it pushes upstream.
+    """
+
+    def __init__(self, cause: Exception):
+        """Initialize the error.
+
+        Args:
+            cause: The underlying exception raised during message conversion.
+        """
+        super().__init__(f"Error mapping context messages to provider format: {cause}")
+
+
 class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
     """Abstract base class for LLM provider adapters.
 

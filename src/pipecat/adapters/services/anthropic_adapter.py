@@ -16,7 +16,7 @@ from anthropic.types.message_param import MessageParam
 from anthropic.types.tool_union_param import ToolUnionParam
 from loguru import logger
 
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
@@ -163,12 +163,14 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             if extracted is not None:
                 system = extracted
 
-        # Convert remaining messages to Anthropic format
-        messages = []
+        # Convert remaining messages to Anthropic format. A malformed message
+        # is wrapped and re-raised so it surfaces as its real cause instead of
+        # silently emptying the conversation (which would later trip a
+        # misleading "empty messages" API error).
         try:
             messages = [self._from_universal_context_message(m) for m in remaining]
         except Exception as e:
-            logger.error(f"Error mapping messages: {e}")
+            raise LLMContextConversionError(e) from e
 
         # Convert any subsequent "system"/"developer"-role messages to "user"-role
         # messages, as Anthropic doesn't support system or developer input messages.
