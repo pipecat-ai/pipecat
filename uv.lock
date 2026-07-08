@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -3775,6 +3775,31 @@ wheels = [
 ]
 
 [[package]]
+name = "moq-ffi"
+version = "0.2.27"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/13/99/6a48d9dd7add52793bf9d4bc6d3656d6b4c5fb4bb7fd2200f6388fd4f461/moq_ffi-0.2.27.tar.gz", hash = "sha256:b89cb9b8fbccc4e2f84a87751ec06b87412fdc38a133d7f644402ea1544a4120", size = 1781014, upload-time = "2026-07-05T22:21:03.177Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/81/86/7ed63179bab982b7c7a1e95a4c903c296ad8d28fe26aee0a4029f2a8160f/moq_ffi-0.2.27-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:8efb7f7b5646cc850c3ec9819ce9b32f725d18e828a8300f30d1257f920a104b", size = 6768032, upload-time = "2026-07-05T22:20:53.606Z" },
+    { url = "https://files.pythonhosted.org/packages/a5/dc/7dc804c250d093e394a5f4b71c7f972909ce908a44f0120d1e3c1dd804d5/moq_ffi-0.2.27-py3-none-macosx_11_0_arm64.whl", hash = "sha256:7fc5cd32f9b792d8a41d2b71ac43667ef55fc151cffd60969786432b9da7629c", size = 6335358, upload-time = "2026-07-05T22:20:55.677Z" },
+    { url = "https://files.pythonhosted.org/packages/62/47/0f0f021b62a82df2874765d8c75fad9ddf01a9318fc962ae786ae865fb3d/moq_ffi-0.2.27-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:caff14ea6af41733085eb0efb35d1be739b05d547db3cfa4262cca54297c6c7c", size = 7190629, upload-time = "2026-07-05T22:20:57.565Z" },
+    { url = "https://files.pythonhosted.org/packages/ce/a2/d6b2059617a381f1fcd833236675c57851df80897f9acb4646106069634d/moq_ffi-0.2.27-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:b2417de29b33274f0b5576b2ef66f4f4ffb58653ba02e65a6674f8bd5c4278b9", size = 7231793, upload-time = "2026-07-05T22:20:59.504Z" },
+    { url = "https://files.pythonhosted.org/packages/22/4d/09398219bc953c52391127bcb0633db7049535cfb13ca2242b7f3f8741bb/moq_ffi-0.2.27-py3-none-win_amd64.whl", hash = "sha256:5d227bf2a8575d42361f8f7cdcf6f0c4e8be76cd04247c98023cf8e799983fb6", size = 5462365, upload-time = "2026-07-05T22:21:01.465Z" },
+]
+
+[[package]]
+name = "moq-rs"
+version = "0.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "moq-ffi" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2f/27/5c0c27157637ed008ea2e4775e18910a6e47dfa25ad959ff92010d2b08eb/moq_rs-0.3.1.tar.gz", hash = "sha256:762d09aa0d505d72999d6f129b761bd5c761dd34c4d43586e97cc13370020809", size = 16329, upload-time = "2026-06-23T16:57:25.013Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cc/46/81a9264bcbd9cb6a909fcedc65557a38d4d9e321100512c0662052b7a0e3/moq_rs-0.3.1-py3-none-any.whl", hash = "sha256:e17281a00513c4bd9a870afaca0b478ae773aa19e6f8d7aa9fb81577d3e5563d", size = 13047, upload-time = "2026-06-23T16:57:24.054Z" },
+]
+
+[[package]]
 name = "more-itertools"
 version = "11.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4901,6 +4926,10 @@ moondream = [
 moonshine = [
     { name = "moonshine-voice" },
 ]
+moq = [
+    { name = "cryptography" },
+    { name = "moq-rs" },
+]
 nvidia = [
     { name = "nvidia-riva-client" },
     { name = "protobuf" },
@@ -5017,6 +5046,7 @@ requires-dist = [
     { name = "azure-cognitiveservices-speech", marker = "extra == 'azure'", specifier = ">=1.47.0,<2" },
     { name = "camb-sdk", marker = "extra == 'camb'", specifier = ">=1.5.4,<2" },
     { name = "coremltools", marker = "extra == 'local-smart-turn'", specifier = ">=8.0" },
+    { name = "cryptography", marker = "extra == 'moq'", specifier = ">=45.0.0" },
     { name = "daily-python", marker = "extra == 'daily'", specifier = ">=0.29.0,<1" },
     { name = "deepgram-sdk", marker = "extra == 'deepgram'", specifier = ">=6.1.1,<8" },
     { name = "docstring-parser", specifier = ">=0.16,<1" },
@@ -5045,6 +5075,7 @@ requires-dist = [
     { name = "mistralai", marker = "extra == 'mistral'", specifier = ">=2.0.0,<3" },
     { name = "mlx-whisper", marker = "extra == 'mlx-whisper'", specifier = "~=0.4.2" },
     { name = "moonshine-voice", marker = "extra == 'moonshine'", specifier = ">=0.0.62" },
+    { name = "moq-rs", marker = "extra == 'moq'", specifier = ">=0.2.13,<1.0.0" },
     { name = "nltk", specifier = ">=3.9.4,<4" },
     { name = "num2words", specifier = ">=0.5.14" },
     { name = "numba", specifier = ">=0.61.2,<1" },
@@ -5107,7 +5138,7 @@ requires-dist = [
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1,<1" },
     { name = "websockets", specifier = ">=13.1" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "camb", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "evals", "fal", "fireworks", "fish", "funasr", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "koala", "kokoro", "langchain", "lemonslice", "livekit", "lmnt", "local", "local-smart-turn", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "moonshine", "nebius", "neuphonic", "novita", "nvidia", "openai", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "qwen", "redis", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "vonage-video-connector", "webrtc", "webrtc-video", "websocket", "whisper", "xai", "cli"]
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "camb", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "evals", "fal", "fireworks", "fish", "funasr", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "koala", "kokoro", "langchain", "lemonslice", "livekit", "lmnt", "local", "local-smart-turn", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "moonshine", "moq", "nebius", "neuphonic", "novita", "nvidia", "openai", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "qwen", "redis", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "vonage-video-connector", "webrtc", "webrtc-video", "websocket", "whisper", "xai", "cli"]
 
 [package.metadata.requires-dev]
 dev = [
