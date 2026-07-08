@@ -129,12 +129,14 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         if remaining and not isinstance(remaining[0], LLMSpecificMessage):
             system = self._extract_initial_system(remaining, system_instruction=system_instruction)
 
-        # Convert remaining messages to Bedrock format
+        # Convert remaining messages to Bedrock format, skipping any message
+        # that fails to convert so it doesn't discard the rest of the history.
         messages = []
-        try:
-            messages = [self._from_universal_context_message(m) for m in remaining]
-        except Exception as e:
-            logger.error(f"Error mapping messages: {e}")
+        for m in remaining:
+            try:
+                messages.append(self._from_universal_context_message(m))
+            except Exception as e:
+                logger.warning(f"Skipping message that failed to convert: {e}")
 
         # Convert any subsequent "system"/"developer"-role messages to "user"-role
         # messages, as AWS Bedrock doesn't support system or developer input messages.

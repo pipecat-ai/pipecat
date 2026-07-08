@@ -163,12 +163,14 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             if extracted is not None:
                 system = extracted
 
-        # Convert remaining messages to Anthropic format
+        # Convert remaining messages to Anthropic format, skipping any message
+        # that fails to convert so it doesn't discard the rest of the history.
         messages = []
-        try:
-            messages = [self._from_universal_context_message(m) for m in remaining]
-        except Exception as e:
-            logger.error(f"Error mapping messages: {e}")
+        for m in remaining:
+            try:
+                messages.append(self._from_universal_context_message(m))
+            except Exception as e:
+                logger.warning(f"Skipping message that failed to convert: {e}")
 
         # Convert any subsequent "system"/"developer"-role messages to "user"-role
         # messages, as Anthropic doesn't support system or developer input messages.
