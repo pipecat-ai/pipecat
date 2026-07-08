@@ -668,7 +668,19 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         # tool, so the normal path is untouched. The recovered call is fed into
         # the same variables the block below consumes, reusing all of its
         # tested defer/run logic.
-        if not function_name and content_buffer:
+        #
+        # Respect the per-turn loop guard: once it has tripped, get_chat_completions
+        # strips `tools` from the request to force a plain-text answer — but a model
+        # like Gemma keeps LEAKING the call as text regardless, and recovering it
+        # would re-execute a call that keeps getting rejected (missing-slot /
+        # waiting-for-user / stray transition), spinning the exact infinite loop the
+        # guard exists to stop. So when the guard is active, do NOT recover: let the
+        # leaked syntax stay plain text (stripped from speech downstream) and end the
+        # turn on the model's words.
+        loop_guard_tripped = (
+            self._tool_call_rounds_this_turn >= self._max_tool_call_rounds_per_turn
+        )
+        if not function_name and content_buffer and not loop_guard_tripped:
             recovered = _recover_leaked_tool_call(
                 content_buffer, [n for n in self._functions.keys() if n]
             )
@@ -748,6 +760,19 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             await self.push_frame(
                 FunctionCallsFromLLMInfoFrame(function_calls=function_calls),
                 direction=FrameDirection.DOWNSTREAM,
+            )
+
+            # Reliable co-emission signal for downstream consumers (the workflow
+            # engine's destination-generation suppression). Reading it here — the
+            # moment we know whether THIS generation produced spoken prose — is
+            # race-free, unlike inferring it from the aggregated assistant message
+            # in the shared context, which on a real (WebRTC) call is often not yet
+            # committed when the deferred transition handler runs (→ the engine
+            # sees "silent", lets the destination node generate, and the caller
+            # hears TWO replies for one turn). True only for real, non-whitespace
+            # prose, matching the defer condition below.
+            self._last_generation_had_text = bool(
+                text_generated_signal and content_buffer.strip()
             )
 
             # If text was generated, defer function calls until after TTS plays
