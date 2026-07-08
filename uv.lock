@@ -4960,6 +4960,7 @@ vonage-video-connector = [
 ]
 webrtc = [
     { name = "aiortc" },
+    { name = "opencv-python-headless" },
 ]
 webrtc-video = [
     { name = "aiortc" },
@@ -5051,7 +5052,7 @@ requires-dist = [
     { name = "nvidia-riva-client", marker = "extra == 'nvidia'", specifier = ">=2.25.1,<3" },
     { name = "onnxruntime", specifier = "~=1.24.3" },
     { name = "openai", specifier = ">=1.74.0,<3" },
-    { name = "opencv-python-headless", marker = "extra == 'webrtc-video'", specifier = ">=4.11.0.86,<5" },
+    { name = "opencv-python-headless", marker = "extra == 'webrtc'", specifier = ">=4.11.0.86,<5" },
     { name = "opentelemetry-api", marker = "extra == 'tracing'", specifier = ">=1.33.0,<2" },
     { name = "opentelemetry-instrumentation", marker = "extra == 'tracing'", specifier = ">=0.54b0,<1" },
     { name = "opentelemetry-sdk", marker = "extra == 'tracing'", specifier = ">=1.33.0,<2" },
