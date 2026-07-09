@@ -525,9 +525,20 @@ class RTVIProcessor(FrameProcessor):
         """
         if not about:
             about = {"library": "pipecat-ai", "library_version": f"{pipecat_version()}"}
+        # Negotiate the protocol version we advertise back to the client.
+        # The server observer serves v1-formatted bot-output events to
+        # 1.x clients (see `_is_legacy_client`), so advertising the
+        # server's own 2.0.0 PROTOCOL_VERSION here would push the client's
+        # aggregator onto its v2 path (server-side speech progress) while
+        # the wire actually carries v1 events, and the two would collide.
+        # For legacy clients, echo their declared version back.
+        if self._client_version[0] == RTVI.LEGACY_SUPPORTED_MAJOR:
+            version = ".".join(str(v) for v in self._client_version)
+        else:
+            version = RTVI.PROTOCOL_VERSION
         message = RTVI.BotReady(
             id=self._client_ready_id,
-            data=RTVI.BotReadyData(version=RTVI.PROTOCOL_VERSION, about=about),
+            data=RTVI.BotReadyData(version=version, about=about),
         )
         await self.push_transport_message(message)
 
