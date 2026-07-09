@@ -52,7 +52,7 @@ from utils import create_llm
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.flows import FlowManager, FlowResult, NodeConfig
+from pipecat.flows import NO_RESPONSE, ConsolidatedFunctionResult, FlowManager, NodeConfig
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -277,7 +277,7 @@ def build_reservation_worker(
 
     async def transfer_to_router(
         flow_manager: FlowManager, reason: str
-    ) -> tuple[FlowResult, NodeConfig]:
+    ) -> ConsolidatedFunctionResult:
         """Hand the conversation back to the general assistant.
 
         Call this when the user no longer wants to make a reservation, or asks
@@ -306,7 +306,12 @@ def build_reservation_worker(
             ),
             deactivate_self=True,
         )
-        return {"status": "transferred"}, party_size_node()
+        # The router produces the next turn, so hand off with NO_RESPONSE: this
+        # (now-inactive) worker neither transitions its own flow nor runs a
+        # completion, either of which would speak into the shared context
+        # alongside the router. on_activated re-seeds party_size_node when
+        # control returns here.
+        return {"status": "transferred"}, NO_RESPONSE
 
     # --- Activation: start or resume the flow ------------------------------
 
