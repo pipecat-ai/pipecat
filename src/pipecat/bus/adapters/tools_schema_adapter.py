@@ -50,7 +50,8 @@ class ToolsSchemaAdapter(TypeAdapter):
             target_type: Unused. ``ToolsSchema`` is always the target.
 
         Returns:
-            A new ``ToolsSchema`` instance.
+            A new ``ToolsSchema`` instance, including ``custom_tools`` if
+            present in ``data``.
         """
         tools = []
         for item in data["standard_tools"]:
