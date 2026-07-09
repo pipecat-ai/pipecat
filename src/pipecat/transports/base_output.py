@@ -381,7 +381,7 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, MixerControlFrame):
             await sender.handle_mixer_control_frame(frame)
         elif isinstance(frame, TTSStoppedFrame):
-            await sender.handle_sync_frame(frame)
+            await sender.handle_tts_stopped(frame)
         elif frame.pts:
             await sender.handle_timed_frame(frame)
         else:
@@ -637,6 +637,21 @@ class BaseOutputTransport(FrameProcessor):
             """
             await self._audio_queue.put(frame)
 
+        async def handle_tts_stopped(self, frame: TTSStoppedFrame):
+            """Queue a TTSStoppedFrame, flushing any trailing buffered audio first.
+
+            `handle_audio_frame` only queues complete `audio_chunk_size` chunks,
+            so up to one chunk's worth of trailing audio can still be sitting in
+            `_audio_buffer`. Queue it now (padded to a full chunk with silence)
+            so it plays before the stop frame is handled, instead of being
+            discarded when the buffer is cleared in `_bot_stopped_speaking`.
+
+            Args:
+                frame: The TTS stopped frame to queue.
+            """
+            await self._enqueue_flushed_audio_buffer()
+            await self._audio_queue.put(frame)
+
         async def handle_mixer_control_frame(self, frame: MixerControlFrame):
             """Handle audio mixer control frames.
 
@@ -685,6 +700,29 @@ class BaseOutputTransport(FrameProcessor):
             await self._transport.push_frame(downstream_frame)
             await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
+        async def _enqueue_flushed_audio_buffer(self):
+            """Pad any unsent trailing audio with silence and queue it for playback.
+
+            Turns whatever is left in `_audio_buffer` into a regular
+            `OutputAudioRawFrame` and puts it on `_audio_queue`, so it goes
+            through the normal playback path (write, error handling, bot
+            speaking tracking) like any other chunk, in order relative to
+            whatever is queued after it (e.g. a TTSStoppedFrame).
+            """
+            if not self._audio_buffer:
+                return
+
+            padding = bytes(self._audio_chunk_size - len(self._audio_buffer))
+            frame = OutputAudioRawFrame(
+                bytes(self._audio_buffer) + padding,
+                sample_rate=self._sample_rate,
+                num_channels=self._params.audio_out_channels,
+            )
+            frame.transport_destination = self._destination
+            self._audio_buffer = bytearray()
+
+            await self._audio_queue.put(frame)
+
         async def _bot_stopped_speaking(self):
             """Handle bot stopped speaking event."""
             if not self._bot_speaking:
@@ -693,8 +731,8 @@ class BaseOutputTransport(FrameProcessor):
             self._bot_speaking = False
             self._tts_audio_received = False
 
-            # Clean audio buffer (there could be tiny left overs if not multiple
-            # to our output chunk size).
+            # Any remaining leftover here (e.g. from an interruption) is
+            # discarded rather than flushed, since it's no longer wanted.
             self._audio_buffer = bytearray()
 
             logger.debug(
