@@ -113,36 +113,34 @@ fi
 # moq-transport's build, and step 5 does that explicitly.
 #
 # Note on the prebuilt client-js pin: prebuilt's committed package.json
-# declares `^1.11.0`, but the link chain canonicalizes on prebuilt's
-# copy and 1.10.0 is the lowest version that (a) satisfies
-# moq-transport's `~1.10.0` peer and (b) exports `findElementByRef` /
-# `setAboutClient` — required by client-react's compiled dist, which
-# imports them statically. Below we inject an npm `overrides` entry
-# into prebuilt/client/package.json so the whole tree pins to 1.10.0,
-# and it survives every subsequent npm operation (unlike `--no-save`,
-# which is silently unwound by `npm link` reconciling the dep tree).
+# declares `^1.11.0`. We pin to 1.12.0 explicitly so the whole tree
+# canonicalizes there. Why 1.12.0 specifically:
+#   - Declares RTVI protocol `2.0.0` in client-ready (older 1.x versions
+#     declare `1.4.0` and force the server observer onto its legacy v1
+#     bot-output path — which the runtime v2 aggregator in
+#     client-react ≥1.5 then mis-parses as duplicated sentences).
+#   - Exports `findElementByRef` / `setAboutClient` (missing in 1.8.x),
+#     which client-react's compiled dist imports statically.
+#   - Satisfies every downstream peer we care about (moq-transport's
+#     ~1.10 warns but works fine — Transport surface hasn't changed).
+# `npm pkg set` mutates the declared range in place; this survives
+# step 4's `npm link` chain (unlike `npm install --no-save`, which
+# npm's dep-tree reconciliation silently unwinds). --cleanup stashes
+# prebuilt/client/package.json so the pin doesn't get committed.
 # ---------------------------------------------------------------------------
 echo "==> [2/5] Installing Python + JS deps..."
 ( cd "$PIPECAT_DIR" && uv sync \
     --extra moq --extra daily --extra silero --extra deepgram \
     --extra cartesia --extra openai --extra runner )
 ( cd "$TRANSPORTS_DIR"    && npm install --ignore-scripts )
-# Prebuilt: pin the client-js declared range down to 1.10.0. Committed
-# package.json says `^1.11.0` which pulls 1.12.0 — too new for
-# voice-ui-kit's 1.8.x-era source (RTVIEvent shadow collisions).
-# `npm pkg set` mutates the declared range in place; this survives
-# step 4's `npm link` chain (unlike `npm install --no-save`, which
-# npm's dep-tree reconciliation silently unwinds). --cleanup stashes
-# prebuilt/client/package.json so the pin doesn't get committed.
-#
-# --legacy-peer-deps bypasses the peer-dep conflicts that surface after
-# the pin: prebuilt also depends on `daily-transport`, `small-webrtc-
-# transport`, `websocket-transport` at versions whose peer client-js is
-# `~1.12.0`. voice-ui-kit dynamically imports transports on demand and
-# we're only exercising MoQ locally, so those transports' peer warnings
-# don't matter here.
+# Prebuilt: pin the client-js range to 1.12.0 (see the design note above
+# step 2 for why). `npm pkg set` mutates the declared range in place;
+# this survives step 4's `npm link` chain (unlike `npm install --no-save`,
+# which npm's dep-tree reconciliation silently unwinds).
+# --legacy-peer-deps bypasses peer-dep warnings from the sibling
+# transports whose peer ranges don't perfectly overlap.
 ( cd "$PREBUILT_CLIENT_DIR" \
-    && npm pkg set "dependencies[@pipecat-ai/client-js]=1.10.0" \
+    && npm pkg set "dependencies[@pipecat-ai/client-js]=1.12.0" \
     && npm install --legacy-peer-deps )
 # voice-ui-kit's pnpm workspace: `pnpm.overrides[@pipecat-ai/moq-transport]`
 # points at the local moq-transport checkout (unpublished — the install
