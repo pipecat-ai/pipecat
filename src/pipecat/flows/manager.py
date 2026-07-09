@@ -692,15 +692,25 @@ class FlowManager:
                         stacklevel=2,
                     )
 
-            # Update LLM context
-            await self._update_llm_context(
-                role_message=role_message,
-                role_messages=role_messages if not role_message else None,
-                task_messages=node_config["task_messages"],
-                functions=formatted_tools,
-                strategy=node_config.get("context_strategy"),
-            )
-            logger.debug("Updated LLM context")
+            # Update LLM context. Skip the update if the worker is inactive
+            # (e.g. it just handed off via
+            # activate_worker(deactivate_self=True)): _update_llm_context
+            # queues frames directly, bypassing the bus activation gate, so
+            # they land in the shared context and race with the newly
+            # activated worker's own activation frames. When the inactive
+            # worker's frames land last, they clobber the active worker's
+            # tools and messages (e.g. remove its transfer function from the
+            # tool list). The node's messages and tools are applied when the
+            # worker sets a node again on reactivation.
+            if self._worker.active:
+                await self._update_llm_context(
+                    role_message=role_message,
+                    role_messages=role_messages if not role_message else None,
+                    task_messages=node_config["task_messages"],
+                    functions=formatted_tools,
+                    strategy=node_config.get("context_strategy"),
+                )
+                logger.debug("Updated LLM context")
 
             # Update state
             self._current_node = node_id

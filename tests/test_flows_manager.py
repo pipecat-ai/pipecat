@@ -1040,12 +1040,15 @@ class TestFlowManager(unittest.IsolatedAsyncioTestCase):
 
     @patch("pipecat.flows.manager.LLMRunFrame")
     async def test_no_completion_on_inactive_worker(self, mock_llm_run_frame):
-        """Test that setting a node on a deactivated worker skips the LLM run.
+        """Test that setting a node on a deactivated worker queues nothing.
 
         After a multi-worker handoff (activate_worker(deactivate_self=True)),
         the handing-off worker may still get a next node from an edge function.
-        Running a completion on it would duplicate the newly activated
-        worker's response.
+        Directly queued frames bypass the bus activation gate and land in the
+        shared context, so a completion would duplicate the newly activated
+        worker's response, and a context update would race with (and can
+        clobber) that worker's tools and messages, e.g. removing its transfer
+        function from the tool list.
         """
         flow_manager = FlowManager(
             worker=self.mock_task,
@@ -1060,14 +1063,18 @@ class TestFlowManager(unittest.IsolatedAsyncioTestCase):
 
         await flow_manager.set_node_from_config(
             {
+                "name": "inactive_node",
                 "task_messages": [{"role": "developer", "content": "Test"}],
                 "functions": [],
             },
         )
 
-        # Context still updates, but no completion is triggered
-        self.assertTrue(self.mock_task.queue_frames.called)
+        # No frames at all: no context update, no completion
+        self.mock_task.queue_frames.assert_not_called()
         mock_llm_run_frame.assert_not_called()
+
+        # Internal state still tracks the new node
+        self.assertEqual(flow_manager.current_node, "inactive_node")
 
     async def test_get_current_context(self):
         """Test getting current conversation context."""
