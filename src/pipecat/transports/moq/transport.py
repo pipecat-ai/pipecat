@@ -16,12 +16,18 @@ pipecat Frame pipeline.
 Each participant publishes under a per-participant broadcast path
 ``<namespace>/<participant_id>`` (e.g. ``pipecat/bot0``); the bot
 subscribes to the peer at ``<namespace>/<peer_id>``. Audio rides on a
-single Opus track; transcript (RTVI JSON) rides on a fixed-name
-``transcript.json`` raw byte track in the same broadcast (one JSON
-message per group). The transcript is a side-channel, like moq-boy's
-``status``/``command`` tracks: it deliberately bypasses the catalog
-(which only describes media renditions), so the browser reads it by
-the well-known name rather than by catalog discovery.
+single Opus track; RTVI JSON rides on a fixed-name ``transcript.json``
+raw byte track (one message per group). The transcript is a side-channel,
+like moq-boy's ``status``/``command`` tracks: it deliberately bypasses
+the catalog (which only describes media renditions), so the browser
+reads it by the well-known name rather than by catalog discovery.
+
+Both directions carry the same shape: the bot publishes bot-side RTVI
+events on its own ``transcript`` track and subscribes to the client's
+``transcript`` track for client-side traffic (``client-ready`` for
+protocol negotiation, typed text input, function-call results, etc).
+This makes MoQ a full bidirectional RTVI transport, on par with the
+Daily and WebSocket transports.
 
 Two modes:
 
@@ -52,6 +58,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InputTransportMessageFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
@@ -272,6 +279,20 @@ class MOQInputTransport(BaseInputTransport):
         """Push a received audio frame downstream."""
         await self.push_audio_frame(
             InputAudioRawFrame(audio=audio, sample_rate=sample_rate, num_channels=1)
+        )
+
+    async def push_received_message(self, message: dict):
+        """Push a received RTVI message to :class:`RTVIProcessor` upstream.
+
+        Called by the backend's transcript drain loop for every JSON frame
+        delivered on the peer's transcript track. ``RTVIProcessor`` sits
+        upstream of this input transport (it's prepended by
+        :class:`PipelineWorker` when ``enable_rtvi=True``), so pushing
+        upstream is the direct route.
+        """
+        await self.push_frame(
+            InputTransportMessageFrame(message=message),
+            FrameDirection.UPSTREAM,
         )
 
 
@@ -694,11 +715,6 @@ class MOQTransport(BaseTransport):
         relevant ``await`` return ``None`` cleanly. No bespoke race-with-
         an-event pattern needed.
         """
-        if not self._params.audio_in_enabled:
-            # Just wait until disconnect() cancels the parent task.
-            await asyncio.Event().wait()
-            return
-
         consumer = origin.consume()
 
         logger.info(f"MOQ: waiting for peer broadcast {self._peer_broadcast_path!r}")
@@ -719,13 +735,22 @@ class MOQTransport(BaseTransport):
         logger.info(f"MOQ: peer broadcast {self._peer_broadcast_path!r} available")
         await self._call_event_handler("on_client_connected")
 
+        # Run the peer audio pump and the peer transcript (RTVI) pump
+        # side by side. Both catch CancelledError internally; on
+        # disconnect, ``consumer.cancel()`` on their moq consumers makes
+        # each loop exit cleanly.
         try:
-            await self._forward_peer_audio(peer_broadcast)
+            await asyncio.gather(
+                self._forward_peer_audio(peer_broadcast),
+                self._forward_peer_transcript(peer_broadcast),
+            )
         finally:
             await self._call_event_handler("on_client_disconnected")
 
     async def _forward_peer_audio(self, peer_broadcast: "moq.BroadcastConsumer"):
         """Read the catalog, subscribe to the first audio track, pump PCM."""
+        if not self._params.audio_in_enabled:
+            return
         catalog_sub = self._track(peer_broadcast.subscribe_catalog())
 
         # @moq/publish.Broadcast publishes an initial catalog before the
@@ -807,6 +832,42 @@ class MOQTransport(BaseTransport):
                     if source_channels > 1:
                         pcm = _downmix_s16_to_mono(pcm, source_channels)
                     await self._input.push_received_audio(pcm, target_rate)
+        except asyncio.CancelledError:
+            pass
+
+    async def _forward_peer_transcript(self, peer_broadcast: "moq.BroadcastConsumer"):
+        """Subscribe to the peer's transcript track and forward RTVI JSON messages inbound.
+
+        Symmetric with the bot's own ``transcript`` track (see
+        :meth:`publish_transcript`): the client writes each RTVI message
+        as a single-frame group; we read them off and push each one into
+        the pipeline as an :class:`InputTransportMessageFrame`, which the
+        :class:`RTVIProcessor` then handles the same way as any other
+        transport. This is what lets ``client-ready`` (for protocol
+        version negotiation), typed text input, function-call results,
+        and any other client→server RTVI traffic reach the bot over MoQ.
+        """
+        track_name = self._params.transcript_track
+        logger.info(f"MOQ: subscribing to peer transcript {track_name!r}")
+        consumer = self._track(peer_broadcast.subscribe_track(track_name))
+        try:
+            while True:
+                frame_bytes = await consumer.read_frame()
+                if frame_bytes is None:
+                    break
+                if self._input is None:
+                    continue
+                try:
+                    message = json.loads(frame_bytes)
+                except (ValueError, UnicodeDecodeError) as e:
+                    logger.warning(f"MOQ: malformed client transcript frame: {e}")
+                    continue
+                if not isinstance(message, dict):
+                    logger.warning(
+                        f"MOQ: expected RTVI object on transcript track, got {type(message).__name__}"
+                    )
+                    continue
+                await self._input.push_received_message(message)
         except asyncio.CancelledError:
             pass
 
