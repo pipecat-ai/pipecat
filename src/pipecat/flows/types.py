@@ -237,13 +237,33 @@ class NodeConfig(TypedDict, total=False):
     respond_immediately: bool
 
 
+class _NoResponse:
+    """Type of the :data:`NO_RESPONSE` sentinel."""
+
+    def __repr__(self) -> str:
+        return "NO_RESPONSE"
+
+
+NO_RESPONSE = _NoResponse()
+"""Sentinel a consolidated function returns in the node slot to finish the call
+without transitioning or running the LLM.
+
+Return ``(result, NO_RESPONSE)`` when the bot should stay silent after the
+function because something else produces the next turn — for example a function
+that hands control to another worker, which then responds. It differs from the
+other two outcomes: ``None`` stays on the node and runs the LLM to respond, and
+a node transitions and then (per the node's ``respond_immediately``) responds;
+``NO_RESPONSE`` does neither, so it queues nothing into the context.
+"""
+
+
 # ``ConsolidatedFunctionResult`` is the public return-type alias for "direct"
 # functions. It must be defined **after** ``NodeConfig`` and without a string
 # forward reference: ``get_type_hints()`` on a user-defined direct function
 # resolves names against the user's module globals, not this module's, so a
 # ``"NodeConfig"`` forward reference here would fail unless the user happened
 # to import ``NodeConfig`` themselves.
-ConsolidatedFunctionResult = tuple[Any, NodeConfig | None]
+ConsolidatedFunctionResult = tuple[Any, NodeConfig | None | _NoResponse]
 """Return type for "consolidated" functions.
 
 Return type for "consolidated" functions that do either or both of:
@@ -252,8 +272,11 @@ Return type for "consolidated" functions that do either or both of:
 
 The first tuple element is the function-call result delivered to the LLM.
 Any JSON-serializable value is accepted (matching Pipecat's upstream
-``FunctionCallResultCallback`` contract). Pass ``None`` to signal a
-transition-only handler; FlowManager substitutes an acknowledgement result.
+``FunctionCallResultCallback`` contract). The second element is the next node
+to transition to, ``None`` to stay on the current node and respond, or
+:data:`NO_RESPONSE` to finish without transitioning or responding. Pass a
+``None`` *result* to signal a transition-only handler; FlowManager substitutes
+an acknowledgement result.
 """
 
 

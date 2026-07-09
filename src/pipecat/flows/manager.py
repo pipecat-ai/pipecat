@@ -44,6 +44,7 @@ from pipecat.flows.exceptions import (
     InvalidFunctionError,
 )
 from pipecat.flows.types import (
+    NO_RESPONSE,
     ActionConfig,
     ConsolidatedFunctionResult,
     ContextStrategy,
@@ -492,25 +493,32 @@ class FlowManager:
                     f"{'Transition-only function called for' if is_transition_only_function else 'Function handler completed for'} {name}"
                 )
 
-                # Determine if this is an edge function
-                is_edge_function = bool(next_node)
-
-                if is_edge_function:
-                    # Store transition info for coordinated execution
-                    transition_info = {
+                # Classify the outcome by what the handler returned in the node
+                # slot. NO_RESPONSE is checked first because it is a truthy
+                # object, so bool(next_node) alone can't distinguish it.
+                if next_node is NO_RESPONSE:
+                    # Finish without transitioning or responding: something else
+                    # produces the next turn (e.g. another worker after a
+                    # handoff). Skipping the transition machinery means nothing
+                    # is queued into the context at all.
+                    properties = FunctionCallResultProperties(
+                        run_llm=False,
+                        on_context_updated=None,
+                    )
+                elif next_node:
+                    # Edge function: transition to the returned node.
+                    self._pending_transition = {
                         "next_node": next_node,
                         "function_name": name,
                         "arguments": params.arguments,
                         "result": result,
                     }
-                    self._pending_transition = transition_info
-
                     properties = FunctionCallResultProperties(
                         run_llm=False,  # Don't run LLM until transition completes
                         on_context_updated=self._check_and_execute_transition,
                     )
                 else:
-                    # Node function - run LLM immediately
+                    # Node function: stay on the current node and respond.
                     properties = FunctionCallResultProperties(
                         run_llm=True,
                         on_context_updated=None,
