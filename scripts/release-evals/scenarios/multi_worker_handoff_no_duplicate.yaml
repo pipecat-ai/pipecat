@@ -50,3 +50,16 @@ turns:
       - event: response
         absent: true
         within_ms: 40000
+
+  # Regression for the follow-up bug (same PR): the deactivated reservation
+  # worker's deferred node change used to write its node's tools into the
+  # shared context, removing transfer_to_reservation from the router's tool
+  # list. Returning to the booking then never handed control back to the
+  # reservation worker.
+  - user: "Okay, back to my booking. Six PM, please."
+    expect:
+      - event: function_call
+        calls:
+          - name: transfer_to_reservation
+      - event: response
+        eval: "the bot continues the reservation, for example by asking or confirming the party size or the time"
