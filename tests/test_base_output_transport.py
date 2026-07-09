@@ -14,6 +14,8 @@ from unittest.mock import AsyncMock
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     InterruptionFrame,
     MixerControlFrame,
@@ -211,5 +213,51 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(written, expected)
             # The buffer should be drained by the flush, not just cleared.
             self.assertEqual(sender._audio_buffer, bytearray())
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_tts_stopped_frame_for_short_turn_signals_bot_speaking(self):
+        """A turn whose entire audio never fills one chunk must still flush
+        as the frame type it was buffered from (e.g. `TTSAudioRawFrame`), so
+        that bot-speaking tracking (which dispatches on frame type) still
+        fires for it, instead of silently skipping start/stop speaking
+        events.
+        """
+        transport = await _make_transport(mixer=None)
+        try:
+            sender = transport._media_senders[None]
+            chunk_size = sender.audio_chunk_size
+
+            # Audio shorter than a single chunk: never queued by
+            # `handle_audio_frame`, only ever sitting in `_audio_buffer`.
+            partial_audio = b"\x03\x04" * (chunk_size // 4)
+            partial_chunk = TTSAudioRawFrame(
+                audio=partial_audio,
+                sample_rate=sender.sample_rate,
+                num_channels=1,
+                context_id="ctx1",
+            )
+            await transport.process_frame(partial_chunk, FrameDirection.DOWNSTREAM)
+            self.assertEqual(len(sender._audio_buffer), len(partial_audio))
+            self.assertFalse(sender._bot_speaking)
+
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx1"), FrameDirection.DOWNSTREAM
+            )
+            await asyncio.sleep(0.1)
+
+            # The flushed frame must be written as the buffered frame's
+            # original type, not a generic `OutputAudioRawFrame`, so that bot
+            # speaking tracking (which dispatches on frame type) recognizes it.
+            written_frame = transport.write_audio_frame.call_args_list[0].args[0]
+            self.assertIsInstance(written_frame, TTSAudioRawFrame)
+            silence_padding = b"\x00" * (chunk_size - len(partial_audio))
+            self.assertEqual(written_frame.audio, partial_audio + silence_padding)
+
+            # Bot started and stopped speaking events must have fired even
+            # though no full chunk was ever queued for this turn.
+            pushed_types = [call.args[0].__class__ for call in transport.push_frame.call_args_list]
+            self.assertIn(BotStartedSpeakingFrame, pushed_types)
+            self.assertIn(BotStoppedSpeakingFrame, pushed_types)
         finally:
             await transport.cancel(CancelFrame())

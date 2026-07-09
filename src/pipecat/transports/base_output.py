@@ -425,8 +425,11 @@ class BaseOutputTransport(FrameProcessor):
             # This is to resize images. We only need to resize one image at a time.
             self._executor = ThreadPoolExecutor(max_workers=1)
 
-            # Buffer to keep track of incoming audio.
+            # Buffer to keep track of incoming audio, along with the type of
+            # the frames it was built from (so a flushed partial chunk can be
+            # reconstructed as the same frame type).
             self._audio_buffer = bytearray()
+            self._audio_buffer_cls: type[OutputAudioRawFrame] = OutputAudioRawFrame
 
             # This will be used to resample incoming audio to the output sample rate.
             self._resampler = create_stream_resampler()
@@ -590,6 +593,7 @@ class BaseOutputTransport(FrameProcessor):
             )
 
             cls = type(frame)
+            self._audio_buffer_cls = cls
             self._audio_buffer.extend(resampled)
             while len(self._audio_buffer) >= self._audio_chunk_size:
                 chunk = cls(
@@ -703,17 +707,18 @@ class BaseOutputTransport(FrameProcessor):
         async def _enqueue_flushed_audio_buffer(self):
             """Pad any unsent trailing audio with silence and queue it for playback.
 
-            Turns whatever is left in `_audio_buffer` into a regular
-            `OutputAudioRawFrame` and puts it on `_audio_queue`, so it goes
-            through the normal playback path (write, error handling, bot
-            speaking tracking) like any other chunk, in order relative to
-            whatever is queued after it (e.g. a TTSStoppedFrame).
+            Turns whatever is left in `_audio_buffer` into a frame of the same
+            type (e.g. `TTSAudioRawFrame`) as the audio it was buffered from,
+            and puts it on `_audio_queue`, so it goes through the normal
+            playback path (write, error handling, bot speaking tracking) like
+            any other chunk, in order relative to whatever is queued after it
+            (e.g. a TTSStoppedFrame).
             """
             if not self._audio_buffer:
                 return
 
             padding = bytes(self._audio_chunk_size - len(self._audio_buffer))
-            frame = OutputAudioRawFrame(
+            frame = self._audio_buffer_cls(
                 bytes(self._audio_buffer) + padding,
                 sample_rate=self._sample_rate,
                 num_channels=self._params.audio_out_channels,
