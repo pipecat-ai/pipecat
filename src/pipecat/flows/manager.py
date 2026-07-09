@@ -593,6 +593,13 @@ class FlowManager:
 
         Used to manually transition between nodes in a flow.
 
+        If the manager's worker is inactive (e.g. it just handed off via
+        ``activate_worker(deactivate_self=True)``), only internal state is
+        updated: no context update and no completion reach the shared
+        context. Call ``set_node_from_config()`` again on reactivation
+        (typically from ``on_activated``) to apply the node's messages and
+        tools; see ``examples/flows/multi_worker_handoff.py``.
+
         Args:
             node_config: Configuration for the new node.
 
@@ -609,10 +616,18 @@ class FlowManager:
         1. Execute pre-actions (if any)
         2. Set up messages (role and task)
         3. Register node functions
-        4. Update LLM context with messages and tools
+        4. Update LLM context with messages and tools (skipped when the
+           worker is inactive)
         5. Update state (current node and functions)
-        6. Trigger LLM completion with new context
+        6. Trigger LLM completion with new context (skipped when the worker
+           is inactive)
         7. Execute post-actions (if any)
+
+        When the worker is inactive, steps 4 and 6 are skipped because their
+        directly queued frames bypass the bus activation gate and would race
+        with the newly activated worker's frames in the shared context. The
+        node's messages and tools are applied when a node is set again on
+        reactivation.
 
         Args:
             node_id: Identifier for the new node.
