@@ -174,8 +174,8 @@ def test_clear_prevents_stale_stop_secs_completion():
         analyzer.append_audio(_pcm_bytes(speech), is_speech=True)
     assert analyzer.speech_triggered
 
-    # The turn is ended externally: the strategy's user_turn_ended hook
-    # calls clear().
+    # The turn is ended externally: the strategy's handle_user_turn_stopped
+    # callback calls clear().
     analyzer.clear()
     assert not analyzer.speech_triggered
 

@@ -393,20 +393,20 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(TRANSCRIPTION_TIMEOUT + 0.1)
         self.assertEqual(stop_count, 2)
 
-    async def test_user_turn_ended_called_on_strategy_stop(self):
-        """user_turn_ended() runs when a stop strategy ends the turn, never at start.
+    async def test_handle_user_turn_stopped_called_on_strategy_stop(self):
+        """handle_user_turn_stopped() runs when a stop strategy ends the turn, never at start.
 
         Unlike reset(), which runs at both turn start and turn stop, the
-        finalized hook must only fire on turn end so strategies can drop
+        stop callback must only fire on turn end so strategies can drop
         state that must not survive an externally-ended turn (e.g. a turn
         analyzer's buffered speech).
         """
         finalized = 0
 
         class SpyStopStrategy(SpeechTimeoutUserTurnStopStrategy):
-            async def user_turn_ended(self):
+            async def handle_user_turn_stopped(self):
                 nonlocal finalized
-                await super().user_turn_ended()
+                await super().handle_user_turn_stopped()
                 finalized += 1
 
         controller = UserTurnController(
@@ -430,14 +430,14 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
 
         await controller.cleanup()
 
-    async def test_user_turn_ended_called_on_watchdog_stop(self):
-        """user_turn_ended() also runs when the stop watchdog ends the turn."""
+    async def test_handle_user_turn_stopped_called_on_watchdog_stop(self):
+        """handle_user_turn_stopped() also runs when the stop watchdog ends the turn."""
         finalized = 0
 
         class SpyNeverStopStrategy(ExternalUserTurnCompletionStopStrategy):
-            async def user_turn_ended(self):
+            async def handle_user_turn_stopped(self):
                 nonlocal finalized
-                await super().user_turn_ended()
+                await super().handle_user_turn_stopped()
                 finalized += 1
 
         controller = UserTurnController(
@@ -459,23 +459,52 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
 
         await controller.cleanup()
 
-    async def test_turn_analyzer_cleared_on_user_turn_ended(self):
+    async def test_turn_analyzer_cleared_on_handle_user_turn_stopped(self):
         """TurnAnalyzerUserTurnStopStrategy clears its analyzer when the turn ends."""
         analyzer = MagicMock()
         strategy = TurnAnalyzerUserTurnStopStrategy(turn_analyzer=analyzer)
 
-        await strategy.user_turn_ended()
+        await strategy.handle_user_turn_stopped()
 
         analyzer.clear.assert_called_once()
 
-    async def test_deferred_forwards_user_turn_ended(self):
-        """The deferred() wrapper forwards the finalized hook to its inner strategy."""
+    async def test_deferred_forwards_handle_user_turn_stopped(self):
+        """The deferred() wrapper forwards the stop callback to its inner strategy."""
         analyzer = MagicMock()
         strategy = deferred(TurnAnalyzerUserTurnStopStrategy(turn_analyzer=analyzer))
 
-        await strategy.user_turn_ended()
+        await strategy.handle_user_turn_stopped()
 
         analyzer.clear.assert_called_once()
+
+    async def test_handle_user_turn_started_called_on_turn_start(self):
+        """handle_user_turn_started() runs when a turn starts, before reset()."""
+        calls = []
+
+        class SpyStartStrategy(VADUserTurnStartStrategy):
+            async def handle_user_turn_started(self):
+                await super().handle_user_turn_started()
+                calls.append("handle_user_turn_started")
+
+            async def reset(self):
+                await super().reset()
+                calls.append("reset")
+
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[SpyStartStrategy()],
+                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)],
+            ),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(self.task_manager)
+
+        self.assertEqual(calls, [])
+
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+        self.assertEqual(calls, ["handle_user_turn_started", "reset"])
+
+        await controller.cleanup()
 
 
 if __name__ == "__main__":

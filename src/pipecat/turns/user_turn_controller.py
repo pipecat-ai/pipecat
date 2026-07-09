@@ -287,8 +287,11 @@ class UserTurnController(BaseObject):
         self._user_turn = True
         self._user_turn_stop_timeout_event.set()
 
-        # Reset all user turn start strategies to start fresh.
+        # Notify start strategies the start has taken effect, then reset them
+        # for the new turn. The callback runs first so a strategy can act on
+        # the state it accumulated up to the trigger before reset() clears it.
         for s in self._user_turn_strategies.start or []:
+            await s.handle_user_turn_started()
             await s.reset()
 
         # Reset all user turn stop strategies to start fresh for the new turn.
@@ -330,14 +333,14 @@ class UserTurnController(BaseObject):
         self._user_turn = False
         self._user_turn_stop_timeout_event.set()
 
-        # Reset all user turn stop strategies to start fresh. Also notify them
-        # the turn is over: unlike reset() (which also runs at turn start),
-        # user_turn_ended() only runs here, so strategies can drop state
-        # that must not survive an externally-ended turn (e.g. a turn
-        # analyzer's buffered speech).
+        # Notify stop strategies the turn has ended, then reset them. The
+        # callback runs first so a strategy can finalize state tied to the
+        # just-ended turn before reset() clears it: e.g. dropping a turn
+        # analyzer's buffered speech that must not survive an externally-ended
+        # turn.
         for s in self._user_turn_strategies.stop or []:
+            await s.handle_user_turn_stopped()
             await s.reset()
-            await s.user_turn_ended()
 
         await self._call_event_handler("on_user_turn_stopped", strategy, params)
 

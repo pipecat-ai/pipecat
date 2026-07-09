@@ -82,12 +82,17 @@ class BaseUserTurnStopStrategy(BaseObject):
         """Reset the strategy to its initial state."""
         pass
 
-    async def user_turn_ended(self):
-        """Called by the controller after a user turn has ended.
+    async def handle_user_turn_stopped(self):
+        """Notify the strategy that a user turn stop has taken effect.
 
-        Runs on every turn end, regardless of which strategy (or the stop
-        watchdog timeout) ended it, and never at turn start. Override to drop
-        state that must not survive an externally-ended turn.
+        Counterpart to :meth:`trigger_user_turn_stopped`: that method *signals*
+        the controller that this strategy detected the turn end; this callback
+        is the controller *notifying* the strategy that the stop is now in
+        effect, regardless of which strategy (or the stop watchdog timeout)
+        ended the turn. Runs immediately before :meth:`reset`, so the strategy
+        can finalize state tied to the just-ended turn before reset clears it:
+        e.g. dropping a turn analyzer's buffered speech that must not survive
+        an externally-ended turn.
         """
         pass
 

@@ -84,6 +84,18 @@ class BaseUserTurnStartStrategy(BaseObject):
         """Reset the strategy to its initial state."""
         pass
 
+    async def handle_user_turn_started(self):
+        """Notify the strategy that a user turn start has taken effect.
+
+        Counterpart to :meth:`trigger_user_turn_started`: that method *signals*
+        the controller that this strategy detected a turn start; this callback
+        is the controller *notifying* the strategy that the start is now in
+        effect, regardless of which start strategy triggered it. Runs
+        immediately before :meth:`reset`, so the strategy can act on state it
+        accumulated up to the trigger before reset clears it for the new turn.
+        """
+        pass
+
     async def process_frame(self, frame: Frame) -> ProcessFrameResult | None:
         """Process an incoming frame.
 

@@ -73,10 +73,10 @@ class DeferredUserTurnStopStrategy(BaseUserTurnStopStrategy):
         await super().reset()
         await self._inner.reset()
 
-    async def user_turn_ended(self):
-        """Notify the inner strategy that the user turn has ended."""
-        await super().user_turn_ended()
-        await self._inner.user_turn_ended()
+    async def handle_user_turn_stopped(self):
+        """Notify the inner strategy that the user turn stop has taken effect."""
+        await super().handle_user_turn_stopped()
+        await self._inner.handle_user_turn_stopped()
 
     async def process_frame(self, frame: Frame) -> ProcessFrameResult | None:
         """Forward frame processing to the inner strategy."""
