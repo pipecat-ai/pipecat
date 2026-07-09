@@ -176,7 +176,10 @@ def build_reservation_worker(
             name="party_size",
             role_message=(
                 "You are a reservation assistant for La Maison, an upscale French "
-                "restaurant. Be casual and friendly. This is a voice conversation, "
+                "restaurant. Your only job is collecting reservation details. If "
+                "the user asks about anything else (weather, menu, general "
+                "questions), call the transfer_to_router tool instead of answering "
+                "yourself. Be casual and friendly. This is a voice conversation, "
                 "so avoid special characters and emojis."
             ),
             task_messages=[
@@ -288,7 +291,18 @@ def build_reservation_worker(
         await worker.activate_worker(
             ROUTER_NAME,
             args=LLMWorkerActivationArgs(
-                messages=[{"role": "developer", "content": reason}],
+                messages=[
+                    {
+                        "role": "developer",
+                        "content": (
+                            f"{reason}. Address this, then offer to continue. If the "
+                            "user returns to their reservation (for example by asking "
+                            "to continue booking or answering a booking question), "
+                            "call the transfer_to_reservation tool instead of "
+                            "collecting reservation details yourself."
+                        ),
+                    }
+                ],
             ),
             deactivate_self=True,
         )
