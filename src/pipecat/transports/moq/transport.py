@@ -31,13 +31,19 @@ Daily and WebSocket transports.
 
 Two modes:
 
-- **Client mode** (default): the bot dials a relay at ``relay_url`` (or
-  the constructor's ``host``/``port``/``path``).
-- **Server mode** (``serve=True``): the bot binds its own UDP socket via
-  ``moq.Server`` and accepts the browser's direct connection. Removes
-  the need for a separate ``moq-relay`` process for local dev. The
-  self-signed cert fingerprints are exposed via
-  :attr:`MOQTransport.cert_fingerprints` so a browser can pin them.
+- **Server mode** (``serve=True``, currently the only supported mode):
+  the bot binds its own UDP socket via ``moq.Server`` and accepts the
+  browser's direct connection. Removes the need for a separate
+  ``moq-relay`` process for local dev. The self-signed cert fingerprints
+  are exposed via :attr:`MOQTransport.cert_fingerprints` so a browser
+  can pin them.
+- **Client mode** (default): MoQ client mode is not yet supported. The
+  bot would dial a relay at ``relay_url`` (or the constructor's
+  ``host``/``port``/``path``); transport-level wiring exists but the
+  runner blocks this mode at arg-parse time until the cert-fingerprint
+  plumbing to the browser is finished and we've validated the flow
+  against an external relay. See
+  :func:`pipecat.runner.moq._validate_moq_args` for the guard.
 
 For a long-lived multi-session agent that discovers clients by MoQ
 announcement (no ``/start`` control plane), see :mod:`pipecat.transports.moq.agent`.

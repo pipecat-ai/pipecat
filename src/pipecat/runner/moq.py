@@ -41,6 +41,25 @@ def _validate_moq_args(args: argparse.Namespace) -> bool:
     ``args.moq_bind`` (defaulted in serve mode), ``args.moq_tls_host`` (the
     hostname presented to the browser).
     """
+    # ------------------------------------------------------------------
+    # TODO: MoQ client mode is not yet supported. The wiring exists but
+    # hasn't been shaken out — the cert-fingerprint plumbing to the
+    # browser is the missing piece for self-signed local relays, and we
+    # haven't validated the flow against a public relay. Fail loudly at
+    # arg-parse time so users get a clear message instead of a downstream
+    # DNS or TLS error. Every --moq-connect / --moq-tls-insecure /
+    # client-mode branch below is preserved so the switchover is a
+    # one-line delete of this guard once client mode is ready.
+    if not args.moq_serve:
+        logger.error(
+            "MoQ client mode is not yet supported. "
+            "Pass --moq-serve to run the bot as its own MoQ server "
+            "(with --moq-tls-generate <hostname> for a self-signed dev cert, or "
+            "--moq-tls-cert/--moq-tls-key for a CA-signed one)."
+        )
+        return False
+    # ------------------------------------------------------------------
+
     # Client-mode URL parse (also used to advertise the browser URL in
     # serve mode when no --moq-tls-generate hostname is supplied).
     connect = args.moq_connect or DEFAULT_MOQ_CONNECT
