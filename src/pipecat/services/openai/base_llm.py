@@ -707,11 +707,14 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 # "tool_code" label / stray punctuation around the recovered call
                 # all strip to silence downstream (run 96 fence precedent).
                 remainder = (content_buffer[:rec_start] + content_buffer[rec_end:]).strip()
-                spoken_text = remainder
-                speakable = re.sub(
+                # Fence/label residue around the recovered call is never
+                # spoken — exclude it from the spoken-text signal too, or a
+                # trailing ``` masks the reply's real tail (the engine's
+                # open-question end guard keys on a trailing "?").
+                spoken_text = re.sub(
                     r"`{2,}[ \t]*[A-Za-z_][\w-]*|`{2,}|\btool_code\b", "", remainder
-                )
-                speakable = re.sub(r"[\s.,;:!?\-–—'\"()\[\]]+", "", speakable)
+                ).strip()
+                speakable = re.sub(r"[\s.,;:!?\-–—'\"()\[\]]+", "", spoken_text)
                 if not speakable:
                     text_generated_signal = False
 
