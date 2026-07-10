@@ -176,14 +176,24 @@ def build_reservation_worker(
             name="party_size",
             role_message=(
                 "You are a reservation assistant for La Maison, an upscale French "
-                "restaurant. Your only job is collecting reservation details. If "
-                "the user asks about anything else (weather, menu, general "
+                "restaurant. Your only job is collecting reservation details. When the "
+                "user gives a detail like party size or time, always call the tool that "
+                "records it to move the booking forward — even if that detail already "
+                "appears earlier in the conversation; never advance based on history "
+                "alone. If the user asks about anything else (weather, menu, general "
                 "questions), call the transfer_to_router tool instead of answering "
-                "yourself. Be casual and friendly. This is a voice conversation, "
-                "so avoid special characters and emojis."
+                "yourself. Be casual and friendly. This is a voice conversation, so "
+                "avoid special characters and emojis."
             ),
             task_messages=[
-                {"role": "developer", "content": "Ask how many people are in their party."}
+                {
+                    "role": "developer",
+                    "content": (
+                        "Ask how many people are in their party. When they answer, "
+                        "always call collect_party_size to record it and continue — "
+                        "even if a party size came up earlier in the conversation."
+                    ),
+                }
             ],
             functions=[collect_party_size, transfer_to_router],
         )
@@ -196,7 +206,9 @@ def build_reservation_worker(
                     "role": "developer",
                     "content": (
                         "Ask what time they would like to dine. The restaurant is "
-                        "open from 5 PM to 10 PM."
+                        "open from 5 PM to 10 PM. When they give a time, always call "
+                        "check_availability to verify it and continue; do not assume "
+                        "availability from earlier in the conversation."
                     ),
                 }
             ],
@@ -232,7 +244,11 @@ def build_reservation_worker(
     async def collect_party_size(
         flow_manager: FlowManager, size: int
     ) -> tuple[PartySizeResult, NodeConfig]:
-        """Record the number of people in the party.
+        """Record the party size and advance the reservation to choosing a time.
+
+        Call this whenever the user gives a party size. Always call it to move
+        forward — do not skip it just because a size already appears earlier in
+        the conversation.
 
         Args:
             size (int): Number of people in the party. Must be between 1 and 12.
@@ -243,7 +259,11 @@ def build_reservation_worker(
     async def check_availability(
         flow_manager: FlowManager, time: str
     ) -> tuple[AvailabilityResult, NodeConfig]:
-        """Check availability for the requested time.
+        """Check availability for the requested time and advance the reservation.
+
+        Call this whenever the user gives a time. Availability can change, so
+        always check it fresh rather than assuming it from earlier in the
+        conversation, and call it every time to move the booking forward.
 
         Args:
             time (str): Reservation time (e.g., '6:00 PM').
@@ -272,7 +292,7 @@ def build_reservation_worker(
         return AvailabilityResult(time=time, available=False), no_availability
 
     async def end_reservation(flow_manager: FlowManager) -> tuple[None, NodeConfig]:
-        """Confirm and end the reservation."""
+        """Finalize the reservation. Call this once the user has confirmed the details."""
         return None, end_node()
 
     async def transfer_to_router(
