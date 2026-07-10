@@ -16,6 +16,7 @@ jobs:
         with:
           # Only issues labeled `needs-repro` are eligible; everything else is untouched.
           only-issue-labels: "needs-repro"
+          stale-issue-message: ""
           days-before-issue-stale: 14
           days-before-issue-close: 0
           days-before-pr-stale: -1
