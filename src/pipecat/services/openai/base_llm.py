@@ -782,6 +782,14 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             self._last_generation_had_text = bool(
                 text_generated_signal and content_buffer.strip()
             )
+            # The words themselves, for guards that need more than the bool —
+            # e.g. the workflow engine's open-question end guard reads the
+            # trailing "?" of the co-spoken reply. Reading the aggregated
+            # assistant message from the shared context has the same race as
+            # above (not yet committed when a deferred handler runs).
+            self._last_generation_text = (
+                content_buffer.strip() if self._last_generation_had_text else ""
+            )
 
             # If text was generated, defer function calls until after TTS plays
             # Otherwise, execute them immediately. Whitespace-only content never
