@@ -306,11 +306,10 @@ def build_reservation_worker(
             ),
             deactivate_self=True,
         )
-        # The router produces the next turn, so hand off with NO_RESPONSE: this
-        # (now-inactive) worker neither transitions its own flow nor runs a
-        # completion, either of which would speak into the shared context
-        # alongside the router. on_activated re-seeds party_size_node when
-        # control returns here.
+        # The router is now responsible for the next turn, so hand off with
+        # NO_RESPONSE to avoid running the LLM. Note that we don't need to
+        # transition to any next node: on_activated re-seeds party_size_node
+        # when control returns to the reservation worker.
         return {"status": "transferred"}, NO_RESPONSE
 
     # --- Activation: start or resume the flow ------------------------------
