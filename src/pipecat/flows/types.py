@@ -245,15 +245,15 @@ class _NoResponse:
 
 
 NO_RESPONSE = _NoResponse()
-"""Sentinel a consolidated function returns in the node slot to finish the call
-without transitioning or running the LLM.
+"""Function return value (in the "next node" slot) indicating "don't immediately respond".
 
-Return ``(result, NO_RESPONSE)`` when the bot should stay silent after the
-function because something else produces the next turn — for example a function
-that hands control to another worker, which then responds. It differs from the
-other two outcomes: ``None`` stays on the node and runs the LLM to respond, and
-a node transitions and then (per the node's ``respond_immediately``) responds;
-``NO_RESPONSE`` does neither, so it queues nothing into the context.
+Return ``(result, NO_RESPONSE)`` from a "consolidated" function when the bot
+should remain silent after the function finishes, rather than immediately
+responding. The function result will make it into the context, but the next
+response will be triggered by something else, like a user utterance.
+
+For functions that transition to another node,
+``NodeConfig.respond_immediately`` provides the equivalent control.
 """
 
 

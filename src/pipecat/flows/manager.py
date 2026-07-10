@@ -493,19 +493,14 @@ class FlowManager:
                     f"{'Transition-only function called for' if is_transition_only_function else 'Function handler completed for'} {name}"
                 )
 
-                # Classify the outcome by what the handler returned in the node
-                # slot. NO_RESPONSE is checked first because it is a truthy
-                # object, so bool(next_node) alone can't distinguish it.
-                if next_node is NO_RESPONSE:
-                    # Finish without transitioning or responding: something else
-                    # produces the next turn (e.g. another worker after a
-                    # handoff). Skipping the transition machinery means nothing
-                    # is queued into the context at all.
+                is_no_response = next_node is NO_RESPONSE
+                if is_no_response or not next_node:
+                    # Node function: stay on the current node.
                     properties = FunctionCallResultProperties(
-                        run_llm=False,
+                        run_llm=not is_no_response,
                         on_context_updated=None,
                     )
-                elif next_node:
+                else:
                     # Edge function: transition to the returned node.
                     self._pending_transition = {
                         "next_node": next_node,
@@ -514,14 +509,8 @@ class FlowManager:
                         "result": result,
                     }
                     properties = FunctionCallResultProperties(
-                        run_llm=False,  # Don't run LLM until transition completes
+                        run_llm=False,
                         on_context_updated=self._check_and_execute_transition,
-                    )
-                else:
-                    # Node function: stay on the current node and respond.
-                    properties = FunctionCallResultProperties(
-                        run_llm=True,
-                        on_context_updated=None,
                     )
 
                 await params.result_callback(result, properties=properties)
