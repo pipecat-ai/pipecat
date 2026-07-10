@@ -96,8 +96,10 @@ def normalize_for_gemma(messages: list) -> list:
       so they never appear as their own non-alternating role.
     - Remaining consecutive same-role turns are merged (content joined by a
       newline).
-    - Leading ``assistant`` turns (before the first ``user`` turn) are dropped so
-      the history starts with ``user``.
+    - Leading ``assistant`` turns (before the first ``user`` turn — typically the
+      call's opening greeting) are folded into the system message ("You already
+      opened the call by saying: …") so the history starts with ``user`` without
+      erasing what the agent already said.
 
     The input list is never mutated; new message dicts are produced. Non-Gemma
     callers are unaffected because this is only wired into
@@ -150,9 +152,26 @@ def normalize_for_gemma(messages: list) -> list:
         else:
             merged.append([role, text])
 
-    # 4. Drop any leading assistant turns so the history starts with user.
+    # 4. Alternation requires the history to start with a user turn, but leading
+    #    assistant turns are usually the call's OPENING GREETING — dropping them
+    #    erases the question the caller is answering (run 118: the greeting asked
+    #    "מה תרצו להזמין?" and the model never saw it, so the caller's "כן" had no
+    #    antecedent and the model re-asked forever). Fold leading assistant turns
+    #    into the system message instead, so the model keeps knowing what it
+    #    already said while the wire format stays alternation-valid.
+    leading: list[str] = []
     while merged and merged[0][0] != "user":
-        merged.pop(0)
+        leading.append(merged.pop(0)[1])
+    if leading:
+        opener = "\n".join(t for t in leading if t)
+        if opener:
+            note = f'\n\nYou already opened the call by saying: "{opener}"'
+            if system_msgs:
+                system_msgs[0]["content"] = (
+                    _stringify_content(system_msgs[0].get("content")) + note
+                )
+            else:
+                system_msgs = [{"role": "system", "content": note.strip()}]
 
     out = system_msgs + [{"role": r, "content": c} for r, c in merged]
     return out

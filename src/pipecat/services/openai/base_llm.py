@@ -9,6 +9,7 @@
 import ast
 import asyncio
 import json
+import re
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -693,12 +694,19 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                     f"{self}: recovered tool call '{rec_name}' emitted as plain "
                     f"text (structured tool_calls was empty)"
                 )
-                # If the call was the *only* content, it will be stripped from
-                # the spoken text downstream, leaving nothing to play — so no
-                # BotStoppedSpeakingFrame will fire to flush a deferred call.
-                # Run it immediately in that case.
+                # If the call was the only SPEAKABLE content, downstream stripping
+                # leaves nothing to play — so no BotStoppedSpeakingFrame will fire
+                # to flush a deferred call and the transition would be silently
+                # dropped at the next generation. Judge the remainder's
+                # speakability, not mere non-emptiness: a markdown fence /
+                # "tool_code" label / stray punctuation around the recovered call
+                # all strip to silence downstream (run 96 fence precedent).
                 remainder = (content_buffer[:rec_start] + content_buffer[rec_end:]).strip()
-                if not remainder:
+                speakable = re.sub(
+                    r"`{2,}[ \t]*[A-Za-z_][\w-]*|`{2,}|\btool_code\b", "", remainder
+                )
+                speakable = re.sub(r"[\s.,;:!?\-–—'\"()\[\]]+", "", speakable)
+                if not speakable:
                     text_generated_signal = False
 
         # if we got a function name and arguments, check to see if it's a function with
