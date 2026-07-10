@@ -84,8 +84,8 @@ To run locally:
 - Daily (direct, testing only): ``python bot.py -d``
 - ESP32: ``python bot.py -t webrtc --esp32 --host 192.168.1.100``
 - Exotel: ``python bot.py -t exotel`` (no proxy needed, but ngrok connection to HTTP 7860 is required)
-- MOQ (dial a relay): ``python bot.py -t moq --moq-connect https://relay.example.com:4080/moq``
 - MOQ (bot is the server, local dev): ``python bot.py -t moq --moq-serve --moq-tls-generate localhost``
+- MOQ (dial an external relay): MoQ client mode is not yet supported.
 - Telephony: ``python bot.py -t twilio -x your_username.ngrok.io``
 - WebRTC only: ``python bot.py -t webrtc``
 - WhatsApp: ``python bot.py --whatsapp``
@@ -1586,18 +1586,22 @@ def main(parser: argparse.ArgumentParser | None = None):
     # MOQ-specific arguments.
     #
     # Mode is selected by --moq-serve:
-    #   client (default): bot dials a relay at --moq-connect
     #   server (--moq-serve): bot binds its own UDP socket at --moq-bind and
     #                         needs --moq-tls-cert/--moq-tls-key (prod) or
     #                         --moq-tls-generate <hostname> (dev).
+    #   client: bot dials a relay at --moq-connect. MoQ client mode is
+    #           not yet supported — the flags below are kept for forward
+    #           compat but blocked at validation time; see
+    #           runner/moq.py::_validate_moq_args.
     parser.add_argument(
         "--moq-connect",
         type=str,
         default=None,
         metavar="URL",
         help=(
-            f"Client mode: relay URL the bot dials (default: {DEFAULT_MOQ_CONNECT}). "
-            "Format: <scheme>://<host>:<port><path>. Ignored when --moq-serve is set."
+            "MoQ client mode is not yet supported. When it is: relay URL the bot "
+            f"dials in client mode (default: {DEFAULT_MOQ_CONNECT}). "
+            "Format: <scheme>://<host>[:port]<path>. Pass --moq-serve for server mode."
         ),
     )
     parser.add_argument(
@@ -1607,7 +1611,7 @@ def main(parser: argparse.ArgumentParser | None = None):
         metavar="ADDR:PORT",
         help=(
             f"Local socket bind address. Server mode default: {DEFAULT_MOQ_SERVE_BIND}. "
-            "Client mode: ephemeral if omitted."
+            "(Client mode: ephemeral if omitted; MoQ client mode is not yet supported.)"
         ),
     )
     parser.add_argument(
@@ -1645,9 +1649,10 @@ def main(parser: argparse.ArgumentParser | None = None):
         default=None,
         metavar="PEM",
         help=(
-            "Path to a PEM-encoded TLS certificate chain. In client mode, the "
-            "fingerprint is sent to the browser for WebTransport cert pinning. "
-            "In server mode, used as the listening server's cert (pair with --moq-tls-key)."
+            "Path to a PEM-encoded TLS certificate chain. In server mode, used as the "
+            "listening server's cert (pair with --moq-tls-key). (Client-mode use — "
+            "sending the fingerprint to the browser for WebTransport cert pinning — is "
+            "future work; MoQ client mode is not yet supported.)"
         ),
     )
     parser.add_argument(
@@ -1662,8 +1667,8 @@ def main(parser: argparse.ArgumentParser | None = None):
         action="store_true",
         default=False,
         help=(
-            "Dev only: disable TLS certificate verification when dialing the relay "
-            "(client mode). Ignored in server mode."
+            "MoQ client mode is not yet supported. When it is: dev only, disable TLS "
+            "certificate verification when dialing the relay. Ignored in server mode."
         ),
     )
     parser.add_argument(
