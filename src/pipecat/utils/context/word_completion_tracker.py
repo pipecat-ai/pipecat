@@ -209,13 +209,13 @@ class WordCompletionTracker:
             word: A single word token returned by the TTS service. TTS services that
                 emit spaces and punctuation as separate tokens (e.g. Inworld) must
                 pre-merge those tokens into the preceding word before calling this
-                method (see ``TTSService._merge_punct_tokens``).
+                method (see ``TTSService._merge_punct_tokens``). May also be a
+                fragment of a still-open SSML tag; :meth:`TextSegmentMap.advance_word`
+                strips such fragments, which contribute no alphanumeric content.
 
         Returns:
             True when all expected content has been covered.
         """
-        normalized = self._normalize(word)
-
         prev_len = len(self._received)
         expected_len = len(self._tts_normalized)
 
@@ -259,6 +259,13 @@ class WordCompletionTracker:
             self._overflow_word = word
             return True
 
+        # Word belongs to this frame: let the segment map strip any SSML tag
+        # markup (tracking tags whose opening tag spans multiple words) and
+        # advance its own cursors in the same step.
+        prev_llm_pos = self._llm_pos
+        word = self._segment_map.advance_word(word)
+        normalized = self._normalize(word)
+
         self._received += normalized
 
         # How many normalized chars from this word belong to the current frame.
@@ -280,10 +287,8 @@ class WordCompletionTracker:
         # Always advance the TTS cursor (tracks position in tts_text for force-complete).
         self._tts_pos = self._advance_by_alnums(self._tts_text, self._tts_pos, chars_for_frame)
 
-        # Advance user_facing and llm cursors via segment boundaries.
-        # Track prev_llm_pos so we can slice _llm_consumed from the span.
-        prev_llm_pos = self._llm_pos
-        self._segment_map.advance(chars_for_frame)
+        # The segment map already advanced (see advance_word above); read back
+        # the resulting user_facing/llm cursor positions.
         self._user_facing_pos = self._segment_map.user_facing_pos
         segment_completed_this_call = self._segment_map.last_completed_segment is not None
         # Sync llm_pos from the segment map whenever it made progress: either real
@@ -362,11 +367,15 @@ class WordCompletionTracker:
     def word_belongs_here(self, word: str) -> bool:
         """Return True if this word plausibly belongs to the remaining TTS text.
 
-        Dispatches to one of two checks depending on whether the word contains
-        any alphanumeric characters after normalization:
+        First asks the segment map to strip any SSML tag markup (see
+        :meth:`TextSegmentMap.strip_word`), which accounts for tags whose opening
+        tag spans multiple words (e.g. ElevenLabs' multi-attribute
+        ``<phoneme alphabet="..." ph="...">``). A word that is pure tag markup, or
+        picks up mid-tag, always belongs — it carries no spoken content of its
+        own. Otherwise dispatches on the stripped content:
 
-        - Alnum words: prefix-match against the remaining expected chars.
-        - Symbol/punctuation words (empty after normalization): literal substring
+        - Alnum content: prefix-match against the remaining expected chars.
+        - Symbol/punctuation content (empty after normalization): literal substring
           search in the remaining raw TTS text, with a fallback for TTS providers
           that substitute Unicode symbols with ASCII punctuation.
 
@@ -374,11 +383,13 @@ class WordCompletionTracker:
         event: if the incoming word does not match this slot's remaining content,
         the caller should force-complete this slot and route the word to the next.
         """
-        normalized = self._normalize(word)
+        content = self._segment_map.strip_word(word)
+        normalized = self._normalize(content)
         if normalized:
             return self._alnum_word_belongs_here(normalized)
-        else:
-            return self._symbol_word_belongs_here(word)
+        if content != word:
+            return True
+        return self._symbol_word_belongs_here(word)
 
     def _alnum_word_belongs_here(self, normalized: str) -> bool:
         """Return True if an alnum-containing word matches this frame's remaining expected chars.

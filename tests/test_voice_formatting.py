@@ -134,6 +134,15 @@ class TestReplaceText(unittest.IsolatedAsyncioTestCase):
         result = await transform("The leisure centre opens at six.", "*")
         self.assertIn("<<l|ɛ|ʒ|ə|r>>", result)
 
+    async def test_ssml_phoneme_tag_replacement(self):
+        """A word can be wrapped in an SSML phoneme tag (e.g. ElevenLabs'
+        <phoneme alphabet="ipa" ph="...">word</phoneme>) instead of respelled."""
+        transform = replace_text(
+            [(r"(?i)\bSiobhan\b", '<phoneme alphabet="ipa" ph="ʃəˈvɔːn">Siobhan</phoneme>')]
+        )
+        result = await transform("My name is Siobhan.", "*")
+        self.assertIn('<phoneme alphabet="ipa" ph="ʃəˈvɔːn">Siobhan</phoneme>', result)
+
 
 class TestNormalizeCollapsesCaseAndSplitReplacements(unittest.IsolatedAsyncioTestCase):
     """Whether normalize() treats a case-only or word-splitting replacement as
@@ -159,6 +168,17 @@ class TestNormalizeCollapsesCaseAndSplitReplacements(unittest.IsolatedAsyncioTes
         transform = replace_text([(r"\bleisure\b", "lezher")])
         result = await transform("leisure", "*")
         self.assertNotEqual(normalize(result), normalize("leisure"))
+
+    async def test_ssml_phoneme_tag_normalizes_the_same_as_original(self):
+        """An SSML phoneme tag wraps the word without altering it, so tag-stripped
+        normalization matches the original — unlike a respelling. (The wrapping
+        markup itself is still picked up as a transformed segment by
+        TextSegmentMap, not by normalize() here.)"""
+        transform = replace_text(
+            [(r"\bSiobhan\b", '<phoneme alphabet="ipa" ph="ʃəˈvɔːn">Siobhan</phoneme>')]
+        )
+        result = await transform("Siobhan", "*")
+        self.assertEqual(normalize(result), normalize("Siobhan"))
 
 
 class TestExpandPercentages(unittest.IsolatedAsyncioTestCase):
