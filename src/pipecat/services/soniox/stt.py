@@ -537,7 +537,9 @@ class SonioxSTTService(WebsocketSTTService):
 
             context = s.context
             if isinstance(context, SonioxContextObject):
-                context = context.model_dump()
+                # Soniox rejects nulls for unset context fields — send only
+                # what the caller populated.
+                context = context.model_dump(exclude_none=True)
 
             # Send the initial configuration message.
             config = {
