@@ -465,7 +465,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
                     Use ``settings=ElevenLabsTTSService.Settings(voice=...)`` instead.
                     Will be removed in 2.0.0.
 
-            model: TTS model to use (e.g., "eleven_turbo_v2_5").
+            model: TTS model to use (e.g., "eleven_flash_v2_5").
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsTTSService.Settings(model=...)`` instead.
@@ -520,7 +520,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
 
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="eleven_turbo_v2_5",
+            model="eleven_flash_v2_5",
             voice=None,
             language=None,
             stability=None,
@@ -1105,7 +1105,7 @@ class ElevenLabsHttpTTSService(TTSService):
                     Will be removed in 2.0.0.
 
             aiohttp_session: aiohttp ClientSession for HTTP requests.
-            model: TTS model to use (e.g., "eleven_turbo_v2_5").
+            model: TTS model to use (e.g., "eleven_flash_v2_5").
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsHttpTTSService.Settings(model=...)`` instead.
@@ -1136,7 +1136,7 @@ class ElevenLabsHttpTTSService(TTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="eleven_turbo_v2_5",
+            model="eleven_flash_v2_5",
             voice=None,
             language=None,
             optimize_streaming_latency=None,

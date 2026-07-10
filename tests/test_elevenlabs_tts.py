@@ -388,7 +388,7 @@ async def _http_payload_for_model(model: str) -> dict:
 
 @pytest.mark.asyncio
 async def test_http_payload_includes_previous_text_when_supported():
-    payload = await _http_payload_for_model("eleven_turbo_v2_5")
+    payload = await _http_payload_for_model("eleven_flash_v2_5")
     assert payload["previous_text"] == "Hello!"
 
 
