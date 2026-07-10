@@ -43,7 +43,7 @@ A good bug report is one a maintainer can act on. The single most useful thing y
 ### What we require
 
 - A minimal reproducible example (runnable code, not just prose). If the bug truly can't be captured in code (for example, it only shows up on rare live calls), say so and include everything you have: logs, timestamps, session IDs, and your pipeline setup.
-- Confirmation that you reproduced the issue yourself on the latest release or `main`.
+- Confirmation that you reproduced the issue yourself on the `main` branch.
 
 ### What gets your report looked at faster
 
