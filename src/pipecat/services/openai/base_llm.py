@@ -681,6 +681,11 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         loop_guard_tripped = (
             self._tool_call_rounds_this_turn >= self._max_tool_call_rounds_per_turn
         )
+        # What the caller actually HEARS this turn. For a recovered leaked call
+        # this is the buffer minus the call syntax — the raw buffer ends with
+        # "[transition_to_x()]", which masks the real tail of the spoken reply
+        # (a trailing "?" that downstream open-question guards key on).
+        spoken_text = content_buffer
         if not function_name and content_buffer and not loop_guard_tripped:
             recovered = _recover_leaked_tool_call(
                 content_buffer, [n for n in self._functions.keys() if n]
@@ -702,6 +707,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 # "tool_code" label / stray punctuation around the recovered call
                 # all strip to silence downstream (run 96 fence precedent).
                 remainder = (content_buffer[:rec_start] + content_buffer[rec_end:]).strip()
+                spoken_text = remainder
                 speakable = re.sub(
                     r"`{2,}[ \t]*[A-Za-z_][\w-]*|`{2,}|\btool_code\b", "", remainder
                 )
@@ -788,7 +794,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             # assistant message from the shared context has the same race as
             # above (not yet committed when a deferred handler runs).
             self._last_generation_text = (
-                content_buffer.strip() if self._last_generation_had_text else ""
+                spoken_text.strip() if self._last_generation_had_text else ""
             )
 
             # If text was generated, defer function calls until after TTS plays
