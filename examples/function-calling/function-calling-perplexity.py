@@ -4,11 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""This example demonstrates using the Perplexity API as a drop-in replacement for OpenAI.
+"""A conversational Perplexity bot.
 
-Note that while this file is in the function-calling examples, Perplexity's API does not
-currently support function calling. The example shows basic chat completion functionality
-using Perplexity's API while maintaining compatibility with the OpenAI interface.
+This lives among the function-calling examples because that's where each LLM
+provider gets a dedicated end-to-end example (and where the release eval suite
+exercises them all). Perplexity's Chat Completions API is the rare exception
+that does NOT support function calling. This bot therefore just holds a plain
+conversation, answering from Perplexity's web-grounded search rather than via
+tool calls.
 """
 
 import os
@@ -17,6 +20,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -37,9 +41,14 @@ from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
+
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -74,6 +83,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
+    # Note: we don't pass tools here. Perplexity's completions API doesn't
+    # support tool calling, so the LLM can't invoke functions.
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,

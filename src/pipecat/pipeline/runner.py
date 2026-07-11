@@ -14,29 +14,24 @@ New code should import :class:`~pipecat.workers.runner.WorkerRunner`
 from :mod:`pipecat.workers.runner`.
 """
 
-import warnings
-
+from pipecat.utils.deprecation import deprecated
 from pipecat.workers.runner import WorkerRunner
 
 __all__ = ["PipelineRunner", "WorkerRunner"]
 
 
+@deprecated(
+    "`PipelineRunner` is deprecated since 1.3.0 and will be removed in 2.0.0. "
+    "Use `WorkerRunner` instead."
+)
 class PipelineRunner(WorkerRunner):
     """Deprecated alias for :class:`~pipecat.workers.runner.WorkerRunner`.
 
     .. deprecated:: 1.3.0
-        Use :class:`~pipecat.workers.runner.WorkerRunner` instead. The
-        runner now runs workers (of which
-        :class:`~pipecat.pipeline.worker.PipelineWorker` is one kind), not
-        just pipelines. ``PipelineRunner`` will be removed in a future
-        release.
+        Use :class:`~pipecat.workers.runner.WorkerRunner` instead.
+        Will be removed in 2.0.0. The :class:`PipelineRunner` now runs workers
+        (of which :class:`~pipecat.pipeline.worker.PipelineWorker` is one kind),
+        not just pipelines.
     """
 
-    def __init__(self, *args, **kwargs):
-        """Initialize the worker runner (deprecated)."""
-        warnings.warn(
-            "PipelineRunner is deprecated, use WorkerRunner instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
+    pass

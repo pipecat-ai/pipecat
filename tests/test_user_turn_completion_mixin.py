@@ -10,11 +10,14 @@ from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     LLMMarkerFrame,
     LLMTextFrame,
+    UserStartedSpeakingFrame,
     UserTurnInferenceCompletedFrame,
+    VADUserStartedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_completion_mixin import (
@@ -22,6 +25,7 @@ from pipecat.turns.user_turn_completion_mixin import (
     USER_TURN_COMPLETION_INSTRUCTIONS,
     USER_TURN_INCOMPLETE_LONG_MARKER,
     USER_TURN_INCOMPLETE_SHORT_MARKER,
+    TurnMarker,
     UserTurnCompletionConfig,
     UserTurnCompletionLLMServiceMixin,
 )
@@ -142,16 +146,16 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         self.assertEqual(len(marker_frames), 1)
 
     async def test_turn_state_reset_after_llm_full_response_end_frame(self):
-        """Test that _turn_complete_found is reset when LLMFullResponseEndFrame is pushed."""
+        """Test that the turn marker is reset when LLMFullResponseEndFrame is pushed."""
         processor = MockProcessor()
 
         # Mock push_frame on the instance so _push_turn_text can call it without
         # a live pipeline, but keep _turn_reset as the real implementation.
         processor.push_frame = AsyncMock()
 
-        # Simulate first LLM response: complete marker sets _turn_complete_found = True
+        # Simulate first LLM response: complete marker sets the marker to COMPLETE
         await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Hello!")
-        self.assertTrue(processor._turn_complete_found)
+        self.assertEqual(processor._turn_marker, TurnMarker.COMPLETE)
 
         # Restore the real push_frame so the mixin override runs, then call it
         # with LLMFullResponseEndFrame as the LLM service would.
@@ -162,10 +166,160 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
             end_frame = LLMFullResponseEndFrame()
             await processor.push_frame(end_frame)
 
-        # _turn_complete_found must now be False — ready for the next response
-        self.assertFalse(processor._turn_complete_found)
+        # The marker must now be cleared — ready for the next response
+        self.assertIsNone(processor._turn_marker)
         self.assertEqual(processor._turn_text_buffer, "")
-        self.assertFalse(processor._turn_suppressed)
+
+    async def test_new_response_cancels_pending_incomplete_timeout(self):
+        """A new LLM response starting must cancel a pending incomplete timeout.
+
+        This closes the race where the timeout fires at the same time a new
+        (completed) inference arrives: whichever response starts first cancels
+        the timeout before its text is parsed, so only one inference runs.
+        """
+        processor = MockProcessor()
+
+        # Arm an incomplete timeout via an ○ marker.
+        processor.push_frame = AsyncMock()
+        processor._start_incomplete_timeout = AsyncMock()
+        await processor._push_turn_text(USER_TURN_INCOMPLETE_SHORT_MARKER)
+        self.assertEqual(processor._turn_marker, TurnMarker.INCOMPLETE)
+
+        # Simulate a live pending timeout task.
+        processor._incomplete_timeout_task = object()
+        processor._cancel_incomplete_timeout = AsyncMock()
+
+        # A new response begins (either the user's completed turn or the
+        # timeout's own re-prompt): the pending timeout must be cancelled.
+        del processor.push_frame  # restore the mixin override
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", AsyncMock()):
+            await processor.push_frame(LLMFullResponseStartFrame())
+
+        processor._cancel_incomplete_timeout.assert_awaited_once()
+
+    async def test_vad_resume_cancels_pending_incomplete_timeout(self):
+        """The user resuming speech mid-turn cancels the pending re-prompt timeout.
+
+        A resume inside an already-open turn produces a VADUserStartedSpeakingFrame
+        but no InterruptionFrame, so the incomplete (○/◐) re-prompt timeout would
+        otherwise expire and talk over the user.
+        """
+        processor = MockProcessor()
+        processor._incomplete_timeout_task = object()
+        processor._cancel_incomplete_timeout = AsyncMock()
+
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            await processor.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+        processor._cancel_incomplete_timeout.assert_awaited_once()
+
+    async def test_only_first_completion_voiced_per_user_turn(self):
+        """A second ✓ inference within the same user turn is not voiced again.
+
+        The acoustic detector can trigger several inferences per user turn, each
+        producing its own ✓; only the first should be spoken. This holds as long
+        as the user hasn't resumed speaking in between — a VADUserStartedSpeakingFrame
+        resets the latch instead (see test_resumed_speech_does_not_permanently_silence_the_turn).
+        """
+        processor = MockProcessor()
+
+        pushed_frames = []
+        processor.push_frame = AsyncMock(
+            side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)
+        )
+
+        # First inference: ✓ is voiced.
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} How are you?")
+        # End of that response resets per-response state but not the per-turn latch.
+        await processor._turn_reset()
+
+        text_before = [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)]
+        self.assertEqual(text_before, ["How are you?"])
+
+        # Second inference in the same user turn: identical ✓ must be dropped.
+        pushed_frames.clear()
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} How are you?")
+        self.assertEqual([f for f in pushed_frames if isinstance(f, LLMTextFrame)], [])
+        completed = [f for f in pushed_frames if isinstance(f, UserTurnInferenceCompletedFrame)]
+        self.assertEqual(completed, [])
+
+    async def test_voiced_response_keeps_streaming_after_latch(self):
+        """The response that set the latch keeps streaming its own continuation."""
+        processor = MockProcessor()
+
+        pushed_frames = []
+        processor.push_frame = AsyncMock(
+            side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)
+        )
+
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Hello")
+        await processor._push_turn_text(" there!")
+
+        text = [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)]
+        self.assertEqual(text, ["Hello", " there!"])
+
+    async def test_new_user_turn_resets_completion_latch(self):
+        """UserStartedSpeakingFrame lets the next user turn voice a completion again."""
+        processor = MockProcessor()
+        processor._user_turn_completion_voiced = True
+
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            await processor.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+        self.assertFalse(processor._user_turn_completion_voiced)
+
+    async def test_vad_resume_resets_completion_latch(self):
+        """VADUserStartedSpeakingFrame lets the same open turn voice a completion again.
+
+        A resume inside an already-open turn produces no UserStartedSpeakingFrame
+        (the controller only fires that for a genuinely new turn), so without this
+        reset the latch would stay tripped for the rest of the turn. Since the
+        controller drops any in-flight completion as stale once the user resumes
+        (see UserTurnController._trigger_user_turn_stop), voicing it would only
+        repeat/talk over the user anyway — so the next ✓, for the turn the user is
+        now continuing, should get to speak instead.
+        """
+        processor = MockProcessor()
+        processor._user_turn_completion_voiced = True
+
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            await processor.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+        self.assertFalse(processor._user_turn_completion_voiced)
+
+    async def test_resumed_speech_does_not_permanently_silence_the_turn(self):
+        """Regression test for the confirmed double-inference-fix interaction bug.
+
+        Sequence: a first ✓ is voiced mid-turn (latch set); the user resumes
+        speaking within the same still-open turn (no UserStartedSpeakingFrame
+        fires, since the controller only emits that for a brand new turn); a
+        second, legitimate ✓ then arrives once the user pauses again. Without
+        resetting the latch on the resume, the second response would be
+        silently dropped and the bot would never reply.
+        """
+        processor = MockProcessor()
+
+        pushed_frames = []
+        processor.push_frame = AsyncMock(
+            side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)
+        )
+
+        # First (premature) inference: LLM says ✓, voiced, latch set.
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} First answer")
+        await processor._turn_reset()
+        self.assertTrue(processor._user_turn_completion_voiced)
+
+        # The user resumes speaking within the same still-open turn (no new
+        # UserStartedSpeakingFrame, since the turn never closed).
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            await processor.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+        # A second, legitimate inference completes once the user pauses again.
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Second answer")
+        await processor._turn_reset()
+
+        texts = [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)]
+        self.assertEqual(texts, ["First answer", "Second answer"])
 
 
 class MockLLMService(LLMService):

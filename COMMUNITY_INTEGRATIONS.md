@@ -40,24 +40,41 @@ Your repository must contain these components:
 
 Join our Discord: https://discord.gg/pipecat
 
-### Step 4: Submit for Listing
+### Step 4: Submit Your Documentation
 
-Submit a pull request to add your integration to our [Community Integrations documentation page](https://docs.pipecat.ai/server/services/community-integrations).
+Community integrations are documented alongside the core services on the [Supported Services page](https://docs.pipecat.ai/api-reference/server/services/supported-services), with a `Community` maintainer badge and their own service page. Submitting your docs means two things: a row on the Supported Services page and a dedicated service page.
 
 **To submit:**
 
 1. Fork the [Pipecat docs repository](https://github.com/pipecat-ai/docs)
-2. Edit the file `server/services/community-integrations.mdx`
-3. Add your integration to the appropriate service category table with:
-   - Service name
-   - Link to your repository
-   - Maintainer GitHub username(s)
-4. Include a link to your demo video (approx 30-60 seconds) in your PR description showing:
+2. **Add a row to the Supported Services page.** Edit `api-reference/server/services/supported-services.mdx` and add your integration to the appropriate category table:
+   - **Service** — your service name, linked to your new service page (see next step)
+   - **Setup** — the install command (e.g. `uv add pipecat-yourservice`)
+   - **Maintainer** — `Community`
+3. **Add a service page.** Create `api-reference/server/services/<category>/<your-service>.mdx`. The easiest path is to copy an existing community page (e.g. `image-generation/replicate.mdx`) and adapt it. Each page should include:
+   - The **community-maintained badge** at the top, via the shared snippet:
+     ```mdx
+     import { CommunityMaintained } from "/snippets/community-maintained.mdx";
+
+     <CommunityMaintained
+       maintainer="your-github-username"
+       maintainerUrl="https://github.com/your-github-username"
+       repo="https://github.com/your-org/pipecat-yourservice"
+     />
+     ```
+   - A short **overview** describing what the integration does (you can adapt the intro from your README)
+   - **Installation** — your install command
+   - **Prerequisites** — required accounts, API keys, and environment variables
+   - **Configuration** — constructor parameters and runtime `Settings`
+   - A minimal **usage** example showing the service in a pipeline
+   - A **compatibility** note with the last tested Pipecat version
+4. **Register the page in navigation.** Add the page path to `docs.json` under the matching `navigation` group, and add a redirect entry following the existing pattern.
+5. Include a link to your demo video (approx 30-60 seconds) in your PR description showing:
    - Core functionality of your integration
    - Handling of an interruption (if applicable to service type)
-5. Submit your pull request
+6. Submit your pull request
 
-Once your PR is submitted, post in the `#community-integrations` Discord channel to let us know.
+Keep your service page lightweight: it should point readers to your repository as the source of truth, not duplicate your full README. Once your PR is submitted, post in the `#community-integrations` Discord channel to let us know.
 
 ## Integration Patterns and Examples
 
@@ -391,6 +408,37 @@ async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
     return changed
 ```
 
+### Service Metadata
+
+A service can describe itself to the rest of the pipeline **at start** by overriding `service_metadata_frame()`. The service broadcasts the returned frame (a `ServiceMetadataFrame` or subtype) right after the `StartFrame`, and processors that care read it to **auto-configure themselves** — so users get correct behavior without wiring it by hand.
+
+Service metadata is a small, growing surface: only a few fields exist today, but the frame types are meant to gain more as more of the framework becomes self-configuring.
+
+The base `ServiceMetadataFrame` carries:
+
+- `service_name` — the broadcasting service's name.
+- `user_turn_strategies` — turn strategies the service recommends. A service that does its own **server-side end-of-turn detection** returns `ExternalUserTurnStrategies()` here; the user aggregator then defers to the service's turn frames instead of running local VAD/smart-turn. The recommendation applies **unless the user passed their own `user_turn_strategies`**, which always wins. `None` leaves the defaults in place.
+
+Subtypes add fields for their service kind:
+
+- **`STTMetadataFrame`** — `ttfs_p99_latency`, the 99th-percentile time from end-of-speech to final transcript, which turn strategies use to tune their timing.
+- **`LLMServiceMetadataFrame`** — `is_realtime_service`, flagging a realtime (speech-to-speech) LLM so the context aggregator auto-enables realtime mode.
+
+The base `STTService` and `LLMService` already return a sensible frame, so most services need nothing here. Override `service_metadata_frame()` — calling `super()` and adjusting the frame — only when your service has something extra to declare, e.g. an STT that detects turns server-side:
+
+```python
+from pipecat.frames.frames import STTMetadataFrame
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+
+def service_metadata_frame(self) -> STTMetadataFrame:
+    # This service defines turn boundaries server-side and emits
+    # UserStarted/StoppedSpeakingFrame, so recommend external turn
+    # strategies; the user aggregator defers to those over local VAD.
+    frame = super().service_metadata_frame()
+    frame.user_turn_strategies = ExternalUserTurnStrategies()
+    return frame
+```
+
 ### Sample Rate Handling
 
 Sample rates are set via PipelineParams and passed to each frame processor at initialization. The pattern is to _not_ set the sample rate value in the constructor of a given service. Instead, use the `start()` method to initialize sample rates from the frame:
@@ -412,6 +460,141 @@ Use Pipecat's tracing decorators:
 - **STT:** `@traced_stt` - decorate `_handle_transcription(self, transcript, is_final, language)` (the standard method name convention)
 - **LLM:** `@traced_llm` - decorate the `_process_context()` method
 - **TTS:** `@traced_tts` - decorate the `run_tts()` method
+
+## Processor Lifecycle: setup, cleanup, start, stop, cancel
+
+Frame processors have two kinds of lifecycle hooks: a framework-driven pair that
+always runs, and a frame-driven set that may be skipped. Putting setup or
+teardown logic in the wrong one is a common source of resource leaks, so follow
+this rule.
+
+### The hooks
+
+**Framework-driven, guaranteed: `setup()` and `cleanup()`.** Both are defined on
+`FrameProcessor`, so **every** processor has them. The pipeline calls them
+directly on each processor — `setup()` once before the pipeline runs
+(`Pipeline._setup_processors()`) and `cleanup()` once at teardown
+(`Pipeline._cleanup_processors()`) — independent of frame flow. They are the only
+hooks **guaranteed** to run, no matter how the pipeline started or ended.
+`setup()` acquires, `cleanup()` releases: they are counterparts, so whatever
+`setup()` allocates, `cleanup()` must be able to release.
+
+**Frame-driven, skippable: `start(StartFrame)`, `stop(EndFrame)`, and
+`cancel(CancelFrame)`.** These are **not** part of `FrameProcessor`. They are
+conventions provided by some base classes (`AIService` and its subclasses,
+`BaseInputTransport`, `BaseOutputTransport`), each of which dispatches to them
+from its own `process_frame`. A plain `FrameProcessor` (an aggregator, a filter)
+has none of them; it has only `process_frame`, `setup()`, and `cleanup()`.
+`start()` initializes when the `StartFrame` arrives; `stop()` and `cancel()` tear
+down. Because they run only when the corresponding frame reaches the processor, a
+processor that never receives the frame never runs them.
+
+Some processors handle these frames inline instead, with
+`isinstance(frame, CancelFrame)` (or `(EndFrame, CancelFrame)`) branches in
+`process_frame`. For this rule, that is equivalent to a `cancel()`/`stop()`
+override.
+
+`stop` (EndFrame) and `cancel` (CancelFrame) differ in urgency: `EndFrame` is a
+control frame processed in order, so `stop()` runs after pending frames drain
+(graceful, "finish then stop"); `CancelFrame` is a system frame processed
+immediately ahead of the queue, so `cancel()` runs at once and discards pending
+work ("stop now").
+
+### The rule
+
+**Initialization.** `setup()` runs before any frames, so it cannot see runtime
+pipeline configuration such as the sample rate carried by the `StartFrame`.
+Acquire config-independent resources there. Initialization that needs the
+negotiated configuration — opening a connection sized to the pipeline sample
+rate, for example — belongs in `start()`, which receives the `StartFrame`.
+
+**Teardown.** Decide where each teardown action goes with two questions:
+
+1. **Must it happen on every exit path?** Releasing resources (closing sockets,
+   releasing clients, cancelling tasks you created with `self.create_task()`,
+   deleting temp files) must. Put it in `cleanup()` and make it idempotent.
+   `cleanup()` is guaranteed; `stop()`/`cancel()`/inline branches are not (the
+   frame can be filtered, swallowed, or never reach the processor), so they must
+   never be the *only* place a resource is released.
+
+2. **Must it happen promptly, before the queue drains?** Stopping active output
+   (cancelling the task still generating audio, telling the transport to stop
+   sending) must, or the bot keeps talking until teardown. Do that in `cancel()`
+   (and, for graceful shutdown, `stop()`), *in addition to* `cleanup()`. Because
+   the release/cancel is idempotent, doing it in both places is safe.
+
+   This includes shutting down an **independent producer**. A websocket or gRPC
+   receive loop runs on its own task and keeps delivering data until you
+   disconnect it, so stopping only the consumer side (for example the task that
+   drains decoded audio) is not enough: the producer keeps reading until
+   teardown. Disconnect the producer in `cancel()`/`stop()`, then repeat it in
+   `cleanup()`.
+
+In short: **`cleanup()` owns the complete, guaranteed teardown; `cancel()` does
+the time-sensitive subset early.** Do not call `cleanup()` from `cancel()` or
+`stop()`: the framework already calls it separately, so doing both runs the logic
+twice. (A plain helper object owned by a processor, not itself a
+`FrameProcessor`, has no framework-driven `cleanup()`, so it is fine for its
+`stop()`/`cancel()` to delegate to its own idempotent `cleanup()`.)
+
+`FrameProcessor.cleanup()` cancels only the processor's *internal* input/process
+tasks. Tasks you create with `self.create_task()` are yours to cancel, so they
+belong in your `cleanup()` override.
+
+**Centralize shared teardown.** When more than one hook needs the same work (for
+example `cancel()`, `stop()`, and `cleanup()` all closing the same connection),
+put that work in a single idempotent private method and have each hook call it.
+Never copy the body into more than one hook: if a later change updates one copy
+and misses another, the processor leaks. Each hook stays a thin wrapper that
+calls `super().<hook>()` (which differs per hook and is required) and then the
+shared helper. Reuse an existing helper (`_disconnect()`, `_stop_tasks()`) when
+there is one; if the hooks share a superset of it, extract that superset into its
+own method and leave the lower-level helper for the paths that reuse it (such as
+a reconnect).
+
+### Example
+
+```python
+class MyService(AIService):
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        await self._connect()
+
+    async def stop(self, frame: EndFrame):
+        await super().stop(frame)
+        await self._teardown()
+
+    async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
+        await self._teardown()
+
+    async def cleanup(self):
+        await super().cleanup()
+        await self._teardown()
+
+    async def _teardown(self):
+        # One idempotent teardown body shared by all three hooks. _disconnect()
+        # also cancels the receive-loop task (an independent producer), which is
+        # why it must run on the prompt cancel()/stop() paths, not only here.
+        await self._disconnect()
+```
+
+A plain `FrameProcessor` has only `setup()` and `cleanup()`, so its custom tasks
+go there:
+
+```python
+class MyAggregator(FrameProcessor):
+    async def cleanup(self):
+        await super().cleanup()
+        await self._cancel_my_task()  # the only teardown hook it has
+```
+
+### Exception: serializers
+
+`FrameSerializer` is not a `FrameProcessor` and has no `setup()`/`cleanup()`.
+Serializers that act on `EndFrame`/`CancelFrame` (for example telephony
+serializers sending a provider disconnect message) can only do so on the frame
+path. That is expected: there is no guaranteed hook to move them to.
 
 ## Best Practices
 
@@ -448,7 +631,8 @@ except Exception as e:
 ### Testing
 
 - Your foundational example serves as a valuable integration-level test
-- Unit tests are nice to have. As the Pipecat teams provides better guidance, we will encourage unit testing more
+- Use the behavioral eval harness (`pipecat eval run`) to test your foundational example end-to-end; [see the docs](https://docs.pipecat.ai/pipecat/evals/overview) for more details
+- Unit tests are nice to have
 
 ## Disclaimer
 

@@ -13,6 +13,8 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.filters.aic_filter import AICFilter
+from pipecat.audio.vad.aic_quail_vad import AICQuailVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -36,23 +38,28 @@ load_dotenv(override=True)
 
 
 def _create_aic_filter() -> AICFilter:
-    license_key = os.getenv("AIC_LICENSE_KEY", "")
+    license_key = os.environ["AIC_SDK_LICENSE"]
 
     return AICFilter(
         license_key=license_key,
-        model_id="quail-vf-2.1-l-16khz",
+        model_id="quail-vf-2.2-l-16khz",
         enhancement_level=0.8,
     )
 
 
 aic_filter = _create_aic_filter()
-aic_vad_analyzer = aic_filter.create_vad_analyzer(
-    speech_hold_duration=0.05, minimum_speech_duration=0.0, sensitivity=6.0
+aic_vad_analyzer = AICQuailVADAnalyzer(
+    license_key=os.environ["AIC_SDK_LICENSE"],
 )
 
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        audio_in_filter=aic_filter,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -100,6 +107,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     audiobuffer = AudioBufferProcessor(
         num_channels=2,  # 1 for mono, 2 for stereo (user left, bot right)
         enable_turn_audio=False,  # Enable per-turn audio recording
+        auto_start_recording=True,  # Start recording automatically when the pipeline starts
     )
 
     pipeline = Pipeline(
@@ -127,7 +135,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        await audiobuffer.start_recording()
         # Kick off the conversation.
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}

@@ -28,7 +28,7 @@ try:
     from mcp.client.streamable_http import streamablehttp_client
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use an MCP client, you need to `pip install pipecat-ai[mcp]`.")
+    logger.error('In order to use an MCP client, you need to `uv add "pipecat-ai[mcp]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 ServerParameters: TypeAlias = StdioServerParameters | SseServerParameters | StreamableHttpParameters

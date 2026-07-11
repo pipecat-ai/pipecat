@@ -17,10 +17,10 @@ from typing import Any
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
-    CancelFrame,
-    EndFrame,
     ErrorFrame,
     Frame,
     StartFrame,
@@ -33,21 +33,12 @@ from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
-# See .env.example for Cartesia configuration needed
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Cartesia, you need to `pip install pipecat-ai[cartesia]`.")
-    raise ImportError(f"Missing module: {e}") from e
-
 
 class GenerationConfig(BaseModel):
-    """Configuration for Cartesia Sonic-3 generation parameters.
+    """Configuration for Cartesia generation parameters.
 
-    Sonic-3 interprets these parameters as guidance to ensure natural speech.
-    Test against your content for best results.
+    Cartesia interprets these parameters as guidance to ensure natural speech.
+    Test against your content for best results. Applicable to sonic-3 and sonic-3.5 models.
 
     Parameters:
         volume: Volume multiplier for generated speech. Valid range: [0.5, 2.0]. Default is 1.0.
@@ -194,7 +185,7 @@ class CartesiaTTSSettings(TTSSettings):
     """Settings for CartesiaTTSService and CartesiaHttpTTSService.
 
     Parameters:
-        generation_config: Generation configuration for Sonic-3 models. Includes volume,
+        generation_config: Generation configuration for Cartesia models. Includes volume,
             speed (numeric), and emotion (string) parameters.
         pronunciation_dict_id: The ID of the pronunciation dictionary to use for
             custom pronunciations.
@@ -222,7 +213,7 @@ class CartesiaTTSService(WebsocketTTSService):
 
         Parameters:
             language: Language to use for synthesis.
-            generation_config: Generation configuration for Sonic-3 models. Includes volume,
+            generation_config: Generation configuration for Cartesia models. Includes volume,
                 speed (numeric), and emotion (string) parameters.
             pronunciation_dict_id: The ID of the pronunciation dictionary to use for custom pronunciations.
         """
@@ -257,13 +248,15 @@ class CartesiaTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=CartesiaTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             cartesia_version: API version string for Cartesia service.
             url: WebSocket URL for Cartesia TTS API.
-            model: TTS model to use (e.g., "sonic-3").
+            model: TTS model to use.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=CartesiaTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate. If None, uses default.
             encoding: Audio encoding format.
@@ -277,7 +270,8 @@ class CartesiaTTSService(WebsocketTTSService):
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=CartesiaTTSService.Settings(...)`` instead.
+                    Use ``settings=CartesiaTTSService.Settings(...)`` instead. Will
+                    be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -285,7 +279,7 @@ class CartesiaTTSService(WebsocketTTSService):
             aggregate_sentences: Whether to aggregate sentences within the TTSService.
 
                 .. deprecated:: 0.0.104
-                    Use ``text_aggregation_mode`` instead.
+                    Use ``text_aggregation_mode`` instead. Will be removed in 2.0.0.
 
             **kwargs: Additional arguments passed to the parent service.
         """
@@ -538,24 +532,6 @@ class CartesiaTTSService(WebsocketTTSService):
         self._output_sample_rate = self.sample_rate
         await self._connect()
 
-    async def stop(self, frame: EndFrame):
-        """Stop the Cartesia TTS service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Stop the Cartesia TTS service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().cancel(frame)
-        await self._disconnect()
-
     async def _connect(self):
         await super()._connect()
 
@@ -770,7 +746,7 @@ class CartesiaHttpTTSService(TTSService):
 
         Parameters:
             language: Language to use for synthesis.
-            generation_config: Generation configuration for Sonic-3 models. Includes volume,
+            generation_config: Generation configuration for Cartesia models. Includes volume,
                 speed (numeric), and emotion (string) parameters.
             pronunciation_dict_id: The ID of the pronunciation dictionary to use for custom pronunciations.
         """
@@ -803,11 +779,13 @@ class CartesiaHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=CartesiaHttpTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
-            model: TTS model to use (e.g., "sonic-3").
+            model: TTS model to use.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=CartesiaHttpTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             base_url: Base URL for Cartesia HTTP API.
             cartesia_version: API version string for Cartesia service.
@@ -820,6 +798,7 @@ class CartesiaHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=CartesiaHttpTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -913,22 +892,9 @@ class CartesiaHttpTTSService(TTSService):
             await self._session.close()
             self._session = None
 
-    async def stop(self, frame: EndFrame):
-        """Stop the Cartesia HTTP TTS service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._close_session()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the Cartesia HTTP TTS service.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
+    async def cleanup(self):
+        """Close the owned HTTP session at teardown."""
+        await super().cleanup()
         await self._close_session()
 
     @traced_tts

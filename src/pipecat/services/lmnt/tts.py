@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -26,15 +28,6 @@ from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
-
-# See .env.example for LMNT configuration needed
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use LMNT, you need to `pip install pipecat-ai[lmnt]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 
 def language_to_lmnt_language(language: Language) -> str:
@@ -114,12 +107,14 @@ class LmntTTSService(InterruptibleTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=LmntTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate. If None, uses default.
             language: Language for synthesis. Defaults to English.
 
                 .. deprecated:: 0.0.106
                     Use ``settings=LmntTTSService.Settings(language=...)`` instead.
+                    Will be removed in 2.0.0.
 
             output_format: Audio output format. One of "pcm_s16le", "pcm_f32le",
                 "mp3", "ulaw", "webm". Defaults to "pcm_s16le".
@@ -127,6 +122,7 @@ class LmntTTSService(InterruptibleTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=LmntTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

@@ -35,7 +35,7 @@ try:
     from av.frame import Frame
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use the SmallWebRTC, you need to `pip install pipecat-ai[webrtc]`.")
+    logger.error('In order to use the SmallWebRTC, you need to `uv add "pipecat-ai[webrtc]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 # Clamp aiortc's SCTP DATA-chunk payload size so the on-wire UDP packet fits

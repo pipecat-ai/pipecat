@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -26,7 +27,6 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -34,6 +34,10 @@ load_dotenv(override=True)
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -71,10 +75,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(
-            user_turn_strategies=ExternalUserTurnStrategies(),
-            vad_analyzer=SileroVADAnalyzer(),
-        ),
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
     pipeline = Pipeline(
@@ -111,6 +112,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await worker.cancel()
+
+    @tts.event_handler("on_tts_request")
+    async def on_tts_request(tts, context_id: str, text: str):
+        """Surface the context_id for debugging and tracing TTS requests.
+
+        Pipecat auto-generates a context_id (UUID) per LLM turn and passes it
+        directly as Cartesia's `context_id` in the WebSocket request. Logging
+        it here lets you correlate your application logs with Cartesia's
+        context-level audio output for end-to-end tracing.
+
+        Docs:
+          - Pipecat event: https://docs.pipecat.ai/api-reference/server/events/service-events#on_tts_request
+          - Cartesia contexts: https://docs.cartesia.ai/use-the-api/tts-websocket/contexts
+        """
+        logger.debug(f"TTS request: {context_id} - {text}")
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 

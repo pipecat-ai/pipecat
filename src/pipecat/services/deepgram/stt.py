@@ -34,6 +34,7 @@ from pipecat.services.settings import (
 from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -48,10 +49,14 @@ try:
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Deepgram, you need to `pip install pipecat-ai[deepgram]`.")
+    logger.error('In order to use Deepgram, you need to `uv add "pipecat-ai[deepgram]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 
+@deprecated(
+    "`LiveOptions` is deprecated since 0.0.105 and will be removed in 2.0.0. Use "
+    "`DeepgramSTTService.Settings` instead."
+)
 class LiveOptions:
     """Deepgram live transcription options.
 
@@ -61,6 +66,7 @@ class LiveOptions:
     .. deprecated:: 0.0.105
         Use ``settings=DeepgramSTTService.Settings(...)`` for runtime-updatable fields
         and direct ``__init__`` parameters for connection-level config instead.
+        Will be removed in 2.0.0.
     """
 
     def __init__(
@@ -331,6 +337,7 @@ class DeepgramSTTService(STTService):
                 .. deprecated:: 0.0.105
                     Use ``settings=DeepgramSTTService.Settings(...)`` for runtime-updatable
                     fields and direct init parameters for connection-level config.
+                    Will be removed in 2.0.0.
 
             addons: Additional Deepgram features to enable.
             settings: Runtime-updatable settings. When provided alongside
@@ -520,6 +527,11 @@ class DeepgramSTTService(STTService):
         await super().cancel(frame)
         await self._disconnect()
 
+    async def cleanup(self):
+        """Release Deepgram resources."""
+        await super().cleanup()
+        await self._disconnect()
+
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Send audio data to Deepgram for transcription.
 
@@ -692,13 +704,13 @@ class DeepgramSTTService(STTService):
             if message.channel.alternatives[0].languages:
                 language = message.channel.alternatives[0].languages[0]
                 language = Language(language)
-            if len(transcript) > 0:
-                if is_final:
-                    # Check if this response is from a finalize() call.
-                    # Only mark as finalized when both we requested it AND Deepgram confirms it.
-                    from_finalize = getattr(message, "from_finalize", False) or False
-                    if from_finalize:
-                        self.confirm_finalize()
+            if is_final:
+                # Check if this response is from a finalize() call.
+                # Only mark as finalized when both we requested it AND Deepgram confirms it.
+                from_finalize = getattr(message, "from_finalize", False) or False
+                if from_finalize:
+                    self.confirm_finalize()
+                if len(transcript) > 0:
                     await self.push_frame(
                         TranscriptionFrame(
                             transcript,
@@ -710,17 +722,23 @@ class DeepgramSTTService(STTService):
                     )
                     await self._handle_transcription(transcript, is_final, language)
                     await self.stop_processing_metrics()
-                else:
-                    # For interim transcriptions, just push the frame without tracing
-                    await self.push_frame(
-                        InterimTranscriptionFrame(
-                            transcript,
-                            self._user_id,
-                            time_now_iso8601(),
-                            language,
-                            result=message,
-                        )
+                elif from_finalize:
+                    # Deepgram already sent the transcript via a regular is_final
+                    # before the finalize response arrived (empty). Report STT TTFB
+                    # immediately instead of falling to the timeout.
+                    await self.stop_ttfb_metrics()
+                    await self._cancel_ttfb_timeout()
+            elif len(transcript) > 0:
+                # For interim transcriptions, just push the frame without tracing
+                await self.push_frame(
+                    InterimTranscriptionFrame(
+                        transcript,
+                        self._user_id,
+                        time_now_iso8601(),
+                        language,
+                        result=message,
                     )
+                )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames with Deepgram-specific handling.

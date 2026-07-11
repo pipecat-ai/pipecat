@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import ServiceSettings
+from pipecat.utils.deprecation import deprecated
 
 try:
     from av.audio.frame import AudioFrame
@@ -34,7 +35,7 @@ try:
     from simli import SimliClient, SimliConfig
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Simli, you need to `pip install pipecat-ai[simli]`.")
+    logger.error('In order to use Simli, you need to `uv add "pipecat-ai[simli]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 
@@ -56,11 +57,16 @@ class SimliVideoService(AIService):
     Settings = SimliVideoSettings
     _settings: Settings
 
+    @deprecated(
+        "`SimliVideoService.InputParams` is deprecated since 0.0.106 and will be removed in "
+        "2.0.0. Use `SimliVideoService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Simli video configuration.
 
         .. deprecated:: 0.0.106
             Use ``SimliVideoService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             enable_logging: Whether to enable Simli logging.
@@ -102,6 +108,7 @@ class SimliVideoService(AIService):
 
                 .. deprecated:: 0.0.106
                     Use ``settings=SimliVideoService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             max_session_length: Absolute maximum session duration in seconds.
                 Avatar will disconnect after this time even if it's speaking.
@@ -188,6 +195,11 @@ class SimliVideoService(AIService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
+        await self._stop_connection()
+
+    async def cleanup(self):
+        """Clean up the Simli video service."""
+        await super().cleanup()
         await self._stop_connection()
 
     async def _start_connection(self):
@@ -296,8 +308,13 @@ class SimliVideoService(AIService):
         await self.push_frame(frame, direction)
 
     async def _stop_connection(self):
-        """Stop the Simli client and cancel processing tasks."""
-        await self._simli_client.stop()
+        """Stop the Simli client and cancel processing tasks.
+
+        Idempotent so it can run from stop(), cancel(), and cleanup().
+        """
+        if self._initialized:
+            await self._simli_client.stop()
+            self._initialized = False
         if self._audio_task:
             await self.cancel_task(self._audio_task)
             self._audio_task = None

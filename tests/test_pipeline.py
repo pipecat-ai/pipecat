@@ -30,6 +30,7 @@ from pipecat.processors.filters.frame_filter import FrameFilter
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import HeartbeatsObserver, run_test
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 
 class TestPipeline(unittest.IsolatedAsyncioTestCase):
@@ -134,7 +135,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
 
         await worker.queue_frame(TextFrame(text="Hello!"))
         await worker.queue_frames([TextFrame(text="Bye!"), EndFrame()])
-        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
+        await worker.run(WorkerParams(task_manager=TaskManager()))
         assert worker.has_finished()
 
     async def test_task_observers(self):
@@ -152,7 +153,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         worker = PipelineWorker(pipeline, observers=[CustomObserver()])
 
         await worker.queue_frames([TextFrame(text="Hello Downstream!"), EndFrame()])
-        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
+        await worker.run(WorkerParams(task_manager=TaskManager()))
         assert frame_received
 
     async def test_task_add_observer(self):
@@ -208,7 +209,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             await worker.queue_frame(EndFrame())
 
         await asyncio.gather(
-            worker.run(WorkerParams(loop=asyncio.get_event_loop())), delayed_add_observer()
+            worker.run(WorkerParams(task_manager=TaskManager())), delayed_add_observer()
         )
 
         assert frame_received
@@ -234,7 +235,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             end_received = isinstance(frame, EndFrame)
 
         await worker.queue_frame(EndFrame())
-        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
+        await worker.run(WorkerParams(task_manager=TaskManager()))
 
         assert start_received
         assert end_received
@@ -252,7 +253,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             stop_received = isinstance(frame, StopFrame)
 
         await worker.queue_frame(StopFrame())
-        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
+        await worker.run(WorkerParams(task_manager=TaskManager()))
 
         assert stop_received
 
@@ -285,7 +286,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
 
         try:
             await asyncio.wait_for(
-                worker.run(WorkerParams(loop=asyncio.get_event_loop())),
+                worker.run(WorkerParams(task_manager=TaskManager())),
                 timeout=1.0,
             )
         except TimeoutError:
@@ -313,7 +314,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
 
         try:
             await asyncio.wait_for(
-                worker.run(WorkerParams(loop=asyncio.get_event_loop())),
+                worker.run(WorkerParams(task_manager=TaskManager())),
                 timeout=1.0,
             )
         except TimeoutError:
@@ -342,7 +343,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
 
         try:
             await asyncio.wait_for(
-                worker.run(WorkerParams(loop=asyncio.get_event_loop())),
+                worker.run(WorkerParams(task_manager=TaskManager())),
                 timeout=1.0,
             )
         except TimeoutError:
@@ -395,7 +396,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
 
         start_time = time.time()
         await asyncio.gather(
-            worker.run(WorkerParams(loop=asyncio.get_event_loop())),
+            worker.run(WorkerParams(task_manager=TaskManager())),
             wait_for_heartbeats(),
         )
         elapsed = time.time() - start_time
@@ -436,7 +437,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
 
             try:
                 await asyncio.wait_for(
-                    worker.run(WorkerParams(loop=asyncio.get_event_loop())),
+                    worker.run(WorkerParams(task_manager=TaskManager())),
                     timeout=0.6,
                 )
             except TimeoutError:
@@ -452,7 +453,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         pipeline = Pipeline([identity])
         worker = PipelineWorker(pipeline, idle_timeout_secs=0.2)
         # This shouldn't freeze, so nothing to check really.
-        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
+        await worker.run(WorkerParams(task_manager=TaskManager()))
 
     async def test_cancel_runner_on_idle_timeout_cancels_peers(self):
         """``cancel_runner_on_idle_timeout`` brings down the whole runner, not just the worker.
@@ -517,7 +518,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             await worker.queue_frame(EndFrame())
 
         await asyncio.wait_for(
-            worker.run(WorkerParams(loop=asyncio.get_event_loop())),
+            worker.run(WorkerParams(task_manager=TaskManager())),
             timeout=2.0,
         )
         self.assertTrue(idle_fired.is_set())
@@ -532,7 +533,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         )
         try:
             await asyncio.wait_for(
-                worker.run(WorkerParams(loop=asyncio.get_event_loop())),
+                worker.run(WorkerParams(task_manager=TaskManager())),
                 timeout=0.3,
             )
         except TimeoutError:
@@ -551,7 +552,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             ),
             idle_timeout_secs=0.3,
         )
-        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
+        await worker.run(WorkerParams(task_manager=TaskManager()))
 
     async def test_idle_task_event_handler_no_frames(self):
         identity = IdentityFilter()
@@ -570,7 +571,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             idle_timeout = True
             await worker.cancel()
 
-        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
+        await worker.run(WorkerParams(task_manager=TaskManager()))
         assert idle_timeout
 
     async def test_idle_task_event_handler_quiet_user(self):
@@ -604,7 +605,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
                 )
                 await asyncio.sleep(0.01)
 
-        await asyncio.gather(send_audio(), worker.run(WorkerParams(loop=asyncio.get_event_loop())))
+        await asyncio.gather(send_audio(), worker.run(WorkerParams(task_manager=TaskManager())))
         assert idle_timeout == 1
 
     async def test_idle_task_frames(self):
@@ -637,7 +638,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         start_time = time.time()
 
         tasks = [
-            asyncio.create_task(worker.run(WorkerParams(loop=asyncio.get_event_loop()))),
+            asyncio.create_task(worker.run(WorkerParams(task_manager=TaskManager()))),
             asyncio.create_task(delayed_frames()),
         ]
 
@@ -682,7 +683,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             await worker.queue_frame(TextFrame("Hello Pipecat!"))
 
         tasks = [
-            asyncio.create_task(worker.run(WorkerParams(loop=asyncio.get_event_loop()))),
+            asyncio.create_task(worker.run(WorkerParams(task_manager=TaskManager()))),
             asyncio.create_task(delayed_frames()),
         ]
 
@@ -721,7 +722,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             cancelled = isinstance(frame, CancelFrame)
 
         try:
-            await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
+            await worker.run(WorkerParams(task_manager=TaskManager()))
         except asyncio.CancelledError:
             assert cancelled
 
@@ -745,7 +746,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         pipeline = Pipeline([StartBlocker(start_received=start_received)])
         worker = PipelineWorker(pipeline, cancel_timeout_secs=0.1)
 
-        run_task = asyncio.create_task(worker.run(WorkerParams(loop=asyncio.get_event_loop())))
+        run_task = asyncio.create_task(worker.run(WorkerParams(task_manager=TaskManager())))
         await start_received.wait()
         await worker.cancel()
         await asyncio.wait_for(run_task, timeout=1.0)
@@ -779,9 +780,56 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         await worker.queue_frame(TextFrame(text="Hello from Pipecat!"))
 
         try:
-            await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
+            await worker.run(WorkerParams(task_manager=TaskManager()))
         except asyncio.CancelledError:
             assert error_received
+
+    async def test_heartbeat_timeout_event_handler(self):
+        """on_heartbeat_timeout fires when heartbeat frames cannot reach the sink."""
+        pipeline = Pipeline([FrameFilter(types=())])
+        worker = PipelineWorker(
+            pipeline,
+            params=PipelineParams(
+                enable_heartbeats=True,
+                heartbeats_period_secs=0.05,
+                heartbeats_monitor_secs=0.1,
+            ),
+        )
+
+        heartbeat_timeout = False
+
+        @worker.event_handler("on_heartbeat_timeout")
+        async def on_heartbeat_timeout(worker: PipelineWorker):
+            nonlocal heartbeat_timeout
+            heartbeat_timeout = True
+            await worker.cancel()
+
+        await worker.run(WorkerParams(task_manager=TaskManager()))
+        assert heartbeat_timeout
+
+    async def test_heartbeat_timeout_fires_repeatedly(self):
+        """on_heartbeat_timeout keeps firing every heartbeats_monitor_secs while stalled."""
+        pipeline = Pipeline([FrameFilter(types=())])
+        worker = PipelineWorker(
+            pipeline,
+            params=PipelineParams(
+                enable_heartbeats=True,
+                heartbeats_period_secs=0.05,
+                heartbeats_monitor_secs=0.1,
+            ),
+        )
+
+        timeout_count = 0
+
+        @worker.event_handler("on_heartbeat_timeout")
+        async def on_heartbeat_timeout(worker: PipelineWorker):
+            nonlocal timeout_count
+            timeout_count += 1
+            if timeout_count >= 2:
+                await worker.cancel()
+
+        await worker.run(WorkerParams(task_manager=TaskManager()))
+        assert timeout_count >= 2
 
 
 if __name__ == "__main__":

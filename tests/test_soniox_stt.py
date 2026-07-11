@@ -10,9 +10,18 @@ from unittest.mock import AsyncMock
 import pytest
 from websockets.protocol import State
 
-from pipecat.frames.frames import TranscriptionFrame
+from pipecat.frames.frames import (
+    InterimTranscriptionFrame,
+    TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.soniox.stt import END_TOKEN, SonioxSTTService, _language_from_tokens
 from pipecat.transcriptions.language import Language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 
 
 class _FakeWebsocket:
@@ -147,6 +156,270 @@ async def test_receive_messages_sets_final_transcription_language(monkeypatch):
         {"text": " computer", "is_final": True, "language": "en"},
     ]
     assert traced_transcriptions == [("Ik zoek computer", True, Language.NL)]
+
+
+def _instrumented_service(monkeypatch, events, **kwargs):
+    """Create a service that records pushes, broadcasts, and interruptions in order."""
+    service = SonioxSTTService(api_key="test-key", **kwargs)
+
+    async def fake_push_frame(frame, direction=None):
+        events.append(("push", type(frame)))
+
+    async def fake_broadcast_frame(frame_cls, **frame_kwargs):
+        events.append(("broadcast", frame_cls))
+
+    async def fake_broadcast_interruption():
+        events.append(("interruption", None))
+
+    async def fake_noop(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(service, "push_frame", fake_push_frame)
+    monkeypatch.setattr(service, "broadcast_frame", fake_broadcast_frame)
+    monkeypatch.setattr(service, "broadcast_interruption", fake_broadcast_interruption)
+    monkeypatch.setattr(service, "_handle_transcription", fake_noop)
+    monkeypatch.setattr(service, "start_processing_metrics", fake_noop)
+    monkeypatch.setattr(service, "stop_processing_metrics", fake_noop)
+    return service
+
+
+def test_service_metadata_recommends_external_turn_strategies_in_soniox_mode():
+    service = SonioxSTTService(api_key="test-key", vad_force_turn_endpoint=False)
+    frame = service.service_metadata_frame()
+    assert isinstance(frame.user_turn_strategies, ExternalUserTurnStrategies)
+
+
+def test_service_metadata_leaves_turn_strategies_unset_in_pipecat_mode():
+    service = SonioxSTTService(api_key="test-key")
+    frame = service.service_metadata_frame()
+    assert frame.user_turn_strategies is None
+
+
+@pytest.mark.asyncio
+async def test_soniox_turn_detection_emits_turn_frames(monkeypatch):
+    events = []
+    service = _instrumented_service(monkeypatch, events, vad_force_turn_endpoint=False)
+
+    messages = [
+        json.dumps({"tokens": [{"text": "Hel", "is_final": False}]}),
+        json.dumps(
+            {
+                "tokens": [
+                    {"text": "Hello.", "is_final": True},
+                    {"text": END_TOKEN, "is_final": True},
+                ]
+            }
+        ),
+        json.dumps({"tokens": [], "finished": True}),
+    ]
+    service._websocket = _FakeWebsocket(messages)
+
+    await service._receive_messages()
+
+    assert events == [
+        # Turn opens on the first token, before any transcription frames.
+        ("broadcast", UserStartedSpeakingFrame),
+        ("interruption", None),
+        ("push", InterimTranscriptionFrame),
+        # Endpoint: finalized transcript first, then the turn closes.
+        ("push", TranscriptionFrame),
+        ("broadcast", UserStoppedSpeakingFrame),
+    ]
+    assert service._user_turn_open is False
+
+
+@pytest.mark.asyncio
+async def test_soniox_turn_detection_should_interrupt_false(monkeypatch):
+    events = []
+    service = _instrumented_service(
+        monkeypatch, events, vad_force_turn_endpoint=False, should_interrupt=False
+    )
+
+    messages = [
+        json.dumps({"tokens": [{"text": "Hel", "is_final": False}]}),
+        json.dumps({"tokens": [], "finished": True}),
+    ]
+    service._websocket = _FakeWebsocket(messages)
+
+    await service._receive_messages()
+
+    assert ("broadcast", UserStartedSpeakingFrame) in events
+    assert ("interruption", None) not in events
+
+
+@pytest.mark.asyncio
+async def test_soniox_turn_detection_reopens_turn_after_end_token(monkeypatch):
+    events = []
+    service = _instrumented_service(monkeypatch, events, vad_force_turn_endpoint=False)
+
+    # A single message can close one turn and start the next.
+    messages = [
+        json.dumps(
+            {
+                "tokens": [
+                    {"text": "Hello.", "is_final": True},
+                    {"text": END_TOKEN, "is_final": True},
+                    {"text": "And", "is_final": False},
+                ]
+            }
+        ),
+        json.dumps({"tokens": [], "finished": True}),
+    ]
+    service._websocket = _FakeWebsocket(messages)
+
+    await service._receive_messages()
+
+    assert events == [
+        ("broadcast", UserStartedSpeakingFrame),
+        ("interruption", None),
+        ("push", TranscriptionFrame),
+        ("broadcast", UserStoppedSpeakingFrame),
+        # Tokens after the endpoint open a new turn.
+        ("broadcast", UserStartedSpeakingFrame),
+        ("interruption", None),
+        ("push", InterimTranscriptionFrame),
+        # The finished message closes the still-open turn.
+        ("broadcast", UserStoppedSpeakingFrame),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_soniox_turn_detection_no_duplicate_started_across_messages(monkeypatch):
+    events = []
+    service = _instrumented_service(monkeypatch, events, vad_force_turn_endpoint=False)
+
+    messages = [
+        json.dumps({"tokens": [{"text": "Hel", "is_final": False}]}),
+        json.dumps({"tokens": [{"text": "Hello", "is_final": True}]}),
+        json.dumps({"tokens": [], "finished": True}),
+    ]
+    service._websocket = _FakeWebsocket(messages)
+
+    await service._receive_messages()
+
+    started = [event for event in events if event == ("broadcast", UserStartedSpeakingFrame)]
+    assert len(started) == 1
+
+
+@pytest.mark.asyncio
+async def test_pipecat_mode_emits_no_turn_frames(monkeypatch):
+    events = []
+    service = _instrumented_service(monkeypatch, events)
+
+    messages = [
+        json.dumps({"tokens": [{"text": "Hel", "is_final": False}]}),
+        json.dumps(
+            {
+                "tokens": [
+                    {"text": "Hello.", "is_final": True},
+                    {"text": END_TOKEN, "is_final": True},
+                ]
+            }
+        ),
+        json.dumps({"tokens": [], "finished": True}),
+    ]
+    service._websocket = _FakeWebsocket(messages)
+
+    await service._receive_messages()
+
+    assert events == [
+        ("push", InterimTranscriptionFrame),
+        ("push", TranscriptionFrame),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_vad_start_opens_turn_before_tokens(monkeypatch):
+    events = []
+    service = _instrumented_service(monkeypatch, events, vad_force_turn_endpoint=False)
+
+    # The local VAD signal is the fast path: the turn opens before any token.
+    await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    assert events == [
+        ("push", VADUserStartedSpeakingFrame),  # re-pushed by the base STTService
+        ("broadcast", UserStartedSpeakingFrame),
+        ("interruption", None),
+    ]
+
+    # Tokens arriving later must not open a second turn.
+    messages = [
+        json.dumps(
+            {
+                "tokens": [
+                    {"text": "Hello.", "is_final": True},
+                    {"text": END_TOKEN, "is_final": True},
+                ]
+            }
+        ),
+        json.dumps({"tokens": [], "finished": True}),
+    ]
+    service._websocket = _FakeWebsocket(messages)
+
+    await service._receive_messages()
+
+    started = [event for event in events if event == ("broadcast", UserStartedSpeakingFrame)]
+    assert len(started) == 1
+    assert events[-2:] == [
+        ("push", TranscriptionFrame),
+        ("broadcast", UserStoppedSpeakingFrame),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_vad_stop_does_not_close_turn(monkeypatch):
+    events = []
+    service = _instrumented_service(monkeypatch, events, vad_force_turn_endpoint=False)
+
+    # The Soniox endpoint owns the turn close: a VAD stop (e.g. a mid-turn
+    # pause) must not close it.
+    await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    assert ("broadcast", UserStoppedSpeakingFrame) not in events
+    assert service._user_turn_open is True
+
+
+@pytest.mark.asyncio
+async def test_pipecat_mode_vad_frames_emit_no_turn_frames(monkeypatch):
+    events = []
+    service = _instrumented_service(monkeypatch, events)
+
+    await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    assert events == [
+        ("push", VADUserStartedSpeakingFrame),
+        ("push", VADUserStoppedSpeakingFrame),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_soniox_turn_detection_error_closes_open_turn(monkeypatch):
+    events = []
+    service = _instrumented_service(monkeypatch, events, vad_force_turn_endpoint=False)
+
+    async def fake_push_error(*args, **kwargs):
+        events.append(("error", None))
+
+    monkeypatch.setattr(service, "push_error", fake_push_error)
+
+    messages = [
+        json.dumps({"tokens": [{"text": "Hel", "is_final": False}]}),
+        json.dumps({"tokens": [], "error_code": 500, "error_message": "boom"}),
+        json.dumps({"tokens": [], "finished": True}),
+    ]
+    service._websocket = _FakeWebsocket(messages)
+
+    await service._receive_messages()
+
+    assert events == [
+        ("broadcast", UserStartedSpeakingFrame),
+        ("interruption", None),
+        ("push", InterimTranscriptionFrame),
+        ("broadcast", UserStoppedSpeakingFrame),
+        ("error", None),
+    ]
 
 
 @pytest.mark.asyncio

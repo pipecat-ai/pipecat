@@ -1403,6 +1403,92 @@ class TestWordCompletionTrackerAccumulatedText(unittest.TestCase):
         self.assertEqual(tracker.get_accumulated_llm_text(), "")
 
 
+class TestUserFacingText(unittest.TestCase):
+    """Tests for get_accumulated_user_facing_text() and get_remaining_user_facing_text().
+
+    Uses a credit-card number scenario where tts_text has SSML tags, llm_text has
+    pattern delimiters, and user_facing_text is the plain user-visible string.
+    """
+
+    TTS_TEXT = "<spell>4111 1111 1111 1111</spell>"
+    LLM_TEXT = "<card>4111 1111 1111 1111</card>"
+    USER_FACING_TEXT = "4111 1111 1111 1111"
+    WORDS = ["4111", "1111", "1111", "1111"]
+
+    def _tracker(self) -> WordCompletionTracker:
+        return WordCompletionTracker(
+            self.TTS_TEXT,
+            llm_text=self.LLM_TEXT,
+            user_facing_text=self.USER_FACING_TEXT,
+        )
+
+    def test_defaults_to_tts_text_when_not_provided(self):
+        """When user_facing_text is omitted, the cursor tracks tts_text instead."""
+        tracker = WordCompletionTracker("hello world")
+        tracker.add_word_and_check_complete("hello")
+        self.assertEqual(
+            tracker.get_accumulated_user_facing_text(),
+            tracker.get_accumulated_tts_text(),
+        )
+
+    def test_before_any_words_accumulated_is_empty(self):
+        tracker = self._tracker()
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "")
+
+    def test_before_any_words_remaining_is_full_text(self):
+        tracker = self._tracker()
+        self.assertEqual(tracker.get_remaining_user_facing_text(), self.USER_FACING_TEXT)
+
+    def test_user_facing_differs_from_tts_after_first_word(self):
+        """The SSML opening tag means tts_text accumulated != user_facing accumulated."""
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("4111")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "4111")
+        self.assertEqual(tracker.get_accumulated_tts_text(), "<spell>4111")
+
+    def test_word_by_word_accumulated_and_remaining(self):
+        """Check accumulated and remaining at each step through the card number."""
+        tracker = self._tracker()
+        expected = [
+            ("4111", " 1111 1111 1111"),
+            ("4111 1111", " 1111 1111"),
+            ("4111 1111 1111", " 1111"),
+            ("4111 1111 1111 1111", ""),
+        ]
+        for word, (exp_acc, exp_rem) in zip(self.WORDS, expected):
+            tracker.add_word_and_check_complete(word)
+            self.assertEqual(tracker.get_accumulated_user_facing_text(), exp_acc)
+            self.assertEqual(tracker.get_remaining_user_facing_text(strip=False), exp_rem)
+
+    def test_accumulated_plus_remaining_reconstructs_user_facing_text(self):
+        """accumulated + remaining(strip=False) == user_facing_text at every step."""
+        tracker = self._tracker()
+        for word in self.WORDS:
+            tracker.add_word_and_check_complete(word)
+            acc = tracker.get_accumulated_user_facing_text()
+            rem = tracker.get_remaining_user_facing_text(strip=False)
+            self.assertEqual(acc + rem, self.USER_FACING_TEXT)
+
+    def test_force_complete_sets_accumulated_to_full_text(self):
+        """Force-completing the slot (mismatched word) sweeps user_facing fully accumulated."""
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("4111")
+        tracker.add_word_and_check_complete("WRONG")  # force-complete
+        self.assertTrue(tracker.is_complete)
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), self.USER_FACING_TEXT)
+        self.assertEqual(tracker.get_remaining_user_facing_text(), "")
+
+    def test_reset_clears_user_facing_pos(self):
+        """reset() resets the user_facing cursor; accumulated returns empty string again."""
+        tracker = self._tracker()
+        for word in self.WORDS:
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), self.USER_FACING_TEXT)
+        tracker.reset()
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "")
+        self.assertEqual(tracker.get_remaining_user_facing_text(), self.USER_FACING_TEXT)
+
+
 class TestWordCompletionTrackerUnicodeSymbolSubstitution(unittest.TestCase):
     """Guards against the regression where ElevenLabs maps Unicode symbols such
     as '→' to ASCII punctuation like '-' in word-timestamp events.
@@ -1596,6 +1682,397 @@ class TestWordCompletionTrackerCJK(unittest.TestCase):
         tracker = WordCompletionTracker(sentence)
         tracker.add_word_and_check_complete("你好，我是")
         self.assertEqual(tracker.get_remaining_tts_text(), "你的智能")
+
+
+# ---------------------------------------------------------------------------
+# Voice-formatting transforms: segment-map cursor alignment
+#
+# Simulates the billing message scenario where currency expansion changes the
+# alnum content:
+#   user_facing / llm: "Your balance is $5, due on 3/15. Call us at 555-1234."
+#   tts (post-transform): "Your balance is five dollars, due on 3/15. Call us at 555-1234."
+#
+# Segment map produced by SequenceMatcher:
+#   Seg 1 (unchanged): "Your balance is "  →  "Your balance is "
+#   Seg 2 (transformed): "$5,"  →  "five dollars,"
+#   Seg 3 (unchanged): " due on 3/15. Call us at 555-1234."  →  same
+# ---------------------------------------------------------------------------
+
+_BILLING_UF = "Your balance is $5, due on 3/15. Call us at 555-1234."
+_BILLING_TTS = "Your balance is five dollars, due on 3/15. Call us at 555-1234."
+_BILLING_WORDS = [
+    "Your",
+    "balance",
+    "is",
+    "five",
+    "dollars,",
+    "due",
+    "on",
+    "3/15.",
+    "Call",
+    "us",
+    "at",
+    "555-1234.",
+]
+
+
+class TestWordCompletionTrackerWithTransforms(unittest.TestCase):
+    """Tracker behaviour when text transforms expand alnum content."""
+
+    def _tracker(self, llm_text=None):
+        return WordCompletionTracker(
+            _BILLING_TTS,
+            llm_text=llm_text,
+            user_facing_text=_BILLING_UF,
+        )
+
+    def _advance(self, tracker, *words):
+        for word in words:
+            tracker.add_word_and_check_complete(word)
+
+    # --- segment map construction ---
+
+    def test_segment_map_built_when_alnum_differs(self):
+        """Segment map is created when tts_text and user_facing_text differ in alnum content."""
+        self.assertIsNotNone(self._tracker()._segment_map)
+
+    def test_segment_map_always_built(self):
+        """A segment map is always built, regardless of whether alnum sequences differ."""
+        from pipecat.utils.context.text_segment_map import TextSegmentMap
+
+        tracker = WordCompletionTracker("hello world")
+        self.assertIsInstance(tracker._segment_map, TextSegmentMap)
+
+    # --- suppress_in_context ---
+
+    def test_suppress_false_before_transformed_segment(self):
+        """Words before the transformed segment are not suppressed."""
+        tracker = self._tracker()
+        self._advance(tracker, "Your", "balance", "is")
+        self.assertFalse(tracker.suppress_in_context())
+
+    def test_suppress_true_mid_transformed_segment(self):
+        """'five' is mid-flight inside the '$5,' segment — must be suppressed."""
+        tracker = self._tracker()
+        self._advance(tracker, "Your", "balance", "is", "five")
+        self.assertTrue(tracker.suppress_in_context())
+
+    def test_suppress_false_when_transformed_segment_completes(self):
+        """'dollars,' completes the segment — must not be suppressed."""
+        tracker = self._tracker()
+        self._advance(tracker, "Your", "balance", "is", "five", "dollars,")
+        self.assertFalse(tracker.suppress_in_context())
+
+    def test_suppress_false_for_words_after_transform(self):
+        """Words after the transformed segment are not suppressed."""
+        tracker = self._tracker()
+        self._advance(tracker, "Your", "balance", "is", "five", "dollars,", "due")
+        self.assertFalse(tracker.suppress_in_context())
+
+    def test_suppress_false_after_reset(self):
+        """reset() clears segment map state so suppress_in_context returns False."""
+        tracker = self._tracker()
+        self._advance(tracker, "Your", "balance", "is", "five")
+        tracker.reset()
+        self.assertFalse(tracker.suppress_in_context())
+
+    # --- user-facing cursor alignment ---
+
+    def test_user_facing_pos_held_during_transformed_segment(self):
+        """user_facing_pos must not advance while 'five' is in the transformed segment."""
+        tracker = self._tracker()
+        self._advance(tracker, "Your", "balance", "is")
+        pos_after_seg1 = tracker._user_facing_pos
+        tracker.add_word_and_check_complete("five")
+        self.assertEqual(tracker._user_facing_pos, pos_after_seg1)
+
+    def test_user_facing_pos_jumps_when_segment_completes(self):
+        """user_facing_pos jumps to end of '$5,' after 'dollars,' is processed."""
+        tracker = self._tracker()
+        self._advance(tracker, "Your", "balance", "is", "five")
+        pos_before = tracker._user_facing_pos
+        tracker.add_word_and_check_complete("dollars,")
+        expected = _BILLING_UF.index("$5,") + len("$5,")  # 16 + 3 = 19
+        self.assertEqual(tracker._user_facing_pos, expected)
+        self.assertGreater(tracker._user_facing_pos, pos_before)
+
+    def test_accumulated_user_facing_after_transform_segment(self):
+        """get_accumulated_user_facing_text() equals 'Your balance is $5,' after 'dollars,'."""
+        tracker = self._tracker()
+        self._advance(tracker, "Your", "balance", "is", "five", "dollars,")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "Your balance is $5,")
+
+    def test_remaining_user_facing_after_transform_segment(self):
+        """get_remaining_user_facing_text() starts with 'due on 3/15.' after 'dollars,'."""
+        tracker = self._tracker()
+        self._advance(tracker, "Your", "balance", "is", "five", "dollars,")
+        remaining = tracker.get_remaining_user_facing_text(strip=True)
+        self.assertTrue(remaining.startswith("due on 3/15."), remaining)
+        self.assertIn("555-1234.", remaining)
+
+    def test_accumulated_plus_remaining_reconstructs_user_facing(self):
+        """Accumulated + remaining (strip=False) reconstructs the full user_facing_text."""
+        tracker = self._tracker()
+        self._advance(tracker, "Your", "balance", "is", "five", "dollars,")
+        acc = tracker.get_accumulated_user_facing_text()
+        rem = tracker.get_remaining_user_facing_text(strip=False)
+        self.assertEqual(acc + rem, _BILLING_UF)
+
+    # --- completion ---
+
+    def test_non_completing_words_return_false(self):
+        """All words except the last return False from add_word_and_check_complete."""
+        tracker = self._tracker()
+        for word in _BILLING_WORDS[:-1]:
+            self.assertFalse(
+                tracker.add_word_and_check_complete(word), f"word '{word}' should not complete"
+            )
+
+    def test_last_word_completes(self):
+        """The final word '555-1234.' completes the tracker."""
+        tracker = self._tracker()
+        for word in _BILLING_WORDS[:-1]:
+            tracker.add_word_and_check_complete(word)
+        self.assertTrue(tracker.add_word_and_check_complete(_BILLING_WORDS[-1]))
+
+    def test_full_sentence_accumulated_user_facing_equals_original(self):
+        """After all words, accumulated user_facing_text equals the original string."""
+        tracker = self._tracker()
+        for word in _BILLING_WORDS:
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), _BILLING_UF)
+
+    # --- llm_text attribution ---
+
+    def test_mid_segment_llm_consumed_is_none(self):
+        """'five' is in a transformed segment — llm_consumed must be None (suppressed)."""
+        tracker = self._tracker(llm_text=_BILLING_UF)
+        self._advance(tracker, "Your", "balance", "is")
+        tracker.add_word_and_check_complete("five")
+        self.assertIsNone(tracker.get_llm_consumed())
+
+    def test_completing_word_llm_consumed_is_original_segment(self):
+        """'dollars,' completing the segment carries '$5,' as llm_consumed."""
+        tracker = self._tracker(llm_text=_BILLING_UF)
+        self._advance(tracker, "Your", "balance", "is", "five")
+        tracker.add_word_and_check_complete("dollars,")
+        self.assertEqual(tracker.get_llm_consumed(), "$5,")
+
+    def test_unchanged_word_llm_consumed_matches_word(self):
+        """An unchanged word's llm_consumed contains that word."""
+        tracker = self._tracker(llm_text=_BILLING_UF)
+        tracker.add_word_and_check_complete("Your")
+        llm = tracker.get_llm_consumed()
+        self.assertIsNotNone(llm)
+        self.assertIn("Your", llm)
+
+    def test_post_transform_word_llm_consumed_matches_word(self):
+        """A word after the transformed segment has a valid llm_consumed."""
+        tracker = self._tracker(llm_text=_BILLING_UF)
+        self._advance(tracker, "Your", "balance", "is", "five", "dollars,")
+        tracker.add_word_and_check_complete("due")
+        llm = tracker.get_llm_consumed()
+        self.assertIsNotNone(llm)
+        self.assertIn("due", llm)
+
+
+class TestWordCompletionTrackerTransformAtEndOfUtterance(unittest.TestCase):
+    """Context attribution when a transformed segment falls at the end of an utterance.
+
+    When a text transform expands a token (e.g. "$5" → "five dollars") and the
+    transformed span is the last thing spoken, the final TTS word ("dollars")
+    triggers the is_complete branch. That branch sweeps the remaining llm_text
+    ("$5") but then validates that the spoken word ("dollars") appears in the
+    sweep — which it doesn't. The sweep must be kept because "dollars" is the
+    expanded form of "$5", not a word that needs to appear verbatim in the
+    original.
+    """
+
+    def test_llm_consumed_preserved_when_final_word_completes_transformed_segment(self):
+        """llm_consumed must be the original token, not None, when the utterance ends on a transform."""
+        tracker = WordCompletionTracker(
+            "Your total is five dollars",  # post-transform TTS text
+            llm_text="Your total is $5",  # original LLM text
+            user_facing_text="Your total is $5",
+        )
+        tracker.add_word_and_check_complete("Your")
+        tracker.add_word_and_check_complete("total")
+        tracker.add_word_and_check_complete("is")
+        tracker.add_word_and_check_complete("five")  # mid-transform, suppressed
+        result = tracker.add_word_and_check_complete("dollars")  # completes transform + utterance
+
+        self.assertTrue(result, "tracker should be complete after 'dollars'")
+        self.assertIsNotNone(
+            tracker.get_llm_consumed(),
+            "llm_consumed must not be None when the final word completes a transformed segment",
+        )
+        self.assertEqual(tracker.get_llm_consumed(), "$5")
+
+    def test_llm_consumed_correct_for_single_word_transform_at_end(self):
+        """Single-word transform ending the utterance: llm_consumed is the original token."""
+        tracker = WordCompletionTracker(
+            "Price is five dollars",
+            llm_text="Price is $5",
+            user_facing_text="Price is $5",
+        )
+        tracker.add_word_and_check_complete("Price")
+        tracker.add_word_and_check_complete("is")
+        tracker.add_word_and_check_complete("five")
+        result = tracker.add_word_and_check_complete("dollars")
+
+        self.assertTrue(result)
+        self.assertIsNotNone(tracker.get_llm_consumed())
+        self.assertEqual(tracker.get_llm_consumed(), "$5")
+
+    def test_transform_at_end_with_llm_tags_sweeps_closing_tag(self):
+        """Transform at end with surrounding XML tags: closing tag must be swept into llm_consumed."""
+        tracker = WordCompletionTracker(
+            "Total is fifty percent",  # "50%" → "fifty percent"
+            llm_text="<price>Total is 50%</price>",
+            user_facing_text="Total is 50%",
+        )
+        tracker.add_word_and_check_complete("Total")
+        tracker.add_word_and_check_complete("is")
+        tracker.add_word_and_check_complete("fifty")
+        result = tracker.add_word_and_check_complete("percent")
+
+        self.assertTrue(result)
+        self.assertIsNotNone(tracker.get_llm_consumed())
+        self.assertIn("50%", tracker.get_llm_consumed())
+
+    def test_mid_sentence_transform_llm_consumed_is_unaffected(self):
+        """Mid-sentence transform behaviour must be preserved alongside the end-of-utterance fix."""
+        tracker = WordCompletionTracker(
+            "Your balance is five dollars due now",
+            llm_text="Your balance is $5 due now",
+            user_facing_text="Your balance is $5 due now",
+        )
+        tracker.add_word_and_check_complete("Your")
+        tracker.add_word_and_check_complete("balance")
+        tracker.add_word_and_check_complete("is")
+        tracker.add_word_and_check_complete("five")
+        self.assertIsNone(tracker.get_llm_consumed())  # suppressed mid-transform
+        tracker.add_word_and_check_complete("dollars")
+        self.assertEqual(tracker.get_llm_consumed(), "$5")  # segment completes
+        tracker.add_word_and_check_complete("due")
+        self.assertIsNotNone(tracker.get_llm_consumed())
+        tracker.add_word_and_check_complete("now")
+        self.assertTrue(tracker.is_complete)
+
+
+class TestWordCompletionTrackerTokenChangingReplacements(unittest.TestCase):
+    """Whether get_llm_consumed() preserves the original text when a replacement
+    changes tokenization or case instead of falling back to the spoken word.
+
+    A replacement that splits one word into several (e.g. ``"BODYPUMP"`` ->
+    ``"body pump"``) is tracked as a transformed segment: intermediate words
+    are suppressed (``get_llm_consumed()`` returns None, mirroring how
+    currency expansion already behaves) and the word that completes the
+    segment carries the full original text. A replacement that only changes
+    case or the connector between words (e.g. ``"SQL"`` -> ``"sql"``, or
+    ``"BODYPUMP"`` -> ``"body-pump"``) keeps proportional, per-word tracking,
+    but is validated case- and connector-insensitively so it isn't discarded.
+    Single-word-to-single-word replacements that change the normalized alnum
+    length (e.g. "leisure" -> "lezher") are unaffected and are included here as
+    passing control cases.
+    """
+
+    def test_word_splitting_replacement_commits_original_on_completion(self):
+        # "BODYPUMP" -> "body pump": audio is correct; the segment is tracked
+        # atomically, so "body" is suppressed and "pump" carries the full
+        # original word, matching how currency expansion already behaves.
+        sentence = "Try BODYPUMP on Monday morning."
+        tts_text = "Try body pump on Monday morning."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+
+        tracker.add_word_and_check_complete("Try")
+        tracker.add_word_and_check_complete("body")
+        self.assertIsNone(tracker.get_llm_consumed())  # suppressed mid-transform
+        self.assertTrue(tracker.suppress_in_context())
+
+        tracker.add_word_and_check_complete("pump")
+        self.assertEqual(tracker.get_llm_consumed(), "BODYPUMP")
+        self.assertFalse(tracker.suppress_in_context())
+
+        for word in ["on", "Monday", "morning."]:
+            tracker.add_word_and_check_complete(word)
+        self.assertTrue(tracker.is_complete)
+
+    def test_case_only_replacement_is_not_discarded(self):
+        # "SQL" -> "sql": same single-token structure, only case differs. The
+        # span-containment check is case-insensitive, so it validates.
+        sentence = "Contact SQL support today."
+        tts_text = "Contact sql support today."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+
+        tracker.add_word_and_check_complete("Contact")
+        tracker.add_word_and_check_complete("sql")
+        self.assertEqual(tracker.get_llm_consumed(), "SQL")
+        tracker.add_word_and_check_complete("support")
+        tracker.add_word_and_check_complete("today.")
+        self.assertTrue(tracker.is_complete)
+
+    def test_hyphenated_single_token_replacement_is_not_discarded(self):
+        # "BODYPUMP" -> "body-pump": single token on both sides, only case+shape differ.
+        sentence = "Try BODYPUMP on Monday morning."
+        tts_text = "Try body-pump on Monday morning."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+
+        tracker.add_word_and_check_complete("Try")
+        tracker.add_word_and_check_complete("body-pump")
+        self.assertEqual(tracker.get_llm_consumed(), "BODYPUMP")
+
+    def test_accumulated_llm_text_matches_original_despite_split(self):
+        """The cursor ends up past the full original sentence once the frame
+        completes, even though the replacement split one word into two."""
+        sentence = "Try BODYPUMP on Monday morning."
+        tts_text = "Try body pump on Monday morning."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+        for word in tts_text.split():
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_accumulated_llm_text(), sentence)
+
+    def test_single_word_case_change_with_different_length_still_works(self):
+        """Control case: "HIIT" -> "hit" differs in alnum length, so it takes
+        the atomic transformed-segment path regardless of case."""
+        sentence = "We run HIIT classes on Tuesday."
+        tts_text = "We run hit classes on Tuesday."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+        for word in ["We", "run", "hit"]:
+            tracker.add_word_and_check_complete(word)
+        self.assertIn("HIIT", tracker.get_llm_consumed())
+        for word in ["classes", "on", "Tuesday."]:
+            tracker.add_word_and_check_complete(word)
+        self.assertTrue(tracker.is_complete)
+
+    def test_single_word_pronunciation_replacement_still_works(self):
+        """Control case: a 1-to-1 respelling ("leisure" -> "lezher") that
+        differs in alnum length maps back to the original word correctly."""
+        sentence = "The leisure centre opens at six."
+        tts_text = "The lezher centre opens at six."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+        for word in ["The", "lezher"]:
+            tracker.add_word_and_check_complete(word)
+        self.assertIn("leisure", tracker.get_llm_consumed())
+
+    def test_inline_ipa_tag_does_not_shift_next_word_boundary(self):
+        """An inline IPA substitution ("leisure" -> "<<l|ɛ|ʒ|ə|r>>") normalizes
+        to no alnum content on the TTS side, since normalize()'s tag-stripping
+        regex treats the double angle brackets as a single (malformed) tag.
+        That must not corrupt the word boundary of the following word."""
+        sentence = "The leisure centre opens at six."
+        tts_text = "The <<l|ɛ|ʒ|ə|r>> centre opens at six."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+
+        tracker.add_word_and_check_complete("The")
+        tracker.add_word_and_check_complete("<<l|ɛ|ʒ|ə|r>>")
+        tracker.add_word_and_check_complete("centre")
+        self.assertEqual(
+            tracker.get_llm_consumed(),
+            "centre",
+            "the word following an inline IPA substitution must keep its own span, "
+            "not have letters stolen from it",
+        )
 
 
 if __name__ == "__main__":

@@ -33,7 +33,7 @@ try:
         PgmqBackend,
     )
 except Exception:
-    raise unittest.SkipTest("pgmq extra not installed (`pip install pipecat-ai[pgmq]`)")
+    raise unittest.SkipTest('pgmq extra not installed (`uv add "pipecat-ai[pgmq]"`)')
 
 # ---------------------------------------------------------------------------
 # IsolatedPgmqBackend: assert it speaks the right SQL to asyncpg.

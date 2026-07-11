@@ -48,10 +48,10 @@ from typing import Any, ClassVar
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel, Field
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
-    CancelFrame,
-    EndFrame,
     ErrorFrame,
     Frame,
     StartFrame,
@@ -62,15 +62,8 @@ from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given, is_given
 from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Sarvam, you need to `pip install pipecat-ai[sarvam]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 
 class SarvamTTSModel(StrEnum):
@@ -355,11 +348,16 @@ class SarvamHttpTTSService(TTSService):
     Settings = SarvamHttpTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`SarvamHttpTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `SarvamHttpTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Sarvam TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``SarvamHttpTTSService.Settings`` directly via the ``settings`` parameter instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language for synthesis. Defaults to English (India).
@@ -429,6 +427,7 @@ class SarvamHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamHttpTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             model: TTS model to use. Options:
                 - "bulbul:v2" (default): Standard model with pitch/loudness support
@@ -436,6 +435,7 @@ class SarvamHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamHttpTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             base_url: Sarvam AI API base URL. Defaults to "https://api.sarvam.ai".
             sample_rate: Audio sample rate in Hz (8000, 16000, 22050, 24000).
@@ -444,6 +444,7 @@ class SarvamHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamHttpTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -716,11 +717,16 @@ class SarvamTTSService(InterruptibleTTSService):
     Settings = SarvamTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`SarvamTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `SarvamTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Configuration parameters for Sarvam TTS WebSocket service.
 
         .. deprecated:: 0.0.105
             Use ``SarvamTTSService.Settings`` directly via the ``settings`` parameter instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             pitch: Voice pitch adjustment (-0.75 to 0.75). Defaults to 0.0.
@@ -827,17 +833,20 @@ class SarvamTTSService(InterruptibleTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             voice_id: Speaker voice ID. If None, uses model-appropriate default.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             url: WebSocket URL for the TTS backend (default production URL).
             aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
 
                 .. deprecated:: 0.0.104
                     Use ``text_aggregation_mode`` instead.
+                    Will be removed in 2.0.0.
 
             text_aggregation_mode: How to aggregate text before synthesis.
             sample_rate: Output audio sample rate in Hz (8000, 16000, 22050, 24000).
@@ -846,6 +855,7 @@ class SarvamTTSService(InterruptibleTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -967,8 +977,10 @@ class SarvamTTSService(InterruptibleTTSService):
         self._output_audio_codec = output_audio_codec
         self._output_audio_bitrate = output_audio_bitrate
 
-        # WebSocket endpoint URL with model query parameter
-        self._websocket_url = f"{url}?model={resolved_model}"
+        # WebSocket endpoint URL with model query parameter. We explicitly request
+        # the completion event so we can emit TTSStoppedFrame as soon as synthesis
+        # finishes, rather than waiting for the stop_frame_timeout_s idle timer.
+        self._websocket_url = f"{url}?model={resolved_model}&send_completion_event=true"
         self._api_key = api_key
 
         self._receive_task = None
@@ -1004,24 +1016,6 @@ class SarvamTTSService(InterruptibleTTSService):
         # WebSocket API expects sample rate as string
         self._speech_sample_rate = str(self.sample_rate)
         await self._connect()
-
-    async def stop(self, frame: EndFrame):
-        """Stop the Sarvam TTS service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the Sarvam TTS service.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._disconnect()
 
     async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio synthesis by sending flush command."""
@@ -1077,12 +1071,12 @@ class SarvamTTSService(InterruptibleTTSService):
 
             ws_additional_headers = {
                 "api-subscription-key": self._api_key,
-                **sdk_headers(),
             }
 
             self._websocket = await websocket_connect(
                 self._websocket_url,
                 additional_headers=ws_additional_headers,
+                user_agent_header=sdk_headers()["User-Agent"],
             )
             logger.debug("Connected to Sarvam TTS Websocket")
             await self._send_config()
@@ -1156,11 +1150,24 @@ class SarvamTTSService(InterruptibleTTSService):
                 if msg.get("type") == "audio":
                     request_id = msg.get("data", {}).get("request_id", "N/A")
                     logger.trace(f"TTS request_id={request_id}, context_id={context_id}")
+
                     # Check for interruption before processing audio
                     await self.stop_ttfb_metrics()
                     audio = base64.b64decode(msg["data"]["audio"])
                     frame = TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=context_id)
                     await self.append_to_audio_context(context_id, frame)
+                elif (
+                    msg.get("type") == "event" and msg.get("data", {}).get("event_type") == "final"
+                ):
+                    # Synthesis for the active context is complete. Emit the
+                    # TTSStoppedFrame immediately so BotStoppedSpeakingFrame tracks
+                    # the end of audio, instead of waiting on stop_frame_timeout_s.
+                    logger.trace(f"TTS final event for context_id={context_id}")
+                    if context_id and self.audio_context_available(context_id):
+                        await self.append_to_audio_context(
+                            context_id, TTSStoppedFrame(context_id=context_id)
+                        )
+                        await self.remove_audio_context(context_id)
                 elif msg.get("type") == "error":
                     error_msg = msg["data"]["message"]
                     await self.push_error(error_msg=f"TTS Error: {error_msg}")

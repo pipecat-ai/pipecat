@@ -1,0 +1,21 @@
+name: interruption_text
+
+# Text modality: the user barges in mid-response. The bot must drop the
+# in-progress answer and respond to the new question (exercises interruption
+# handling and context ordering). send_after fires 2s after the bot starts its
+# long answer, so there's a real response to interrupt.
+
+judge: !include judge_text.yaml
+
+turns:
+  - user: "Tell me a long, detailed story about the history of Paris."
+    expect:
+      - event: llm_started
+
+  - user: "Actually, never mind that — what's the capital of Japan?"
+    send_after:
+      event: llm_started
+      delay_ms: 2000
+    expect:
+      - event: response
+        eval: "the response says the capital of Japan is Tokyo, instead of continuing the Paris story"

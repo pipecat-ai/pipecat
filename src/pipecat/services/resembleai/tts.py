@@ -12,6 +12,8 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
 from loguru import logger
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -26,14 +28,6 @@ from pipecat.frames.frames import (
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Resemble AI, you need to `pip install pipecat-ai[resembleai]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 
 @dataclass
@@ -74,6 +68,7 @@ class ResembleAITTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ResembleAITTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             url: WebSocket URL for Resemble AI TTS API.
             precision: PCM bit depth (PCM_32, PCM_24, PCM_16, or MULAW).

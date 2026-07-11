@@ -96,8 +96,8 @@ class BaseOutputTransport(FrameProcessor):
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
-                    "Transport parameter `video_out_bitrate` is deprecated and will be removed in a future "
-                    "version. Use provider specific settings instead.",
+                    "Transport parameter `video_out_bitrate` is deprecated and will be removed in "
+                    "2.0.0. Use provider specific settings instead.",
                     DeprecationWarning,
                     stacklevel=2,
                 )
@@ -151,6 +151,12 @@ class BaseOutputTransport(FrameProcessor):
         """
         for _, sender in self._media_senders.items():
             await sender.cancel(frame)
+
+    async def cleanup(self):
+        """Release output transport resources at teardown."""
+        await super().cleanup()
+        for _, sender in self._media_senders.items():
+            await sender.cleanup()
 
     async def set_transport_ready(self, frame: StartFrame):
         """Called when the transport is ready to stream.
@@ -375,7 +381,7 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, MixerControlFrame):
             await sender.handle_mixer_control_frame(frame)
         elif isinstance(frame, TTSStoppedFrame):
-            await sender.handle_sync_frame(frame)
+            await sender.handle_tts_stopped(frame)
         elif frame.pts:
             await sender.handle_timed_frame(frame)
         else:
@@ -419,8 +425,11 @@ class BaseOutputTransport(FrameProcessor):
             # This is to resize images. We only need to resize one image at a time.
             self._executor = ThreadPoolExecutor(max_workers=1)
 
-            # Buffer to keep track of incoming audio.
+            # Buffer to keep track of incoming audio, along with the type of
+            # the frames it was built from (so a flushed partial chunk can be
+            # reconstructed as the same frame type).
             self._audio_buffer = bytearray()
+            self._audio_buffer_cls: type[OutputAudioRawFrame] = OutputAudioRawFrame
 
             # This will be used to resample incoming audio to the output sample rate.
             self._resampler = create_stream_resampler()
@@ -526,6 +535,10 @@ class BaseOutputTransport(FrameProcessor):
             Args:
                 frame: The cancel frame signaling immediate cancellation.
             """
+            await self.cleanup()
+
+        async def cleanup(self):
+            """Release media sender resources at teardown."""
             # Since we are cancelling everything it doesn't matter what task we cancel first.
             await self._cancel_audio_task()
             await self._cancel_clock_task()
@@ -545,9 +558,13 @@ class BaseOutputTransport(FrameProcessor):
             await self._cancel_clock_task()
             await self._cancel_video_task()
 
-            if self._audio_queue.has_uninterruptible:
+            if self._audio_queue.has_uninterruptible or self._mixer:
                 # Keep the audio task running but drain all interruptible frames
-                # so the pending UninterruptibleFrames are still delivered.
+                # so the pending UninterruptibleFrames are still delivered. With
+                # a mixer, cancelling the task would also stop mixer-only output
+                # during the restart, causing an audible gap in the background
+                # audio (made worse by telephony serializers that clear the
+                # playout buffer on interruptions).
                 self._audio_queue.reset()
             else:
                 await self._cancel_audio_task()
@@ -576,6 +593,7 @@ class BaseOutputTransport(FrameProcessor):
             )
 
             cls = type(frame)
+            self._audio_buffer_cls = cls
             self._audio_buffer.extend(resampled)
             while len(self._audio_buffer) >= self._audio_chunk_size:
                 chunk = cls(
@@ -621,6 +639,21 @@ class BaseOutputTransport(FrameProcessor):
             Args:
                 frame: The frame to handle synchronously.
             """
+            await self._audio_queue.put(frame)
+
+        async def handle_tts_stopped(self, frame: TTSStoppedFrame):
+            """Queue a TTSStoppedFrame, flushing any trailing buffered audio first.
+
+            `handle_audio_frame` only queues complete `audio_chunk_size` chunks,
+            so up to one chunk's worth of trailing audio can still be sitting in
+            `_audio_buffer`. Queue it now (padded to a full chunk with silence)
+            so it plays before the stop frame is handled, instead of being
+            discarded when the buffer is cleared in `_bot_stopped_speaking`.
+
+            Args:
+                frame: The TTS stopped frame to queue.
+            """
+            await self._enqueue_flushed_audio_buffer()
             await self._audio_queue.put(frame)
 
         async def handle_mixer_control_frame(self, frame: MixerControlFrame):
@@ -671,6 +704,30 @@ class BaseOutputTransport(FrameProcessor):
             await self._transport.push_frame(downstream_frame)
             await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
+        async def _enqueue_flushed_audio_buffer(self):
+            """Pad any unsent trailing audio with silence and queue it for playback.
+
+            Turns whatever is left in `_audio_buffer` into a frame of the same
+            type (e.g. `TTSAudioRawFrame`) as the audio it was buffered from,
+            and puts it on `_audio_queue`, so it goes through the normal
+            playback path (write, error handling, bot speaking tracking) like
+            any other chunk, in order relative to whatever is queued after it
+            (e.g. a TTSStoppedFrame).
+            """
+            if not self._audio_buffer:
+                return
+
+            padding = bytes(self._audio_chunk_size - len(self._audio_buffer))
+            frame = self._audio_buffer_cls(
+                bytes(self._audio_buffer) + padding,
+                sample_rate=self._sample_rate,
+                num_channels=self._params.audio_out_channels,
+            )
+            frame.transport_destination = self._destination
+            self._audio_buffer = bytearray()
+
+            await self._audio_queue.put(frame)
+
         async def _bot_stopped_speaking(self):
             """Handle bot stopped speaking event."""
             if not self._bot_speaking:
@@ -679,8 +736,8 @@ class BaseOutputTransport(FrameProcessor):
             self._bot_speaking = False
             self._tts_audio_received = False
 
-            # Clean audio buffer (there could be tiny left overs if not multiple
-            # to our output chunk size).
+            # Any remaining leftover here (e.g. from an interruption) is
+            # discarded rather than flushed, since it's no longer wanted.
             self._audio_buffer = bytearray()
 
             logger.debug(
@@ -819,7 +876,13 @@ class BaseOutputTransport(FrameProcessor):
             silence_frame = OutputAudioRawFrame(
                 audio=silence, sample_rate=self.sample_rate, num_channels=1
             )
-            await self._transport.write_audio_frame(silence_frame)
+            try:
+                await asyncio.wait_for(
+                    self._transport.write_audio_frame(silence_frame),
+                    timeout=secs + 1,
+                )
+            except TimeoutError:
+                logger.warning(f"{self} timed out writing end-frame silence")
 
         async def _audio_task_handler(self):
             """Main audio processing task handler."""
@@ -948,7 +1011,7 @@ class BaseOutputTransport(FrameProcessor):
                     resized_image = image.resize(desired_size)
                     # logger.warning(f"{frame} does not have the expected size {desired_size}, resizing")
                     frame = OutputImageRawFrame(
-                        resized_image.tobytes(), resized_image.size, resized_image.format
+                        resized_image.tobytes(), resized_image.size, resized_image.mode
                     )
 
                 return frame

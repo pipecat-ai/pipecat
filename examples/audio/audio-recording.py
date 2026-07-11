@@ -51,6 +51,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -90,6 +91,10 @@ async def save_audio_file(audio: bytes, filename: str, sample_rate: int, num_cha
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -124,8 +129,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    # Create audio buffer processor
-    audiobuffer = AudioBufferProcessor()
+    # Create audio buffer processor. Recording starts automatically when the
+    # pipeline starts; alternatively, push an AudioBufferStartRecordingFrame or
+    # call start_recording() to start it on demand.
+    audiobuffer = AudioBufferProcessor(auto_start_recording=True)
 
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
@@ -158,15 +165,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        # Start recording audio
-        await audiobuffer.start_recording()
-        # Start conversation - empty prompt to let LLM follow system instructions
+        # Kick off the conversation
+        context.add_message(
+            {"role": "developer", "content": "Please introduce yourself to the user."}
+        )
         await worker.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await worker.cancel()
+
+    @audiobuffer.event_handler("on_recording_started")
+    async def on_recording_started(buffer):
+        logger.info(f"Recording started")
+
+    @audiobuffer.event_handler("on_recording_stopped")
+    async def on_recording_stopped(buffer):
+        logger.info(f"Recording stopped")
 
     # Handler for merged audio
     @audiobuffer.event_handler("on_audio_data")

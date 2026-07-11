@@ -5,7 +5,6 @@
 #
 
 
-import asyncio
 import os
 import random
 from datetime import datetime
@@ -13,8 +12,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -38,47 +36,32 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
-async def fetch_weather_from_api(params: FunctionCallParams):
-    temperature = (
-        random.randint(60, 85)
-        if params.arguments["format"] == "fahrenheit"
-        else random.randint(15, 30)
-    )
+async def get_current_weather(params: FunctionCallParams, location: str, format: str):
+    """Get the current weather.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+        format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
+    """
+    temperature = random.randint(60, 85) if format == "fahrenheit" else random.randint(15, 30)
     await params.result_callback(
         {
             "conditions": "nice",
             "temperature": temperature,
-            "location": params.arguments["location"],
-            "format": params.arguments["format"],
+            "location": location,
+            "format": format,
             "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
         }
     )
 
 
-weather_function = FunctionSchema(
-    name="get_current_weather",
-    description="Get the current weather",
-    properties={
-        "location": {
-            "type": "string",
-            "description": "The city and state, e.g. San Francisco, CA",
-        },
-        "format": {
-            "type": "string",
-            "enum": ["celsius", "fahrenheit"],
-            "description": "The temperature unit to use. Infer this from the users location.",
-        },
-    },
-    required=["location", "format"],
-)
-
-# Create tools schema
-tools = ToolsSchema(standard_tools=[weather_function])
-
-
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -137,23 +120,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             transition_threshold_seconds=360,
         ),
         # you could choose to pass tools here rather than via context
-        # tools=tools
+        # tools=[get_current_weather]
     )
-
-    # Register function for function calls
-    # you can either register a single function for all function calls, or specific functions
-    # llm.register_function(None, fetch_weather_from_api)
-    llm.register_function("get_current_weather", fetch_weather_from_api)
 
     # AWS Nova Sonic drives the conversation server-side.
     #
     # It does not, however, emit turn frames (UserStartedSpeakingFrame,
-    # UserStoppedSpeakingFrame). realtime_service_mode ensures that context
-    # aggregation will work without those frames, but you can add supplemental
-    # local turn frames for consumption by other pipeline processors that
-    # expect them (like RTVI), or to trigger on_user_turn_* events. WARNING:
-    # you should consider supplemental local turn frames approximate, as they
-    # may not always align with server turns.
+    # UserStoppedSpeakingFrame). Context aggregation works without those
+    # frames, but you can add supplemental local turn frames for consumption
+    # by other pipeline processors that expect them (like RTVI), or to trigger
+    # on_user_turn_* events. WARNING: you should consider supplemental local
+    # turn frames approximate, as they may not always align with server turns.
     #
     # To enable supplemental local turn frames, uncomment the SileroVADAnalyzer
     # and related imports below and the `user_params=` argument further down.
@@ -167,10 +144,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # )
     # from pipecat.turns.user_stop import BaseUserTurnStopStrategy
 
-    context = LLMContext(tools=tools)
+    context = LLMContext(tools=[get_current_weather])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        realtime_service_mode=True,
         # user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 

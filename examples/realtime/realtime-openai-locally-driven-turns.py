@@ -30,9 +30,9 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame, LLMSetToolsFrame
 from pipecat.observers.loggers.transcription_log_observer import TranscriptionLogObserver
 from pipecat.pipeline.pipeline import Pipeline
@@ -65,19 +65,26 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
-async def fetch_weather_from_api(params: FunctionCallParams):
-    temperature = 75 if params.arguments["format"] == "fahrenheit" else 24
+async def get_current_weather(params: FunctionCallParams, location: str, format: str):
+    """Get the current weather.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+        format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
+    """
+    temperature = 75 if format == "fahrenheit" else 24
     await params.result_callback(
         {
             "conditions": "nice",
             "temperature": temperature,
-            "format": params.arguments["format"],
+            "format": format,
             "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
         }
     )
 
 
 async def get_news(params: FunctionCallParams):
+    """Get the current news."""
     await params.result_callback(
         {
             "news": [
@@ -89,50 +96,20 @@ async def get_news(params: FunctionCallParams):
     )
 
 
-async def fetch_restaurant_recommendation(params: FunctionCallParams):
+async def get_restaurant_recommendation(params: FunctionCallParams, location: str):
+    """Get a restaurant recommendation.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+    """
     await params.result_callback({"name": "The Golden Dragon"})
 
 
-weather_function = FunctionSchema(
-    name="get_current_weather",
-    description="Get the current weather",
-    properties={
-        "location": {
-            "type": "string",
-            "description": "The city and state, e.g. San Francisco, CA",
-        },
-        "format": {
-            "type": "string",
-            "enum": ["celsius", "fahrenheit"],
-            "description": "The temperature unit to use. Infer this from the users location.",
-        },
-    },
-    required=["location", "format"],
-)
-
-get_news_function = FunctionSchema(
-    name="get_news",
-    description="Get the current news.",
-    properties={},
-    required=[],
-)
-
-restaurant_function = FunctionSchema(
-    name="get_restaurant_recommendation",
-    description="Get a restaurant recommendation",
-    properties={
-        "location": {
-            "type": "string",
-            "description": "The city and state, e.g. San Francisco, CA",
-        },
-    },
-    required=["location"],
-)
-
-tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
-
-
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -184,23 +161,23 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         ),
     )
 
-    llm.register_function("get_current_weather", fetch_weather_from_api)
-    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
-    llm.register_function("get_news", get_news)
-
     context = LLMContext(
         [{"role": "developer", "content": "Say hello!"}],
-        tools,
+        [get_current_weather, get_restaurant_recommendation],
     )
 
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         # Drive turn detection locally via SileroVAD wired into the user
-        # aggregator. realtime_service_mode keeps context-write semantics
-        # correct and (by default) drops the transcript wait on turn-end so
-        # local VAD can drive turn boundaries on the latency critical path.
-        realtime_service_mode=True,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        # aggregator. Realtime-service mode is auto-detected and (by default)
+        # drops the transcript wait on turn-end, so local VAD can drive turn
+        # boundaries on the latency critical path.
+        user_params=LLMUserAggregatorParams(
+            # stop_secs is intentionally longer than Pipecat's 0.2s default:
+            # manual-VAD mode seems to do a bit better when end-of-speech is
+            # padded with a bit more silence.
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
+        ),
     )
 
     pipeline = Pipeline(
@@ -229,10 +206,9 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         await worker.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(15)
-        new_tools = ToolsSchema(
-            standard_tools=[weather_function, restaurant_function, get_news_function]
+        await worker.queue_frames(
+            [LLMSetToolsFrame(tools=[get_current_weather, get_restaurant_recommendation, get_news])]
         )
-        await worker.queue_frames([LLMSetToolsFrame(tools=new_tools)])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

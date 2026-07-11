@@ -16,7 +16,7 @@ try:
     import sentry_sdk
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Sentry, you need to `pip install pipecat-ai[sentry]`.")
+    logger.error('In order to use Sentry, you need to `uv add "pipecat-ai[sentry]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics

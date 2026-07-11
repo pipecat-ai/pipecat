@@ -11,7 +11,6 @@ context when token limits are reached, enabling efficient long-running conversat
 """
 
 import json
-import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional
 
@@ -25,6 +24,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMContextMessage,
     LLMSpecificMessage,
 )
+from pipecat.utils.deprecation import deprecated
 
 # Fallback timeout (seconds) used when summarization_timeout is None.
 DEFAULT_SUMMARIZATION_TIMEOUT = 120.0
@@ -167,6 +167,10 @@ class LLMAutoContextSummarizationConfig:
             self.summary_config.target_context_tokens = int(self.max_context_tokens * 0.8)
 
 
+@deprecated(
+    "`LLMContextSummarizationConfig` is deprecated since 0.0.104 and will be removed in 2.0.0. "
+    "Use `LLMAutoContextSummarizationConfig` instead."
+)
 @dataclass
 class LLMContextSummarizationConfig:
     """Configuration for context summarization behavior.
@@ -174,6 +178,7 @@ class LLMContextSummarizationConfig:
     .. deprecated:: 0.0.104
         Use :class:`LLMAutoContextSummarizationConfig` with a nested
         :class:`LLMContextSummaryConfig` instead.
+        Will be removed in 2.0.0.
 
         Example::
 
@@ -207,12 +212,6 @@ class LLMContextSummarizationConfig:
 
     def __post_init__(self):
         """Validate configuration parameters."""
-        warnings.warn(
-            "LLMContextSummarizationConfig is deprecated. "
-            "Use LLMAutoContextSummarizationConfig with a nested LLMContextSummaryConfig instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         if self.max_context_tokens is None and self.max_unsummarized_messages is None:
             raise ValueError(
                 "At least one of max_context_tokens and max_unsummarized_messages must be set"

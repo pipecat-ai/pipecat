@@ -21,6 +21,7 @@ from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from pipecat.adapters.base_llm_adapter import LLMContextConversionError
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.frames.frames import (
     AssistantImageRawFrame,
@@ -46,6 +47,7 @@ from pipecat.services.settings import (
     assert_given,
     is_given,
 )
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 # Suppress gRPC fork warnings
@@ -64,7 +66,7 @@ try:
     genai._api_client.READ_BUFFER_SIZE = 5 * 1024 * 1024
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Google AI, you need to `pip install pipecat-ai[google]`.")
+    logger.error('In order to use Google AI, you need to `uv add "pipecat-ai[google]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 
@@ -140,11 +142,16 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
     # Backward compatibility: ThinkingConfig used to be defined inline here.
     ThinkingConfig = GoogleThinkingConfig
 
+    @deprecated(
+        "`GoogleLLMService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `GoogleLLMService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Google AI models.
 
         .. deprecated:: 0.0.105
             Use ``settings=GoogleLLMService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             max_tokens: Maximum number of tokens to generate.
@@ -188,11 +195,13 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GoogleLLMService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             params: Optional model parameters for inference.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GoogleLLMService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings for this service.  When both
                 deprecated parameters and *settings* are provided, *settings*
@@ -201,6 +210,8 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GoogleLLMService.Settings(system_instruction=...)`` instead.
+                    Will be removed in 2.0.0.
+
             tools: List of available tools/functions.
             tool_config: Configuration for tool usage.
             http_options: HTTP options for the client.
@@ -596,6 +607,8 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             await self.run_function_calls(function_calls)
         except DeadlineExceeded:
             await self._call_event_handler("on_completion_timeout")
+        except LLMContextConversionError as e:
+            await self.push_error(error_msg=str(e), exception=e)
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
@@ -642,9 +655,18 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         await super().cancel(frame)
         await self._close_client()
 
+    async def cleanup(self):
+        """Release resources held by the service."""
+        await super().cleanup()
+        await self._close_client()
+
     async def _close_client(self):
+        if not self._client:
+            return
         try:
             await self._client.aio.aclose()
         except Exception:
             # Do nothing - we're shutting down anyway
             pass
+        finally:
+            self._client = None

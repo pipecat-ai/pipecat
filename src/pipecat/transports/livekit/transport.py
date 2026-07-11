@@ -51,7 +51,7 @@ try:
     from tenacity import retry, stop_after_attempt, wait_exponential
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use LiveKit, you need to `pip install pipecat-ai[livekit]`.")
+    logger.error('In order to use LiveKit, you need to `uv add "pipecat-ai[livekit]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 # DTMF mapping according to RFC 4733
@@ -169,8 +169,14 @@ class LiveKitTransportClient:
         self._audio_track: rtc.LocalAudioTrack | None = None
         self._audio_tracks = {}
         self._audio_queue = asyncio.Queue()
+        # Per-participant ``(AudioStream, Task)`` so unsubscribe can close
+        # the owned native stream and cancel its producer task instead of
+        # leaking both on every track republish.
+        self._audio_streams: dict[str, tuple[rtc.AudioStream, asyncio.Task]] = {}
         self._video_tracks = {}
         self._video_queue = asyncio.Queue()
+        # Symmetric registry for video streams.
+        self._video_streams: dict[str, tuple[rtc.VideoStream, asyncio.Task]] = {}
         self._other_participant_has_joined = False
         self._task_manager: BaseTaskManager | None = None
         self._async_lock = asyncio.Lock()
@@ -290,6 +296,9 @@ class LiveKitTransportClient:
             await self._callbacks.on_before_disconnect()
             await self.room.disconnect()
             self._connected = False
+            # Close any remaining per-participant streams and cancel their
+            # producer tasks so they do not outlive the connection.
+            await self._close_all_streams()
             logger.info(f"Disconnected from {self._room_name}")
             await self._callbacks.on_disconnected()
 
@@ -498,24 +507,34 @@ class LiveKitTransportClient:
         """Handle track subscribed events."""
         if track.kind == rtc.TrackKind.KIND_AUDIO:
             logger.info(f"Audio track subscribed: {track.sid} from participant {participant.sid}")
+            # If the participant is re-publishing (e.g. mute/unmute cycle),
+            # close + cancel the previous stream/task before replacing the
+            # registry entry, so two producers never feed ``_audio_queue``
+            # for the same participant.
+            await self._close_audio_stream(participant.sid)
             self._audio_tracks[participant.sid] = track
             audio_stream = rtc.AudioStream(track)
-            self._task_manager.create_task(
+            task = self._task_manager.create_task(
                 self._process_audio_stream(audio_stream, participant.sid),
                 f"{self}::_process_audio_stream",
             )
+            self._audio_streams[participant.sid] = (audio_stream, task)
             await self._callbacks.on_audio_track_subscribed(participant.sid)
         elif track.kind == rtc.TrackKind.KIND_VIDEO:
             logger.info(f"Video track subscribed: {track.sid} from participant {participant.sid}")
+            # Symmetric: clean up any prior video stream/task for the same
+            # participant before replacing.
+            await self._close_video_stream(participant.sid)
             self._video_tracks[participant.sid] = track
             # Only process video stream if video input is enabled to prevent
             # unbounded queue growth when there is no consumer for video frames.
             if self._params.video_in_enabled:
                 video_stream = rtc.VideoStream(track)
-                self._task_manager.create_task(
+                task = self._task_manager.create_task(
                     self._process_video_stream(video_stream, participant.sid),
                     f"{self}::_process_video_stream",
                 )
+                self._video_streams[participant.sid] = (video_stream, task)
             await self._callbacks.on_video_track_subscribed(participant.sid)
 
     async def _async_on_track_unsubscribed(
@@ -527,9 +546,55 @@ class LiveKitTransportClient:
         """Handle track unsubscribed events."""
         logger.info(f"Track unsubscribed: {publication.sid} from {participant.identity}")
         if track.kind == rtc.TrackKind.KIND_AUDIO:
+            await self._close_audio_stream(participant.sid)
             await self._callbacks.on_audio_track_unsubscribed(participant.sid)
         elif track.kind == rtc.TrackKind.KIND_VIDEO:
+            await self._close_video_stream(participant.sid)
             await self._callbacks.on_video_track_unsubscribed(participant.sid)
+
+    async def _close_audio_stream(self, participant_id: str) -> None:
+        """Close a participant's owned audio stream and cancel its producer task.
+
+        Idempotent: no-op when there is no registered stream for the
+        participant.
+        """
+        entry = self._audio_streams.pop(participant_id, None)
+        if entry is None:
+            return
+        stream, task = entry
+        try:
+            await asyncio.wait_for(stream.aclose(), timeout=2.0)
+        except Exception as e:
+            logger.warning(f"AudioStream.aclose failed for {participant_id}: {e}")
+        if task is not None and not task.done():
+            task.cancel()
+
+    async def _close_video_stream(self, participant_id: str) -> None:
+        """Close a participant's owned video stream and cancel its producer task.
+
+        Idempotent: no-op when there is no registered stream for the
+        participant.
+        """
+        entry = self._video_streams.pop(participant_id, None)
+        if entry is None:
+            return
+        stream, task = entry
+        try:
+            await asyncio.wait_for(stream.aclose(), timeout=2.0)
+        except Exception as e:
+            logger.warning(f"VideoStream.aclose failed for {participant_id}: {e}")
+        if task is not None and not task.done():
+            task.cancel()
+
+    async def _close_all_streams(self) -> None:
+        """Close every per-participant audio/video stream and cancel its task.
+
+        Idempotent: no-op when no streams are registered.
+        """
+        for participant_id in list(self._audio_streams.keys()):
+            await self._close_audio_stream(participant_id)
+        for participant_id in list(self._video_streams.keys()):
+            await self._close_video_stream(participant_id)
 
     async def _async_on_data_received(self, data: rtc.DataPacket):
         """Handle data received events."""
@@ -642,11 +707,7 @@ class LiveKitInputTransport(BaseInputTransport):
             frame: The end frame signaling transport shutdown.
         """
         await super().stop(frame)
-        await self._client.disconnect()
-        if self._audio_in_task:
-            await self.cancel_task(self._audio_in_task)
-        if self._video_in_task:
-            await self.cancel_task(self._video_in_task)
+        await self._teardown()
         logger.info("LiveKitInputTransport stopped")
 
     async def cancel(self, frame: CancelFrame):
@@ -656,11 +717,7 @@ class LiveKitInputTransport(BaseInputTransport):
             frame: The cancel frame signaling immediate cancellation.
         """
         await super().cancel(frame)
-        await self._client.disconnect()
-        if self._audio_in_task and self._params.audio_in_enabled:
-            await self.cancel_task(self._audio_in_task)
-        if self._video_in_task and self._params.video_in_enabled:
-            await self.cancel_task(self._video_in_task)
+        await self._teardown()
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the input transport with shared client setup.
@@ -672,9 +729,24 @@ class LiveKitInputTransport(BaseInputTransport):
         await self._client.setup(setup)
 
     async def cleanup(self):
-        """Cleanup input transport and shared resources."""
+        """Release input transport resources at teardown."""
         await super().cleanup()
+        await self._teardown()
         await self._transport.cleanup()
+
+    async def _teardown(self):
+        """Disconnect the client and cancel the media input tasks.
+
+        Single idempotent teardown body shared by ``stop``, ``cancel`` and
+        ``cleanup``.
+        """
+        await self._client.disconnect()
+        if self._audio_in_task:
+            await self.cancel_task(self._audio_in_task)
+            self._audio_in_task = None
+        if self._video_in_task:
+            await self.cancel_task(self._video_in_task)
+            self._video_in_task = None
 
     async def push_app_message(self, message: Any, sender: str):
         """Push an application message as an urgent transport frame.
@@ -853,8 +925,9 @@ class LiveKitOutputTransport(BaseOutputTransport):
         await self._client.setup(setup)
 
     async def cleanup(self):
-        """Cleanup output transport and shared resources."""
+        """Release output transport resources at teardown."""
         await super().cleanup()
+        await self._client.disconnect()
         await self._transport.cleanup()
 
     async def send_message(

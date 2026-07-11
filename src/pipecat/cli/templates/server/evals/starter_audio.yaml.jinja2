@@ -1,0 +1,50 @@
+name: starter_audio
+
+# Starter eval scenario for {{ project_name }} — audio mode (the full round trip).
+#
+# The harness synthesizes the user's speech (Kokoro) and transcribes the bot's
+# spoken replies (Moonshine). Both run locally with no API key.
+{% if mode == 'cascade' %}# Your bot's real VAD, STT, and TTS are exercised end to end — slower than text
+# mode, so run this before shipping (and in CI), not on every edit. For the
+# fast inner loop, see starter_text.yaml.
+{% else %}# A realtime speech-to-speech bot has no separate text LLM step, so audio mode
+# is how you eval it — the same way a person would talk to it: speech in,
+# speech out, end to end.
+{% endif %}#
+# Run it (two terminals, both in server/):
+#
+#   uv run bot.py -t eval                                 # 1: the bot, headless
+#   uv run pipecat eval run evals/starter_audio.yaml -v   # 2: this scenario
+#
+# The first run downloads the local speech models — expect a one-time delay.
+#
+# `eval:` criteria are scored by a judge LLM — by default a local Ollama
+# (`ollama pull gemma2:9b`); add `eval: {service: openai, model: gpt-4.1}` under
+# `judge:` to use OpenAI instead.
+
+# Synthesize each `user:` turn as speech, so the bot's VAD + STT run for real.
+user:
+  modality: audio
+  speech:
+    service: kokoro
+    voice: af_heart
+    sample_rate: 16000
+
+# Make the bot speak, and judge the transcription of its actual audio.
+judge:
+  modality: audio
+  transcription:
+    service: moonshine
+    model: small-streaming
+
+turns:
+  # The bot speaks first on connect. A turn with no `user:` just waits for and
+  # asserts on events — here, the greeting — so we don't barge into it.
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation (a greeting, an introduction, or an offer to help)"
+
+  - user: "What can you help me with?"
+    expect:
+      - event: response
+        eval: "the bot answers, describing what it can do or offering to help"

@@ -19,10 +19,10 @@ from typing import Any, ClassVar
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
-    CancelFrame,
-    EndFrame,
     ErrorFrame,
     Frame,
     StartFrame,
@@ -38,16 +38,9 @@ from pipecat.services.tts_service import (
     WebsocketTTSService,
 )
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Rime, you need to `pip install pipecat-ai[rime]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 
 def language_to_rime_language(language: Language) -> str:
@@ -135,11 +128,16 @@ class RimeTTSService(WebsocketTTSService):
     Settings = RimeTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`RimeTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `RimeTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Configuration parameters for Rime TTS service.
 
         .. deprecated:: 0.0.105
             Use ``settings=RimeTTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language for synthesis. Defaults to English.
@@ -191,18 +189,21 @@ class RimeTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=RimeTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             url: Rime websocket API endpoint.
             model: Model ID to use for synthesis.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=RimeTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate in Hz.
             params: Additional configuration parameters.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=RimeTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -211,6 +212,7 @@ class RimeTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.104
                     Use ``text_aggregation_mode`` instead.
+                    Will be removed in 2.0.0.
 
             **kwargs: Additional arguments passed to parent class.
         """
@@ -298,6 +300,8 @@ class RimeTTSService(WebsocketTTSService):
         self._receive_task = None
         self._cumulative_time = 0  # Accumulates time across messages
         self._extra_msg_fields = {}  # Extra fields for next message
+        self._audio_remainder = b""  # Held-back byte of a sample split across chunks
+        self._audio_remainder_context_id = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -368,10 +372,12 @@ class RimeTTSService(WebsocketTTSService):
         return params
 
     # A set of Rime-specific helpers for text transformations
+    @staticmethod
     def SPELL(text: str) -> str:
         """Wrap text in Rime spell function."""
         return f"spell({text})"
 
+    @staticmethod
     def PAUSE_TAG(seconds: float) -> str:
         """Convenience method to create a pause tag."""
         return f"<{seconds * 1000}>"
@@ -432,24 +438,6 @@ class RimeTTSService(WebsocketTTSService):
         self._sampling_rate = self.sample_rate
         await self._connect()
 
-    async def stop(self, frame: EndFrame):
-        """Stop the service and close connection.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel current operation and clean up.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._disconnect()
-
     async def _connect(self):
         """Establish websocket connection and start receive task."""
         await super()._connect()
@@ -479,6 +467,8 @@ class RimeTTSService(WebsocketTTSService):
             params = "&".join(f"{k}={v}" for k, v in ws_params.items() if v is not None)
             url = f"{self._url}?{params}"
             headers = {"Authorization": f"Bearer {self._api_key}"}
+            self._audio_remainder = b""
+            self._audio_remainder_context_id = None
             self._websocket = await websocket_connect(url, additional_headers=headers)
 
             await self._call_event_handler("on_connected")
@@ -565,6 +555,21 @@ class RimeTTSService(WebsocketTTSService):
         logger.trace(f"{self}: flushing audio")
         await self._get_websocket().send(json.dumps({"operation": "flush"}))
 
+    def _sample_aligned_audio(self, context_id: str, audio: bytes) -> bytes:
+        """Return whole 16-bit samples, holding back any dangling byte.
+
+        Rime chops its PCM stream at arbitrary byte boundaries, so a chunk may
+        end mid-sample. The dangling byte is held back and prepended to the
+        context's next chunk so emitted frames always contain whole samples.
+        """
+        if self._audio_remainder_context_id != context_id:
+            self._audio_remainder = b""
+            self._audio_remainder_context_id = context_id
+        audio = self._audio_remainder + audio
+        aligned = len(audio) - (len(audio) % 2)
+        self._audio_remainder = audio[aligned:]
+        return audio[:aligned]
+
     async def _receive_messages(self):
         """Process incoming websocket messages."""
         async for message in self._get_websocket():
@@ -576,8 +581,11 @@ class RimeTTSService(WebsocketTTSService):
             context_id = msg["contextId"]
             if msg["type"] == "chunk":
                 # Process audio chunk
+                audio = self._sample_aligned_audio(context_id, base64.b64decode(msg["data"]))
+                if not audio:
+                    continue
                 frame = TTSAudioRawFrame(
-                    audio=base64.b64decode(msg["data"]),
+                    audio=audio,
                     sample_rate=self.sample_rate,
                     num_channels=1,
                     context_id=context_id,
@@ -659,11 +667,16 @@ class RimeHttpTTSService(TTSService):
     Settings = RimeTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`RimeHttpTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `RimeHttpTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Configuration parameters for Rime HTTP TTS service.
 
         .. deprecated:: 0.0.105
             Use ``settings=RimeHttpTTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language for synthesis. Defaults to English.
@@ -701,18 +714,21 @@ class RimeHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=RimeHttpTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             aiohttp_session: Shared aiohttp session for HTTP requests.
             model: Model ID to use for synthesis.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=RimeHttpTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate in Hz.
             params: Additional configuration parameters.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=RimeHttpTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -882,13 +898,15 @@ class RimeHttpTTSService(TTSService):
             await self.stop_ttfb_metrics()
 
 
+@deprecated(
+    "`RimeNonJsonTTSService` is deprecated since 0.0.102 and will be removed in 2.0.0. "
+    "Use `RimeTTSService` instead."
+)
 class RimeNonJsonTTSService(InterruptibleTTSService):
     """Pipecat TTS service for Rime's non-JSON WebSocket API.
 
     .. deprecated:: 0.0.102
-        Arcana now supports JSON WebSocket with word-level timestamps via the
-        ``wss://users-ws.rime.ai/ws3`` endpoint. Use :class:`RimeTTSService`
-        with ``model="arcana"`` instead.
+        Use :class:`RimeTTSService` instead. Will be removed in 2.0.0.
 
     This service enables Text-to-Speech synthesis over WebSocket endpoints
     that require plain text (not JSON) messages and return raw audio bytes.
@@ -902,11 +920,16 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
     Settings = RimeNonJsonTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`RimeNonJsonTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `RimeNonJsonTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Configuration parameters for Rime Non-JSON WebSocket TTS service.
 
         .. deprecated:: 0.0.105
             Use ``settings=RimeNonJsonTTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Args:
             language: Language for synthesis. Defaults to English.
@@ -947,12 +970,14 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=RimeNonJsonTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             url: Rime websocket API endpoint.
             model: Model ID to use for synthesis.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=RimeNonJsonTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             audio_format: Audio format to use.
             sample_rate: Audio sample rate in Hz.
@@ -960,6 +985,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=RimeNonJsonTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -969,6 +995,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
                     Use ``text_aggregation_mode`` instead. Set to ``TextAggregationMode.SENTENCE``
                     to aggregate text into sentences before synthesis, or
                     ``TextAggregationMode.TOKEN`` to stream tokens directly for lower latency.
+                    Will be removed in 2.0.0.
 
             text_aggregation_mode: How to aggregate text before synthesis.
             **kwargs: Additional arguments passed to parent class.
@@ -1059,16 +1086,6 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         await super().start(frame)
         self._sampling_rate = self.sample_rate
         await self._connect()
-
-    async def stop(self, frame: EndFrame):
-        """Stop the service and close connection."""
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel current operation and clean up."""
-        await super().cancel(frame)
-        await self._disconnect()
 
     async def _connect(self):
         """Establish WebSocket connection and start receive task."""

@@ -20,6 +20,8 @@ from dataclasses import fields as dataclass_fields
 from typing import Any, Literal
 
 from loguru import logger
+from typing_extensions import override
+from websockets.asyncio.client import connect as websocket_connect
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.inworld_realtime_adapter import InworldRealtimeLLMAdapter
@@ -36,6 +38,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
+    LLMServiceMetadataFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
     StartFrame,
@@ -51,7 +54,7 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, RealtimeServiceInfo
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
@@ -59,16 +62,10 @@ from pipecat.services.settings import (
     assert_given,
     is_given,
 )
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 
 from . import events
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Inworld Realtime, you need to `pip install pipecat-ai[inworld]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 
 @dataclass
@@ -202,11 +199,10 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     transcription.
 
     Emits ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame`` from
-    Inworld's server-side VAD events. Pair with
-    ``LLMContextAggregatorPair(..., realtime_service_mode=True)``
-    so context writes are decoupled from those frames. If you wire local
-    VAD (``LLMUserAggregatorParams.vad_analyzer``) on top of this
-    service, disable Inworld's server-side turn detection first via
+    Inworld's server-side VAD events. ``LLMContextAggregatorPair`` auto-detects
+    this realtime service and decouples context writes from those frames. If
+    you wire local VAD (``LLMUserAggregatorParams.vad_analyzer``) on top of
+    this service, disable Inworld's server-side turn detection first via
     ``turn_detection=None`` (manual mode); otherwise both sources
     broadcast duplicate user-turn frames. See
     ``examples/realtime/realtime-inworld-locally-driven-turns.py``.
@@ -254,10 +250,6 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     _settings: Settings
 
     adapter_class = InworldRealtimeLLMAdapter
-
-    # Realtime (speech-to-speech) service. Emits UserStarted/Stopped
-    # speaking frames from server-side VAD events.
-    _realtime_service_info = RealtimeServiceInfo(emits_user_turn_frames=True)
 
     # Target ~60ms audio chunks when sending to Inworld (16-bit mono).
     _AUDIO_CHUNK_TARGET_MS = 60
@@ -441,10 +433,16 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             and session_properties.audio.input.turn_detection is None
         )
 
-    def _emits_user_turn_frames(self) -> bool:
-        # In manual mode the server doesn't emit VAD events, so we
-        # don't broadcast UserStarted/StoppedSpeakingFrame.
-        return not self._is_manual_turn_detection()
+    def service_metadata_frame(self) -> LLMServiceMetadataFrame:
+        """Realtime service; recommends external turn strategies when server-side VAD is active."""
+        # In manual mode the server doesn't emit VAD events, so there are no turn frames.
+        emits_turn_frames = not self._is_manual_turn_detection()
+        self._warn_if_realtime_service_emits_no_turn_frames(emits_turn_frames)
+        return LLMServiceMetadataFrame(
+            service_name=self.name,
+            is_realtime_service=True,
+            user_turn_strategies=ExternalUserTurnStrategies() if emits_turn_frames else None,
+        )
 
     async def _handle_interruption(self):
         """Handle user interruption of assistant speech.
@@ -536,9 +534,19 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         await super().cancel(frame)
         await self._disconnect()
 
+    async def cleanup(self):
+        """Release resources on teardown."""
+        await super().cleanup()
+        await self._disconnect()
+
     #
     # Frame processing
     #
+
+    @override
+    def _service_tools(self) -> "ToolsSchema | list[Any] | None":
+        """Return the tools configured on ``session_properties``, if any."""
+        return assert_given(self._settings.session_properties).tools
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames from the pipeline."""
@@ -562,6 +570,10 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         elif isinstance(frame, LLMMessagesAppendFrame):
             await self._handle_messages_append(frame)
         elif isinstance(frame, LLMSetToolsFrame):
+            # Continuous session: no fresh context frame per turn, so sync the
+            # registered tool handlers to the new tool set here (the base service
+            # only does this on LLMContextFrame).
+            self._sync_registered_tool_handlers(frame.tools)
             await self._send_session_update()
 
         await self.push_frame(frame, direction)
@@ -705,7 +717,9 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
 
     async def _send_session_update(self):
         """Update session settings on the server."""
-        settings = assert_given(self._settings.session_properties)
+        # Mutate a copy: the stored session_properties is read elsewhere (e.g.
+        # _service_tools) and must stay intact.
+        settings = assert_given(self._settings.session_properties).model_copy()
         adapter = self.get_llm_adapter()
 
         if self._context:
@@ -714,6 +728,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
                 system_instruction=assert_given(self._settings.system_instruction),
             )
 
+            # tools given in the context override the tools in the session properties
             if llm_invocation_params["tools"]:
                 settings.tools = llm_invocation_params["tools"]
 
@@ -1169,6 +1184,6 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         item = events.ConversationItem(
             type="function_call_output",
             call_id=tool_call_id,
-            output=json.dumps(result, ensure_ascii=False),
+            output=result,
         )
         await self.send_client_event(events.ConversationItemCreateEvent(item=item))

@@ -12,9 +12,8 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -40,19 +39,26 @@ load_dotenv(override=True)
 BASE_FILENAME = "/tmp/pipecat_conversation_"
 
 
-async def fetch_weather_from_api(params: FunctionCallParams):
-    temperature = 75 if params.arguments["format"] == "fahrenheit" else 24
+async def get_current_weather(params: FunctionCallParams, location: str, format: str):
+    """Get the current weather.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+        format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
+    """
+    temperature = 75 if format == "fahrenheit" else 24
     await params.result_callback(
         {
             "conditions": "nice",
             "temperature": temperature,
-            "format": params.arguments["format"],
+            "format": format,
             "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
         }
     )
 
 
 async def get_saved_conversation_filenames(params: FunctionCallParams):
+    """Get a list of saved conversation histories. Returns a list of filenames. Each filename includes a date and timestamp. Each file is conversation history that can be loaded into this session."""
     # Construct the full pattern including the BASE_FILENAME
     full_pattern = f"{BASE_FILENAME}*.json"
 
@@ -64,6 +70,7 @@ async def get_saved_conversation_filenames(params: FunctionCallParams):
 
 
 async def save_conversation(params: FunctionCallParams):
+    """Save the current conversation. Use this function to persist the current conversation to external storage."""
     timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
     filename = f"{BASE_FILENAME}{timestamp}.json"
     logger.debug(
@@ -80,8 +87,12 @@ async def save_conversation(params: FunctionCallParams):
         await params.result_callback({"success": False, "error": str(e)})
 
 
-async def load_conversation(params: FunctionCallParams):
-    filename = params.arguments["filename"]
+async def load_conversation(params: FunctionCallParams, filename: str):
+    """Load a conversation history. Use this function to load a conversation history into the current session.
+
+    Args:
+        filename: The filename of the conversation history to load.
+    """
     logger.debug(f"loading conversation from {filename}")
     try:
         with open(filename) as file:
@@ -96,62 +107,14 @@ async def load_conversation(params: FunctionCallParams):
 
 system_instruction = "You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a succinct, creative and helpful way. Prefer responses that are one sentence long unless you are asked for a longer or more detailed response."
 
-weather_function = FunctionSchema(
-    name="get_current_weather",
-    description="Get the current weather",
-    properties={
-        "location": {
-            "type": "string",
-            "description": "The city and state, e.g. San Francisco, CA",
-        },
-        "format": {
-            "type": "string",
-            "enum": ["celsius", "fahrenheit"],
-            "description": "The temperature unit to use. Infer this from the users location.",
-        },
-    },
-    required=["location", "format"],
-)
-
-save_conversation_function = FunctionSchema(
-    name="save_conversation",
-    description="Save the current conversation. Use this function to persist the current conversation to external storage.",
-    properties={},
-    required=[],
-)
-
-get_filenames_function = FunctionSchema(
-    name="get_saved_conversation_filenames",
-    description="Get a list of saved conversation histories. Returns a list of filenames. Each filename includes a date and timestamp. Each file is conversation history that can be loaded into this session.",
-    properties={},
-    required=[],
-)
-
-load_conversation_function = FunctionSchema(
-    name="load_conversation",
-    description="Load a conversation history. Use this function to load a conversation history into the current session.",
-    properties={
-        "filename": {
-            "type": "string",
-            "description": "The filename of the conversation history to load.",
-        }
-    },
-    required=["filename"],
-)
-
-tools = ToolsSchema(
-    standard_tools=[
-        weather_function,
-        save_conversation_function,
-        get_filenames_function,
-        load_conversation_function,
-    ]
-)
-
 
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -186,14 +149,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    # you can either register a single function for all function calls, or specific functions
-    # llm.register_function(None, fetch_weather_from_api)
-    llm.register_function("get_current_weather", fetch_weather_from_api)
-    llm.register_function("save_conversation", save_conversation)
-    llm.register_function("get_saved_conversation_filenames", get_saved_conversation_filenames)
-    llm.register_function("load_conversation", load_conversation)
-
-    context = LLMContext(tools=tools)
+    context = LLMContext(
+        tools=[
+            get_current_weather,
+            save_conversation,
+            get_saved_conversation_filenames,
+            load_conversation,
+        ]
+    )
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

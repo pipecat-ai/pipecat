@@ -10,32 +10,34 @@ This module implements Tavus as a sink transport layer, providing video
 avatar functionality through Tavus's streaming API.
 """
 
-import asyncio
 from dataclasses import dataclass
 
 import aiohttp
 from daily.daily import AudioData, VideoFrame
 from loguru import logger
 
-from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
     InterruptionFrame,
-    OutputAudioRawFrame,
     OutputImageRawFrame,
     OutputTransportReadyFrame,
     SpeechOutputAudioRawFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
+    TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import ServiceSettings
-from pipecat.transports.tavus.transport import TavusCallbacks, TavusParams, TavusTransportClient
+from pipecat.transports.tavus.transport import (
+    TavusCallbacks,
+    TavusParams,
+    TavusTransportClient,
+)
 
 
 @dataclass
@@ -66,7 +68,7 @@ class TavusVideoService(AIService):
         *,
         api_key: str,
         replica_id: str,
-        persona_id: str = "pipecat-stream",
+        persona_id: str = "pipecat0",
         session: aiohttp.ClientSession,
         settings: Settings | None = None,
         **kwargs,
@@ -76,7 +78,10 @@ class TavusVideoService(AIService):
         Args:
             api_key: Tavus API key used for authentication.
             replica_id: ID of the Tavus voice replica to use for speech synthesis.
-            persona_id: ID of the Tavus persona. Defaults to "pipecat-stream" for Pipecat TTS voice.
+            persona_id: ID of the Tavus persona. Defaults to "pipecat0", which
+                signals Tavus to use the TTS voice of the Pipecat bot instead
+                of a Tavus persona voice, and to expect audio over the
+                `conversation.echo` app message API.
             session: Async HTTP session used for communication with Tavus.
             settings: Runtime-updatable settings. Tavus has no model concept, so this
                 is primarily used for the ``extra`` dict.
@@ -94,14 +99,6 @@ class TavusVideoService(AIService):
 
         self._other_participant_has_joined = False
         self._client: TavusTransportClient | None = None
-
-        self._conversation_id: str
-        self._resampler = create_stream_resampler()
-
-        self._audio_buffer = bytearray()
-        self._send_task: asyncio.Task | None = None
-        # This is the custom track destination expected by Tavus
-        self._transport_destination: str | None = "stream"
         self._transport_ready = False
 
     async def setup(self, setup: FrameProcessorSetup):
@@ -126,17 +123,17 @@ class TavusVideoService(AIService):
             params=TavusParams(
                 audio_in_enabled=True,
                 video_in_enabled=True,
-                audio_out_enabled=True,
-                microphone_out_enabled=False,
+                audio_out_faster_than_realtime=True,
             ),
         )
         await self._client.setup(setup)
 
     async def cleanup(self):
-        """Clean up the service and release resources."""
+        """Release resources at teardown."""
         await super().cleanup()
-        await self._client.cleanup()
-        self._client = None
+        if self._client:
+            await self._client.cleanup()
+            self._client = None
 
     async def _on_joined(self, data):
         """Handle bot joined the Daily room."""
@@ -212,11 +209,7 @@ class TavusVideoService(AIService):
         """
         await super().start(frame)
         await self._client.start(frame)
-        if self._transport_destination:
-            await self._client.register_audio_destination(
-                self._transport_destination, auto_silence=False
-            )
-        await self._create_send_task()
+        await self._client.start_send_task()
 
     async def stop(self, frame: EndFrame):
         """Stop the Tavus video service.
@@ -225,8 +218,7 @@ class TavusVideoService(AIService):
             frame: The end frame.
         """
         await super().stop(frame)
-        await self._end_conversation()
-        await self._cancel_send_task()
+        await self._teardown()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the Tavus video service.
@@ -235,8 +227,7 @@ class TavusVideoService(AIService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
-        await self._end_conversation()
-        await self._cancel_send_task()
+        await self._teardown()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames through the service.
@@ -251,7 +242,9 @@ class TavusVideoService(AIService):
             await self._handle_interruptions()
             await self.push_frame(frame, direction)
         elif isinstance(frame, TTSAudioRawFrame):
-            await self._handle_audio_frame(frame)
+            await self._client.queue_tts_frame(frame)
+        elif isinstance(frame, TTSStoppedFrame):
+            await self._client.queue_tts_frame(frame)
         elif isinstance(frame, OutputTransportReadyFrame):
             self._transport_ready = True
             await self.push_frame(frame, direction)
@@ -267,50 +260,16 @@ class TavusVideoService(AIService):
 
     async def _handle_interruptions(self):
         """Handle interruption events by resetting send tasks and notifying client."""
-        await self._cancel_send_task()
-        await self._create_send_task()
+        await self._client.cancel_send_task()
         await self._client.send_interrupt_message()
+        await self._client.start_send_task()
+
+    async def _teardown(self):
+        """Gracefully ends the Tavus conversation and cancels the send task."""
+        await self._end_conversation()
+        await self._client.cancel_send_task()
 
     async def _end_conversation(self):
         """End the current conversation and reset state."""
         await self._client.stop()
         self._other_participant_has_joined = False
-
-    async def _create_send_task(self):
-        """Create the audio sending task if it doesn't exist."""
-        if not self._send_task:
-            self._queue = asyncio.Queue()
-            self._send_task = self.create_task(self._send_task_handler())
-
-    async def _cancel_send_task(self):
-        """Cancel the audio sending task if it exists."""
-        if self._send_task:
-            await self.cancel_task(self._send_task)
-            self._send_task = None
-
-    async def _handle_audio_frame(self, frame: OutputAudioRawFrame):
-        """Process audio frames for sending to Tavus."""
-        sample_rate = self._client.out_sample_rate
-        # 40 ms of audio
-        chunk_size = int((sample_rate * 2) / 25)
-        # We might need to resample if incoming audio doesn't match the
-        # transport sample rate.
-        resampled = await self._resampler.resample(frame.audio, frame.sample_rate, sample_rate)
-        self._audio_buffer.extend(resampled)
-        while len(self._audio_buffer) >= chunk_size:
-            chunk = OutputAudioRawFrame(
-                bytes(self._audio_buffer[:chunk_size]),
-                sample_rate=sample_rate,
-                num_channels=frame.num_channels,
-            )
-            chunk.transport_destination = self._transport_destination
-            await self._queue.put(chunk)
-            self._audio_buffer = self._audio_buffer[chunk_size:]
-
-    async def _send_task_handler(self):
-        """Handle sending audio frames to the Tavus client."""
-        while True:
-            frame = await self._queue.get()
-            if isinstance(frame, OutputAudioRawFrame) and self._client:
-                await self._client.write_audio_frame(frame)
-            self._queue.task_done()

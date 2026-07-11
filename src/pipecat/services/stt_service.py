@@ -20,9 +20,12 @@ from websockets.protocol import State
 
 from pipecat.frames.frames import (
     AudioRawFrame,
+    CancelFrame,
+    EndFrame,
     ErrorFrame,
     Frame,
     InterruptionFrame,
+    LLMContextAssistantTurnFrame,
     ServiceSwitcherRequestMetadataFrame,
     StartFrame,
     STTMetadataFrame,
@@ -39,6 +42,7 @@ from pipecat.services.settings import STTSettings, is_given
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.deprecation import deprecated
 
 # Duration in seconds of silent audio sent for WebSocket keepalive (100ms).
 _KEEPALIVE_SILENCE_DURATION = 0.1
@@ -224,42 +228,38 @@ class STTService(AIService):
         """
         return self._sample_rate
 
+    @deprecated(
+        "`STTService.set_model` is deprecated since 0.0.104 and will be removed in 2.0.0. "
+        "Use `STTUpdateSettingsFrame(model=...)` instead."
+    )
     async def set_model(self, model: str):
         """Set the speech recognition model.
 
         .. deprecated:: 0.0.104
             Use ``STTUpdateSettingsFrame(model=...)`` instead.
+            Will be removed in 2.0.0.
 
         Args:
             model: The name of the model to use for speech recognition.
         """
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "'set_model' is deprecated, use 'STTUpdateSettingsFrame(model=...)' instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
         logger.info(f"Switching STT model to: [{model}]")
         settings_cls = type(self._settings)
         await self._update_settings(settings_cls(model=model))
 
+    @deprecated(
+        "`STTService.set_language` is deprecated since 0.0.104 and will be removed in 2.0.0. "
+        "Use `STTUpdateSettingsFrame(language=...)` instead."
+    )
     async def set_language(self, language: Language):
         """Set the language for speech recognition.
 
         .. deprecated:: 0.0.104
             Use ``STTUpdateSettingsFrame(language=...)`` instead.
+            Will be removed in 2.0.0.
 
         Args:
             language: The language to use for speech recognition.
         """
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "'set_language' is deprecated, use 'STTUpdateSettingsFrame(language=...)' instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
         logger.info(f"Switching STT language to: [{language}]")
         settings_cls = type(self._settings)
         await self._update_settings(settings_cls(language=language))
@@ -277,6 +277,18 @@ class STTService(AIService):
             2026-04-28, first-party services return a string.
         """
         return Language(language)
+
+    async def _process_assistant_turn(self, text: str) -> None:
+        """Called when the assistant's turn completes with the aggregated reply text.
+
+        Override in subclasses to react to each completed bot reply — for
+        example, to feed the text to a provider-side context carryover API.
+        The default implementation is a no-op.
+
+        Args:
+            text: The assistant's aggregated spoken text for this turn.
+        """
+        pass
 
     @abstractmethod
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
@@ -392,14 +404,7 @@ class STTService(AIService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartFrame):
-            # Push StartFrame first, then metadata so downstream receives them in order
-            await self.push_frame(frame, direction)
-            await self._push_stt_metadata()
-        elif isinstance(frame, ServiceSwitcherRequestMetadataFrame):
-            await self._push_stt_metadata()
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, AudioRawFrame):
+        if isinstance(frame, AudioRawFrame):
             # In this service we accumulate audio internally and at the end we
             # push a TextFrame. We also push audio downstream in case someone
             # else needs it.
@@ -437,6 +442,9 @@ class STTService(AIService):
             logger.debug(f"STT service {'muted' if frame.mute else 'unmuted'}")
         elif isinstance(frame, InterruptionFrame):
             await self._reset_stt_ttfb_state()
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, LLMContextAssistantTurnFrame):
+            await self._process_assistant_turn(frame.text)
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
@@ -481,18 +489,23 @@ class STTService(AIService):
         """
         return True
 
-    async def _push_stt_metadata(self):
-        """Push STT metadata frame for downstream processors (e.g., turn strategies)."""
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Build the STT metadata frame broadcast at start.
+
+        Overrides :meth:`AIService.service_metadata_frame` to return an
+        :class:`~pipecat.frames.frames.STTMetadataFrame` carrying the service's TTFS
+        P99 latency. A service that does its own server-side end-of-turn detection
+        overrides this (calling ``super()``) to set ``user_turn_strategies`` on the
+        returned frame.
+        """
         if not self.supports_ttfs:
-            await self.broadcast_frame(
-                STTMetadataFrame, service_name=self.name, ttfs_p99_latency=0.0
-            )
-            return
-        ttfs = self._ttfs_p99_latency
-        if ttfs is None:
-            ttfs = DEFAULT_TTFS_P99
-            logger.warning(f"{self.name}: ttfs_p99_latency not set, using default {ttfs}s")
-        await self.broadcast_frame(STTMetadataFrame, service_name=self.name, ttfs_p99_latency=ttfs)
+            ttfs = 0.0
+        else:
+            ttfs = self._ttfs_p99_latency
+            if ttfs is None:
+                ttfs = DEFAULT_TTFS_P99
+                logger.warning(f"{self.name}: ttfs_p99_latency not set, using default {ttfs}s")
+        return STTMetadataFrame(service_name=self.name, ttfs_p99_latency=ttfs)
 
     async def _cancel_ttfb_timeout(self):
         """Cancel any pending TTFB timeout task."""
@@ -710,6 +723,13 @@ class SegmentedSTTService(STTService):
     Requires VAD to be enabled in the pipeline to function properly. Maintains a
     small audio buffer to account for the delay between actual speech start and
     VAD detection.
+
+    The buffered segment is passed to :meth:`run_stt` as a WAV container by
+    default, which is what cloud providers want for their upload APIs. Local
+    models that consume raw 16-bit PCM directly override
+    :attr:`wants_wav_segments` to return ``False`` so they receive the
+    unwrapped buffer instead. This is a subclass-level contract, not a
+    user-configurable option: the format is dictated by what the model expects.
     """
 
     def __init__(self, *, sample_rate: int | None = None, **kwargs):
@@ -735,6 +755,17 @@ class SegmentedSTTService(STTService):
         """
         await super().start(frame)
         self._audio_buffer_size_1s = self.sample_rate * 2
+
+    @property
+    def wants_wav_segments(self) -> bool:
+        """Whether segments are passed to :meth:`run_stt` as a WAV container.
+
+        Returns True (the default) for cloud providers whose upload APIs expect
+        a WAV file. Local models that read the buffer as raw 16-bit PCM override
+        this to return False; otherwise they would misinterpret the 44-byte WAV
+        header as audio samples.
+        """
+        return True
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame, marking TranscriptionFrames as finalized.
@@ -765,19 +796,25 @@ class SegmentedSTTService(STTService):
     async def _handle_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         self._user_speaking = False
 
-        content = io.BytesIO()
-        wav = wave.open(content, "wb")
-        wav.setsampwidth(2)
-        wav.setnchannels(1)
-        wav.setframerate(self.sample_rate)
-        wav.writeframes(self._audio_buffer)
-        wav.close()
-        content.seek(0)
+        if self.wants_wav_segments:
+            content = io.BytesIO()
+            wav = wave.open(content, "wb")
+            wav.setsampwidth(2)
+            wav.setnchannels(1)
+            wav.setframerate(self.sample_rate)
+            wav.writeframes(self._audio_buffer)
+            wav.close()
+            content.seek(0)
+            audio = content.read()
+        else:
+            # Local models read the buffer as raw 16-bit PCM; wrapping it in a
+            # WAV container would make them misread the 44-byte header as audio.
+            audio = bytes(self._audio_buffer)
 
         # Start clean.
         self._audio_buffer.clear()
 
-        await self.process_generator(self.run_stt(content.read()))
+        await self.process_generator(self.run_stt(audio))
 
     async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
         """Process audio frames by buffering them for segmented transcription.
@@ -834,6 +871,33 @@ class WebsocketSTTService(STTService, WebsocketService):
         """
         STTService.__init__(self, **kwargs)
         WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
+
+    async def stop(self, frame: EndFrame):
+        """Stop the websocket STT service on a graceful end.
+
+        Args:
+            frame: The end frame.
+        """
+        await super().stop(frame)
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the websocket STT service immediately.
+
+        Disconnecting here is the prompt teardown: the websocket receive loop
+        runs independently and keeps reading transcripts from the provider until
+        the socket is closed.
+
+        Args:
+            frame: The cancel frame.
+        """
+        await super().cancel(frame)
+        await self._disconnect()
+
+    async def cleanup(self):
+        """Release websocket STT resources at teardown."""
+        await super().cleanup()
+        await self._disconnect()
 
     async def _connect(self):
         """Connect and start keepalive task if enabled."""

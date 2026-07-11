@@ -15,6 +15,8 @@ from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -22,7 +24,11 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -30,17 +36,10 @@ from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_
 from pipecat.services.stt_latency import SONIOX_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Soniox, you need to `pip install pipecat-ai[soniox]`.")
-    raise ImportError(f"Missing module: {e}") from e
-
 
 KEEPALIVE_MESSAGE = '{"type": "keepalive"}'
 
@@ -78,11 +77,16 @@ class SonioxContextObject(BaseModel):
     translation_terms: list[SonioxContextTranslationTerm] | None = None
 
 
+@deprecated(
+    "`SonioxInputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use "
+    "`SonioxSTTService.Settings` instead."
+)
 class SonioxInputParams(BaseModel):
     """Real-time transcription settings.
 
     .. deprecated:: 0.0.105
         Use ``settings=SonioxSTTService.Settings(...)`` instead.
+        Will be removed in 2.0.0.
 
     See Soniox WebSocket API documentation for more details:
     https://soniox.com/docs/speech-to-text/api-reference/websocket-api#configuration-parameters
@@ -99,7 +103,7 @@ class SonioxInputParams(BaseModel):
         client_reference_id: Client reference ID to use for transcription.
     """
 
-    model: str = "stt-rt-v4"
+    model: str = "stt-rt-v5"
 
     audio_format: str | None = "pcm_s16le"
     num_channels: int | None = 1
@@ -232,7 +236,15 @@ class SonioxSTTSettings(STTSettings):
         enable_speaker_diarization: Whether to enable speaker diarization.
         enable_language_identification: Whether to enable language identification.
         max_endpoint_delay_ms: Max ms before endpoint detection finalizes the turn (500-3000).
+        endpoint_sensitivity: Endpoint detection sensitivity (-1.0 to 1.0); higher finalizes sooner.
+        endpoint_latency_adjustment_level: Reduces endpoint latency vs. the default (0-3); higher
+            finalizes sooner but may reduce accuracy.
         client_reference_id: Client reference ID to use for transcription.
+
+    The ``max_endpoint_delay_ms``, ``endpoint_sensitivity`` and
+    ``endpoint_latency_adjustment_level`` settings only take effect when
+    ``vad_force_turn_endpoint=False``; otherwise Soniox endpoint detection is
+    disabled and these settings are ignored.
     """
 
     language_hints: list[Language] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -243,6 +255,10 @@ class SonioxSTTSettings(STTSettings):
         default_factory=lambda: NOT_GIVEN
     )
     max_endpoint_delay_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpoint_sensitivity: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpoint_latency_adjustment_level: int | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
     client_reference_id: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -270,6 +286,7 @@ class SonioxSTTService(WebsocketSTTService):
         num_channels: int = 1,
         params: SonioxInputParams | None = None,
         vad_force_turn_endpoint: bool = True,
+        should_interrupt: bool = True,
         settings: Settings | None = None,
         ttfs_p99_latency: float | None = SONIOX_TTFS_P99,
         **kwargs,
@@ -284,6 +301,7 @@ class SonioxSTTService(WebsocketSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SonioxSTTService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             audio_format: Audio format for transcription. Defaults to ``"pcm_s16le"``.
             num_channels: Number of audio channels. Defaults to 1.
@@ -292,9 +310,19 @@ class SonioxSTTService(WebsocketSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SonioxSTTService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
-            vad_force_turn_endpoint: Listen to `VADUserStoppedSpeakingFrame` to send finalize message to Soniox.
-                If disabled, Soniox will detect the end of the speech. Defaults to True.
+            vad_force_turn_endpoint: Controls turn detection mode.
+                When True (Pipecat mode, default): Soniox endpoint detection is
+                disabled and a `VADUserStoppedSpeakingFrame` sends a finalize
+                message to Soniox. When False (Soniox turn detection mode): Soniox
+                endpoint detection is enabled and controls turn endings. Emits
+                UserStartedSpeakingFrame on the local VAD signal when a VAD analyzer
+                is configured (most responsive) or on the first transcript token
+                otherwise, and UserStoppedSpeakingFrame when the endpoint is detected.
+            should_interrupt: Whether to interrupt the bot when the user starts speaking
+                in Soniox turn detection mode (vad_force_turn_endpoint=False). Only applies
+                when using Soniox's built-in endpoint detection. Defaults to True.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
@@ -303,7 +331,7 @@ class SonioxSTTService(WebsocketSTTService):
         """
         # --- 1. Hardcoded defaults ---
         default_settings = self.Settings(
-            model="stt-rt-v4",
+            model="stt-rt-v5",
             language=None,
             language_hints=None,
             language_hints_strict=None,
@@ -311,6 +339,8 @@ class SonioxSTTService(WebsocketSTTService):
             enable_speaker_diarization=False,
             enable_language_identification=False,
             max_endpoint_delay_ms=None,
+            endpoint_sensitivity=None,
+            endpoint_latency_adjustment_level=None,
             client_reference_id=None,
         )
 
@@ -353,6 +383,7 @@ class SonioxSTTService(WebsocketSTTService):
         self._api_key = api_key
         self._url = url
         self._vad_force_turn_endpoint = vad_force_turn_endpoint
+        self._should_interrupt = should_interrupt
 
         # Init-only audio config
         self._audio_format = audio_format
@@ -360,6 +391,9 @@ class SonioxSTTService(WebsocketSTTService):
 
         self._final_transcription_buffer = []
         self._last_tokens_received: float | None = None
+
+        # Turn tracking for Soniox turn-detection mode.
+        self._user_turn_open = False
 
         self._receive_task = None
 
@@ -370,6 +404,50 @@ class SonioxSTTService(WebsocketSTTService):
             True, as Soniox STT supports metrics generation.
         """
         return True
+
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Request external turn strategies in Soniox's turn-detection mode.
+
+        With ``vad_force_turn_endpoint=False`` Soniox's endpoint detection decides
+        turn endings and this service emits ``UserStarted/StoppedSpeakingFrame``,
+        so the user aggregator defers to those rather than running local
+        VAD/smart-turn. In the default Pipecat mode
+        (``vad_force_turn_endpoint=True``) the STT emits no turn frames, so the
+        defaults are left in place. Applied unless the user passed their own
+        ``user_turn_strategies``.
+        """
+        frame = super().service_metadata_frame()
+        if not self._vad_force_turn_endpoint:
+            frame.user_turn_strategies = ExternalUserTurnStrategies()
+        return frame
+
+    async def _user_turn_started(self):
+        """Open a user turn — Soniox turn-detection mode only.
+
+        Soniox has no speech-started event, so the turn opens on the local VAD
+        signal when available (fast path) or on the first transcript token
+        otherwise; whichever arrives first wins, the other is a no-op.
+        Broadcasts UserStartedSpeakingFrame before any transcription frames for
+        the turn are pushed, then pushes an interruption to cancel any bot audio.
+        """
+        if self._vad_force_turn_endpoint or self._user_turn_open:
+            return
+        self._user_turn_open = True
+        await self.broadcast_frame(UserStartedSpeakingFrame)
+        if self._should_interrupt:
+            await self.broadcast_interruption()
+
+    async def _user_turn_stopped(self):
+        """Close the user turn — Soniox turn-detection mode only.
+
+        Soniox is authoritative — broadcast UserStoppedSpeakingFrame right after
+        the endpoint's finalized TranscriptionFrame (same downstream queue, so
+        ordering is preserved).
+        """
+        if self._vad_force_turn_endpoint or not self._user_turn_open:
+            return
+        self._user_turn_open = False
+        await self.broadcast_frame(UserStoppedSpeakingFrame)
 
     async def start(self, frame: StartFrame):
         """Start the Soniox STT websocket connection.
@@ -455,7 +533,14 @@ class SonioxSTTService(WebsocketSTTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VADUserStoppedSpeakingFrame) and self._vad_force_turn_endpoint:
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            # In Soniox turn-detection mode the local VAD signal is the fast
+            # path for opening the turn — the first transcript token arrives a
+            # full network round-trip plus model TTFB later and remains the
+            # fallback when no VAD analyzer is configured. No-op in Pipecat
+            # mode or mid-turn.
+            await self._user_turn_started()
+        elif isinstance(frame, VADUserStoppedSpeakingFrame) and self._vad_force_turn_endpoint:
             # Send finalize message to Soniox so we get the final tokens asap.
             if self._websocket and self._websocket.state is State.OPEN:
                 await self._websocket.send(FINALIZE_MESSAGE)
@@ -524,6 +609,8 @@ class SonioxSTTService(WebsocketSTTService):
                 "num_channels": self._num_channels,
                 "enable_endpoint_detection": enable_endpoint_detection,
                 "max_endpoint_delay_ms": s.max_endpoint_delay_ms,
+                "endpoint_sensitivity": s.endpoint_sensitivity,
+                "endpoint_latency_adjustment_level": s.endpoint_latency_adjustment_level,
                 "sample_rate": self.sample_rate,
                 "language_hints": _prepare_language_hints(assert_given(s.language_hints)),
                 "language_hints_strict": s.language_hints_strict,
@@ -595,6 +682,10 @@ class SonioxSTTService(WebsocketSTTService):
                 await self.stop_processing_metrics()
                 self._final_transcription_buffer = []
 
+        async def finalize_turn():
+            await send_endpoint_transcript()
+            await self._user_turn_stopped()
+
         async for message in self._get_websocket():
             try:
                 content = json.loads(message)
@@ -613,11 +704,16 @@ class SonioxSTTService(WebsocketSTTService):
                 non_final_transcription = []
 
                 for token in tokens:
+                    if not is_end_token(token):
+                        # In Soniox turn-detection mode, the first token of a new
+                        # turn opens it (no-op in Pipecat mode or when a VAD
+                        # signal already opened the turn).
+                        await self._user_turn_started()
                     if token["is_final"]:
                         if is_end_token(token):
                             # Found an endpoint, tokens until here will be sent as transcript,
                             # the rest will be sent as interim tokens (even final tokens).
-                            await send_endpoint_transcript()
+                            await finalize_turn()
                         else:
                             if not self._final_transcription_buffer:
                                 await self.start_processing_metrics()
@@ -647,16 +743,18 @@ class SonioxSTTService(WebsocketSTTService):
                 error_code = content.get("error_code")
                 error_message = content.get("error_message")
                 if error_code or error_message:
-                    # In case of error, still send the final transcript (if any remaining in the buffer).
-                    await send_endpoint_transcript()
+                    # In case of error, still send the final transcript (if any remaining
+                    # in the buffer) and close any open user turn.
+                    await finalize_turn()
                     await self.push_error(
                         error_msg=f"Error: {error_code} (_receive_messages) - {error_message}"
                     )
 
                 finished = content.get("finished")
                 if finished:
-                    # When finished, still send the final transcript (if any remaining in the buffer).
-                    await send_endpoint_transcript()
+                    # When finished, still send the final transcript (if any remaining
+                    # in the buffer) and close any open user turn.
+                    await finalize_turn()
                     logger.debug("Transcription finished.")
                     return
 

@@ -264,7 +264,7 @@ class TestUserBotLatencyObserver(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [
             VADUserStoppedSpeakingFrame(),
-            SleepFrame(sleep=0.1),  # Simulate turn analyzer wait
+            SleepFrame(sleep=0.2),  # Simulate turn analyzer wait
             UserStoppedSpeakingFrame(),
             BotStartedSpeakingFrame(),
         ]
@@ -491,7 +491,7 @@ class TestUserBotLatencyObserver(unittest.IsolatedAsyncioTestCase):
                 tool_call_id=tool_call_id,
                 arguments={"location": "Atlanta"},
             ),
-            SleepFrame(sleep=0.1),
+            SleepFrame(sleep=0.2),
             FunctionCallResultFrame(
                 function_name="get_weather",
                 tool_call_id=tool_call_id,

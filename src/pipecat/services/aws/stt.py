@@ -18,6 +18,9 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from loguru import logger
+from websockets import Subprotocol
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -40,15 +43,6 @@ from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-
-try:
-    from websockets import Subprotocol
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use AWS services, you need to `pip install pipecat-ai[aws]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 
 @dataclass
@@ -86,7 +80,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
         Args:
             api_key: AWS secret access key. If None, falls back to environment
-                variables and the default boto3 credential chain (instance
+                variables and the default botocore credential chain (instance
                 profiles, IRSA, ECS task roles, SSO, etc.).
             aws_access_key_id: AWS access key ID. Same fallback behaviour as
                 ``api_key``.
@@ -99,6 +93,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSTranscribeSTTService.Settings(language=...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -136,7 +131,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         self._show_speaker_label = False
         self._enable_channel_identification = False
 
-        # Resolve credentials using the shared chain (explicit → env → boto3).
+        # Resolve credentials using the shared chain (explicit → env → botocore).
         resolved = resolve_credentials(
             aws_access_key_id=aws_access_key_id,
             aws_secret_access_key=api_key,

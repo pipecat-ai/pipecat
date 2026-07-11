@@ -168,7 +168,7 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
 
         for message in messages:
             if isinstance(message, LLMSpecificMessage):
-                result.append(message.message)
+                result.append(self._from_specific_message(message))
                 continue
 
             role = message.get("role")
@@ -221,6 +221,32 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
                 )
 
         return result
+
+    def _from_specific_message(self, message: LLMSpecificMessage) -> ResponseInputItemParam:
+        """Convert an OpenAI-Responses-specific message to an input item.
+
+        Reasoning messages — persisted so the model's prior reasoning round-trips
+        on later turns — become Responses ``reasoning`` input items. Anything
+        else is assumed to already be in Responses input shape.
+
+        Args:
+            message: The LLM-specific message from the context.
+
+        Returns:
+            A Responses API input item.
+        """
+        payload = message.message
+        if isinstance(payload, dict) and payload.get("type") == "reasoning":
+            item: dict[str, Any] = {
+                "type": "reasoning",
+                "id": payload.get("id"),
+                "summary": payload.get("summary", []),
+            }
+            encrypted = payload.get("encrypted_content")
+            if encrypted:
+                item["encrypted_content"] = encrypted
+            return cast(ResponseInputItemParam, item)
+        return cast(ResponseInputItemParam, payload)
 
     def _convert_multimodal_content(self, content: list) -> list:
         """Convert multimodal content parts to Responses API format.

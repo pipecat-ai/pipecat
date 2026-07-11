@@ -89,6 +89,7 @@ class DeepgramSageMakerTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=DeepgramSageMakerTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate in Hz. If None, uses the value from StartFrame.
             encoding: Audio encoding format. Defaults to "linear16".
@@ -159,6 +160,11 @@ class DeepgramSageMakerTTSService(TTSService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
+        await self._disconnect()
+
+    async def cleanup(self):
+        """Clean up the Deepgram SageMaker TTS service."""
+        await super().cleanup()
         await self._disconnect()
 
     async def _connect(self):

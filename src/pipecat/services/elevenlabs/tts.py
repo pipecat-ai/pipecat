@@ -23,12 +23,13 @@ from typing import (
 )
 
 import aiohttp
+import websockets
 from loguru import logger
 from pydantic import BaseModel
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
-    CancelFrame,
-    EndFrame,
     ErrorFrame,
     Frame,
     InterruptionFrame,
@@ -46,17 +47,8 @@ from pipecat.services.tts_service import (
     WebsocketTTSService,
 )
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
-
-# See .env.example for ElevenLabs configuration needed
-try:
-    import websockets
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use ElevenLabs, you need to `pip install pipecat-ai[elevenlabs]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 # Models that support language codes
 # The following models are excluded as they don't support language codes:
@@ -66,6 +58,11 @@ except ModuleNotFoundError as e:
 ELEVENLABS_MULTILINGUAL_MODELS = {
     "eleven_flash_v2_5",
     "eleven_turbo_v2_5",
+}
+
+# Models that reject the previous_text/next_text context parameters
+ELEVENLABS_CONTEXT_UNSUPPORTED_MODELS = {
+    "eleven_v3",
 }
 
 
@@ -403,11 +400,16 @@ class ElevenLabsTTSService(WebsocketTTSService):
     Settings = ElevenLabsTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`ElevenLabsTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `ElevenLabsTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for ElevenLabs TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``settings=ElevenLabsTTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language to use for synthesis.
@@ -461,11 +463,13 @@ class ElevenLabsTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
-            model: TTS model to use (e.g., "eleven_turbo_v2_5").
+            model: TTS model to use (e.g., "eleven_flash_v2_5").
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             url: WebSocket URL for ElevenLabs TTS API.
             sample_rate: Audio sample rate. If None, uses default.
@@ -484,6 +488,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -492,6 +497,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.104
                     Use ``text_aggregation_mode`` instead.
+                    Will be removed in 2.0.0.
 
             **kwargs: Additional arguments passed to the parent service.
         """
@@ -514,7 +520,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
 
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="eleven_turbo_v2_5",
+            model="eleven_flash_v2_5",
             voice=None,
             language=None,
             stability=None,
@@ -695,24 +701,6 @@ class ElevenLabsTTSService(WebsocketTTSService):
         self._output_format = output_format_from_sample_rate(self.sample_rate)
         await self._connect()
 
-    async def stop(self, frame: EndFrame):
-        """Stop the ElevenLabs TTS service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the ElevenLabs TTS service.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._disconnect()
-
     async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio and finalize the current context.
 
@@ -796,11 +784,23 @@ class ElevenLabsTTSService(WebsocketTTSService):
     async def _disconnect_websocket(self):
         try:
             await self.stop_all_metrics()
-
-            if self._websocket:
+            websocket = self._websocket
+            if websocket:
                 logger.debug("Disconnecting from ElevenLabs")
-                await self._websocket.send(json.dumps({"close_socket": True}))
-                await self._websocket.close()
+                # The multi-stream protocol tears down in two steps: we ask
+                # ElevenLabs to close, then it closes. Wait for its close before
+                # forcing ours, so we don't race the closing handshake (which
+                # otherwise ends a notable fraction of sessions in a 1006 close).
+                # The timeout is only a fallback ceiling; the clean close
+                # normally arrives well within it.
+                await websocket.send(json.dumps({"close_socket": True}))
+                try:
+                    await asyncio.wait_for(websocket.wait_closed(), timeout=2.0)
+                except TimeoutError:
+                    logger.debug(
+                        "ElevenLabs did not close the WebSocket within 2.0s; closing from our side"
+                    )
+                await websocket.close()
                 logger.debug("Disconnected from ElevenLabs")
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
@@ -1044,11 +1044,16 @@ class ElevenLabsHttpTTSService(TTSService):
     Settings = ElevenLabsHttpTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`ElevenLabsHttpTTSService.InputParams` is deprecated since 0.0.105 and will be removed "
+        "in 2.0.0. Use `ElevenLabsHttpTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for ElevenLabs HTTP TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``settings=ElevenLabsHttpTTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language to use for synthesis.
@@ -1097,12 +1102,14 @@ class ElevenLabsHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsHttpTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             aiohttp_session: aiohttp ClientSession for HTTP requests.
-            model: TTS model to use (e.g., "eleven_turbo_v2_5").
+            model: TTS model to use (e.g., "eleven_flash_v2_5").
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsHttpTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             base_url: Base URL for ElevenLabs HTTP API.
             sample_rate: Audio sample rate. If None, uses default.
@@ -1114,6 +1121,7 @@ class ElevenLabsHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsHttpTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -1122,12 +1130,13 @@ class ElevenLabsHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.104
                     Use ``text_aggregation_mode`` instead.
+                    Will be removed in 2.0.0.
 
             **kwargs: Additional arguments passed to the parent service.
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="eleven_turbo_v2_5",
+            model="eleven_flash_v2_5",
             voice=None,
             language=None,
             optimize_streaming_latency=None,
@@ -1361,8 +1370,8 @@ class ElevenLabsHttpTTSService(TTSService):
             "model_id": model_id,
         }
 
-        # Include previous text as context if available
-        if self._previous_text:
+        # Include previous text as context when the model supports it
+        if self._previous_text and model_id not in ELEVENLABS_CONTEXT_UNSUPPORTED_MODELS:
             payload["previous_text"] = self._previous_text
 
         if self._voice_settings:

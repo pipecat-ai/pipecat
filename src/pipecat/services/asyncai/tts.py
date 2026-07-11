@@ -14,12 +14,13 @@ from dataclasses import dataclass
 from typing import Any
 
 import aiohttp
+import websockets
 from loguru import logger
 from pydantic import BaseModel
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
-    CancelFrame,
-    EndFrame,
     ErrorFrame,
     Frame,
     StartFrame,
@@ -30,16 +31,8 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
-
-try:
-    import websockets
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Async, you need to `pip install pipecat-ai[asyncai]`.")
-    raise ImportError(f"Missing module: {e}") from e
 
 
 def language_to_async_language(language: Language) -> str:
@@ -92,11 +85,15 @@ class AsyncAITTSService(WebsocketTTSService):
     Settings = AsyncAITTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`AsyncAITTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `AsyncAITTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Async TTS configuration.
 
         .. deprecated:: 0.0.105
-            Use ``AsyncAITTSService.Settings`` directly via the ``settings`` parameter instead.
+            Use ``AsyncAITTSService.Settings`` directly via the ``settings`` parameter instead. Will be removed in 2.0.0.
 
         Parameters:
             language: Language to use for synthesis.
@@ -130,6 +127,7 @@ class AsyncAITTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AsyncAITTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             version: Async API version.
             url: WebSocket URL for Async TTS API.
@@ -137,6 +135,7 @@ class AsyncAITTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AsyncAITTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate.
             encoding: Audio encoding format.
@@ -145,6 +144,7 @@ class AsyncAITTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AsyncAITTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -152,6 +152,7 @@ class AsyncAITTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.104
                     Use ``text_aggregation_mode`` instead.
+                    Will be removed in 2.0.0.
 
             text_aggregation_mode: How to aggregate text before synthesis.
             **kwargs: Additional arguments passed to the parent service.
@@ -250,24 +251,6 @@ class AsyncAITTSService(WebsocketTTSService):
         await super().start(frame)
         self._output_sample_rate = self.sample_rate
         await self._connect()
-
-    async def stop(self, frame: EndFrame):
-        """Stop the Async TTS service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the Async TTS service.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._disconnect()
 
     async def _connect(self):
         await super()._connect()
@@ -493,11 +476,16 @@ class AsyncAIHttpTTSService(TTSService):
     Settings = AsyncAITTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`AsyncAIHttpTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `AsyncAIHttpTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Async API.
 
         .. deprecated:: 0.0.105
             Use ``AsyncAIHttpTTSService.Settings`` directly via the ``settings`` parameter instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             language: Language to use for synthesis.
@@ -529,12 +517,14 @@ class AsyncAIHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AsyncAIHttpTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             aiohttp_session: An aiohttp session for making HTTP requests.
             model: TTS model to use (e.g., "async_flash_v1.0").
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AsyncAIHttpTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             url: Base URL for Async API.
             version: API version string for Async API.
@@ -545,6 +535,7 @@ class AsyncAIHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AsyncAIHttpTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

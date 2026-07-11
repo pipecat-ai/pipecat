@@ -1,0 +1,170 @@
+{#
+Event Handler Macros
+Reusable event handlers for different transport types
+#}
+
+{# Standard event handlers for web/telephony #}
+{% macro standard_handlers(bot_type='telephony') %}
+{% if bot_type == 'web' %}
+@worker.rtvi.event_handler("on_client_ready")
+async def on_client_ready(rtvi):
+    # Kick off the conversation
+    context.add_message({"role": "developer", "content": "Start by concisely introducing yourself."})
+    await worker.queue_frames([LLMRunFrame()])
+
+{% endif %}
+@transport.event_handler("on_client_connected")
+async def on_client_connected(transport, client):
+    logger.info("Client connected")
+    {% if bot_type != 'web' %}
+    # Kick off the conversation
+    context.add_message({"role": "developer", "content": "Start by concisely introducing yourself."})
+    await worker.queue_frames([LLMRunFrame()])
+    {% endif %}
+
+@transport.event_handler("on_client_disconnected")
+async def on_client_disconnected(transport, client):
+    logger.info("Client disconnected")
+    await worker.cancel()
+{% endmacro %}
+
+{# Daily PSTN dial-in event handlers #}
+{% macro daily_pstn_dialin_handlers() %}
+@transport.event_handler("on_first_participant_joined")
+async def on_first_participant_joined(transport, participant):
+    logger.debug(f"First participant joined: {participant['id']}")
+    # Kick off the conversation
+    context.add_message({"role": "developer", "content": "Start by concisely introducing yourself."})
+    await worker.queue_frames([LLMRunFrame()])
+
+@transport.event_handler("on_client_disconnected")
+async def on_client_disconnected(transport, client):
+    logger.info("Client disconnected")
+    await worker.cancel()
+
+@transport.event_handler("on_dialin_error")
+async def on_dialin_error(transport, data):
+    logger.error(f"Dial-in error: {data}")
+    await worker.cancel()
+{% endmacro %}
+
+{# Dial-out call handlers shared by Daily PSTN and Twilio + Daily SIP dial-out #}
+{% macro _dialout_call_handlers() %}
+@transport.event_handler("on_joined")
+async def on_joined(transport, data):
+    await dialout_manager.attempt_dialout()
+
+@transport.event_handler("on_dialout_answered")
+async def on_dialout_answered(transport, data):
+    logger.debug(f"Dial-out answered: {data}")
+    dialout_manager.mark_successful()
+
+@transport.event_handler("on_dialout_error")
+async def on_dialout_error(transport, data: Any):
+    logger.error(f"Dial-out error, retrying: {data}")
+
+    if dialout_manager.should_retry():
+        await dialout_manager.attempt_dialout()
+    else:
+        logger.error("No more retries allowed, stopping bot.")
+        await worker.cancel()
+{% endmacro %}
+
+{# Daily PSTN dial-out event handlers. With guarded=True the bot also supports
+   local runs (webrtc/eval): the dial-out machinery is only set up when the
+   request carried dial-out settings, and the bot stays silent otherwise. #}
+{% macro daily_pstn_dialout_handlers(guarded=False) %}
+{% if guarded %}
+if dialout_settings:
+    # Production flow: place the outbound call once the bot has joined the room.
+    dialout_manager = DialoutManager(transport, dialout_settings)
+
+{{ _dialout_call_handlers() | indent(4, first=True) }}
+{% else %}
+{{ _dialout_call_handlers() }}
+{% endif %}
+
+@transport.event_handler("on_client_disconnected")
+async def on_client_disconnected(transport, client):
+    logger.info("Client disconnected")
+    await worker.cancel()
+{% endmacro %}
+
+{# Twilio call-forwarding handlers used by the SIP dial-in scenario #}
+{% macro _sip_dialin_call_handlers() %}
+@transport.event_handler("on_dialin_ready")
+async def on_dialin_ready(transport, sip_endpoint):
+    logger.info(f"Forwarding call {request.call_sid} to {request.sip_uri}")
+
+    try:
+        twilio_client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
+
+        # Update the Twilio call with TwiML to forward to the Daily SIP endpoint
+        twilio_client.calls(request.call_sid).update(
+            twiml=f"<Response><Dial><Sip>{request.sip_uri}</Sip></Dial></Response>"
+        )
+        logger.info("Call forwarded successfully")
+    except Exception as e:
+        logger.error(f"Failed to forward call: {str(e)}")
+        await worker.cancel()
+
+@transport.event_handler("on_dialin_error")
+async def on_dialin_error(transport, data):
+    logger.error(f"Dial-in error: {data}")
+    await worker.cancel()
+{% endmacro %}
+
+{# Twilio + Daily SIP dial-in event handlers. With guarded=True the bot also
+   supports local runs (webrtc/eval): the Twilio call forwarding only happens
+   when the request carried the SIP call details. #}
+{% macro twilio_daily_sip_dialin_handlers(guarded=False) %}
+{% if guarded %}
+if request:
+    # Production flow: forward the Twilio call to the Daily SIP endpoint.
+{{ _sip_dialin_call_handlers() | indent(4, first=True) }}
+{% else %}
+{{ _sip_dialin_call_handlers() }}
+{% endif %}
+
+@transport.event_handler("on_client_connected")
+async def on_client_connected(transport, client):
+    logger.info("Client connected")
+    context.add_message({"role": "developer", "content": "Start by concisely introducing yourself."})
+    await worker.queue_frames([LLMRunFrame()])
+
+@transport.event_handler("on_client_disconnected")
+async def on_client_disconnected(transport, client):
+    logger.info("Client disconnected")
+    await worker.cancel()
+{% endmacro %}
+
+{# Twilio + Daily SIP dial-out event handlers (same as Daily PSTN dial-out) #}
+{% macro twilio_daily_sip_dialout_handlers(guarded=False) %}
+{{ daily_pstn_dialout_handlers(guarded) -}}
+{% endmacro %}
+
+{# Transcription event handler (feature-based) #}
+{% macro transcription_handler() %}
+@user_aggregator.event_handler("on_user_turn_stopped")
+async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
+    timestamp = f"[{message.timestamp}] " if message.timestamp else ""
+    line = f"{timestamp}user: {message.content}"
+    logger.info(f"Transcript: {line}")
+
+@assistant_aggregator.event_handler("on_assistant_turn_stopped")
+async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+    timestamp = f"[{message.timestamp}] " if message.timestamp else ""
+    line = f"{timestamp}assistant: {message.content}"
+    logger.info(f"Transcript: {line}")
+{% endmacro %}
+
+{# Recording event handler (feature-based) #}
+{% macro recording_handler() %}
+@audio_buffer.event_handler("on_audio_data")
+async def on_audio_data(buffer, audio, sample_rate, num_channels):
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"recordings/merged_{timestamp}.wav"
+    os.makedirs("recordings", exist_ok=True)
+    await save_audio_file(audio, filename, sample_rate, num_channels)
+{% endmacro %}
+

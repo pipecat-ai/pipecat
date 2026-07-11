@@ -57,6 +57,7 @@ class GroqSTTService(BaseWhisperSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GroqSTTService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             api_key: Groq API key. Defaults to None.
             base_url: API base URL. Defaults to "https://api.groq.com/openai/v1".
@@ -64,16 +65,19 @@ class GroqSTTService(BaseWhisperSTTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GroqSTTService.Settings(language=...)`` instead.
+                    Will be removed in 2.0.0.
 
             prompt: Optional text to guide the model's style or continue a previous segment.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GroqSTTService.Settings(prompt=...)`` instead.
+                    Will be removed in 2.0.0.
 
             temperature: Optional sampling temperature between 0 and 1.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GroqSTTService.Settings(temperature=...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.

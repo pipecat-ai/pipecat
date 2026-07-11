@@ -14,6 +14,7 @@ import pytest
 from websockets.protocol import State
 
 from pipecat.services.elevenlabs.tts import (
+    ElevenLabsHttpTTSService,
     ElevenLabsTTSService,
     _select_alignment,
     _strip_utterance_leading_spaces,
@@ -344,6 +345,57 @@ async def test_keepalive_without_active_context_sends_empty():
     await service._send_keepalive()
 
     assert ws.sent == [{"text": ""}]
+
+
+class _FakeHttpResponse:
+    """Minimal aiohttp response stand-in; the 400 makes run_tts bail after posting."""
+
+    status = 400
+
+    async def text(self):
+        return "rejected"
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _FakeHttpSession:
+    """Records the JSON payload of each POST."""
+
+    def __init__(self):
+        self.payloads: list[dict] = []
+
+    def post(self, url, json=None, headers=None, params=None):
+        self.payloads.append(json)
+        return _FakeHttpResponse()
+
+
+async def _http_payload_for_model(model: str) -> dict:
+    session = _FakeHttpSession()
+    service = ElevenLabsHttpTTSService(
+        api_key="test-key",
+        aiohttp_session=session,
+        settings=ElevenLabsHttpTTSService.Settings(voice="test-voice", model=model),
+    )
+    service._previous_text = "Hello!"
+    async for _ in service.run_tts("How can I assist you today?", "ctx-1"):
+        pass
+    return session.payloads[0]
+
+
+@pytest.mark.asyncio
+async def test_http_payload_includes_previous_text_when_supported():
+    payload = await _http_payload_for_model("eleven_flash_v2_5")
+    assert payload["previous_text"] == "Hello!"
+
+
+@pytest.mark.asyncio
+async def test_http_payload_omits_previous_text_for_eleven_v3():
+    payload = await _http_payload_for_model("eleven_v3")
+    assert "previous_text" not in payload
 
 
 if __name__ == "__main__":

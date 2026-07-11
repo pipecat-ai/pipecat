@@ -27,6 +27,7 @@ For Gemini adapter:
 6. Multiple system instructions: first extracted, later ones converted to user messages
 7. system_instruction overrides context system message, with conflict warnings
 8. Developer messages are converted to user
+9. Malformed messages raise LLMContextConversionError (preserving the underlying cause)
 
 For Anthropic adapter:
 1. LLMStandardMessage objects are converted to Anthropic MessageParam format
@@ -37,6 +38,7 @@ For Anthropic adapter:
 6. Empty text content is converted to "(empty)"
 7. system_instruction overrides context system message, with conflict warnings
 8. Developer messages are converted to user
+9. Malformed messages raise LLMContextConversionError (preserving the underlying cause)
 
 For AWS Bedrock adapter:
 1. LLMStandardMessage objects are converted to AWS Bedrock format
@@ -47,6 +49,7 @@ For AWS Bedrock adapter:
 6. Empty text content is converted to "(empty)"
 7. system_instruction overrides context system message, with conflict warnings
 8. Developer messages are converted to user
+9. Malformed messages raise LLMContextConversionError (preserving the underlying cause)
 
 For OpenAI Responses adapter:
 1. LLMContext messages are converted to Responses API input items
@@ -68,6 +71,7 @@ from unittest.mock import patch
 
 from google.genai.types import Content, FunctionCall, FunctionResponse, Part
 
+from pipecat.adapters.base_llm_adapter import LLMContextConversionError
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
@@ -389,6 +393,26 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
                 )
             ],
         )
+
+    def test_malformed_message_raises_conversion_error(self):
+        """Test that a malformed message raises LLMContextConversionError, preserving the underlying cause."""
+        # A data URL with no comma has no base64 payload, so the adapter's
+        # url.split(",")[1] raises IndexError during conversion.
+        malformed_message = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What's in this image?"},
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64"}},
+            ],
+        }
+        context = LLMContext(messages=[malformed_message])
+
+        with self.assertRaises(LLMContextConversionError) as ctx:
+            self.adapter.get_llm_invocation_params(context)
+
+        # The underlying cause is preserved for debugging.
+        self.assertIsInstance(ctx.exception.__cause__, IndexError)
+        self.assertIn("Error mapping context messages to provider format", str(ctx.exception))
 
     def test_standard_messages_converted_to_gemini_format(self):
         """Test that LLMStandardMessage objects are converted to Gemini Content format."""
@@ -812,6 +836,26 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         """Sets up a common adapter instance for all tests."""
         self.adapter = AnthropicLLMAdapter()
 
+    def test_malformed_message_raises_conversion_error(self):
+        """Test that a malformed message raises LLMContextConversionError, preserving the underlying cause."""
+        # A data URL with no comma has no base64 payload, so the adapter's
+        # url.split(",")[1] raises IndexError during conversion.
+        malformed_message = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What's in this image?"},
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64"}},
+            ],
+        }
+        context = LLMContext(messages=[malformed_message])
+
+        with self.assertRaises(LLMContextConversionError) as ctx:
+            self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        # The underlying cause is preserved for debugging.
+        self.assertIsInstance(ctx.exception.__cause__, IndexError)
+        self.assertIn("Error mapping context messages to provider format", str(ctx.exception))
+
     def test_standard_messages_converted_to_anthropic_format(self):
         """Test that LLMStandardMessage objects are converted to Anthropic MessageParam format."""
         # Create standard messages
@@ -1177,6 +1221,26 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
     def setUp(self) -> None:
         """Sets up a common adapter instance for all tests."""
         self.adapter = AWSBedrockLLMAdapter()
+
+    def test_malformed_message_raises_conversion_error(self):
+        """Test that a malformed message raises LLMContextConversionError, preserving the underlying cause."""
+        # A data URL with no comma has no base64 payload, so the adapter's
+        # url.split(",")[1] raises IndexError during conversion.
+        malformed_message = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What's in this image?"},
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64"}},
+            ],
+        }
+        context = LLMContext(messages=[malformed_message])
+
+        with self.assertRaises(LLMContextConversionError) as ctx:
+            self.adapter.get_llm_invocation_params(context)
+
+        # The underlying cause is preserved for debugging.
+        self.assertIsInstance(ctx.exception.__cause__, IndexError)
+        self.assertIn("Error mapping context messages to provider format", str(ctx.exception))
 
     def test_standard_messages_converted_to_aws_bedrock_format(self):
         """Test that LLMStandardMessage objects are converted to AWS Bedrock format."""
@@ -2083,6 +2147,52 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(len(params["input"]), 2)
         self.assertEqual(params["input"][0]["role"], "user")
         self.assertEqual(params["input"][1]["type"], "function_call")
+
+    def test_reasoning_message_becomes_reasoning_item(self):
+        """A persisted reasoning message converts to a Responses reasoning item."""
+        reasoning_msg = self.adapter.create_llm_specific_message(
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "summary": [{"type": "summary_text", "text": "Let me think."}],
+                "encrypted_content": "ENCRYPTED",
+            }
+        )
+        context = LLMContext(messages=[reasoning_msg])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(
+            params["input"][0],
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "summary": [{"type": "summary_text", "text": "Let me think."}],
+                "encrypted_content": "ENCRYPTED",
+            },
+        )
+
+    def test_reasoning_precedes_assistant_message(self):
+        """Reasoning round-trips positioned before the assistant reply it produced."""
+        reasoning_msg = self.adapter.create_llm_specific_message(
+            {"type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "ENCRYPTED"}
+        )
+        context = LLMContext(messages=[reasoning_msg, {"role": "assistant", "content": "Hello!"}])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["input"][0]["type"], "reasoning")
+        self.assertEqual(params["input"][1]["role"], "assistant")
+
+    def test_reasoning_without_encrypted_content_omits_field(self):
+        """encrypted_content is optional; omit it rather than send null."""
+        reasoning_msg = self.adapter.create_llm_specific_message(
+            {"type": "reasoning", "id": "rs_2", "summary": []}
+        )
+        context = LLMContext(messages=[reasoning_msg])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["input"][0]["type"], "reasoning")
+        self.assertEqual(params["input"][0]["id"], "rs_2")
+        self.assertNotIn("encrypted_content", params["input"][0])
 
     def test_id_for_llm_specific_messages(self):
         """Adapter identifier is 'openai_responses'."""

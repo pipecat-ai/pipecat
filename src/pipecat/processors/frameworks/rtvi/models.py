@@ -4,9 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""RTVI protocol v1 message models.
+"""RTVI protocol v2 message models.
 
-Contains all RTVI protocol v1 message definitions and data structures.
+Contains all RTVI protocol v2 message definitions and data structures.
 Import this module under the ``RTVI`` alias to use as a namespace::
 
     import pipecat.processors.frameworks.rtvi.models as RTVI
@@ -22,12 +22,18 @@ from typing import (
 
 from pydantic import BaseModel, ConfigDict
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     AggregationType,
 )
+from pipecat.utils.deprecation import deprecated
 
 # -- Constants --
-PROTOCOL_VERSION = "1.4.0"
+PROTOCOL_VERSION = "2.0.0"
+
+# -- Version compatibility --
+# Any 1.x client is deprecated but still supported with the old bot-output format.
+LEGACY_SUPPORTED_MAJOR = 1
 
 MESSAGE_LABEL = "rtvi-ai"
 MessageLiteral = Literal["rtvi-ai"]
@@ -178,13 +184,17 @@ class BotReady(BaseModel):
     data: BotReadyData
 
 
+@deprecated(
+    "`LLMFunctionCallMessageData` is deprecated since 0.0.102 and will be removed in 2.0.0. "
+    "Use `LLMFunctionCallInProgressMessageData` instead."
+)
 class LLMFunctionCallMessageData(BaseModel):
     """Data for LLM function call notification.
 
     Contains function call details including name, ID, and arguments.
 
     .. deprecated:: 0.0.102
-        Use ``LLMFunctionCallInProgressMessageData`` instead.
+        Use :class:`LLMFunctionCallInProgressMessageData` instead. Will be removed in 2.0.0.
     """
 
     function_name: str
@@ -192,14 +202,18 @@ class LLMFunctionCallMessageData(BaseModel):
     args: Mapping[str, Any]
 
 
+@deprecated(
+    "`LLMFunctionCallMessage` is deprecated since 0.0.102 and will be removed in 2.0.0. "
+    "Use `LLMFunctionCallInProgressMessage` instead."
+)
 class LLMFunctionCallMessage(BaseModel):
     """Message notifying of an LLM function call.
 
     Sent when the LLM makes a function call.
 
     .. deprecated:: 0.0.102
-        Use ``LLMFunctionCallInProgressMessage`` with the
-        ``llm-function-call-in-progress`` event type instead.
+        Use :class:`LLMFunctionCallInProgressMessage` with the
+        ``llm-function-call-in-progress`` event type instead. Will be removed in 2.0.0.
     """
 
     label: MessageLiteral = MESSAGE_LABEL
@@ -225,6 +239,17 @@ class SendTextData(BaseModel):
 
     content: str
     options: SendTextOptions | None = None
+
+
+class DTMFInputData(BaseModel):
+    """Data format for a DTMF keypress sent from the client.
+
+    Carries a single keypad entry. Clients send one ``dtmf`` message per key, the
+    way a telephony transport delivers them; the bot's DTMF handling (e.g. a
+    ``DTMFAggregator``) sequences them.
+    """
+
+    button: KeypadEntry
 
 
 class LLMFunctionCallStartMessageData(BaseModel):
@@ -345,15 +370,68 @@ class TextMessageData(BaseModel):
     text: str
 
 
+SpokenStatus = Literal["new", "in-progress", "completed"] | None
+
+
+class SpokenProgressData(BaseModel):
+    """Word-level TTS progress within a spoken segment.
+
+    Parameters:
+        accumulated_text: Text already spoken in this segment, including the current word.
+        remaining_text: Text not yet spoken in this segment.
+    """
+
+    accumulated_text: str
+    remaining_text: str
+
+
+class BotOutputTransformResult(BaseModel):
+    """Return type for bot output transform functions.
+
+    Parameters:
+        text: The transformed full text of the segment.
+        accumulated_text: Transformed spoken-so-far portion. Only populated
+            when the transform is called from a progress context.
+        remaining_text: Transformed not-yet-spoken portion. Only populated
+            when the transform is called from a progress context.
+    """
+
+    text: str
+    accumulated_text: str | None = None
+    remaining_text: str | None = None
+
+
 class BotOutputMessageData(TextMessageData):
     """Data for bot output RTVI messages.
 
     Extends TextMessageData to include metadata about the output.
+
+    This class supports both protocol v1 (1.4.x) and v2 (2.0.0+) clients. The
+    observer populates different field subsets depending on the negotiated version;
+    ``send_rtvi_message`` serialises with ``exclude_none=True`` so each client
+    only sees the fields relevant to its version.
+
+    Parameters:
+        aggregated_by: What form the text is in (e.g., sentence, code, etc.).
+        segment_id: ID of the source AggregatedTextFrame.
+        spoken: **(v1 only)** Whether the text has been spoken by TTS.
+        will_be_spoken: **(v2+)** Whether the text will be spoken by TTS.
+        spoken_status: **(v2+)** Lifecycle status of the segment:
+            ``"new"`` on first emit, ``"in-progress"`` during word playback,
+            ``"completed"`` when the last word is spoken (or immediately for
+            non-spoken segments).
+        spoken_progress: **(v2+)** Accumulated / remaining text breakdown.
+            Present when ``will_be_spoken`` is ``True``.
     """
 
-    spoken: bool = False  # Indicates if the text has been spoken by TTS
     aggregated_by: AggregationType | str
-    # Indicates what form the text is in (e.g., by word, sentence, etc.)
+    segment_id: int | None = None
+    # v1 field (protocol 1.4.x)
+    spoken: bool | None = None
+    # v2 fields (protocol 2.0.0+)
+    will_be_spoken: bool | None = None
+    spoken_status: SpokenStatus | None = None
+    spoken_progress: SpokenProgressData | None = None
 
 
 class BotOutputMessage(BaseModel):
@@ -471,6 +549,28 @@ class UserStoppedSpeakingMessage(BaseModel):
     type: Literal["user-stopped-speaking"] = "user-stopped-speaking"
 
 
+class VADUserStartedSpeakingMessage(BaseModel):
+    """Message indicating VAD detected the user started speaking.
+
+    Raw VAD signal, emitted independently of turn finalization (unlike
+    ``user-started-speaking``, which a turn strategy may gate or defer).
+    """
+
+    label: MessageLiteral = MESSAGE_LABEL
+    type: Literal["vad-user-started-speaking"] = "vad-user-started-speaking"
+
+
+class VADUserStoppedSpeakingMessage(BaseModel):
+    """Message indicating VAD detected the user stopped speaking.
+
+    Raw VAD signal, emitted independently of turn finalization (unlike
+    ``user-stopped-speaking``, which a turn strategy may gate or defer).
+    """
+
+    label: MessageLiteral = MESSAGE_LABEL
+    type: Literal["vad-user-stopped-speaking"] = "vad-user-stopped-speaking"
+
+
 class UserMuteStartedMessage(BaseModel):
     """Message indicating user has been muted."""
 
@@ -497,6 +597,18 @@ class BotStoppedSpeakingMessage(BaseModel):
 
     label: MessageLiteral = MESSAGE_LABEL
     type: Literal["bot-stopped-speaking"] = "bot-stopped-speaking"
+
+
+class BotInterruptedMessage(BaseModel):
+    """Message indicating the bot was interrupted and its in-flight output cut off.
+
+    Fires for any pipeline interruption — a VAD-detected user barge-in or a
+    programmatic interrupt (e.g. ``send-text`` with ``run_immediately``) — so a
+    client can drop whatever the bot was mid-saying.
+    """
+
+    label: MessageLiteral = MESSAGE_LABEL
+    type: Literal["bot-interrupted"] = "bot-interrupted"
 
 
 class MetricsMessage(BaseModel):

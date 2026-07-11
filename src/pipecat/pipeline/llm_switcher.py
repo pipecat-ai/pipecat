@@ -9,14 +9,16 @@
 from typing import Any, cast
 
 from pipecat.adapters.schemas.direct_function import DirectFunction
+from pipecat.frames.frames import Frame, LLMContextFrame
 from pipecat.pipeline.service_switcher import (
     ServiceSwitcher,
     ServiceSwitcherStrategyManual,
     StrategyType,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
+from pipecat.utils.deprecation import deprecated
 
 
 class LLMSwitcher(ServiceSwitcher[StrategyType]):
@@ -40,6 +42,35 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
                 Defaults to ``ServiceSwitcherStrategyManual``.
         """
         super().__init__(cast(list[FrameProcessor], llms), strategy_type)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process a frame, syncing context tool handlers on all member LLMs.
+
+        On an ``LLMContextFrame``, the handlers advertised in the context are
+        synced on every member LLM — active or not — so that tools listed via
+        ``LLMContext(tools=[...])`` keep working across service switches.
+
+        This is needed because member LLMs sit behind per-branch filters: only the
+        active LLM receives the context frame and would otherwise sync its handlers,
+        leaving inactive LLMs out of step with the advertised tools.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow.
+        """
+        await super().process_frame(frame, direction)
+        if isinstance(frame, LLMContextFrame):
+            self._sync_registered_tool_handlers(frame.context.tools)
+
+    def _sync_registered_tool_handlers(self, tools) -> None:
+        """Sync the context's tool handlers on every member LLM.
+
+        Args:
+            tools: The advertised tools whose handlers should be synced on all
+                member LLMs.
+        """
+        for llm in self.llms:
+            llm._sync_registered_tool_handlers(tools)
 
     @property
     def llms(self) -> list[LLMService]:
@@ -79,7 +110,7 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
         function_name: str | None,
         handler: Any,
         *,
-        cancel_on_interruption: bool = True,
+        cancel_on_interruption: bool | None = None,
         timeout_secs: float | None = None,
     ):
         """Register a function handler for LLM function calls, on all LLMs, active or not.
@@ -90,7 +121,8 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
             handler: The function handler. Should accept a single FunctionCallParams
                 parameter.
             cancel_on_interruption: Whether to cancel this function call when an
-                interruption occurs. Defaults to True.
+                interruption occurs. Defaults to ``None`` (fall back to the
+                ``@tool_options`` decorator value on the handler, then to True).
             timeout_secs: Optional timeout in seconds for the function call.
         """
         for llm in self.llms:
@@ -101,23 +133,34 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
                 timeout_secs=timeout_secs,
             )
 
+    @deprecated(
+        "`LLMSwitcher.register_direct_function` is deprecated since 1.4.0 and will be removed "
+        "in 2.0.0. Use `LLMContext(tools=[...])` instead."
+    )
     def register_direct_function(
         self,
         handler: DirectFunction,
         *,
-        cancel_on_interruption: bool = True,
+        cancel_on_interruption: bool | None = None,
         timeout_secs: float | None = None,
     ):
         """Register a direct function handler for LLM function calls, on all LLMs, active or not.
 
+        .. deprecated:: 1.4.0
+            Use :class:`LLMContext` with ``tools=[...]`` instead. Direct functions
+            listed in the context are registered on every member LLM automatically
+            — at session start, or push an :class:`LLMSetToolsFrame` to change tools
+            mid-session. Will be removed in 2.0.0.
+
         Args:
             handler: The direct function to register. Must follow DirectFunction protocol.
             cancel_on_interruption: Whether to cancel this function call when an
-                interruption occurs. Defaults to True.
+                interruption occurs. Defaults to ``None`` (fall back to the
+                ``@tool_options`` decorator value on the handler, then to True).
             timeout_secs: Optional timeout in seconds for the function call.
         """
         for llm in self.llms:
-            llm.register_direct_function(
+            llm._register_direct_function(
                 handler=handler,
                 cancel_on_interruption=cancel_on_interruption,
                 timeout_secs=timeout_secs,

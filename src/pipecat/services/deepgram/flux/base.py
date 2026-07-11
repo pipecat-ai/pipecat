@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     EndFrame,
     InterimTranscriptionFrame,
     StartFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -28,6 +29,7 @@ from pipecat.frames.frames import (
 from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -205,6 +207,26 @@ class DeepgramFluxSTTBase(STTService):
         self._register_event_handler("on_eager_end_of_turn")
         self._register_event_handler("on_update")
 
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Deepgram Flux service supports metrics generation.
+        """
+        return True
+
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Recommend external turn strategies: Flux detects turns server-side.
+
+        Flux emits its own start-of-turn and end-of-turn events (as
+        ``UserStarted/StoppedSpeakingFrame``), so the user aggregator defers to
+        those rather than running local VAD/smart-turn. Applied unless the user
+        passed their own ``user_turn_strategies``.
+        """
+        frame = super().service_metadata_frame()
+        frame.user_turn_strategies = ExternalUserTurnStrategies()
+        return frame
+
     # ------------------------------------------------------------------
     # Abstract transport interface — implemented by each concrete subclass
     # ------------------------------------------------------------------
@@ -328,6 +350,59 @@ class DeepgramFluxSTTBase(STTService):
         except Exception as e:
             await self.push_error(error_msg=f"Error sending CloseStream: {e}", exception=e)
 
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    async def start(self, frame: StartFrame):
+        """Start the Deepgram Flux STT service.
+
+        Args:
+            frame: The start frame containing initialization parameters and metadata.
+        """
+        await super().start(frame)
+        await self._connect()
+
+    async def stop(self, frame: EndFrame):
+        """Stop the Deepgram Flux STT service.
+
+        Args:
+            frame: The end frame.
+        """
+        await super().stop(frame)
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the Deepgram Flux STT service.
+
+        Args:
+            frame: The cancel frame.
+        """
+        await super().cancel(frame)
+        await self._disconnect()
+
+    async def cleanup(self):
+        """Release Deepgram Flux STT resources at teardown."""
+        await super().cleanup()
+        await self._disconnect()
+
+    async def start_metrics(self):
+        """Start TTFB and processing metrics collection."""
+        # TTFB (Time To First Byte) metrics are currently disabled for Deepgram Flux.
+        # Ideally, TTFB should measure the time from when a user starts speaking
+        # until we receive the first transcript. However, Deepgram Flux delivers
+        # both the "user started speaking" event and the first transcript simultaneously,
+        # making this timing measurement meaningless in this context.
+        # await self.start_ttfb_metrics()
+        await self.start_processing_metrics()
+
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Language | None = None
+    ):
+        """Handle a transcription result with tracing."""
+        pass
+
     async def _send_configure(self, fields: set[str]):
         """Send a Configure control message to update settings mid-stream.
 
@@ -370,14 +445,6 @@ class DeepgramFluxSTTBase(STTService):
         logger.debug(f"{self}: sending Configure message: {message}")
         await self._transport_send_json(message)
 
-    def can_generate_metrics(self) -> bool:
-        """Check if this service can generate processing metrics.
-
-        Returns:
-            True, as Deepgram Flux service supports metrics generation.
-        """
-        return True
-
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply a settings delta.
 
@@ -398,54 +465,6 @@ class DeepgramFluxSTTBase(STTService):
         self._warn_unhandled_updated_settings(changed.keys() - self._CONFIGURE_FIELDS)
 
         return changed
-
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
-
-    async def start(self, frame: StartFrame):
-        """Start the Deepgram Flux STT service.
-
-        Args:
-            frame: The start frame containing initialization parameters and metadata.
-        """
-        await super().start(frame)
-        await self._connect()
-
-    async def stop(self, frame: EndFrame):
-        """Stop the Deepgram Flux STT service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the Deepgram Flux STT service.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._disconnect()
-
-    async def start_metrics(self):
-        """Start TTFB and processing metrics collection."""
-        # TTFB (Time To First Byte) metrics are currently disabled for Deepgram Flux.
-        # Ideally, TTFB should measure the time from when a user starts speaking
-        # until we receive the first transcript. However, Deepgram Flux delivers
-        # both the "user started speaking" event and the first transcript simultaneously,
-        # making this timing measurement meaningless in this context.
-        # await self.start_ttfb_metrics()
-        await self.start_processing_metrics()
-
-    @traced_stt
-    async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Language | None = None
-    ):
-        """Handle a transcription result with tracing."""
-        pass
 
     # ------------------------------------------------------------------
     # Message handling

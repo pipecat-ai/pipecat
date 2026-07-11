@@ -32,7 +32,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 
 if TYPE_CHECKING:
-    from pipecat.workers.base_worker import BaseWorker
+    from pipecat.pipeline.worker import PipelineWorker
 
 _LIFECYCLE_FRAMES = (StartFrame, EndFrame, CancelFrame, StopFrame)
 _PASSTHROUGH_FRAMES = (OutputTransportMessageUrgentFrame,)
@@ -161,7 +161,7 @@ class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
     def __init__(
         self,
         *,
-        worker: "BaseWorker",
+        worker: "PipelineWorker",
         direction: FrameDirection,
         bridges: tuple[str, ...] = (),
         exclude_frames: tuple[type[Frame], ...] | None = None,
@@ -172,7 +172,7 @@ class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
         Args:
             worker: The owning worker; the edge reads ``worker.bus`` lazily
                 so the bus only needs to be set (via
-                :meth:`BaseWorker.attach`) by the time the processor is
+                :meth:`PipelineWorker.attach`) by the time the processor is
                 set up. ``worker.name`` is the message source and
                 ``worker.active`` gates inbound frames.
             direction: Direction this edge captures and forwards to the
@@ -230,4 +230,7 @@ class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
             return
         if self._bridges and message.bridge not in self._bridges:
             return
-        await self.push_frame(message.frame, message.direction)
+        # Route via the worker's push queue (rather than ``push_frame`` from
+        # this edge) so bus inbound serialises with frames the worker queues
+        # itself (e.g. those a flow framework enqueues from ``set_node``).
+        await self._task.queue_frame(message.frame, message.direction)

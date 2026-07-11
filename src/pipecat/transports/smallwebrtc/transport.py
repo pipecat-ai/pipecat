@@ -45,13 +45,12 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 
 try:
-    import cv2
     from aiortc import VideoStreamTrack
     from aiortc.mediastreams import AudioStreamTrack, MediaStreamError
     from av import AudioFrame, AudioResampler, VideoFrame
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use the SmallWebRTC, you need to `pip install pipecat-ai[webrtc]`.")
+    logger.error('In order to use the SmallWebRTC, you need to `uv add "pipecat-ai[webrtc]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 CAM_VIDEO_SOURCE = "camera"
@@ -216,13 +215,6 @@ class SmallWebRTCClient:
     messaging through the SmallWebRTCConnection interface.
     """
 
-    FORMAT_CONVERSIONS = {
-        "yuv420p": cv2.COLOR_YUV2RGB_I420,
-        "yuvj420p": cv2.COLOR_YUV2RGB_I420,  # OpenCV treats both the same
-        "nv12": cv2.COLOR_YUV2RGB_NV12,
-        "gray": cv2.COLOR_GRAY2RGB,
-    }
-
     def __init__(self, webrtc_connection: SmallWebRTCConnection, callbacks: SmallWebRTCCallbacks):
         """Initialize the WebRTC client.
 
@@ -279,12 +271,28 @@ class SmallWebRTCClient:
             The converted RGB frame as a NumPy array.
 
         Raises:
+            ImportError: If OpenCV is not installed.
             ValueError: If the format is unsupported.
         """
         if format_name.startswith("rgb"):  # Already in RGB, no conversion needed
             return frame_array
 
-        conversion_code = SmallWebRTCClient.FORMAT_CONVERSIONS.get(format_name)
+        try:
+            import cv2
+        except ModuleNotFoundError as e:
+            raise ImportError(
+                "Receiving non-RGB video frames requires OpenCV. Install it with "
+                '`uv add "pipecat-ai[webrtc-video]"`.'
+            ) from e
+
+        format_conversions = {
+            "yuv420p": cv2.COLOR_YUV2RGB_I420,
+            "yuvj420p": cv2.COLOR_YUV2RGB_I420,  # OpenCV treats both the same
+            "nv12": cv2.COLOR_YUV2RGB_NV12,
+            "gray": cv2.COLOR_GRAY2RGB,
+        }
+
+        conversion_code = format_conversions.get(format_name)
 
         if conversion_code is None:
             raise ValueError(f"Unsupported format: {format_name}")
@@ -643,6 +651,18 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         if self._receive_video_task:
             await self.cancel_task(self._receive_video_task)
             self._receive_video_task = None
+        if self._receive_screen_video_task:
+            await self.cancel_task(self._receive_screen_video_task)
+            self._receive_screen_video_task = None
+
+    async def _teardown(self):
+        """Cancel receive tasks and disconnect the WebRTC client.
+
+        Idempotent so it can run from ``stop()``, ``cancel()``, and
+        ``cleanup()`` without duplicating work.
+        """
+        await self._stop_tasks()
+        await self._client.disconnect()
 
     async def stop(self, frame: EndFrame):
         """Stop the input transport and disconnect from WebRTC.
@@ -651,8 +671,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             frame: The end frame signaling transport shutdown.
         """
         await super().stop(frame)
-        await self._stop_tasks()
-        await self._client.disconnect()
+        await self._teardown()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the input transport and disconnect immediately.
@@ -661,8 +680,12 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             frame: The cancel frame signaling immediate cancellation.
         """
         await super().cancel(frame)
-        await self._stop_tasks()
-        await self._client.disconnect()
+        await self._teardown()
+
+    async def cleanup(self):
+        """Release resources during teardown."""
+        await super().cleanup()
+        await self._teardown()
 
     async def _receive_audio(self):
         """Background task for receiving audio frames from WebRTC."""
@@ -837,6 +860,14 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
         await self._client.connect()
         await self.set_transport_ready(frame)
 
+    async def _teardown(self):
+        """Disconnect the WebRTC client.
+
+        Idempotent so it can run from ``stop()``, ``cancel()``, and
+        ``cleanup()`` without duplicating work.
+        """
+        await self._client.disconnect()
+
     async def stop(self, frame: EndFrame):
         """Stop the output transport and disconnect from WebRTC.
 
@@ -844,7 +875,7 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
             frame: The end frame signaling transport shutdown.
         """
         await super().stop(frame)
-        await self._client.disconnect()
+        await self._teardown()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the output transport and disconnect immediately.
@@ -853,7 +884,12 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
             frame: The cancel frame signaling immediate cancellation.
         """
         await super().cancel(frame)
-        await self._client.disconnect()
+        await self._teardown()
+
+    async def cleanup(self):
+        """Release resources during teardown."""
+        await super().cleanup()
+        await self._teardown()
 
     async def send_message(
         self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame

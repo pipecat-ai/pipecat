@@ -1,0 +1,61 @@
+name: patient_intake
+
+judge: !include judge_text.yaml
+
+turns:
+  - expect:
+      - event: response
+        eval: "the bot introduces itself and asks for the patient's date of birth"
+
+  - user: "My birthday is January first, nineteen eighty-three."
+    expect:
+      - event: function_call
+        calls:
+          - name: verify_birthday
+            args: { birthday: "1983-01-01" }
+      - event: response
+        eval: "the bot asks what prescriptions or medications the patient is taking"
+
+  - user: "I take Lipitor, twenty milligrams."
+    expect:
+      - event: function_call
+        calls:
+          - name: record_prescriptions
+      - event: response
+        eval: "the bot asks about the patient's allergies"
+
+  - user: "I'm allergic to penicillin."
+    expect:
+      - event: function_call
+        calls:
+          - name: record_allergies
+      - event: response
+        eval: "the bot asks about the patient's medical conditions"
+
+  - user: "I have high blood pressure."
+    expect:
+      - event: function_call
+        calls:
+          - name: record_conditions
+      - event: response
+        eval: "the bot asks what brings the patient in for their visit"
+
+  - user: "I'm here for a routine checkup."
+    expect:
+      - event: function_call
+        calls:
+          - name: record_visit_reasons
+      - event: response
+        eval: "the bot reviews or summarizes the collected information and asks the patient to confirm"
+
+  # confirm_information's node immediately calls complete_intake to end — both fire
+  # here with no further user turn and no judgeable text, so we assert the calls
+  # only (the end node tears down before any farewell).
+  - user: "Yes, that's all correct."
+    expect:
+      - event: function_call
+        calls:
+          - name: confirm_information
+      - event: function_call
+        calls:
+          - name: complete_intake

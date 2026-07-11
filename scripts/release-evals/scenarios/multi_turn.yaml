@@ -1,0 +1,22 @@
+name: multi_turn
+
+# Text modality: a two-turn conversation where the second turn depends on the
+# first. Tests context retention across turns.
+
+judge: !include judge_text.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "My name is Alex, and I'm planning a trip to Italy."
+    expect:
+      - event: response
+        eval: "acknowledges the user's message (the name Alex and/or the trip to Italy)"
+
+  - user: "Remind me — what's my name and where am I going?"
+    expect:
+      - event: response
+        eval: "recalls that the user's name is Alex and the destination is Italy"

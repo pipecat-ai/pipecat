@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     LLMAssistantPushAggregationFrame,
     LLMContextAssistantTimestampFrame,
+    LLMContextAssistantTurnFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -28,17 +29,19 @@ from pipecat.frames.frames import (
     LLMMessagesTransformFrame,
     LLMMessagesUpdateFrame,
     LLMRunFrame,
+    LLMServiceMetadataFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
-    RealtimeServiceMetadataFrame,
     SpeechControlParamsFrame,
     StartFrame,
+    STTMetadataFrame,
     TextFrame,
     TranscriptionFrame,
     TranslationFrame,
+    TTSStartedFrame,
     TTSTextFrame,
     UserMuteStartedFrame,
     UserStartedSpeakingFrame,
@@ -76,6 +79,7 @@ from pipecat.turns.user_stop import (
     SpeechTimeoutUserTurnStopStrategy,
 )
 from pipecat.turns.user_turn_strategies import (
+    ExternalUserTurnStrategies,
     FilterIncompleteUserTurnStrategies,
     UserTurnStrategies,
 )
@@ -318,6 +322,44 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
         self.assertTrue(should_stop)
         self.assertEqual(stop_message.content, "Hello!")
+
+    async def test_service_requested_turn_strategies_applied(self):
+        """An STTMetadataFrame swaps the defaults when the user set none."""
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(context)  # no user_turn_strategies
+
+        frame = STTMetadataFrame(
+            service_name="some-stt",
+            ttfs_p99_latency=0.0,
+            user_turn_strategies=ExternalUserTurnStrategies(),
+        )
+        await run_test(Pipeline([user_aggregator]), frames_to_send=[frame])
+
+        strategies = user_aggregator._user_turn_controller._user_turn_strategies
+        self.assertTrue(any(isinstance(s, ExternalUserTurnStartStrategy) for s in strategies.start))
+        self.assertTrue(any(isinstance(s, ExternalUserTurnStopStrategy) for s in strategies.stop))
+
+    async def test_user_strategies_override_service_request(self):
+        """A user-provided strategy wins; the service's request is ignored."""
+        existing_stop = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(stop=[existing_stop])
+            ),
+        )
+
+        frame = STTMetadataFrame(
+            service_name="some-stt",
+            ttfs_p99_latency=0.0,
+            user_turn_strategies=ExternalUserTurnStrategies(),
+        )
+        await run_test(Pipeline([user_aggregator]), frames_to_send=[frame])
+
+        strategies = user_aggregator._user_turn_controller._user_turn_strategies
+        self.assertEqual(strategies.stop, [existing_stop])
+        self.assertFalse(any(isinstance(s, ExternalUserTurnStopStrategy) for s in strategies.stop))
 
     async def test_user_turn_stop_timeout_no_transcription(self):
         context = LLMContext()
@@ -829,7 +871,11 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             LLMTextFrame("Hello from Pipecat!"),
             LLMFullResponseEndFrame(),
         ]
-        expected_down_frames = [LLMContextFrame, LLMContextAssistantTimestampFrame]
+        expected_down_frames = [
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+        ]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -867,7 +913,11 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             LLMTextFrame("Pipecat!"),
             LLMFullResponseEndFrame(),
         ]
-        expected_down_frames = [LLMContextFrame, LLMContextAssistantTimestampFrame]
+        expected_down_frames = [
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+        ]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -895,7 +945,11 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             make_text_frame("you?"),
             LLMFullResponseEndFrame(),
         ]
-        expected_down_frames = [LLMContextFrame, LLMContextAssistantTimestampFrame]
+        expected_down_frames = [
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+        ]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -914,7 +968,11 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             TextFrame(text="you?"),
             LLMFullResponseEndFrame(),
         ]
-        expected_down_frames = [LLMContextFrame, LLMContextAssistantTimestampFrame]
+        expected_down_frames = [
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+        ]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -953,7 +1011,11 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             make_text_frame("helps!", includes_spaces=True),
             LLMFullResponseEndFrame(),
         ]
-        expected_down_frames = [LLMContextFrame, LLMContextAssistantTimestampFrame]
+        expected_down_frames = [
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+        ]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -990,8 +1052,10 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         expected_down_frames = [
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
         ]
         await run_test(
             aggregator,
@@ -1025,9 +1089,11 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         expected_down_frames = [
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
             InterruptionFrame,
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
         ]
         await run_test(
             aggregator,
@@ -1070,9 +1136,11 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         expected_down_frames = [
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
             InterruptionFrame,
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
         ]
         await run_test(
             aggregator,
@@ -1194,12 +1262,13 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(stop_messages), 1)
         self.assertEqual(stop_messages[0].content, "Hello from Pipecat!")
 
-    async def test_push_aggregation_fires_turn_stopped_for_tts_speak(self):
-        """LLMAssistantPushAggregationFrame must fire on_assistant_turn_stopped.
+    async def test_tts_speak_fires_turn_started_and_stopped(self):
+        """A TTSSpeakFrame(append_to_context=True) utterance must fire both turn events.
 
-        Mirrors the TTSSpeakFrame(append_to_context=True) greeting flow: TTS-driven
-        TTSTextFrames accumulate without an LLMFullResponseStartFrame, then the
-        TTS service emits LLMAssistantPushAggregationFrame to commit them.
+        Mirrors the TTSSpeakFrame greeting flow with a word-timestamp TTS service:
+        a TTSStartedFrame opens the turn (no surrounding LLMFullResponseStartFrame),
+        word-level TTSTextFrames accumulate, then the TTS service emits
+        LLMAssistantPushAggregationFrame to commit them and stop the turn.
         """
         context = LLMContext()
         aggregator = LLMAssistantAggregator(context)
@@ -1217,12 +1286,18 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             stop_messages.append(message)
 
         frames_to_send = [
+            TTSStartedFrame(append_to_context=True),
             TTSTextFrame("Hello,", aggregated_by=AggregationType.WORD),
             TTSTextFrame("how", aggregated_by=AggregationType.WORD),
             TTSTextFrame("can I help?", aggregated_by=AggregationType.WORD),
             LLMAssistantPushAggregationFrame(),
         ]
-        expected_down_frames = [LLMContextFrame, LLMContextAssistantTimestampFrame]
+        expected_down_frames = [
+            TTSStartedFrame,
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+        ]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -1236,6 +1311,130 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             context.messages[-1],
             {"role": "assistant", "content": "Hello, how can I help?"},
         )
+
+    async def test_tts_speak_interruption_records_partial_text(self):
+        """Interrupting a TTSSpeakFrame utterance records the partially-spoken text.
+
+        The TTSStartedFrame opens the turn, so a mid-utterance interruption finds an
+        open turn: the words spoken so far are written to context and
+        on_assistant_turn_stopped fires with interrupted=True. (No
+        LLMAssistantPushAggregationFrame arrives — the interruption cancels the
+        utterance before the TTS service commits it.)
+        """
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        start_count = 0
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_started")
+        async def on_assistant_turn_started(aggregator):
+            nonlocal start_count
+            start_count += 1
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        frames_to_send = [
+            TTSStartedFrame(append_to_context=True),
+            TTSTextFrame("Let me", aggregated_by=AggregationType.WORD),
+            TTSTextFrame("check on", aggregated_by=AggregationType.WORD),
+            SleepFrame(),
+            InterruptionFrame(),
+        ]
+        expected_down_frames = [
+            TTSStartedFrame,
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+            InterruptionFrame,
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.assertEqual(start_count, 1)
+        self.assertEqual(len(stop_messages), 1)
+        self.assertTrue(stop_messages[0].interrupted)
+        self.assertEqual(stop_messages[0].content, "Let me check on")
+        self.assertEqual(
+            context.messages[-1],
+            {"role": "assistant", "content": "Let me check on"},
+        )
+
+    async def test_tts_started_append_to_context_false_does_not_open_turn(self):
+        """A TTSStartedFrame(append_to_context=False) utterance must not open a turn.
+
+        When the spoken text won't be written to context, neither
+        on_assistant_turn_started nor on_assistant_turn_stopped should fire, and a
+        following interruption must find no open turn.
+        """
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        start_count = 0
+        stop_count = 0
+
+        @aggregator.event_handler("on_assistant_turn_started")
+        async def on_assistant_turn_started(aggregator):
+            nonlocal start_count
+            start_count += 1
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            nonlocal stop_count
+            stop_count += 1
+
+        frames_to_send = [
+            TTSStartedFrame(append_to_context=False),
+            TTSTextFrame("off the record", aggregated_by=AggregationType.WORD),
+            SleepFrame(),
+            InterruptionFrame(),
+        ]
+        expected_down_frames = [TTSStartedFrame, InterruptionFrame]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.assertEqual(start_count, 0)
+        self.assertEqual(stop_count, 0)
+        self.assertEqual(len(context.messages), 0)
+
+    async def test_tts_started_does_not_double_open_during_llm_response(self):
+        """A TTSStartedFrame during an LLM response must not re-open the turn.
+
+        LLMFullResponseStartFrame is the earlier signal and already opened the turn,
+        so the response's TTSStartedFrame is a no-op: on_assistant_turn_started fires
+        exactly once.
+        """
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        start_count = 0
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_started")
+        async def on_assistant_turn_started(aggregator):
+            nonlocal start_count
+            start_count += 1
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            TTSStartedFrame(append_to_context=True),
+            TTSTextFrame("Hello!", aggregated_by=AggregationType.WORD),
+            LLMFullResponseEndFrame(),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+        self.assertEqual(start_count, 1)
+        self.assertEqual(len(stop_messages), 1)
+        self.assertEqual(stop_messages[0].content, "Hello!")
 
     async def test_push_aggregation_does_not_double_fire_in_llm_response(self):
         """LLMAssistantPushAggregationFrame mid-response must not double-fire turn events.
@@ -1579,6 +1778,23 @@ class TestToolChangeMessages(unittest.IsolatedAsyncioTestCase):
         self.assertIn("`x`", msgs[0])
         self.assertIn("`y`", msgs[0])
 
+    async def test_set_tools_accepts_plain_list(self):
+        # Regression: a bare list (e.g. direct functions / FunctionSchema objects,
+        # not wrapped in a ToolsSchema) must be normalized rather than raise
+        # "'list' object has no attribute 'standard_tools'". Mirrors re-adding a
+        # tool via LLMSetToolsFrame(tools=[...]) after it was removed.
+        context = LLMContext()  # tools default to NOT_GIVEN
+        aggregator = LLMUserAggregator(
+            context, params=LLMUserAggregatorParams(add_tool_change_messages=True)
+        )
+        await self._send_set_tools_to_user_aggregator(aggregator, [_function_schema("b")])
+        msgs = _developer_messages(context)
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("just been added", msgs[0])
+        self.assertIn("`b`", msgs[0])
+        # The bare list was normalized into a ToolsSchema in the context.
+        self.assertEqual({s.name for s in context.tools.standard_tools}, {"b"})
+
     async def test_custom_tools_only_change_no_message(self):
         # Standard tools identical; only custom tools differ → no announcement.
         context = LLMContext(
@@ -1668,7 +1884,7 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
     def _build_pair(
         self,
         *,
-        realtime_service_mode: bool = False,
+        realtime_service_mode: bool | None = None,
         user_params: LLMUserAggregatorParams | None = None,
     ) -> tuple[LLMContext, LLMContextAggregatorPair]:
         context = LLMContext()
@@ -1689,17 +1905,20 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(pair.user()._realtime_service_mode)
         self.assertTrue(pair.assistant()._realtime_service_mode)
 
-    async def test_pair_omits_realtime_wiring_when_unset(self):
+    async def test_pair_defaults_to_auto_mode(self):
+        # Default: realtime_service_mode is auto-configured (None), and the
+        # assistant→user back-reference is always wired so it's ready if a
+        # realtime service later auto-enables the mode.
         _, pair = self._build_pair()
-        self.assertIsNone(pair.assistant()._paired_user_aggregator)
-        self.assertFalse(pair.user()._realtime_service_mode)
-        self.assertFalse(pair.assistant()._realtime_service_mode)
+        self.assertIs(pair.assistant()._paired_user_aggregator, pair.user())
+        self.assertIsNone(pair.user()._realtime_service_mode)
+        self.assertIsNone(pair.assistant()._realtime_service_mode)
 
     async def test_realtime_strategy_mutations_with_defaults(self):
-        # At __init__ time only the mutations apply (drop the
-        # transcription start strategy, flip wait_for_transcript on
-        # default stops). The external-strategy replacement is deferred
-        # to the RealtimeServiceMetadataFrame handler.
+        # With realtime_service_mode explicitly enabled, the init-time
+        # mutations apply (drop the transcription start strategy, flip
+        # wait_for_transcript on default stops). No metadata frame has
+        # arrived, so no service-recommended external strategies are installed.
         _, pair = self._build_pair(realtime_service_mode=True)
         strategies = pair.user()._user_turn_controller._user_turn_strategies
         for s in strategies.start:
@@ -1715,14 +1934,16 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
             if hasattr(s, "wait_for_transcript"):
                 self.assertFalse(s.wait_for_transcript)
 
-    async def test_realtime_metadata_replaces_defaults_when_service_emits_turn_frames(self):
-        # When the service advertises emits_user_turn_frames=True and
-        # the user didn't pass custom strategies, the handler swaps the
-        # defaults out for ExternalUserTurnStart/StopStrategy.
+    async def test_realtime_metadata_applies_recommended_external_strategies(self):
+        # A realtime service recommending ExternalUserTurnStrategies (and no
+        # custom user strategies) installs them, then realtime mode mutates
+        # them (wait_for_transcript=False).
         _, pair = self._build_pair(realtime_service_mode=True)
         frames_to_send = [
-            RealtimeServiceMetadataFrame(
-                service_name="FakeRealtimeLLM", emits_user_turn_frames=True
+            LLMServiceMetadataFrame(
+                service_name="FakeRealtimeLLM",
+                is_realtime_service=True,
+                user_turn_strategies=ExternalUserTurnStrategies(),
             ),
         ]
         await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
@@ -1731,18 +1952,16 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(strategies.start[0], ExternalUserTurnStartStrategy)
         self.assertEqual(len(strategies.stop), 1)
         self.assertIsInstance(strategies.stop[0], ExternalUserTurnStopStrategy)
-        # Realtime-mode mutation is reapplied to the new stop strategy.
+        # Realtime-mode mutation is applied to the recommended stop strategy.
         self.assertFalse(strategies.stop[0].wait_for_transcript)
 
-    async def test_realtime_metadata_keeps_defaults_when_service_does_not_emit_turn_frames(self):
-        # Services advertising emits_user_turn_frames=False keep the
-        # default strategies so locally-driven turns (e.g. local VAD)
-        # can fire on_user_turn_* events.
+    async def test_realtime_metadata_keeps_defaults_when_service_recommends_nothing(self):
+        # A realtime service that recommends no strategies (e.g. one that
+        # doesn't emit its own turn frames) keeps the default strategies so
+        # locally-driven turns (e.g. local VAD) can fire on_user_turn_* events.
         _, pair = self._build_pair(realtime_service_mode=True)
         frames_to_send = [
-            RealtimeServiceMetadataFrame(
-                service_name="FakeRealtimeLLM", emits_user_turn_frames=False
-            ),
+            LLMServiceMetadataFrame(service_name="FakeRealtimeLLM", is_realtime_service=True),
         ]
         await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
         strategies = pair.user()._user_turn_controller._user_turn_strategies
@@ -1753,8 +1972,8 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(isinstance(s, VADUserTurnStartStrategy) for s in strategies.start))
 
     async def test_realtime_metadata_keeps_custom_strategies(self):
-        # Custom user_turn_strategies opts out of the swap — explicit
-        # user choice wins, regardless of what the service advertises.
+        # Custom user_turn_strategies opts out of the recommendation — explicit
+        # user choice wins, regardless of what the service recommends.
         custom = UserTurnStrategies(
             start=[VADUserTurnStartStrategy()],
             stop=[SpeechTimeoutUserTurnStopStrategy()],
@@ -1764,8 +1983,10 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
             user_params=LLMUserAggregatorParams(user_turn_strategies=custom),
         )
         frames_to_send = [
-            RealtimeServiceMetadataFrame(
-                service_name="FakeRealtimeLLM", emits_user_turn_frames=True
+            LLMServiceMetadataFrame(
+                service_name="FakeRealtimeLLM",
+                is_realtime_service=True,
+                user_turn_strategies=ExternalUserTurnStrategies(),
             ),
         ]
         await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
@@ -1897,58 +2118,96 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(stop_messages), 1)
         self.assertIsNone(stop_messages[0].content)
 
-    async def test_realtime_metadata_recommendation_log_when_unconfigured(self):
-        # Cascade pair receiving a RealtimeServiceMetadataFrame logs the
-        # one-time recommendation. The user half records the fact via
-        # _realtime_recommendation_logged.
+    async def test_realtime_metadata_auto_enables_mode_when_unset(self):
+        # Default (auto) pair: a realtime service announcing itself flips both
+        # halves into realtime mode with no manual opt-in, and mutates the
+        # default strategies for realtime use.
         _, pair = self._build_pair()
         user = pair.user()
 
         frames_to_send = [
-            RealtimeServiceMetadataFrame(
-                service_name="FakeRealtimeLLM", emits_user_turn_frames=False
-            ),
+            LLMServiceMetadataFrame(service_name="FakeRealtimeLLM", is_realtime_service=True),
         ]
         await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
-        self.assertTrue(user._realtime_recommendation_logged)
+        self.assertTrue(user._realtime_service_mode)
+        self.assertTrue(pair.assistant()._realtime_service_mode)
+        self.assertTrue(user._realtime_metadata_handled)
+        strategies = user._user_turn_controller._user_turn_strategies
+        for s in strategies.start:
+            self.assertNotIsInstance(s, TranscriptionUserTurnStartStrategy)
+        for s in strategies.stop:
+            if hasattr(s, "wait_for_transcript"):
+                self.assertFalse(s.wait_for_transcript)
 
-    async def test_realtime_metadata_no_log_when_configured(self):
-        # When realtime mode is opted in, the metadata frame is consumed
-        # without firing the recommendation log (we still flag the
-        # one-shot bookkeeping).
+    async def test_realtime_metadata_handled_when_explicitly_enabled(self):
+        # With realtime mode explicitly enabled, the metadata frame is processed
+        # and the one-shot guard is set.
         _, pair = self._build_pair(realtime_service_mode=True)
         user = pair.user()
 
         frames_to_send = [
-            RealtimeServiceMetadataFrame(
-                service_name="FakeRealtimeLLM", emits_user_turn_frames=False
+            LLMServiceMetadataFrame(service_name="FakeRealtimeLLM", is_realtime_service=True),
+        ]
+        await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
+        self.assertTrue(user._realtime_metadata_handled)
+
+    async def test_external_recommendation_applies_with_realtime_mode_disabled(self):
+        # The external-strategy recommendation is decoupled from
+        # realtime_service_mode: a service recommending ExternalUserTurnStrategies
+        # gets them applied even when realtime mode is explicitly disabled. They
+        # are NOT realtime-mutated (wait_for_transcript keeps its default), since
+        # realtime mode is off.
+        _, pair = self._build_pair(realtime_service_mode=False)
+        frames_to_send = [
+            LLMServiceMetadataFrame(
+                service_name="FakeRealtimeLLM",
+                is_realtime_service=True,
+                user_turn_strategies=ExternalUserTurnStrategies(),
             ),
         ]
         await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
-        self.assertTrue(user._realtime_recommendation_logged)
+        self.assertFalse(pair.user()._realtime_service_mode)
+        strategies = pair.user()._user_turn_controller._user_turn_strategies
+        self.assertIsInstance(strategies.start[0], ExternalUserTurnStartStrategy)
+        self.assertIsInstance(strategies.stop[0], ExternalUserTurnStopStrategy)
+        # Not realtime-mutated: wait_for_transcript keeps its default (True).
+        self.assertTrue(strategies.stop[0].wait_for_transcript)
 
-    async def test_realtime_mode_assistant_requires_paired_user_aggregator(self):
-        # Direct construction of the assistant half with realtime mode
-        # set but no paired user half raises at StartFrame validation.
-        # (We call the validation directly so the error isn't swallowed
-        # by the pipeline's exception handler.)
+    async def test_realtime_metadata_reapplies_mutation_on_rebroadcast(self):
+        # Regression: a second metadata broadcast (e.g. a ServiceSwitcher switch)
+        # re-adopts a fresh recommendation, so the realtime mutation must re-run.
+        # The one-shot guard governs only auto-enable/logging, not strategy install.
+        # (No-double-registration is covered at the controller level in
+        # test_user_turn_controller.py, since handlers are torn down at session end.)
+        _, pair = self._build_pair(realtime_service_mode=True)
+        frames_to_send = [
+            LLMServiceMetadataFrame(
+                service_name="FakeRealtimeLLM",
+                is_realtime_service=True,
+                user_turn_strategies=ExternalUserTurnStrategies(),
+            ),
+            LLMServiceMetadataFrame(
+                service_name="FakeRealtimeLLM",
+                is_realtime_service=True,
+                user_turn_strategies=ExternalUserTurnStrategies(),
+            ),
+        ]
+        await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
+        strategies = pair.user()._user_turn_controller.user_turn_strategies
+        self.assertIsInstance(strategies.stop[0], ExternalUserTurnStopStrategy)
+        # Mutation re-applied after the second broadcast (not skipped by the guard).
+        self.assertFalse(strategies.stop[0].wait_for_transcript)
+
+    async def test_realtime_mode_requires_paired_user_aggregator(self):
+        # Realtime mode needs the assistant's back-reference to the user half to
+        # flush user messages. Constructing the assistant directly (bypassing the
+        # pair) leaves it unpaired; the same check runs at StartFrame for an
+        # explicit mode and at the auto-enable flip. (Called directly so the error
+        # isn't swallowed by the pipeline's exception handler.)
         context = LLMContext()
         assistant = LLMAssistantAggregator(context, _realtime_service_mode=True)
         with self.assertRaises(RuntimeError):
-            assistant._validate_realtime_pairing()
-
-    async def test_realtime_mode_assistant_rejects_mismatched_halves(self):
-        # If a user code path constructs halves with mismatched configs
-        # and wires them up by hand, assistant validation catches it.
-        context = LLMContext()
-        user = LLMUserAggregator(context, _realtime_service_mode=True)
-        assistant = LLMAssistantAggregator(
-            context,
-            _realtime_service_mode=False,
-            _paired_user_aggregator=user,
-        )
-        with self.assertRaises(RuntimeError):
-            assistant._validate_realtime_pairing()
+            assistant._require_paired_user_aggregator()
 
 
 if __name__ == "__main__":

@@ -30,6 +30,26 @@ from pipecat.processors.aggregators.llm_context import (
 TLLMInvocationParams = TypeVar("TLLMInvocationParams", bound=Mapping[str, Any])
 
 
+class LLMContextConversionError(Exception):
+    """Raised when converting a universal ``LLMContext`` to a provider's message format fails.
+
+    Adapters that transform context messages into a provider-specific format
+    raise this from their conversion routine, wrapping the underlying error
+    (preserved as ``__cause__``). Its message identifies the failure as a
+    context-mapping problem and carries the underlying cause. The corresponding
+    LLM service catches this and surfaces it in the ``ErrorFrame`` it pushes
+    upstream.
+    """
+
+    def __init__(self, cause: Exception):
+        """Initialize the error.
+
+        Args:
+            cause: The underlying exception raised during message conversion.
+        """
+        super().__init__(f"Error mapping context messages to provider format: {cause}")
+
+
 class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
     """Abstract base class for LLM provider adapters.
 
@@ -175,7 +195,7 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
                         "Migrate to ToolsSchema to enable built-in tool support. "
                         "Use ToolsSchema(custom_tools=...) as an escape hatch for any "
                         "provider-specific tools that don't fit the standard schema.",
-                        DeprecationWarning,
+                        UserWarning,
                         stacklevel=2,
                     )
                 # Fall through and return the original tools unchanged.

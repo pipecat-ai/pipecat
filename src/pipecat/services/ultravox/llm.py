@@ -21,7 +21,12 @@ from typing import Any, Literal
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel, Field
+from typing_extensions import override
+from websockets.asyncio import client as websocket_client
+from websockets.exceptions import ConnectionClosed
 
+from pipecat.adapters.schemas.direct_function import DirectFunction
+from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
@@ -35,6 +40,7 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMServiceMetadataFrame,
     LLMTextFrame,
     StartFrame,
     TranscriptionFrame,
@@ -48,17 +54,9 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, RealtimeServiceInfo
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
 from pipecat.utils.time import time_now_iso8601
-
-try:
-    from websockets.asyncio import client as websocket_client
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Ultravox, you need to `pip install pipecat-ai[ultravox]`.")
-    raise ImportError(f"Missing module: {e}") from e
-
 
 # Result shipped as the client_tool_result when we see an async-tool
 # "started" message — i.e. when an async-registered function call
@@ -179,9 +177,9 @@ class UltravoxRealtimeLLMService(LLMService):
     so pipeline processors that depend on those frames — RTVI client
     speech events, ``TurnTrackingObserver``, ``AudioBufferProcessor`` turn
     recording, ``UserIdleController``, user mute strategies, voicemail
-    detector — won't activate with the default server-VAD-only setup. Pair
-    with ``LLMContextAggregatorPair(..., realtime_service_mode=True)``
-    so context writes are correct anyway. To produce the turn frames
+    detector — won't activate with the default server-VAD-only setup.
+    ``LLMContextAggregatorPair`` auto-detects this realtime service so context
+    writes are correct anyway. To produce the turn frames
     locally, wire ``vad_analyzer=SileroVADAnalyzer()`` (or similar) into
     ``LLMUserAggregatorParams``; locally-generated turn boundaries are a
     heuristic and may not match Ultravox's server-side turn decisions.
@@ -190,16 +188,17 @@ class UltravoxRealtimeLLMService(LLMService):
     Settings = UltravoxRealtimeLLMSettings
     _settings: Settings
 
-    # Realtime (speech-to-speech) service. Does NOT emit
-    # UserStarted/StoppedSpeakingFrame from server-side turn signals.
-    _realtime_service_info = RealtimeServiceInfo(emits_user_turn_frames=False)
+    def service_metadata_frame(self) -> LLMServiceMetadataFrame:
+        """Realtime service; emits no server-side turn frames, so recommends no external strategies."""
+        self._warn_if_realtime_service_emits_no_turn_frames(emits_turn_frames=False)
+        return LLMServiceMetadataFrame(service_name=self.name, is_realtime_service=True)
 
     def __init__(
         self,
         *,
         params: AgentInputParams | OneShotInputParams | JoinUrlInputParams,
         settings: Settings | None = None,
-        one_shot_selected_tools: ToolsSchema | None = None,
+        one_shot_selected_tools: ToolsSchema | list[FunctionSchema | DirectFunction] | None = None,
         **kwargs,
     ):
         """Initialize the Ultravox Realtime LLM service.
@@ -208,7 +207,9 @@ class UltravoxRealtimeLLMService(LLMService):
             params: Configuration parameters for the model.
             settings: Ultravox Realtime LLM settings. If provided, the ``settings``
                 values take precedence over default values.
-            one_shot_selected_tools: ToolsSchema for tools to use with this call.
+            one_shot_selected_tools: Tools to use with this call: a ``ToolsSchema``
+                or a plain list of direct functions and/or ``FunctionSchema``
+                objects (handlers auto-register).
                 May only be set with OneShotInputParams.
             **kwargs: Additional arguments passed to parent LLMService.
         """
@@ -239,6 +240,12 @@ class UltravoxRealtimeLLMService(LLMService):
             **kwargs,
         )
         self._params = params
+        # Accept a plain list of standard tools as a convenience; normalize it to a
+        # ToolsSchema so the rest of the service has a single form to handle.
+        if isinstance(one_shot_selected_tools, list):
+            normalized = LLMContext._normalize_and_validate_tools(one_shot_selected_tools)
+            one_shot_selected_tools = normalized if isinstance(normalized, ToolsSchema) else None
+        self._selected_tools: ToolsSchema | None = None
         if one_shot_selected_tools:
             if not isinstance(self._params, OneShotInputParams):
                 logger.warning(
@@ -404,6 +411,11 @@ class UltravoxRealtimeLLMService(LLMService):
         await super().cancel(frame)
         await self._disconnect()
 
+    async def cleanup(self):
+        """Release resources held by the service."""
+        await super().cleanup()
+        await self._disconnect()
+
     async def _disconnect(self):
         self._disconnecting = True
         if self._socket:
@@ -426,6 +438,11 @@ class UltravoxRealtimeLLMService(LLMService):
     # frame processing
     # StartFrame, StopFrame, CancelFrame implemented in base class
     #
+
+    @override
+    def _service_tools(self) -> "ToolsSchema | None":
+        """Return the ``one_shot_selected_tools`` configured at construction, if any."""
+        return self._selected_tools
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames for the Ultravox Realtime service.
@@ -604,59 +621,66 @@ class UltravoxRealtimeLLMService(LLMService):
         """Receive messages from the Ultravox Realtime WebSocket."""
         if not self._socket:
             return
-        async for message in self._socket:
-            try:
-                if isinstance(message, bytes):
-                    await self._handle_audio(message)
-                    continue
+        try:
+            async for message in self._socket:
+                try:
+                    if isinstance(message, bytes):
+                        await self._handle_audio(message)
+                        continue
 
-                data = json.loads(message)
-                match data.get("type"):
-                    case "state":
-                        if self._bot_responding and data.get("state") != "speaking":
-                            await self._handle_response_end()
-                    case "playback_clear_buffer":
-                        # Server signals that the user interrupted the bot
-                        # mid-speech and any buffered output audio should be
-                        # dropped. Broadcast InterruptionFrame so the assistant
-                        # aggregator records the message interrupted=True
-                        # (upstream) and BaseOutputTransport clears its audio
-                        # buffer (downstream). The subsequent "state" message
-                        # transitioning off "speaking" is what closes the
-                        # response via _handle_response_end; firing the
-                        # interruption first ensures the aggregator handles
-                        # InterruptionFrame before LLMFullResponseEndFrame.
-                        await self.broadcast_interruption()
-                    case "client_tool_invocation":
-                        await self._handle_tool_invocation(
-                            data.get("toolName"), data.get("invocationId"), data.get("parameters")
-                        )
-                    case "transcript":
-                        match data.get("role"):
-                            case "user":
-                                if not data.get("final"):
-                                    logger.warning(
-                                        "Unexpected non-final user transcript from Ultravox Realtime; ignoring."
+                    data = json.loads(message)
+                    match data.get("type"):
+                        case "state":
+                            if self._bot_responding and data.get("state") != "speaking":
+                                await self._handle_response_end()
+                        case "playback_clear_buffer":
+                            # Server signals that the user interrupted the bot
+                            # mid-speech and any buffered output audio should be
+                            # dropped. Broadcast InterruptionFrame so the assistant
+                            # aggregator records the message interrupted=True
+                            # (upstream) and BaseOutputTransport clears its audio
+                            # buffer (downstream). The subsequent "state" message
+                            # transitioning off "speaking" is what closes the
+                            # response via _handle_response_end; firing the
+                            # interruption first ensures the aggregator handles
+                            # InterruptionFrame before LLMFullResponseEndFrame.
+                            await self.broadcast_interruption()
+                        case "client_tool_invocation":
+                            await self._handle_tool_invocation(
+                                data.get("toolName"),
+                                data.get("invocationId"),
+                                data.get("parameters"),
+                            )
+                        case "transcript":
+                            match data.get("role"):
+                                case "user":
+                                    if not data.get("final"):
+                                        logger.warning(
+                                            "Unexpected non-final user transcript from Ultravox Realtime; ignoring."
+                                        )
+                                    else:
+                                        await self._handle_user_transcript(data.get("text"))
+                                case "agent":
+                                    await self._handle_agent_transcript(
+                                        data.get("medium"),
+                                        data.get("text"),
+                                        data.get("delta"),
+                                        data.get("final", False),
                                     )
-                                else:
-                                    await self._handle_user_transcript(data.get("text"))
-                            case "agent":
-                                await self._handle_agent_transcript(
-                                    data.get("medium"),
-                                    data.get("text"),
-                                    data.get("delta"),
-                                    data.get("final", False),
-                                )
-                            case _:
-                                logger.debug(
-                                    f"Received transcript with unknown role from Ultravox Realtime: {data}"
-                                )
-                    case _:
-                        logger.debug(f"Received unhandled Ultravox message: {data}")
-            except Exception as e:
-                if self._disconnecting or not self._socket:
-                    return
-                await self.push_error("Ultravox websocket receive error", e, fatal=True)
+                                case _:
+                                    logger.debug(
+                                        f"Received transcript with unknown role from Ultravox Realtime: {data}"
+                                    )
+                        case _:
+                            logger.debug(f"Received unhandled Ultravox message: {data}")
+                except Exception as e:
+                    if self._disconnecting or not self._socket:
+                        return
+                    await self.push_error("Ultravox websocket receive error", e, fatal=True)
+        except ConnectionClosed:
+            if self._disconnecting or not self._socket:
+                return
+            raise
 
     async def _handle_audio(self, audio: bytes):
         """Handle incoming audio bytes from Ultravox Realtime."""

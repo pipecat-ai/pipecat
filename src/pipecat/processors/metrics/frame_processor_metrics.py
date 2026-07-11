@@ -10,6 +10,7 @@ import time
 
 from loguru import logger
 
+from pipecat.audio.utils import detect_speech_onset
 from pipecat.frames.frames import MetricsFrame
 from pipecat.metrics.metrics import (
     LLMTokenUsage,
@@ -17,6 +18,7 @@ from pipecat.metrics.metrics import (
     MetricsData,
     ProcessingMetricsData,
     TextAggregationMetricsData,
+    TTFAMetricsData,
     TTFBMetricsData,
     TTSUsageMetricsData,
 )
@@ -28,9 +30,14 @@ class FrameProcessorMetrics(BaseObject):
 
     Provides comprehensive metrics tracking for frame processing operations,
     including timing measurements, resource usage, and performance analytics.
-    Supports TTFB tracking, processing duration metrics, and usage statistics
-    for LLM and TTS operations.
+    Supports TTFB tracking, TTFA tracking, processing duration metrics, and
+    usage statistics for LLM and TTS operations.
     """
+
+    # Cap on buffered audio while waiting for a TTFA speech onset, so a response
+    # that is all silence (or never becomes audible) can't grow the buffer without
+    # bound.
+    _TTFA_MAX_BUFFER_SECONDS = 3.0
 
     def __init__(self):
         """Initialize the frame processor metrics collector.
@@ -44,6 +51,11 @@ class FrameProcessorMetrics(BaseObject):
         self._start_text_aggregation_time = 0
         self._last_ttfb_time = 0
         self._should_report_ttfb = True
+        # TTFA (time-to-first-audio) state. TTFA extends TTFB: scanning for the
+        # first audible sample begins when TTFB stops (see stop_ttfb_metrics).
+        # Audio is buffered across chunks until a sustained onset is confirmed.
+        self._ttfa_active = False
+        self._ttfa_buffer = b""
 
     @property
     def ttfb(self) -> float | None:
@@ -121,7 +133,63 @@ class FrameProcessorMetrics(BaseObject):
             processor=self._processor_name(), value=self._last_ttfb_time, model=self._model_name()
         )
         self._start_ttfb_time = 0
+        # The first byte has arrived; begin scanning leading silence so TTFA can
+        # be reported as TTFB plus the silence duration (see process_ttfa_metrics).
+        self._ttfa_active = True
+        self._ttfa_buffer = b""
         return MetricsFrame(data=[ttfb])
+
+    async def process_ttfa_metrics(self, *, audio: bytes, sample_rate: int, num_channels: int):
+        """Scan buffered audio for speech onset and report TTFA.
+
+        TTFA extends TTFB: once :meth:`stop_ttfb_metrics` records the first byte,
+        audio is buffered across chunks (the leading silence may span several,
+        and onset confirmation needs a little audio past it) and scanned for a
+        sustained speech onset. When found, TTFB plus the leading-silence
+        duration is emitted and measuring stops until the next response.
+
+        Args:
+            audio: Raw PCM audio bytes (16-bit signed integers).
+            sample_rate: Sample rate of the audio in Hz.
+            num_channels: Number of interleaved audio channels.
+
+        Returns:
+            MetricsFrame containing TTFA data once onset is confirmed, otherwise
+            None.
+        """
+        if not self._ttfa_active or sample_rate <= 0:
+            return None
+
+        self._ttfa_buffer += audio
+        onset = detect_speech_onset(self._ttfa_buffer, sample_rate, num_channels)
+        if onset is None:
+            # No confirmed onset yet. Bound memory against pathologically long
+            # (or never-arriving) silence by giving up past a sane limit.
+            max_bytes = int(self._TTFA_MAX_BUFFER_SECONDS * sample_rate * max(num_channels, 1) * 2)
+            if len(self._ttfa_buffer) >= max_bytes:
+                logger.debug(
+                    f"{self._processor_name()} TTFA: no onset within "
+                    f"{self._TTFA_MAX_BUFFER_SECONDS:.0f}s of audio; not reporting"
+                )
+                self._ttfa_active = False
+                self._ttfa_buffer = b""
+            return None
+
+        silence_duration = onset / sample_rate
+        value = self._last_ttfb_time + silence_duration
+        logger.debug(
+            f"{self._processor_name()} TTFA: {value:.3f}s ({silence_duration:.3f}s leading silence)"
+        )
+        ttfa = TTFAMetricsData(
+            processor=self._processor_name(),
+            ttfa=value,
+            leading_silence=silence_duration,
+            ttfb=self._last_ttfb_time,
+            model=self._model_name(),
+        )
+        self._ttfa_active = False
+        self._ttfa_buffer = b""
+        return MetricsFrame(data=[ttfa])
 
     async def start_processing_metrics(self, *, start_time: float | None = None):
         """Start measuring processing time.

@@ -8,7 +8,6 @@
 
 import asyncio
 import os
-import warnings
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -28,16 +27,19 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given, is_given
 from pipecat.services.stt_latency import SPEECHMATICS_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
@@ -58,9 +60,7 @@ try:
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use Speechmatics, you need to `pip install pipecat-ai[speechmatics]`."
-    )
+    logger.error('In order to use Speechmatics, you need to `uv add "pipecat-ai[speechmatics]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 
@@ -344,11 +344,16 @@ class SpeechmaticsSTTService(STTService):
         # Extra parameters
         extra_params: dict | None = None
 
+    @deprecated(
+        "`SpeechmaticsSTTService.UpdateParams` is deprecated since 0.0.104 and will be removed in "
+        "2.0.0. Use `SpeechmaticsSTTService.Settings` instead."
+    )
     class UpdateParams(BaseModel):
         """Update parameters for Speechmatics STT service.
 
         .. deprecated:: 0.0.104
-            Use ``SpeechmaticsSTTService.Settings`` with ``STTUpdateSettingsFrame`` instead.
+            Use ``SpeechmaticsSTTService.Settings`` with :class:`STTUpdateSettingsFrame` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             focus_speakers: List of speaker IDs to focus on. When enabled, only these speakers are
@@ -402,6 +407,7 @@ class SpeechmaticsSTTService(STTService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SpeechmaticsSTTService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             should_interrupt: Determine whether the bot should be interrupted when Speechmatics turn_detection_mode is configured to detect user speech.
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -533,6 +539,20 @@ class SpeechmaticsSTTService(STTService):
         if default_settings.enable_diarization:
             self._register_event_handler("on_speakers_result")
 
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Request external turn strategies when Speechmatics endpoints server-side.
+
+        Every mode other than the default ``EXTERNAL`` (which uses Pipecat's own
+        endpointing) has Speechmatics detect turns and emit the turn frames, so the
+        user aggregator defers to those. Applied unless the user passed their own
+        ``user_turn_strategies``.
+        """
+        frame = super().service_metadata_frame()
+        mode = self._settings.turn_detection_mode
+        if is_given(mode) and mode != TurnDetectionMode.EXTERNAL:
+            frame.user_turn_strategies = ExternalUserTurnStrategies()
+        return frame
+
     # ============================================================================
     # LIFE-CYCLE / SESSION MANAGEMENT
     # ============================================================================
@@ -608,6 +628,11 @@ class SpeechmaticsSTTService(STTService):
     async def cancel(self, frame: CancelFrame):
         """Called when the session is cancelled."""
         await super().cancel(frame)
+        await self._disconnect()
+
+    async def cleanup(self):
+        """Release Speechmatics resources at pipeline teardown."""
+        await super().cleanup()
         await self._disconnect()
 
     async def _connect(self) -> None:
@@ -780,6 +805,10 @@ class SpeechmaticsSTTService(STTService):
 
         return config
 
+    @deprecated(
+        "`SpeechmaticsSTTService.update_params` is deprecated since 0.0.104 and will be removed in "
+        "2.0.0. Use `STTUpdateSettingsFrame` instead."
+    )
     def update_params(
         self,
         params: UpdateParams,
@@ -787,8 +816,9 @@ class SpeechmaticsSTTService(STTService):
         """Updates the speaker configuration.
 
         .. deprecated:: 0.0.104
-            Use ``STTUpdateSettingsFrame`` with
+            Use :class:`STTUpdateSettingsFrame` with
             ``SpeechmaticsSTTService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         This can update the speakers to listen to or ignore during an in-flight
         transcription. Only available if diarization is enabled.
@@ -796,13 +826,6 @@ class SpeechmaticsSTTService(STTService):
         Args:
             params: Update parameters for the service.
         """
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "update_params() is deprecated. Use STTUpdateSettingsFrame with "
-                "self.Settings(...) instead.",
-                DeprecationWarning,
-            )
         # Check possible
         if not self._config.enable_diarization:
             raise ValueError("Diarization is not enabled")

@@ -1,0 +1,15 @@
+name: vision_describe
+
+# Vision modality: the bot is handed an image on connect (via the manifest
+# entry's `runner_body:`, passed to the bot as --runner-body) and describes it.
+# The image is
+# a cat, so we judge that the description is of a cat. Tests image input end to
+# end. This is a bot-first turn (no user input): the bot speaks once it has the
+# image.
+
+judge: !include judge_text.yaml
+
+turns:
+  - expect:
+      - event: response
+        eval: "describes a cat or kitten"

@@ -47,7 +47,7 @@ try:
     from mistralai.extra.realtime import RealtimeConnection, UnknownRealtimeEvent
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Mistral STT, you need to `pip install pipecat-ai[mistral]`.")
+    logger.error('In order to use Mistral STT, you need to `uv add "pipecat-ai[mistral]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 
@@ -168,6 +168,11 @@ class MistralSTTService(STTService):
             frame: Frame indicating service should be cancelled.
         """
         await super().cancel(frame)
+        await self._disconnect()
+
+    async def cleanup(self):
+        """Clean up resources, closing the connection and cancelling tasks."""
+        await super().cleanup()
         await self._disconnect()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

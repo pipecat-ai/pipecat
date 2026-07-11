@@ -24,8 +24,9 @@ import random
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -44,6 +45,7 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
+@tool_options(cancel_on_interruption=False)
 async def fetch_weather_from_api(params: FunctionCallParams):
     # Simulate a long-running API call so we can demonstrate that the
     # conversation continues while the tool is in flight.
@@ -79,6 +81,7 @@ weather_function = FunctionSchema(
         },
     },
     required=["location", "format"],
+    handler=fetch_weather_from_api,
 )
 
 
@@ -93,6 +96,10 @@ system_prompt = (
 
 
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -118,13 +125,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             temperature=0.3,
             max_duration=datetime.timedelta(minutes=3),
         ),
-        one_shot_selected_tools=ToolsSchema(standard_tools=[weather_function]),
-    )
-
-    llm.register_function(
-        "get_current_weather",
-        fetch_weather_from_api,
-        cancel_on_interruption=False,
+        one_shot_selected_tools=[weather_function],
     )
 
     context = LLMContext([])
@@ -139,7 +140,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # )
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        realtime_service_mode=True,
         # user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 

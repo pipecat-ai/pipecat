@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -37,6 +37,10 @@ load_dotenv(override=True)
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -159,6 +163,7 @@ There is also a secret menu that changes daily. If the user asks about it, use t
             },
         },
         required=[],
+        handler=get_secret_menu,
     )
 
     llm = UltravoxRealtimeLLMService(
@@ -169,10 +174,8 @@ There is also a secret menu that changes daily. If the user asks about it, use t
             max_duration=datetime.timedelta(minutes=3),
             output_medium="text",
         ),
-        one_shot_selected_tools=ToolsSchema(standard_tools=[secret_menu_function]),
+        one_shot_selected_tools=[secret_menu_function],
     )
-
-    llm.register_function("get_secret_menu", get_secret_menu)
 
     tts = InworldTTSService(
         api_key=os.getenv("INWORLD_API_KEY", ""),
@@ -194,7 +197,6 @@ There is also a secret menu that changes daily. If the user asks about it, use t
     # )
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        realtime_service_mode=True,
         # user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 

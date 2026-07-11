@@ -158,6 +158,34 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(worker.active)
         self.assertTrue(activated.is_set())
 
+    async def test_deactivate_self_takes_effect_before_activate_is_sent(self):
+        """activate_worker(deactivate_self=True) deactivates before the bus
+        round-trip, so this worker and the target are never both active."""
+        worker = make_stub_pipeline_task("test", bridged=())
+        worker._active = True
+        worker._pending_activation = False
+        await worker.attach(registry=self.registry, bus=self.bus)
+
+        sent: list[tuple[str, bool]] = []
+        original_send = worker.send_bus_message
+
+        async def record_send(message):
+            sent.append((type(message).__name__, worker.active))
+            await original_send(message)
+
+        worker.send_bus_message = record_send
+
+        await worker.activate_worker("other", deactivate_self=True)
+
+        # Flipped synchronously, without waiting for the bus round-trip.
+        self.assertFalse(worker.active)
+        self.assertEqual(
+            [name for name, _ in sent],
+            ["BusDeactivateWorkerMessage", "BusActivateWorkerMessage"],
+        )
+        # Both messages were published with this worker already inactive.
+        self.assertTrue(all(active is False for _, active in sent))
+
     async def test_activation_args_property_set_and_cleared(self):
         """activation_args returns the latest args while active and is cleared on deactivate."""
         worker = make_stub_pipeline_task("test", bridged=())
@@ -1190,6 +1218,43 @@ class TestJobLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(msgs[0].target, "parent")
         self.assertEqual(msgs[0].job_id, "t1")
         self.assertEqual(msgs[0].data, {"final": True})
+
+    async def test_send_job_stream_end_marks_job_complete(self):
+        """send_job_stream_end removes the job from active_jobs, like send_job_response.
+
+        A cancel that races in after the stream ends is then a no-op: no
+        on_job_cancelled hook and no CANCELLED response for the finished job.
+        """
+        sent = capture_bus(self.bus)
+
+        worker = await self._attach(BaseWorker("worker"))
+        await worker.on_bus_message(
+            BusJobRequestMessage(source="parent", target="worker", job_id="t1")
+        )
+        self.assertIn("t1", worker.active_jobs)
+
+        cancelled = []
+
+        @worker.event_handler("on_job_cancelled")
+        async def on_cancelled(t, message):
+            cancelled.append(message)
+
+        await worker.send_job_stream_end("t1", {"final": True})
+        self.assertNotIn("t1", worker.active_jobs)
+
+        # A late cancel for the already-completed job is ignored.
+        await worker.on_bus_message(
+            BusJobCancelMessage(source="parent", target="worker", job_id="t1")
+        )
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(cancelled, [])
+        cancelled_responses = [
+            m
+            for m in sent
+            if isinstance(m, BusJobResponseMessage) and m.status == JobStatus.CANCELLED
+        ]
+        self.assertEqual(cancelled_responses, [])
 
     async def test_stream_end_triggers_on_job_completed(self):
         """BusJobStreamEndMessage triggers group completion like BusJobResponseMessage."""

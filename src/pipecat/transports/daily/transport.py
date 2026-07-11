@@ -72,9 +72,7 @@ try:
     from daily import LogLevel as DailyLogLevel
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use the Daily transport, you need to `pip install pipecat-ai[daily]`."
-    )
+    logger.error('In order to use the Daily transport, you need to `uv add "pipecat-ai[daily]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 VAD_RESET_PERIOD_MS = 2000
@@ -653,21 +651,20 @@ class DailyTransportClient(EventHandler):
             return None
 
     async def register_audio_destination(self, destination: str, auto_silence: bool | None = True):
-        """Register a custom audio destination for multi-track output.
+        """Register an audio destination for multi-track output.
+
+        Built-in destination ("microphone") is configured at join time so it's
+        skipped here.
 
         Args:
             destination: The destination identifier to register.
             auto_silence: If True, the audio source inserts silence when no audio is available.
                 If False, the source waits for audio data. Defaults to True.
         """
-        params = (self._params.custom_audio_track_params or {}).get(destination)
-        self._custom_audio_tracks[destination] = await self.add_custom_audio_track(
-            destination, params=params, auto_silence=auto_silence
-        )
-        publishing: dict[str, Any] = {"customAudio": {destination: True}}
-        if params and params.send_settings:
-            publishing["customAudio"][destination] = {"sendSettings": params.send_settings}
-        self._client.update_publishing(publishing)
+        if destination == "screenAudio":
+            await self._register_screen_audio_destination(auto_silence=auto_silence)
+        else:
+            await self._register_custom_audio_destination(destination, auto_silence=auto_silence)
 
     async def register_video_destination(self, destination: str):
         """Register a video destination for multi-track output.
@@ -1275,23 +1272,16 @@ class DailyTransportClient(EventHandler):
         """
         future = self._get_event_loop().create_future()
 
-        sample_rate = params.sample_rate if params and params.sample_rate else self._out_sample_rate
-        channels = params.channels if params else 1
-
-        audio_source = CustomAudioSource(sample_rate, channels, auto_silence)
-
-        audio_track = CustomAudioTrack(audio_source)
+        track = await self._create_audio_track(params, auto_silence)
 
         self._client.add_custom_audio_track(
             track_name=track_name,
-            audio_track=audio_track,
+            audio_track=track.track,
             ignore_audio_level=True,
             completion=completion_callback(future),
         )
 
         await future
-
-        track = DailyAudioTrack(source=audio_source, track=audio_track)
 
         return track
 
@@ -1304,6 +1294,8 @@ class DailyTransportClient(EventHandler):
         Returns:
             error: An error description or None.
         """
+        if track_name == "screenAudio":
+            return
         future = self._get_event_loop().create_future()
         self._client.remove_custom_audio_track(
             track_name=track_name,
@@ -1430,6 +1422,20 @@ class DailyTransportClient(EventHandler):
         )
         return await future
 
+    async def _create_audio_track(
+        self,
+        params: DailyCustomAudioTrackParams | None = None,
+        auto_silence: bool | None = True,
+    ) -> DailyAudioTrack:
+        """Create an audio track for the given parameters."""
+        sample_rate = params.sample_rate if params and params.sample_rate else self._out_sample_rate
+        channels = params.channels if params else 1
+
+        audio_source = CustomAudioSource(sample_rate, channels, auto_silence)
+        audio_track = CustomAudioTrack(audio_source)
+
+        return DailyAudioTrack(source=audio_source, track=audio_track)
+
     async def _create_video_track(
         self,
         params: DailyCustomVideoTrackParams | None = None,
@@ -1446,6 +1452,41 @@ class DailyTransportClient(EventHandler):
         video_track = CustomVideoTrack(video_source)
 
         return DailyVideoTrack(source=video_source, track=video_track)
+
+    async def _register_custom_audio_destination(
+        self, destination: str, auto_silence: bool | None = True
+    ):
+        """Register a custom audio destination for multi-track output."""
+        params = (self._params.custom_audio_track_params or {}).get(destination)
+        self._custom_audio_tracks[destination] = await self.add_custom_audio_track(
+            destination, params=params, auto_silence=auto_silence
+        )
+        publishing: dict[str, Any] = {"customAudio": {destination: True}}
+        if params and params.send_settings:
+            publishing["customAudio"][destination] = {"sendSettings": params.send_settings}
+        self._client.update_publishing(publishing)
+
+    async def _register_screen_audio_destination(self, auto_silence: bool | None = True):
+        """Register screen audio destination track."""
+        params = (self._params.custom_audio_track_params or {}).get("screenAudio")
+
+        audio_track = await self._create_audio_track(params, auto_silence)
+        self._custom_audio_tracks["screenAudio"] = audio_track
+
+        # screenAudio input settings.
+        inputs: dict[str, Any] = {
+            "screenAudio": {
+                "isEnabled": True,
+                "settings": {"customTrack": {"id": audio_track.track.id}},
+            }
+        }
+        self._client.update_inputs(inputs)
+
+        # screenAudio publishing settings.
+        publishing: dict[str, Any] = {"screenAudio": True}
+        if params and params.send_settings:
+            publishing["screenAudio"] = {"sendSettings": params.send_settings}
+        self._client.update_publishing(publishing)
 
     async def _register_screen_video_destination(self):
         """Register screen video destination track."""
@@ -1814,7 +1855,7 @@ class DailyInputTransport(BaseInputTransport):
         # Audio task when using a virtual speaker (i.e. no user tracks).
         self._audio_in_task: asyncio.Task | None = None
 
-    async def start_audio_in_streaming(self):
+    async def _start_audio_in_streaming(self):
         """Start receiving audio from participants."""
         if not self._params.audio_in_enabled:
             return
@@ -1845,8 +1886,9 @@ class DailyInputTransport(BaseInputTransport):
         await self._client.setup(setup)
 
     async def cleanup(self):
-        """Cleanup input transport and shared resources."""
+        """Release input transport resources at teardown."""
         await super().cleanup()
+        await self._stop_audio_in_task()
         await self._client.cleanup()
         await self._transport.cleanup()
 
@@ -1874,7 +1916,7 @@ class DailyInputTransport(BaseInputTransport):
         await self.set_transport_ready(frame)
 
         if self._params.audio_in_stream_on_start:
-            await self.start_audio_in_streaming()
+            await self._start_audio_in_streaming()
 
     async def stop(self, frame: EndFrame):
         """Stop the input transport and leave the Daily room.
@@ -1884,12 +1926,7 @@ class DailyInputTransport(BaseInputTransport):
         """
         # Parent stop.
         await super().stop(frame)
-        # Leave the room.
-        await self._client.leave()
-        # Stop audio thread.
-        if self._audio_in_task:
-            await self.cancel_task(self._audio_in_task)
-            self._audio_in_task = None
+        await self._teardown()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the input transport and leave the Daily room.
@@ -1897,11 +1934,24 @@ class DailyInputTransport(BaseInputTransport):
         Args:
             frame: The cancel frame signaling immediate cancellation.
         """
-        # Parent stop.
+        # Parent cancel.
         await super().cancel(frame)
+        await self._teardown()
+
+    async def _teardown(self):
+        """Leave the room and stop the audio-in task.
+
+        Shared by stop() and cancel(). The room leave is balanced against join()
+        via the client's leave counter, so it stays out of cleanup(); the
+        audio-in task cancel is also reached from cleanup().
+        """
         # Leave the room.
         await self._client.leave()
         # Stop audio thread.
+        await self._stop_audio_in_task()
+
+    async def _stop_audio_in_task(self):
+        """Cancel the audio-in task if running. Idempotent."""
         if self._audio_in_task:
             await self.cancel_task(self._audio_in_task)
             self._audio_in_task = None
@@ -2140,8 +2190,7 @@ class DailyOutputTransport(BaseOutputTransport):
         """
         # Parent stop.
         await super().stop(frame)
-        # Leave the room.
-        await self._client.leave()
+        await self._teardown()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the output transport and leave the Daily room.
@@ -2149,9 +2198,17 @@ class DailyOutputTransport(BaseOutputTransport):
         Args:
             frame: The cancel frame signaling immediate cancellation.
         """
-        # Parent stop.
+        # Parent cancel.
         await super().cancel(frame)
-        # Leave the room.
+        await self._teardown()
+
+    async def _teardown(self):
+        """Leave the room.
+
+        Shared by stop() and cancel(). The room leave is balanced against join()
+        via the client's leave counter, so it stays out of cleanup(), which
+        releases the shared client through its own teardown.
+        """
         await self._client.leave()
 
     async def send_message(

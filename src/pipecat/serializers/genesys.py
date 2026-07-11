@@ -174,10 +174,12 @@ class GenesysAudioHookSerializer(FrameSerializer):
         self._sample_rate = 0  # Pipeline input rate, set in setup()
         self._session_id = str(uuid.uuid4())
 
-        # Use Pipecat's official resampler if needed (SOXR)
-        # Only used for TTS output (16kHz → 8kHz), input goes without resampling
-        self._input_resampler = SOXRStreamAudioResampler()
-        self._output_resampler = SOXRStreamAudioResampler()
+        self._input_resampler = SOXRStreamAudioResampler(
+            clear_after_secs=self._params.resampler_clear_after_secs
+        )
+        self._output_resampler = SOXRStreamAudioResampler(
+            clear_after_secs=self._params.resampler_clear_after_secs
+        )
 
         # Protocol state
         self._client_seq = 0

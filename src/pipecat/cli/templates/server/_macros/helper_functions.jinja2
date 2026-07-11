@@ -1,0 +1,170 @@
+{#
+Helper Functions Macros
+Reusable utility functions and setup code used across templates
+#}
+
+{# Audio recording helper function #}
+{% macro save_audio_file_function() %}
+
+async def save_audio_file(audio: bytes, filename: str, sample_rate: int, num_channels: int):
+    """Save audio data to a WAV file."""
+    if len(audio) > 0:
+        with io.BytesIO() as buffer:
+            with wave.open(buffer, "wb") as wf:
+                wf.setsampwidth(2)
+                wf.setnchannels(num_channels)
+                wf.setframerate(sample_rate)
+                wf.writeframes(audio)
+            async with aiofiles.open(filename, "wb") as file:
+                await file.write(buffer.getvalue())
+        logger.info(f"Audio saved to {filename}")
+{% endmacro %}
+
+{# Context and message setup #}
+{% macro setup_context() %}
+context = LLMContext()
+user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+    context,
+    user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+)
+{% endmacro %}
+
+{# Feature processors setup #}
+{% macro setup_feature_processors(recording, transcription, bot_type) %}
+{% if recording %}
+# Audio recording, started automatically when the pipeline starts
+audio_buffer = AudioBufferProcessor(auto_start_recording=True)
+{% endif %}
+
+{% endmacro %}
+
+{# Twilio call info helper function #}
+{% macro get_call_info_function() %}
+
+class CallInfo(BaseModel):
+    """Caller details fetched from the Twilio REST API."""
+
+    from_number: str | None = None
+    to_number: str | None = None
+
+
+async def get_call_info(call_sid: str | None) -> CallInfo | None:
+    """Fetch call information from the Twilio REST API using aiohttp.
+
+    Args:
+        call_sid: The Twilio call SID (e.g. call_data.call_id), or None.
+
+    Returns:
+        A CallInfo with the caller's numbers, or None if it couldn't be fetched.
+    """
+    if not call_sid:
+        return None
+
+    account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+
+    if not account_sid or not auth_token:
+        logger.warning("Missing Twilio credentials, cannot fetch call info")
+        return None
+
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{call_sid}.json"
+
+    try:
+        # Use HTTP Basic Auth with aiohttp
+        auth = aiohttp.BasicAuth(account_sid, auth_token)
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, auth=auth) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    logger.error(f"Twilio API error ({response.status}): {error_text}")
+                    return None
+
+                data = await response.json()
+
+                return CallInfo(from_number=data.get("from"), to_number=data.get("to"))
+
+    except Exception as e:
+        logger.error(f"Error fetching call info from Twilio: {e}")
+        return None
+{% endmacro %}
+
+{# DialoutManager class for dial-out (Daily PSTN and Twilio + Daily SIP) #}
+{% macro dialout_manager_class(transports) %}
+
+class DialoutManager:
+    """Manages dialout attempts with retry logic.
+
+    Handles the complexity of initiating outbound calls with automatic retry
+    on failure, up to a configurable maximum number of attempts.
+
+    Args:
+        transport: The Daily transport instance for making the dialout
+        dialout_settings: Settings containing {% if 'twilio_daily_sip_dialout' in transports %}SIP URI{% else %}phone number and optional caller ID{% endif %}
+        max_retries: Maximum number of dialout attempts (default: 5)
+    """
+
+    def __init__(
+        self,
+        transport: BaseTransport,
+        dialout_settings: DialoutSettings,
+        max_retries: int | None = 5,
+    ):
+        self._transport = transport
+        {% if 'twilio_daily_sip_dialout' in transports %}
+        self._sip_uri = dialout_settings.sip_uri
+        {% else %}
+        self._phone_number = dialout_settings.phone_number
+        {% endif %}
+        self._max_retries = max_retries
+        self._attempt_count = 0
+        self._is_successful = False
+
+    async def attempt_dialout(self) -> bool:
+        """Attempt to start a dialout call.
+
+        Initiates an outbound call if retry limit hasn't been reached and
+        no successful connection has been made yet.
+
+        Returns:
+            True if dialout attempt was initiated, False if max retries reached
+            or call already successful
+        """
+        if self._attempt_count >= self._max_retries:
+            logger.error(
+                f"Maximum retry attempts ({self._max_retries}) reached. Giving up on dialout."
+            )
+            return False
+
+        if self._is_successful:
+            logger.debug("Dialout already successful, skipping attempt")
+            return False
+
+        self._attempt_count += 1
+        {% if 'twilio_daily_sip_dialout' in transports %}
+        logger.info(
+            f"Attempting dialout (attempt {self._attempt_count}/{self._max_retries}) to: {self._sip_uri}"
+        )
+
+        await self._transport.start_dialout({"sipUri": self._sip_uri})
+        {% else %}
+        logger.info(
+            f"Attempting dialout (attempt {self._attempt_count}/{self._max_retries}) to: {self._phone_number}"
+        )
+
+        await self._transport.start_dialout({"phoneNumber": self._phone_number})
+        {% endif %}
+        return True
+
+    def mark_successful(self):
+        """Mark the dialout as successful to prevent further retry attempts."""
+        self._is_successful = True
+
+    def should_retry(self) -> bool:
+        """Check if another dialout attempt should be made.
+
+        Returns:
+            True if retry limit not reached and call not yet successful
+        """
+        return self._attempt_count < self._max_retries and not self._is_successful
+{% endmacro %}

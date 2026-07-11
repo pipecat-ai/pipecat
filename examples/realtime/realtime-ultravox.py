@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -36,6 +36,10 @@ load_dotenv(override=True)
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -158,6 +162,7 @@ There is also a secret menu that changes daily. If the user asks about it, use t
             },
         },
         required=[],
+        handler=get_secret_menu,
     )
 
     llm = UltravoxRealtimeLLMService(
@@ -167,22 +172,19 @@ There is also a secret menu that changes daily. If the user asks about it, use t
             temperature=0.3,
             max_duration=datetime.timedelta(minutes=3),
         ),
-        one_shot_selected_tools=ToolsSchema(standard_tools=[secret_menu_function]),
+        one_shot_selected_tools=[secret_menu_function],
     )
-
-    llm.register_function("get_secret_menu", get_secret_menu)
 
     context = LLMContext([])
 
     # Ultravox drives the conversation server-side.
     #
     # It does not, however, emit turn frames (UserStartedSpeakingFrame,
-    # UserStoppedSpeakingFrame). realtime_service_mode ensures that context
-    # aggregation will work without those frames, but you can add supplemental
-    # local turn frames for consumption by other pipeline processors that
-    # expect them (like RTVI), or to trigger on_user_turn_* events. WARNING:
-    # you should consider supplemental local turn frames approximate, as they
-    # may not always align with server turns.
+    # UserStoppedSpeakingFrame). Context aggregation works without those
+    # frames, but you can add supplemental local turn frames for consumption
+    # by other pipeline processors that expect them (like RTVI), or to trigger
+    # on_user_turn_* events. WARNING: you should consider supplemental local
+    # turn frames approximate, as they may not always align with server turns.
     #
     # To enable supplemental local turn frames, uncomment the SileroVADAnalyzer
     # and related imports below and the `user_params=` argument further down.
@@ -197,7 +199,6 @@ There is also a secret menu that changes daily. If the user asks about it, use t
     # from pipecat.turns.user_stop import BaseUserTurnStopStrategy
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        realtime_service_mode=True,
         # user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 

@@ -34,21 +34,11 @@ from pipecat import version as pipecat_version
 
 USER_AGENT = f"pipecat/{pipecat_version()}"
 from pydantic import BaseModel
-
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
-
-try:
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Inworld WebSocket TTS, you need to `pip install websockets`.")
-    raise ImportError(f"Missing module: {e}") from e
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     AggregationType,
-    CancelFrame,
-    EndFrame,
     ErrorFrame,
     Frame,
     InterruptionFrame,
@@ -59,8 +49,10 @@ from pipecat.frames.frames import (
     TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
@@ -139,11 +131,16 @@ class InworldHttpTTSService(TTSService):
     Settings = InworldTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`InworldHttpTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `InworldHttpTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Inworld TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``InworldHttpTTSService.Settings`` directly via the ``settings`` parameter instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             temperature: Temperature for speech synthesis.
@@ -179,11 +176,13 @@ class InworldHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=InworldHttpTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             model: ID of the model to use for synthesis.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=InworldHttpTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             streaming: Whether to use streaming mode.
             sample_rate: Audio sample rate in Hz.
@@ -193,7 +192,8 @@ class InworldHttpTTSService(TTSService):
             params: Input parameters for Inworld TTS configuration.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=InworldHttpTTSService.Settings(...)`` instead.
+                    Use ``settings=InworldHttpTTSService.Settings(...)`` instead. Will
+                    be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -565,11 +565,16 @@ class InworldTTSService(WebsocketTTSService):
     Settings = InworldTTSSettings
     _settings: Settings
 
+    @deprecated(
+        "`InworldTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `InworldTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Inworld WebSocket TTS configuration.
 
         .. deprecated:: 0.0.105
             Use ``InworldTTSService.Settings`` directly via the ``settings`` parameter instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             temperature: Temperature for speech synthesis.
@@ -620,11 +625,13 @@ class InworldTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=InworldTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
 
             model: ID of the model to use for synthesis.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=InworldTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             url: URL of the Inworld WebSocket API.
             sample_rate: Audio sample rate in Hz.
@@ -639,6 +646,7 @@ class InworldTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=InworldTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -646,6 +654,7 @@ class InworldTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.104
                     Use ``text_aggregation_mode`` instead.
+                    Will be removed in 2.0.0.
 
             text_aggregation_mode: How to aggregate text before synthesis.
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.
@@ -774,24 +783,6 @@ class InworldTTSService(WebsocketTTSService):
         await super().start(frame)
         self._audio_sample_rate = self.sample_rate
         await self._connect()
-
-    async def stop(self, frame: EndFrame):
-        """Stop the Inworld WebSocket TTS service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the Inworld WebSocket TTS service.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._disconnect()
 
     async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio without closing the context.
@@ -1045,10 +1036,19 @@ class InworldTTSService(WebsocketTTSService):
                 error_msg = status.get("message", "Unknown error")
                 error_code = status.get("code")
 
-                # Handle "Context not found" error (code 5)
-                # This can happen when a keepalive message is sent but no context is available.
+                # Handle benign context errors:
+                # - "Context not found" (code 5): keepalive sent after context expired
+                # - "context_id is required" / "no open context": keepalive sent
+                #   without an active context
                 if error_code == 5 and "not found" in error_msg.lower():
                     logger.debug(f"{self}: Context {ctx_id} not found.")
+                    continue
+                lower_error_msg = error_msg.lower()
+                if (
+                    "context_id is required" in lower_error_msg
+                    or "no open context" in lower_error_msg
+                ):
+                    logger.debug(f"{self}: Contextless message rejected (benign): {error_msg}")
                     continue
 
                 # For other errors, push error frame
@@ -1218,6 +1218,11 @@ class InworldTTSService(WebsocketTTSService):
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
+
+            if self._websocket is None:
+                logger.warning(f"{self}: websocket unavailable after connect attempt, skipping TTS")
+                yield ErrorFrame(error="websocket unavailable")
+                return
 
             try:
                 if not self.audio_context_available(context_id):

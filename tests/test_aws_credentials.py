@@ -17,7 +17,7 @@ class TestResolveCredentials(unittest.TestCase):
     """Tests for resolve_credentials() fallback chain."""
 
     def test_explicit_credentials_take_priority(self):
-        """Explicit parameters override env vars and boto3 chain."""
+        """Explicit parameters override env vars and botocore chain."""
         result = resolve_credentials(
             aws_access_key_id="explicit-key",
             aws_secret_access_key="explicit-secret",
@@ -63,12 +63,12 @@ class TestResolveCredentials(unittest.TestCase):
         self.assertEqual(result.secret_key, "override-secret")
 
     @patch.dict(os.environ, {}, clear=True)
-    def test_partial_explicit_credentials_do_not_mix_with_boto3_chain(self):
-        """Partial explicit credentials are not completed from ambient boto3 credentials."""
+    def test_partial_explicit_credentials_do_not_mix_with_botocore_chain(self):
+        """Partial explicit credentials are not completed from ambient botocore credentials."""
         mock_frozen = MagicMock()
-        mock_frozen.access_key = "boto3-key"
-        mock_frozen.secret_key = "boto3-secret"
-        mock_frozen.token = "boto3-token"
+        mock_frozen.access_key = "ambient-key"
+        mock_frozen.secret_key = "ambient-secret"
+        mock_frozen.token = "ambient-token"
 
         mock_creds = MagicMock()
         mock_creds.get_frozen_credentials.return_value = mock_frozen
@@ -76,23 +76,20 @@ class TestResolveCredentials(unittest.TestCase):
         mock_session = MagicMock()
         mock_session.get_credentials.return_value = mock_creds
 
-        mock_boto3 = MagicMock()
-        mock_boto3.Session.return_value = mock_session
-
-        with patch.dict("sys.modules", {"boto3": mock_boto3}):
+        with patch("botocore.session.Session", return_value=mock_session) as mock_session_cls:
             result = resolve_credentials(aws_access_key_id="explicit-key")
 
         self.assertEqual(result.access_key, "explicit-key")
         self.assertIsNone(result.secret_key)
-        mock_boto3.Session.assert_not_called()
+        mock_session_cls.assert_not_called()
 
     @patch.dict(os.environ, {}, clear=True)
-    def test_boto3_chain_fallback(self):
-        """When no explicit creds or env vars, falls back to boto3 chain."""
+    def test_botocore_chain_fallback(self):
+        """When no explicit creds or env vars, falls back to botocore chain."""
         mock_frozen = MagicMock()
-        mock_frozen.access_key = "boto3-key"
-        mock_frozen.secret_key = "boto3-secret"
-        mock_frozen.token = "boto3-token"
+        mock_frozen.access_key = "ambient-key"
+        mock_frozen.secret_key = "ambient-secret"
+        mock_frozen.token = "ambient-token"
 
         mock_creds = MagicMock()
         mock_creds.get_frozen_credentials.return_value = mock_frozen
@@ -100,17 +97,13 @@ class TestResolveCredentials(unittest.TestCase):
         mock_session = MagicMock()
         mock_session.get_credentials.return_value = mock_creds
 
-        mock_boto3 = MagicMock()
-        mock_boto3.Session.return_value = mock_session
-
-        # boto3 is imported inside resolve_credentials via `import boto3`,
-        # so we patch it in sys.modules.
-        with patch.dict("sys.modules", {"boto3": mock_boto3}):
+        with patch("botocore.session.Session", return_value=mock_session):
             result = resolve_credentials()
 
-        self.assertEqual(result.access_key, "boto3-key")
-        self.assertEqual(result.secret_key, "boto3-secret")
-        self.assertEqual(result.session_token, "boto3-token")
+        self.assertEqual(result.access_key, "ambient-key")
+        self.assertEqual(result.secret_key, "ambient-secret")
+        self.assertEqual(result.session_token, "ambient-token")
+        mock_session.set_config_variable.assert_called_once_with("region", "us-east-1")
 
     @patch.dict(os.environ, {}, clear=True)
     def test_default_region(self):
@@ -132,15 +125,25 @@ class TestResolveCredentials(unittest.TestCase):
     @patch.dict(os.environ, {}, clear=True)
     def test_none_when_no_credentials_available(self):
         """access_key and secret_key are None when nothing resolves."""
-        # Mock boto3 import to fail
-        with patch.dict("sys.modules", {"boto3": None}):
-            # Force re-import to hit the ImportError path
+        mock_session = MagicMock()
+        mock_session.get_credentials.return_value = None
+
+        with patch("botocore.session.Session", return_value=mock_session):
             result = resolve_credentials()
 
-        # Since boto3 import will actually succeed (it's installed),
-        # but if no creds are configured, frozen creds may return None
-        # Just verify the function doesn't crash and returns AWSCredentials
         self.assertIsInstance(result, AWSCredentials)
+        self.assertIsNone(result.access_key)
+        self.assertIsNone(result.secret_key)
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_botocore_import_error_returns_none_credentials(self):
+        """ImportError from botocore is swallowed; result has None credentials."""
+        with patch("botocore.session.Session", side_effect=ImportError("no botocore")):
+            result = resolve_credentials()
+
+        self.assertIsInstance(result, AWSCredentials)
+        self.assertIsNone(result.access_key)
+        self.assertIsNone(result.secret_key)
 
 
 if __name__ == "__main__":

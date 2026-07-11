@@ -70,13 +70,22 @@ class ConsumerProcessor(FrameProcessor):
 
     async def _stop(self, _: EndFrame):
         """Stop the consumer task."""
-        if self._consumer_task:
-            await self.cancel_task(self._consumer_task)
+        await self._cancel_consumer_task()
 
     async def _cancel(self, _: CancelFrame):
         """Cancel the consumer task."""
+        await self._cancel_consumer_task()
+
+    async def cleanup(self):
+        """Clean up the processor and release resources."""
+        await super().cleanup()
+        await self._cancel_consumer_task()
+
+    async def _cancel_consumer_task(self):
+        """Cancel the consumer task, idempotently."""
         if self._consumer_task:
             await self.cancel_task(self._consumer_task)
+            self._consumer_task = None
 
     async def _consumer_task_handler(self):
         """Handle consuming frames from the producer queue."""

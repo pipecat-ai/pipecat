@@ -35,9 +35,14 @@ dependencies = [
     "resampy~=0.4.3",
     "soxr~=1.0.0",
     "openai>=1.74.0,<3",
+    "typing_extensions>=4.9",
     # Pinning numba to resolve package dependencies
     "numba>=0.61.2,<1",
     "wait_for2>=0.4.1,<1; python_version<'3.12'",
+    "websockets>=13.1",
+    "pyyaml>=6,<7",
+    "pyyaml-include>=1.4,<2",
+    "num2words>=0.5.14",
     # Required by LocalSmartTurnAnalyzerV3
     # Inlined here instead of using a self-referential extra for Poetry compatibility.
     "onnxruntime~=1.24.3",
@@ -50,83 +55,103 @@ Source = "https://github.com/pipecat-ai/pipecat"
 Issues = "https://github.com/pipecat-ai/pipecat/issues"
 Changelog = "https://github.com/pipecat-ai/pipecat/blob/main/CHANGELOG.md"
 
+[project.scripts]
+# The Pipecat CLI ships with pipecat-ai, but its dependencies are optional (the `cli`
+# extra). These console scripts target a graceful-degradation shim that prints an
+# install hint when the `cli` extra isn't installed (rather than an ImportError).
+pipecat = "pipecat.cli.main:run"
+pc = "pipecat.cli.main:run"
+
 [project.optional-dependencies]
-aic = [ "aic-sdk~=2.2.0" ]
+aic = [ "aic-sdk~=2.5.0" ]
 anthropic = [ "anthropic>=0.49.0,<1" ]
-assemblyai = [ "pipecat-ai[websockets-base]" ]
-asyncai = [ "pipecat-ai[websockets-base]" ]
-aws = [ "aioboto3>=15.5.0,<16", "pipecat-ai[websockets-base]" ]
+assemblyai = []
+asyncai = []
+aws = [ "aiobotocore>=3,<4" ]
 aws-nova-sonic = [ "aws_sdk_bedrock_runtime~=0.4.0; python_version>='3.12'" ]
 azure = [ "azure-cognitiveservices-speech>=1.47.0,<2"]
-cartesia = [ "pipecat-ai[websockets-base]" ]
+cartesia = []
 camb = [ "camb-sdk>=1.5.4,<2" ]
 cerebras = []
-daily = [ "daily-python~=0.28.0" ]
-deepgram = [ "deepgram-sdk>=6.1.1,<8", "pipecat-ai[websockets-base]" ]
+daily = [ "daily-python>=0.29.0,<1" ]
+deepgram = [ "deepgram-sdk>=6.1.1,<8" ]
 deepseek = []
-elevenlabs = [ "pipecat-ai[websockets-base]" ]
+elevenlabs = []
+evals = [ "pipecat-ai[cli]", "pipecat-ai[kokoro]", "pipecat-ai[moonshine]" ]
 fal = []
 fireworks = []
-fish = [ "ormsgpack>=1.7.0,<2", "pipecat-ai[websockets-base]" ]
-gladia = [ "pipecat-ai[websockets-base]" ]
-google = [ "google-cloud-speech>=2.33.0,<3", "google-cloud-texttospeech>=2.31.0,<3", "google-genai>=1.68.0,<2", "pipecat-ai[websockets-base]" ]
-gradium = [ "pipecat-ai[websockets-base]" ]
+fish = [ "ormsgpack>=1.7.0,<2" ]
+funasr = [ "funasr>=1.1.0" ]
+gladia = []
+google = [ "google-cloud-speech>=2.33.0,<3", "google-cloud-texttospeech>=2.31.0,<3", "google-genai>=1.68.0,<3" ]
+gradium = []
 grok = []
 groq = [ "groq>=0.23.0,<2" ]
 gstreamer = [ "pygobject~=3.50.0" ]
-heygen = [ "livekit>=1.0.13,<2", "pipecat-ai[websockets-base]" ]
+heygen = [ "livekit>=1.0.13,<2" ]
 hume = [ "hume>=0.11.2,<1" ]
 inception = []
-inworld = [ "pipecat-ai[websockets-base]" ]
+inworld = []
 koala = [ "pvkoala~=2.0.3" ]
 kokoro = [ "kokoro-onnx>=0.5.0,<1", "requests>=2.32.5,<3" ]
 langchain = [ "langchain>=1.2.13,<2", "langchain-community>=0.4.1,<1", "langchain-openai>=1.1.12,<2" ]
 lemonslice = [ "pipecat-ai[daily]" ]
 livekit = [ "livekit>=1.0.13,<2", "livekit-api>=1.0.5,<2", "tenacity>=8.2.3,<10.0.0", "pyjwt>=2.12.0,<3" ]
-lmnt = [ "pipecat-ai[websockets-base]" ]
+lmnt = []
 local = [ "pyaudio~=0.2.14" ]
 local-smart-turn = [ "coremltools>=8.0", "transformers>=4.48.0,<6", "torch>=2.5.0,<3", "torchaudio>=2.5.0,<3" ]
 mcp = [ "mcp[cli]>=1.11.0,<2" ]
-mem0 = [ "mem0ai>=1.0.8,<2" ]
+mem0 = [ "mem0ai>=2,<3" ]
 mistral = ["mistralai>=2.0.0,<3"]
 mlx-whisper = [ "mlx-whisper~=0.4.2" ]
 moondream = [ "accelerate~=1.10.0", "einops~=0.8.0", "pyvips[binary]~=3.0.0", "timm~=1.0.13", "transformers>=4.48.0,<6" ]
+moonshine = [ "moonshine-voice>=0.0.62" ]
 nebius = []
-neuphonic = [ "pipecat-ai[websockets-base]" ]
+neuphonic = []
 novita = []
 nvidia = [ "nvidia-riva-client>=2.25.1,<3", "protobuf>=6.31.1,<7" ]
-openai = [ "pipecat-ai[websockets-base]" ]
-rnnoise = [ "pyrnnoise~=0.4.1" ]
+openai = []
+rnnoise = [ "pyrnnoise~=0.4.3", "av<17.1.0" ]
 openrouter = []
 perplexity = []
 pgmq = ["pgmq>=1.0.6,<1.1", "asyncpg>=0.30.0"]
 piper = [ "piper-tts>=1.3.0,<2", "requests>=2.32.5,<3" ]
 qwen = []
 redis = ["redis[hiredis]>=5.0.0"]
-resembleai = [ "pipecat-ai[websockets-base]" ]
-rime = [ "pipecat-ai[websockets-base]" ]
-runner = [ "python-dotenv>=1.0.0,<2.0.0", "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<1", "pipecat-ai-prebuilt>=1.0.1"]
+resembleai = []
+rime = []
+runner = [ "python-dotenv>=1.0.0,<2.0.0", "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<1", "pipecat-ai-prebuilt>=1.0.3"]
 sagemaker = ["aws_sdk_sagemaker_runtime_http2; python_version>='3.12'"]
 sambanova = []
-sarvam = [ "sarvamai==0.1.28", "pipecat-ai[websockets-base]" ]
+sarvam = [ "sarvamai==0.1.28" ]
 sentry = [ "sentry-sdk>=2.28.0,<3" ]
 silero = []
 simli = [ "simli-ai~=2.0.1"]
-smallest = [ "pipecat-ai[websockets-base]" ]
-soniox = [ "pipecat-ai[websockets-base]" ]
+smallest = []
+soniox = []
 soundfile = [ "soundfile~=0.13.1" ]
 speechmatics = [ "speechmatics-voice[smart]~=0.2.8" ]
 strands = [ "strands-agents>=1.9.1,<2" ]
 tavus = [ "pipecat-ai[daily]" ]
 together = []
 tracing = [ "opentelemetry-sdk>=1.33.0,<2", "opentelemetry-api>=1.33.0,<2", "opentelemetry-instrumentation>=0.54b0,<1" ]
-ultravox = [ "pipecat-ai[websockets-base]" ]
-vonage-video-connector = [ "vonage-video-connector~=0.2.3b0; python_full_version>='3.13' and python_full_version<'3.14' and platform_system=='Linux'" ]
-webrtc = [ "aiortc>=1.14.0,<2", "opencv-python>=4.11.0.86,<5" ]
-websocket = [ "pipecat-ai[websockets-base]", "fastapi>=0.115.6,<1" ]
-websockets-base = [ "websockets>=13.1" ]
+ultravox = []
+vonage-video-connector = [ "vonage-video-connector~=1.0.2; python_version=='3.13' and platform_system=='Linux'" ]
+webrtc = [ "aiortc>=1.14.0,<2", "opencv-python-headless>=4.11.0.86,<5" ]
+webrtc-video = [ "pipecat-ai[webrtc]" ]
+websocket = [ "fastapi>=0.115.6,<1" ]
 whisper = [ "faster-whisper~=1.2.1" ]
-xai = [ "pipecat-ai[websockets-base]" ]
+xai = []
+
+# CLI tooling for `pipecat init` (not a service). Optional so the runtime/base-image
+# install stays lean; install with `pip install "pipecat-ai[cli]"`.
+cli = [
+    "typer>=0.20.0,<1",
+    "rich>=13.0.0,<14",
+    "jinja2>=3.1.0,<4",
+    "questionary>=2.0.0,<3",
+    "ruff>=0.12.1,<1",
+]
 
 [dependency-groups]
 dev = [
@@ -175,6 +200,14 @@ where = ["src"]
 ]
 "pipecat.services.aws_nova_sonic" = ["src/pipecat/services/aws_nova_sonic/ready.wav"]
 "pipecat.audio.turn.smart_turn.data" = ["src/pipecat/audio/turn/smart_turn/data/smart-turn-v3.2-cpu.onnx"]
+# CLI project-scaffolding templates (jinja + client TS/JS/JSON/CSS trees). The
+# `.gitignore` patterns are listed explicitly because glob `*` does not match dotfiles.
+"pipecat.cli" = [
+    "templates/**/*",
+    "templates/**/.gitignore",
+    # Agent-readiness files written by `pipecat init` (AGENTS.md + CLAUDE.md).
+    "agent_templates/**/*",
+]
 
 [tool.pytest.ini_options]
 addopts = "--verbose"

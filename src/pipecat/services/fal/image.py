@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.image_service import ImageGenService
 from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven
+from pipecat.utils.deprecation import deprecated
 
 
 @dataclass
@@ -74,11 +75,16 @@ class FalImageGenService(ImageGenService):
     Settings = FalImageGenSettings
     _settings: Settings
 
+    @deprecated(
+        "`FalImageGenService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `FalImageGenService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for Fal.ai image generation.
 
         .. deprecated:: 0.0.105
             Use ``settings=FalImageGenService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             seed: Random seed for reproducible generation. If None, uses random seed.
@@ -98,8 +104,6 @@ class FalImageGenService(ImageGenService):
         enable_safety_checker: bool = True
         format: str = "png"
 
-    _settings: Settings
-
     def __init__(
         self,
         *,
@@ -117,12 +121,14 @@ class FalImageGenService(ImageGenService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=FalImageGenService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
 
             aiohttp_session: HTTP client session for downloading generated images.
             model: The Fal.ai model to use for generation. Defaults to "fal-ai/fast-sdxl".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=FalImageGenService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             key: Optional API key for Fal.ai. If provided, sets FAL_KEY environment variable.
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -181,7 +187,7 @@ class FalImageGenService(ImageGenService):
         def load_image_bytes(encoded_image: bytes):
             buffer = io.BytesIO(encoded_image)
             image = Image.open(buffer)
-            return (image.tobytes(), image.size, image.format)
+            return (image.tobytes(), image.size, image.mode)
 
         logger.debug(f"Generating image from prompt: {prompt}")
 

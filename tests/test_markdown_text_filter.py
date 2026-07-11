@@ -20,14 +20,14 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             **Bold text** and *italic text*
             1. Numbered list item
             - Bullet point
-            Some `inline code` here
+            Some `inline code` here\n\n## Subtitle
         """
 
         expected_text = """
             Bold text and italic text
             1. Numbered list item
             - Bullet point
-            Some inline code here
+            Some inline code here\nSubtitle
         """
 
         result = await self.filter.filter(input_text)
@@ -77,6 +77,21 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
                 expected,
                 f"Failed to handle repeated characters in: '{input_text}'\nExpected: '{expected}'\nGot: '{result}'",
             )
+
+    async def test_preserve_repeated_characters(self):
+        """Test preservation of repeated characters (5 or more)."""
+        filter = MarkdownTextFilter(
+            params=MarkdownTextFilter.InputParams(filter_repeated_sequences=False)
+        )
+        repeated_sequence = "55555"
+
+        result = await filter.filter(repeated_sequence)
+
+        self.assertEqual(
+            result,
+            repeated_sequence,
+            f"Preserve repeated sequences failed.\nExpected:\n{repeated_sequence}\nGot:\n{result}",
+        )
 
     async def test_numbered_list_preservation(self):
         """Test that numbered lists are preserved correctly."""
@@ -244,6 +259,77 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             "bold and italic",
             "Text filtering should be re-enabled",
         )
+
+    async def test_header_stripping(self):
+        """Test that markdown headers are stripped to plain text."""
+        input_text = (
+            "# Title\n"  # fmt: skip
+            "\n"
+            "## Subtitle\n"
+        )
+        expected = (
+            "Title\n"  # fmt: skip
+            "Subtitle"
+        )
+
+        result = await self.filter.filter(input_text)
+
+        self.assertEqual(
+            result.strip(),
+            expected,
+            f"Header stripping failed.\nInput:\n{input_text}\nExpected:\n{expected}\nGot:\n{result.strip()}",
+        )
+
+    async def test_closed_atx_header_stripping(self):
+        """Test that closed ATX headers (## Title ##) strip both markers."""
+        test_cases = {
+            "## Subtitle ##": "Subtitle",  # Symmetric closing run
+            "### Deep ###": "Deep",
+            "## Done ###": "Done",  # Asymmetric closing run
+            "# Title\n\n## Subtitle ##": "Title\nSubtitle",  # Closed header after a blank line
+        }
+
+        for input_text, expected in test_cases.items():
+            result = await self.filter.filter(input_text)
+            self.assertEqual(
+                result.strip(),
+                expected,
+                f"Closed ATX header stripping failed for: {input_text!r}\nGot: {result!r}",
+            )
+
+    async def test_header_trailing_space_preserved(self):
+        """Test that open headers keep trailing whitespace.
+
+        Trailing spaces matter for word-by-word streaming in bot-tts-text, so
+        only a closing marker's surrounding spaces are absorbed.
+        """
+        result = await self.filter.filter("## Trailing   ")
+        self.assertEqual(
+            result, "Trailing   ", f"Header trailing space not preserved.\nGot: {result!r}"
+        )
+
+    async def test_header_levels(self):
+        """Test that all six ATX header levels are reduced to their text."""
+        for n in range(1, 7):
+            input_text = f"{'#' * n} Heading"
+            result = await self.filter.filter(input_text)
+            self.assertEqual(result.strip(), "Heading", f"h{n} header failed.\nGot: {result!r}")
+
+    async def test_hash_in_content_not_treated_as_header(self):
+        """Test that a '#' that isn't a leading ATX marker is left in the text."""
+        test_cases = {
+            "C# is great": "C# is great",  # No leading marker
+            "## Issue #42 today": "Issue #42 today",  # '#' mid-content, not a closing run
+            "## C# matters": "C# matters",  # Content starts with a hash word
+        }
+
+        for input_text, expected in test_cases.items():
+            result = await self.filter.filter(input_text)
+            self.assertEqual(
+                result.strip(),
+                expected,
+                f"Hash-in-content handling failed for: {input_text!r}\nGot: {result!r}",
+            )
 
 
 if __name__ == "__main__":

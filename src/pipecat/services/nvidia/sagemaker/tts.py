@@ -13,7 +13,7 @@ import os
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
-import aioboto3
+import aiobotocore.session
 from loguru import logger
 
 from pipecat.frames.frames import (
@@ -120,12 +120,13 @@ class NvidiaSageMakerHTTPTTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        session = aioboto3.Session(
+        session = aiobotocore.session.get_session()
+        self._client_ctx = session.create_client(  # pyright: ignore[reportGeneralTypeIssues]
+            "sagemaker-runtime",
+            region_name=self._region,
             aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
             aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
-            region_name=self._region,
         )
-        self._client_ctx = session.client("sagemaker-runtime")
         self._client = await self._client_ctx.__aenter__()
         logger.debug(f"{self}: connected to SageMaker endpoint '{self._endpoint_name}'")
 
@@ -154,6 +155,11 @@ class NvidiaSageMakerHTTPTTSService(TTSService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
+        await self._close_client()
+
+    async def cleanup(self):
+        """Release the SageMaker client at teardown."""
+        await super().cleanup()
         await self._close_client()
 
     # ── Synthesis ─────────────────────────────────────────────────────────────
@@ -186,7 +192,7 @@ class NvidiaSageMakerHTTPTTSService(TTSService):
                 }
             )
 
-            response = await self._client.invoke_endpoint(
+            response = await self._client.invoke_endpoint(  # pyright: ignore[reportGeneralTypeIssues]
                 EndpointName=self._endpoint_name,
                 ContentType="application/json",
                 Accept="application/octet-stream",
@@ -302,23 +308,9 @@ class NvidiaSageMakerTTSService(InterruptibleTTSService):
         await super().start(frame)
         await self._connect()
 
-    async def stop(self, frame: EndFrame):
-        """Stop the TTS service and disconnect from the SageMaker endpoint.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the TTS service and disconnect from the SageMaker endpoint.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._disconnect()
+    # Teardown is handled by the base WebsocketTTSService, whose stop/cancel/
+    # cleanup all route through self._disconnect() (which cancels the receive
+    # task and closes the bidi-stream session).
 
     # ── Connection management (WebsocketService abstract interface) ────────────
 

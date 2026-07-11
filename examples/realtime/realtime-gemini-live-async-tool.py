@@ -21,8 +21,9 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -42,6 +43,7 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
+@tool_options(cancel_on_interruption=False)
 async def fetch_weather_from_api(params: FunctionCallParams):
     # Simulate a long-running API call so we can demonstrate that the
     # conversation continues while the tool is in flight.
@@ -77,9 +79,10 @@ weather_function = FunctionSchema(
         },
     },
     required=["location", "format"],
+    handler=fetch_weather_from_api,
 )
 
-tools = ToolsSchema(standard_tools=[weather_function])
+tools = [weather_function]
 
 
 system_instruction = (
@@ -93,6 +96,10 @@ system_instruction = (
 
 
 transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -119,12 +126,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         tools=tools,
     )
 
-    llm.register_function(
-        "get_current_weather",
-        fetch_weather_from_api,
-        cancel_on_interruption=False,
-    )
-
     context = LLMContext()
     # Gemini Live doesn't emit user-turn frames. Server-side VAD is
     # enabled by default; to surface turn frames (for RTVI speech
@@ -138,7 +139,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # )
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        realtime_service_mode=True,
         # user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 

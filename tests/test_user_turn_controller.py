@@ -12,6 +12,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    UserTurnInferenceCompletedFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -19,7 +20,11 @@ from pipecat.turns.user_start import VADUserTurnStartStrategy
 from pipecat.turns.user_start.min_words_user_turn_start_strategy import (
     MinWordsUserTurnStartStrategy,
 )
-from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy, deferred
+from pipecat.turns.user_stop import (
+    ExternalUserTurnCompletionStopStrategy,
+    SpeechTimeoutUserTurnStopStrategy,
+    deferred,
+)
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
@@ -32,6 +37,43 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.task_manager = TaskManager()
         self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
+
+    async def test_completion_dropped_while_user_speaking(self):
+        """A completion arriving while the user speaks must not stop the turn.
+
+        External completions (e.g. an LLM ✓) resolve with latency, so the user
+        may have resumed speaking. The controller drops the finalization while
+        the user is speaking and finalizes once they fall silent.
+        """
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[VADUserTurnStartStrategy()],
+                stop=[ExternalUserTurnCompletionStopStrategy()],
+            ),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(self.task_manager)
+
+        stopped = False
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            nonlocal stopped
+            stopped = True
+
+        # Start a turn; the user is now speaking.
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+
+        # A completion resolving while the user still speaks is stale: dropped.
+        await controller.process_frame(UserTurnInferenceCompletedFrame())
+        self.assertFalse(stopped)
+
+        # Once the user stops, a fresh completion finalizes the turn.
+        await controller.process_frame(VADUserStoppedSpeakingFrame())
+        await controller.process_frame(UserTurnInferenceCompletedFrame())
+        self.assertTrue(stopped)
+
+        await controller.cleanup()
 
     async def test_default_user_turn_strategies(self):
         controller = UserTurnController(
@@ -70,6 +112,28 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         # Wait for user_speech_timeout to elapse
         await asyncio.sleep(TRANSCRIPTION_TIMEOUT + 0.1)
         self.assertTrue(should_stop)
+
+    async def test_update_strategies_does_not_accumulate_event_handlers(self):
+        # Regression: re-applying strategies (e.g. realtime mode re-installing the
+        # same instances, or repeated metadata broadcasts) must not accumulate
+        # duplicate controller event handlers on the strategy instances —
+        # _cleanup_strategies removes what _setup_strategies added.
+        start = VADUserTurnStartStrategy()
+        stop = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(start=[start], stop=[stop])
+        )
+        await controller.setup(self.task_manager)
+
+        # Re-apply the same strategy instances several times.
+        for _ in range(3):
+            await controller.update_strategies(UserTurnStrategies(start=[start], stop=[stop]))
+
+        for strategy in (start, stop):
+            for name, handler in strategy._event_handlers.items():
+                self.assertLessEqual(
+                    len(handler.handlers), 1, f"{name} double-registered on {strategy}"
+                )
 
     async def test_inference_triggered_fires_alongside_stopped(self):
         """Default strategies fire both inference-triggered and stopped, in order."""

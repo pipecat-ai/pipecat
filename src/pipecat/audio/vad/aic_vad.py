@@ -1,10 +1,13 @@
 """AIC-integrated VAD analyzer that lazily binds to the AIC SDK backend.
 
 This module provides VAD analyzer implementations that query the AIC SDK's
-is_speech_detected() and map it to a float confidence (1.0/0.0).
+``is_speech_detected()`` and map it to a float confidence (1.0/0.0).
+
+.. deprecated:: 1.4.0
+    Use :class:`AICQuailVADAnalyzer` instead. Will be removed in 1.6.0.
 
 Classes:
-    AICVADAnalyzer: For aic-sdk (uses 'aic_sdk' module)
+    AICVADAnalyzer: For aic-sdk (uses 'aic_sdk' module). Deprecated.
 """
 
 from collections.abc import Callable
@@ -14,10 +17,18 @@ from aic_sdk import VadParameter
 from loguru import logger
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
+from pipecat.utils.deprecation import deprecated
 
 
+@deprecated(
+    "`AICVADAnalyzer` is deprecated since 1.4.0 and will be removed in 1.6.0. "
+    "Use `AICQuailVADAnalyzer` instead."
+)
 class AICVADAnalyzer(VADAnalyzer):
     """VAD analyzer that lazily binds to the AIC VadContext via a factory.
+
+    .. deprecated:: 1.4.0
+        Use :class:`AICQuailVADAnalyzer` instead. Will be removed in 1.6.0.
 
     The analyzer can be constructed before the AIC Processor exists. Once the filter has
     started and the Processor is available, the provided factory will succeed and the

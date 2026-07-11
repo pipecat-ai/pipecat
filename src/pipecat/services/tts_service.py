@@ -52,6 +52,7 @@ from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.frame_queue import FrameQueue
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.pattern_pair_aggregator import PatternMatch
@@ -195,6 +196,7 @@ class TTSService(AIService):
                     Use ``text_aggregation_mode`` instead. Set to ``TextAggregationMode.SENTENCE``
                     to aggregate text into sentences before synthesis, or
                     ``TextAggregationMode.TOKEN`` to stream tokens directly for lower latency.
+                    Will be removed in 2.0.0.
 
             push_text_frames: Whether to push TextFrames and LLMFullResponseEndFrames.
             push_stop_frames: Whether to automatically push TTSStoppedFrames.
@@ -318,6 +320,12 @@ class TTSService(AIService):
         # correct PTS to TTSStoppedFrame and LLMFullResponseEndFrame.
         self._word_last_pts: int = 0
         self._llm_response_started: bool = False
+        # LLMFullResponseEndFrames received in process_frame, keyed by the turn's
+        # context_id, held so each can be re-pushed (with corrected PTS) at end of
+        # its context instead of creating a new one. Reusing the original frame
+        # keeps its id, so observers that dedup by frame.id (e.g. RTVIObserver)
+        # don't emit a second bot-llm-stopped.
+        self._pending_llm_response_end_frames: dict[str, LLMFullResponseEndFrame] = {}
         self._reuse_context_id_within_turn: bool = reuse_context_id_within_turn
 
         # _turn_context_id:
@@ -422,42 +430,38 @@ class TTSService(AIService):
         CHUNK_SECONDS = 0.5
         return int(self.sample_rate * CHUNK_SECONDS * 2)  # 2 bytes/sample
 
+    @deprecated(
+        "`TTSService.set_model` is deprecated since 0.0.104 and will be removed in 2.0.0. "
+        "Use `TTSUpdateSettingsFrame(model=...)` instead."
+    )
     async def set_model(self, model: str):
         """Set the TTS model to use.
 
         .. deprecated:: 0.0.104
             Use ``TTSUpdateSettingsFrame(model=...)`` instead.
+            Will be removed in 2.0.0.
 
         Args:
             model: The name of the TTS model.
         """
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "'set_model' is deprecated, use 'TTSUpdateSettingsFrame(model=...)' instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
         logger.info(f"Switching TTS model to: [{model}]")
         settings_cls = type(self._settings)
         await self._update_settings(settings_cls(model=model))
 
+    @deprecated(
+        "`TTSService.set_voice` is deprecated since 0.0.104 and will be removed in 2.0.0. "
+        "Use `TTSUpdateSettingsFrame(voice=...)` instead."
+    )
     async def set_voice(self, voice: str):
         """Set the voice for speech synthesis.
 
         .. deprecated:: 0.0.104
             Use ``TTSUpdateSettingsFrame(voice=...)`` instead.
+            Will be removed in 2.0.0.
 
         Args:
             voice: The voice identifier or name.
         """
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "'set_voice' is deprecated, use 'TTSUpdateSettingsFrame(voice=...)' instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
         logger.info(f"Switching TTS voice to: [{voice}]")
         settings_cls = type(self._settings)
         await self._update_settings(settings_cls(voice=voice))
@@ -556,6 +560,12 @@ class TTSService(AIService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
+        # Prompt stop of audio production. cleanup() repeats this idempotently.
+        await self._stop_audio_context_task()
+
+    async def cleanup(self):
+        """Release TTS resources at teardown."""
+        await super().cleanup()
         await self._stop_audio_context_task()
 
     def add_text_transformer(
@@ -735,6 +745,12 @@ class TTSService(AIService):
                     # drained (including the final TTSTextFrame).  Pushing
                     # directly would let it race ahead of queued text frames.
                     await self._serialization_queue.put(frame)
+                elif self._turn_context_id is not None:
+                    # Hold the original frame, keyed by this turn's context_id, so
+                    # _maybe_reset_word_timestamps can re-push it (with the PTS of
+                    # the last word frame) at end of that context, rather than
+                    # emitting a fresh frame with a new id.
+                    self._pending_llm_response_end_frames[self._turn_context_id] = frame
             else:
                 await self.push_frame(frame, direction)
 
@@ -910,6 +926,7 @@ class TTSService(AIService):
         self._streamed_text = ""
         self._text_aggregation_metrics_started = False
         self._aggregated_frame_sequencer.clear()  # discard all pending slots on interruption
+        self._pending_llm_response_end_frames.clear()
         await self.reset_word_timestamps()
 
         await self._stop_audio_context_task()
@@ -975,7 +992,7 @@ class TTSService(AIService):
         self,
         src_frame: AggregatedTextFrame,
         includes_inter_frame_spaces: bool | None = False,
-        append_tts_text_to_context: bool | None = True,
+        append_tts_text_to_context: bool = True,
         push_assistant_aggregation: bool | None = False,
     ):
         type = src_frame.aggregated_by
@@ -1044,6 +1061,8 @@ class TTSService(AIService):
         # is spoken, so we set append_to_context to False.
         src_frame.append_to_context = False
         src_frame.context_id = context_id
+        src_frame.will_be_spoken = True
+
         # Route AggregatedTextFrame through the serialization queue so it is emitted
         # immediately before the TTSStartedFrame of the audio context it describes,
         # rather than racing ahead of audio frames from a previous context.
@@ -1065,9 +1084,7 @@ class TTSService(AIService):
                 transformed_text = await transform(transformed_text, type)
 
         self._tts_contexts[context_id] = TTSContext(
-            append_to_context=append_tts_text_to_context
-            if append_tts_text_to_context is not None
-            else True,
+            append_to_context=append_tts_text_to_context,
             push_assistant_aggregation=push_assistant_aggregation,
         )
 
@@ -1080,6 +1097,9 @@ class TTSService(AIService):
         if self._push_start_frame and not self.audio_context_available(context_id):
             await self.create_audio_context(context_id)
             await self.start_ttfb_metrics()
+            # Note: TTSStartedFrame's append_to_context is stamped in
+            # _handle_audio_context, where every TTSStartedFrame
+            # (base-class- and subclass-emitted) funnels through.
             await self.append_to_audio_context(context_id, TTSStartedFrame(context_id=context_id))
 
         # Register this spoken frame so the sequencer can track its completion
@@ -1090,7 +1110,9 @@ class TTSService(AIService):
             src_frame,
             context_id,
             tracker=WordCompletionTracker(
-                prepared_text, llm_text=src_frame.raw_text or src_frame.text
+                prepared_text,
+                llm_text=src_frame.raw_text or src_frame.text,
+                user_facing_text=src_frame.text,
             )
             if not self._push_text_frames
             else None,
@@ -1111,11 +1133,10 @@ class TTSService(AIService):
             # context and the context that IS added does not include TTS-specific tags
             # or transformations.
             frame = TTSTextFrame(text, aggregated_by=type)
+            frame.will_be_spoken = True
             frame.includes_inter_frame_spaces = includes_inter_frame_spaces
             frame.context_id = context_id
-            # Only override append_to_context if explicitly set
-            if append_tts_text_to_context is not None:
-                frame.append_to_context = append_tts_text_to_context
+            frame.append_to_context = append_tts_text_to_context
             # Appending to the context, so it preserves the ordering.
             await self.append_to_audio_context(context_id, frame)
             # TTSTextFrame is queued; mark the spoken slot complete so any skipped
@@ -1225,6 +1246,8 @@ class TTSService(AIService):
                         includes_inter_frame_spaces=ifs,
                     ),
                 )
+        elif context_id is not None:
+            logger.trace(f"Dropping stale words for context {context_id}; word times: {word_times}")
         else:
             await self._add_word_timestamps(
                 word_times=word_times, context_id=context_id, includes_inter_frame_spaces=ifs
@@ -1430,20 +1453,29 @@ class TTSService(AIService):
 
             self._serialization_queue.task_done()
 
-    async def _maybe_reset_word_timestamps(self):
+    async def _maybe_reset_word_timestamps(self, context_id: str | None = None):
         """Reset word-timestamp state and emit LLMFullResponseEndFrame if needed.
 
         Called at the end of an audio context (either on clean completion timeout or
         when the context queue is drained). Resets the PTS baseline so the next turn
         starts fresh. If an LLM response is still marked as in-progress and text frames
-        are not being pushed (which would have already emitted the frame), an
-        LLMFullResponseEndFrame is pushed with the PTS of the last word frame.
+        are not being pushed (which would have already emitted the frame), the end
+        frame held for ``context_id`` is re-pushed with the PTS of the last word frame.
+
+        Args:
+            context_id: The audio context that just ended, used to look up the held
+                LLMFullResponseEndFrame.
         """
         await self.reset_word_timestamps()
         # If self._push_text_frames is True, we have already pushed the original LLMFullResponseEndFrame
         if self._llm_response_started and not self._push_text_frames:
             self._llm_response_started = False
-            frame = LLMFullResponseEndFrame()
+            # Re-push the original end frame held in process_frame (preserving its
+            # id) rather than a new one, so observers that dedup by frame.id don't
+            # see a second LLM-response end. Fall back to a fresh frame if absent.
+            frame = self._pending_llm_response_end_frames.pop(context_id, None) or (
+                LLMFullResponseEndFrame()
+            )
             frame.pts = self._word_last_pts
             await self.push_frame(frame)
 
@@ -1488,10 +1520,18 @@ class TTSService(AIService):
                         await self.stop_ttfb_metrics()
                         await self.start_word_timestamps()
                         timestamps_started = True
+                    await self.process_ttfa_metrics(frame)
 
                 if frame:
                     if isinstance(frame, TTSStartedFrame):
                         should_push_stop_frame = self._push_stop_frames
+                        # Stamp appropriate append_to_context value onto every
+                        # TTSStartedFrame here — the single point both
+                        # base-class- and subclass-emitted started frames pass
+                        # through.
+                        tts_context = self._tts_contexts.get(context_id)
+                        if tts_context is not None:
+                            frame.append_to_context = tts_context.append_to_context
                     elif isinstance(frame, TTSStoppedFrame):
                         # Checking if we have any remaining spoken slots before pushing the TTSStoppedFrame
                         await self._apply_force_complete()
@@ -1518,7 +1558,7 @@ class TTSService(AIService):
         if should_push_stop_frame and self._push_stop_frames:
             await self.push_frame(TTSStoppedFrame(context_id=context_id))
 
-        await self._maybe_reset_word_timestamps()
+        await self._maybe_reset_word_timestamps(context_id)
 
     async def on_audio_context_interrupted(self, context_id: str):
         """Called when an audio context is cancelled due to an interruption.
@@ -1550,11 +1590,16 @@ class TTSService(AIService):
         pass
 
 
+@deprecated(
+    "`WordTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. Use "
+    "`TTSService` instead."
+)
 class WordTTSService(TTSService):
     """Deprecated. Use TTSService directly instead.
 
     .. deprecated:: 0.0.105
         Word timestamp functionality is now always active in TTSService.
+        Will be removed in 2.0.0.
     """
 
     def __init__(self, **kwargs):
@@ -1591,6 +1636,34 @@ class WebsocketTTSService(TTSService, WebsocketService):
         """
         TTSService.__init__(self, **kwargs)
         WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
+
+    async def stop(self, frame: EndFrame):
+        """Stop the websocket TTS service on a graceful end.
+
+        Args:
+            frame: The end frame.
+        """
+        await super().stop(frame)
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the websocket TTS service immediately.
+
+        Disconnecting here is the prompt teardown: the websocket receive loop
+        runs independently of the audio-context task, so it keeps reading from
+        the provider until the socket is closed. Stopping only the audio-context
+        task (in :meth:`TTSService.cancel`) halts output but not reception.
+
+        Args:
+            frame: The cancel frame.
+        """
+        await super().cancel(frame)
+        await self._disconnect()
+
+    async def cleanup(self):
+        """Release websocket TTS resources at teardown."""
+        await super().cleanup()
+        await self._disconnect()
 
     async def _report_error(self, error: ErrorFrame):
         await self._call_event_handler("on_connection_error", error.error)
@@ -1652,11 +1725,16 @@ class InterruptibleTTSService(WebsocketTTSService):
             self._bot_speaking = False
 
 
+@deprecated(
+    "`WebsocketWordTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+    "Use `WebsocketTTSService` instead."
+)
 class WebsocketWordTTSService(WebsocketTTSService):
     """Deprecated. Use WebsocketTTSService directly instead.
 
     .. deprecated:: 0.0.105
         Word timestamp functionality is now always active in TTSService.
+        Will be removed in 2.0.0.
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
@@ -1669,11 +1747,16 @@ class WebsocketWordTTSService(WebsocketTTSService):
         super().__init__(reconnect_on_error=reconnect_on_error, **kwargs)
 
 
+@deprecated(
+    "`InterruptibleWordTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+    "Use `InterruptibleTTSService` instead."
+)
 class InterruptibleWordTTSService(InterruptibleTTSService):
     """Deprecated. Use InterruptibleTTSService directly instead.
 
     .. deprecated:: 0.0.105
         Word timestamp functionality is now always active in TTSService.
+        Will be removed in 2.0.0.
     """
 
     def __init__(self, **kwargs):
@@ -1685,6 +1768,10 @@ class InterruptibleWordTTSService(InterruptibleTTSService):
         super().__init__(**kwargs)
 
 
+@deprecated(
+    "`AudioContextTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+    "Use `WebsocketTTSService` instead."
+)
 class AudioContextTTSService(WebsocketTTSService):
     """Deprecated. Inherit from WebsocketTTSService directly instead.
 
@@ -1695,6 +1782,7 @@ class AudioContextTTSService(WebsocketTTSService):
         Subclass :class:`WebsocketTTSService` directly and pass
         ``reuse_context_id_within_turn`` as
         keyword arguments to its ``__init__``.
+        Will be removed in 2.0.0.
     """
 
     def __init__(
@@ -1711,14 +1799,6 @@ class AudioContextTTSService(WebsocketTTSService):
             reconnect_on_error: Whether to automatically reconnect on websocket errors.
             **kwargs: Additional arguments passed to the parent WebsocketTTSService.
         """
-        import warnings
-
-        warnings.warn(
-            "AudioContextTTSService is deprecated. Inherit from WebsocketTTSService directly "
-            "and pass reuse_context_id_within_turn as kwargs.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         super().__init__(
             reuse_context_id_within_turn=reuse_context_id_within_turn,
             reconnect_on_error=reconnect_on_error,
@@ -1726,11 +1806,16 @@ class AudioContextTTSService(WebsocketTTSService):
         )
 
 
+@deprecated(
+    "`AudioContextWordTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+    "Use `WebsocketTTSService` instead."
+)
 class AudioContextWordTTSService(AudioContextTTSService):
     """Deprecated. Use WebsocketTTSService directly instead.
 
     .. deprecated:: 0.0.105
         Subclass :class:`WebsocketTTSService` directly.
+        Will be removed in 2.0.0.
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
@@ -1740,11 +1825,4 @@ class AudioContextWordTTSService(AudioContextTTSService):
             reconnect_on_error: Whether to automatically reconnect on websocket errors.
             **kwargs: Additional arguments passed to parent classes.
         """
-        import warnings
-
-        warnings.warn(
-            "AudioContextWordTTSService is deprecated. Inherit from WebsocketTTSService directly.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         super().__init__(reconnect_on_error=reconnect_on_error, **kwargs)

@@ -43,18 +43,19 @@ from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
     BotSpeakingFrame,
     CancelFrame,
-    CancelTaskFrame,
+    CancelWorkerFrame,
     EndFrame,
-    EndTaskFrame,
+    EndWorkerFrame,
     ErrorFrame,
     Frame,
     HeartbeatFrame,
     InterruptionFrame,
-    InterruptionTaskFrame,
+    InterruptionWorkerFrame,
     MetricsFrame,
+    PipelineFlushFrame,
     StartFrame,
     StopFrame,
-    StopTaskFrame,
+    StopWorkerFrame,
     TTSSpeakFrame,
     UserSpeakingFrame,
 )
@@ -77,7 +78,8 @@ from pipecat.processors.frameworks.rtvi.models import (
     UIJobUpdateData,
     UISnapshotMessage,
 )
-from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.startup import run_setup_hook
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.tracing_context import TracingContext
@@ -179,6 +181,8 @@ class PipelineWorker(BaseWorker):
 
     - on_frame_reached_upstream: Called when upstream frames reach the source
     - on_frame_reached_downstream: Called when downstream frames reach the sink
+    - on_heartbeat_timeout: Called when a heartbeat frame is not received within the monitor timeout.
+          Fires repeatedly every ``heartbeats_monitor_secs`` for as long as the stall persists.
     - on_idle_timeout: Called when pipeline is idle beyond timeout threshold
     - on_pipeline_started: Called when pipeline starts with StartFrame
     - on_pipeline_finished: Called after the pipeline has reached any terminal state.
@@ -197,6 +201,10 @@ class PipelineWorker(BaseWorker):
 
         @worker.event_handler("on_frame_reached_upstream")
         async def on_frame_reached_upstream(worker, frame):
+            ...
+
+        @worker.event_handler("on_heartbeat_timeout")
+        async def on_heartbeat_timeout(worker):
             ...
 
         @worker.event_handler("on_idle_timeout")
@@ -284,7 +292,9 @@ class PipelineWorker(BaseWorker):
                 peers.
             cancel_timeout_secs: Timeout (in seconds) to wait for cancellation to happen
                 cleanly.
-            check_dangling_tasks: Whether to check for processors' tasks finishing properly.
+            check_dangling_tasks: Whether to warn about tasks left running when
+                the worker finishes. Only applies when the worker owns its task
+                manager; otherwise the runner reports dangling tasks.
             clock: Clock implementation for timing operations.
             conversation_id: Optional custom ID for the conversation.
             enable_rtvi: Whether to automatically add RTVI support to the pipeline.
@@ -303,14 +313,19 @@ class PipelineWorker(BaseWorker):
             params: Configuration parameters for the pipeline.
             rtvi_observer_params: The RTVI observer parameter to use if RTVI is enabled.
             rtvi_processor: The RTVI processor to add if RTVI is enabled.
-            task_manager: Optional worker manager for handling asyncio tasks.
+            task_manager: Optional task manager for handling asyncio tasks.
             tool_resources: Deprecated alias for ``app_resources``.
 
                 .. deprecated:: 1.2.0
                     Use ``app_resources`` instead. ``tool_resources`` will be
-                    removed in a future version.
+                    removed in 2.0.0.
         """
-        super().__init__(name=name, active=active)
+        super().__init__(
+            name=name,
+            active=active,
+            task_manager=task_manager,
+            check_dangling_tasks=check_dangling_tasks,
+        )
         self._bridged = bridged
         if tool_resources is not None:
             with warnings.catch_warnings():
@@ -328,7 +343,6 @@ class PipelineWorker(BaseWorker):
         self._cancel_on_idle_timeout = cancel_on_idle_timeout
         self._cancel_runner_on_idle_timeout = cancel_runner_on_idle_timeout
         self._cancel_timeout_secs = cancel_timeout_secs
-        self._check_dangling_tasks = check_dangling_tasks
         self._clock = clock or SystemClock()
         self._conversation_id = conversation_id
         self._enable_tracing = enable_tracing and is_tracing_available()
@@ -361,10 +375,6 @@ class PipelineWorker(BaseWorker):
 
         self._finished = False
         self._cancelled = False
-
-        # This worker maneger will handle all the asyncio tasks created by this
-        # PipelineWorker and its frame processors.
-        self._pipeline_task_manager = task_manager or TaskManager()
 
         # This queue is the queue used to push frames to the pipeline.
         self._push_queue = asyncio.Queue()
@@ -484,6 +494,7 @@ class PipelineWorker(BaseWorker):
         self._reached_downstream_types: set[type[Frame]] = set()
         self._register_event_handler("on_frame_reached_upstream")
         self._register_event_handler("on_frame_reached_downstream")
+        self._register_event_handler("on_heartbeat_timeout")
         self._register_event_handler("on_idle_timeout")
         self._register_event_handler("on_pipeline_started")
         self._register_event_handler("on_pipeline_finished")
@@ -699,8 +710,7 @@ class PipelineWorker(BaseWorker):
             # 2. By an asyncio worker cancellation (except case).
             logger.debug(f"Pipeline worker {self} is finishing...")
             await self._cancel_tasks()
-            if self._check_dangling_tasks:
-                self._print_dangling_tasks()
+            self._print_dangling_tasks()
             self._finished = True
             logger.debug(f"Pipeline worker {self} has finished")
 
@@ -741,6 +751,32 @@ class PipelineWorker(BaseWorker):
         elif isinstance(frames, Iterable):
             for frame in frames:
                 await self.queue_frame(frame, direction)
+
+    async def flush_pipeline(self, timeout: float = 5.0) -> bool:
+        """Flush all in-flight frames from the pipeline and wait for it to drain.
+
+        Pushes a :class:`~pipecat.frames.frames.PipelineFlushFrame` downstream;
+        the sink bounces it back upstream and the source sets its event once it
+        completes the round-trip, signalling that every frame queued ahead of it
+        has been processed. The probe is injected straight into the pipeline so
+        it bypasses any ``queue_frame`` override (e.g. tool-call deferral).
+
+        Args:
+            timeout: Seconds to wait before giving up. On timeout a warning is
+                logged and ``False`` is returned rather than blocking forever
+                (e.g. if a processor swallows the probe).
+
+        Returns:
+            True if the pipeline drained, False if the wait timed out.
+        """
+        event = asyncio.Event()
+        await self._pipeline.queue_frame(PipelineFlushFrame(event=event))
+        try:
+            await asyncio.wait_for(event.wait(), timeout)
+            return True
+        except TimeoutError:
+            logger.warning(f"{self}: pipeline flush timed out after {timeout}s")
+            return False
 
     async def on_bus_message(self, message: BusMessage) -> None:
         """Handle outbound bus messages: TTS playback and RTVI UI translation.
@@ -970,10 +1006,7 @@ class PipelineWorker(BaseWorker):
 
     async def _setup(self, params: WorkerParams):
         """Set up the pipeline worker and all processors."""
-        await super().setup(self._pipeline_task_manager)
-
-        mgr_params = TaskManagerParams(loop=params.loop)
-        self.task_manager.setup(mgr_params)
+        await super().setup(self._task_manager or params.task_manager)
 
         setup = FrameProcessorSetup(
             clock=self._clock,
@@ -1081,25 +1114,34 @@ class PipelineWorker(BaseWorker):
 
         This is the worker that processes frames coming upstream from the
         pipeline. These frames might indicate, for example, that we want the
-        pipeline to be stopped (e.g. EndTaskFrame) in which case we would send
+        pipeline to be stopped (e.g. EndWorkerFrame) in which case we would send
         an EndFrame down the pipeline.
         """
         if isinstance(frame, tuple(self._reached_upstream_types)):
             await self._call_event_handler("on_frame_reached_upstream", frame)
 
-        if isinstance(frame, EndTaskFrame):
+        if isinstance(frame, PipelineFlushFrame):
+            # The flush probe completed its round-trip (down to the sink, back up
+            # to the source). Everything queued ahead of it has been processed;
+            # release whoever is awaiting it.
+            logger.debug(f"{self}: flush probe reached source — pipeline drained")
+            if frame.event:
+                frame.event.set()
+            return
+
+        if isinstance(frame, EndWorkerFrame):
             # Tell the worker we should end nicely.
             logger.debug(f"{self}: received end worker frame upstream {frame}")
             await self.queue_frame(EndFrame(reason=frame.reason))
-        elif isinstance(frame, CancelTaskFrame):
+        elif isinstance(frame, CancelWorkerFrame):
             # Tell the worker we should end right away.
             logger.debug(f"{self}: received cancel worker frame upstream {frame}")
             await self.queue_frame(CancelFrame(reason=frame.reason))
-        elif isinstance(frame, StopTaskFrame):
+        elif isinstance(frame, StopWorkerFrame):
             # Tell the worker we should stop nicely.
             logger.debug(f"{self}: received stop worker frame upstream {frame}")
             await self.queue_frame(StopFrame())
-        elif isinstance(frame, InterruptionTaskFrame):
+        elif isinstance(frame, InterruptionWorkerFrame):
             # Tell the worker we should interrupt the pipeline. Note that we are
             # bypassing the push queue and directly queue into the
             # pipeline. This is in case the push worker is blocked waiting for a
@@ -1126,6 +1168,14 @@ class PipelineWorker(BaseWorker):
         if isinstance(frame, tuple(self._reached_downstream_types)):
             await self._call_event_handler("on_frame_reached_downstream", frame)
 
+        if isinstance(frame, PipelineFlushFrame):
+            # The flush probe reached the sink. Bounce the same instance back
+            # upstream so it returns to the source (carrying its event) and the
+            # round-trip drains both directions.
+            logger.debug(f"{self}: flush probe reached sink — bouncing upstream")
+            await self._sink.push_frame(frame, FrameDirection.UPSTREAM)
+            return
+
         if isinstance(frame, StartFrame):
             await self._call_event_handler("on_pipeline_started", frame)
             await self._observer.on_pipeline_started()
@@ -1145,18 +1195,18 @@ class PipelineWorker(BaseWorker):
             self._pipeline_end_event.set()
         elif isinstance(frame, HeartbeatFrame):
             await self._heartbeat_queue.put(frame)
-        elif isinstance(frame, EndTaskFrame):
+        elif isinstance(frame, EndWorkerFrame):
             logger.debug(f"{self}: received end worker frame downstream {frame}")
-            await self.queue_frame(EndTaskFrame(reason=frame.reason), FrameDirection.UPSTREAM)
-        elif isinstance(frame, StopTaskFrame):
+            await self.queue_frame(EndWorkerFrame(reason=frame.reason), FrameDirection.UPSTREAM)
+        elif isinstance(frame, StopWorkerFrame):
             logger.debug(f"{self}: received stop worker frame downstream {frame}")
-            await self.queue_frame(StopTaskFrame(), FrameDirection.UPSTREAM)
-        elif isinstance(frame, CancelTaskFrame):
+            await self.queue_frame(StopWorkerFrame(), FrameDirection.UPSTREAM)
+        elif isinstance(frame, CancelWorkerFrame):
             logger.debug(f"{self}: received cancel worker frame downstream {frame}")
-            await self.queue_frame(CancelTaskFrame(reason=frame.reason), FrameDirection.UPSTREAM)
-        elif isinstance(frame, InterruptionTaskFrame):
+            await self.queue_frame(CancelWorkerFrame(reason=frame.reason), FrameDirection.UPSTREAM)
+        elif isinstance(frame, InterruptionWorkerFrame):
             logger.debug(f"{self}: received interruption worker frame downstream {frame}")
-            await self.queue_frame(InterruptionTaskFrame(), FrameDirection.UPSTREAM)
+            await self.queue_frame(InterruptionWorkerFrame(), FrameDirection.UPSTREAM)
 
     async def _heartbeat_push_handler(self):
         """Push heartbeat frames at regular intervals."""
@@ -1170,10 +1220,10 @@ class PipelineWorker(BaseWorker):
     async def _heartbeat_monitor_handler(self):
         """Monitor heartbeat frames for processing time and timeout detection.
 
-        This worker monitors heartbeat frames. If a heartbeat frame has not
-        been received for a long period a warning will be logged. It also logs
-        the time that a heartbeat frame takes to processes, that is how long it
-        takes for the heartbeat frame to traverse all the pipeline.
+        Logs the time each heartbeat takes to traverse the pipeline. If no
+        heartbeat arrives within ``heartbeats_monitor_secs``, logs a warning
+        and fires ``on_heartbeat_timeout``. The event fires repeatedly every
+        ``heartbeats_monitor_secs`` for as long as the stall persists.
         """
         wait_time = self._params.heartbeats_monitor_secs
         while True:
@@ -1186,6 +1236,7 @@ class PipelineWorker(BaseWorker):
                 logger.warning(
                     f"{self}: heartbeat frame not received for more than {wait_time} seconds"
                 )
+                await self._call_event_handler("on_heartbeat_timeout")
 
     async def _idle_monitor_handler(self):
         """Monitor pipeline activity and detect idle conditions.
@@ -1243,12 +1294,6 @@ class PipelineWorker(BaseWorker):
             deprecated_function_name="setup_pipeline_task",
         )
 
-    def _print_dangling_tasks(self):
-        """Log any dangling tasks that haven't been properly cleaned up."""
-        tasks = [t.get_name() for t in self.task_manager.current_tasks()]
-        if tasks:
-            logger.warning(f"{self} dangling tasks detected: {tasks}")
-
     def _create_start_metadata(self) -> dict[str, Any]:
         """Build and return start metadata including user-provided values."""
         start_metadata = {}
@@ -1270,37 +1315,32 @@ class PipelineWorker(BaseWorker):
         return None
 
 
+@deprecated(
+    "`PipelineTask` is deprecated since 1.3.0 and will be removed in 2.0.0. "
+    "Use `PipelineWorker` instead."
+)
 class PipelineTask(PipelineWorker):
     """Deprecated alias for :class:`PipelineWorker`.
 
     .. deprecated:: 1.3.0
-        Use :class:`PipelineWorker` instead. ``PipelineTask`` will be removed
-        in a future release.
+        Use :class:`PipelineWorker` instead. :class:`PipelineTask` will be removed
+        in 2.0.0.
     """
 
-    def __init__(self, *args, **kwargs):
-        """Initialize the pipeline worker (deprecated)."""
-        warnings.warn(
-            "PipelineTask is deprecated, use PipelineWorker instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
+    pass
 
 
+@deprecated(
+    "`PipelineTaskParams` is deprecated since 1.3.0 and will be removed in 2.0.0. "
+    "Use `WorkerParams` instead."
+)
 @dataclass
 class PipelineTaskParams(WorkerParams):
     """Deprecated alias for :class:`~pipecat.workers.base_worker.WorkerParams`.
 
     .. deprecated:: 1.3.0
         Use :class:`~pipecat.workers.base_worker.WorkerParams` instead.
-        ``PipelineTaskParams`` will be removed in a future release.
+        Will be removed in 2.0.0.
     """
 
-    def __post_init__(self):
-        """Warn on construction."""
-        warnings.warn(
-            "PipelineTaskParams is deprecated, use WorkerParams instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+    pass

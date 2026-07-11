@@ -14,7 +14,7 @@ import asyncio
 import json
 from collections.abc import Callable
 
-import aioboto3
+import aiobotocore.session
 from loguru import logger
 
 from pipecat.frames.frames import (
@@ -123,7 +123,7 @@ class AWSAgentCoreProcessor(FrameProcessor):
         Args:
             agentArn: The Amazon Web Services Resource Name (ARN) of the agent.
             aws_access_key: AWS access key ID. If None, falls back to
-                environment variables and the default boto3 credential chain
+                environment variables and the default botocore credential chain
                 (instance profiles, IRSA, ECS task roles, SSO, etc.).
             aws_secret_key: AWS secret access key. Same fallback behaviour as
                 ``aws_access_key``.
@@ -140,9 +140,9 @@ class AWSAgentCoreProcessor(FrameProcessor):
         super().__init__(**kwargs)
 
         self._agentArn = agentArn
-        self._aws_session = aioboto3.Session()
+        self._aws_session = aiobotocore.session.get_session()
 
-        # Resolve credentials using the shared chain (explicit → env → boto3).
+        # Resolve credentials using the shared chain (explicit → env → botocore).
         self._aws_params = resolve_credentials(
             aws_access_key_id=aws_access_key,
             aws_secret_access_key=aws_secret_key,
@@ -189,6 +189,13 @@ class AWSAgentCoreProcessor(FrameProcessor):
         # Schedule closing the output response after timeout
         self._close_task = self.create_task(self._close_output_response_after_timeout())
 
+    async def cleanup(self):
+        """Release resources held by this processor."""
+        await super().cleanup()
+        if self._close_task:
+            await self.cancel_task(self._close_task)
+            self._close_task = None
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and handle LLM message frames.
 
@@ -204,14 +211,12 @@ class AWSAgentCoreProcessor(FrameProcessor):
             if not payload:
                 return
 
-            # aioboto3's `client()` is an async context manager but its stubs don't
-            # advertise `__aenter__` / `__aexit__` in a way pyright can see.
-            async with self._aws_session.client(  # pyright: ignore[reportGeneralTypeIssues]
+            async with self._aws_session.create_client(  # pyright: ignore[reportGeneralTypeIssues]
                 "bedrock-agentcore",
                 **self._aws_params,  # pyright: ignore[reportArgumentType]
             ) as client:
                 # Invoke the AgentCore agent
-                response = await client.invoke_agent_runtime(
+                response = await client.invoke_agent_runtime(  # pyright: ignore[reportGeneralTypeIssues]
                     agentRuntimeArn=self._agentArn, payload=payload.encode()
                 )
 
