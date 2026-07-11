@@ -128,12 +128,34 @@ def _recover_leaked_tool_call(content: str, known_names):
             except (ValueError, SyntaxError):
                 continue
             start, end = pos, k + 1
+            # Absorb a quote wrapper (`['func(...)']`) so the leftover `['`/`']`
+            # never masks the real tail of any co-spoken prose.
+            if (
+                start > 0
+                and content[start - 1] in "\"'"
+                and end < len(content)
+                and content[end] == content[start - 1]
+            ):
+                start -= 1
+                end += 1
             # Absorb the pythonic-list wrapper `[ ... ]` if present.
             if start > 0 and content[start - 1] == "[":
                 start -= 1
             if end < len(content) and content[end] == "]":
                 end += 1
             return name, args, start, end
+    # Degenerate list forms with no parsable call: the model names the tool as
+    # a (possibly quoted) list item — `[func]`, `['func']`, `["func()"]`. No
+    # arguments survive that form, but the intent is unambiguous for a
+    # registered name, and leaving it as text means it is stripped from speech
+    # and the call silently dropped.
+    for name in known_names:
+        m = re.search(
+            r"\[\s*(['\"]?)" + re.escape(name) + r"(?:\s*\(\s*\))?\1\s*\]",
+            content,
+        )
+        if m:
+            return name, {}, m.start(), m.end()
     return None
 
 
@@ -445,6 +467,26 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                     f"({self._tool_call_rounds_this_turn} consecutive rounds this "
                     f"turn); disabling tools for this completion to force a text answer"
                 )
+            params.pop("tools", None)
+            params.pop("tool_choice", None)
+
+        # An empty completion with tools enabled is almost always the server's
+        # tool parser swallowing a malformed textual call (vLLM pythonic buffers
+        # `[`-prefixed output, fails to parse e.g. `['func()']`, and streams
+        # NOTHING — run 636's 11.7s dead turn). Re-sending the identical request
+        # just reproduces the swallow, so the retry drops tools: prose comes
+        # through, and a call the model still leaks as text is executed by
+        # _recover_leaked_tool_call. tool_choice="required" (routing nodes) is
+        # exempt — those force the structured path server-side and need the call.
+        if (
+            getattr(self, "_empty_retry_in_flight", False)
+            and params.get("tools")
+            and params.get("tool_choice") != "required"
+        ):
+            logger.warning(
+                f"{self}: retrying an empty completion without tools so the "
+                f"server tool parser cannot swallow the output again"
+            )
             params.pop("tools", None)
             params.pop("tool_choice", None)
 
