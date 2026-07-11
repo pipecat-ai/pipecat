@@ -681,6 +681,27 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         loop_guard_tripped = (
             self._tool_call_rounds_this_turn >= self._max_tool_call_rounds_per_turn
         )
+        # EMPTY-GENERATION RETRY: no text and no tool call = a dead turn — the
+        # caller hears silence and unanswered messages pile up (two
+        # consecutive empty completions swallowed a booking slot and a phone
+        # number on a live flow). Retry the same context once; a second empty
+        # result stands (upstream idle handling takes over).
+        if (
+            not function_name
+            and not content_buffer.strip()
+            and not getattr(self, "_empty_retry_in_flight", False)
+        ):
+            self._empty_retry_in_flight = True
+            try:
+                logger.warning(
+                    f"{self}: empty completion (no text, no tool calls) — "
+                    f"retrying the generation once"
+                )
+                await self._process_context(context)
+            finally:
+                self._empty_retry_in_flight = False
+            return
+
         # What the caller actually HEARS this turn. For a recovered leaked call
         # this is the buffer minus the call syntax — the raw buffer ends with
         # "[transition_to_x()]", which masks the real tail of the spoken reply
