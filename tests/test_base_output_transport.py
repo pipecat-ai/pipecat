@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.transports.base_output import BaseOutputTransport
@@ -142,6 +143,54 @@ class TestBaseOutputTransportInterruptions(unittest.IsolatedAsyncioTestCase):
             # The queued bot audio was dropped by the reset.
             self.assertTrue(sender._audio_queue.empty())
             release_write.set()
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_interruption_drops_tts_text_for_already_written_audio(self):
+        """Reproduces #4996: a TTSTextFrame queued behind audio that has
+        already been handed to write_audio_frame must not be silently
+        dropped on interruption -- it's the only record that reaches the
+        assistant context aggregator, which sits downstream of
+        transport.output() in the normal pipeline.
+        """
+        transport = await self._make_transport(mixer=None)
+        try:
+            sender = transport._media_senders[None]
+
+            write_started = asyncio.Event()
+            release_write = asyncio.Event()
+
+            async def slow_write(frame):
+                write_started.set()
+                await release_write.wait()
+                return True
+
+            transport.write_audio_frame = AsyncMock(side_effect=slow_write)
+
+            # First chunk starts writing -- already handed off/"released"
+            # toward the caller -- but the write hasn't returned yet, so
+            # the audio task loop is still blocked inside it.
+            first_chunk = OutputAudioRawFrame(
+                audio=b"\x01\x02" * (sender.audio_chunk_size // 2),
+                sample_rate=sender.sample_rate,
+                num_channels=1,
+            )
+            await transport.process_frame(first_chunk, FrameDirection.DOWNSTREAM)
+            await write_started.wait()
+
+            # The word for that in-flight audio arrives as text while the
+            # write is still pending, so it's provably still sitting,
+            # un-dequeued, behind it in the queue.
+            text_frame = TTSTextFrame(text="hello", aggregated_by="word")
+            await transport.process_frame(text_frame, FrameDirection.DOWNSTREAM)
+            self.assertFalse(sender._audio_queue.empty())
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            release_write.set()
+            await asyncio.sleep(0.05)
+
+            pushed_types = [c.args[0].__class__ for c in transport.push_frame.call_args_list]
+            self.assertIn(TTSTextFrame, pushed_types)
         finally:
             await transport.cancel(CancelFrame())
 
