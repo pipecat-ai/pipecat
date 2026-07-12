@@ -704,13 +704,13 @@ class DeepgramSTTService(STTService):
             if message.channel.alternatives[0].languages:
                 language = message.channel.alternatives[0].languages[0]
                 language = Language(language)
-            if len(transcript) > 0:
-                if is_final:
-                    # Check if this response is from a finalize() call.
-                    # Only mark as finalized when both we requested it AND Deepgram confirms it.
-                    from_finalize = getattr(message, "from_finalize", False) or False
-                    if from_finalize:
-                        self.confirm_finalize()
+            if is_final:
+                # Check if this response is from a finalize() call.
+                # Only mark as finalized when both we requested it AND Deepgram confirms it.
+                from_finalize = getattr(message, "from_finalize", False) or False
+                if from_finalize:
+                    self.confirm_finalize()
+                if len(transcript) > 0:
                     await self.push_frame(
                         TranscriptionFrame(
                             transcript,
@@ -722,17 +722,23 @@ class DeepgramSTTService(STTService):
                     )
                     await self._handle_transcription(transcript, is_final, language)
                     await self.stop_processing_metrics()
-                else:
-                    # For interim transcriptions, just push the frame without tracing
-                    await self.push_frame(
-                        InterimTranscriptionFrame(
-                            transcript,
-                            self._user_id,
-                            time_now_iso8601(),
-                            language,
-                            result=message,
-                        )
+                elif from_finalize:
+                    # Deepgram already sent the transcript via a regular is_final
+                    # before the finalize response arrived (empty). Report STT TTFB
+                    # immediately instead of falling to the timeout.
+                    await self.stop_ttfb_metrics()
+                    await self._cancel_ttfb_timeout()
+            elif len(transcript) > 0:
+                # For interim transcriptions, just push the frame without tracing
+                await self.push_frame(
+                    InterimTranscriptionFrame(
+                        transcript,
+                        self._user_id,
+                        time_now_iso8601(),
+                        language,
+                        result=message,
                     )
+                )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames with Deepgram-specific handling.

@@ -117,6 +117,49 @@ class TestReplaceText(unittest.IsolatedAsyncioTestCase):
         result = await transform("Hello world", "*")
         self.assertEqual(result, "Hello world")
 
+    async def test_word_splitting_replacement(self):
+        """A replacement is allowed to turn one word into several."""
+        transform = replace_text([(r"\bBODYPUMP\b", "body pump")])
+        result = await transform("Try BODYPUMP on Monday morning.", "*")
+        self.assertEqual(result, "Try body pump on Monday morning.")
+
+    async def test_case_only_replacement(self):
+        """A replacement is allowed to change only the case of a word."""
+        transform = replace_text([(r"\bSQL\b", "sql")])
+        result = await transform("Contact SQL support today.", "*")
+        self.assertEqual(result, "Contact sql support today.")
+
+    async def test_inline_ipa_tag_replacement(self):
+        transform = replace_text([(r"\bleisure\b", "<<l|ɛ|ʒ|ə|r>>")])
+        result = await transform("The leisure centre opens at six.", "*")
+        self.assertIn("<<l|ɛ|ʒ|ə|r>>", result)
+
+
+class TestNormalizeCollapsesCaseAndSplitReplacements(unittest.IsolatedAsyncioTestCase):
+    """Whether normalize() treats a case-only or word-splitting replacement as
+    unchanged. normalize() lowercases text and drops whitespace/punctuation, so a
+    replacement that only changes case, or that splits one word into several,
+    normalizes identically on both sides even though the original text cannot be
+    recovered by simple proportional advancement.
+    """
+
+    async def test_word_split_normalizes_the_same_as_original(self):
+        transform = replace_text([(r"\bBODYPUMP\b", "body pump")])
+        result = await transform("BODYPUMP", "*")
+        self.assertEqual(normalize(result), normalize("BODYPUMP"))
+
+    async def test_case_change_normalizes_the_same_as_original(self):
+        transform = replace_text([(r"\bSQL\b", "sql")])
+        result = await transform("SQL", "*")
+        self.assertEqual(normalize(result), normalize("SQL"))
+
+    async def test_pronunciation_respelling_does_not_normalize_the_same(self):
+        """Contrast case: a genuine 1-to-1 respelling ("leisure" -> "lezher") does
+        change the normalized alnum content, so it is correctly flagged as transformed."""
+        transform = replace_text([(r"\bleisure\b", "lezher")])
+        result = await transform("leisure", "*")
+        self.assertNotEqual(normalize(result), normalize("leisure"))
+
 
 class TestExpandPercentages(unittest.IsolatedAsyncioTestCase):
     async def test_integer_percent(self):

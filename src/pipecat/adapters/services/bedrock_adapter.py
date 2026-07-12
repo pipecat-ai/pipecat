@@ -14,7 +14,7 @@ from typing import Any, TypedDict, cast
 
 from loguru import logger
 
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
@@ -129,12 +129,13 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         if remaining and not isinstance(remaining[0], LLMSpecificMessage):
             system = self._extract_initial_system(remaining, system_instruction=system_instruction)
 
-        # Convert remaining messages to Bedrock format
-        messages = []
+        # Convert remaining messages to Bedrock format. A conversion failure
+        # (e.g. a malformed message) is wrapped so it surfaces with its
+        # underlying cause.
         try:
             messages = [self._from_universal_context_message(m) for m in remaining]
         except Exception as e:
-            logger.error(f"Error mapping messages: {e}")
+            raise LLMContextConversionError(e) from e
 
         # Convert any subsequent "system"/"developer"-role messages to "user"-role
         # messages, as AWS Bedrock doesn't support system or developer input messages.

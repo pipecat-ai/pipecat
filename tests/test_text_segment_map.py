@@ -198,5 +198,70 @@ class TestTextSegmentMapEqualTexts(unittest.TestCase):
         self.assertFalse(smap.in_transformed_segment)
 
 
+class TestTextSegmentMapTokenChangingReplacements(unittest.TestCase):
+    """Whether segments are flagged as transformed when a replacement changes
+    tokenization, versus when it only changes case or the connector between
+    words.
+
+    A replacement that splits one word into several changes the *word count*
+    within the segment, which breaks the 1:1 token correspondence proportional
+    advancement assumes -- it must be flagged transformed so the segment is
+    held and committed atomically instead. A replacement that only changes
+    case or swaps the connector between words (space vs. hyphen) keeps the
+    same single-token structure, so proportional advancement still lands at
+    the correct position; those are intentionally left unflagged here and are
+    instead handled by lenient (case/connector-insensitive) span validation in
+    ``WordCompletionTracker``.
+    """
+
+    def test_word_splitting_replacement_is_flagged_transformed(self):
+        # "BODYPUMP" -> "body pump": same alnum content, different tokenization.
+        smap = TextSegmentMap(
+            "Try body pump on Monday morning.",
+            "Try BODYPUMP on Monday morning.",
+        )
+        seg = next(s for s in smap._segments if s.original == "BODYPUMP")
+        self.assertTrue(
+            seg.is_transformed,
+            "a replacement that splits one word into several must be treated as transformed",
+        )
+
+    def test_case_only_replacement_is_not_flagged_transformed(self):
+        # "SQL" -> "sql": same alnum content, same single-token structure, only
+        # case differs. Proportional advancement already lands correctly here.
+        smap = TextSegmentMap(
+            "Contact sql support today.",
+            "Contact SQL support today.",
+        )
+        seg = next(s for s in smap._segments if s.original == "SQL")
+        self.assertFalse(seg.is_transformed)
+
+    def test_hyphenated_single_token_replacement_is_not_flagged_transformed(self):
+        # "BODYPUMP" -> "body-pump": still a single token on both sides.
+        smap = TextSegmentMap(
+            "Try body-pump on Monday morning.",
+            "Try BODYPUMP on Monday morning.",
+        )
+        seg = next(s for s in smap._segments if s.original == "BODYPUMP")
+        self.assertFalse(seg.is_transformed)
+
+    def test_different_length_replacement_is_already_flagged_transformed(self):
+        # Control case: "HIIT" -> "hit" differs in alnum length, so it takes
+        # the transformed/atomic path via the existing alnum-content check.
+        smap = TextSegmentMap(
+            "We run hit classes on Tuesday.",
+            "We run HIIT classes on Tuesday.",
+        )
+        seg = next(s for s in smap._segments if s.original == "HIIT")
+        self.assertTrue(seg.is_transformed)
+
+    def test_acronym_letter_spacing_is_flagged_transformed(self):
+        # "API" -> "A P I": same alnum content, but letter-spacing splits one
+        # word into three -- the same word-count change as splitting replacements.
+        smap = TextSegmentMap("A P I launched", "API launched")
+        seg = next(s for s in smap._segments if s.original == "API")
+        self.assertTrue(seg.is_transformed)
+
+
 if __name__ == "__main__":
     unittest.main()

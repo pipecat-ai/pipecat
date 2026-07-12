@@ -10,9 +10,8 @@ from typing import Any
 
 from openai import NOT_GIVEN as OPENAI_NOT_GIVEN
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.bus.adapters.base import DeserializeFunc, SerializeFunc, TypeAdapter
+from pipecat.bus.adapters.tools_schema_adapter import ToolsSchemaAdapter
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMSpecificMessage,
@@ -26,6 +25,10 @@ class LLMContextAdapter(TypeAdapter):
     The ``NOT_GIVEN`` sentinel is preserved across serialization: missing
     keys are restored as ``NOT_GIVEN`` on deserialization.
     """
+
+    def __init__(self) -> None:
+        """Initialize the adapter."""
+        self._tools_schema_adapter = ToolsSchemaAdapter()
 
     def serialize(self, obj: Any, serialize_value: SerializeFunc) -> dict[str, Any]:
         """Serialize an ``LLMContext`` to a JSON-compatible dict.
@@ -42,7 +45,7 @@ class LLMContextAdapter(TypeAdapter):
             "messages": [self._serialize_message(m, serialize_value) for m in obj.messages],
         }
         if not isinstance(obj.tools, NotGiven):
-            result["tools"] = self._serialize_tools(obj.tools)
+            result["tools"] = self._tools_schema_adapter.serialize(obj.tools, serialize_value)
         if not isinstance(obj.tool_choice, NotGiven):
             result["tool_choice"] = serialize_value(obj.tool_choice)
         return result
@@ -67,7 +70,11 @@ class LLMContextAdapter(TypeAdapter):
             A new ``LLMContext`` instance.
         """
         messages = [self._deserialize_message(m, deserialize_value) for m in data["messages"]]
-        tools = self._deserialize_tools(data["tools"]) if "tools" in data else OPENAI_NOT_GIVEN
+        tools = (
+            self._tools_schema_adapter.deserialize(data["tools"], deserialize_value)
+            if "tools" in data
+            else OPENAI_NOT_GIVEN
+        )
         tool_choice = (
             deserialize_value(data["tool_choice"]) if "tool_choice" in data else OPENAI_NOT_GIVEN
         )
@@ -89,20 +96,3 @@ class LLMContextAdapter(TypeAdapter):
                 message=deserialize_value(data["message"]),
             )
         return deserialize_value(data)
-
-    def _serialize_tools(self, tools: Any) -> list[dict[str, Any]]:
-        return [tool.to_default_dict() for tool in tools.standard_tools]
-
-    def _deserialize_tools(self, data: list[dict[str, Any]]) -> Any:
-        tools = []
-        for item in data:
-            params = item.get("parameters", {})
-            tools.append(
-                FunctionSchema(
-                    name=item["name"],
-                    description=item.get("description", ""),
-                    properties=params.get("properties", {}),
-                    required=params.get("required", []),
-                )
-            )
-        return ToolsSchema(standard_tools=tools)

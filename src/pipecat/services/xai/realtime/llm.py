@@ -1038,6 +1038,6 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         item = events.ConversationItem(
             type="function_call_output",
             call_id=tool_call_id,
-            output=json.dumps(result, ensure_ascii=False),
+            output=result,
         )
         await self.send_client_event(events.ConversationItemCreateEvent(item=item))
