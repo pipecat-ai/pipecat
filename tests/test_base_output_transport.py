@@ -146,13 +146,7 @@ class TestBaseOutputTransportInterruptions(unittest.IsolatedAsyncioTestCase):
         finally:
             await transport.cancel(CancelFrame())
 
-    async def test_interruption_drops_tts_text_for_already_written_audio(self):
-        """Reproduces #4996: a TTSTextFrame queued behind audio that has
-        already been handed to write_audio_frame must not be silently
-        dropped on interruption -- it's the only record that reaches the
-        assistant context aggregator, which sits downstream of
-        transport.output() in the normal pipeline.
-        """
+    async def test_interruption_forwards_tts_text_for_already_written_audio(self):
         transport = await self._make_transport(mixer=None)
         try:
             sender = transport._media_senders[None]
