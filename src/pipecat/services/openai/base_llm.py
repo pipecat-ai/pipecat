@@ -13,7 +13,7 @@ import re
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 from loguru import logger
@@ -47,6 +47,42 @@ from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
 from pipecat.services.settings import LLMSettings, _NotGiven, assert_given
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_llm
+
+
+def _repair_truncated_json(text) -> Optional[dict]:
+    """Best-effort repair of a JSON object cut off mid-generation.
+
+    Closes an unterminated string and any unclosed braces, then re-parses.
+    Returns the parsed dict, or None when the text is not a repairable
+    object (wrong shape, or still invalid after closing).
+    """
+    if not isinstance(text, str):
+        return None
+    s = text.strip()
+    if not s.startswith("{"):
+        return None
+    # Drop a dangling escape at the very end ('\' with nothing after it).
+    if s.endswith("\\"):
+        s = s[:-1]
+    # Close an unterminated string: count unescaped quotes.
+    quotes = len(re.findall(r'(?<!\\)"', s))
+    if quotes % 2 == 1:
+        s += '"'
+    # Trim a trailing comma or colon left hanging by the cut.
+    s = re.sub(r"[,:]\s*$", "", s)
+    # A key without a value ("key" at object level) can't be salvaged —
+    # drop it back to the previous comma/brace.
+    s += "}" * max(0, s.count("{") - s.count("}"))
+    try:
+        parsed = json.loads(s)
+    except json.JSONDecodeError:
+        # Last resort: drop the final (possibly half-written) member.
+        s2 = re.sub(r',\s*"[^"]*"?\s*:?\s*("[^"]*"?)?\s*}\s*$', "}", s)
+        try:
+            parsed = json.loads(s2)
+        except json.JSONDecodeError:
+            return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _recover_leaked_tool_call(content: str, known_names):
@@ -805,8 +841,22 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 try:
                     arguments = json.loads(arguments)
                 except json.JSONDecodeError:
-                    logger.warning(f"{self}: Failed to parse function call arguments: {arguments}")
-                    continue
+                    # A generation that hits its token limit mid-arguments
+                    # leaves unterminated JSON. Repair (close the dangling
+                    # string/braces) and retry — a partially captured call
+                    # beats a dropped one, and blank fields are validated by
+                    # the application's own handlers.
+                    repaired = _repair_truncated_json(arguments)
+                    if repaired is None:
+                        logger.warning(
+                            f"{self}: Failed to parse function call arguments: {arguments}"
+                        )
+                        continue
+                    logger.warning(
+                        f"{self}: repaired truncated function call arguments: "
+                        f"{str(arguments)[:80]!r}"
+                    )
+                    arguments = repaired
 
                 # Drop a malformed web_search call with an empty/missing query
                 # before it can run (Tavily would 400 and the error result would
