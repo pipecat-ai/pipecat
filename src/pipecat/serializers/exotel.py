@@ -15,6 +15,8 @@ from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AudioRawFrame,
+    CancelFrame,
+    EndFrame,
     Frame,
     InputAudioRawFrame,
     InputDTMFFrame,
@@ -88,6 +90,8 @@ class ExotelFrameSerializer(FrameSerializer):
         """Serializes a Pipecat frame to Exotel WebSocket format.
 
         Handles conversion of various frame types to Exotel WebSocket messages.
+        Terminal frames are handled as lifecycle hooks without sending a message because
+        Exotel does not define a bot-originated termination event.
 
         Args:
             frame: The Pipecat frame to serialize.
@@ -95,7 +99,9 @@ class ExotelFrameSerializer(FrameSerializer):
         Returns:
             Serialized data as string or bytes, or None if the frame isn't handled.
         """
-        if isinstance(frame, InterruptionFrame):
+        if isinstance(frame, (EndFrame, CancelFrame)):
+            return None
+        elif isinstance(frame, InterruptionFrame):
             answer = {"event": "clear", "streamSid": self._stream_sid}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):
