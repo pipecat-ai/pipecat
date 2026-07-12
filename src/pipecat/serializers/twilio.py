@@ -16,8 +16,6 @@ from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import create_stream_resampler, pcm_to_ulaw, ulaw_to_pcm
 from pipecat.frames.frames import (
     AudioRawFrame,
-    CancelFrame,
-    EndFrame,
     Frame,
     InputAudioRawFrame,
     InputDTMFFrame,
@@ -27,6 +25,7 @@ from pipecat.frames.frames import (
     StartFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer
+from pipecat.serializers.base_telephony import AutoHangupFrameSerializer
 
 
 def _build_call_resource_url(
@@ -54,7 +53,7 @@ def _build_call_resource_url(
     return f"{root}/2010-04-01/Accounts/{account_sid}/Calls/{call_sid}.json"
 
 
-class TwilioFrameSerializer(FrameSerializer):
+class TwilioFrameSerializer(AutoHangupFrameSerializer):
     """Serializer for Twilio Media Streams WebSocket protocol.
 
     This serializer handles converting between Pipecat frames and Twilio's WebSocket
@@ -153,7 +152,6 @@ class TwilioFrameSerializer(FrameSerializer):
         self._output_resampler = create_stream_resampler(
             clear_after_secs=self._params.resampler_clear_after_secs
         )
-        self._hangup_attempted = False
 
     async def setup(self, frame: StartFrame):
         """Sets up the serializer with pipeline configuration.
@@ -175,13 +173,7 @@ class TwilioFrameSerializer(FrameSerializer):
         Returns:
             Serialized data as string or bytes, or None if the frame isn't handled.
         """
-        if (
-            self._params.auto_hang_up
-            and not self._hangup_attempted
-            and isinstance(frame, (EndFrame, CancelFrame))
-        ):
-            self._hangup_attempted = True
-            await self._hang_up_call()
+        if await self._maybe_hang_up(frame, enabled=self._params.auto_hang_up):
             return None
         elif isinstance(frame, InterruptionFrame):
             answer = {"event": "clear", "streamSid": self._stream_sid}

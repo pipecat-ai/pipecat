@@ -23,8 +23,6 @@ from pipecat.audio.utils import (
 )
 from pipecat.frames.frames import (
     AudioRawFrame,
-    CancelFrame,
-    EndFrame,
     Frame,
     InputAudioRawFrame,
     InputDTMFFrame,
@@ -32,9 +30,10 @@ from pipecat.frames.frames import (
     StartFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer
+from pipecat.serializers.base_telephony import AutoHangupFrameSerializer
 
 
-class TelnyxFrameSerializer(FrameSerializer):
+class TelnyxFrameSerializer(AutoHangupFrameSerializer):
     """Serializer for Telnyx WebSocket protocol.
 
     This serializer handles converting between Pipecat frames and Telnyx's WebSocket
@@ -114,7 +113,6 @@ class TelnyxFrameSerializer(FrameSerializer):
         self._output_resampler = create_stream_resampler(
             clear_after_secs=self._params.resampler_clear_after_secs
         )
-        self._hangup_attempted = False
 
     async def setup(self, frame: StartFrame):
         """Sets up the serializer with pipeline configuration.
@@ -139,13 +137,7 @@ class TelnyxFrameSerializer(FrameSerializer):
         Raises:
             ValueError: If an unsupported encoding is specified.
         """
-        if (
-            self._params.auto_hang_up
-            and not self._hangup_attempted
-            and isinstance(frame, (EndFrame, CancelFrame))
-        ):
-            self._hangup_attempted = True
-            await self._hang_up_call()
+        if await self._maybe_hang_up(frame, enabled=self._params.auto_hang_up):
             return None
         elif isinstance(frame, InterruptionFrame):
             answer = {"event": "clear"}
