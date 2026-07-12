@@ -48,8 +48,11 @@ class MiniMaxLLMService(OpenAILLMService):
 
         Args:
             api_key: The API key for accessing MiniMax's API.
-            base_url: The base URL for MiniMax API. Defaults to "https://api.minimax.io/v1".
-            model: The model identifier to use. Defaults to "MiniMax-M3".
+            base_url: The base URL for the MiniMax API. Defaults to the global endpoint
+                ``https://api.minimax.io/v1``. Use ``https://api.minimaxi.com/v1`` for
+                Mainland China.
+            model: The model identifier to use. Defaults to ``MiniMax-M3``. The
+                ``MiniMax-M2.7`` model is also supported.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=MiniMaxLLMService.Settings(model=...)`` instead.

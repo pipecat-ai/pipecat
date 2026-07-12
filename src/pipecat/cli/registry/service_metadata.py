@@ -562,12 +562,15 @@ class ServiceRegistry:
         ServiceDefinition(
             value="minimax_llm",
             label="MiniMax",
-            package="pipecat-ai",
+            package="pipecat-ai[minimax]",
             class_name=["MiniMaxLLMService"],
             env_prefix="MINIMAX",
-            include_params=["api_key"],
+            include_params=["api_key", "base_url"],
             settings_params=["model", "system_instruction"],
-            param_defaults={"model": "MiniMax-M3"},
+            param_defaults={
+                "base_url": "https://api.minimax.io/v1",
+                "model": "MiniMax-M3",
+            },
         ),
         ServiceDefinition(
             value="mistral_llm",
