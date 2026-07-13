@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import os
 import traceback
 import warnings
 from collections.abc import Awaitable, Callable
@@ -47,6 +48,13 @@ from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FrameP
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
+
+# Frame-push tracing is opt-in: the logger.trace() calls on the per-frame push
+# path run twice per frame hop (thousands of times per second per live
+# pipeline) and loguru builds their f-string arguments even when the TRACE
+# level is filtered out. Set PIPECAT_TRACE_FRAMES=1 (with a TRACE-level sink)
+# to enable them.
+_TRACE_FRAMES = os.getenv("PIPECAT_TRACE_FRAMES", "").lower() in ("1", "true", "yes")
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.frame_queue import FrameQueue
 
@@ -892,7 +900,8 @@ class FrameProcessor(BaseObject):
         try:
             timestamp = self._clock.get_time() if self._clock else 0
             if direction == FrameDirection.DOWNSTREAM and self._next:
-                logger.trace(f"Pushing {frame} downstream from {self} to {self._next}")
+                if _TRACE_FRAMES:
+                    logger.trace(f"Pushing {frame} downstream from {self} to {self._next}")
 
                 if self._observer:
                     data = FramePushed(
@@ -905,7 +914,8 @@ class FrameProcessor(BaseObject):
                     await self._observer.on_push_frame(data)
                 await self._next.queue_frame(frame, direction)
             elif direction == FrameDirection.UPSTREAM and self._prev:
-                logger.trace(f"Pushing {frame} upstream from {self} to {self._prev}")
+                if _TRACE_FRAMES:
+                    logger.trace(f"Pushing {frame} upstream from {self} to {self._prev}")
                 if self._observer:
                     data = FramePushed(
                         source=self,
