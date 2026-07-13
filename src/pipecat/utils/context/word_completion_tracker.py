@@ -295,8 +295,8 @@ class WordCompletionTracker:
         # alnum chars were consumed, or a segment that needs zero TTS alnum chars
         # (e.g. an inline IPA substitution that normalizes to no alnum content)
         # completed outright. For a pure non-alnum word that neither consumes
-        # chars nor completes a segment, advance() is a no-op and llm_pos is
-        # handled manually in the branch below.
+        # chars nor completes a segment, advance_word made no progress and
+        # llm_pos is handled manually in the branch below.
         if chars_for_frame > 0 or segment_completed_this_call:
             self._llm_pos = self._segment_map.llm_pos
 
@@ -329,9 +329,9 @@ class WordCompletionTracker:
                     self._llm_consumed = None
             elif chars_for_frame == 0 and not segment_completed_this_call:
                 # Non-alnum word (emoji, punctuation, symbol) that doesn't complete
-                # any segment: segment map advance(0) made no progress. Consume the
-                # raw word from llm_text, skipping any leading spaces that belong
-                # to the previous token's span.
+                # any segment: advance_word made no progress. Consume the raw word
+                # from llm_text, skipping any leading spaces that belong to the
+                # previous token's span.
                 start = self._llm_pos
                 while start < len(self._llm_text) and self._llm_text[start].isspace():
                     start += 1
@@ -382,6 +382,12 @@ class WordCompletionTracker:
         Used to detect when the TTS provider silently dropped a word-timestamp
         event: if the incoming word does not match this slot's remaining content,
         the caller should force-complete this slot and route the word to the next.
+
+        Args:
+            word: A single word token returned by the TTS service.
+
+        Returns:
+            True if the word plausibly belongs to the remaining TTS text.
         """
         content = self._segment_map.strip_word(word)
         if not content:

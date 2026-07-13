@@ -245,6 +245,12 @@ class TextSegmentMap:
 
         Non-mutating peek variant of :meth:`advance_word`'s stripping step, so
         callers can decide whether a word belongs here before consuming it.
+
+        Args:
+            word: Raw word token to strip.
+
+        Returns:
+            *word* with tag markup removed.
         """
         content, _ = _strip_tag_markup(word, self._in_open_tag)
         return content
@@ -377,7 +383,7 @@ class TextSegmentMap:
 
     @property
     def last_completed_segment(self) -> TextSegment | None:
-        """The segment completed by the last :meth:`advance` call, or ``None``."""
+        """The segment completed by the last :meth:`advance_word` call, or ``None``."""
         return self._last_completed
 
     def reset(self) -> None:
