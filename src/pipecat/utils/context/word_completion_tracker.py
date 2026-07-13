@@ -384,11 +384,11 @@ class WordCompletionTracker:
         the caller should force-complete this slot and route the word to the next.
         """
         content = self._segment_map.strip_word(word)
+        if not content:
+            return True
         normalized = self._normalize(content)
         if normalized:
             return self._alnum_word_belongs_here(normalized)
-        if content != word:
-            return True
         return self._symbol_word_belongs_here(word)
 
     def _alnum_word_belongs_here(self, normalized: str) -> bool:
