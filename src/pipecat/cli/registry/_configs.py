@@ -286,6 +286,15 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "requesty_llm": (
+        "RequestyLLMService(\n"
+        '        api_key=os.getenv("REQUESTY_API_KEY"),\n'
+        "        settings=RequestyLLMService.Settings(\n"
+        '            model=os.getenv("REQUESTY_MODEL"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "sambanova_llm": (
         "SambaNovaLLMService(\n"
         '        api_key=os.getenv("SAMBANOVA_API_KEY"),\n'

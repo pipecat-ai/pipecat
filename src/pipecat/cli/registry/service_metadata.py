@@ -642,6 +642,15 @@ class ServiceRegistry:
             settings_params=["model", "system_instruction"],
         ),
         ServiceDefinition(
+            value="requesty_llm",
+            label="Requesty",
+            package="pipecat-ai[requesty]",
+            class_name=["RequestyLLMService"],
+            env_prefix="REQUESTY",
+            include_params=["api_key"],
+            settings_params=["model", "system_instruction"],
+        ),
+        ServiceDefinition(
             value="sambanova_llm",
             label="SambaNova",
             package="pipecat-ai[sambanova]",

@@ -107,6 +107,7 @@ IMPORTS = {
     "openrouter_llm": ["from pipecat.services.openrouter.llm import OpenRouterLLMService"],
     "perplexity_llm": ["from pipecat.services.perplexity.llm import PerplexityLLMService"],
     "qwen_llm": ["from pipecat.services.qwen.llm import QwenLLMService"],
+    "requesty_llm": ["from pipecat.services.requesty.llm import RequestyLLMService"],
     "sambanova_llm": ["from pipecat.services.sambanova.llm import SambaNovaLLMService"],
     "sarvam_llm": ["from pipecat.services.sarvam.llm import SarvamLLMService"],
     "together_llm": ["from pipecat.services.together.llm import TogetherLLMService"],

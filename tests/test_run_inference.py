@@ -24,6 +24,7 @@ from pipecat.services.openai.responses.llm import (
     OpenAIResponsesLLMService,
 )
 from pipecat.services.openrouter.llm import OpenRouterLLMService
+from pipecat.services.requesty.llm import RequestyLLMService
 
 
 @pytest.mark.asyncio
@@ -111,6 +112,35 @@ async def test_openrouter_run_inference_converts_developer_messages_to_user():
     """Test OpenRouter requests convert developer messages for broad model compatibility."""
     with patch.object(OpenRouterLLMService, "create_client"):
         service = OpenRouterLLMService(settings=OpenRouterLLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        mock_context = MagicMock(spec=LLMContext)
+        mock_adapter = MagicMock()
+        mock_adapter.get_llm_invocation_params.return_value = OpenAILLMInvocationParams(
+            messages=[{"role": "user", "content": "Tool result"}],
+            tools=OPENAI_NOT_GIVEN,
+            tool_choice=OPENAI_NOT_GIVEN,
+        )
+        service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "Done"
+        service._client.chat.completions.create.return_value = mock_response
+
+        result = await service.run_inference(mock_context)
+
+        assert result == "Done"
+        mock_adapter.get_llm_invocation_params.assert_called_once_with(
+            mock_context, system_instruction=None, convert_developer_to_user=True
+        )
+
+
+@pytest.mark.asyncio
+async def test_requesty_run_inference_converts_developer_messages_to_user():
+    """Test Requesty requests convert developer messages for broad model compatibility."""
+    with patch.object(RequestyLLMService, "create_client"):
+        service = RequestyLLMService(settings=RequestyLLMService.Settings(model="gpt-4"))
         service._client = AsyncMock()
 
         mock_context = MagicMock(spec=LLMContext)
