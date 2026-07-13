@@ -90,41 +90,35 @@ class BaseUserTurnStartStrategy(BaseObject):
 
         For a start strategy this only ever ran at turn start, so its work *is*
         "on turn start" — which is exactly what :meth:`handle_user_turn_started`
-        names. New strategies override that callback directly.
+        names. New strategies should override that callback directly.
         """
         pass
 
     async def handle_user_turn_started(self):
         """Notify the strategy that a user turn has started.
 
-        The controller calls this on every start strategy when a turn begins —
-        the natural place for a start strategy to ready itself for the next
-        detection. Override to run the start logic. The default bridges to a
-        legacy :meth:`reset` override, if any, so pre-callback strategies keep
-        working.
+        The controller calls this on every start strategy when a turn begins.
+        Override to run, for example, logic to reset state and prepare for the
+        next detection.
         """
         await self._reset_via_deprecated_hook()
 
     async def handle_user_turn_stopped(self):
         """Notify the strategy that the user turn has stopped.
 
-        A no-op by default. Unlike a stop strategy, a start strategy is *not*
-        reset on turn stop: its per-turn work is turn-start semantic (e.g. a
-        wake-phrase strategy refreshes its keepalive timeout when a turn
-        starts), so running it on turn stop would be wrong. Override only for
-        the rare start strategy that must act on turn end.
+        The controller calls this on every start strategy when a turn ends.
+        Override if the strategy needs to act on turn end (likely uncommon).
         """
         pass
 
     async def _reset_via_deprecated_hook(self):
-        """Bridge the default callback to a legacy :meth:`reset` override.
+        """Bridge the ``handle_user_turn_started`` callback to a legacy :meth:`reset` override.
 
-        Pipecat's own strategies override :meth:`handle_user_turn_started` and
-        never reach this. A strategy written before that callback existed, still
-        overriding :meth:`reset`, keeps working: the default callback runs its
-        ``reset`` from here. Guarded on an actual override so strategies that
-        never touched ``reset`` (e.g. :class:`VADUserTurnStartStrategy`) stay
-        silent.
+        For backward compatibility with custom strategies written before the
+        callback existed: a strategy that still overrides :meth:`reset` keeps
+        working, since the default callback runs its ``reset`` from here.
+        Guarded on an actual override so strategies that never touched ``reset``
+        (Pipecat's own strategies, which override the callbacks) stay silent.
         """
         if type(self).reset is BaseUserTurnStartStrategy.reset:
             return

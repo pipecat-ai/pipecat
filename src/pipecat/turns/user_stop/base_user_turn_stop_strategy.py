@@ -88,20 +88,18 @@ class BaseUserTurnStopStrategy(BaseObject):
 
         A stop strategy is reset at both turn boundaries — armed on start,
         cleaned up on stop — so this historically ran at both. New strategies
-        override the boundary callbacks directly, which say plainly *when* the
-        work runs, and reset however they like inside them (a private helper
-        called from both, an extra ``clear()`` on stop, and so on).
+        should override the boundary callbacks directly, which say plainly
+        *when* the work runs, and reset however they like inside them (a private
+        helper called from both, an extra ``clear()`` on stop, and so on).
         """
         pass
 
     async def handle_user_turn_started(self):
         """Notify the strategy that a user turn has started.
 
-        The controller calls this on every stop strategy when a turn begins,
-        so the strategy can arm itself to detect the end of the turn now in
-        progress. Override to run the arming logic. The default bridges to a
-        legacy :meth:`reset` override, if any, so pre-callback strategies keep
-        working.
+        The controller calls this on every stop strategy when a turn begins.
+        Override to run, for example, logic to arm the strategy to detect the
+        end of the turn now in progress.
         """
         await self._reset_via_deprecated_hook()
 
@@ -111,21 +109,18 @@ class BaseUserTurnStopStrategy(BaseObject):
         The controller calls this on every stop strategy when a turn ends,
         regardless of which strategy (or the stop watchdog timeout) ended it.
         Override to run stop-specific logic — e.g. dropping a turn analyzer's
-        buffered speech that must not survive an externally-ended turn. The
-        default bridges to a legacy :meth:`reset` override, if any, so
-        pre-callback strategies keep working.
+        buffered speech that must not survive an externally-ended turn.
         """
         await self._reset_via_deprecated_hook()
 
     async def _reset_via_deprecated_hook(self):
-        """Bridge the default callbacks to a legacy :meth:`reset` override.
+        """Bridge the ``handle_user_turn_*`` callbacks to a legacy :meth:`reset` override.
 
-        Pipecat's own strategies override the ``handle_user_turn_*`` callbacks
-        and never reach this. A strategy written before those callbacks existed,
-        still overriding :meth:`reset`, keeps working: the default callbacks run
-        its ``reset`` from here. Guarded on an actual override so strategies that
-        never touched ``reset`` (e.g. :class:`ExternalUserTurnCompletionStopStrategy`)
-        stay silent.
+        For backward compatibility with custom strategies written before the
+        callbacks existed: a strategy that still overrides :meth:`reset` keeps
+        working, since the default callbacks run its ``reset`` from here.
+        Guarded on an actual override so strategies that never touched ``reset``
+        (Pipecat's own strategies, which override the callbacks) stay silent.
         """
         if type(self).reset is BaseUserTurnStopStrategy.reset:
             return
