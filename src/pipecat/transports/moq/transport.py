@@ -16,11 +16,17 @@ pipecat Frame pipeline.
 Each participant publishes under a per-participant broadcast path
 ``<namespace>/<participant_id>`` (e.g. ``pipecat/bot0``); the bot
 subscribes to the peer at ``<namespace>/<peer_id>``. Audio rides on a
-single Opus track; RTVI JSON rides on a fixed-name ``transcript.json``
-raw byte track (one message per group). The transcript is a side-channel,
-like moq-boy's ``status``/``command`` tracks: it deliberately bypasses
-the catalog (which only describes media renditions), so the browser
-reads it by the well-known name rather than by catalog discovery.
+single Opus track; RTVI JSON rides on a fixed-name ``transcript.json.z``
+track carried by moq's JSON stream helper (``publish_json_stream`` /
+``subscribe_json_stream``). The stream is an ordered, lossless append-log
+of records — every message is delivered in order, unlike the JSON
+*snapshot* helper (``publish_json`` / ``subscribe_json``) which collapses
+to the latest value and would drop RTVI events a slow consumer fell
+behind on. Compression is enabled (hence the ``.z`` suffix). The
+transcript is a side-channel, like moq-boy's ``status``/``command``
+tracks: it deliberately bypasses the catalog (which only describes media
+renditions), so the browser reads it by the well-known name rather than
+by catalog discovery.
 
 Both directions carry the same shape: the bot publishes bot-side RTVI
 events on its own ``transcript`` track and subscribes to the client's
@@ -50,7 +56,6 @@ announcement (no ``/start`` control plane), see :mod:`pipecat.transports.moq.age
 """
 
 import asyncio
-import json
 import time
 from dataclasses import dataclass
 from enum import IntEnum
@@ -89,10 +94,12 @@ DEFAULT_PARTICIPANT_ID = "bot0"
 DEFAULT_PEER_ID = "client0"
 DEFAULT_AUDIO_OUT_TRACK = "bot-audio"
 # Fixed-name JSON side-channel track (cf. ``catalog.json``). Carries RTVI
-# events, one JSON message per group. Not a catalog rendition, so the
-# browser subscribes by this well-known name. Delta-encoding (moq-json) does
-# not apply: RTVI is a stream of discrete events, not a mutating document.
-DEFAULT_TRANSCRIPT_TRACK = "transcript.json"
+# events as a lossless, ordered append-log via moq's JSON stream helper —
+# not the JSON *snapshot* helper, which collapses to the latest value and
+# would drop events a slow consumer fell behind on. Not a catalog
+# rendition, so the browser subscribes by this well-known name. The ``.z``
+# suffix marks that the stream is compressed on the wire.
+DEFAULT_TRANSCRIPT_TRACK = "transcript.json.z"
 
 # Pin the Opus wire rate to its highest supported internal rate (Opus
 # supports {8, 12, 16, 24, 48} kHz). Chrome's WebCodecs Opus decoder
@@ -173,8 +180,10 @@ class MOQParams(TransportParams):
             to: ``<namespace>/<peer_id>``.
         audio_out_track: Name of the bot's outgoing audio track.
         transcript_track: Name of the bot's outgoing transcript track. A
-            fixed-name raw byte track carrying RTVI JSON (one message per
-            group), discovered by convention rather than via the catalog.
+            fixed-name JSON stream track carrying RTVI messages as a
+            lossless, ordered append-log (moq's ``publish_json_stream`` /
+            ``subscribe_json_stream``, compression on), discovered by
+            convention rather than via the catalog.
         verify_ssl: Verify the relay's TLS certificate. Client mode only.
         connection_timeout: Seconds to wait for the peer broadcast to be
             announced before giving up.
@@ -290,8 +299,8 @@ class MOQInputTransport(BaseInputTransport):
     async def push_received_message(self, message: dict):
         """Push a received RTVI message to :class:`RTVIProcessor` upstream.
 
-        Called by the backend's transcript drain loop for every JSON frame
-        delivered on the peer's transcript track. ``RTVIProcessor`` sits
+        Called by the backend's transcript drain loop for every record
+        delivered on the peer's transcript stream. ``RTVIProcessor`` sits
         upstream of this input transport (it's prepended by
         :class:`PipelineWorker` when ``enable_rtvi=True``), so pushing
         upstream is the direct route.
@@ -367,12 +376,9 @@ class MOQOutputTransport(BaseOutputTransport):
     async def send_message(
         self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
     ):
-        """Publish a transport message (RTVI JSON) on the transcript track."""
-        payload = frame.message
-        if not isinstance(payload, (bytes, bytearray)):
-            payload = json.dumps(payload).encode("utf-8")
+        """Publish a transport message (RTVI JSON) on the transcript stream."""
         try:
-            self._moq_transport.publish_transcript(bytes(payload))
+            self._moq_transport.publish_transcript(frame.message)
         except Exception as e:
             logger.warning(f"Failed to publish transport message: {e}")
 
@@ -454,8 +460,12 @@ class MOQTransport(BaseTransport):
         # so MOQOutputTransport.start() can publish_audio + write
         # transcript frames without racing with _run()'s async bring-up.
         self._publish_broadcast: moq.BroadcastProducer = moq.BroadcastProducer()
-        self._transcript_out: moq.TrackProducer = self._publish_broadcast.publish_track(
-            params.transcript_track
+        # Lossless, ordered JSON append-log for RTVI (compression on). The
+        # stream helper delivers every appended record in order — the
+        # snapshot helper (publish_json) would collapse to the latest value
+        # and drop events a slow consumer fell behind on.
+        self._transcript_out: moq.JsonStreamProducer = self._publish_broadcast.publish_json_stream(
+            params.transcript_track, compression=True
         )
         # Audio track is opened lazily once the pipeline's output sample
         # rate is known (in :meth:`open_audio_track`). We stash the rate
@@ -597,9 +607,14 @@ class MOQTransport(BaseTransport):
         self._audio_out.write(moq.AudioFrame(timestamp_us=self._publish_pts_us, data=audio))
         self._publish_pts_us += int(duration_s * 1_000_000)
 
-    def publish_transcript(self, payload: bytes):
-        """Write a transcript payload (RTVI JSON) to the transcript track."""
-        self._transcript_out.write_frame(payload)
+    def publish_transcript(self, message):
+        """Append an RTVI message to the transcript JSON stream.
+
+        ``message`` is a JSON-serializable value (the RTVI message dict);
+        the stream helper serializes and frames it, appending one record
+        to the ordered log so no message is dropped.
+        """
+        self._transcript_out.append(message)
 
     @property
     def cert_fingerprints(self) -> list[str]:
@@ -842,12 +857,14 @@ class MOQTransport(BaseTransport):
             pass
 
     async def _forward_peer_transcript(self, peer_broadcast: "moq.BroadcastConsumer"):
-        """Subscribe to the peer's transcript track and forward RTVI JSON messages inbound.
+        """Subscribe to the peer's transcript stream and forward RTVI messages inbound.
 
-        Symmetric with the bot's own ``transcript`` track (see
-        :meth:`publish_transcript`): the client writes each RTVI message
-        as a single-frame group; we read them off and push each one into
-        the pipeline as an :class:`InputTransportMessageFrame`, which the
+        Symmetric with the bot's own ``transcript`` stream (see
+        :meth:`publish_transcript`): the client appends each RTVI message
+        as a record on the JSON stream; the ``subscribe_json_stream``
+        consumer yields them, already parsed, in order — every message,
+        losslessly. We push each into the pipeline as an
+        :class:`InputTransportMessageFrame`, which the
         :class:`RTVIProcessor` then handles the same way as any other
         transport. This is what lets ``client-ready`` (for protocol
         version negotiation), typed text input, function-call results,
@@ -855,22 +872,14 @@ class MOQTransport(BaseTransport):
         """
         track_name = self._params.transcript_track
         logger.info(f"MOQ: subscribing to peer transcript {track_name!r}")
-        consumer = self._track(peer_broadcast.subscribe_track(track_name))
+        consumer = self._track(peer_broadcast.subscribe_json_stream(track_name, compression=True))
         try:
-            while True:
-                frame_bytes = await consumer.read_frame()
-                if frame_bytes is None:
-                    break
+            async for message in consumer:
                 if self._input is None:
-                    continue
-                try:
-                    message = json.loads(frame_bytes)
-                except (ValueError, UnicodeDecodeError) as e:
-                    logger.warning(f"MOQ: malformed client transcript frame: {e}")
                     continue
                 if not isinstance(message, dict):
                     logger.warning(
-                        f"MOQ: expected RTVI object on transcript track, got {type(message).__name__}"
+                        f"MOQ: expected RTVI object on transcript stream, got {type(message).__name__}"
                     )
                     continue
                 await self._input.push_received_message(message)
