@@ -6,6 +6,7 @@
 
 import asyncio
 import unittest
+import warnings
 from unittest.mock import MagicMock
 
 from pipecat.frames.frames import (
@@ -393,14 +394,36 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(TRANSCRIPTION_TIMEOUT + 0.1)
         self.assertEqual(stop_count, 2)
 
-    async def test_handle_user_turn_stopped_called_on_strategy_stop(self):
-        """handle_user_turn_stopped() runs when a stop strategy ends the turn, never at start.
+    async def test_turn_start_notifies_start_and_stop_strategies(self):
+        """Turn start calls handle_user_turn_started on both start and stop strategies."""
+        started = []
 
-        Unlike reset(), which runs at both turn start and turn stop, the
-        stop callback must only fire on turn end so strategies can drop
-        state that must not survive an externally-ended turn (e.g. a turn
-        analyzer's buffered speech).
-        """
+        class SpyStart(VADUserTurnStartStrategy):
+            async def handle_user_turn_started(self):
+                started.append("start")
+
+        class SpyStop(SpeechTimeoutUserTurnStopStrategy):
+            async def handle_user_turn_started(self):
+                await super().handle_user_turn_started()
+                started.append("stop")
+
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[SpyStart()],
+                stop=[SpyStop(user_speech_timeout=TRANSCRIPTION_TIMEOUT)],
+            ),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(self.task_manager)
+
+        self.assertEqual(started, [])
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+        self.assertEqual(started, ["start", "stop"])
+
+        await controller.cleanup()
+
+    async def test_handle_user_turn_stopped_called_on_strategy_stop(self):
+        """handle_user_turn_stopped() runs on a stop strategy when it ends the turn, never at start."""
         finalized = 0
 
         class SpyStopStrategy(SpeechTimeoutUserTurnStopStrategy):
@@ -459,52 +482,93 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
 
         await controller.cleanup()
 
-    async def test_turn_analyzer_cleared_on_handle_user_turn_stopped(self):
-        """TurnAnalyzerUserTurnStopStrategy clears its analyzer when the turn ends."""
+    async def test_start_strategy_not_reset_on_turn_stop(self):
+        """A start strategy's handle_user_turn_stopped is a no-op (the deliberate asymmetry).
+
+        Start strategies are armed on turn start but never reset on turn stop:
+        their reset is turn-start semantic (e.g. WakePhrase refreshes its
+        keepalive timeout), so a stop-side reset would be wrong.
+        """
+        resets = 0
+
+        class LegacyStart(VADUserTurnStartStrategy):
+            async def reset(self):  # the deprecated hook
+                nonlocal resets
+                resets += 1
+
+        strategy = LegacyStart()
+
+        # Arming on turn start bridges to reset()...
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            await strategy.handle_user_turn_started()
+        self.assertEqual(resets, 1)
+
+        # ...but turn stop does not touch it.
+        await strategy.handle_user_turn_stopped()
+        self.assertEqual(resets, 1)
+
+    async def test_stop_strategy_reset_bridged_on_both_callbacks(self):
+        """A stop strategy's reset() is bridged on both turn boundaries (armed, then cleaned)."""
+        resets = 0
+
+        class LegacyStop(ExternalUserTurnCompletionStopStrategy):
+            async def reset(self):  # the deprecated hook
+                nonlocal resets
+                resets += 1
+
+        strategy = LegacyStop()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            await strategy.handle_user_turn_started()
+            await strategy.handle_user_turn_stopped()
+        self.assertEqual(resets, 2)
+
+    async def test_legacy_reset_override_warns(self):
+        """Overriding the deprecated reset() keeps working but warns."""
+
+        class LegacyStop(ExternalUserTurnCompletionStopStrategy):
+            async def reset(self):
+                pass
+
+        with self.assertWarns(DeprecationWarning):
+            await LegacyStop().handle_user_turn_started()
+
+    async def test_migrated_strategy_does_not_warn(self):
+        """A strategy overriding the callbacks (not reset) never trips the deprecation."""
+        strategy = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+        await strategy.setup(self.task_manager)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            await strategy.handle_user_turn_started()
+            await strategy.handle_user_turn_stopped()
+        await strategy.cleanup()
+
+    async def test_turn_analyzer_cleared_on_stop_but_not_start(self):
+        """The analyzer is cleared when the turn ends, but not when it starts.
+
+        Clearing on start would drop the continuously-fed pre-speech buffer;
+        that's the whole reason the clear can't live in the shared reset.
+        """
         analyzer = MagicMock()
         strategy = TurnAnalyzerUserTurnStopStrategy(turn_analyzer=analyzer)
 
-        await strategy.handle_user_turn_stopped()
+        await strategy.handle_user_turn_started()
+        analyzer.clear.assert_not_called()
 
+        await strategy.handle_user_turn_stopped()
         analyzer.clear.assert_called_once()
 
-    async def test_deferred_forwards_handle_user_turn_stopped(self):
-        """The deferred() wrapper forwards the stop callback to its inner strategy."""
+    async def test_deferred_forwards_both_callbacks(self):
+        """The deferred() wrapper forwards both callbacks to its inner strategy."""
         analyzer = MagicMock()
         strategy = deferred(TurnAnalyzerUserTurnStopStrategy(turn_analyzer=analyzer))
 
+        await strategy.handle_user_turn_started()
+        analyzer.clear.assert_not_called()
+
         await strategy.handle_user_turn_stopped()
-
         analyzer.clear.assert_called_once()
-
-    async def test_handle_user_turn_started_called_on_turn_start(self):
-        """handle_user_turn_started() runs when a turn starts, before reset()."""
-        calls = []
-
-        class SpyStartStrategy(VADUserTurnStartStrategy):
-            async def handle_user_turn_started(self):
-                await super().handle_user_turn_started()
-                calls.append("handle_user_turn_started")
-
-            async def reset(self):
-                await super().reset()
-                calls.append("reset")
-
-        controller = UserTurnController(
-            user_turn_strategies=UserTurnStrategies(
-                start=[SpyStartStrategy()],
-                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)],
-            ),
-            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
-        )
-        await controller.setup(self.task_manager)
-
-        self.assertEqual(calls, [])
-
-        await controller.process_frame(VADUserStartedSpeakingFrame())
-        self.assertEqual(calls, ["handle_user_turn_started", "reset"])
-
-        await controller.cleanup()
 
 
 if __name__ == "__main__":

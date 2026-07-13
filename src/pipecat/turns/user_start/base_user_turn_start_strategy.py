@@ -6,6 +6,7 @@
 
 """Base turn start strategy for determining when the user starts speaking."""
 
+import warnings
 from dataclasses import dataclass
 
 from pipecat.frames.frames import Frame
@@ -81,20 +82,60 @@ class BaseUserTurnStartStrategy(BaseObject):
         pass
 
     async def reset(self):
-        """Reset the strategy to its initial state."""
+        """Reset the strategy to its initial state.
+
+        .. deprecated:: 1.6.0
+            Use :meth:`handle_user_turn_started` instead. Will be removed in
+            2.0.0.
+
+        For a start strategy this only ever ran at turn start, so its work *is*
+        "on turn start" — which is exactly what :meth:`handle_user_turn_started`
+        names. New strategies override that callback directly.
+        """
         pass
 
     async def handle_user_turn_started(self):
-        """Notify the strategy that a user turn start has taken effect.
+        """Notify the strategy that a user turn has started.
 
-        Counterpart to :meth:`trigger_user_turn_started`: that method *signals*
-        the controller that this strategy detected a turn start; this callback
-        is the controller *notifying* the strategy that the start is now in
-        effect, regardless of which start strategy triggered it. Runs
-        immediately before :meth:`reset`, so the strategy can act on state it
-        accumulated up to the trigger before reset clears it for the new turn.
+        The controller calls this on every start strategy when a turn begins —
+        the natural place for a start strategy to ready itself for the next
+        detection. Override to run the start logic. The default bridges to a
+        legacy :meth:`reset` override, if any, so pre-callback strategies keep
+        working.
+        """
+        await self._reset_via_deprecated_hook()
+
+    async def handle_user_turn_stopped(self):
+        """Notify the strategy that the user turn has stopped.
+
+        A no-op by default. Unlike a stop strategy, a start strategy is *not*
+        reset on turn stop: its per-turn work is turn-start semantic (e.g. a
+        wake-phrase strategy refreshes its keepalive timeout when a turn
+        starts), so running it on turn stop would be wrong. Override only for
+        the rare start strategy that must act on turn end.
         """
         pass
+
+    async def _reset_via_deprecated_hook(self):
+        """Bridge the default callback to a legacy :meth:`reset` override.
+
+        Pipecat's own strategies override :meth:`handle_user_turn_started` and
+        never reach this. A strategy written before that callback existed, still
+        overriding :meth:`reset`, keeps working: the default callback runs its
+        ``reset`` from here. Guarded on an actual override so strategies that
+        never touched ``reset`` (e.g. :class:`VADUserTurnStartStrategy`) stay
+        silent.
+        """
+        if type(self).reset is BaseUserTurnStartStrategy.reset:
+            return
+        warnings.warn(
+            f"Overriding `reset` in `{type(self).__name__}` is deprecated since "
+            "1.6.0 and will be removed in 2.0.0. Override `handle_user_turn_started` "
+            "instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        await self.reset()
 
     async def process_frame(self, frame: Frame) -> ProcessFrameResult | None:
         """Process an incoming frame.

@@ -147,15 +147,14 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
             await self.task_manager.cancel_task(self._timeout_task)
             self._timeout_task = None
 
-    async def reset(self):
-        """Reset the strategy.
+    async def handle_user_turn_started(self):
+        """Ready the strategy for a new user turn.
 
-        In timeout mode, preserves state and refreshes timeout since reset
-        means a turn started (activity). In single activation mode, does
-        nothing — the keepalive timeout (started when the wake phrase was
-        detected) handles the transition back to IDLE.
+        In timeout mode, preserves state and refreshes the timeout — a turn
+        starting is the activity that keeps the strategy awake. In single
+        activation mode, does nothing: the keepalive timeout (started when the
+        wake phrase was detected) handles the transition back to IDLE.
         """
-        await super().reset()
         if self._state == _WakeState.AWAKE:
             if not self._single_activation:
                 self._refresh_timeout()
