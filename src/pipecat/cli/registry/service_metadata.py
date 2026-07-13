@@ -560,8 +560,21 @@ class ServiceRegistry:
             settings_params=["model", "system_instruction"],
         ),
         ServiceDefinition(
+            value="minimax_anthropic_llm",
+            label="MiniMax (Anthropic-compatible)",
+            package="pipecat-ai[anthropic]",
+            class_name=["MiniMaxAnthropicLLMService"],
+            env_prefix="MINIMAX",
+            include_params=["api_key", "base_url"],
+            settings_params=["model", "system_instruction"],
+            param_defaults={
+                "base_url": "https://api.minimax.io/anthropic",
+                "model": "MiniMax-M3",
+            },
+        ),
+        ServiceDefinition(
             value="minimax_llm",
-            label="MiniMax",
+            label="MiniMax (OpenAI-compatible)",
             package="pipecat-ai[minimax]",
             class_name=["MiniMaxLLMService"],
             env_prefix="MINIMAX",

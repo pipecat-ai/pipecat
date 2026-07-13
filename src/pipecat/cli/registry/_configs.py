@@ -206,6 +206,16 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "minimax_anthropic_llm": (
+        "MiniMaxAnthropicLLMService(\n"
+        '        api_key=os.getenv("MINIMAX_API_KEY"),\n'
+        '        base_url=os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/anthropic"),\n'
+        "        settings=MiniMaxAnthropicLLMService.Settings(\n"
+        '            model=os.getenv("MINIMAX_MODEL", "MiniMax-M3"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "minimax_llm": (
         "MiniMaxLLMService(\n"
         '        api_key=os.getenv("MINIMAX_API_KEY"),\n'

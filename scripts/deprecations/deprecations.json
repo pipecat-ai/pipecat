@@ -2280,6 +2280,28 @@
       "location": "pipecat/services/mem0/memory.py"
     },
     {
+      "subject": "MiniMaxAnthropicLLMService.model",
+      "module": "pipecat.services.minimax.anthropic_llm",
+      "kind": "parameter",
+      "deprecated_in": "0.0.105",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "settings=MiniMaxAnthropicLLMService.Settings(model=...)",
+      "message": "Use ``settings=MiniMaxAnthropicLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/minimax/anthropic_llm.py"
+    },
+    {
+      "subject": "MiniMaxLLMService.model",
+      "module": "pipecat.services.minimax.llm",
+      "kind": "parameter",
+      "deprecated_in": "0.0.105",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "settings=MiniMaxLLMService.Settings(model=...)",
+      "message": "Use ``settings=MiniMaxLLMService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/minimax/llm.py"
+    },
+    {
       "subject": "MiniMaxHttpTTSService.InputParams",
       "module": "pipecat.services.minimax.tts",
       "kind": "class",
