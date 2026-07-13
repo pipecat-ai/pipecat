@@ -59,6 +59,12 @@ STREAM_CHUNK_TIMEOUT_SECS = 15
 # connection. Cleanup over a dead socket can otherwise hang un-cancellably.
 STREAM_CLEANUP_TIMEOUT_SECS = 2
 
+# How many times to re-run a generation that came back empty (no text, no tool
+# call) before giving up to idle handling. One retry was too few for a model
+# that empties transiently (Gemma-4 stalled a live turn after a single failed
+# retry); each retry is a fresh attempt and only fires on an otherwise-dead turn.
+MAX_EMPTY_COMPLETION_RETRIES = 3
+
 
 def _repair_truncated_json(text) -> Optional[dict]:
     """Best-effort repair of a JSON object cut off mid-generation.
@@ -526,7 +532,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         # _recover_leaked_tool_call. tool_choice="required" (routing nodes) is
         # exempt — those force the structured path server-side and need the call.
         if (
-            getattr(self, "_empty_retry_in_flight", False)
+            getattr(self, "_empty_retry_depth", 0) > 0
             and params.get("tools")
             and params.get("tool_choice") != "required"
         ):
@@ -809,24 +815,28 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             self._tool_call_rounds_this_turn >= self._max_tool_call_rounds_per_turn
         )
         # EMPTY-GENERATION RETRY: no text and no tool call = a dead turn — the
-        # caller hears silence and unanswered messages pile up (two
-        # consecutive empty completions swallowed a booking slot and a phone
-        # number on a live flow). Retry the same context once; a second empty
-        # result stands (upstream idle handling takes over).
+        # caller hears silence and unanswered messages pile up (two consecutive
+        # empty completions swallowed a booking slot and a phone number on a live
+        # flow; wf15 run 1893 stalled at the party node after ONE empty + one
+        # failed retry). A single retry is not enough for a model that empties
+        # transiently (Gemma-4): retry up to MAX_EMPTY_COMPLETION_RETRIES, each a
+        # fresh attempt on the same context, before giving up to idle handling.
+        # Healthy turns never reach here, so this adds latency only to a turn that
+        # would otherwise have gone silent.
         if (
             not function_name
             and not content_buffer.strip()
-            and not getattr(self, "_empty_retry_in_flight", False)
+            and getattr(self, "_empty_retry_depth", 0) < MAX_EMPTY_COMPLETION_RETRIES
         ):
-            self._empty_retry_in_flight = True
+            self._empty_retry_depth = getattr(self, "_empty_retry_depth", 0) + 1
             try:
                 logger.warning(
                     f"{self}: empty completion (no text, no tool calls) — "
-                    f"retrying the generation once"
+                    f"retry {self._empty_retry_depth}/{MAX_EMPTY_COMPLETION_RETRIES}"
                 )
                 await self._process_context(context)
             finally:
-                self._empty_retry_in_flight = False
+                self._empty_retry_depth -= 1
             return
 
         # What the caller actually HEARS this turn. For a recovered leaked call
