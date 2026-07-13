@@ -7,6 +7,8 @@
 """Speech timeout-based user turn stop strategy."""
 
 import asyncio
+from collections.abc import Sequence
+from typing import Optional
 
 from loguru import logger
 
@@ -43,18 +45,43 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
     (rearmed on each transcript). stt_timeout has no meaning here since it
     is defined relative to VAD stop, and STT has already emitted a
     transcript — so the stt wait is marked done immediately.
+
+    Incomplete-utterance hold (optional): when the accumulated transcript
+    ends mid-thought — a trailing comma/dash, or a final word from
+    ``hold_endings`` (conjunctions, prepositions, hesitations for the
+    deployment's language) — the trigger is deferred once per speech
+    fragment by ``incomplete_hold_secs``, giving the user room to finish
+    ("…because I have <pause> five minutes"). Complete-sounding utterances
+    pay no extra latency. Disabled by default.
     """
 
-    def __init__(self, *, user_speech_timeout: float = 0.6, **kwargs):
+    def __init__(
+        self,
+        *,
+        user_speech_timeout: float = 0.6,
+        incomplete_hold_secs: float = 0.0,
+        hold_endings: Optional[Sequence[str]] = None,
+        **kwargs,
+    ):
         """Initialize the speech timeout-based user turn stop strategy.
 
         Args:
             user_speech_timeout: Time to wait for the user to potentially
                 say more after they pause speaking. Defaults to 0.6 seconds.
+            incomplete_hold_secs: Extra time to hold the turn open when the
+                transcript so far ends mid-thought (see ``hold_endings``).
+                0 (the default) disables the hold.
+            hold_endings: Final words/phrases that mark an utterance as
+                unfinished (language-specific; matched on word boundaries
+                after trailing punctuation is stripped). A trailing comma,
+                colon, or dash always counts as unfinished.
             **kwargs: Additional keyword arguments.
         """
         super().__init__(**kwargs)
         self._user_speech_timeout = user_speech_timeout
+        self._incomplete_hold_secs = incomplete_hold_secs
+        self._hold_endings = tuple(hold_endings or ())
+        self._hold_spent = False
         self._stt_timeout: float = 0.0  # STT P99 latency from STTMetadataFrame
         self._stop_secs: float = 0.0  # VAD stop_secs from VADUserStoppedSpeakingFrame
         self._stop_secs_warned: bool = False
@@ -78,6 +105,7 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._vad_stopped_time = None
         self._user_speech_wait_done = False
         self._stt_wait_done = False
+        self._hold_spent = False
         await self._cancel_all_tasks()
 
     async def setup(self, task_manager: BaseTaskManager):
@@ -126,6 +154,8 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._vad_stopped_time = None
         self._user_speech_wait_done = False
         self._stt_wait_done = False
+        # New speech fragment → it earns its own incomplete-utterance hold.
+        self._hold_spent = False
         await self._cancel_all_tasks()
 
     async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
@@ -173,6 +203,11 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
     async def _handle_transcription(self, frame: TranscriptionFrame):
         """Handle user transcription."""
         self._text += frame.text
+        if frame.text.strip():
+            # New words are a new speech fragment — it earns its own
+            # incomplete-utterance hold (soft speech can arrive without a
+            # VAD start, so the VAD reset alone would miss it).
+            self._hold_spent = False
 
         if frame.finalized:
             self._transcript_finalized = True
@@ -247,13 +282,50 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         Both timers must be done (stt is marked done immediately on the
         fallback path and when finalization short-circuits the safety net),
         the user must not be currently speaking, and at least one transcript
-        must have been received.
+        must have been received. An utterance that ends mid-thought defers
+        the trigger once per speech fragment (see incomplete_hold_secs).
         """
         if self._vad_user_speaking or not self._text:
             return
 
         if self._user_speech_wait_done and self._stt_wait_done:
+            if (
+                self._incomplete_hold_secs > 0
+                and not self._hold_spent
+                and self._looks_incomplete(self._text)
+            ):
+                self._hold_spent = True
+                logger.debug(
+                    f"{self}: transcript ends mid-thought — holding the turn "
+                    f"open another {self._incomplete_hold_secs}s"
+                )
+                self._user_speech_wait_done = False
+                self._user_speech_timeout_task = self.task_manager.create_task(
+                    self._user_speech_timeout_handler(self._incomplete_hold_secs),
+                    f"{self}::_user_speech_timeout_handler",
+                )
+                return
             await self.trigger_user_turn_stopped()
+
+    # Trailing marks that never end a finished utterance (comma/colon/dash),
+    # vs. terminal punctuation stripped before the word-boundary match.
+    _UNFINISHED_TRAILING = (",", ":", "-", "–", "—", "־")
+    _TERMINAL_PUNCTUATION = ".,!?;:…'\"״׳)]-–—־ \t\n"
+
+    def _looks_incomplete(self, text: str) -> bool:
+        """Whether the transcript so far sounds like an unfinished thought."""
+        stripped = text.rstrip()
+        if not stripped:
+            return False
+        if stripped.endswith(self._UNFINISHED_TRAILING):
+            return True
+        stripped = stripped.rstrip(self._TERMINAL_PUNCTUATION)
+        for ending in self._hold_endings:
+            if stripped.endswith(ending):
+                prefix = stripped[: -len(ending)]
+                if not prefix or not prefix[-1].isalnum():
+                    return True
+        return False
 
     async def _cancel_all_tasks(self):
         """Cancel any running timer tasks and clear the handles."""
