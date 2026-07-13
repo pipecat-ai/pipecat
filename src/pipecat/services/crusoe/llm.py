@@ -56,7 +56,7 @@ class CrusoeLLMService(OpenAILLMService):
         """
         # Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="nvidia/NVIDIA-Nemotron-3-Ultra-550B",
+            model="zai/GLM-5.2",
         )
 
         # Apply settings delta (canonical API, always wins)
