@@ -1159,6 +1159,67 @@ class TestWordCompletionTrackerEmojiInSentence(unittest.TestCase):
         self.assertTrue(tracker.is_complete)
 
 
+class TestWordCompletionTrackerMultiAttributeSsmlTag(unittest.TestCase):
+    """SSML tags whose opening tag contains internal whitespace (e.g. multiple
+    attributes) can arrive split across several TTS word-timestamp events, since
+    some providers tokenize on whitespace without tag awareness. ElevenLabs'
+    phoneme tag (``<phoneme alphabet="ipa" ph="...">word</phoneme>``, see
+    https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices)
+    is a real-world example: the opening tag alone is reported as three separate
+    words (``<phoneme``, ``alphabet="ipa"``, then the closing ``ph="...">word...``).
+    """
+
+    TTS_TEXT = 'My name is <phoneme alphabet="ipa" ph="ʃəˈvɔːn">Siobhan</phoneme>.'
+    # Fragments exactly as ElevenLabs reports them: the multi-attribute opening
+    # tag is split at each internal space into its own "word".
+    WORDS = [
+        "My",
+        "name",
+        "is",
+        "<phoneme",
+        'alphabet="ipa"',
+        'ph="ʃəˈvɔːn">Siobhan</phoneme>.',
+    ]
+
+    def test_tag_fragments_belong_to_the_frame(self):
+        """Each fragment of the still-open tag must be recognised as belonging
+        to this frame rather than routed elsewhere as passthrough."""
+        tracker = WordCompletionTracker(self.TTS_TEXT)
+        for word in self.WORDS[:3]:
+            tracker.add_word_and_check_complete(word)
+        for word in self.WORDS[3:]:
+            self.assertTrue(
+                tracker.word_belongs_here(word),
+                f"{word!r} is part of the open <phoneme> tag and must belong here",
+            )
+            tracker.add_word_and_check_complete(word)
+
+    def test_does_not_force_complete_on_tag_open_fragment(self):
+        """The opening '<phoneme' fragment must not force-complete the slot —
+        the tag isn't closed yet, so 'Siobhan' hasn't been spoken."""
+        tracker = WordCompletionTracker(self.TTS_TEXT)
+        for word in self.WORDS[:3]:
+            tracker.add_word_and_check_complete(word)
+        result = tracker.add_word_and_check_complete("<phoneme")
+        self.assertFalse(result, "tag isn't closed yet; frame must not be complete")
+
+    def test_completes_only_after_closing_fragment(self):
+        """Only the final fragment (which closes the tag) should complete the slot."""
+        tracker = WordCompletionTracker(self.TTS_TEXT)
+        results = [tracker.add_word_and_check_complete(w) for w in self.WORDS]
+        self.assertEqual(results, [False, False, False, False, False, True])
+
+    def test_llm_consumed_maps_tag_fragments_to_original_word(self):
+        """With llm_text tracking, the tag fragments must all map back to the
+        single original word 'Siobhan.' rather than losing the span."""
+        llm_text = "My name is Siobhan."
+        tracker = WordCompletionTracker(self.TTS_TEXT, llm_text=llm_text)
+        for word in self.WORDS[:-1]:
+            tracker.add_word_and_check_complete(word)
+        tracker.add_word_and_check_complete(self.WORDS[-1])
+        self.assertEqual(tracker.get_llm_consumed(), "Siobhan.")
+
+
 class TestWordCompletionTrackerRemainingText(unittest.TestCase):
     """Tests for get_remaining_tts_text() and get_remaining_llm_text().
 

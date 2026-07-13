@@ -61,54 +61,47 @@ class TestTextSegmentMapAdvance(unittest.TestCase):
 
     def test_unchanged_words_advance_user_facing_pos(self):
         smap = self._make_currency_map()
-        smap.advance(4)  # Your
+        smap.advance_word("Your")
         self.assertGreater(smap.user_facing_pos, 0)
         self.assertFalse(smap.in_transformed_segment)
 
     def test_in_transformed_segment_true_mid_segment(self):
         smap = self._make_currency_map()
-        smap.advance(4)  # Your
-        smap.advance(7)  # balance
-        smap.advance(2)  # is
-        smap.advance(5)  # forty — enters transformed segment
+        smap.advance_word("Your")
+        smap.advance_word("balance")
+        smap.advance_word("is")
+        smap.advance_word("forty")  # enters transformed segment
         self.assertTrue(smap.in_transformed_segment)
 
     def test_cursors_held_during_transformed_segment(self):
         smap = self._make_currency_map()
-        smap.advance(4)
-        smap.advance(7)
-        smap.advance(2)
+        smap.advance_word("Your")
+        smap.advance_word("balance")
+        smap.advance_word("is")
         pos_before = smap.user_facing_pos
-        smap.advance(5)  # forty
-        smap.advance(3)  # two
+        smap.advance_word("forty")
+        smap.advance_word("two")
         self.assertEqual(smap.user_facing_pos, pos_before)
 
     def test_cursors_jump_on_segment_completion(self):
         smap = self._make_currency_map()
-        smap.advance(4)
-        smap.advance(7)
-        smap.advance(2)
+        smap.advance_word("Your")
+        smap.advance_word("balance")
+        smap.advance_word("is")
         pos_before = smap.user_facing_pos
-        smap.advance(5)  # forty
-        smap.advance(3)  # two
-        smap.advance(7)  # dollars
-        smap.advance(3)  # and
-        smap.advance(5)  # fifty
-        smap.advance(5)  # cents — segment completes
+        smap.advance_word("forty")
+        smap.advance_word("two")
+        smap.advance_word("dollars")
+        smap.advance_word("and")
+        smap.advance_word("fifty")
+        smap.advance_word("cents")  # segment completes
         self.assertGreater(smap.user_facing_pos, pos_before)
         self.assertFalse(smap.in_transformed_segment)
 
     def test_last_completed_segment_on_transform_completion(self):
         smap = self._make_currency_map()
-        smap.advance(4)
-        smap.advance(7)
-        smap.advance(2)
-        smap.advance(5)
-        smap.advance(3)
-        smap.advance(7)
-        smap.advance(3)
-        smap.advance(5)
-        smap.advance(5)  # cents
+        for word in ["Your", "balance", "is", "forty", "two", "dollars", "and", "fifty", "cents"]:
+            smap.advance_word(word)
         seg = smap.last_completed_segment
         self.assertIsNotNone(seg)
         self.assertTrue(seg.is_transformed)
@@ -116,7 +109,7 @@ class TestTextSegmentMapAdvance(unittest.TestCase):
 
     def test_last_completed_segment_none_before_completion(self):
         smap = self._make_currency_map()
-        smap.advance(4)  # Your
+        smap.advance_word("Your")
         self.assertIsNone(smap.last_completed_segment)
 
     def test_in_transformed_segment_false_before_segment(self):
@@ -125,15 +118,8 @@ class TestTextSegmentMapAdvance(unittest.TestCase):
 
     def test_in_transformed_segment_false_after_completion(self):
         smap = self._make_currency_map()
-        smap.advance(4)
-        smap.advance(7)
-        smap.advance(2)
-        smap.advance(5)
-        smap.advance(3)
-        smap.advance(7)
-        smap.advance(3)
-        smap.advance(5)
-        smap.advance(5)
+        for word in ["Your", "balance", "is", "forty", "two", "dollars", "and", "fifty", "cents"]:
+            smap.advance_word(word)
         self.assertFalse(smap.in_transformed_segment)
 
 
@@ -147,7 +133,9 @@ class TestTextSegmentMapWithLlmText(unittest.TestCase):
             "$42",
             llm_text="<card>$42</card>",
         )
-        smap.advance(15)
+        smap.advance_word("forty")
+        smap.advance_word("two")
+        smap.advance_word("dollars")
         # Position 9 is the "<" that opens "</card>" — the two alnum digits
         # have been consumed but the closing tag is still unread (it will be
         # swept by WordCompletionTracker on the final "is_complete" word).
@@ -158,7 +146,8 @@ class TestTextSegmentMapWithLlmText(unittest.TestCase):
         # advance_by_alnums("50%", 0, 2) consumes "5" and "0", then the
         # trailing loop advances past "%" (non-alnum, non-space, non-tag) → 3.
         smap = TextSegmentMap("fifty percent", "50%")
-        smap.advance(12)
+        smap.advance_word("fifty")
+        smap.advance_word("percent")
         self.assertEqual(smap.llm_pos, 3)  # past "50%"
 
 
@@ -168,7 +157,8 @@ class TestTextSegmentMapReset(unittest.TestCase):
             "forty two dollars",
             "$42",
         )
-        smap.advance(8)
+        smap.advance_word("forty")
+        smap.advance_word("two")
         smap.reset()
         self.assertEqual(smap.user_facing_pos, 0)
         self.assertEqual(smap.llm_pos, 0)
@@ -177,10 +167,12 @@ class TestTextSegmentMapReset(unittest.TestCase):
 
     def test_reset_allows_replay(self):
         smap = TextSegmentMap("forty two dollars", "$42")
-        smap.advance(8)
+        smap.advance_word("forty")
+        smap.advance_word("two")
         pos_first = smap.user_facing_pos
         smap.reset()
-        smap.advance(8)
+        smap.advance_word("forty")
+        smap.advance_word("two")
         self.assertEqual(smap.user_facing_pos, pos_first)
 
 
@@ -192,9 +184,9 @@ class TestTextSegmentMapEqualTexts(unittest.TestCase):
 
     def test_advance_works_for_equal_texts(self):
         smap = TextSegmentMap("hello world", "hello world")
-        smap.advance(5)  # hello
+        smap.advance_word("hello")
         self.assertFalse(smap.in_transformed_segment)
-        smap.advance(5)  # world
+        smap.advance_word("world")
         self.assertFalse(smap.in_transformed_segment)
 
 
@@ -261,6 +253,37 @@ class TestTextSegmentMapTokenChangingReplacements(unittest.TestCase):
         smap = TextSegmentMap("A P I launched", "API launched")
         seg = next(s for s in smap._segments if s.original == "API")
         self.assertTrue(seg.is_transformed)
+
+
+class TestTextSegmentMapSsmlPhonemeTag(unittest.TestCase):
+    """SSML phoneme tags (e.g. ElevenLabs' <phoneme alphabet="ipa" ph="...">)
+    wrap a word for pronunciation without changing its alnum content, but the
+    surrounding markup means the segment must be treated as transformed (held
+    atomically) rather than assumed to advance proportionally word-by-word.
+    """
+
+    def test_phoneme_wrapped_word_is_flagged_transformed(self):
+        llm_text = "My name is Siobhan."
+        tts_text = 'My name is <phoneme alphabet="ipa" ph="ʃəˈvɔːn">Siobhan</phoneme>.'
+        smap = TextSegmentMap(tts_text, llm_text, llm_text)
+        seg = next(s for s in smap._segments if "Siobhan" in s.original)
+        self.assertTrue(seg.is_transformed)
+
+    def test_in_transformed_segment_true_for_leading_zero_alnum_fragment(self):
+        """Once the preceding segment is fully consumed, a fragment that itself
+        contributes zero alnum chars (e.g. a still-open tag's attribute text,
+        which normalizes to '') is textually already inside the transformed
+        segment and must report in_transformed_segment=True. Otherwise callers
+        (WordCompletionTracker.suppress_in_context) wrongly treat the fragment
+        as outside any transform and try to attribute raw llm_text chars to it."""
+        llm_text = "My name is Siobhan."
+        tts_text = 'My name is <phoneme alphabet="ipa" ph="ʃəˈvɔːn">Siobhan</phoneme>.'
+        smap = TextSegmentMap(tts_text, llm_text, llm_text)
+        smap.advance_word("My")
+        smap.advance_word("name")
+        smap.advance_word("is")  # prior unchanged segment now fully consumed
+        smap.advance_word("<phoneme")  # 0 alnum chars, but inside the transformed segment
+        self.assertTrue(smap.in_transformed_segment)
 
 
 if __name__ == "__main__":

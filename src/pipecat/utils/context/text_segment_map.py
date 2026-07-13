@@ -13,6 +13,51 @@ from dataclasses import dataclass
 from pipecat.utils.text.transforms._alnum_utils import advance_by_alnums, normalize
 
 
+def _strip_tag_markup(word: str, in_open_tag: bool) -> tuple[str, bool]:
+    """Strip SSML/XML tag markup from *word*, tracking tags that span words.
+
+    A tag whose opening tag contains internal whitespace (e.g. multiple
+    attributes, as in ElevenLabs' ``<phoneme alphabet="..." ph="...">``) can be
+    reported as several separate word-timestamp tokens by TTS providers that
+    tokenize on whitespace without tag awareness. This walks *word*
+    character-by-character, carrying open/close state across calls so a tag
+    opened in one word and closed in a later one (or an attribute-only word
+    entirely inside an open tag) is still recognised as pure markup.
+
+    Args:
+        word: Raw word token to strip.
+        in_open_tag: Whether a previous word left an unclosed tag open.
+
+    Returns:
+        (content, still_in_open_tag): *word* with all tag markup removed, and
+        whether a tag remains open after processing it.
+    """
+    result = []
+    i, n = 0, len(word)
+    while i < n:
+        if in_open_tag:
+            close = word.find(">", i)
+            if close == -1:
+                i = n
+            else:
+                in_open_tag = False
+                i = close + 1
+        else:
+            open_ = word.find("<", i)
+            if open_ == -1:
+                result.append(word[i:])
+                i = n
+            else:
+                result.append(word[i:open_])
+                close = word.find(">", open_)
+                if close == -1:
+                    in_open_tag = True
+                    i = n
+                else:
+                    i = close + 1
+    return "".join(result), in_open_tag
+
+
 @dataclass(frozen=True)
 class TextSegment:
     """Immutable aligned chunk between original and TTS text.
@@ -68,6 +113,11 @@ class TextSegmentMap:
     segments, both cursors are held until the entire TTS segment has been consumed,
     then jump to the end of the corresponding original segment in one step.
 
+    Callers advance the map word-by-word via :meth:`advance_word`, which also
+    strips SSML tag markup from a raw word-timestamp token, tracking tags whose
+    opening tag spans multiple words (e.g. an SSML tag with several attributes,
+    split on whitespace by some TTS providers' word-timestamp streams).
+
     Example::
 
         # "$42.50" was expanded to "forty two dollars and fifty cents"
@@ -75,15 +125,11 @@ class TextSegmentMap:
             "Your balance is forty two dollars and fifty cents",
             "Your balance is $42.50",
         )
-        smap.advance(4)   # "Your" — unchanged segment
-        smap.advance(7)   # "balance" — unchanged segment
-        smap.advance(2)   # "is" — unchanged segment
-        smap.advance(5)   # "forty" — transformed segment, cursors held
-        smap.advance(3)   # "two"
-        smap.advance(7)   # "dollars"
-        smap.advance(3)   # "and"
-        smap.advance(5)   # "fifty"
-        smap.advance(5)   # "cents" — segment completes, cursors jump
+        for word in ["Your", "balance", "is"]:
+            smap.advance_word(word)   # unchanged segment
+        for word in ["forty", "two", "dollars", "and", "fifty"]:
+            smap.advance_word(word)   # transformed segment, cursors held
+        smap.advance_word("cents")    # segment completes, cursors jump
         assert smap.last_completed_segment.original == "$42.50"
         assert not smap.in_transformed_segment
     """
@@ -191,18 +237,59 @@ class TextSegmentMap:
         self._user_facing_pos: int = 0
         self._llm_pos: int = 0
         self._last_completed: TextSegment | None = None
+        self._touched_current_segment: bool = False
+        self._in_open_tag: bool = False
 
-    def advance(self, n_alnum: int) -> None:
+    def strip_word(self, word: str) -> str:
+        """Return *word* with any SSML tag markup removed, without consuming it.
+
+        Non-mutating peek variant of :meth:`advance_word`'s stripping step, so
+        callers can decide whether a word belongs here before consuming it.
+
+        Args:
+            word: Raw word token to strip.
+
+        Returns:
+            *word* with tag markup removed.
+        """
+        content, _ = _strip_tag_markup(word, self._in_open_tag)
+        return content
+
+    def advance_word(self, word: str) -> str:
+        """Strip tag markup from *word*, commit the tag state, and advance.
+
+        Combines :meth:`strip_word` with the internal char-count advance: strips
+        *word* (tracking any tag left open for the next call), then advances
+        cursors by the resulting content's alphanumeric character count -- zero
+        for a word that is entirely tag markup.
+
+        Args:
+            word: Raw TTS word-timestamp token.
+
+        Returns:
+            *word* with tag markup removed. Callers should use this in place of
+            the raw word for their own alnum accounting.
+        """
+        content, self._in_open_tag = _strip_tag_markup(word, self._in_open_tag)
+        self._advance(len(normalize(content)))
+        return content
+
+    def _advance(self, n_alnum: int) -> None:
         """Consume *n_alnum* TTS alphanumeric chars, advancing internal cursors.
 
         For unchanged segments the cursors move proportionally through both original
         and LLM text. For transformed segments the cursors are held until the whole
         segment is consumed, then jump to the end of the original segment.
 
+        Internal primitive behind :meth:`advance_word`, which is the entry point
+        callers should use -- it strips SSML tag markup first, which a bare
+        alnum count can't account for on its own.
+
         Args:
             n_alnum: Number of TTS alphanumeric characters to consume.
         """
         self._last_completed = None
+        seg_idx_before = self._seg_idx
 
         # A segment can require zero TTS alnum chars (e.g. an inline IPA tag
         # that normalizes to no alnum content). Such a segment never has
@@ -221,6 +308,12 @@ class TextSegmentMap:
             consume = min(remaining, available)
             remaining -= consume
             self._complete_or_advance_segment(consume)
+
+        # True once this call has processed a word without moving off of
+        # seg_idx_before via completion -- i.e. the cursor's current segment
+        # is one this call actually touched, as opposed to one it merely
+        # landed on by completing the previous segment.
+        self._touched_current_segment = self._seg_idx == seg_idx_before
 
     def _complete_or_advance_segment(self, consume: int) -> None:
         """Apply *consume* alnum chars to the segment at the current index.
@@ -273,15 +366,24 @@ class TextSegmentMap:
 
     @property
     def in_transformed_segment(self) -> bool:
-        """True when mid-flight inside a transformed segment (not yet complete)."""
+        """True when the cursor is on a transformed segment that isn't complete yet.
+
+        True once the segment's alnum budget has partly been consumed (the
+        original condition), or once a call has touched this segment without
+        consuming anything (e.g. a leading zero-alnum fragment such as a
+        still-open tag's attribute text, which normalizes to ``""``) -- as long
+        as that call didn't simply land here by completing the *previous*
+        segment, in which case the word that triggered it belongs to that
+        previous segment, not this one.
+        """
         if self._seg_idx >= len(self._segments):
             return False
         seg = self._segments[self._seg_idx]
-        return seg.is_transformed and self._seg_consumed > 0
+        return seg.is_transformed and (self._seg_consumed > 0 or self._touched_current_segment)
 
     @property
     def last_completed_segment(self) -> TextSegment | None:
-        """The segment completed by the last :meth:`advance` call, or ``None``."""
+        """The segment completed by the last :meth:`advance_word` call, or ``None``."""
         return self._last_completed
 
     def reset(self) -> None:
