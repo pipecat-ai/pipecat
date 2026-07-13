@@ -498,9 +498,13 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                         arguments = ""
                         tool_call_id = ""
                         func_idx += 1
+                    if tool_call.id:
+                        # The id may arrive on a delta without the function
+                        # name (some providers split them across deltas), so
+                        # capture it independently.
+                        tool_call_id = tool_call.id
                     if tool_call.function and tool_call.function.name:
                         function_name += tool_call.function.name
-                        tool_call_id = tool_call.id
                     if tool_call.function and tool_call.function.arguments:
                         # Keep iterating through the response to collect all the argument fragments
                         arguments += tool_call.function.arguments
