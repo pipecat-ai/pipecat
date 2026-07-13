@@ -186,7 +186,7 @@ def _self_signed_pem(tmp_path):
 # the cert-hash helper tests when that's not installed; the helpers are
 # defined in run.py, so import = require runner extra.
 fastapi = pytest.importorskip("fastapi")
-from pipecat.runner.run import (  # noqa: E402
+from pipecat.runner.moq import (  # noqa: E402
     _build_moq_client_config,
     _cert_hash_from_pem,
     _hex_to_b64,
@@ -261,7 +261,7 @@ class TestCertHashHelpers(unittest.TestCase):
         args.moq_port = 4080
         args.moq_path = "/"
         args.moq_serve = True
-        args.moq_cert = None  # serve-mode: no PEM on disk
+        args.moq_tls_cert = None  # serve-mode: no PEM on disk
         args.moq_client_id = "client0"
         args.moq_bot_id = "bot0"
 
@@ -277,7 +277,7 @@ class TestCertHashHelpers(unittest.TestCase):
         # the browser reads track names from it at runtime.
         self.assertNotIn("publishTrack", cfg)
         self.assertNotIn("subscribeTrack", cfg)
-        self.assertEqual(cfg["transcriptTrack"], "transcript")
+        self.assertEqual(cfg["transcriptTrack"], "transcript.json.z")
 
     def test_build_moq_client_config_client_mode_falls_back_to_pem(self):
         """In client mode (no serve, ``--moq-cert /path``), the helper
@@ -294,7 +294,7 @@ class TestCertHashHelpers(unittest.TestCase):
             args.moq_port = 4080
             args.moq_path = "/moq"
             args.moq_serve = False
-            args.moq_cert = pem_path
+            args.moq_tls_cert = pem_path
             args.moq_client_id = "client0"
             args.moq_bot_id = "bot0"
 
@@ -311,7 +311,7 @@ class TestCertHashHelpers(unittest.TestCase):
         args.moq_port = 4080
         args.moq_path = "/moq"
         args.moq_serve = False
-        args.moq_cert = None
+        args.moq_tls_cert = None
         args.moq_client_id = "client0"
         args.moq_bot_id = "bot0"
 
@@ -352,8 +352,8 @@ class TestMOQTransportInit(unittest.TestCase):
         # calls on it without standing up an actual broadcast.
         with patch("pipecat.transports.moq.transport.moq") as moq_mock:
             broadcast = MagicMock(name="broadcast")
-            track = MagicMock(name="transcript_track")
-            broadcast.publish_track.return_value = track
+            track = MagicMock(name="transcript_stream")
+            broadcast.publish_json_stream.return_value = track
             moq_mock.BroadcastProducer.return_value = broadcast
 
             transport = MOQTransport(params=params, host="localhost", port=4080)
@@ -367,12 +367,13 @@ class TestMOQTransportInit(unittest.TestCase):
         self.assertIs(transport._publish_broadcast, broadcast)
 
     def test_transcript_track_created_synchronously(self):
-        """Same constraint for the transcript byte track: ``send_message``
-        on the output transport writes RTVI JSON into it, and that can
-        happen before ``_run()`` finishes dialing."""
+        """Same constraint for the transcript JSON stream: ``send_message``
+        on the output transport appends RTVI messages into it, and that can
+        happen before ``_run()`` finishes dialing. Compression is on (the
+        ``.z`` suffix)."""
         transport, broadcast, track, _moq = self._make_transport()
         self.assertIs(transport._transcript_out, track)
-        broadcast.publish_track.assert_called_once_with("transcript")
+        broadcast.publish_json_stream.assert_called_once_with("transcript.json.z", compression=True)
 
     def test_audio_track_is_lazy(self):
         """The audio track, by contrast, is intentionally lazy. We don't

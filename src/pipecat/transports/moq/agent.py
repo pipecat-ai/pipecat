@@ -26,8 +26,8 @@ client can't read another's request or spoof a response. The prefixes are just
 strings; the deployment chooses auth + namespacing (e.g. ``demo/pipecat/request``
 behind minted tokens, or open ``request`` for a public demo).
 
-The per-session media engine (Opus publish/subscribe, the ``transcript.json``
-side-channel, audio pacing/PTS) is inherited unchanged from
+The per-session media engine (Opus publish/subscribe, the ``transcript.json.z``
+JSON-stream side-channel, audio pacing/PTS) is inherited unchanged from
 :class:`MOQTransport`; only the connection bring-up is replaced.
 """
 
