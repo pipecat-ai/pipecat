@@ -49,6 +49,17 @@ from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 
+# Longest wait for the next streamed completion chunk before the generation
+# is abandoned as wedged. Generous vs. healthy inter-chunk gaps (tens of ms;
+# first chunk = prefill, seconds) but bounded, so a server that accepts the
+# request and then never streams cannot silently freeze the turn.
+STREAM_CHUNK_TIMEOUT_SECS = 15
+
+# Longest wait for closing a completion stream before abandoning the
+# connection. Cleanup over a dead socket can otherwise hang un-cancellably.
+STREAM_CLEANUP_TIMEOUT_SECS = 2
+
+
 def _repair_truncated_json(text) -> Optional[dict]:
     """Best-effort repair of a JSON object cut off mid-generation.
 
@@ -656,18 +667,56 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             try:
                 yield chunk_iter
             finally:
-                # Close the iterator first to cascade cleanup through
-                # nested async generators (httpx/httpcore internals).
-                if hasattr(chunk_iter, "aclose"):
-                    await chunk_iter.aclose()
-                # Then close the stream to release HTTP resources.
-                if hasattr(stream, "close"):
-                    await stream.close()
-                elif hasattr(stream, "aclose"):
-                    await stream.aclose()
+                # Bounded: this finally also runs on cancellation, and over a
+                # wedged connection aclose() itself can hang forever — which
+                # makes the task un-cancellable, blocks _start_interruption's
+                # inline cancel, and freezes the whole pipeline (run 350).
+                # Past the bound the socket is leaked; process teardown reaps.
+                async def _cleanup():
+                    # Close the iterator first to cascade cleanup through
+                    # nested async generators (httpx/httpcore internals).
+                    if hasattr(chunk_iter, "aclose"):
+                        await chunk_iter.aclose()
+                    # Then close the stream to release HTTP resources.
+                    if hasattr(stream, "close"):
+                        await stream.close()
+                    elif hasattr(stream, "aclose"):
+                        await stream.aclose()
+
+                try:
+                    await asyncio.wait_for(_cleanup(), STREAM_CLEANUP_TIMEOUT_SECS)
+                except TimeoutError:
+                    logger.warning(
+                        f"{self}: stream cleanup timed out after "
+                        f"{STREAM_CLEANUP_TIMEOUT_SECS}s — abandoning the connection"
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.warning(f"{self}: stream cleanup failed: {e}")
+
+        async def _timeout_guarded(it):
+            # A server that accepts the request but then stops streaming (the
+            # response never produces another chunk and never terminates)
+            # would otherwise hang this generation forever: heartbeats queue
+            # behind it, the pipeline stalls, and the call goes silent until
+            # hangup (run 350). Bound the wait per chunk and treat a timeout
+            # as end-of-stream — if nothing was generated, the empty-completion
+            # retry below re-runs the turn on a fresh connection.
+            while True:
+                try:
+                    yield await asyncio.wait_for(it.__anext__(), STREAM_CHUNK_TIMEOUT_SECS)
+                except StopAsyncIteration:
+                    return
+                except TimeoutError:
+                    logger.warning(
+                        f"{self}: no stream chunk for {STREAM_CHUNK_TIMEOUT_SECS}s — "
+                        f"server stopped streaming mid-response; treating as end of stream"
+                    )
+                    return
 
         async with _closing(chunk_stream) as chunk_iter:
-            async for chunk in chunk_iter:
+            async for chunk in _timeout_guarded(chunk_iter):
                 if chunk.usage:
                     cached_tokens = (
                         chunk.usage.prompt_tokens_details.cached_tokens

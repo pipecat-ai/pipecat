@@ -179,6 +179,14 @@ class FrameProcessorQueue(asyncio.PriorityQueue):
 # This prevents hanging if a library swallows asyncio.CancelledError.
 INPUT_TASK_CANCEL_TIMEOUT_SECS = 3
 
+# Timeout in seconds for cancelling the non-system frame processing task.
+# An interruption cancels this task inline from the input task; without a
+# bound, a process task wedged in un-cancellable cleanup (e.g. an HTTP
+# stream aclose() over a dead connection) blocks the input task forever,
+# which freezes the whole pipeline — heartbeats, new turns, even CancelFrame.
+# On timeout the wedged task is orphaned and a fresh process task takes over.
+PROCESS_TASK_CANCEL_TIMEOUT_SECS = 3
+
 
 class FrameProcessor(BaseObject):
     """Base class for all frame processors in the pipeline.
@@ -1000,7 +1008,7 @@ class FrameProcessor(BaseObject):
     async def __cancel_process_task(self):
         """Cancel the non-system frame processing task."""
         if self.__process_frame_task:
-            await self.cancel_task(self.__process_frame_task)
+            await self.cancel_task(self.__process_frame_task, PROCESS_TASK_CANCEL_TIMEOUT_SECS)
             self.__process_frame_task = None
 
     async def __process_frame(
