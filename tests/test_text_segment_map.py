@@ -6,7 +6,50 @@
 
 import unittest
 
-from pipecat.utils.context.text_segment_map import TextSegmentMap
+from pipecat.utils.context.text_segment_map import (
+    TextSegmentMap,
+    _raw_len_for_clean_chars,
+    strip_markup,
+)
+
+
+class TestStripMarkupHelpers(unittest.TestCase):
+    """The markup-stripping primitives behind is_transformed and _classify_hop's
+    markup-stripped matching (strategy 3)."""
+
+    def test_strip_markup_removes_tags(self):
+        self.assertEqual(strip_markup("<b>hi</b> there"), "hi there")
+
+    def test_strip_markup_preserves_non_markup(self):
+        self.assertEqual(strip_markup("1234-5678"), "1234-5678")
+
+    def test_strip_markup_unclosed_tag_swallows_rest(self):
+        # A '<' with no closing '>' consumes to the end (how a mid-tag fragment reads).
+        self.assertEqual(strip_markup("keep <phoneme attr"), "keep ")
+
+    def test_strip_markup_stray_gt_is_kept(self):
+        self.assertEqual(strip_markup("a > b"), "a > b")
+
+    def test_raw_len_maps_clean_prefix_to_raw_offset(self):
+        # "hello" (5 clean chars) ends just before "</speak>" at raw index 12.
+        self.assertEqual(_raw_len_for_clean_chars("<speak>hello</speak>", 5), 12)
+
+    def test_raw_len_identity_without_markup(self):
+        self.assertEqual(_raw_len_for_clean_chars("1234-5678", 9), 9)
+
+    def test_raw_len_zero_or_negative_is_zero(self):
+        self.assertEqual(_raw_len_for_clean_chars("<b>x</b>", 0), 0)
+
+    def test_raw_len_beyond_available_returns_full_length(self):
+        self.assertEqual(_raw_len_for_clean_chars("<b>x</b>", 99), len("<b>x</b>"))
+
+    def test_raw_len_agrees_with_strip_markup(self):
+        # Consuming len(strip_markup(t)) clean chars must land at/after the last
+        # clean char for any input.
+        for t in ["<speak>hello</speak>", "1234-5678", "<a>x</a><b>y</b>", "plain"]:
+            clean = strip_markup(t)
+            pos = _raw_len_for_clean_chars(t, len(clean))
+            self.assertEqual(strip_markup(t[:pos]), clean)
 
 
 class TestTextSegmentMapBuild(unittest.TestCase):
