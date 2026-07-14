@@ -164,6 +164,42 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(events, ["inference_triggered", "stopped"])
 
+    async def test_inference_trigger_dropped_while_user_speaking(self):
+        """Inference and finalization wait until the user is no longer speaking."""
+        stop = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[VADUserTurnStartStrategy()],
+                stop=[stop],
+            )
+        )
+
+        await controller.setup(self.task_manager)
+
+        events: list[str] = []
+
+        @controller.event_handler("on_user_turn_inference_triggered")
+        async def on_user_turn_inference_triggered(controller, strategy):
+            events.append("inference_triggered")
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            events.append("stopped")
+
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+
+        # A stop decision can resolve after the user has resumed speaking.
+        # Neither inference nor finalization should proceed until a fresh
+        # decision arrives after the user falls silent.
+        await stop.trigger_user_turn_stopped()
+        self.assertEqual(events, [])
+
+        await controller.process_frame(VADUserStoppedSpeakingFrame())
+        await stop.trigger_user_turn_stopped()
+        self.assertEqual(events, ["inference_triggered", "stopped"])
+
+        await controller.cleanup()
+
     async def test_deferred_wrapper_skips_stopped(self):
         """A deferred() wrapper drops the inner strategy's on_user_turn_stopped event."""
         wrapped = deferred(
