@@ -1599,6 +1599,7 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
         else:
             trigger_inference = self._inference_on_context_initialization
 
+        messages = self._convert_tool_content_for_seeding(messages)
         logger.debug(f"Creating initial response: {messages}")
 
         # Enforce Gemini 2.5's "seed must end with user turn" requirement.
@@ -1628,6 +1629,54 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             self._needs_initial_turn_complete_message = True
 
         self._ready_for_realtime_input = True
+
+    @staticmethod
+    def _convert_tool_content_for_seeding(messages: list[Content]) -> list[Content]:
+        """Convert FunctionCall/FunctionResponse Content to text for seeding.
+
+        Gemini Live's ``send_client_content`` rejects Content that contains
+        ``FunctionCall`` or ``FunctionResponse`` parts (error 1007). This
+        happens after multi-agent handoffs or reconnects when the context
+        contains tool-call history.
+
+        This method replaces those Content objects with text summaries so
+        the model understands what happened without breaking the API
+        contract.
+
+        Args:
+            messages: The list of Content objects from the adapter.
+
+        Returns:
+            A new list with tool-related Content replaced by text
+            summaries. Non-tool Content passes through unchanged.
+        """
+        result = []
+        for msg in messages:
+            if not msg.parts:
+                result.append(msg)
+                continue
+
+            has_function_call = any(getattr(p, "function_call", None) for p in msg.parts)
+            has_function_response = any(getattr(p, "function_response", None) for p in msg.parts)
+
+            if has_function_call:
+                summaries = []
+                for p in msg.parts:
+                    fc = getattr(p, "function_call", None)
+                    if fc:
+                        summaries.append(f"[Called function {fc.name}({fc.args})]")
+                result.append(Content(role="model", parts=[Part(text=" ".join(summaries))]))
+            elif has_function_response:
+                summaries = []
+                for p in msg.parts:
+                    fr = getattr(p, "function_response", None)
+                    if fr:
+                        summaries.append(f"[Function {fr.name} returned {fr.response}]")
+                result.append(Content(role="user", parts=[Part(text=" ".join(summaries))]))
+            else:
+                result.append(msg)
+
+        return result
 
     async def _create_single_response(self, messages_list):
         """Create a single response from a list of messages.
