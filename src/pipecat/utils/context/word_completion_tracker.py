@@ -11,7 +11,7 @@ import unicodedata
 
 from loguru import logger
 
-from pipecat.utils.context.text_segment_map import TextSegmentMap, strip_markup
+from pipecat.utils.context.text_segment_map import TextSegmentMap, strip_complete_markup
 
 
 class WordCompletionTracker:
@@ -98,7 +98,7 @@ class WordCompletionTracker:
         # except when a slot is force-completed (which the segment map never
         # observes, since it manually jumps this cursor to the end).
         self._user_facing_text: str = (
-            user_facing_text if user_facing_text is not None else strip_markup(tts_text)
+            user_facing_text if user_facing_text is not None else strip_complete_markup(tts_text)
         )
         self._user_facing_pos = 0
 

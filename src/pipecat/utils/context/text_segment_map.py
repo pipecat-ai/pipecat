@@ -36,17 +36,38 @@ def _iter_clean_chars(text: str) -> Iterator[tuple[int, str]]:
 
 
 def strip_markup(text: str) -> str:
-    """Remove XML/SSML-like markup from text without depending on tag names.
+    """Remove XML/SSML-like markup from a word-timestamp fragment.
 
     Syntax-based, not tag-name based: treats anything between '<' and '>' as
-    markup and preserves text outside it.
+    markup and preserves text outside it. An unclosed '<' swallows the rest of
+    *text*, matching how a raw word-timestamp token can arrive mid-tag (see
+    :func:`_iter_clean_chars`).
 
-    Module-level rather than private to either class below: both
-    :class:`TextSegment` and :class:`TextSegmentMap` use it, and so does
-    :class:`~pipecat.utils.context.word_completion_tracker.WordCompletionTracker`
-    (to default ``user_facing_text`` to a tag-free string).
+    For a *complete* text (not a possibly-truncated fragment), use
+    :func:`strip_complete_markup` instead -- swallowing the rest of the string
+    past a lone '<' is only correct for a genuinely truncated tag; in a
+    complete text a lone '<' is real content (e.g. ``"5 < 10"`` or ``"<3"``).
+
+    Used by :meth:`TextSegmentMap._classify_hop`'s markup-stripped matching,
+    where the incoming word may be a fragment of a still-open tag.
     """
     return "".join(ch for _, ch in _iter_clean_chars(text))
+
+
+def strip_complete_markup(text: str) -> str:
+    """Remove well-formed '<...>' markup from a complete, static text.
+
+    Unlike :func:`strip_markup`, only strips matched '<...>' pairs -- a lone
+    '<' with no later '>' is left in place as real content rather than
+    swallowing the rest of *text*, since there is no streamed fragment here
+    that could be mid-tag. Mirrors the tag-stripping regex in
+    :func:`pipecat.utils.text.transforms._alnum_utils.normalize`.
+
+    Used by :attr:`TextSegment.is_transformed` and by
+    :class:`~pipecat.utils.context.word_completion_tracker.WordCompletionTracker`
+    to default ``user_facing_text`` to a tag-free string.
+    """
+    return re.sub(r"<[^>]+>", "", text)
 
 
 def _raw_len_for_clean_chars(text: str, n: int) -> int:
@@ -99,7 +120,7 @@ class TextSegment:
         has raw markup around the original word, so the raw segment cursor can move
         while the original/LLM cursors must remain held.
         """
-        if self.tts != strip_markup(self.tts):
+        if self.tts != strip_complete_markup(self.tts):
             return True
         if normalize(self.original) != normalize(self.tts):
             return True

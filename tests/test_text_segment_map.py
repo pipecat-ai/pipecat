@@ -9,13 +9,14 @@ import unittest
 from pipecat.utils.context.text_segment_map import (
     TextSegmentMap,
     _raw_len_for_clean_chars,
+    strip_complete_markup,
     strip_markup,
 )
 
 
 class TestStripMarkupHelpers(unittest.TestCase):
-    """The markup-stripping primitives behind is_transformed and _classify_hop's
-    markup-stripped matching (strategy 3)."""
+    """The markup-stripping primitives behind _classify_hop's markup-stripped
+    matching (strategy 3)."""
 
     def test_strip_markup_removes_tags(self):
         self.assertEqual(strip_markup("<b>hi</b> there"), "hi there")
@@ -50,6 +51,21 @@ class TestStripMarkupHelpers(unittest.TestCase):
             clean = strip_markup(t)
             pos = _raw_len_for_clean_chars(t, len(clean))
             self.assertEqual(strip_markup(t[:pos]), clean)
+
+
+class TestStripCompleteMarkupHelper(unittest.TestCase):
+    """strip_complete_markup() is used on complete texts (TextSegment.is_transformed,
+    WordCompletionTracker's default user_facing_text) where, unlike strip_markup(),
+    a lone unmatched '<' is real content rather than a truncated tag."""
+
+    def test_strip_complete_markup_removes_well_formed_tags(self):
+        self.assertEqual(strip_complete_markup("<b>hi</b> there"), "hi there")
+
+    def test_strip_complete_markup_keeps_unmatched_angle_bracket(self):
+        self.assertEqual(strip_complete_markup("5 < 10"), "5 < 10")
+
+    def test_strip_complete_markup_keeps_emoticon(self):
+        self.assertEqual(strip_complete_markup("I love you <3 always"), "I love you <3 always")
 
 
 class TestTextSegmentMapBuild(unittest.TestCase):
@@ -327,6 +343,19 @@ class TestTextSegmentMapSsmlPhonemeTag(unittest.TestCase):
         smap.advance_word("is")  # prior unchanged segment now fully consumed
         smap.advance_word("<phoneme")  # 0 alnum chars, but inside the transformed segment
         self.assertTrue(smap.in_transformed_segment)
+
+
+class TestTextSegmentMapStrayAngleBracket(unittest.TestCase):
+    """A literal '<' with no matching '>' in ordinary TTS text (e.g. an emoticon
+    like "<3" or a comparison like "5 < 10") is real content, not a truncated
+    SSML tag, so it must not cause a segment to be misclassified as transformed."""
+
+    def test_unchanged_segment_with_stray_angle_bracket_not_flagged_transformed(self):
+        text = "I love you <3 always"
+        smap = TextSegmentMap(text, text)
+        seg = smap._segments[0]
+        self.assertEqual(seg.tts, text)
+        self.assertFalse(seg.is_transformed)
 
 
 if __name__ == "__main__":

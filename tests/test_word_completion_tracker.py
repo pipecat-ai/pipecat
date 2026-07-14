@@ -1551,6 +1551,20 @@ class TestUserFacingText(unittest.TestCase):
         self.assertEqual(tracker.get_remaining_user_facing_text(), self.USER_FACING_TEXT)
 
 
+class TestUserFacingTextStrayAngleBracket(unittest.TestCase):
+    """A literal '<' with no matching '>' in tts_text (e.g. an emoticon like "<3")
+    is real content, not a truncated SSML tag. When user_facing_text is omitted,
+    the default derived from tts_text must not silently drop everything after it."""
+
+    def test_default_user_facing_text_keeps_text_after_stray_bracket(self):
+        text = "I love you <3 always"
+        tracker = WordCompletionTracker(text)
+        for word in text.split():
+            tracker.add_word_and_check_complete(word)
+        self.assertTrue(tracker.is_complete)
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), text)
+
+
 class TestWordCompletionTrackerUnicodeSymbolSubstitution(unittest.TestCase):
     """Guards against the regression where ElevenLabs maps Unicode symbols such
     as '→' to ASCII punctuation like '-' in word-timestamp events.
