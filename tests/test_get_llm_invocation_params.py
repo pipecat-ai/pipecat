@@ -85,6 +85,7 @@ from pipecat.adapters.services.open_ai_responses_adapter import OpenAIResponsesL
 from pipecat.adapters.services.perplexity_adapter import PerplexityLLMAdapter
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
+    LLMSpecificMessage,
     LLMStandardMessage,
 )
 
@@ -1130,6 +1131,68 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
 
         self.assertEqual(params["system"], "New instruction.")
         # Only the user message should remain
+        self.assertEqual(len(params["messages"]), 1)
+        self.assertEqual(params["messages"][0]["role"], "user")
+
+    def test_valid_thought_message_converted_to_thinking_block(self):
+        """A well-formed thought message becomes an assistant thinking block."""
+        messages = [
+            {"role": "user", "content": "Hello"},
+            LLMSpecificMessage(
+                llm="anthropic",
+                message={"type": "thought", "text": "Let me think", "signature": "sig"},
+            ),
+            {"role": "assistant", "content": "Hi"},
+        ]
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        # user, thinking (assistant), assistant -> the two assistant messages merge
+        self.assertEqual(len(params["messages"]), 2)
+        thinking_block = params["messages"][1]["content"][0]
+        self.assertEqual(thinking_block["type"], "thinking")
+        self.assertEqual(thinking_block["thinking"], "Let me think")
+        self.assertEqual(thinking_block["signature"], "sig")
+
+    def test_empty_thought_message_skipped(self):
+        """An empty thought (no text/signature) is dropped, not emitted as a role-less dict.
+
+        Regression test: under the interleaved-thinking beta, Anthropic can emit
+        empty thinking blocks that were stored as ``{"type": "thought", "text":
+        "", "signature": ""}``. Previously the adapter forwarded that dict
+        verbatim, causing a ``KeyError: 'role'`` during message conversion.
+        """
+        messages = [
+            {"role": "user", "content": "please help with this issue"},
+            LLMSpecificMessage(
+                llm="anthropic",
+                message={"type": "thought", "text": "", "signature": ""},
+            ),
+            {"role": "assistant", "content": "I can help with that."},
+        ]
+        context = LLMContext(messages=messages)
+
+        # Must not raise KeyError.
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        # The empty thought is dropped, leaving the user and assistant messages.
+        self.assertEqual(len(params["messages"]), 2)
+        self.assertEqual(params["messages"][0]["role"], "user")
+        self.assertEqual(params["messages"][1]["role"], "assistant")
+        self.assertEqual(params["messages"][1]["content"], "I can help with that.")
+
+    def test_thought_message_missing_signature_skipped(self):
+        """A thought with text but no signature is dropped (Anthropic requires both)."""
+        messages = [
+            {"role": "user", "content": "Hello"},
+            LLMSpecificMessage(
+                llm="anthropic",
+                message={"type": "thought", "text": "partial reasoning", "signature": ""},
+            ),
+        ]
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
         self.assertEqual(len(params["messages"]), 1)
         self.assertEqual(params["messages"][0]["role"], "user")
 

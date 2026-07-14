@@ -2000,7 +2000,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _handle_thought_end(self, frame: LLMThoughtEndFrame):
         thought = concatenate_aggregated_text(self._thought_aggregation)
 
-        if self._thought_append_to_context:
+        # Only persist thoughts that carry usable content. Some providers (e.g.
+        # Anthropic under the interleaved-thinking beta) can emit empty thinking
+        # blocks with no text or signature; storing them yields a malformed
+        # context message that later breaks provider serialization.
+        if self._thought_append_to_context and thought and frame.signature:
             llm = self._thought_llm
             self._context.add_message(
                 LLMSpecificMessage(

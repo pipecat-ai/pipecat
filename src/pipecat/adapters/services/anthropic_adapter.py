@@ -167,7 +167,11 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         # (e.g. a malformed message) is wrapped so it surfaces with its
         # underlying cause.
         try:
-            messages = [self._from_universal_context_message(m) for m in remaining]
+            messages = [
+                converted
+                for m in remaining
+                if (converted := self._from_universal_context_message(m)) is not None
+            ]
         except Exception as e:
             raise LLMContextConversionError(e) from e
 
@@ -211,12 +215,12 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
 
         return self.ConvertedMessages(messages=messages, system=system)
 
-    def _from_universal_context_message(self, message: LLMContextMessage) -> MessageParam:
+    def _from_universal_context_message(self, message: LLMContextMessage) -> MessageParam | None:
         if isinstance(message, LLMSpecificMessage):
             return self._from_anthropic_specific_message(message)
         return self._from_standard_message(message)
 
-    def _from_anthropic_specific_message(self, message: LLMSpecificMessage) -> MessageParam:
+    def _from_anthropic_specific_message(self, message: LLMSpecificMessage) -> MessageParam | None:
         """Convert LLMSpecificMessage to Anthropic format.
 
         Anthropic-specific messages may either be special thought messages that
@@ -225,18 +229,24 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
 
         Args:
             message: Anthropic-specific message.
+
+        Returns:
+            The converted message, or ``None`` if the message should be skipped
+            (e.g. an empty/incomplete thought that carries no usable content).
         """
         # Handle special case of thought messages.
         # These can be converted to standalone "assistant" messages; later
         # these thinking messages will be properly merged into the assistant
         # response messages before the context is sent to Anthropic for the
         # next turn.
-        if (
-            isinstance(message.message, dict)
-            and message.message.get("type") == "thought"
-            and (text := message.message.get("text"))
-            and (signature := message.message.get("signature"))
-        ):
+        if isinstance(message.message, dict) and message.message.get("type") == "thought":
+            text = message.message.get("text")
+            signature = message.message.get("signature")
+            # A thinking block is only valid to Anthropic with both text and a
+            # signature. The interleaved-thinking beta can emit empty thoughts on
+            # tool-use turns; skip them rather than forwarding a role-less dict.
+            if not text or not signature:
+                return None
             return {
                 "role": "assistant",
                 "content": [
