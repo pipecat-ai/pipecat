@@ -112,7 +112,9 @@ class BaseUserTurnStartStrategy(BaseObject):
         Override to run, for example, logic to reset state and prepare for the
         next detection.
         """
-        await self._reset_via_deprecated_hook()
+        # Backward compatibility: a custom strategy may still override the
+        # deprecated reset(); invoke it here (the base reset() is a no-op).
+        await self.reset()
 
     async def handle_user_turn_stopped(self):
         """Notify the strategy that the user turn has stopped.
@@ -121,19 +123,6 @@ class BaseUserTurnStartStrategy(BaseObject):
         Override if the strategy needs to act on turn end (likely uncommon).
         """
         pass
-
-    async def _reset_via_deprecated_hook(self):
-        """Bridge the ``handle_user_turn_started`` callback to a legacy :meth:`reset` override.
-
-        For backward compatibility with a custom strategy that extends this base
-        class and still overrides :meth:`reset`: the default callback runs its
-        ``reset`` from here, so it keeps working. Guarded on an actual override
-        so strategies that never touched ``reset`` don't invoke the base no-op.
-        The deprecation warning is raised in :meth:`__init_subclass__`, which
-        flags the override wherever it lives in the hierarchy.
-        """
-        if type(self).reset is not BaseUserTurnStartStrategy.reset:
-            await self.reset()
 
     async def process_frame(self, frame: Frame) -> ProcessFrameResult | None:
         """Process an incoming frame.

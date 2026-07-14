@@ -113,7 +113,9 @@ class BaseUserTurnStopStrategy(BaseObject):
         Override to run, for example, logic to arm the strategy to detect the
         end of the turn now in progress.
         """
-        await self._reset_via_deprecated_hook()
+        # Backward compatibility: a custom strategy may still override the
+        # deprecated reset(); invoke it here (the base reset() is a no-op).
+        await self.reset()
 
     async def handle_user_turn_stopped(self):
         """Notify the strategy that the user turn has stopped.
@@ -123,20 +125,9 @@ class BaseUserTurnStopStrategy(BaseObject):
         Override to run stop-specific logic — e.g. dropping a turn analyzer's
         buffered speech that must not survive an externally-ended turn.
         """
-        await self._reset_via_deprecated_hook()
-
-    async def _reset_via_deprecated_hook(self):
-        """Bridge the ``handle_user_turn_*`` callbacks to a legacy :meth:`reset` override.
-
-        For backward compatibility with a custom strategy that extends this base
-        class and still overrides :meth:`reset`: the default callbacks run its
-        ``reset`` from here, so it keeps working. Guarded on an actual override
-        so strategies that never touched ``reset`` don't invoke the base no-op.
-        The deprecation warning is raised in :meth:`__init_subclass__`, which
-        flags the override wherever it lives in the hierarchy.
-        """
-        if type(self).reset is not BaseUserTurnStopStrategy.reset:
-            await self.reset()
+        # Backward compatibility: a custom strategy may still override the
+        # deprecated reset(); invoke it here (the base reset() is a no-op).
+        await self.reset()
 
     async def process_frame(self, frame: Frame) -> ProcessFrameResult | None:
         """Process an incoming frame to decide whether the user stopped speaking.
