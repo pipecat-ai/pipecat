@@ -491,17 +491,18 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         """
         resets = 0
 
-        class LegacyStart(VADUserTurnStartStrategy):
-            async def reset(self):  # the deprecated hook
-                nonlocal resets
-                resets += 1
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+
+            class LegacyStart(VADUserTurnStartStrategy):
+                async def reset(self):  # the deprecated hook
+                    nonlocal resets
+                    resets += 1
 
         strategy = LegacyStart()
 
         # Arming on turn start bridges to reset()...
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            await strategy.handle_user_turn_started()
+        await strategy.handle_user_turn_started()
         self.assertEqual(resets, 1)
 
         # ...but turn stop does not touch it.
@@ -512,30 +513,59 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         """A stop strategy's reset() is bridged on both turn boundaries (armed, then cleaned)."""
         resets = 0
 
-        class LegacyStop(ExternalUserTurnCompletionStopStrategy):
-            async def reset(self):  # the deprecated hook
-                nonlocal resets
-                resets += 1
-
-        strategy = LegacyStop()
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
-            await strategy.handle_user_turn_started()
-            await strategy.handle_user_turn_stopped()
+
+            class LegacyStop(ExternalUserTurnCompletionStopStrategy):
+                async def reset(self):  # the deprecated hook
+                    nonlocal resets
+                    resets += 1
+
+        strategy = LegacyStop()
+        await strategy.handle_user_turn_started()
+        await strategy.handle_user_turn_stopped()
         self.assertEqual(resets, 2)
 
-    async def test_legacy_reset_override_warns(self):
-        """Overriding the deprecated reset() keeps working but warns."""
+    async def test_overriding_reset_warns_at_class_definition(self):
+        """Overriding the deprecated reset() warns when the class is defined."""
+        with self.assertWarns(DeprecationWarning):
 
-        class LegacyStop(ExternalUserTurnCompletionStopStrategy):
-            async def reset(self):
-                pass
+            class LegacyStop(ExternalUserTurnCompletionStopStrategy):
+                async def reset(self):
+                    pass
+
+    async def test_subclass_of_concrete_strategy_overriding_reset_warns_but_is_not_bridged(self):
+        """Subclassing a concrete strategy and overriding reset() warns, but reset() won't run.
+
+        A concrete strategy's callback overrides don't route through the
+        backward-compat bridge, so a legacy reset() on such a subclass is never
+        invoked. __init_subclass__ still flags it loudly so the author migrates
+        to the callbacks — no silent no-op.
+        """
+        reset_calls = 0
 
         with self.assertWarns(DeprecationWarning):
-            await LegacyStop().handle_user_turn_started()
 
-    async def test_migrated_strategy_does_not_warn(self):
-        """A strategy overriding the callbacks (not reset) never trips the deprecation."""
+            class MyMinWords(MinWordsUserTurnStartStrategy):
+                async def reset(self):
+                    nonlocal reset_calls
+                    reset_calls += 1
+
+        strategy = MyMinWords(min_words=3)
+        await strategy.handle_user_turn_started()
+        self.assertEqual(reset_calls, 0)
+
+    async def test_overriding_callbacks_does_not_warn_at_class_definition(self):
+        """Defining a strategy that overrides the callbacks (not reset) doesn't warn."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+
+            class Migrated(ExternalUserTurnCompletionStopStrategy):
+                async def handle_user_turn_stopped(self):
+                    pass
+
+    async def test_migrated_strategy_does_not_warn_at_runtime(self):
+        """A strategy overriding the callbacks never warns on the per-turn callbacks."""
         strategy = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
         await strategy.setup(self.task_manager)
         with warnings.catch_warnings():

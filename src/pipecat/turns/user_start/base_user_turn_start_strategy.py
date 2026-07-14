@@ -77,6 +77,17 @@ class BaseUserTurnStartStrategy(BaseObject):
         self._register_event_handler("on_user_turn_started", sync=True)
         self._register_event_handler("on_reset_aggregation", sync=True)
 
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # reset() is deprecated.
+        if cls.reset is not BaseUserTurnStartStrategy.reset:
+            warnings.warn(
+                f"`{cls.__name__}` overrides `reset`, which is deprecated since 1.6.0 "
+                "and will be removed in 2.0.0. Override `handle_user_turn_started` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
     async def cleanup(self):
         """Cleanup the strategy."""
         pass
@@ -114,22 +125,15 @@ class BaseUserTurnStartStrategy(BaseObject):
     async def _reset_via_deprecated_hook(self):
         """Bridge the ``handle_user_turn_started`` callback to a legacy :meth:`reset` override.
 
-        For backward compatibility with custom strategies written before the
-        callback existed: a strategy that still overrides :meth:`reset` keeps
-        working, since the default callback runs its ``reset`` from here.
-        Guarded on an actual override so strategies that never touched ``reset``
-        (Pipecat's own strategies, which override the callbacks) stay silent.
+        For backward compatibility with a custom strategy that extends this base
+        class and still overrides :meth:`reset`: the default callback runs its
+        ``reset`` from here, so it keeps working. Guarded on an actual override
+        so strategies that never touched ``reset`` don't invoke the base no-op.
+        The deprecation warning is raised in :meth:`__init_subclass__`, which
+        flags the override wherever it lives in the hierarchy.
         """
-        if type(self).reset is BaseUserTurnStartStrategy.reset:
-            return
-        warnings.warn(
-            f"Overriding `reset` in `{type(self).__name__}` is deprecated since "
-            "1.6.0 and will be removed in 2.0.0. Override `handle_user_turn_started` "
-            "instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        await self.reset()
+        if type(self).reset is not BaseUserTurnStartStrategy.reset:
+            await self.reset()
 
     async def process_frame(self, frame: Frame) -> ProcessFrameResult | None:
         """Process an incoming frame.
