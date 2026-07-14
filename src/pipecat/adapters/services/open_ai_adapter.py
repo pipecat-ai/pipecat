@@ -211,9 +211,9 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
                 result.append(_openai_from_llm_standard_message(message))
 
         if convert_developer_to_user:
-            for msg in result:
-                if msg.get("role") == "developer":
-                    msg["role"] = "user"
+            result = [
+                {**msg, "role": "user"} if msg.get("role") == "developer" else msg for msg in result
+            ]
 
         return result
 
