@@ -416,9 +416,9 @@ class TestAudioSender(unittest.IsolatedAsyncioTestCase):
 
 
 class TestDTMFSender(unittest.IsolatedAsyncioTestCase):
-    """A dtmf turn sends one RTVI ``dtmf`` message per key."""
+    """A dtmf turn sends one RTVI ``dtmf`` message with all keys."""
 
-    async def test_send_user_dtmf_one_message_per_key(self):
+    async def test_send_user_dtmf_single_message_with_all_keys(self):
         s = _session()
         sent: list[RTVI.Message] = []
 
@@ -428,9 +428,23 @@ class TestDTMFSender(unittest.IsolatedAsyncioTestCase):
         s._send = fake_send
         await s._send_user_dtmf("12#")
 
-        self.assertEqual(len(sent), 3)
-        self.assertTrue(all(m.type == "dtmf" for m in sent))
-        self.assertEqual([m.data["button"] for m in sent], ["1", "2", "#"])
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0].type, "dtmf")
+        self.assertEqual(sent[0].data["buttons"], ["1", "2", "#"])
+
+    async def test_send_user_dtmf_single_key(self):
+        s = _session()
+        sent: list[RTVI.Message] = []
+
+        async def fake_send(message):
+            sent.append(message)
+
+        s._send = fake_send
+        await s._send_user_dtmf("1")
+
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0].type, "dtmf")
+        self.assertEqual(sent[0].data["buttons"], ["1"])
 
 
 def _free_port() -> int:

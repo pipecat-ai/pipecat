@@ -1010,21 +1010,20 @@ class EvalSession:
         await self._send(message)
 
     async def _send_user_dtmf(self, keys: str) -> None:
-        """Send a DTMF keypress turn: one RTVI ``dtmf`` message per key.
+        """Send a DTMF keypress turn as one RTVI ``dtmf`` message.
 
-        The bot's ``RTVIProcessor`` turns each into an ``InputDTMFFrame`` pushed
-        downstream, the same path a telephony transport's keypress takes. The
-        bot's ``DTMFAggregator`` (if any) accumulates them and flushes — on the
-        ``#`` terminator or its idle timeout — into a transcription the bot reacts
-        to. Keys go out back-to-back; use ``send_after`` across turns to pace them.
+        The bot's ``RTVIProcessor`` turns each key into an ``InputDTMFFrame``
+        pushed downstream, the same path a telephony transport's keypress takes.
+        The bot's ``DTMFAggregator`` (if any) accumulates them and flushes — on
+        the ``#`` terminator or its idle timeout — into a transcription the bot
+        reacts to. Use ``send_after`` across turns to pace key sequences.
         """
-        for key in keys:
-            message = RTVI.Message(
-                type="dtmf",
-                id=self._message_id(),
-                data={"button": key},
-            )
-            await self._send(message)
+        message = RTVI.Message(
+            type="dtmf",
+            id=self._message_id(),
+            data={"buttons": list(keys)},
+        )
+        await self._send(message)
 
     async def _send_image(self, image_path: str) -> None:
         """Register an image (base64, with its MIME type) for the current turn.

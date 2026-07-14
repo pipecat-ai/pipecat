@@ -453,14 +453,16 @@ class RTVIProcessor(FrameProcessor):
             logger.error(f"Error processing audio buffer: {e}")
 
     async def _handle_dtmf(self, data: RTVI.DTMFInputData):
-        """Handle a DTMF keypress from the client.
+        """Handle DTMF keypresses from the client.
 
         Like ``_handle_audio_buffer``, the RTVIProcessor sits at the top of the
         pipeline, so pushing ``InputDTMFFrame`` downstream reaches the input
         transport and the bot's DTMF handling exactly as a telephony transport's
-        keypress would.
+        keypresses would. A multi-key sequence is pushed as one frame per key,
+        in order.
         """
-        await self.push_frame(InputDTMFFrame(button=data.button))
+        for button in data.buttons:
+            await self.push_frame(InputDTMFFrame(button=button))
 
     async def _handle_send_text(self, data: RTVI.SendTextData):
         """Handle a send-text message from the client."""
