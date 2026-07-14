@@ -257,6 +257,7 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                 return
             service.__tts_tracing_patches_installed__ = True
             service._tts_spans = {}
+            service._pending_tts_text = {}
 
             orig_create = service.create_audio_context
             orig_append = service.append_to_audio_context
@@ -282,6 +283,11 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                             settings=settings,
                             operation_name="tts",
                         )
+
+                        pending = service._pending_tts_text.pop(context_id, None)
+                        if pending:
+                            span.set_attribute("text", pending["text"])
+                            span.set_attribute("metrics.character_count", pending["character_count"])
                     except Exception as e:
                         logging.warning(f"Error opening TTS span: {e}")
                 return await orig_create(context_id)
@@ -320,6 +326,7 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
 
             async def traced_remove_audio_context(context_id):
                 entry = service._tts_spans.pop(context_id, None)
+                service._pending_tts_text.pop(context_id, None)
                 if entry:
                     try:
                         entry["span"].end()
@@ -364,16 +371,32 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
             owner.setup = patched_setup
 
         def attach_run_tts_attributes(service, text, args, kwargs):
-            """Attach text-specific attributes to the in-flight TTS span."""
+            """Attach text-specific attributes to the in-flight TTS span.
+
+            For services where ``create_audio_context`` is called inside
+            ``run_tts`` (e.g., ElevenLabs WebSocket), the span may not exist
+            yet when this function runs. In that case, store the text as
+            pending so ``traced_create_audio_context`` can attach it when
+            the span is created.
+            """
             if not getattr(service, "_tracing_enabled", False):
+                return
+            if not text:
                 return
             try:
                 context_id = args[0] if args else kwargs.get("context_id")
                 entry = getattr(service, "_tts_spans", {}).get(context_id)
-                if entry and text:
+                if entry:
                     span = entry["span"]
                     span.set_attribute("text", text)
                     span.set_attribute("metrics.character_count", len(text))
+                else:
+                    pending_dict = getattr(service, "_pending_tts_text", None)
+                    if pending_dict is not None:
+                        pending_dict[context_id] = {
+                            "text": text,
+                            "character_count": len(text),
+                        }
             except Exception as e:
                 logging.warning(f"Error attaching TTS text to span: {e}")
 
