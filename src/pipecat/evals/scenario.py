@@ -144,7 +144,6 @@ from typing import Any
 
 import yaml
 from loguru import logger
-from yamlinclude import YamlIncludeConstructor
 
 from pipecat.audio.dtmf.types import KeypadEntry
 
@@ -178,6 +177,27 @@ yaml.add_implicit_resolver(
     list("-+0123456789"),
     Loader=_ScenarioLoader,
 )
+
+
+def _add_include_constructor(loader_class: type[yaml.SafeLoader], base_dir: Path) -> None:
+    """Register an ``!include <relative-path>`` constructor on ``loader_class``.
+
+    Included files load with the same loader class, so nested includes work and
+    scalars get the same resolver treatment as the top-level document. Paths
+    resolve against ``base_dir`` (the scenario file's directory).
+    """
+
+    def _include(loader: yaml.SafeLoader, node: yaml.Node) -> Any:
+        if not isinstance(node, yaml.ScalarNode):
+            raise yaml.constructor.ConstructorError(
+                None, None, "!include expects a file path", node.start_mark
+            )
+        include_path = base_dir / str(loader.construct_scalar(node))
+        with include_path.open() as f:
+            return yaml.load(f, loader_class)
+
+    loader_class.add_constructor("!include", _include)
+
 
 # Events whose payloads carry bot-generated text the judge can sensibly
 # evaluate. Asserting ``eval:`` on anything else (user transcripts, tool
@@ -381,7 +401,7 @@ class EvalScenario:
         class _Loader(_ScenarioLoader):
             pass
 
-        YamlIncludeConstructor.add_to_loader_class(loader_class=_Loader, base_dir=str(path.parent))
+        _add_include_constructor(_Loader, path.parent)
 
         with path.open() as f:
             data = yaml.load(f, _Loader)
