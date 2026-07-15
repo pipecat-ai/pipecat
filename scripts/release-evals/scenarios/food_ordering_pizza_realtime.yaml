@@ -1,0 +1,136 @@
+name: food_ordering_pizza_realtime
+
+# Audio on both sides. The Realtime API itself supports text input items and
+# text-only output modalities, but OpenAIRealtimeLLMService doesn't implement
+# text-driven turns yet: RTVI send-text lands in the service's unimplemented
+# LLMMessagesAppendFrame path, and skip_tts only tags LLMTextFrames for a
+# downstream TTS rather than switching the session to text output. Until that's
+# wired up, drive realtime bots with audio.
+user: !include user_audio.yaml
+judge: !include judge_audio.yaml
+
+# The extended pizza-ordering conversation: beyond the basic order flow (see
+# food_ordering_pizza.yaml), it exercises each Flows-to-realtime integration
+# surface, called out per turn.
+#
+# Assertion style: the mechanics are asserted stepwise via function_call
+# expectations (deterministic), while the bot's spoken behavior is judged ONCE,
+# conversation-wide, on the last judgeable turn. Per-turn response judgments
+# race the node transitions — the model speaks in the same server-created
+# response that makes the function call, before the new node's instructions
+# land — so mid-conversation `response` expectations here are bare arrival
+# checks that only pace the turns.
+turns:
+  # Initial node: LLMRunFrame-driven greeting (no user input yet).
+  - expect:
+      - event: response
+
+  # Node transition: tools swap (LLMSetToolsFrame) + task message append
+  # (LLMMessagesAppendFrame) — the pizza functions only exist on the new node.
+  - user: "I'd like to order a pizza."
+    expect:
+      - event: function_call
+        calls:
+          - name: choose_pizza
+      - event: response
+
+  - user: "A large pepperoni please."
+    expect:
+      - event: function_call
+        calls:
+          - name: select_pizza_order
+            args: { size: large, pizza_type: pepperoni }
+      - event: response
+
+  # The confirmation node replaces the role message (LLMUpdateSettingsFrame →
+  # session instructions): from here on the bot addresses the user as "boss"
+  # (asserted in the final conversation-level judgment).
+  - user: "Could you read my order back one more time?"
+    expect:
+      - event: response
+
+  # Per-tool timeout: check_daily_special hangs and its 3s timeout resolves the
+  # call. A timed-out call doesn't trigger a response (by design), so assert
+  # the call only; the conversation continuing past it is the recovery check.
+  - user: "What's today's special?"
+    expect:
+      - event: function_call
+        calls:
+          - name: check_daily_special
+
+  # Pure delay before sending: room for check_daily_special's timeout to fire
+  # undisturbed (user speech would cancel the call instead, since it's also
+  # cancel_on_interruption). Keep this turn to one sentence — a mid-turn pause
+  # gets split into two turns by the server's semantic turn detection, and the
+  # second half then barges in on the bot's answer.
+  - user: "How long will delivery take?"
+    send_after:
+      delay_ms: 9000
+    expect:
+      - event: function_call
+        calls:
+          - name: get_delivery_estimate
+      - event: response
+
+  # Revision: respond_immediately=False + RESET context strategy
+  # (LLMMessagesUpdateFrame). The model narrates the revise_order call (one
+  # bare response), then the node waits silently for the user — the absent
+  # check is what validates respond_immediately=False. The 14s send delay
+  # lets the previous turn's slow (4s) delivery lookup finish speaking first.
+  - user: "Actually, I want to change my order."
+    send_after:
+      delay_ms: 14000
+    expect:
+      - event: function_call
+        calls:
+          - name: revise_order
+      - event: response
+      - event: response
+        absent: true
+        within_ms: 8000
+
+  - user: "Let's do sushi instead."
+    expect:
+      - event: function_call
+        calls:
+          - name: choose_sushi
+      - event: response
+
+  - user: "Two california rolls please."
+    expect:
+      - event: function_call
+        calls:
+          - name: select_sushi_order
+            args: { count: 2, roll_type: california }
+      - event: response
+
+  # Barge-in during a slow, cancellable tool: the delivery lookup takes 4s and
+  # has cancel_on_interruption, so the next turn's barge-in cancels it.
+  - user: "How long would delivery take now?"
+    expect:
+      - event: function_call
+        calls:
+          - name: get_delivery_estimate
+
+  # The judge holds the whole conversation, so this last judgeable turn also
+  # carries the conversation-wide checks (the terminal turn below tears the
+  # pipeline down before its response reaches the harness).
+  - user: "Never mind, I'll come pick it up myself."
+    send_after:
+      event: function_call
+      delay_ms: 500
+    expect:
+      - event: response
+        eval: >-
+          the bot's final reply acknowledges the user will pick the order up
+          (without stating a new delivery time); AND, considering the entire
+          conversation: the bot addressed the user as 'boss' at least once
+          and stated an estimated delivery time at some point
+
+  # Terminal turn — assert the function call only: end_conversation tears the
+  # pipeline down before the farewell reaches the harness.
+  - user: "That's everything, please confirm my order."
+    expect:
+      - event: function_call
+        calls:
+          - name: complete_order

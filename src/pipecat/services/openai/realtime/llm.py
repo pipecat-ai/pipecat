@@ -38,6 +38,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
+    LLMRunFrame,
     LLMServiceMetadataFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
@@ -349,6 +350,10 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         self._context: LLMContext = None
 
         self._llm_needs_conversation_setup = True
+        # The instructions most recently sent in a session.update, used to
+        # detect when a context change (e.g. a Flows node transition appending
+        # system/developer messages) requires a fresh update.
+        self._last_sent_instructions: str | None = None
 
         self._disconnecting = False
         self._api_session_ready = False
@@ -646,7 +651,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         if isinstance(frame, TranscriptionFrame):
             pass
         elif isinstance(frame, LLMContextFrame):
-            await self._handle_context(frame.context)
+            await self._handle_context(frame.context, frame.run_llm)
         elif isinstance(frame, InputAudioRawFrame):
             if not self._audio_input_paused:
                 await self._send_user_audio(frame)
@@ -665,33 +670,102 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             self._handle_speech_control_params(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):
             await self._handle_messages_append(frame)
+        elif isinstance(frame, LLMRunFrame):
+            # Only reached in pipelines without a user context aggregator: the
+            # aggregator consumes LLMRunFrame and forwards the request as a
+            # context frame with run_llm=True (handled in _handle_context).
+            await self._create_response()
         elif isinstance(frame, LLMSetToolsFrame):
             # Continuous session: no fresh context frame per turn, so sync the
             # registered tool handlers to the new tool set here (the base service
             # only does this on LLMContextFrame).
             self._sync_registered_tool_handlers(frame.tools)
             await self._send_session_update()
-
         await self.push_frame(frame, direction)
 
-    async def _handle_context(self, context: LLMContext):
+    async def _handle_context(self, context: LLMContext, run_llm: bool | None = None):
         if not self._context:
-            # We got our initial context
+            # We got our initial context. The conversation is seeded from it
+            # (and the session configured) in _create_response.
             self._context = context
             # Initialize our bookkeeping of already-completed tool calls in
             # the context
             await self._process_completed_function_calls(send_new_results=False)
-            # Run the LLM at next opportunity
-            await self._create_response()
-        else:
-            # We got an updated context.
-            # This may contain a new user message or tool call result.
-            self._context = context
-            # Send results for newly-completed function calls, if any.
-            await self._process_completed_function_calls(send_new_results=True)
+            if run_llm is not False:
+                # Run the LLM at next opportunity
+                await self._create_response()
+            return
 
-    async def _handle_messages_append(self, frame):
-        logger.error("!!! NEED TO IMPLEMENT MESSAGES APPEND")
+        # We got an updated context. It may carry new system-level guidance
+        # (e.g. a Flows node transition appending task messages), a new user
+        # message, or tool call results.
+        self._context = context
+
+        # If the context's system-level guidance changed, send the session the
+        # new instructions before any response is created below.
+        await self._maybe_refresh_session_instructions()
+
+        # Send results for newly-completed function calls, if any.
+        sent_new_result = await self._process_completed_function_calls(send_new_results=True)
+
+        # Create a response when explicitly requested (run_llm=True — e.g. an
+        # LLMRunFrame driving a Flows node transition), or — for context frames
+        # without explicit intent — when new tool results warrant one.
+        if run_llm or (run_llm is None and sent_new_result):
+            await self._create_response()
+
+    async def _maybe_refresh_session_instructions(self):
+        """Send a session.update if the context-derived instructions changed.
+
+        In a continuous session, system-level guidance that changes
+        mid-conversation (system/developer messages appended by a Flows node
+        transition, an IVR prompt swap, a context reset, ...) can only reach
+        the model through the session's instructions — conversation history is
+        held server-side and is only seeded once.
+        """
+        adapter = self.get_llm_adapter()
+        params = adapter.get_llm_invocation_params(
+            self._context, system_instruction=assert_given(self._settings.system_instruction)
+        )
+        instructions = params["system_instruction"]
+        if instructions and instructions != self._last_sent_instructions:
+            await self._send_session_update()
+
+    async def _handle_messages_append(self, frame: LLMMessagesAppendFrame):
+        """Append messages directly to the server-side conversation.
+
+        Only reached in pipelines without a user context aggregator (the
+        aggregator consumes ``LLMMessagesAppendFrame`` and folds the messages
+        into the context, which arrives here as a context frame instead).
+        Text-only: non-text content is skipped with a warning.
+        """
+        for message in frame.messages:
+            role = message.get("role", "user")
+            content = message.get("content")
+            if isinstance(content, list):
+                content = " ".join(
+                    part.get("text", "")
+                    for part in content
+                    if part.get("type") in ("text", "input_text")
+                )
+            if not isinstance(content, str) or not content:
+                logger.warning(f"{self} skipping non-text appended message: {message}")
+                continue
+            if role in ("system", "developer"):
+                role = "system"
+            item = events.ConversationItem(
+                type="message",
+                role=role,
+                content=[
+                    events.ItemContent(
+                        type="text" if role == "assistant" else "input_text", text=content
+                    )
+                ],
+            )
+            self._messages_added_manually[item.id] = True
+            await self.send_client_event(events.ConversationItemCreateEvent(item=item))
+        if frame.run_llm:
+            await self._create_response()
 
     #
     # websocket communication
@@ -824,6 +898,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         outgoing = self._strip_unsupported_reasoning(settings)
 
         await self.send_client_event(events.SessionUpdateEvent(session=outgoing))
+        self._last_sent_instructions = settings.instructions
 
     #
     # inbound server event handling
@@ -1110,6 +1185,11 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         await self._truncate_current_audio_response()
         await self.broadcast_frame(UserStartedSpeakingFrame)
         await self.broadcast_interruption()
+        # The broadcast only reaches the other processors — it doesn't come
+        # back through our own process_frame — so run the base interruption
+        # handling (cancelling in-flight cancel_on_interruption function
+        # calls) directly.
+        await self._handle_interruptions(InterruptionFrame())
 
     async def _handle_evt_speech_stopped(self, evt):
         # Note: this event is not received when turn detection is disabled,
@@ -1171,7 +1251,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         adapter = self.get_llm_adapter()
 
         # Configure the LLM for this session if needed
-        if self._llm_needs_conversation_setup:
+        if self._llm_needs_conversation_setup and self._context:
             logger.debug(
                 f"Setting up conversation on OpenAI Realtime LLM service with initial messages: {adapter.get_messages_for_logging(self._context)}"
             )
@@ -1201,7 +1281,13 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             )
         )
 
-    async def _process_completed_function_calls(self, send_new_results: bool):
+    async def _process_completed_function_calls(self, send_new_results: bool) -> bool:
+        """Track completed tool calls in the context, optionally sending new results.
+
+        Returns:
+            Whether any new result was sent to the service. The caller decides
+            whether that warrants creating a response (see _handle_context).
+        """
         # Check for set of completed function calls in the context
         sent_new_result = False
         for message in self._context.get_messages():
@@ -1258,10 +1344,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                         await self._send_tool_result(tool_call_id, message.get("content"))
                     self._completed_tool_calls.add(tool_call_id)
 
-        # If we reported any new tool call results to the service, trigger
-        # another response
-        if sent_new_result:
-            await self._create_response()
+        return sent_new_result
 
     def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):
         """Auto-size the pre-roll from the upstream VAD's start_secs.

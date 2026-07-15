@@ -476,21 +476,34 @@ class LLMContextAggregator(FrameProcessor):
         """
         return self._context
 
-    def _get_context_frame(self) -> LLMContextFrame:
+    def _get_context_frame(self, run_llm: bool | None = None) -> LLMContextFrame:
         """Create a context frame with the current context.
+
+        Args:
+            run_llm: Explicit response intent to carry on the frame (see
+                :class:`~pipecat.frames.frames.LLMContextFrame`).
 
         Returns:
             LLMContextFrame containing the current context.
         """
-        return LLMContextFrame(context=self._context)
+        return LLMContextFrame(context=self._context, run_llm=run_llm)
 
-    async def push_context_frame(self, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+    async def push_context_frame(
+        self,
+        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+        run_llm: bool | None = None,
+    ):
         """Push a context frame in the specified direction.
 
         Args:
             direction: The direction to push the frame (upstream or downstream).
+            run_llm: Explicit response intent to carry on the frame. ``True``
+                for pushes triggered by an explicit run request (``LLMRunFrame``,
+                message frames with ``run_llm=True``), so realtime services —
+                which don't respond to every context frame the way cascade
+                services do — know to generate a response.
         """
-        frame = self._get_context_frame()
+        frame = self._get_context_frame(run_llm=run_llm)
         await self.push_frame(frame, direction)
 
     def add_messages(self, messages):
@@ -1111,22 +1124,33 @@ class LLMUserAggregator(LLMContextAggregator):
         return should_mute_frame
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
-        await self.push_context_frame()
+        await self.push_context_frame(run_llm=True)
 
     async def _handle_llm_messages_append(self, frame: LLMMessagesAppendFrame):
         self.add_messages(frame.messages)
-        if frame.run_llm:
-            await self.push_context_frame()
+        await self._push_context_after_messages_change(frame.run_llm)
 
     async def _handle_llm_messages_update(self, frame: LLMMessagesUpdateFrame):
         self.set_messages(frame.messages)
-        if frame.run_llm:
-            await self.push_context_frame()
+        await self._push_context_after_messages_change(frame.run_llm)
 
     async def _handle_llm_messages_transform(self, frame: LLMMessagesTransformFrame):
         self.transform_messages(frame.transform)
-        if frame.run_llm:
-            await self.push_context_frame()
+        await self._push_context_after_messages_change(frame.run_llm)
+
+    async def _push_context_after_messages_change(self, run_llm: bool):
+        """Push the changed context, with response intent matching the request.
+
+        Without a response request (``run_llm=False``), cascade pipelines just
+        keep the change for the next inference, but realtime services hold
+        conversation state server-side — push an ingest-only context frame so
+        the change (new system-level guidance, tool results) reaches the
+        session now rather than at the next response.
+        """
+        if run_llm:
+            await self.push_context_frame(run_llm=True)
+        elif self._realtime_service_mode:
+            await self.push_context_frame(run_llm=False)
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         text = frame.text
@@ -1547,7 +1571,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
             if self._push_context_on_bot_stopped_speaking and not self._user_speaking:
                 logger.debug(f"{self}: Bot stopped speaking — pushing deferred context frame!")
-                await self.push_context_frame(FrameDirection.UPSTREAM)
+                # The deferred push stands in for a function-result push that
+                # resolved to run_llm=True (see
+                # _maybe_push_context_after_function_result), so keep the intent.
+                await self.push_context_frame(FrameDirection.UPSTREAM, run_llm=True)
         elif isinstance(frame, LLMServiceMetadataFrame):
             # Auto-configure realtime mode on the assistant half too — the
             # broadcast reaches both halves. The assistant only needs the flag
@@ -1611,32 +1638,46 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         return aggregation
 
-    async def push_context_frame(self, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+    async def push_context_frame(
+        self,
+        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+        run_llm: bool | None = None,
+    ):
         """Push a context frame in the specified direction.
 
         Args:
             direction: The direction to push the frame (upstream or downstream).
+            run_llm: Explicit response intent to carry on the frame (see
+                :class:`~pipecat.frames.frames.LLMContextFrame`).
         """
-        await super().push_context_frame(direction)
+        await super().push_context_frame(direction, run_llm=run_llm)
         self._push_context_on_bot_stopped_speaking = False
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
-        await self.push_context_frame(FrameDirection.UPSTREAM)
+        await self.push_context_frame(FrameDirection.UPSTREAM, run_llm=True)
 
     async def _handle_llm_messages_append(self, frame: LLMMessagesAppendFrame):
         self.add_messages(frame.messages)
-        if frame.run_llm:
-            await self.push_context_frame(FrameDirection.UPSTREAM)
+        await self._push_context_after_messages_change(frame.run_llm)
 
     async def _handle_llm_messages_update(self, frame: LLMMessagesUpdateFrame):
         self.set_messages(frame.messages)
-        if frame.run_llm:
-            await self.push_context_frame(FrameDirection.UPSTREAM)
+        await self._push_context_after_messages_change(frame.run_llm)
 
     async def _handle_llm_messages_transform(self, frame: LLMMessagesTransformFrame):
         self.transform_messages(frame.transform)
-        if frame.run_llm:
-            await self.push_context_frame(FrameDirection.UPSTREAM)
+        await self._push_context_after_messages_change(frame.run_llm)
+
+    async def _push_context_after_messages_change(self, run_llm: bool):
+        """Push the changed context upstream, with matching response intent.
+
+        See :meth:`LLMUserAggregator._push_context_after_messages_change` —
+        same ingest-only push for realtime services, in the upstream direction.
+        """
+        if run_llm:
+            await self.push_context_frame(FrameDirection.UPSTREAM, run_llm=True)
+        elif self._realtime_service_mode:
+            await self.push_context_frame(FrameDirection.UPSTREAM, run_llm=False)
 
     async def _handle_interruptions(self, frame: InterruptionFrame):
         await self._trigger_assistant_turn_stopped(interrupted=True)
@@ -1756,6 +1797,15 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         if run_llm and not self._user_speaking:
             await self._maybe_push_context_after_function_result()
+        elif not run_llm and is_final and self._realtime_service_mode:
+            # No response requested, but realtime services read tool results out
+            # of the context — push an ingest-only frame so the result reaches
+            # the session now (a ``None`` result is recorded as COMPLETED and
+            # needs delivering too, e.g. a timed-out call). Deferring it risks
+            # it being dropped (a Flows edge function whose transition RESETs
+            # the context) or delivered by a later run_llm=None push that then
+            # triggers a response at the wrong moment.
+            await self.push_context_frame(FrameDirection.UPSTREAM, run_llm=False)
 
         # Call the `on_context_updated` callback once the function call result
         # is added to the context. Also, run this in a separate task to make
@@ -1796,7 +1846,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
             self._push_context_on_bot_stopped_speaking = True
         else:
             logger.debug(f"{self}: Pushing context frame!")
-            await self.push_context_frame(FrameDirection.UPSTREAM)
+            # This push only happens when the function-call result resolved to
+            # run_llm=True, so carry that intent for realtime services.
+            await self.push_context_frame(FrameDirection.UPSTREAM, run_llm=True)
 
     async def _handle_function_call_intermediate_result(
         self, frame: FunctionCallResultFrame, in_progress_frame: FunctionCallInProgressFrame
