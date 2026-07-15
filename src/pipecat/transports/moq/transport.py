@@ -76,10 +76,11 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
     StartFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 try:
     import moq
@@ -259,11 +260,22 @@ class MOQInputTransport(BaseInputTransport):
         params: MOQParams,
         **kwargs,
     ):
-        """Initialize the MOQ input transport."""
+        """Initialize the MOQ input transport.
+
+        Args:
+            transport: The parent MOQTransport managing the MoQ session.
+            params: MOQ transport configuration parameters.
+            **kwargs: Additional arguments passed to the parent class.
+        """
         super().__init__(params, **kwargs)
         self._moq_transport = transport
         self._params = params
         self._initialized = False
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Forward setup to the shared MOQTransport so it can create tasks."""
+        await super().setup(setup)
+        await self._moq_transport.setup(setup)
 
     async def start(self, frame: StartFrame):
         """Auto-connect to the MOQ relay when the pipeline starts."""
@@ -331,6 +343,11 @@ class MOQOutputTransport(BaseOutputTransport):
         self._moq_transport = transport
         self._params = params
         self._initialized = False
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Forward setup to the shared MOQTransport so it can create tasks."""
+        await super().setup(setup)
+        await self._moq_transport.setup(setup)
 
     async def start(self, frame: StartFrame):
         """Start the MOQ output transport."""
@@ -455,6 +472,9 @@ class MOQTransport(BaseTransport):
         self._input: MOQInputTransport | None = None
         self._output: MOQOutputTransport | None = None
         self._connection_task: asyncio.Task | None = None
+        # Shared task manager, wired in by the input/output processors'
+        # setup() forwarding. Owns the serve-loop task in _run().
+        self._task_manager: BaseTaskManager | None = None
 
         # Owned for the lifetime of this transport. Created synchronously
         # so MOQOutputTransport.start() can publish_audio + write
@@ -512,6 +532,15 @@ class MOQTransport(BaseTransport):
         if not self._output:
             self._output = MOQOutputTransport(self, self._params, name=self._output_name)
         return self._output
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Capture the task manager from the input/output processors.
+
+        Both processors forward their setup here; we only need to store
+        the reference once since they share the same task manager.
+        """
+        if self._task_manager is None:
+            self._task_manager = setup.task_manager
 
     # ------------------------------------------------------------------
     # Publishing helpers — called from the output transport.
@@ -673,7 +702,14 @@ class MOQTransport(BaseTransport):
                 # so memory doesn't grow with past connections.
                 serve_task: asyncio.Task | None = None
                 if self._params.serve:
-                    serve_task = asyncio.create_task(cast(moq.Server, transport).serve())
+                    assert self._task_manager is not None, (
+                        "MOQTransport.setup() must run before _run(); "
+                        "input/output processors forward setup on the pipeline's first frame."
+                    )
+                    serve_task = self._task_manager.create_task(
+                        cast(moq.Server, transport).serve(),
+                        f"{self}::moq_serve",
+                    )
 
                 try:
                     # Drive the subscribe side. The output side keeps
@@ -682,12 +718,8 @@ class MOQTransport(BaseTransport):
                     # the pipeline.
                     await self._consume_peer(origin)
                 finally:
-                    if serve_task is not None:
-                        serve_task.cancel()
-                        try:
-                            await serve_task
-                        except asyncio.CancelledError:
-                            pass
+                    if serve_task is not None and self._task_manager is not None:
+                        await self._task_manager.cancel_task(serve_task)
 
         except asyncio.CancelledError:
             raise
