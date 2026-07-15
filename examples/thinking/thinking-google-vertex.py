@@ -24,7 +24,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.google.vertex.llm import GoogleVertexLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -66,13 +66,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    llm = GoogleLLMService(
-        api_key=os.environ["GOOGLE_API_KEY"],
-        # To use a more powerful (slower) reasoning model, uncomment the pro
-        # model and the thinking_level line below.
-        # model="gemini-3.1-pro-preview",
-        settings=GoogleLLMService.Settings(
-            thinking=GoogleLLMService.ThinkingConfig(
+    llm = GoogleVertexLLMService(
+        credentials=os.environ["GOOGLE_VERTEX_TEST_CREDENTIALS"],
+        project_id=os.environ["GOOGLE_CLOUD_PROJECT_ID"],
+        location=os.environ["GOOGLE_CLOUD_LOCATION"],
+        # location="global",  # Gemini 3.x may need "global" (comment out env location above)
+        settings=GoogleVertexLLMService.Settings(
+            # To use a more powerful (slower) reasoning model, uncomment the pro
+            # model below, plus the thinking_level and location="global" lines.
+            # model="gemini-3.1-pro-preview",
+            thinking=GoogleVertexLLMService.ThinkingConfig(
                 thinking_budget=-1,  # Dynamic thinking (default model, Gemini 2.5)
                 # thinking_level="low",  # Gemini 3.x (comment out thinking_budget above)
                 include_thoughts=True,
