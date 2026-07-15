@@ -1,0 +1,40 @@
+name: license-check
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "pyproject.toml"
+      - "uv.lock"
+      - "scripts/check_licenses.py"
+      - ".github/workflows/license-check.yaml"
+  pull_request:
+    branches:
+      - "**"
+    paths:
+      - "pyproject.toml"
+      - "uv.lock"
+      - "scripts/check_licenses.py"
+      - ".github/workflows/license-check.yaml"
+
+concurrency:
+  group: license-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: "Core dependency license check"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Check core dependency licenses
+        run: python3 scripts/check_licenses.py
