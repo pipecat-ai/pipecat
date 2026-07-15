@@ -24,13 +24,33 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.google.vertex.llm import GoogleVertexLLMService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
+
+
+async def check_flight_status(params: FunctionCallParams, flight_number: str):
+    """Check the status of a flight. Returns status (e.g., "on time", "delayed") and departure time.
+
+    Args:
+        flight_number (str): The flight number, e.g. "AA100".
+    """
+    await params.result_callback({"status": "delayed", "departure_time": "14:30"})
+
+
+async def book_taxi(params: FunctionCallParams, time: str):
+    """Book a taxi for a given time. Returns status (e.g., "done").
+
+    Args:
+        time (str): The time to book the taxi for, e.g. "15:00".
+    """
+    await params.result_callback({"status": "done"})
+
 
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
@@ -66,13 +86,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    llm = GoogleLLMService(
-        api_key=os.environ["GOOGLE_API_KEY"],
-        # To use a more powerful (slower) reasoning model, uncomment the pro
-        # model and the thinking_level line below.
-        # model="gemini-3.1-pro-preview",
-        settings=GoogleLLMService.Settings(
-            thinking=GoogleLLMService.ThinkingConfig(
+    llm = GoogleVertexLLMService(
+        credentials=os.environ["GOOGLE_VERTEX_TEST_CREDENTIALS"],
+        project_id=os.environ["GOOGLE_CLOUD_PROJECT_ID"],
+        location=os.environ["GOOGLE_CLOUD_LOCATION"],
+        # location="global",  # Gemini 3.x may need "global" (comment out env location above)
+        settings=GoogleVertexLLMService.Settings(
+            # To use a more powerful (slower) reasoning model, uncomment the pro
+            # model below, plus the thinking_level and location="global" lines.
+            # model="gemini-3.1-pro-preview",
+            thinking=GoogleVertexLLMService.ThinkingConfig(
                 thinking_budget=-1,  # Dynamic thinking (default model, Gemini 2.5)
                 # thinking_level="low",  # Gemini 3.x (comment out thinking_budget above)
                 include_thoughts=True,
@@ -81,7 +104,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    context = LLMContext()
+    context = LLMContext(tools=[check_flight_status, book_taxi])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -114,14 +137,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Kick off the conversation.
         context.add_message({"role": "developer", "content": "Say hello briefly."})
         # Replace the above with one of these example prompts to demonstrate
-        # thinking.
-        # These examples come from Gemini and Anthropic docs.
+        # thinking and function calling.
+        # This example comes from Gemini docs.
         # context.add_message(
         #     {
         #         "role": "user",
-        #         "content": "Analogize photosynthesis and growing up. Keep your answer concise.",
-        #         # "content": "Compare and contrast electric cars and hybrid cars."
-        #         # "content": "Are there an infinite number of prime numbers such that n mod 4 == 3?"
+        #         "content": "Check the status of flight AA100 and, if it's delayed, book me a taxi 2 hours before its departure time.",
         #     }
         # )
         await worker.queue_frames([LLMRunFrame()])
