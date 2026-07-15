@@ -6,8 +6,6 @@
 
 """Tests for _convert_tool_content_for_seeding in GeminiLiveLLMService (#4926)."""
 
-import pytest
-
 from google.genai.types import Content, FunctionCall, FunctionResponse, Part
 
 from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
@@ -26,7 +24,13 @@ class TestConvertToolContentForSeeding:
         messages = [
             Content(
                 role="model",
-                parts=[Part(function_call=FunctionCall(name="transfer_to_agent", args={"agent": "support"}))],
+                parts=[
+                    Part(
+                        function_call=FunctionCall(
+                            name="transfer_to_agent", args={"agent": "support"}
+                        )
+                    )
+                ],
             )
         ]
         result = GeminiLiveLLMService._convert_tool_content_for_seeding(messages)
@@ -38,7 +42,13 @@ class TestConvertToolContentForSeeding:
         messages = [
             Content(
                 role="user",
-                parts=[Part(function_response=FunctionResponse(name="transfer_to_agent", response={"status": "done"}))],
+                parts=[
+                    Part(
+                        function_response=FunctionResponse(
+                            name="transfer_to_agent", response={"status": "done"}
+                        )
+                    )
+                ],
             )
         ]
         result = GeminiLiveLLMService._convert_tool_content_for_seeding(messages)
