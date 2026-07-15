@@ -90,6 +90,60 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+def _is_normal_close(exc: BaseException) -> bool:
+    """Return True for the MoQ session-closed error we see when the peer hangs up.
+
+    moq-rs surfaces a normal WebTransport close (code=0) as a
+    ``MoqError.Protocol`` whose message contains
+    ``"webtransport error: closed"``. That's not a failure — it's the
+    expected end of every session, both when the browser disconnects and
+    when the bot itself tears down its own transport. We log it at info
+    (and skip the ``on_error`` handler) instead of ERROR + traceback.
+    """
+    if not isinstance(exc, moq.MoqError):
+        return False
+    msg = str(exc)
+    return "webtransport error: closed" in msg or "session error" in msg and "closed" in msg
+
+
+_moq_task_filter_installed = False
+
+
+def _install_moq_task_exception_filter() -> None:
+    """Chain a loop-level exception filter that swallows normal-close leaks.
+
+    ``moq.Server`` spawns per-session tasks internally and doesn't await
+    them; when the peer WebTransport closes those tasks exit with the
+    normal-close ``MoqError.Protocol`` and, on garbage collection, asyncio
+    prints a scary "Task exception was never retrieved" traceback. GC can
+    fire well after our ``_run`` returns, so a scoped install/restore
+    around ``_run`` misses it. Install once, permanently, on first
+    ``_run`` — the filter only drops ``_is_normal_close`` errors and
+    delegates everything else to the previously-installed handler, so
+    leaving it in place is safe and idempotent across transport instances.
+    """
+    global _moq_task_filter_installed
+    if _moq_task_filter_installed:
+        return
+    loop = asyncio.get_running_loop()
+    previous = loop.get_exception_handler()
+
+    def _filter(loop_, context):
+        exc = context.get("exception")
+        if exc is not None and _is_normal_close(exc):
+            logger.debug(
+                f"MOQ: swallowed unretrieved-task exception from a normal close: {exc}"
+            )
+            return
+        if previous is not None:
+            previous(loop_, context)
+        else:
+            loop_.default_exception_handler(context)
+
+    loop.set_exception_handler(_filter)
+    _moq_task_filter_installed = True
+
+
 DEFAULT_NAMESPACE = "pipecat"
 DEFAULT_PARTICIPANT_ID = "bot0"
 DEFAULT_PEER_ID = "client0"
@@ -366,8 +420,20 @@ class MOQOutputTransport(BaseOutputTransport):
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
-        """Stop the MOQ output transport."""
+        """Stop the MOQ output transport.
+
+        On graceful end (an ``EndFrame`` — pushed by ``EndWorkerFrame``
+        from an ``end_call`` tool, for example) let the moq audio buffer
+        drain fully before the base class tears things down. Without
+        this the bot's final TTS utterance gets clipped: base_output's
+        stop() unblocks as soon as every audio frame has been *written*
+        to moq's pacing queue, but moq buffers up to
+        ``audio_out_max_buffer_ms`` (25s) of paced audio that still has
+        to reach the browser and drain the client jitter buffer before
+        it actually plays.
+        """
         await super().stop(frame)
+        await self._moq_transport.wait_for_audio_drain()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the MOQ output transport."""
@@ -636,6 +702,31 @@ class MOQTransport(BaseTransport):
         self._audio_out.write(moq.AudioFrame(timestamp_us=self._publish_pts_us, data=audio))
         self._publish_pts_us += int(duration_s * 1_000_000)
 
+    async def wait_for_audio_drain(self, jitter_buffer_margin_s: float = 0.3) -> None:
+        """Block until the pacing clock catches up to wall-clock, then a bit more.
+
+        ``publish_audio`` paces each write against ``_publish_audio_clock``,
+        which tracks the presentation-time deadline of the last chunk
+        written to the moq audio stream. When wall-clock reaches that
+        value, the last audio chunk has (approximately) been consumed by
+        the browser's player. Add a small margin for the client-side
+        jitter buffer to drain past the final sample before we signal
+        session-ending and tear the transport down.
+
+        No-op when no audio has been published yet or the clock has
+        already caught up. Capped at ``audio_out_max_buffer_ms`` as a
+        safety net so a bogus clock value can't stall shutdown.
+        """
+        if self._publish_audio_clock is None:
+            return
+        pending = self._publish_audio_clock - time.monotonic()
+        if pending <= 0:
+            return
+        cap = self._params.audio_out_max_buffer_ms / 1000.0
+        drain = min(pending, cap) + jitter_buffer_margin_s
+        logger.info(f"MOQ: draining {drain:.2f}s of buffered outbound audio before shutdown")
+        await asyncio.sleep(drain)
+
     def publish_transcript(self, message):
         """Append an RTVI message to the transcript JSON stream.
 
@@ -671,6 +762,12 @@ class MOQTransport(BaseTransport):
         peer's broadcast through the same origin — only the transport
         bring-up differs.
         """
+        # Install the loop-level filter that swallows the normal-close
+        # unretrieved-task warning from moq.Server's internal tasks.
+        # Idempotent + permanent for the loop's lifetime — see the
+        # helper's docstring for why we can't scope it to _run.
+        _install_moq_task_exception_filter()
+
         origin = moq.OriginProducer()
 
         if self._params.serve:
@@ -724,8 +821,14 @@ class MOQTransport(BaseTransport):
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.error(f"MOQ transport error: {e}", exc_info=True)
-            await self._call_event_handler("on_error", str(e), e)
+            if _is_normal_close(e):
+                # Browser closed the WebTransport session (or the bot did,
+                # via disconnect()). Not an error — code=0 is a clean
+                # close, expected at end-of-call.
+                logger.info(f"MOQ transport closed: {e}")
+            else:
+                logger.error(f"MOQ transport error: {e}", exc_info=True)
+                await self._call_event_handler("on_error", str(e), e)
         finally:
             self._audio_out = None
             self._cert_fingerprints = []
@@ -930,7 +1033,28 @@ class MOQTransport(BaseTransport):
         return consumer
 
     async def disconnect(self):
-        """Disconnect from the MOQ relay."""
+        """Disconnect from the MOQ relay.
+
+        Sends an intra-transport ``session-ending`` notification on the
+        transcript stream before tearing anything down. This gives the
+        browser-side MoQ transport a chance to disable auto-reconnect,
+        drain its jitter buffer, and close the audio decoder cleanly —
+        without that heads-up, WebTransport just vanishes underneath
+        Chrome's WebCodecs decoder and can crash the renderer ("Aw snap").
+        """
+        # Best-effort: publish the shutdown marker while the transcript
+        # stream is still alive, then yield briefly so the frame has time
+        # to reach the wire before we cancel _run. 250ms is well under
+        # any interactive perception threshold.
+        try:
+            if hasattr(self, "_transcript_out") and self._transcript_out is not None:
+                self._transcript_out.append(
+                    {"label": "moq-transport", "type": "session-ending"}
+                )
+                await asyncio.sleep(0.25)
+        except Exception as e:
+            logger.debug(f"MOQ: could not send session-ending notification: {e}")
+
         # Cancel any open consumers so their async iterations terminate.
         for c in self._active_consumers:
             try:

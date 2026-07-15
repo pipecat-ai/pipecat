@@ -41,8 +41,10 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.schemas.direct_function import tool_options
+from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import EndWorkerFrame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -54,12 +56,46 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.transports.moq.transport import MOQParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
+
+
+# cancel_on_interruption=False so the tool call survives interruptions —
+# without it, the bot's own farewell TTS bleeding back through the mic
+# triggers VAD → InterruptionFrame → cancels the in-flight end_call, and
+# the user has to say goodbye twice.
+@tool_options(cancel_on_interruption=False)
+async def end_call(params: FunctionCallParams):
+    """Gracefully wind the conversation down and shut the pipeline.
+
+    The result callback returns first so the LLM can produce its farewell
+    turn; ``EndWorkerFrame`` (pushed downstream) then flushes queued
+    frames — including the final TTS utterance — before terminating the
+    worker.
+    """
+    logger.info("end_call tool invoked — pipeline will shut down after farewell")
+    await params.result_callback({"success": True})
+    await params.llm.push_frame(EndWorkerFrame())
+
+
+end_call_function = FunctionSchema(
+    name="end_call",
+    description=(
+        "Gracefully end the call. Use this when the user says goodbye, indicates "
+        "they're finished, or otherwise wants to hang up. Deliver a short farewell "
+        "in the same turn — the pipeline waits for that utterance to finish "
+        "playing before it shuts down."
+    ),
+    properties={},
+    required=[],
+    handler=end_call,
+)
+
 
 # Transport-specific parameters using lambdas for deferred creation
 transport_params = {
@@ -92,12 +128,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 "Your goal is to demonstrate your capabilities in a succinct way. "
                 "Your output will be spoken aloud, so avoid special characters that can't easily "
                 "be spoken, such as emojis or bullet points. Respond to what the user said in a "
-                "creative and helpful way."
+                "creative and helpful way. "
+                "If the user says goodbye, 'that's all', 'hang up', 'end call', or "
+                "anything similar signaling they're done, IMMEDIATELY call the "
+                "`end_call` tool on the very first mention — do not ask for "
+                "confirmation, do not wait for a second cue. In the same turn, "
+                "produce a brief spoken farewell (e.g. 'Goodbye, take care!'); "
+                "the pipeline plays that utterance before it shuts down."
             ),
         ),
     )
 
-    context = LLMContext()
+    context = LLMContext(tools=[end_call_function])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
