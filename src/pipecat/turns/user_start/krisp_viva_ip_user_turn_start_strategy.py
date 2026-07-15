@@ -170,9 +170,8 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         self._audio_buffer.clear()
         self._decision_made = False
 
-    async def reset(self):
-        """Reset the strategy to its initial state."""
-        await super().reset()
+    async def handle_user_turn_started(self):
+        """Ready the strategy for a new user turn."""
         self._reset_state()
 
     async def process_frame(self, frame: Frame) -> ProcessFrameResult:

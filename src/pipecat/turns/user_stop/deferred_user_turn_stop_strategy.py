@@ -68,14 +68,12 @@ class DeferredUserTurnStopStrategy(BaseUserTurnStopStrategy):
         await super().cleanup()
         await self._inner.cleanup()
 
-    async def reset(self):
-        """Reset the inner strategy for a new user turn."""
-        await super().reset()
-        await self._inner.reset()
+    async def handle_user_turn_started(self):
+        """Forward the turn-started callback to the inner strategy."""
+        await self._inner.handle_user_turn_started()
 
     async def handle_user_turn_stopped(self):
-        """Notify the inner strategy that the user turn stop has taken effect."""
-        await super().handle_user_turn_stopped()
+        """Forward the turn-stopped callback to the inner strategy."""
         await self._inner.handle_user_turn_stopped()
 
     async def process_frame(self, frame: Frame) -> ProcessFrameResult | None:

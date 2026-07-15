@@ -6,6 +6,7 @@
 
 """Base user turn stop strategy for determining when the user stopped speaking."""
 
+import warnings
 from dataclasses import dataclass
 
 from pipecat.frames.frames import Frame
@@ -74,27 +75,59 @@ class BaseUserTurnStopStrategy(BaseObject):
         self._register_event_handler("on_user_turn_inference_triggered", sync=True)
         self._register_event_handler("on_user_turn_stopped", sync=True)
 
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # reset() is deprecated.
+        if cls.reset is not BaseUserTurnStopStrategy.reset:
+            warnings.warn(
+                f"`{cls.__name__}` overrides `reset`, which is deprecated since 1.6.0 "
+                "and will be removed in 2.0.0. Override `handle_user_turn_started` and "
+                "`handle_user_turn_stopped` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
     async def cleanup(self):
         """Cleanup the strategy."""
         pass
 
     async def reset(self):
-        """Reset the strategy to its initial state."""
-        pass
+        """Reset the strategy to its initial state.
 
-    async def handle_user_turn_stopped(self):
-        """Notify the strategy that a user turn stop has taken effect.
+        .. deprecated:: 1.6.0
+            Use :meth:`handle_user_turn_started` and
+            :meth:`handle_user_turn_stopped` instead. Will be removed in 2.0.0.
 
-        Counterpart to :meth:`trigger_user_turn_stopped`: that method *signals*
-        the controller that this strategy detected the turn end; this callback
-        is the controller *notifying* the strategy that the stop is now in
-        effect, regardless of which strategy (or the stop watchdog timeout)
-        ended the turn. Runs immediately before :meth:`reset`, so the strategy
-        can finalize state tied to the just-ended turn before reset clears it:
-        e.g. dropping a turn analyzer's buffered speech that must not survive
-        an externally-ended turn.
+        A stop strategy is reset at both turn boundaries — armed on start,
+        cleaned up on stop — so this historically ran at both. New strategies
+        should override the boundary callbacks directly, which say plainly
+        *when* the work runs, and reset however they like inside them (a private
+        helper called from both, an extra ``clear()`` on stop, and so on).
         """
         pass
+
+    async def handle_user_turn_started(self):
+        """Notify the strategy that a user turn has started.
+
+        The controller calls this on every stop strategy when a turn begins.
+        Override to run, for example, logic to arm the strategy to detect the
+        end of the turn now in progress.
+        """
+        # Backward compatibility: a custom strategy may still override the
+        # deprecated reset(); invoke it here (the base reset() is a no-op).
+        await self.reset()
+
+    async def handle_user_turn_stopped(self):
+        """Notify the strategy that the user turn has stopped.
+
+        The controller calls this on every stop strategy when a turn ends,
+        regardless of which strategy (or the stop watchdog timeout) ended it.
+        Override to run stop-specific logic — e.g. dropping a turn analyzer's
+        buffered speech that must not survive an externally-ended turn.
+        """
+        # Backward compatibility: a custom strategy may still override the
+        # deprecated reset(); invoke it here (the base reset() is a no-op).
+        await self.reset()
 
     async def process_frame(self, frame: Frame) -> ProcessFrameResult | None:
         """Process an incoming frame to decide whether the user stopped speaking.

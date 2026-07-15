@@ -6,6 +6,7 @@
 
 """Base turn start strategy for determining when the user starts speaking."""
 
+import warnings
 from dataclasses import dataclass
 
 from pipecat.frames.frames import Frame
@@ -76,23 +77,50 @@ class BaseUserTurnStartStrategy(BaseObject):
         self._register_event_handler("on_user_turn_started", sync=True)
         self._register_event_handler("on_reset_aggregation", sync=True)
 
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # reset() is deprecated.
+        if cls.reset is not BaseUserTurnStartStrategy.reset:
+            warnings.warn(
+                f"`{cls.__name__}` overrides `reset`, which is deprecated since 1.6.0 "
+                "and will be removed in 2.0.0. Override `handle_user_turn_started` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
     async def cleanup(self):
         """Cleanup the strategy."""
         pass
 
     async def reset(self):
-        """Reset the strategy to its initial state."""
+        """Reset the strategy to its initial state.
+
+        .. deprecated:: 1.6.0
+            Use :meth:`handle_user_turn_started` instead. Will be removed in
+            2.0.0.
+
+        For a start strategy this only ever ran at turn start, so its work *is*
+        "on turn start" — which is exactly what :meth:`handle_user_turn_started`
+        names. New strategies should override that callback directly.
+        """
         pass
 
     async def handle_user_turn_started(self):
-        """Notify the strategy that a user turn start has taken effect.
+        """Notify the strategy that a user turn has started.
 
-        Counterpart to :meth:`trigger_user_turn_started`: that method *signals*
-        the controller that this strategy detected a turn start; this callback
-        is the controller *notifying* the strategy that the start is now in
-        effect, regardless of which start strategy triggered it. Runs
-        immediately before :meth:`reset`, so the strategy can act on state it
-        accumulated up to the trigger before reset clears it for the new turn.
+        The controller calls this on every start strategy when a turn begins.
+        Override to run, for example, logic to reset state and prepare for the
+        next detection.
+        """
+        # Backward compatibility: a custom strategy may still override the
+        # deprecated reset(); invoke it here (the base reset() is a no-op).
+        await self.reset()
+
+    async def handle_user_turn_stopped(self):
+        """Notify the strategy that the user turn has stopped.
+
+        The controller calls this on every start strategy when a turn ends.
+        Override if the strategy needs to act on turn end (likely uncommon).
         """
         pass
 

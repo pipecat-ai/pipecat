@@ -96,9 +96,16 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
     def wait_for_transcript(self, value: bool) -> None:
         self._wait_for_transcript = value
 
-    async def reset(self):
-        """Reset the strategy to its initial state."""
-        await super().reset()
+    async def handle_user_turn_started(self):
+        """Ready the strategy to detect the end of the turn now starting."""
+        await self._reset()
+
+    async def handle_user_turn_stopped(self):
+        """Clear per-turn state once the turn has ended."""
+        await self._reset()
+
+    async def _reset(self):
+        """Clear per-turn state. Runs at both turn boundaries."""
         self._text = ""
         self._vad_user_speaking = False
         self._transcript_finalized = False
