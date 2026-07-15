@@ -227,9 +227,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             The same list, possibly with an appended user message.
         """
         if messages and messages[-1]["role"] == "assistant":
-            messages.append(
-                {"role": "user", "content": [{"type": "text", "text": "(continue)"}]}
-            )
+            messages.append({"role": "user", "content": [{"type": "text", "text": "(continue)"}]})
         return messages
 
     def _from_universal_context_message(self, message: LLMContextMessage) -> MessageParam:

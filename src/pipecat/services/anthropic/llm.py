@@ -311,8 +311,9 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         system = invocation_params["system"]
         tools = invocation_params["tools"]
 
-        # Claude 4.6+ rejects requests ending with an assistant message.
-        if self._model_disables_prefill():
+        # Models without assistant-prefill support reject requests that end
+        # with an assistant message.
+        if self._should_inject_trailing_user_message():
             adapter.ensure_last_message_is_user(messages)
 
         # Build params using the same method as streaming completions
@@ -339,13 +340,32 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
 
         return next((block.text for block in response.content if hasattr(block, "text")), None)
 
-    # Claude 4.6+ models do not support assistant message prefilling.
-    _NO_PREFILL_PATTERNS = ("claude-sonnet-4-6", "claude-opus-4-6")
+    # Models known to support assistant message prefilling (a request whose
+    # message list ends with an assistant message). Anthropic dropped prefill
+    # support starting with the 4.6-generation models, so this is a frozen
+    # legacy set: any model NOT matching is assumed to reject prefill and gets
+    # a trailing user message injected when needed.
+    _PREFILL_SUPPORTED_PATTERNS = (
+        "claude-2",
+        "claude-instant",
+        "claude-3",
+        "claude-opus-4-0",
+        "claude-opus-4-1",
+        "claude-sonnet-4-0",
+        "claude-sonnet-4-5",
+        "claude-haiku-4-5",
+    )
 
-    def _model_disables_prefill(self) -> bool:
-        """Return True if the current model does not support assistant message prefilling."""
+    def _should_inject_trailing_user_message(self) -> bool:
+        """Whether to fix up requests whose message list ends with an assistant message.
+
+        Models without assistant-prefill support reject such requests, so
+        injection is on for every model not known to support prefill.
+        Subclasses with exotic model naming can override
+        ``_PREFILL_SUPPORTED_PATTERNS``.
+        """
         model = self._settings.model or ""
-        return any(model.startswith(p) for p in self._NO_PREFILL_PATTERNS)
+        return not any(model.startswith(p) for p in self._PREFILL_SUPPORTED_PATTERNS)
 
     def _get_llm_invocation_params(self, context: LLMContext) -> AnthropicLLMInvocationParams:
         adapter = self.get_llm_adapter()
@@ -354,8 +374,9 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             enable_prompt_caching=assert_given(self._settings.enable_prompt_caching),
             system_instruction=assert_given(self._settings.system_instruction),
         )
-        # Claude 4.6+ rejects requests ending with an assistant message.
-        if self._model_disables_prefill():
+        # Models without assistant-prefill support reject requests that end
+        # with an assistant message.
+        if self._should_inject_trailing_user_message():
             adapter.ensure_last_message_is_user(params["messages"])
         return params
 

@@ -1166,8 +1166,14 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         """Test that ensure_last_message_is_user does nothing when last message is a tool_result (user role)."""
         messages = [
             {"role": "user", "content": "What's the weather?"},
-            {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "get_weather", "input": {}}]},
-            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "Sunny, 22°C"}]},
+            {
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "t1", "name": "get_weather", "input": {}}],
+            },
+            {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "Sunny, 22°C"}],
+            },
         ]
         result = AnthropicLLMAdapter.ensure_last_message_is_user(messages)
         self.assertEqual(len(result), 3)  # No message appended
@@ -1554,8 +1560,16 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         """Test that ensure_last_message_is_user does nothing when last message is a toolResult (user role)."""
         messages = [
             {"role": "user", "content": [{"text": "What's the weather?"}]},
-            {"role": "assistant", "content": [{"toolUse": {"toolUseId": "t1", "name": "get_weather", "input": {}}}]},
-            {"role": "user", "content": [{"toolResult": {"toolUseId": "t1", "content": [{"text": "Sunny, 22°C"}]}}]},
+            {
+                "role": "assistant",
+                "content": [{"toolUse": {"toolUseId": "t1", "name": "get_weather", "input": {}}}],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"toolResult": {"toolUseId": "t1", "content": [{"text": "Sunny, 22°C"}]}}
+                ],
+            },
         ]
         result = AWSBedrockLLMAdapter.ensure_last_message_is_user(messages)
         self.assertEqual(len(result), 3)  # No message appended
@@ -2624,6 +2638,108 @@ class TestBaseLLMAdapterHelpers(unittest.TestCase):
         )
 
         self.assertIsNone(result)
+
+
+class TestTrailingUserMessageInjection(unittest.TestCase):
+    """Model gating for the no-prefill trailing-user-message injection.
+
+    Claude 4.6+ models reject requests whose message list ends with an
+    assistant message. Injection must default to ON for any model not known
+    to support prefill (so future models are covered) and stay OFF for the
+    frozen legacy set that still supports prefill.
+    """
+
+    def _anthropic(self, **settings):
+        from pipecat.services.anthropic.llm import AnthropicLLMService
+
+        return AnthropicLLMService(
+            api_key="test-key", settings=AnthropicLLMService.Settings(**settings)
+        )
+
+    def _bedrock(self, **settings):
+        from pipecat.services.aws.llm import AWSBedrockLLMService
+
+        return AWSBedrockLLMService(
+            aws_region="us-east-1", settings=AWSBedrockLLMService.Settings(**settings)
+        )
+
+    def test_anthropic_no_prefill_models_inject(self):
+        """Models without prefill support — including unknown future ones — inject."""
+        for model in (
+            "claude-sonnet-4-6",
+            "claude-opus-4-6",
+            "claude-opus-4-8",
+            "claude-sonnet-5",  # hypothetical future model: must default to inject
+        ):
+            service = self._anthropic(model=model)
+            self.assertTrue(service._should_inject_trailing_user_message(), model)
+
+    def test_anthropic_legacy_prefill_models_do_not_inject(self):
+        """Models known to support prefill are left untouched."""
+        for model in (
+            "claude-haiku-4-5-20251001",
+            "claude-sonnet-4-5",
+            "claude-opus-4-1",
+            "claude-3-7-sonnet-latest",
+        ):
+            service = self._anthropic(model=model)
+            self.assertFalse(service._should_inject_trailing_user_message(), model)
+
+    def test_prefill_patterns_overridable_by_subclass(self):
+        """Deployments with exotic model naming can override the pattern set."""
+        from pipecat.services.anthropic.llm import AnthropicLLMService
+
+        class CustomService(AnthropicLLMService):
+            _PREFILL_SUPPORTED_PATTERNS = ("my-claude-proxy",)
+
+        service = CustomService(
+            api_key="test-key", settings=CustomService.Settings(model="my-claude-proxy-v2")
+        )
+        self.assertFalse(service._should_inject_trailing_user_message())
+
+    def test_anthropic_invocation_params_append_trailing_user(self):
+        """A trailing assistant message gets a user message appended, request-only."""
+        service = self._anthropic(model="claude-sonnet-4-6")
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hold on a second."},
+                {"role": "assistant", "content": "◐"},
+            ]
+        )
+        params = service._get_llm_invocation_params(context)
+
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertEqual(
+            params["messages"][-1]["content"], [{"type": "text", "text": "(continue)"}]
+        )
+        # The stored context is never mutated — the fix applies to the request only.
+        self.assertEqual(context.messages[-1]["role"], "assistant")
+
+    def test_anthropic_invocation_params_untouched_when_prefill_supported(self):
+        """Legacy prefill-supporting models keep the trailing assistant message."""
+        service = self._anthropic(model="claude-haiku-4-5")
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hold on a second."},
+                {"role": "assistant", "content": "◐"},
+            ]
+        )
+        params = service._get_llm_invocation_params(context)
+
+        self.assertEqual(params["messages"][-1]["role"], "assistant")
+
+    def test_bedrock_gate_by_model(self):
+        """Bedrock IDs match by substring; non-Claude models never inject."""
+        cases = {
+            "us.anthropic.claude-sonnet-4-6-v1:0": True,
+            "anthropic.claude-opus-4-8-v1:0": True,
+            "us.anthropic.claude-haiku-4-5-v1:0": False,
+            "anthropic.claude-3-7-sonnet-20250219-v1:0": False,
+            "amazon.nova-pro-v1:0": False,
+        }
+        for model, expected in cases.items():
+            service = self._bedrock(model=model)
+            self.assertEqual(service._should_inject_trailing_user_message(), expected, model)
 
 
 if __name__ == "__main__":
