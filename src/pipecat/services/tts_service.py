@@ -1497,6 +1497,7 @@ class TTSService(AIService):
         running = True
         timestamps_started = False
         should_push_stop_frame = False
+        received_audio = False
         while running:
             try:
                 frame = await asyncio.wait_for(queue.get(), timeout=self._stop_frame_timeout_s)
@@ -1515,6 +1516,7 @@ class TTSService(AIService):
                     )
                     continue
                 elif isinstance(frame, TTSAudioRawFrame):
+                    received_audio = True
                     # Set the word-timestamp baseline once, on the first audio chunk.
                     if not timestamps_started:
                         await self.stop_ttfb_metrics()
@@ -1559,6 +1561,12 @@ class TTSService(AIService):
             await self.push_frame(TTSStoppedFrame(context_id=context_id))
 
         await self._maybe_reset_word_timestamps(context_id)
+
+        if not received_audio:
+            await self._maybe_resume_frame_processing()
+            await self.push_error_frame(
+                ErrorFrame(error=f"{self} produced no audio for context {context_id}")
+            )
 
     async def on_audio_context_interrupted(self, context_id: str):
         """Called when an audio context is cancelled due to an interruption.

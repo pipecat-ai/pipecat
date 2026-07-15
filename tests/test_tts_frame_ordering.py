@@ -42,6 +42,7 @@ from pipecat.frames.frames import (
     AggregatedTextFrame,
     ControlFrame,
     DataFrame,
+    ErrorFrame,
     Frame,
     InterruptionFrame,
     LLMAssistantPushAggregationFrame,
@@ -295,6 +296,31 @@ class MockWebSocketPauseTTSServiceNoAudio(TTSService):
             yield
 
 
+class MockWebSocketPauseTTSServiceEmptyContext(TTSService):
+    """Simulates a WebSocket TTS service that completes without audio."""
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            push_start_frame=True,
+            push_text_frames=False,
+            pause_frame_processing=True,
+            sample_rate=_SAMPLE_RATE,
+            **kwargs,
+        )
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        async def _complete_context():
+            await asyncio.sleep(0.01)
+            await self.remove_audio_context(context_id)
+
+        self.create_task(_complete_context(), name=f"mock_ws_pause_empty_{context_id}")
+        if False:
+            yield
+
+
 class _MockWordTimestampHttpTTSService(TTSService):
     """HTTP-style TTS: yields audio synchronously, calls add_word_timestamps first.
 
@@ -534,6 +560,7 @@ async def test_websocket_tts_with_pause_frame_ordering():
     tts = MockWebSocketPauseTTSService()
     frames_received = await run_test(tts, frames_to_send=_make_frames_no_sleep())
     _assert_group_ordering(frames_received[0], _GROUPS)
+    assert not any(isinstance(frame, ErrorFrame) for frames in frames_received for frame in frames)
 
 
 @pytest.mark.asyncio
@@ -1266,6 +1293,34 @@ async def test_no_deadlock_on_interrupt_before_audio_simple():
     assert any(f.label == "after_interrupt" for f in foo_frames), (
         "FooFrame after interruption was not received — possible deadlock"
     )
+
+
+@pytest.mark.asyncio
+async def test_empty_audio_context_resumes_processing_and_pushes_error():
+    """A completed empty paused context must not block the pipeline or hide the failure."""
+    tts = MockWebSocketPauseTTSServiceEmptyContext()
+
+    frames_received = await asyncio.wait_for(
+        run_test(
+            tts,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                TextFrame(text="Hello."),
+                LLMFullResponseEndFrame(),
+                FooFrame(label="after_empty_context"),
+            ],
+        ),
+        timeout=3.0,
+    )
+
+    assert any(
+        isinstance(frame, FooFrame) and frame.label == "after_empty_context"
+        for frame in frames_received[0]
+    )
+    errors = [frame for frame in frames_received[1] if isinstance(frame, ErrorFrame)]
+    assert len(errors) == 1
+    assert errors[0].fatal is False
+    assert "produced no audio for context" in errors[0].error
 
 
 @pytest.mark.asyncio
