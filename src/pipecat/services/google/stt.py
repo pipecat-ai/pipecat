@@ -999,7 +999,6 @@ class GoogleSTTService(STTService):
                                 time_now_iso8601(),
                                 primary_language,
                                 result=result,
-                                finalized=True,
                             )
                         )
                         await self.stop_processing_metrics()
