@@ -151,7 +151,9 @@ def _add_token_usage_to_span(span, token_usage):
                 token_usage["cache_creation_input_tokens"],
             )
         if "reasoning_tokens" in token_usage and token_usage["reasoning_tokens"] is not None:
-            span.set_attribute("gen_ai.usage.reasoning_tokens", token_usage["reasoning_tokens"])
+            span.set_attribute(
+                "gen_ai.usage.reasoning.output_tokens", token_usage["reasoning_tokens"]
+            )
         if "input_audio_tokens" in token_usage and token_usage["input_audio_tokens"] is not None:
             span.set_attribute("gen_ai.usage.audio.input_tokens", token_usage["input_audio_tokens"])
         if "output_audio_tokens" in token_usage and token_usage["output_audio_tokens"] is not None:
@@ -184,7 +186,7 @@ def _add_token_usage_to_span(span, token_usage):
 
         reasoning_tokens = getattr(token_usage, "reasoning_tokens", None)
         if reasoning_tokens is not None:
-            span.set_attribute("gen_ai.usage.reasoning_tokens", reasoning_tokens)
+            span.set_attribute("gen_ai.usage.reasoning.output_tokens", reasoning_tokens)
 
         input_audio_tokens = getattr(token_usage, "input_audio_tokens", None)
         if input_audio_tokens is not None:
