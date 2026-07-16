@@ -42,7 +42,21 @@ from pipecat.services.stt_latency import GOOGLE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
+
+try:
+    from google.genai import Client
+    from google.genai.live import AsyncSession
+    from google.genai.types import (
+        AudioTranscriptionConfig,
+        Blob,
+        LiveConnectConfig,
+    )
+
+    HAS_GENAI = True
+except ModuleNotFoundError:
+    HAS_GENAI = False
 
 try:
     from google.api_core.client_options import ClientOptions
@@ -1035,4 +1049,366 @@ class GoogleSTTService(STTService):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             # Re-raise the exception to let it propagate (e.g. in the case of a
             # timeout, propagate to _stream_audio to reconnect)
+            raise
+
+
+#
+# Gemini STT Service
+#
+
+
+@dataclass
+class GeminiSTTSettings(STTSettings):
+    """Settings for GeminiSTTService.
+
+    Parameters:
+        language_hints: Expected languages in the audio (e.g. ``["es-ES"]``).
+            If ``language_hints`` is not set, but the parent's standard ``language``
+            setting is provided, it will be automatically used to populate
+            ``language_hints``. If neither is set, automatic language recognition
+            is enabled.
+    """
+
+    language_hints: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+class GeminiSTTService(STTService):
+    """Gemini Speech-to-Text streaming service using Gemini Live API.
+
+    Provides real-time speech recognition using Gemini's Live API with support for
+    language hints and adaptation phrases.
+
+    Note:
+        Requires the `google-genai` package.
+    """
+
+    Settings = GeminiSTTSettings
+    _settings: Settings
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        enterprise: bool | None = None,
+        vertexai: bool | None = None,
+        credentials: Any | None = None,
+        credentials_path: str | None = None,
+        project: str | None = None,
+        location: str | None = None,
+        model: str | None = "latest",
+        settings: Settings | None = None,
+        http_options: Any | None = None,
+        **kwargs,
+    ):
+        """Initialize the Gemini STT service.
+
+        Args:
+            api_key: Google AI API key for authentication. If not provided, the SDK will look for
+                the GEMINI_API_KEY environment variable.
+            enterprise: Use Google Cloud Vertex AI backend if True.
+            vertexai: Alias for ``enterprise``.
+            credentials: Google Cloud credentials object.
+            credentials_path: Path to Google Cloud service account JSON file.
+            project: Google Cloud project ID (required for Vertex AI).
+            location: Google Cloud region (e.g. "us-central1").
+            model: The Gemini model to use for ASR. Defaults to the latest.
+            settings: Runtime-updatable settings.
+            http_options: Optional HTTP options for the Client.
+            **kwargs: Additional arguments passed to the parent STTService.
+        """
+        if not HAS_GENAI:
+            raise ImportError(
+                "google-genai SDK is not installed. "
+                'Please install it via `uv add "pipecat-ai[google]"`.'
+            )
+
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            language=None,
+            model=model,
+            language_hints=None,
+        )
+
+        # 2. No direct init arg overrides (model handled in step 1)
+
+        # 3. No deprecated params to process
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            settings=default_settings,
+            **kwargs,
+        )
+
+        # Resolve credentials if provided
+        creds: google.auth.credentials.Credentials | None = None
+        project_id = project
+        if credentials:
+            if isinstance(credentials, str):
+                import json
+
+                from google.oauth2 import service_account
+
+                json_account_info = json.loads(credentials)
+                project_id = project_id or json_account_info.get("project_id")
+                creds = service_account.Credentials.from_service_account_info(
+                    json_account_info,
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"],
+                )
+            else:
+                creds = credentials
+        elif credentials_path:
+            import json
+
+            from google.oauth2 import service_account
+
+            with open(credentials_path) as f:
+                json_account_info = json.load(f)
+                project_id = project_id or json_account_info.get("project_id")
+            creds = service_account.Credentials.from_service_account_file(
+                credentials_path,
+                scopes=["https://www.googleapis.com/auth/cloud-platform"],
+            )
+
+        # Determine if we should use Vertex AI (enterprise)
+        is_enterprise = enterprise
+        if is_enterprise is None:
+            if vertexai is not None:
+                is_enterprise = vertexai
+            elif api_key is not None:
+                is_enterprise = False
+            elif creds or project_id or location:
+                is_enterprise = True
+
+        client_kwargs = {
+            "api_key": api_key,
+            "http_options": http_options,
+        }
+        if is_enterprise:
+            client_kwargs["enterprise"] = True
+            if project_id:
+                client_kwargs["project"] = project_id
+            client_kwargs["location"] = location or "global"
+            if creds:
+                client_kwargs["credentials"] = creds
+        else:
+            if api_key is None:
+                client_kwargs["api_key"] = os.environ.get("GEMINI_API_KEY") or os.environ.get(
+                    "GOOGLE_API_KEY"
+                )
+
+        self._client = Client(**client_kwargs)
+        self._session: AsyncSession | None = None
+        self._request_queue: asyncio.Queue | None = None
+        self._streaming_task: asyncio.Task | None = None
+
+    def language_to_service_language(self, language: Language) -> str | None:
+        """Convert a language to the service-specific language format (BCP-47 string)."""
+        return str(Language(language))
+
+    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
+        """Apply settings delta and reconnect if anything changed."""
+        changed = await super()._update_settings(delta)
+        if changed:
+            await self._reconnect_if_needed()
+        return changed
+
+    async def _reconnect_if_needed(self):
+        """Reconnect the stream if it's currently active."""
+        if self._streaming_task:
+            logger.debug("Reconnecting Gemini ASR stream due to configuration changes")
+            await self._disconnect()
+            await self._connect()
+
+    async def start(self, frame: StartFrame):
+        """Start the STT service and establish connection."""
+        await super().start(frame)
+        await self._connect()
+
+    async def stop(self, frame: EndFrame):
+        """Stop the STT service and clean up resources."""
+        await super().stop(frame)
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the STT service and clean up resources."""
+        await super().cancel(frame)
+        await self._disconnect()
+
+    async def cleanup(self):
+        """Release streaming resources."""
+        await super().cleanup()
+        await self._disconnect()
+
+    async def _connect(self):
+        """Initialize streaming connection."""
+        logger.debug("Connecting to Gemini Live ASR")
+
+        lang_hints = self._settings.language_hints
+        if not lang_hints and self._settings.language:
+            lang_hints = [self._settings.language]
+
+        if getattr(self._client._api_client, "vertexai", False):
+            if lang_hints:
+                input_audio_transcription = AudioTranscriptionConfig(
+                    language_hints={"language_codes": lang_hints},
+                )
+            else:
+                input_audio_transcription = AudioTranscriptionConfig(
+                    language_auto={},
+                )
+        else:
+            if lang_hints:
+                logger.warning(
+                    "language_hints/language is only supported on Vertex AI (enterprise=True). "
+                    "Ignoring language configuration for Gemini Developer API."
+                )
+            input_audio_transcription = AudioTranscriptionConfig()
+
+        config = LiveConnectConfig(
+            response_modalities=["TEXT"],
+            input_audio_transcription=input_audio_transcription,
+        )
+
+        self._request_queue = asyncio.Queue()
+
+        # We start the stream loop in a background task
+        self._streaming_task = self.create_task(self._stream_audio(config))
+        await self._call_event_handler("on_connected")
+
+    async def _disconnect(self):
+        """Clean up streaming connection resources."""
+        if self._streaming_task:
+            logger.debug("Disconnecting from Gemini Live ASR")
+            await self.cancel_task(self._streaming_task)
+            self._streaming_task = None
+
+        self._session = None
+        await self._call_event_handler("on_disconnected")
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
+        """Process an audio chunk for STT transcription.
+
+        Args:
+            audio: Raw audio bytes to transcribe.
+
+        Yields:
+            Frame: None (actual transcription frames are pushed via internal processing).
+        """
+        if self._streaming_task:
+            await self.start_processing_metrics()
+            await self._request_queue.put(audio)
+        yield None
+
+    async def _send_loop(self):
+        """Send loop to stream audio data to Gemini session."""
+        try:
+            while True:
+                audio_data = await self._request_queue.get()
+                self._request_queue.task_done()
+
+                if self._session:
+                    logger.debug(f"Sending {len(audio_data)} bytes of audio to Gemini ASR")
+                    await self._session.send_realtime_input(
+                        audio=Blob(
+                            data=audio_data,
+                            mime_type=f"audio/pcm;rate={self.sample_rate}",
+                        )
+                    )
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Error in Gemini ASR send loop: {e}")
+            raise
+
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: str | None = None
+    ):
+        """Called when a transcription is processed. Override in subclasses or observers."""
+        pass
+
+    async def _receive_loop(self):
+        """Receive loop to process transcription responses from Gemini session."""
+        try:
+            while True:
+                turn = self._session.receive()
+                async for message in turn:
+                    logger.debug(f"Received message from Gemini ASR: {message}")
+                    sc = message.server_content
+                    if not sc:
+                        continue
+
+                    # 1. Check for final transcription segment
+                    if getattr(sc, "input_transcription", None):
+                        text = sc.input_transcription.text
+                        if text:
+                            # Push final TranscriptionFrame
+                            await self.push_frame(
+                                TranscriptionFrame(
+                                    text=text,
+                                    user_id=self._user_id,
+                                    timestamp=time_now_iso8601(),
+                                    language=self._settings.language,
+                                    result=message,
+                                    finalized=True,
+                                )
+                            )
+                            await self.stop_processing_metrics()
+                            await self._handle_transcription(
+                                text, is_final=True, language=self._settings.language
+                            )
+                            continue
+
+                    # 2. Check for interim/partial transcription
+                    if getattr(sc, "interim_input_transcription", None):
+                        text = sc.interim_input_transcription.text
+                        if text:
+                            # Push InterimTranscriptionFrame
+                            await self.push_frame(
+                                InterimTranscriptionFrame(
+                                    text=text,
+                                    user_id=self._user_id,
+                                    timestamp=time_now_iso8601(),
+                                    language=self._settings.language,
+                                    result=message,
+                                )
+                            )
+                            await self._handle_transcription(
+                                text, is_final=False, language=self._settings.language
+                            )
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Error in Gemini ASR receive loop: {e}")
+            raise
+
+    async def _stream_audio(self, config: LiveConnectConfig):
+        """Handle connection and spawning tasks for ASR streaming."""
+        model = self._settings.model or "latest"
+        try:
+            async with self._client.aio.live.connect(model=model, config=config) as session:
+                self._session = session
+
+                # Start send and receive tasks
+                send_task = self.create_task(self._send_loop())
+                receive_task = self.create_task(self._receive_loop())
+
+                done, pending = await asyncio.wait(
+                    [send_task, receive_task], return_when=asyncio.FIRST_COMPLETED
+                )
+
+                for task in pending:
+                    await self.cancel_task(task)
+
+                # If a task failed, propagate the exception
+                for task in done:
+                    task.result()
+
+        except Exception as e:
+            logger.error(f"Gemini ASR connection error: {e}")
+            await self.push_error(error_msg=f"Gemini ASR error: {e}", exception=e)
+            await self._call_event_handler("on_connection_error", error=str(e))
             raise
