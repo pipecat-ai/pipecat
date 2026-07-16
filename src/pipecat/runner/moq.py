@@ -109,13 +109,11 @@ def _validate_moq_args(args: argparse.Namespace) -> bool:
             logger.warning(
                 "--moq-tls-generate is ignored — using --moq-tls-cert/--moq-tls-key instead"
             )
-        if not (has_cert and has_key) and not has_generate:
-            logger.error(
-                "server mode (--moq-serve) requires TLS configuration: "
-                "pass --moq-tls-cert and --moq-tls-key for a CA-signed cert, "
-                "or --moq-tls-generate <hostname> for a self-signed dev cert"
-            )
-            return False
+        elif not (has_cert and has_key) and not has_generate:
+            # No TLS config supplied at all — default to a self-signed dev
+            # cert for localhost rather than requiring --moq-tls-generate.
+            args.moq_tls_generate = "localhost"
+            has_generate = True
 
         bind = args.moq_bind or DEFAULT_MOQ_SERVE_BIND
         try:

@@ -84,7 +84,8 @@ To run locally:
 - Daily (direct, testing only): ``python bot.py -d``
 - ESP32: ``python bot.py -t webrtc --esp32 --host 192.168.1.100``
 - Exotel: ``python bot.py -t exotel`` (no proxy needed, but ngrok connection to HTTP 7860 is required)
-- MOQ (bot is the server, local dev): ``python bot.py -t moq --moq-serve --moq-tls-generate localhost``
+- MOQ (bot is the server, local dev): ``python bot.py -t moq`` (``--moq-serve`` and
+  ``--moq-tls-generate localhost`` are the defaults)
 - MOQ (dial an external relay): MoQ client mode is not yet supported.
 - Telephony: ``python bot.py -t twilio -x your_username.ngrok.io``
 - WebRTC only: ``python bot.py -t webrtc``
@@ -1617,12 +1618,13 @@ def main(parser: argparse.ArgumentParser | None = None):
     parser.add_argument(
         "--moq-serve",
         action="store_true",
-        default=False,
+        default=True,
         help=(
             "Run the bot as a MOQ server — the bot binds its own UDP socket and "
             "accepts the browser's direct connection (no separate moq-relay needed). "
             "Requires --moq-tls-cert/--moq-tls-key (production) or "
-            "--moq-tls-generate <hostname> (self-signed dev cert)."
+            "--moq-tls-generate <hostname> (self-signed dev cert). On by default, "
+            "since MoQ client mode isn't supported yet."
         ),
     )
     parser.add_argument(
@@ -1677,8 +1679,9 @@ def main(parser: argparse.ArgumentParser | None = None):
         default=None,
         metavar="HOSTNAME",
         help=(
-            "Server mode, dev only: generate a self-signed TLS cert for HOSTNAME "
-            "(e.g. localhost). Mutually exclusive with --moq-tls-cert/--moq-tls-key."
+            "Server mode, dev only: generate a self-signed TLS cert for HOSTNAME. "
+            "Defaults to a self-signed cert for localhost when no TLS config is "
+            "given at all. Mutually exclusive with --moq-tls-cert/--moq-tls-key."
         ),
     )
 
@@ -1698,7 +1701,10 @@ def main(parser: argparse.ArgumentParser | None = None):
 
     # Resolve MoQ args (parses --moq-connect, applies serve-mode defaults,
     # warns on conflicting flags). Stashes derived host/port/path/bind on `args`.
-    if args.transport == "moq" and not _validate_moq_args(args):
+    # Always run this — not just for -t moq — so args.moq_host etc. are populated
+    # whenever a client requests the moq transport at /start, even when the runner
+    # supports all transports (args.transport is None).
+    if not _validate_moq_args(args):
         return
 
     # Validate ESP32 requirements
