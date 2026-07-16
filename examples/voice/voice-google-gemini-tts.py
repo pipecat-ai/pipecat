@@ -23,7 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.google.llm import GoogleLLMService
-from pipecat.services.google.stt import GoogleSTTService
+from pipecat.services.google.stt import GeminiSTTService
 from pipecat.services.google.tts import GeminiTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -58,11 +58,14 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot with Gemini TTS")
 
-    stt = GoogleSTTService(
-        settings=GoogleSTTService.Settings(
-            languages=[Language.EN_US],
+    stt = GeminiSTTService(
+        # api_key=os.environ["GOOGLE_API_KEY"], # set this to use Gemini API
+        credentials=os.environ[
+            "GOOGLE_TEST_CREDENTIALS"
+        ],  # Set this to use Google Cloud (Vertex AI)
+        settings=GeminiSTTService.Settings(
+            model="latest",
         ),
-        credentials=os.environ["GOOGLE_TEST_CREDENTIALS"],
     )
 
     tts = GeminiTTSService(
