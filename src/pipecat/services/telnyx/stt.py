@@ -12,8 +12,9 @@ wss://api.telnyx.com/v2/speech-to-text/transcription.
 Protocol:
   - Connect with Authorization: Bearer <key> header.
   - Send raw 16-bit PCM audio as binary WebSocket frames.
-  - Receive JSON text frames with transcript, is_final, confidence.
-  - Send {"type": "CloseStream"} to end the session gracefully.
+  - Receive JSON text frames with transcript, is_final, confidence, speech_final.
+  - Send {"type": "CloseStream"} to end the session gracefully (Deepgram, Speechmatics, Soniox only).
+  - Receive {"errors": [...]} on validation or connection errors.
 """
 
 from __future__ import annotations
@@ -80,7 +81,8 @@ class TelnyxSTTService(WebsocketSTTService):
         transcription_engine: str = "Telnyx",
         input_format: str = "linear16",
         sample_rate: int = 16000,
-        language: str = "en",
+        language: str = "en-US",
+        interim_results: bool = True,
         settings: Settings | None = None,
         **kwargs: Any,
     ):
@@ -91,7 +93,8 @@ class TelnyxSTTService(WebsocketSTTService):
             transcription_engine: STT engine (Telnyx, Deepgram, Google, Azure).
             input_format: Audio encoding (linear16, mulaw, alaw).
             sample_rate: Audio sample rate in Hz.
-            language: ISO 639-1 language code.
+            language: BCP-47 language code (e.g., "en-US").
+            interim_results: Whether to request interim (partial) transcripts.
             settings: Runtime-updatable settings.
             **kwargs: Additional arguments passed to WebsocketSTTService.
         """
@@ -102,7 +105,7 @@ class TelnyxSTTService(WebsocketSTTService):
         )
 
         if settings:
-            default_settings.update_from(settings)
+            default_settings.apply_update(settings)
 
         super().__init__(sample_rate=sample_rate, **kwargs)
         self._api_key = api_key
@@ -110,6 +113,7 @@ class TelnyxSTTService(WebsocketSTTService):
         self._input_format = input_format
         self._sample_rate = sample_rate
         self._language = language
+        self._interim_results = interim_results
         self._receive_task = None
 
     def _build_url(self) -> str:
@@ -118,6 +122,8 @@ class TelnyxSTTService(WebsocketSTTService):
             f"?transcription_engine={self._transcription_engine}"
             f"&input_format={self._input_format}"
             f"&sample_rate={self._sample_rate}"
+            f"&language={self._language}"
+            f"&interim_results={'true' if self._interim_results else 'false'}"
         )
 
     async def start(self, frame: Frame):
@@ -157,10 +163,11 @@ class TelnyxSTTService(WebsocketSTTService):
         try:
             if self._websocket:
                 logger.debug("Disconnecting from Telnyx STT")
-                try:
-                    await self._websocket.send(json.dumps({"type": "CloseStream"}))
-                except Exception:
-                    pass
+                if self._transcription_engine in ("Deepgram", "Speechmatics", "Soniox"):
+                    try:
+                        await self._websocket.send(json.dumps({"type": "CloseStream"}))
+                    except Exception:
+                        pass
                 await self._websocket.close()
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
@@ -179,6 +186,16 @@ class TelnyxSTTService(WebsocketSTTService):
                 data = json.loads(message)
             except json.JSONDecodeError:
                 logger.warning(f"Telnyx STT: non-JSON message: {message}")
+                continue
+
+            if data.get("errors"):
+                errors = data["errors"]
+                detail = errors[0].get("detail") if errors else "Unknown Telnyx STT error"
+                logger.error(f"Telnyx STT error: {detail}")
+                await self.push_error(error_msg=detail)
+                continue
+
+            if data.get("utterance_end"):
                 continue
 
             is_final = data.get("is_final", False)

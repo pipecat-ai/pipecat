@@ -13,8 +13,9 @@ Protocol:
   - Connect with Authorization: Bearer <key> header.
   - Send init frame {"text": " ", "voice_settings": {"voice_speed": <speed>}}.
   - Send text frames {"text": "..."} for each synthesis request.
-  - Receive audio_chunk frames with base64-encoded PCM audio.
-  - Receive a final frame (isFinal: true) when synthesis is done.
+  - Receive audio frames with base64-encoded PCM audio ({"audio": "<b64>"}).
+  - Receive a final frame ({"isFinal": true}) when synthesis is done.
+  - Receive an error frame ({"error": "..."}) on failure.
   - Send {"force": true} to interrupt mid-stream.
 """
 
@@ -108,7 +109,7 @@ class TelnyxTTSService(WebsocketTTSService):
         )
 
         if settings:
-            default_settings.update_from(settings)
+            default_settings.apply_update(settings)
 
         super().__init__(
             push_start_frame=True,
@@ -119,11 +120,17 @@ class TelnyxTTSService(WebsocketTTSService):
         self._api_key = api_key
         self._voice = voice
         self._speed = speed
+        self._sample_rate = sample_rate
         self._receive_task = None
         self._current_context_id: str | None = None
 
     def _build_url(self) -> str:
-        return f"wss://api.telnyx.com/v2/text-to-speech/speech?voice={self._voice}&audio_format=pcm"
+        return (
+            f"wss://api.telnyx.com/v2/text-to-speech/speech"
+            f"?voice={self._voice}"
+            f"&audio_format=linear16"
+            f"&sample_rate={self._sample_rate}"
+        )
 
     async def start(self, frame: Frame):
         """Start the TTS service and connect to the WebSocket."""
@@ -188,36 +195,35 @@ class TelnyxTTSService(WebsocketTTSService):
                 logger.warning(f"Telnyx TTS: non-JSON message: {message}")
                 continue
 
-            msg_type = msg.get("type")
             ctx_id = self._current_context_id
 
-            if msg_type == "audio_chunk":
-                audio_b64 = msg.get("audio")
-                if not audio_b64:
-                    continue
-                if not ctx_id or not self.audio_context_available(ctx_id):
-                    continue
-                audio_data = base64.b64decode(audio_b64)
-                frame = TTSAudioRawFrame(
-                    audio=audio_data,
-                    sample_rate=self.sample_rate,
-                    num_channels=1,
-                    context_id=ctx_id,
-                )
-                await self.append_to_audio_context(ctx_id, frame)
-
-            elif msg_type == "final":
-                if ctx_id and self.audio_context_available(ctx_id):
-                    await self.append_to_audio_context(ctx_id, TTSStoppedFrame(context_id=ctx_id))
-                    await self.remove_audio_context(ctx_id)
-
-            elif msg_type == "error":
-                error_msg = msg.get("error", "Unknown Telnyx TTS error")
+            if msg.get("error"):
+                error_msg = msg["error"]
                 logger.error(f"Telnyx TTS error: {error_msg}")
                 if ctx_id and self.audio_context_available(ctx_id):
                     await self.append_to_audio_context(ctx_id, TTSStoppedFrame(context_id=ctx_id))
                     await self.remove_audio_context(ctx_id)
                 await self.push_error(error_msg=error_msg)
+                continue
+
+            if msg.get("isFinal"):
+                if ctx_id and self.audio_context_available(ctx_id):
+                    await self.append_to_audio_context(ctx_id, TTSStoppedFrame(context_id=ctx_id))
+                    await self.remove_audio_context(ctx_id)
+                continue
+
+            audio_b64 = msg.get("audio")
+            if not audio_b64 or not ctx_id or not self.audio_context_available(ctx_id):
+                continue
+
+            audio_data = base64.b64decode(audio_b64)
+            frame = TTSAudioRawFrame(
+                audio=audio_data,
+                sample_rate=self.sample_rate,
+                num_channels=1,
+                context_id=ctx_id,
+            )
+            await self.append_to_audio_context(ctx_id, frame)
 
     async def on_audio_context_interrupted(self, context_id: str):
         """Handle interruption by sending a force frame to stop synthesis."""
