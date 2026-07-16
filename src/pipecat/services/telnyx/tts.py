@@ -35,12 +35,12 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 
 @dataclass
@@ -115,22 +115,50 @@ class TelnyxTTSService(WebsocketTTSService):
             push_start_frame=True,
             push_stop_frames=False,
             sample_rate=sample_rate,
+            settings=default_settings,
             **kwargs,
         )
         self._api_key = api_key
-        self._voice = voice
-        self._speed = speed
         self._sample_rate = sample_rate
         self._receive_task = None
         self._current_context_id: str | None = None
 
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics."""
+        return True
+
+    def language_to_service_language(self, language: Language) -> str | None:
+        """Convert a Language enum to Telnyx service language format.
+
+        Telnyx TTS embeds language in the voice ID, so there is no separate
+        language parameter. Returns None to indicate the language is not
+        applicable as a standalone setting.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            None, since Telnyx TTS has no separate language parameter.
+        """
+        return None
+
     def _build_url(self) -> str:
         return (
             f"wss://api.telnyx.com/v2/text-to-speech/speech"
-            f"?voice={self._voice}"
+            f"?voice={self._settings.voice}"
             f"&audio_format=linear16"
             f"&sample_rate={self._sample_rate}"
         )
+
+    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+        """Apply a settings delta and reconnect if voice or speed changed."""
+        changed = await super()._update_settings(delta)
+
+        if changed and self._websocket:
+            await self._disconnect()
+            await self._connect()
+
+        return changed
 
     async def start(self, frame: Frame):
         """Start the TTS service and connect to the WebSocket."""
@@ -159,10 +187,9 @@ class TelnyxTTSService(WebsocketTTSService):
                 self._build_url(),
                 additional_headers={"Authorization": f"Bearer {self._api_key}"},
             )
-            # Send the init handshake with voice_settings.
             init_frame = {
                 "text": " ",
-                "voice_settings": {"voice_speed": self._speed},
+                "voice_settings": {"voice_speed": self._settings.speed},
             }
             await self._websocket.send(json.dumps(init_frame))
             await self._call_event_handler("on_connected")
@@ -234,6 +261,7 @@ class TelnyxTTSService(WebsocketTTSService):
                 logger.warning(f"Telnyx TTS: failed to send force frame: {e}")
         await super().on_audio_context_interrupted(context_id)
 
+    @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Send text to the Telnyx TTS WebSocket for synthesis."""
         logger.debug(f"{self}: Generating TTS [{text}]")
