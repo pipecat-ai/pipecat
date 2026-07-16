@@ -42,7 +42,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     UninterruptibleFrame,
 )
-from pipecat.metrics.metrics import LLMTokenUsage, MetricsData
+from pipecat.metrics.metrics import LLMTokenUsage, MetricsData, STTUsage
 from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
@@ -493,6 +493,17 @@ class FrameProcessor(BaseObject):
         """
         if self.can_generate_metrics() and self.usage_metrics_enabled:
             frame = await self._metrics.start_llm_usage_metrics(tokens)
+            if frame:
+                await self.push_frame(frame)
+
+    async def start_stt_usage_metrics(self, usage: STTUsage):
+        """Start STT usage metrics collection.
+
+        Args:
+            usage: Usage information for the STT operation.
+        """
+        if self.can_generate_metrics() and self.usage_metrics_enabled:
+            frame = await self._metrics.start_stt_usage_metrics(usage)
             if frame:
                 await self.push_frame(frame)
 
