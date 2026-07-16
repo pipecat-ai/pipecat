@@ -1107,25 +1107,31 @@ def traced_gemini_live(operation: str) -> Callable:
                                         operation_attrs["tool.arguments"] = str(call.args)[:1000]
 
                         elif operation == "llm_tool_result" and len(args) >= 3:
-                            # _tool_result(self, tool_call_id, tool_name, result); its
-                            # positional args, in order. ``result`` is Gemini's already-
-                            # built FunctionResponse.response payload (a dict).
-                            tool_call_id, tool_name, result = args[0], args[1], args[2]
-                            if tool_call_id:
-                                operation_attrs["tool.call_id"] = tool_call_id
-                            if tool_name:
-                                operation_attrs["tool.function_name"] = tool_name
-                            if isinstance(result, dict):
-                                result_str = json.dumps(result)
-                                if len(result_str) > 2000:  # larger limit for results
-                                    result_str = result_str[:2000] + "..."
-                                operation_attrs["tool.result"] = result_str
-                                if "error" in result:
-                                    operation_attrs["tool.result_status"] = "error"
-                                elif "success" in result:
-                                    operation_attrs["tool.result_status"] = "success"
-                                else:
-                                    operation_attrs["tool.result_status"] = "completed"
+                            # _tool_result(self, tool_call_id, tool_call_name, result); its
+                            # positional args, in order. ``result`` is expected to be
+                            # Gemini's FunctionResponse.response payload (a dict), but is
+                            # validated at runtime rather than assumed.
+                            tool_call_id, tool_call_name, result = args[0], args[1], args[2]
+                            try:
+                                if tool_call_id:
+                                    operation_attrs["tool.call_id"] = tool_call_id
+                                if tool_call_name:
+                                    operation_attrs["tool.function_name"] = tool_call_name
+                                if isinstance(result, dict):
+                                    result_str = json.dumps(result)
+                                    if len(result_str) > 2000:  # larger limit for results
+                                        result_str = result_str[:2000] + "..."
+                                    operation_attrs["tool.result"] = result_str
+                                    if "error" in result:
+                                        operation_attrs["tool.result_status"] = "error"
+                                    elif "success" in result:
+                                        operation_attrs["tool.result_status"] = "success"
+                                    else:
+                                        operation_attrs["tool.result_status"] = "completed"
+                            except Exception as e:
+                                logging.warning(
+                                    f"Error capturing tool result attributes for tracing: {e}"
+                                )
 
                         elif operation == "llm_response" and args:
                             # Extract usage and response metadata from turn complete event
