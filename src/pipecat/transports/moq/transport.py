@@ -58,6 +58,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Optional, cast
 
+import numpy as np
 from loguru import logger
 from pydantic import ConfigDict
 
@@ -171,20 +172,12 @@ def _downmix_s16_to_mono(pcm: bytes, channels: int) -> bytes:
     the MediaStreamAudioSourceNode's channelCount=2 when the
     MediaStreamTrack doesn't expose channelCount in its settings).
     """
-    import array
-
-    samples = array.array("h")
-    samples.frombytes(pcm)
-    if channels <= 1 or len(samples) % channels != 0:
+    samples = np.frombuffer(pcm, dtype=np.int16)
+    if channels <= 1 or samples.size % channels != 0:
         return pcm
-    frames = len(samples) // channels
-    out = array.array("h", [0]) * frames
-    for i in range(frames):
-        base = i * channels
-        acc = 0
-        for c in range(channels):
-            acc += samples[base + c]
-        out[i] = max(-32768, min(32767, acc // channels))
+    frames = samples.size // channels
+    summed = samples.reshape(frames, channels).astype(np.int32).sum(axis=1)
+    out = np.clip(summed // channels, -32768, 32767).astype(np.int16)
     return out.tobytes()
 
 
@@ -322,12 +315,20 @@ class MOQInputTransport(BaseInputTransport):
         self._initialized = False
 
     async def setup(self, setup: FrameProcessorSetup):
-        """Forward setup to the shared MOQTransport so it can create tasks."""
+        """Forward setup to the shared MOQTransport so it can create tasks.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
         await super().setup(setup)
         await self._moq_transport.setup(setup)
 
     async def start(self, frame: StartFrame):
-        """Auto-connect to the MOQ relay when the pipeline starts."""
+        """Auto-connect to the MOQ relay when the pipeline starts.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         await super().start(frame)
         if self._initialized:
             return
@@ -339,11 +340,19 @@ class MOQInputTransport(BaseInputTransport):
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
-        """Stop the MOQ input transport."""
+        """Stop the MOQ input transport.
+
+        Args:
+            frame: The end frame signaling transport shutdown.
+        """
         await super().stop(frame)
 
     async def cancel(self, frame: CancelFrame):
-        """Cancel the MOQ input transport."""
+        """Cancel the MOQ input transport.
+
+        Args:
+            frame: The cancel frame signaling immediate cancellation.
+        """
         await super().cancel(frame)
 
     async def cleanup(self):
@@ -352,7 +361,12 @@ class MOQInputTransport(BaseInputTransport):
         await self._moq_transport.cleanup()
 
     async def push_received_audio(self, audio: bytes, sample_rate: int):
-        """Push a received audio frame downstream."""
+        """Push a received audio frame downstream.
+
+        Args:
+            audio: Raw mono 16-bit PCM audio bytes.
+            sample_rate: Sample rate of ``audio``, in Hz.
+        """
         await self.push_audio_frame(
             InputAudioRawFrame(audio=audio, sample_rate=sample_rate, num_channels=1)
         )
@@ -394,12 +408,20 @@ class MOQOutputTransport(BaseOutputTransport):
         self._initialized = False
 
     async def setup(self, setup: FrameProcessorSetup):
-        """Forward setup to the shared MOQTransport so it can create tasks."""
+        """Forward setup to the shared MOQTransport so it can create tasks.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
         await super().setup(setup)
         await self._moq_transport.setup(setup)
 
     async def start(self, frame: StartFrame):
-        """Start the MOQ output transport."""
+        """Start the MOQ output transport.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         await super().start(frame)
         if self._initialized:
             return
@@ -426,12 +448,19 @@ class MOQOutputTransport(BaseOutputTransport):
         ``audio_out_max_buffer_ms`` (25s) of paced audio that still has
         to reach the browser and drain the client jitter buffer before
         it actually plays.
+
+        Args:
+            frame: The end frame signaling transport shutdown.
         """
         await super().stop(frame)
         await self._moq_transport.wait_for_audio_drain()
 
     async def cancel(self, frame: CancelFrame):
-        """Cancel the MOQ output transport."""
+        """Cancel the MOQ output transport.
+
+        Args:
+            frame: The cancel frame signaling immediate cancellation.
+        """
         await super().cancel(frame)
 
     async def cleanup(self):
@@ -446,6 +475,10 @@ class MOQOutputTransport(BaseOutputTransport):
         bounded so InterruptionFrame can actually stop playback in the
         browser — but the pacing clock needs to be re-anchored to ``now``
         so the next utterance plays immediately instead of catching up.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow in the pipeline.
         """
         if isinstance(frame, InterruptionFrame):
             self._moq_transport.reset_audio_pacing()
@@ -454,14 +487,25 @@ class MOQOutputTransport(BaseOutputTransport):
     async def send_message(
         self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
     ):
-        """Publish a transport message (RTVI JSON) on the transcript stream."""
+        """Publish a transport message (RTVI JSON) on the transcript stream.
+
+        Args:
+            frame: The transport message frame to send.
+        """
         try:
             self._moq_transport.publish_transcript(frame.message)
         except Exception as e:
             logger.warning(f"Failed to publish transport message: {e}")
 
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
-        """Write an audio frame to the bot's audio track."""
+        """Write an audio frame to the bot's audio track.
+
+        Args:
+            frame: The output audio frame to write.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
+        """
         try:
             await self._moq_transport.publish_audio(frame.audio)
             return True
@@ -1056,12 +1100,8 @@ class MOQTransport(BaseTransport):
                 logger.debug(f"MOQ: consumer.cancel() raised: {e}")
         self._active_consumers.clear()
 
-        if self._connection_task is not None:
-            self._connection_task.cancel()
-            try:
-                await self._connection_task
-            except asyncio.CancelledError:
-                pass
+        if self._connection_task is not None and self._task_manager is not None:
+            await self._task_manager.cancel_task(self._connection_task)
             self._connection_task = None
 
     async def cleanup(self):
