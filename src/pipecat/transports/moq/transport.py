@@ -722,12 +722,22 @@ class MOQTransportClient:
         # Run the peer audio pump and the peer transcript (RTVI) pump
         # side by side. Both catch CancelledError internally; on
         # disconnect, ``consumer.cancel()`` on their moq consumers makes
-        # each loop exit cleanly.
+        # each loop exit cleanly. ``return_exceptions=True`` so that if
+        # one raises, we still wait for the other to finish instead of
+        # leaving it running as an orphaned, uncancelled task — then we
+        # re-raise the first real exception ourselves so callers see the
+        # same failure they would have without ``return_exceptions``.
         try:
-            await asyncio.gather(
+            results = await asyncio.gather(
                 self._forward_peer_audio(peer_broadcast),
                 self._forward_peer_transcript(peer_broadcast),
+                return_exceptions=True,
             )
+            for result in results:
+                if isinstance(result, BaseException) and not isinstance(
+                    result, asyncio.CancelledError
+                ):
+                    raise result
         finally:
             await self._callbacks.on_client_disconnected()
 
@@ -1041,6 +1051,9 @@ class MOQInputTransport(BaseInputTransport):
         peer's transcript stream. ``RTVIProcessor`` sits upstream of this
         input transport (it's prepended by :class:`PipelineWorker` when
         ``enable_rtvi=True``), so pushing upstream is the direct route.
+
+        Args:
+            message: The parsed RTVI message.
         """
         await self.push_frame(
             InputTransportMessageFrame(message=message),
@@ -1297,27 +1310,53 @@ class MOQTransport(BaseTransport):
     # ------------------------------------------------------------------
 
     async def _on_connected(self):
+        """Handle the MOQ session (client or server) being established."""
         await self._call_event_handler("on_connected")
 
     async def _on_disconnected(self):
+        """Handle the MOQ session ending."""
         await self._call_event_handler("on_disconnected")
 
     async def _on_client_connected(self):
+        """Handle the peer's broadcast being announced."""
         await self._call_event_handler("on_client_connected")
 
     async def _on_client_disconnected(self):
+        """Handle the peer's broadcast going away."""
         await self._call_event_handler("on_client_disconnected")
 
     async def _on_track_subscribed(self, track: MOQTrack):
+        """Handle a remote track subscription succeeding.
+
+        Args:
+            track: The subscribed track's identity.
+        """
         await self._call_event_handler("on_track_subscribed", track)
 
     async def _on_error(self, message: str, exception: Exception):
+        """Handle an error from the underlying MOQ transport.
+
+        Args:
+            message: Human-readable description of the error.
+            exception: The underlying exception.
+        """
         await self._call_event_handler("on_error", message, exception)
 
     async def _on_audio_received(self, audio: bytes, sample_rate: int):
+        """Handle decoded PCM audio received from the peer's audio track.
+
+        Args:
+            audio: Raw mono 16-bit PCM audio bytes.
+            sample_rate: Sample rate of ``audio``, in Hz.
+        """
         if self._input is not None:
             await self._input.push_received_audio(audio, sample_rate)
 
     async def _on_message_received(self, message: dict):
+        """Handle an RTVI message received from the peer's transcript stream.
+
+        Args:
+            message: The parsed RTVI message.
+        """
         if self._input is not None:
             await self._input.push_received_message(message)
