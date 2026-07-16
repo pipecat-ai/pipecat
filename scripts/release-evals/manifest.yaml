@@ -157,6 +157,8 @@ suite:
     scenarios: [weather_function_call]
   - bot: function-calling/function-calling-cerebras.py
     scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-crusoe.py
+    scenarios: [weather_function_call]
   - bot: function-calling/function-calling-deepseek.py
     scenarios: [weather_function_call]
   - bot: function-calling/function-calling-fireworks.py

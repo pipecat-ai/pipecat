@@ -89,6 +89,7 @@ IMPORTS = {
     "aws_bedrock_llm": ["from pipecat.services.aws.llm import AWSBedrockLLMService"],
     "azure_llm": ["from pipecat.services.azure.llm import AzureLLMService"],
     "cerebras_llm": ["from pipecat.services.cerebras.llm import CerebrasLLMService"],
+    "crusoe_llm": ["from pipecat.services.crusoe.llm import CrusoeLLMService"],
     "deepseek_llm": ["from pipecat.services.deepseek.llm import DeepSeekLLMService"],
     "fireworks_llm": ["from pipecat.services.fireworks.llm import FireworksLLMService"],
     "google_gemini_llm": ["from pipecat.services.google.llm import GoogleLLMService"],
