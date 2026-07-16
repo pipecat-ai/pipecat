@@ -466,7 +466,7 @@ class MOQTransportClient:
                 frame_duration_ms=self._params.audio_out_frame_ms,
             ),
         )
-        logger.info(
+        logger.debug(
             f"MOQ: publishing audio as Opus "
             f"(pipeline rate={sample_rate}Hz, opus rate={OPUS_SAMPLE_RATE}Hz, "
             f"frame={self._params.audio_out_frame_ms}ms, "
@@ -552,7 +552,7 @@ class MOQTransportClient:
             return
         cap = self._params.audio_out_max_buffer_ms / 1000.0
         drain = min(pending, cap) + jitter_buffer_margin_s
-        logger.info(f"MOQ: draining {drain:.2f}s of buffered outbound audio before shutdown")
+        logger.debug(f"MOQ: draining {drain:.2f}s of buffered outbound audio before shutdown")
         await asyncio.sleep(drain)
 
     def publish_transcript(self, message):
@@ -602,20 +602,20 @@ class MOQTransportClient:
             ctx_label = f"serving {self._serve_bind} as {self._broadcast_path}"
         else:
             ctx_label = f"connecting to {self._url} as {self._broadcast_path}"
-        logger.info(f"MOQ: {ctx_label}")
+        logger.debug(f"MOQ: {ctx_label}")
 
         try:
             async with self._make_transport(origin) as transport:
                 if self._params.serve:
                     server = cast(moq.Server, transport)
                     self._cert_fingerprints = server.cert_fingerprints()
-                    logger.info(
+                    logger.debug(
                         f"MOQ: bound on {server.local_addr} "
                         f"(cert sha256: {self._cert_fingerprints})"
                     )
 
                 origin.publish(self._broadcast_path, self._publish_broadcast)
-                logger.info(
+                logger.debug(
                     f"MOQ: published broadcast {self._broadcast_path!r} "
                     f"(transcript: {self._params.transcript_track!r}, "
                     f"audio: {self._params.audio_out_track!r})"
@@ -653,7 +653,7 @@ class MOQTransportClient:
                 # Browser closed the WebTransport session (or the bot did,
                 # via disconnect()). Not an error — code=0 is a clean
                 # close, expected at end-of-call.
-                logger.info(f"MOQ transport closed: {e}")
+                logger.debug(f"MOQ transport closed: {e}")
             else:
                 logger.error(f"MOQ transport error: {e}", exc_info=True)
                 await self._callbacks.on_error(str(e), e)
@@ -701,7 +701,7 @@ class MOQTransportClient:
         """
         consumer = origin.consume()
 
-        logger.info(f"MOQ: waiting for peer broadcast {self._peer_broadcast_path!r}")
+        logger.debug(f"MOQ: waiting for peer broadcast {self._peer_broadcast_path!r}")
         announced = self._track(consumer.announced_broadcast(self._peer_broadcast_path))
         try:
             peer_broadcast = await asyncio.wait_for(
@@ -716,7 +716,7 @@ class MOQTransportClient:
         except (asyncio.CancelledError, StopAsyncIteration):
             return
 
-        logger.info(f"MOQ: peer broadcast {self._peer_broadcast_path!r} available")
+        logger.debug(f"MOQ: peer broadcast {self._peer_broadcast_path!r} available")
         await self._callbacks.on_client_connected()
 
         # Run the peer audio pump and the peer transcript (RTVI) pump
@@ -782,7 +782,7 @@ class MOQTransportClient:
         # omits `channelCount` (common on macOS). We decode at the
         # source channel count and downmix in Python below.
         source_channels = audio.channel_count
-        logger.info(
+        logger.debug(
             f"MOQ: subscribing to peer audio {track_name!r} "
             f"(source rate={audio.sample_rate}Hz, channels={source_channels}, "
             f"output rate={target_rate}Hz, "
@@ -834,7 +834,7 @@ class MOQTransportClient:
         client→server RTVI traffic reach the bot over MoQ.
         """
         track_name = self._params.transcript_track
-        logger.info(f"MOQ: subscribing to peer transcript {track_name!r}")
+        logger.debug(f"MOQ: subscribing to peer transcript {track_name!r}")
         consumer = self._track(peer_broadcast.subscribe_json_stream(track_name, compression=True))
         try:
             async for message in consumer:
@@ -1095,7 +1095,7 @@ class MOQOutputTransport(BaseOutputTransport):
         # synchronous — no race with _run()'s async bring-up to lose
         # initial audio frames.
         self._client.open_audio_track(self.sample_rate)
-        logger.info(
+        logger.debug(
             f"MOQ output: sample_rate={self.sample_rate}, chunk_size={self.audio_chunk_size}"
         )
         await self.set_transport_ready(frame)
