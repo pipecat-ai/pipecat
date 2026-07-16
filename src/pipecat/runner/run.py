@@ -592,8 +592,6 @@ def _setup_unified_start_route(
         dailyToken: str | None
         wsUrl: str | None
         token: str | None
-        namespace: str | None
-        relay: str | None
         # MoQ-specific. Carries everything the browser needs to construct
         # an `@pipecat-ai/moq-transport` instance.
         moq: dict[str, Any] | None
@@ -789,8 +787,6 @@ def _setup_unified_start_route(
 
             return StartBotResult(
                 sessionId=session_id,
-                namespace=namespace,
-                relay=f"{args.moq_host}:{args.moq_port}",
                 moq=_build_moq_client_config(args, namespace, runner_args.cert_fingerprints),
             )
 
