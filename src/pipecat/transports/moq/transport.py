@@ -402,6 +402,12 @@ class MOQTransportClient:
         self._broadcast_path = f"{params.namespace}/{params.participant_id}"
         self._peer_broadcast_path = f"{params.namespace}/{params.peer_id}"
         self._cleaned_up = False
+        # Number of input/output transports currently holding the session
+        # open. Both call :meth:`connect` on start and :meth:`stop`/
+        # :meth:`cancel` on shutdown; the session is only actually torn
+        # down once every holder has released it (see :meth:`_release`),
+        # mirroring DailyTransportClient's join/leave counter.
+        self._holders = 0
 
     async def setup(self, setup: FrameProcessorSetup):
         """Capture the task manager from the input/output processors.
@@ -413,11 +419,17 @@ class MOQTransportClient:
             self._task_manager = setup.task_manager
 
     def connect(self):
-        """Start driving the MOQ session in the background.
+        """Register a holder and start the MOQ session on the first call.
 
-        Called once by :meth:`MOQInputTransport.start` after ``setup()``
-        has wired in the task manager.
+        Called by both :meth:`MOQInputTransport.start` and
+        :meth:`MOQOutputTransport.start`, after ``setup()`` has wired in
+        the task manager. Only the first call actually dials/serves;
+        later calls just record another holder, balanced against
+        :meth:`stop`/:meth:`cancel` releasing it.
         """
+        self._holders += 1
+        if self._connection_task is not None:
+            return
         assert self._task_manager is not None, (
             "MOQTransportClient.setup() must run before connect(); "
             "input/output processors forward setup on the pipeline's first frame."
@@ -880,15 +892,56 @@ class MOQTransportClient:
             self._connection_task = None
 
     async def cleanup(self):
-        """Tear down the underlying MOQ connection.
+        """Unconditionally tear down the underlying MOQ connection.
 
-        Both the input and output processors call this on shutdown, so
-        we guard against repeating the work.
+        Called as a last-resort safety net from
+        :class:`MOQInputTransport.cleanup`/:class:`MOQOutputTransport.cleanup`
+        (the FrameProcessor lifecycle hook, always invoked regardless of
+        whether ``stop()``/``cancel()`` already released the session), so
+        we guard against repeating the work. Prefer :meth:`stop`/
+        :meth:`cancel` to end the session during normal shutdown — those
+        wait for every holder to release before tearing anything down.
         """
         if self._cleaned_up:
             return
         self._cleaned_up = True
         await self.disconnect()
+
+    async def _release(self, *, drain: bool):
+        """Release one holder's claim on the session, draining first if asked.
+
+        The session is only actually disconnected once every holder
+        (input and output) has released it — see :attr:`_holders`.
+        """
+        if drain:
+            await self.wait_for_audio_drain()
+        self._holders -= 1
+        if self._holders > 0:
+            return
+        await self.cleanup()
+
+    async def stop(self):
+        """Release this holder's claim on the session, draining buffered audio first.
+
+        Called by both :meth:`MOQInputTransport.stop` and
+        :meth:`MOQOutputTransport.stop`. Safe regardless of which one
+        runs first: the session only actually disconnects once both
+        have released their claim, and by the time the last one does,
+        every audio frame written by the output side has already been
+        drained. Draining twice (once per caller) is harmless — the
+        second call just observes the clock has already caught up.
+        """
+        await self._release(drain=True)
+
+    async def cancel(self):
+        """Release this holder's claim on the session immediately, without draining.
+
+        Called by both :meth:`MOQInputTransport.cancel` and
+        :meth:`MOQOutputTransport.cancel`: cancellation is a hard stop,
+        so there's nothing to drain, and the session disconnects as soon
+        as both have released their claim.
+        """
+        await self._release(drain=False)
 
 
 class MOQInputTransport(BaseInputTransport):
@@ -896,7 +949,6 @@ class MOQInputTransport(BaseInputTransport):
 
     def __init__(
         self,
-        transport: "MOQTransport",
         client: MOQTransportClient,
         params: MOQParams,
         **kwargs,
@@ -904,14 +956,11 @@ class MOQInputTransport(BaseInputTransport):
         """Initialize the MOQ input transport.
 
         Args:
-            transport: The parent MOQTransport, used to push received
-                audio/messages into the pipeline.
             client: MOQTransportClient instance managing the MoQ session.
             params: MOQ transport configuration parameters.
             **kwargs: Additional arguments passed to the parent class.
         """
         super().__init__(params, **kwargs)
-        self._transport = transport
         self._client = client
         self._params = params
         self._initialized = False
@@ -942,24 +991,37 @@ class MOQInputTransport(BaseInputTransport):
     async def stop(self, frame: EndFrame):
         """Stop the MOQ input transport.
 
+        Releases this transport's claim on the shared session (see
+        :meth:`MOQTransportClient.stop`). ``EndFrame`` reaches this
+        (upstream) input transport before it reaches
+        :class:`MOQOutputTransport` downstream, so this call alone
+        doesn't end the session — the client waits for the output
+        transport to release its own claim (after draining its buffered
+        audio) before actually disconnecting.
+
         Args:
             frame: The end frame signaling transport shutdown.
         """
         await super().stop(frame)
+        await self._client.stop()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the MOQ input transport.
+
+        Releases this transport's claim on the shared session. Unlike
+        ``stop()``, cancellation is immediate — there's no audio to
+        drain.
 
         Args:
             frame: The cancel frame signaling immediate cancellation.
         """
         await super().cancel(frame)
+        await self._client.cancel()
 
     async def cleanup(self):
         """Cleanup resources."""
         await super().cleanup()
         await self._client.cleanup()
-        await self._transport.cleanup()
 
     async def push_received_audio(self, audio: bytes, sample_rate: int):
         """Push a received audio frame downstream.
@@ -991,7 +1053,6 @@ class MOQOutputTransport(BaseOutputTransport):
 
     def __init__(
         self,
-        transport: "MOQTransport",
         client: MOQTransportClient,
         params: MOQParams,
         **kwargs,
@@ -999,13 +1060,11 @@ class MOQOutputTransport(BaseOutputTransport):
         """Initialize the MOQ output transport.
 
         Args:
-            transport: The parent MOQTransport instance.
             client: MOQTransportClient instance managing the MoQ session.
             params: MOQ transport configuration parameters.
             **kwargs: Additional arguments passed to the parent class.
         """
         super().__init__(params, **kwargs)
-        self._transport = transport
         self._client = client
         self._params = params
         self._initialized = False
@@ -1029,6 +1088,7 @@ class MOQOutputTransport(BaseOutputTransport):
         if self._initialized:
             return
         self._initialized = True
+        self._client.connect()
         # Open the publish_audio track now that we know the pipeline's
         # output sample rate. The producer side of the broadcast was
         # created in MOQTransportClient.__init__, so this call is
@@ -1045,7 +1105,8 @@ class MOQOutputTransport(BaseOutputTransport):
 
         On graceful end (an ``EndFrame`` — pushed by ``EndWorkerFrame``
         from an ``end_call`` tool, for example) let the moq audio buffer
-        drain fully before the base class tears things down. Without
+        drain fully before releasing this transport's claim on the
+        shared session (see :meth:`MOQTransportClient.stop`). Without
         this the bot's final TTS utterance gets clipped: base_output's
         stop() unblocks as soon as every audio frame has been *written*
         to moq's pacing queue, but moq buffers up to
@@ -1057,21 +1118,25 @@ class MOQOutputTransport(BaseOutputTransport):
             frame: The end frame signaling transport shutdown.
         """
         await super().stop(frame)
-        await self._client.wait_for_audio_drain()
+        await self._client.stop()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the MOQ output transport.
+
+        Releases this transport's claim on the shared session. Unlike
+        ``stop()``, cancellation is immediate — there's no audio to
+        drain.
 
         Args:
             frame: The cancel frame signaling immediate cancellation.
         """
         await super().cancel(frame)
+        await self._client.cancel()
 
     async def cleanup(self):
         """Cleanup resources."""
         await super().cleanup()
         await self._client.cleanup()
-        await self._transport.cleanup()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Reset the publish_audio pacing clock on interruption.
@@ -1201,15 +1266,13 @@ class MOQTransport(BaseTransport):
     def input(self) -> MOQInputTransport:
         """Get the input transport for receiving media."""
         if not self._input:
-            self._input = MOQInputTransport(self, self._client, self._params, name=self._input_name)
+            self._input = MOQInputTransport(self._client, self._params, name=self._input_name)
         return self._input
 
     def output(self) -> MOQOutputTransport:
         """Get the output transport for sending media."""
         if not self._output:
-            self._output = MOQOutputTransport(
-                self, self._client, self._params, name=self._output_name
-            )
+            self._output = MOQOutputTransport(self._client, self._params, name=self._output_name)
         return self._output
 
     @property
