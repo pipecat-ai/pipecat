@@ -141,6 +141,15 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "crusoe_llm": (
+        "CrusoeLLMService(\n"
+        '        api_key=os.getenv("CRUSOE_API_KEY"),\n'
+        "        settings=CrusoeLLMService.Settings(\n"
+        '            model=os.getenv("CRUSOE_MODEL"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "deepseek_llm": (
         "DeepSeekLLMService(\n"
         '        api_key=os.getenv("DEEPSEEK_API_KEY"),\n'

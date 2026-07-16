@@ -497,6 +497,15 @@ class ServiceRegistry:
             settings_params=["model", "system_instruction"],
         ),
         ServiceDefinition(
+            value="crusoe_llm",
+            label="Crusoe",
+            package="pipecat-ai[crusoe]",
+            class_name=["CrusoeLLMService"],
+            env_prefix="CRUSOE",
+            include_params=["api_key"],
+            settings_params=["model", "system_instruction"],
+        ),
+        ServiceDefinition(
             value="deepseek_llm",
             label="DeepSeek",
             package="pipecat-ai[deepseek]",
