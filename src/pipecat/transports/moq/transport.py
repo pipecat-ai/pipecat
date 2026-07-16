@@ -50,9 +50,6 @@ Two modes:
   plumbing to the browser is finished and we've validated the flow
   against an external relay. See
   :func:`pipecat.runner.moq._validate_moq_args` for the guard.
-
-For a long-lived multi-session agent that discovers clients by MoQ
-announcement (no ``/start`` control plane), see :mod:`pipecat.transports.moq.agent`.
 """
 
 import asyncio
