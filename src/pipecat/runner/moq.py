@@ -60,30 +60,6 @@ def _validate_moq_args(args: argparse.Namespace) -> bool:
         return False
     # ------------------------------------------------------------------
 
-    # Client-mode URL parse (also used to advertise the browser URL in
-    # serve mode when no --moq-tls-generate hostname is supplied).
-    connect = args.moq_connect or DEFAULT_MOQ_CONNECT
-    parsed = urlparse(connect)
-    if not parsed.hostname:
-        logger.error(
-            f"--moq-connect must be a full URL with a host "
-            f"(e.g. https://relay.example.com/moq); got {connect!r}"
-        )
-        return False
-    # Default the port from the scheme so URLs on standard HTTPS/HTTP
-    # ports (e.g. https://relay.quic.video/anon) don't have to spell
-    # it out explicitly.
-    default_ports = {"https": 443, "http": 80}
-    client_port = parsed.port or default_ports.get(parsed.scheme.lower())
-    if client_port is None:
-        logger.error(
-            f"--moq-connect needs an explicit port; scheme "
-            f"{parsed.scheme!r} has no standard default (got {connect!r})"
-        )
-        return False
-    client_host = parsed.hostname
-    client_path = parsed.path or DEFAULT_MOQ_PATH
-
     has_cert = bool(args.moq_tls_cert)
     has_key = bool(args.moq_tls_key)
     has_generate = bool(args.moq_tls_generate)
@@ -134,6 +110,28 @@ def _validate_moq_args(args: argparse.Namespace) -> bool:
         args.moq_tls_host = tls_host
     else:
         # Client mode.
+        connect = args.moq_connect or DEFAULT_MOQ_CONNECT
+        parsed = urlparse(connect)
+        if not parsed.hostname:
+            logger.error(
+                f"--moq-connect must be a full URL with a host "
+                f"(e.g. https://relay.example.com/moq); got {connect!r}"
+            )
+            return False
+        # Default the port from the scheme so URLs on standard HTTPS/HTTP
+        # ports (e.g. https://relay.quic.video/anon) don't have to spell
+        # it out explicitly.
+        default_ports = {"https": 443, "http": 80}
+        client_port = parsed.port or default_ports.get(parsed.scheme.lower())
+        if client_port is None:
+            logger.error(
+                f"--moq-connect needs an explicit port; scheme "
+                f"{parsed.scheme!r} has no standard default (got {connect!r})"
+            )
+            return False
+        client_host = parsed.hostname
+        client_path = parsed.path or DEFAULT_MOQ_PATH
+
         if has_generate:
             logger.warning("--moq-tls-generate is ignored — only used in server mode")
         if has_key and not has_cert:

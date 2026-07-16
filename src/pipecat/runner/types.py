@@ -275,6 +275,10 @@ class MOQRunnerArguments(RunnerArguments):
         port: MOQ relay/server port.
         path: MOQ endpoint path on the relay (client mode).
         namespace: MOQ namespace (like a room identifier).
+        participant_id: This bot's participant id; it broadcasts under
+            ``<namespace>/<participant_id>``.
+        peer_id: The peer's participant id; the bot subscribes to
+            ``<namespace>/<peer_id>``.
         verify_ssl: Whether to verify SSL certificates (client mode).
         serve: When True, the bot binds its own MOQ server instead of
             dialing a relay — useful for local dev with no separate

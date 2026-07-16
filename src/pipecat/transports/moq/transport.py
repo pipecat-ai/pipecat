@@ -50,19 +50,18 @@ Two modes:
   plumbing to the browser is finished and we've validated the flow
   against an external relay. See
   :func:`pipecat.runner.moq._validate_moq_args` for the guard.
-
-For a long-lived multi-session agent that discovers clients by MoQ
-announcement (no ``/start`` control plane), see :mod:`pipecat.transports.moq.agent`.
 """
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Optional, cast
+from typing import cast
 
+import numpy as np
 from loguru import logger
-from pydantic import ConfigDict
+from pydantic import BaseModel, ConfigDict
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -174,20 +173,12 @@ def _downmix_s16_to_mono(pcm: bytes, channels: int) -> bytes:
     the MediaStreamAudioSourceNode's channelCount=2 when the
     MediaStreamTrack doesn't expose channelCount in its settings).
     """
-    import array
-
-    samples = array.array("h")
-    samples.frombytes(pcm)
-    if channels <= 1 or len(samples) % channels != 0:
+    samples = np.frombuffer(pcm, dtype=np.int16)
+    if channels <= 1 or samples.size % channels != 0:
         return pcm
-    frames = len(samples) // channels
-    out = array.array("h", [0]) * frames
-    for i in range(frames):
-        base = i * channels
-        acc = 0
-        for c in range(channels):
-            acc += samples[base + c]
-        out[i] = max(-32768, min(32767, acc // channels))
+    frames = samples.size // channels
+    summed = samples.reshape(frames, channels).astype(np.int32).sum(axis=1)
+    out = np.clip(summed // channels, -32768, 32767).astype(np.int16)
     return out.tobytes()
 
 
@@ -303,215 +294,54 @@ class MOQParams(TransportParams):
     audio_out_max_buffer_ms: int = 25000
 
 
-class MOQInputTransport(BaseInputTransport):
-    """MOQ input transport: subscribes to the peer's audio track."""
+class MOQCallbacks(BaseModel):
+    """Callback handlers bridging :class:`MOQTransportClient` to :class:`MOQTransport`.
 
-    def __init__(
-        self,
-        transport: "MOQTransport",
-        params: MOQParams,
-        **kwargs,
-    ):
-        """Initialize the MOQ input transport.
+    Decouples the moq-rs session/connection logic from pipecat's Frame
+    pipeline: :class:`MOQTransportClient` only ever calls these, it never
+    reaches into :class:`MOQInputTransport`/:class:`MOQOutputTransport` or
+    pipecat frame types directly.
 
-        Args:
-            transport: The parent MOQTransport managing the MoQ session.
-            params: MOQ transport configuration parameters.
-            **kwargs: Additional arguments passed to the parent class.
-        """
-        super().__init__(params, **kwargs)
-        self._moq_transport = transport
-        self._params = params
-        self._initialized = False
+    Parameters:
+        on_connected: Called when the MOQ session (client or server) is established.
+        on_disconnected: Called when the session ends.
+        on_client_connected: Called when the peer's broadcast is announced.
+        on_client_disconnected: Called when the peer's broadcast goes away.
+        on_track_subscribed: Called when a remote track subscription succeeds.
+        on_error: Called when the underlying transport errors.
+        on_audio_received: Called with decoded mono PCM audio from the peer's audio track.
+        on_message_received: Called with each RTVI message from the peer's transcript stream.
+    """
 
-    async def setup(self, setup: FrameProcessorSetup):
-        """Forward setup to the shared MOQTransport so it can create tasks."""
-        await super().setup(setup)
-        await self._moq_transport.setup(setup)
-
-    async def start(self, frame: StartFrame):
-        """Auto-connect to the MOQ relay when the pipeline starts."""
-        await super().start(frame)
-        if self._initialized:
-            return
-        self._initialized = True
-
-        self._moq_transport._connection_task = self.create_task(
-            self._moq_transport._run(), "moq_run"
-        )
-        await self.set_transport_ready(frame)
-
-    async def stop(self, frame: EndFrame):
-        """Stop the MOQ input transport."""
-        await super().stop(frame)
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the MOQ input transport."""
-        await super().cancel(frame)
-
-    async def cleanup(self):
-        """Cleanup resources."""
-        await super().cleanup()
-        await self._moq_transport.cleanup()
-
-    async def push_received_audio(self, audio: bytes, sample_rate: int):
-        """Push a received audio frame downstream."""
-        await self.push_audio_frame(
-            InputAudioRawFrame(audio=audio, sample_rate=sample_rate, num_channels=1)
-        )
-
-    async def push_received_message(self, message: dict):
-        """Push a received RTVI message to :class:`RTVIProcessor` upstream.
-
-        Called by the backend's transcript drain loop for every record
-        delivered on the peer's transcript stream. ``RTVIProcessor`` sits
-        upstream of this input transport (it's prepended by
-        :class:`PipelineWorker` when ``enable_rtvi=True``), so pushing
-        upstream is the direct route.
-        """
-        await self.push_frame(
-            InputTransportMessageFrame(message=message),
-            FrameDirection.UPSTREAM,
-        )
+    on_connected: Callable[[], Awaitable[None]]
+    on_disconnected: Callable[[], Awaitable[None]]
+    on_client_connected: Callable[[], Awaitable[None]]
+    on_client_disconnected: Callable[[], Awaitable[None]]
+    on_track_subscribed: Callable[[MOQTrack], Awaitable[None]]
+    on_error: Callable[[str, Exception], Awaitable[None]]
+    on_audio_received: Callable[[bytes, int], Awaitable[None]]
+    on_message_received: Callable[[dict], Awaitable[None]]
 
 
-class MOQOutputTransport(BaseOutputTransport):
-    """MOQ output transport: writes audio + transcript frames to MOQ tracks."""
+class MOQTransportClient:
+    """Owns the moq-rs QUIC session/connection for a single MOQ transport.
 
-    def __init__(
-        self,
-        transport: "MOQTransport",
-        params: MOQParams,
-        **kwargs,
-    ):
-        """Initialize the MOQ output transport.
-
-        Args:
-            transport: The parent MOQTransport managing the MoQ session.
-            params: MOQ transport configuration parameters.
-            **kwargs: Additional arguments passed to the parent class.
-        """
-        super().__init__(params, **kwargs)
-        self._moq_transport = transport
-        self._params = params
-        self._initialized = False
-
-    async def setup(self, setup: FrameProcessorSetup):
-        """Forward setup to the shared MOQTransport so it can create tasks."""
-        await super().setup(setup)
-        await self._moq_transport.setup(setup)
-
-    async def start(self, frame: StartFrame):
-        """Start the MOQ output transport."""
-        await super().start(frame)
-        if self._initialized:
-            return
-        self._initialized = True
-        # Open the publish_audio track now that we know the pipeline's
-        # output sample rate. The producer side of the broadcast was
-        # created in MOQTransport.__init__, so this call is synchronous
-        # — no race with _run() to lose initial audio frames.
-        self._moq_transport.open_audio_track(self.sample_rate)
-        logger.info(
-            f"MOQ output: sample_rate={self.sample_rate}, chunk_size={self.audio_chunk_size}"
-        )
-        await self.set_transport_ready(frame)
-
-    async def stop(self, frame: EndFrame):
-        """Stop the MOQ output transport.
-
-        On graceful end (an ``EndFrame`` — pushed by ``EndWorkerFrame``
-        from an ``end_call`` tool, for example) let the moq audio buffer
-        drain fully before the base class tears things down. Without
-        this the bot's final TTS utterance gets clipped: base_output's
-        stop() unblocks as soon as every audio frame has been *written*
-        to moq's pacing queue, but moq buffers up to
-        ``audio_out_max_buffer_ms`` (25s) of paced audio that still has
-        to reach the browser and drain the client jitter buffer before
-        it actually plays.
-        """
-        await super().stop(frame)
-        await self._moq_transport.wait_for_audio_drain()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the MOQ output transport."""
-        await super().cancel(frame)
-
-    async def cleanup(self):
-        """Cleanup resources."""
-        await super().cleanup()
-        await self._moq_transport.cleanup()
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Reset the publish_audio pacing clock on interruption.
-
-        The pacing in ``write_audio_frame`` keeps moq's in-flight buffer
-        bounded so InterruptionFrame can actually stop playback in the
-        browser — but the pacing clock needs to be re-anchored to ``now``
-        so the next utterance plays immediately instead of catching up.
-        """
-        if isinstance(frame, InterruptionFrame):
-            self._moq_transport.reset_audio_pacing()
-        await super().process_frame(frame, direction)
-
-    async def send_message(
-        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
-    ):
-        """Publish a transport message (RTVI JSON) on the transcript stream."""
-        try:
-            self._moq_transport.publish_transcript(frame.message)
-        except Exception as e:
-            logger.warning(f"Failed to publish transport message: {e}")
-
-    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
-        """Write an audio frame to the bot's audio track."""
-        try:
-            await self._moq_transport.publish_audio(frame.audio)
-            return True
-        except Exception as e:
-            logger.error(f"Error writing audio frame: {e}")
-            return False
-
-
-class MOQTransport(BaseTransport):
-    """MOQ transport that connects to a MOQ relay via the ``moq`` library.
-
-    Example::
-
-        transport = MOQTransport(
-            params=MOQParams(
-                audio_in_enabled=True,
-                audio_out_enabled=True,
-                namespace="my-room",
-            ),
-            host="localhost",
-            port=4080,
-        )
-
-        @transport.event_handler("on_connected")
-        async def on_connected(transport):
-            print("Connected to MOQ relay")
-
-    Event handlers available:
-
-    - ``on_connected`` — connection to relay established
-    - ``on_disconnected`` — connection lost / closed
-    - ``on_client_connected`` — peer broadcast announced (client joined)
-    - ``on_client_disconnected`` — peer broadcast went away
-    - ``on_track_subscribed`` — remote track subscription succeeded
-    - ``on_error`` — error in the underlying transport
+    Mirrors the ``<Provider>TransportClient`` pattern used by the other
+    transports (e.g. ``DailyTransportClient``, ``SmallWebRTCClient``): it
+    owns dialing/serving, the publish broadcast, and forwarding the
+    peer's audio/transcript, and talks back to :class:`MOQTransport` only
+    through ``callbacks`` — it has no knowledge of pipecat Frames or the
+    input/output transports.
     """
 
     def __init__(
         self,
         params: MOQParams,
-        host: str = "localhost",
-        port: int = 4080,
-        path: str = "/moq",
-        input_name: str | None = None,
-        output_name: str | None = None,
+        url: str,
+        serve_bind: str,
+        callbacks: MOQCallbacks,
     ):
-        """Initialize the MOQ transport.
+        """Initialize the MOQ transport client.
 
         The publish broadcast and its transcript track are created here,
         synchronously, so the output processor can begin writing into
@@ -521,28 +351,23 @@ class MOQTransport(BaseTransport):
 
         Args:
             params: MOQ configuration parameters.
-            host: Relay host address.
-            port: Relay port number.
-            path: MOQ endpoint path on the relay.
-            input_name: Optional name for the input processor.
-            output_name: Optional name for the output processor.
+            url: Full relay URL to dial in client mode.
+            serve_bind: Address to bind in serve mode.
+            callbacks: Event/data callbacks back to the owning transport.
         """
-        super().__init__(input_name=input_name, output_name=output_name)
-
         self._params = params
-        self._url = params.relay_url or f"https://{host}:{port}{path}"
-        self._serve_bind = params.serve_bind or f"[::]:{port}"
+        self._url = url
+        self._serve_bind = serve_bind
+        self._callbacks = callbacks
 
-        self._input: MOQInputTransport | None = None
-        self._output: MOQOutputTransport | None = None
         self._connection_task: asyncio.Task | None = None
         # Shared task manager, wired in by the input/output processors'
         # setup() forwarding. Owns the serve-loop task in _run().
         self._task_manager: BaseTaskManager | None = None
 
-        # Owned for the lifetime of this transport. Created synchronously
-        # so MOQOutputTransport.start() can publish_audio + write
-        # transcript frames without racing with _run()'s async bring-up.
+        # Owned for the lifetime of this client. Created synchronously so
+        # MOQOutputTransport.start() can publish_audio + write transcript
+        # frames without racing with _run()'s async bring-up.
         self._publish_broadcast: moq.BroadcastProducer = moq.BroadcastProducer()
         # Lossless, ordered JSON append-log for RTVI (compression on). The
         # stream helper delivers every appended record in order — the
@@ -577,25 +402,12 @@ class MOQTransport(BaseTransport):
         self._broadcast_path = f"{params.namespace}/{params.participant_id}"
         self._peer_broadcast_path = f"{params.namespace}/{params.peer_id}"
         self._cleaned_up = False
-
-        self._register_event_handler("on_connected")
-        self._register_event_handler("on_disconnected")
-        self._register_event_handler("on_client_connected")
-        self._register_event_handler("on_client_disconnected")
-        self._register_event_handler("on_track_subscribed")
-        self._register_event_handler("on_error")
-
-    def input(self) -> MOQInputTransport:
-        """Get the input transport for receiving media."""
-        if not self._input:
-            self._input = MOQInputTransport(self, self._params, name=self._input_name)
-        return self._input
-
-    def output(self) -> MOQOutputTransport:
-        """Get the output transport for sending media."""
-        if not self._output:
-            self._output = MOQOutputTransport(self, self._params, name=self._output_name)
-        return self._output
+        # Number of input/output transports currently holding the session
+        # open. Both call :meth:`connect` on start and :meth:`stop`/
+        # :meth:`cancel` on shutdown; the session is only actually torn
+        # down once every holder has released it (see :meth:`_release`),
+        # mirroring DailyTransportClient's join/leave counter.
+        self._holders = 0
 
     async def setup(self, setup: FrameProcessorSetup):
         """Capture the task manager from the input/output processors.
@@ -605,6 +417,24 @@ class MOQTransport(BaseTransport):
         """
         if self._task_manager is None:
             self._task_manager = setup.task_manager
+
+    def connect(self):
+        """Register a holder and start the MOQ session on the first call.
+
+        Called by both :meth:`MOQInputTransport.start` and
+        :meth:`MOQOutputTransport.start`, after ``setup()`` has wired in
+        the task manager. Only the first call actually dials/serves;
+        later calls just record another holder, balanced against
+        :meth:`stop`/:meth:`cancel` releasing it.
+        """
+        self._holders += 1
+        if self._connection_task is not None:
+            return
+        assert self._task_manager is not None, (
+            "MOQTransportClient.setup() must run before connect(); "
+            "input/output processors forward setup on the pipeline's first frame."
+        )
+        self._connection_task = self._task_manager.create_task(self._run(), "moq_run")
 
     # ------------------------------------------------------------------
     # Publishing helpers — called from the output transport.
@@ -636,7 +466,7 @@ class MOQTransport(BaseTransport):
                 frame_duration_ms=self._params.audio_out_frame_ms,
             ),
         )
-        logger.info(
+        logger.debug(
             f"MOQ: publishing audio as Opus "
             f"(pipeline rate={sample_rate}Hz, opus rate={OPUS_SAMPLE_RATE}Hz, "
             f"frame={self._params.audio_out_frame_ms}ms, "
@@ -722,7 +552,7 @@ class MOQTransport(BaseTransport):
             return
         cap = self._params.audio_out_max_buffer_ms / 1000.0
         drain = min(pending, cap) + jitter_buffer_margin_s
-        logger.info(f"MOQ: draining {drain:.2f}s of buffered outbound audio before shutdown")
+        logger.debug(f"MOQ: draining {drain:.2f}s of buffered outbound audio before shutdown")
         await asyncio.sleep(drain)
 
     def publish_transcript(self, message):
@@ -772,25 +602,25 @@ class MOQTransport(BaseTransport):
             ctx_label = f"serving {self._serve_bind} as {self._broadcast_path}"
         else:
             ctx_label = f"connecting to {self._url} as {self._broadcast_path}"
-        logger.info(f"MOQ: {ctx_label}")
+        logger.debug(f"MOQ: {ctx_label}")
 
         try:
             async with self._make_transport(origin) as transport:
                 if self._params.serve:
                     server = cast(moq.Server, transport)
                     self._cert_fingerprints = server.cert_fingerprints()
-                    logger.info(
+                    logger.debug(
                         f"MOQ: bound on {server.local_addr} "
                         f"(cert sha256: {self._cert_fingerprints})"
                     )
 
                 origin.publish(self._broadcast_path, self._publish_broadcast)
-                logger.info(
+                logger.debug(
                     f"MOQ: published broadcast {self._broadcast_path!r} "
                     f"(transcript: {self._params.transcript_track!r}, "
                     f"audio: {self._params.audio_out_track!r})"
                 )
-                await self._call_event_handler("on_connected")
+                await self._callbacks.on_connected()
 
                 # In serve mode, drive the accept loop in the background.
                 # serve() holds each session task until the session closes,
@@ -798,7 +628,7 @@ class MOQTransport(BaseTransport):
                 serve_task: asyncio.Task | None = None
                 if self._params.serve:
                     assert self._task_manager is not None, (
-                        "MOQTransport.setup() must run before _run(); "
+                        "MOQTransportClient.setup() must run before _run(); "
                         "input/output processors forward setup on the pipeline's first frame."
                     )
                     serve_task = self._task_manager.create_task(
@@ -823,14 +653,14 @@ class MOQTransport(BaseTransport):
                 # Browser closed the WebTransport session (or the bot did,
                 # via disconnect()). Not an error — code=0 is a clean
                 # close, expected at end-of-call.
-                logger.info(f"MOQ transport closed: {e}")
+                logger.debug(f"MOQ transport closed: {e}")
             else:
                 logger.error(f"MOQ transport error: {e}", exc_info=True)
-                await self._call_event_handler("on_error", str(e), e)
+                await self._callbacks.on_error(str(e), e)
         finally:
             self._audio_out = None
             self._cert_fingerprints = []
-            await self._call_event_handler("on_disconnected")
+            await self._callbacks.on_disconnected()
 
     def _make_transport(self, origin: "moq.OriginProducer"):
         """Return the async-context-manager that owns the MOQ session.
@@ -871,7 +701,7 @@ class MOQTransport(BaseTransport):
         """
         consumer = origin.consume()
 
-        logger.info(f"MOQ: waiting for peer broadcast {self._peer_broadcast_path!r}")
+        logger.debug(f"MOQ: waiting for peer broadcast {self._peer_broadcast_path!r}")
         announced = self._track(consumer.announced_broadcast(self._peer_broadcast_path))
         try:
             peer_broadcast = await asyncio.wait_for(
@@ -886,20 +716,30 @@ class MOQTransport(BaseTransport):
         except (asyncio.CancelledError, StopAsyncIteration):
             return
 
-        logger.info(f"MOQ: peer broadcast {self._peer_broadcast_path!r} available")
-        await self._call_event_handler("on_client_connected")
+        logger.debug(f"MOQ: peer broadcast {self._peer_broadcast_path!r} available")
+        await self._callbacks.on_client_connected()
 
         # Run the peer audio pump and the peer transcript (RTVI) pump
         # side by side. Both catch CancelledError internally; on
         # disconnect, ``consumer.cancel()`` on their moq consumers makes
-        # each loop exit cleanly.
+        # each loop exit cleanly. ``return_exceptions=True`` so that if
+        # one raises, we still wait for the other to finish instead of
+        # leaving it running as an orphaned, uncancelled task — then we
+        # re-raise the first real exception ourselves so callers see the
+        # same failure they would have without ``return_exceptions``.
         try:
-            await asyncio.gather(
+            results = await asyncio.gather(
                 self._forward_peer_audio(peer_broadcast),
                 self._forward_peer_transcript(peer_broadcast),
+                return_exceptions=True,
             )
+            for result in results:
+                if isinstance(result, BaseException) and not isinstance(
+                    result, asyncio.CancelledError
+                ):
+                    raise result
         finally:
-            await self._call_event_handler("on_client_disconnected")
+            await self._callbacks.on_client_disconnected()
 
     async def _forward_peer_audio(self, peer_broadcast: "moq.BroadcastConsumer"):
         """Read the catalog, subscribe to the first audio track, pump PCM."""
@@ -952,14 +792,13 @@ class MOQTransport(BaseTransport):
         # omits `channelCount` (common on macOS). We decode at the
         # source channel count and downmix in Python below.
         source_channels = audio.channel_count
-        logger.info(
+        logger.debug(
             f"MOQ: subscribing to peer audio {track_name!r} "
             f"(source rate={audio.sample_rate}Hz, channels={source_channels}, "
             f"output rate={target_rate}Hz, "
             f"max_latency_ms={self._params.audio_in_max_latency_ms})"
         )
-        await self._call_event_handler(
-            "on_track_subscribed",
+        await self._callbacks.on_track_subscribed(
             MOQTrack(
                 broadcast_path=self._peer_broadcast_path,
                 name=track_name,
@@ -981,11 +820,11 @@ class MOQTransport(BaseTransport):
         )
         try:
             async for frame in consumer:
-                if frame.data and self._input is not None:
+                if frame.data:
                     pcm = frame.data
                     if source_channels > 1:
                         pcm = _downmix_s16_to_mono(pcm, source_channels)
-                    await self._input.push_received_audio(pcm, target_rate)
+                    await self._callbacks.on_audio_received(pcm, target_rate)
         except asyncio.CancelledError:
             pass
 
@@ -996,26 +835,25 @@ class MOQTransport(BaseTransport):
         :meth:`publish_transcript`): the client appends each RTVI message
         as a record on the JSON stream; the ``subscribe_json_stream``
         consumer yields them, already parsed, in order — every message,
-        losslessly. We push each into the pipeline as an
-        :class:`InputTransportMessageFrame`, which the
-        :class:`RTVIProcessor` then handles the same way as any other
-        transport. This is what lets ``client-ready`` (for protocol
-        version negotiation), typed text input, function-call results,
-        and any other client→server RTVI traffic reach the bot over MoQ.
+        losslessly. Delivered via :attr:`MOQCallbacks.on_message_received`,
+        which :class:`MOQTransport` wires to push an
+        :class:`InputTransportMessageFrame` into the pipeline, handled by
+        :class:`RTVIProcessor` the same way as any other transport. This
+        is what lets ``client-ready`` (for protocol version negotiation),
+        typed text input, function-call results, and any other
+        client→server RTVI traffic reach the bot over MoQ.
         """
         track_name = self._params.transcript_track
-        logger.info(f"MOQ: subscribing to peer transcript {track_name!r}")
+        logger.debug(f"MOQ: subscribing to peer transcript {track_name!r}")
         consumer = self._track(peer_broadcast.subscribe_json_stream(track_name, compression=True))
         try:
             async for message in consumer:
-                if self._input is None:
-                    continue
                 if not isinstance(message, dict):
                     logger.warning(
                         f"MOQ: expected RTVI object on transcript stream, got {type(message).__name__}"
                     )
                     continue
-                await self._input.push_received_message(message)
+                await self._callbacks.on_message_received(message)
         except asyncio.CancelledError:
             pass
 
@@ -1059,21 +897,466 @@ class MOQTransport(BaseTransport):
                 logger.debug(f"MOQ: consumer.cancel() raised: {e}")
         self._active_consumers.clear()
 
-        if self._connection_task is not None:
-            self._connection_task.cancel()
-            try:
-                await self._connection_task
-            except asyncio.CancelledError:
-                pass
+        if self._connection_task is not None and self._task_manager is not None:
+            await self._task_manager.cancel_task(self._connection_task)
             self._connection_task = None
 
     async def cleanup(self):
-        """Tear down the underlying MOQ connection.
+        """Unconditionally tear down the underlying MOQ connection.
 
-        Both the input and output processors call this on shutdown, so
-        we guard against repeating the work.
+        Called as a last-resort safety net from
+        :class:`MOQInputTransport.cleanup`/:class:`MOQOutputTransport.cleanup`
+        (the FrameProcessor lifecycle hook, always invoked regardless of
+        whether ``stop()``/``cancel()`` already released the session), so
+        we guard against repeating the work. Prefer :meth:`stop`/
+        :meth:`cancel` to end the session during normal shutdown — those
+        wait for every holder to release before tearing anything down.
         """
         if self._cleaned_up:
             return
         self._cleaned_up = True
         await self.disconnect()
+
+    async def _release(self, *, drain: bool):
+        """Release one holder's claim on the session, draining first if asked.
+
+        The session is only actually disconnected once every holder
+        (input and output) has released it — see :attr:`_holders`.
+        """
+        if drain:
+            await self.wait_for_audio_drain()
+        self._holders -= 1
+        if self._holders > 0:
+            return
+        await self.cleanup()
+
+    async def stop(self):
+        """Release this holder's claim on the session, draining buffered audio first.
+
+        Called by both :meth:`MOQInputTransport.stop` and
+        :meth:`MOQOutputTransport.stop`. Safe regardless of which one
+        runs first: the session only actually disconnects once both
+        have released their claim, and by the time the last one does,
+        every audio frame written by the output side has already been
+        drained. Draining twice (once per caller) is harmless — the
+        second call just observes the clock has already caught up.
+        """
+        await self._release(drain=True)
+
+    async def cancel(self):
+        """Release this holder's claim on the session immediately, without draining.
+
+        Called by both :meth:`MOQInputTransport.cancel` and
+        :meth:`MOQOutputTransport.cancel`: cancellation is a hard stop,
+        so there's nothing to drain, and the session disconnects as soon
+        as both have released their claim.
+        """
+        await self._release(drain=False)
+
+
+class MOQInputTransport(BaseInputTransport):
+    """MOQ input transport: subscribes to the peer's audio track."""
+
+    def __init__(
+        self,
+        client: MOQTransportClient,
+        params: MOQParams,
+        **kwargs,
+    ):
+        """Initialize the MOQ input transport.
+
+        Args:
+            client: MOQTransportClient instance managing the MoQ session.
+            params: MOQ transport configuration parameters.
+            **kwargs: Additional arguments passed to the parent class.
+        """
+        super().__init__(params, **kwargs)
+        self._client = client
+        self._params = params
+        self._initialized = False
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Forward setup to the shared MOQTransportClient so it can create tasks.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        await self._client.setup(setup)
+
+    async def start(self, frame: StartFrame):
+        """Auto-connect to the MOQ relay when the pipeline starts.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
+        await super().start(frame)
+        if self._initialized:
+            return
+        self._initialized = True
+
+        self._client.connect()
+        await self.set_transport_ready(frame)
+
+    async def stop(self, frame: EndFrame):
+        """Stop the MOQ input transport.
+
+        Releases this transport's claim on the shared session (see
+        :meth:`MOQTransportClient.stop`). ``EndFrame`` reaches this
+        (upstream) input transport before it reaches
+        :class:`MOQOutputTransport` downstream, so this call alone
+        doesn't end the session — the client waits for the output
+        transport to release its own claim (after draining its buffered
+        audio) before actually disconnecting.
+
+        Args:
+            frame: The end frame signaling transport shutdown.
+        """
+        await super().stop(frame)
+        await self._client.stop()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the MOQ input transport.
+
+        Releases this transport's claim on the shared session. Unlike
+        ``stop()``, cancellation is immediate — there's no audio to
+        drain.
+
+        Args:
+            frame: The cancel frame signaling immediate cancellation.
+        """
+        await super().cancel(frame)
+        await self._client.cancel()
+
+    async def cleanup(self):
+        """Cleanup resources."""
+        await super().cleanup()
+        await self._client.cleanup()
+
+    async def push_received_audio(self, audio: bytes, sample_rate: int):
+        """Push a received audio frame downstream.
+
+        Args:
+            audio: Raw mono 16-bit PCM audio bytes.
+            sample_rate: Sample rate of ``audio``, in Hz.
+        """
+        await self.push_audio_frame(
+            InputAudioRawFrame(audio=audio, sample_rate=sample_rate, num_channels=1)
+        )
+
+    async def push_received_message(self, message: dict):
+        """Push a received RTVI message to :class:`RTVIProcessor` upstream.
+
+        Called by :class:`MOQTransport` for every record delivered on the
+        peer's transcript stream. ``RTVIProcessor`` sits upstream of this
+        input transport (it's prepended by :class:`PipelineWorker` when
+        ``enable_rtvi=True``), so pushing upstream is the direct route.
+
+        Args:
+            message: The parsed RTVI message.
+        """
+        await self.push_frame(
+            InputTransportMessageFrame(message=message),
+            FrameDirection.UPSTREAM,
+        )
+
+
+class MOQOutputTransport(BaseOutputTransport):
+    """MOQ output transport: writes audio + transcript frames to MOQ tracks."""
+
+    def __init__(
+        self,
+        client: MOQTransportClient,
+        params: MOQParams,
+        **kwargs,
+    ):
+        """Initialize the MOQ output transport.
+
+        Args:
+            client: MOQTransportClient instance managing the MoQ session.
+            params: MOQ transport configuration parameters.
+            **kwargs: Additional arguments passed to the parent class.
+        """
+        super().__init__(params, **kwargs)
+        self._client = client
+        self._params = params
+        self._initialized = False
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Forward setup to the shared MOQTransportClient so it can create tasks.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        await self._client.setup(setup)
+
+    async def start(self, frame: StartFrame):
+        """Start the MOQ output transport.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
+        await super().start(frame)
+        if self._initialized:
+            return
+        self._initialized = True
+        self._client.connect()
+        # Open the publish_audio track now that we know the pipeline's
+        # output sample rate. The producer side of the broadcast was
+        # created in MOQTransportClient.__init__, so this call is
+        # synchronous — no race with _run()'s async bring-up to lose
+        # initial audio frames.
+        self._client.open_audio_track(self.sample_rate)
+        logger.debug(
+            f"MOQ output: sample_rate={self.sample_rate}, chunk_size={self.audio_chunk_size}"
+        )
+        await self.set_transport_ready(frame)
+
+    async def stop(self, frame: EndFrame):
+        """Stop the MOQ output transport.
+
+        On graceful end (an ``EndFrame`` — pushed by ``EndWorkerFrame``
+        from an ``end_call`` tool, for example) let the moq audio buffer
+        drain fully before releasing this transport's claim on the
+        shared session (see :meth:`MOQTransportClient.stop`). Without
+        this the bot's final TTS utterance gets clipped: base_output's
+        stop() unblocks as soon as every audio frame has been *written*
+        to moq's pacing queue, but moq buffers up to
+        ``audio_out_max_buffer_ms`` (25s) of paced audio that still has
+        to reach the browser and drain the client jitter buffer before
+        it actually plays.
+
+        Args:
+            frame: The end frame signaling transport shutdown.
+        """
+        await super().stop(frame)
+        await self._client.stop()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the MOQ output transport.
+
+        Releases this transport's claim on the shared session. Unlike
+        ``stop()``, cancellation is immediate — there's no audio to
+        drain.
+
+        Args:
+            frame: The cancel frame signaling immediate cancellation.
+        """
+        await super().cancel(frame)
+        await self._client.cancel()
+
+    async def cleanup(self):
+        """Cleanup resources."""
+        await super().cleanup()
+        await self._client.cleanup()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Reset the publish_audio pacing clock on interruption.
+
+        The pacing in ``write_audio_frame`` keeps moq's in-flight buffer
+        bounded so InterruptionFrame can actually stop playback in the
+        browser — but the pacing clock needs to be re-anchored to ``now``
+        so the next utterance plays immediately instead of catching up.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow in the pipeline.
+        """
+        if isinstance(frame, InterruptionFrame):
+            self._client.reset_audio_pacing()
+        await super().process_frame(frame, direction)
+
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
+        """Publish a transport message (RTVI JSON) on the transcript stream.
+
+        Args:
+            frame: The transport message frame to send.
+        """
+        try:
+            self._client.publish_transcript(frame.message)
+        except Exception as e:
+            logger.warning(f"Failed to publish transport message: {e}")
+
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
+        """Write an audio frame to the bot's audio track.
+
+        Args:
+            frame: The output audio frame to write.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
+        """
+        try:
+            await self._client.publish_audio(frame.audio)
+            return True
+        except Exception as e:
+            logger.error(f"Error writing audio frame: {e}")
+            return False
+
+
+class MOQTransport(BaseTransport):
+    """MOQ transport that connects to a MOQ relay via the ``moq`` library.
+
+    Example::
+
+        transport = MOQTransport(
+            params=MOQParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                namespace="my-room",
+            ),
+            host="localhost",
+            port=4080,
+        )
+
+        @transport.event_handler("on_connected")
+        async def on_connected(transport):
+            print("Connected to MOQ relay")
+
+    Event handlers available:
+
+    - ``on_connected`` — connection to relay established
+    - ``on_disconnected`` — connection lost / closed
+    - ``on_client_connected`` — peer broadcast announced (client joined)
+    - ``on_client_disconnected`` — peer broadcast went away
+    - ``on_track_subscribed`` — remote track subscription succeeded
+    - ``on_error`` — error in the underlying transport
+    """
+
+    def __init__(
+        self,
+        params: MOQParams,
+        host: str = "localhost",
+        port: int = 4080,
+        path: str = "/moq",
+        input_name: str | None = None,
+        output_name: str | None = None,
+    ):
+        """Initialize the MOQ transport.
+
+        Args:
+            params: MOQ configuration parameters.
+            host: Relay host address.
+            port: Relay port number.
+            path: MOQ endpoint path on the relay.
+            input_name: Optional name for the input processor.
+            output_name: Optional name for the output processor.
+        """
+        super().__init__(input_name=input_name, output_name=output_name)
+
+        self._params = params
+
+        callbacks = MOQCallbacks(
+            on_connected=self._on_connected,
+            on_disconnected=self._on_disconnected,
+            on_client_connected=self._on_client_connected,
+            on_client_disconnected=self._on_client_disconnected,
+            on_track_subscribed=self._on_track_subscribed,
+            on_error=self._on_error,
+            on_audio_received=self._on_audio_received,
+            on_message_received=self._on_message_received,
+        )
+        self._client = MOQTransportClient(
+            params=params,
+            url=params.relay_url or f"https://{host}:{port}{path}",
+            serve_bind=params.serve_bind or f"[::]:{port}",
+            callbacks=callbacks,
+        )
+
+        self._input: MOQInputTransport | None = None
+        self._output: MOQOutputTransport | None = None
+
+        self._register_event_handler("on_connected")
+        self._register_event_handler("on_disconnected")
+        self._register_event_handler("on_client_connected")
+        self._register_event_handler("on_client_disconnected")
+        self._register_event_handler("on_track_subscribed")
+        self._register_event_handler("on_error")
+
+    def input(self) -> MOQInputTransport:
+        """Get the input transport for receiving media."""
+        if not self._input:
+            self._input = MOQInputTransport(self._client, self._params, name=self._input_name)
+        return self._input
+
+    def output(self) -> MOQOutputTransport:
+        """Get the output transport for sending media."""
+        if not self._output:
+            self._output = MOQOutputTransport(self._client, self._params, name=self._output_name)
+        return self._output
+
+    @property
+    def cert_fingerprints(self) -> list[str]:
+        """SHA-256 fingerprints (hex) of the serving cert (server mode only).
+
+        Populated once the bot has bound; empty in client mode or before
+        the session bring-up has reached the listen step. Useful for
+        telling a browser client which self-signed cert to pin.
+        """
+        return self._client.cert_fingerprints
+
+    async def disconnect(self):
+        """Disconnect from the MOQ relay.
+
+        See :meth:`MOQTransportClient.disconnect` for details.
+        """
+        await self._client.disconnect()
+
+    # ------------------------------------------------------------------
+    # MOQTransportClient callbacks.
+    # ------------------------------------------------------------------
+
+    async def _on_connected(self):
+        """Handle the MOQ session (client or server) being established."""
+        await self._call_event_handler("on_connected")
+
+    async def _on_disconnected(self):
+        """Handle the MOQ session ending."""
+        await self._call_event_handler("on_disconnected")
+
+    async def _on_client_connected(self):
+        """Handle the peer's broadcast being announced."""
+        await self._call_event_handler("on_client_connected")
+
+    async def _on_client_disconnected(self):
+        """Handle the peer's broadcast going away."""
+        await self._call_event_handler("on_client_disconnected")
+
+    async def _on_track_subscribed(self, track: MOQTrack):
+        """Handle a remote track subscription succeeding.
+
+        Args:
+            track: The subscribed track's identity.
+        """
+        await self._call_event_handler("on_track_subscribed", track)
+
+    async def _on_error(self, message: str, exception: Exception):
+        """Handle an error from the underlying MOQ transport.
+
+        Args:
+            message: Human-readable description of the error.
+            exception: The underlying exception.
+        """
+        await self._call_event_handler("on_error", message, exception)
+
+    async def _on_audio_received(self, audio: bytes, sample_rate: int):
+        """Handle decoded PCM audio received from the peer's audio track.
+
+        Args:
+            audio: Raw mono 16-bit PCM audio bytes.
+            sample_rate: Sample rate of ``audio``, in Hz.
+        """
+        if self._input is not None:
+            await self._input.push_received_audio(audio, sample_rate)
+
+    async def _on_message_received(self, message: dict):
+        """Handle an RTVI message received from the peer's transcript stream.
+
+        Args:
+            message: The parsed RTVI message.
+        """
+        if self._input is not None:
+            await self._input.push_received_message(message)
