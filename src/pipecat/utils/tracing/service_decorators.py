@@ -119,6 +119,45 @@ def _get_parent_service_context(self):
     return context_api.get_current()
 
 
+def _get_system_instruction(service, context) -> str | None:
+    """Resolve the effective system instruction for tracing (internal use only).
+
+    System instructions can live on the LLM service (``settings.system_instruction``,
+    the norm — and the composed source of truth, see
+    ``LLMService._compose_system_instruction``) or be supplied as an initial
+    system message in the context. The service setting takes priority,
+    matching service behavior.
+
+    Args:
+        service: The LLM service instance.
+        context: The universal ``LLMContext``, or None.
+
+    Returns:
+        The system instruction text, or None if none is present.
+    """
+    if hasattr(service, "_settings") and getattr(service._settings, "system_instruction", None):
+        return service._settings.system_instruction
+
+    if not context:
+        return None
+
+    # Fall back to extracting from context messages
+    ctx_messages = context.get_messages()
+    if ctx_messages:
+        first = ctx_messages[0]
+        if isinstance(first, dict) and first.get("role") == "system":
+            content = first.get("content")
+            if isinstance(content, str):
+                return content
+            elif isinstance(content, list):
+                return " ".join(
+                    part.get("text", "")
+                    for part in content
+                    if isinstance(part, dict) and part.get("type") == "text"
+                )
+    return None
+
+
 def _add_token_usage_to_span(span, token_usage):
     """Add token usage metrics to a span (internal use only).
 
@@ -835,27 +874,7 @@ def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Call
 
                             # Handle system message for different services
                             # settings.system_instruction takes priority (matches service behavior)
-                            system_message = None
-                            if hasattr(self, "_settings") and getattr(
-                                self._settings, "system_instruction", None
-                            ):
-                                system_message = self._settings.system_instruction
-                            else:
-                                # Fall back to extracting from context messages
-                                ctx_messages = context.get_messages()
-                                if ctx_messages:
-                                    first = ctx_messages[0]
-                                    if isinstance(first, dict) and first.get("role") == "system":
-                                        content = first.get("content")
-                                        if isinstance(content, str):
-                                            system_message = content
-                                        elif isinstance(content, list):
-                                            system_message = " ".join(
-                                                part.get("text", "")
-                                                for part in content
-                                                if isinstance(part, dict)
-                                                and part.get("type") == "text"
-                                            )
+                            system_message = _get_system_instruction(self, context)
 
                             # Use given_fields() defensively in case a service doesn't
                             # initialize all settings.
@@ -1059,25 +1078,16 @@ def traced_gemini_live(operation: str) -> Callable:
                                     if tools_list:
                                         operation_attrs["tools"] = tools_list
 
-                            # Capture system instruction information
-                            system_instruction = getattr(self, "_system_instruction", None)
+                            # Capture the effective system instruction:
+                            # settings.system_instruction takes priority, else
+                            # an initial system message from the context.
+                            system_instruction = _get_system_instruction(
+                                self, getattr(self, "_context", None)
+                            )
                             if system_instruction:
-                                operation_attrs["system_instruction"] = system_instruction[
+                                operation_attrs["gen_ai.system_instructions"] = system_instruction[
                                     :500
                                 ]  # Truncate if very long
-
-                            # Capture context system instructions if available
-                            if hasattr(self, "_context") and self._context:
-                                try:
-                                    context_system = self._context.extract_system_instructions()
-                                    if context_system:
-                                        operation_attrs["context_system_instruction"] = (
-                                            context_system[:500]
-                                        )  # Truncate if very long
-                                except Exception as e:
-                                    logging.warning(
-                                        f"Error extracting context system instructions: {e}"
-                                    )
 
                         elif operation == "llm_tool_call" and args:
                             # Extract tool call information
