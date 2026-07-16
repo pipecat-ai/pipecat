@@ -85,3 +85,60 @@ async def test_run_stt_skips_send_when_connection_is_none():
         pass
 
     assert service._connection is None
+
+
+def _results_message(transcript: str, is_final: bool):
+    from deepgram.listen.v1.types import ListenV1Results
+
+    return ListenV1Results.model_validate(
+        {
+            "type": "Results",
+            "channel_index": [0, 1],
+            "duration": 1.2,
+            "start": 0.0,
+            "is_final": is_final,
+            "speech_final": is_final,
+            "channel": {
+                "alternatives": [{"transcript": transcript, "confidence": 0.99, "words": []}]
+            },
+            "metadata": {
+                "request_id": "req-123",
+                "model_info": {"name": "n", "version": "v", "arch": "a"},
+                "model_uuid": "u",
+            },
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_final_transcript_emits_usage_before_transcription_frame(monkeypatch):
+    from pipecat.frames.frames import InterimTranscriptionFrame, MetricsFrame, TranscriptionFrame
+    from pipecat.metrics.metrics import STTUsageMetricsData
+
+    service = DeepgramSTTService(api_key="test-key")
+    service._enable_usage_metrics = True
+    pushed_frames = []
+
+    async def fake_push_frame(frame, direction=None):
+        pushed_frames.append(frame)
+
+    monkeypatch.setattr(service, "push_frame", fake_push_frame)
+
+    # Simulate audio previously submitted to the service.
+    service._stt_usage_pending_seconds = 1.25
+
+    # Interim results must not emit usage.
+    await service._on_message(_results_message("hello", is_final=False))
+    assert [type(f) for f in pushed_frames] == [InterimTranscriptionFrame]
+
+    # A final transcript emits usage before the TranscriptionFrame so tracing
+    # can attach it to the span the frame closes.
+    await service._on_message(_results_message("hello world", is_final=True))
+
+    frame_types = [type(f) for f in pushed_frames]
+    assert frame_types == [InterimTranscriptionFrame, MetricsFrame, TranscriptionFrame]
+
+    data = pushed_frames[1].data[0]
+    assert isinstance(data, STTUsageMetricsData)
+    assert data.value.audio_seconds == 1.25
+    assert service._stt_usage_pending_seconds == 0.0

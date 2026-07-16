@@ -666,6 +666,9 @@ class SonioxSTTService(WebsocketSTTService):
             if self._final_transcription_buffer:
                 text = "".join(map(lambda token: token["text"], self._final_transcription_buffer))
                 language = _language_from_tokens(self._final_transcription_buffer)
+                # Report usage before the transcription frame so tracing can
+                # attach it to the STT span the frame closes.
+                await self.emit_stt_usage_metrics()
                 # Soniox only pushes TranscriptionFrame when an end token is received,
                 # so every TranscriptionFrame is inherently finalized
                 await self.push_frame(
