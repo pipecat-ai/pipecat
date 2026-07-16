@@ -1001,6 +1001,27 @@ def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Call
     return decorator
 
 
+def _gemini_audio_modality_tokens(details) -> int | None:
+    """Get the AUDIO token count from a Gemini modality breakdown, if reported.
+
+    Duck-typed (``entry.modality`` / ``entry.token_count``) so this module
+    doesn't depend on Google types. Gemini omits modalities with no tokens
+    (and omits the list entirely when there is no breakdown), so absence
+    means "not reported" rather than zero.
+
+    Args:
+        details: A modality breakdown from usage metadata, e.g.
+            ``prompt_tokens_details``.
+
+    Returns:
+        The AUDIO token count, or ``None`` if not reported.
+    """
+    for entry in details or []:
+        if getattr(getattr(entry, "modality", None), "value", None) == "AUDIO":
+            return entry.token_count
+    return None
+
+
 def traced_gemini_live(operation: str) -> Callable:
     """Trace Gemini Live service methods with operation-specific attributes.
 
@@ -1200,18 +1221,44 @@ def traced_gemini_live(operation: str) -> Callable:
                         elif operation == "llm_response" and args:
                             # Extract usage and response metadata from turn complete event
                             msg = args[0] if args else None
+
                             if msg and hasattr(msg, "usage_metadata") and msg.usage_metadata:
                                 usage = msg.usage_metadata
-
-                                # Token usage - basic attributes for span visibility
-                                if hasattr(usage, "prompt_token_count"):
-                                    operation_attrs["tokens.prompt"] = usage.prompt_token_count or 0
-                                if hasattr(usage, "response_token_count"):
-                                    operation_attrs["tokens.completion"] = (
-                                        usage.response_token_count or 0
+                                operation_attrs["gen_ai.usage.input_tokens"] = (
+                                    usage.prompt_token_count or 0
+                                )
+                                operation_attrs["gen_ai.usage.output_tokens"] = (
+                                    usage.response_token_count or 0
+                                )
+                                if usage.cached_content_token_count is not None:
+                                    operation_attrs["gen_ai.usage.cache_read.input_tokens"] = (
+                                        usage.cached_content_token_count
                                     )
-                                if hasattr(usage, "total_token_count"):
-                                    operation_attrs["tokens.total"] = usage.total_token_count or 0
+                                if usage.thoughts_token_count is not None:
+                                    operation_attrs["gen_ai.usage.reasoning_tokens"] = (
+                                        usage.thoughts_token_count
+                                    )
+                                input_audio_tokens = _gemini_audio_modality_tokens(
+                                    usage.prompt_tokens_details
+                                )
+                                if input_audio_tokens is not None:
+                                    operation_attrs["gen_ai.usage.audio.input_tokens"] = (
+                                        input_audio_tokens
+                                    )
+                                output_audio_tokens = _gemini_audio_modality_tokens(
+                                    usage.response_tokens_details
+                                )
+                                if output_audio_tokens is not None:
+                                    operation_attrs["gen_ai.usage.audio.output_tokens"] = (
+                                        output_audio_tokens
+                                    )
+                                cached_audio_tokens = _gemini_audio_modality_tokens(
+                                    usage.cache_tokens_details
+                                )
+                                if cached_audio_tokens is not None:
+                                    operation_attrs[
+                                        "gen_ai.usage.audio.cache_read.input_tokens"
+                                    ] = cached_audio_tokens
 
                             # Get output text and modality from service state
                             text = getattr(self, "_bot_text_buffer", "")
@@ -1246,21 +1293,6 @@ def traced_gemini_live(operation: str) -> Callable:
                             settings=settings,
                             **operation_attrs,
                         )
-
-                        # For llm_response operation, also handle token usage metrics
-                        if operation == "llm_response" and hasattr(self, "start_llm_usage_metrics"):
-                            msg = args[0] if args else None
-                            if msg and hasattr(msg, "usage_metadata") and msg.usage_metadata:
-                                usage = msg.usage_metadata
-                                # Create LLMTokenUsage object
-                                from pipecat.metrics.metrics import LLMTokenUsage
-
-                                tokens = LLMTokenUsage(
-                                    prompt_tokens=usage.prompt_token_count or 0,
-                                    completion_tokens=usage.response_token_count or 0,
-                                    total_tokens=usage.total_token_count or 0,
-                                )
-                                _add_token_usage_to_span(current_span, tokens)
 
                         # Capture TTFB metric if available
                         ttfb = getattr(getattr(self, "_metrics", None), "ttfb", None)
