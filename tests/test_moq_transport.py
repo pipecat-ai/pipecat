@@ -18,7 +18,7 @@ Three areas covered:
    conversion). We hit a real ``certHash=None`` bug here once; locking
    the round-trip in stops a regression.
 
-3. **``MOQTransport.__init__`` characterization** — the publish
+3. **``MOQTransportClient.__init__`` characterization** — the publish
    broadcast and transcript track must be created synchronously,
    because :class:`MOQOutputTransport.start` opens the audio track
    immediately without waiting for ``_run()``'s async bring-up. If a
@@ -328,7 +328,7 @@ class TestMOQTransportInit(unittest.TestCase):
     """Lock in the synchronous-construction contract:
 
     The publish broadcast and transcript track MUST be created in
-    ``__init__``, NOT in ``_run()``'s async bring-up.
+    ``MOQTransportClient.__init__``, NOT in ``_run()``'s async bring-up.
 
     Why: :class:`MOQOutputTransport.start` runs as part of pipecat's
     StartFrame propagation. It calls ``open_audio_track`` immediately,
@@ -363,8 +363,8 @@ class TestMOQTransportInit(unittest.TestCase):
         """The bot's broadcast producer exists immediately after
         ``__init__`` — not lazily inside ``_run()``."""
         transport, broadcast, _track, _moq = self._make_transport()
-        self.assertIsNotNone(transport._publish_broadcast)
-        self.assertIs(transport._publish_broadcast, broadcast)
+        self.assertIsNotNone(transport._client._publish_broadcast)
+        self.assertIs(transport._client._publish_broadcast, broadcast)
 
     def test_transcript_track_created_synchronously(self):
         """Same constraint for the transcript JSON stream: ``send_message``
@@ -372,7 +372,7 @@ class TestMOQTransportInit(unittest.TestCase):
         happen before ``_run()`` finishes dialing. Compression is on (the
         ``.z`` suffix)."""
         transport, broadcast, track, _moq = self._make_transport()
-        self.assertIs(transport._transcript_out, track)
+        self.assertIs(transport._client._transcript_out, track)
         broadcast.publish_json_stream.assert_called_once_with("transcript.json.z", compression=True)
 
     def test_audio_track_is_lazy(self):
@@ -382,7 +382,7 @@ class TestMOQTransportInit(unittest.TestCase):
         If __init__ were to eagerly open the track here, we'd commit to
         the wrong sample rate."""
         transport, broadcast, _track, _moq = self._make_transport()
-        self.assertIsNone(transport._audio_out)
+        self.assertIsNone(transport._client._audio_out)
         broadcast.publish_audio.assert_not_called()
 
     def test_broadcast_paths_built_from_params(self):
@@ -402,8 +402,8 @@ class TestMOQTransportInit(unittest.TestCase):
             moq_mock.BroadcastProducer.return_value = MagicMock()
             transport = MOQTransport(params=params, host="localhost", port=4080)
 
-        self.assertEqual(transport._broadcast_path, "myroom/alice")
-        self.assertEqual(transport._peer_broadcast_path, "myroom/bob")
+        self.assertEqual(transport._client._broadcast_path, "myroom/alice")
+        self.assertEqual(transport._client._peer_broadcast_path, "myroom/bob")
 
     def test_cert_fingerprints_initially_empty(self):
         """Serve-mode cert fingerprints get populated by ``_run()`` once
