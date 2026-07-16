@@ -141,7 +141,7 @@ def test_span_attributes_from_llm_token_usage_object():
     assert span.attributes["gen_ai.usage.cache_read.input_tokens"] == 30
     assert span.attributes["gen_ai.usage.audio.input_tokens"] == 40
     assert span.attributes["gen_ai.usage.audio.output_tokens"] == 25
-    assert span.attributes["gen_ai.usage.cache_read.audio_tokens"] == 20
+    assert span.attributes["gen_ai.usage.audio.cache_read.input_tokens"] == 20
 
 
 def test_span_attributes_omitted_when_audio_fields_unset():
@@ -152,7 +152,7 @@ def test_span_attributes_omitted_when_audio_fields_unset():
     )
     assert "gen_ai.usage.audio.input_tokens" not in span.attributes
     assert "gen_ai.usage.audio.output_tokens" not in span.attributes
-    assert "gen_ai.usage.cache_read.audio_tokens" not in span.attributes
+    assert "gen_ai.usage.audio.cache_read.input_tokens" not in span.attributes
 
 
 def test_span_attributes_from_dict():
@@ -169,4 +169,4 @@ def test_span_attributes_from_dict():
     )
     assert span.attributes["gen_ai.usage.audio.input_tokens"] == 40
     assert span.attributes["gen_ai.usage.audio.output_tokens"] == 25
-    assert span.attributes["gen_ai.usage.cache_read.audio_tokens"] == 20
+    assert span.attributes["gen_ai.usage.audio.cache_read.input_tokens"] == 20

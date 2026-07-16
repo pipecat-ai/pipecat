@@ -163,7 +163,7 @@ def _add_token_usage_to_span(span, token_usage):
             and token_usage["cache_read_input_audio_tokens"] is not None
         ):
             span.set_attribute(
-                "gen_ai.usage.cache_read.audio_tokens",
+                "gen_ai.usage.audio.cache_read.input_tokens",
                 token_usage["cache_read_input_audio_tokens"],
             )
     else:
@@ -197,7 +197,7 @@ def _add_token_usage_to_span(span, token_usage):
         cache_read_input_audio_tokens = getattr(token_usage, "cache_read_input_audio_tokens", None)
         if cache_read_input_audio_tokens is not None:
             span.set_attribute(
-                "gen_ai.usage.cache_read.audio_tokens", cache_read_input_audio_tokens
+                "gen_ai.usage.audio.cache_read.input_tokens", cache_read_input_audio_tokens
             )
 
 
@@ -1417,7 +1417,7 @@ def traced_openai_realtime(operation: str) -> Callable:
                                             and cached_details.audio_tokens is not None
                                         ):
                                             operation_attrs[
-                                                "gen_ai.usage.cache_read.audio_tokens"
+                                                "gen_ai.usage.audio.cache_read.input_tokens"
                                             ] = cached_details.audio_tokens
                                     output_details = getattr(usage, "output_token_details", None)
                                     if output_details and output_details.audio_tokens is not None:
