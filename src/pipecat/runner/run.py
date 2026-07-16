@@ -324,6 +324,28 @@ def _print_security_status(args: argparse.Namespace):
         print("   → Allowed origins: all (no restriction)")
 
 
+def _print_dev_runner_banner():
+    """Print a bordered banner identifying this as the development runner.
+
+    It points out the runner is for development purposes only and links to the
+    deployment docs.
+    """
+    lines = [
+        "PIPECAT DEVELOPMENT RUNNER",
+        "",
+        "For development purposes only.",
+        "",
+        "Learn about running bots locally and in production:",
+        "https://docs.pipecat.ai/pipecat/deployment/overview",
+    ]
+    width = max(len(line) for line in lines)
+    print()
+    print("╭" + "─" * (width + 2) + "╮")
+    for line in lines:
+        print(f"│ {line.ljust(width)} │")
+    print("╰" + "─" * (width + 2) + "╯")
+
+
 def _print_startup_message(args: argparse.Namespace):
     """Print connection information for the development runner."""
     print()
@@ -1535,6 +1557,9 @@ def main(parser: argparse.ArgumentParser | None = None):
     # Log level
     logger.remove()
     logger.add(sys.stderr, level="TRACE" if args.verbose else "DEBUG")
+
+    # Print overall dev runner banner
+    _print_dev_runner_banner()
 
     # Handle direct Daily connection (no FastAPI server)
     if args.direct:
