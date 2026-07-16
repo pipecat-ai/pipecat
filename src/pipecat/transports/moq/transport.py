@@ -131,9 +131,7 @@ def _install_moq_task_exception_filter() -> None:
     def _filter(loop_, context):
         exc = context.get("exception")
         if exc is not None and _is_normal_close(exc):
-            logger.debug(
-                f"MOQ: swallowed unretrieved-task exception from a normal close: {exc}"
-            )
+            logger.debug(f"MOQ: swallowed unretrieved-task exception from a normal close: {exc}")
             return
         if previous is not None:
             previous(loop_, context)
@@ -1048,9 +1046,7 @@ class MOQTransport(BaseTransport):
         # any interactive perception threshold.
         try:
             if hasattr(self, "_transcript_out") and self._transcript_out is not None:
-                self._transcript_out.append(
-                    {"label": "moq-transport", "type": "session-ending"}
-                )
+                self._transcript_out.append({"label": "moq-transport", "type": "session-ending"})
                 await asyncio.sleep(0.25)
         except Exception as e:
             logger.debug(f"MOQ: could not send session-ending notification: {e}")
