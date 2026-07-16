@@ -1106,49 +1106,32 @@ def traced_gemini_live(operation: str) -> Callable:
                                     except Exception:
                                         operation_attrs["tool.arguments"] = str(call.args)[:1000]
 
-                        elif operation == "llm_tool_result" and args:
-                            # Extract tool result information
-                            tool_result_message = args[0] if args else None
-                            if tool_result_message and isinstance(tool_result_message, dict):
-                                # Extract the tool call information
-                                tool_call_id = tool_result_message.get("tool_call_id")
-                                tool_call_name = tool_result_message.get("tool_call_name")
-                                result_content = tool_result_message.get("content")
-
+                        elif operation == "llm_tool_result" and len(args) >= 3:
+                            # _tool_result(self, tool_call_id, tool_call_name, result); its
+                            # positional args, in order. ``result`` is expected to be
+                            # Gemini's FunctionResponse.response payload (a dict), but is
+                            # validated at runtime rather than assumed.
+                            tool_call_id, tool_call_name, result = args[0], args[1], args[2]
+                            try:
                                 if tool_call_id:
                                     operation_attrs["tool.call_id"] = tool_call_id
                                 if tool_call_name:
                                     operation_attrs["tool.function_name"] = tool_call_name
-
-                                # Parse and capture the result
-                                if result_content:
-                                    try:
-                                        result = json.loads(result_content)
-                                        # Serialize the result, truncating if too long
-                                        result_str = json.dumps(result)
-                                        if len(result_str) > 2000:  # Larger limit for results
-                                            result_str = result_str[:2000] + "..."
-                                        operation_attrs["tool.result"] = result_str
-
-                                        # Add result status/success indicator if present
-                                        if isinstance(result, dict):
-                                            if "error" in result:
-                                                operation_attrs["tool.result_status"] = "error"
-                                            elif "success" in result:
-                                                operation_attrs["tool.result_status"] = "success"
-                                            else:
-                                                operation_attrs["tool.result_status"] = "completed"
-
-                                    except json.JSONDecodeError:
-                                        operation_attrs["tool.result"] = (
-                                            f"Invalid JSON: {str(result_content)[:500]}"
-                                        )
-                                        operation_attrs["tool.result_status"] = "parse_error"
-                                    except Exception as e:
-                                        operation_attrs["tool.result"] = (
-                                            f"Error processing result: {str(e)}"
-                                        )
-                                        operation_attrs["tool.result_status"] = "processing_error"
+                                if isinstance(result, dict):
+                                    result_str = json.dumps(result)
+                                    if len(result_str) > 2000:  # larger limit for results
+                                        result_str = result_str[:2000] + "..."
+                                    operation_attrs["tool.result"] = result_str
+                                    if "error" in result:
+                                        operation_attrs["tool.result_status"] = "error"
+                                    elif "success" in result:
+                                        operation_attrs["tool.result_status"] = "success"
+                                    else:
+                                        operation_attrs["tool.result_status"] = "completed"
+                            except Exception as e:
+                                logging.warning(
+                                    f"Error capturing tool result attributes for tracing: {e}"
+                                )
 
                         elif operation == "llm_response" and args:
                             # Extract usage and response metadata from turn complete event
