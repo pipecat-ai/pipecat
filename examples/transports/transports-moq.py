@@ -30,10 +30,6 @@ Usage:
         -t moq --moq-serve --moq-tls-generate localhost --moq-namespace my-room
 
     # Then open http://localhost:7860 and click Connect.
-
-    # Can also run with other transports:
-    uv run python examples/transports/transports-moq.py -t webrtc
-    uv run python examples/transports/transports-moq.py -t daily
 """
 
 import os
