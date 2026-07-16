@@ -831,6 +831,50 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         await strategy.process_frame(UserStoppedSpeakingFrame())
         self.assertTrue(should_start)
 
+    async def test_stale_text_does_not_stop_turn(self):
+        """A resumed chunk's stop must not trigger on the previous chunk's text.
+
+        `UserStoppedSpeakingFrame` is a system frame, so it can reach the
+        strategy before the final `TranscriptionFrame` it was pushed after. When
+        the user then resumes before that chunk's timer fires, the late final
+        must not satisfy the next chunk's immediate trigger. The raced chunk
+        falls back to the timer path and waits for its own transcript.
+        """
+        strategy = ExternalUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
+        await strategy.setup(TaskManager())
+        self.addAsyncCleanup(strategy.cleanup)
+
+        stops = 0
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal stops
+            stops += 1
+
+        # First chunk: the stop overtakes its own final, which lands late.
+        await strategy.process_frame(UserStartedSpeakingFrame())
+        await strategy.process_frame(UserStoppedSpeakingFrame())
+        self.assertEqual(stops, 0)
+        await strategy.process_frame(
+            TranscriptionFrame(text="chunk one", user_id="cat", timestamp="")
+        )
+
+        # The user resumes before the timer fires, so the turn stays open and
+        # the strategy is not reset.
+        await strategy.process_frame(UserStartedSpeakingFrame())
+
+        # Second chunk: its stop overtakes its final too. "chunk one" must not
+        # trigger here — this chunk has no transcript of its own yet.
+        await strategy.process_frame(UserStoppedSpeakingFrame())
+        self.assertEqual(stops, 0)
+
+        # Once this chunk's own final lands, the timer path stops the turn.
+        await strategy.process_frame(
+            TranscriptionFrame(text="chunk two", user_id="cat", timestamp="")
+        )
+        await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
+        self.assertEqual(stops, 1)
+
 
 class TestExternalUserTurnCompletionStopStrategy(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:

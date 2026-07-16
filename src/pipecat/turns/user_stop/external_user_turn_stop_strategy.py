@@ -115,6 +115,13 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
     async def _handle_user_started_speaking(self, _: UserStartedSpeakingFrame):
         """Handle when the external service indicates the user is speaking."""
         self._user_speaking = True
+        # Drop text from the chunk the user just finished, so only text finalized
+        # for this chunk can trigger a stop. `UserStoppedSpeakingFrame` is a system
+        # frame and can arrive before the final transcript it was pushed after;
+        # keeping the old text would trigger inference on it and leave this chunk's
+        # transcript to land after the LLM run. Without text, such a raced chunk
+        # falls back to the timer path and waits for its own transcript.
+        self._text = ""
 
     async def _handle_user_stopped_speaking(self, _: UserStoppedSpeakingFrame):
         """Handle when the external service indicates the user has stopped speaking."""
