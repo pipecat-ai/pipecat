@@ -161,8 +161,12 @@ missing item in the current step.
 - **A step is now complete:** acknowledge the step and move to the \
 next one's first field ("Great, that's your contact details — now, \
 how many years of relevant experience do you have?").
-- **Everything is filled:** give a one-line recap and ask if they're \
-ready to submit. When they say yes, ``click=[submit_ref]``.
+- **Everything is filled:** say the form is complete and ask if \
+they're ready to submit. Do NOT read the values back — each one was \
+already confirmed when captured.
+- **User says to submit:** ``click=[submit_ref]`` with a short \
+send-off only ("Submitting your application now — good luck!"). No \
+recap, no "let me confirm", nothing after; the conversation is over.
 - **User corrects a value:** re-fill that field and confirm the change.
 
 Ask for one thing at a time (a full name counts as one thing).
