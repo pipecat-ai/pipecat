@@ -182,6 +182,8 @@ class TTSService(AIService):
         settings: TTSSettings | None = None,
         # if True, the context ID is reused within an LLM turn
         reuse_context_id_within_turn: bool = True,
+        # Static metadata attached to every TTS tracing span (when tracing is enabled)
+        tracing_metadata: dict[str, Any] | None = None,
         **kwargs,
     ):
         """Initialize the TTS service.
@@ -221,6 +223,10 @@ class TTSService(AIService):
             settings: The runtime-updatable settings for the TTS service.
             reuse_context_id_within_turn: Whether the service should reuse context IDs within the
                 same turn.
+            tracing_metadata: Optional static metadata attached to every TTS tracing span as
+                ``metadata.<key>`` attributes (only primitive values are recorded). Useful for
+                associating spans with a session, user, or environment. Has no effect unless
+                tracing is enabled.
             **kwargs: Additional arguments passed to the parent AIService.
         """
         super().__init__(
@@ -327,6 +333,7 @@ class TTSService(AIService):
         # don't emit a second bot-llm-stopped.
         self._pending_llm_response_end_frames: dict[str, LLMFullResponseEndFrame] = {}
         self._reuse_context_id_within_turn: bool = reuse_context_id_within_turn
+        self._tracing_metadata: dict[str, Any] | None = tracing_metadata
 
         # _turn_context_id:
         #   Set on LLMFullResponseStartFrame and cleared after LLMFullResponseEndFrame

@@ -93,6 +93,7 @@ class STTService(AIService):
         keepalive_timeout: float | None = None,
         keepalive_interval: float = 5.0,
         settings: STTSettings | None = None,
+        tracing_metadata: dict[str, Any] | None = None,
         **kwargs,
     ):
         """Initialize the STT service.
@@ -119,6 +120,10 @@ class STTService(AIService):
                 close idle connections (e.g. behind a ServiceSwitcher).
             keepalive_interval: Seconds between idle checks when keepalive is enabled.
             settings: The runtime-updatable settings for the STT service.
+            tracing_metadata: Optional static metadata attached to every STT tracing span as
+                ``metadata.<key>`` attributes (only primitive values are recorded). Useful for
+                associating spans with a session, user, or environment. Has no effect unless
+                tracing is enabled.
             **kwargs: Additional arguments passed to the parent AIService.
         """
         super().__init__(
@@ -152,6 +157,7 @@ class STTService(AIService):
         self._audio_passthrough = audio_passthrough
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
+        self._tracing_metadata: dict[str, Any] | None = tracing_metadata
 
         self._muted: bool = False
         self._user_id: str = ""

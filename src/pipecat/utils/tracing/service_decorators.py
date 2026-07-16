@@ -24,8 +24,10 @@ if TYPE_CHECKING:
     from opentelemetry import trace
 
 from pipecat.frames.frames import (
+    AudioRawFrame,
     MetricsFrame,
     TranscriptionFrame,
+    TTSAudioRawFrame,
     TTSStoppedFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
@@ -206,7 +208,15 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
         is_async_generator = inspect.isasyncgenfunction(f)
 
         def end_tts_span(service, context_id, *, interrupted=False):
-            """End the TTS span for ``context_id`` if still open. Idempotent."""
+            """End the TTS span for ``context_id`` if still open. Idempotent.
+
+            Before closing, flush any accumulated output audio onto the
+            span as ``langfuse.media`` (plus ``output`` and
+            ``audio.data_size_bytes``). All TTS span-closing paths funnel
+            through here so the audio is attached regardless of whether
+            the synthesis ended via ``TTSStoppedFrame``, natural
+            completion, removal, or interruption.
+            """
             entry = service._tts_spans.pop(context_id, None)
             if not entry:
                 return
@@ -214,6 +224,20 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                 span = entry["span"]
                 if interrupted:
                     span.set_attribute("tts.interrupted", True)
+                audio_chunks = entry.get("audio_chunks") or []
+                if audio_chunks:
+                    try:
+                        settings = getattr(service, "_settings", None)
+                        add_tts_span_attributes(
+                            span=span,
+                            service_name=service.__class__.__name__,
+                            model=_get_model_name(service),
+                            voice_id=getattr(settings, "voice", "unknown"),
+                            operation_name="tts",
+                            audio_data=b"".join(audio_chunks),
+                        )
+                    except Exception as e:
+                        logging.warning(f"Error attaching TTS audio to span: {e}")
                 span.end()
             except Exception as e:
                 logging.warning(f"Error closing TTS span: {e}")
@@ -271,7 +295,11 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                         parent = _get_turn_context(service) or _get_parent_service_context(service)
                         tracer = trace.get_tracer("pipecat")
                         span = tracer.start_span("tts", context=parent)
-                        service._tts_spans[context_id] = {"span": span, "ttfb_recorded": False}
+                        service._tts_spans[context_id] = {
+                            "span": span,
+                            "ttfb_recorded": False,
+                            "audio_chunks": [],
+                        }
 
                         settings = getattr(service, "_settings", None)
                         add_tts_span_attributes(
@@ -281,34 +309,36 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                             voice_id=getattr(settings, "voice", "unknown"),
                             settings=settings,
                             operation_name="tts",
+                            metadata=getattr(service, "_tracing_metadata", None),
                         )
                     except Exception as e:
                         logging.warning(f"Error opening TTS span: {e}")
                 return await orig_create(context_id)
 
             async def traced_append_to_audio_context(context_id, frame):
-                entry = service._tts_spans.get(context_id)
-                if entry and frame is not None:
-                    try:
-                        if isinstance(frame, TTSStoppedFrame):
-                            entry["span"].end()
-                            service._tts_spans.pop(context_id, None)
-                    except Exception as e:
-                        logging.warning(f"Error updating TTS span: {e}")
+                if frame is not None and isinstance(frame, TTSStoppedFrame):
+                    end_tts_span(service, context_id)
                 return await orig_append(context_id, frame)
 
             async def traced_push_frame(frame, direction=FrameDirection.DOWNSTREAM):
                 await orig_push_frame(frame, direction)
                 if not getattr(service, "_tracing_enabled", False):
                     return
-                if not isinstance(frame, MetricsFrame):
+                if not isinstance(frame, (MetricsFrame, TTSAudioRawFrame)):
                     return
                 try:
                     playing_id = getattr(service, "_playing_context_id", None)
                     if playing_id is None:
                         return
                     entry = service._tts_spans.get(playing_id)
-                    if not entry or entry["ttfb_recorded"]:
+                    if not entry:
+                        return
+                    if isinstance(frame, TTSAudioRawFrame):
+                        # Accumulate synthesized audio so it can be flushed
+                        # onto the span as langfuse.media when it closes.
+                        entry["audio_chunks"].append(frame.audio)
+                        return
+                    if entry["ttfb_recorded"]:
                         return
                     for data in frame.data:
                         if isinstance(data, TTFBMetricsData):
@@ -316,15 +346,10 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                             entry["ttfb_recorded"] = True
                             break
                 except Exception as e:
-                    logging.warning(f"Error recording TTS ttfb from MetricsFrame: {e}")
+                    logging.warning(f"Error in TTS push_frame tracing: {e}")
 
             async def traced_remove_audio_context(context_id):
-                entry = service._tts_spans.pop(context_id, None)
-                if entry:
-                    try:
-                        entry["span"].end()
-                    except Exception as e:
-                        logging.warning(f"Error closing TTS span: {e}")
+                end_tts_span(service, context_id)
                 return await orig_remove(context_id)
 
             async def traced_on_audio_context_completed(context_id):
@@ -458,6 +483,63 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
         return _noop_decorator if func is None else _noop_decorator(func)
 
     def decorator(f):
+        def flush_stt_audio(service, span, state):
+            """Flush accumulated input audio onto the STT span before it closes.
+
+            Attaches the user's spoken audio as ``langfuse.media`` (plus
+            ``input`` and ``audio.data_size_bytes``). Called from every
+            span-closing path so the audio is captured whether the span
+            ends on a finalized transcript, on ``UserStoppedSpeakingFrame``,
+            or on the TTFB-timeout path.
+            """
+            audio_chunks = state.get("audio_chunks") or []
+            if not audio_chunks:
+                return
+            try:
+                add_stt_span_attributes(
+                    span=span,
+                    service_name=service.__class__.__name__,
+                    model=_get_model_name(service),
+                    vad_enabled=getattr(service, "vad_enabled", False),
+                    audio_data=b"".join(audio_chunks),
+                )
+            except Exception as e:
+                logging.warning(f"Error attaching STT audio to span: {e}")
+
+        def patch_process_frame(owner):
+            """Wrap ``owner.process_frame`` to accumulate the segment's input audio.
+
+            The user's speech arrives as ``AudioRawFrame`` (specifically
+            ``InputAudioRawFrame``) on the inbound ``process_frame`` path,
+            which is separate from the ``push_frame`` path that drives the
+            span lifecycle. We accumulate audio whenever a segment is
+            active — a span is open, or speech start has been anchored via
+            VAD (``segment_start_time``) — so capture begins at the start
+            of speech when VAD is available rather than only once the
+            first transcript opens the span.
+
+            Idempotent: if a parent class has already been wrapped, skip.
+            """
+            original_process_frame = owner.process_frame
+            if getattr(original_process_frame, "__stt_tracing_process_frame_wrapped__", False):
+                return
+
+            @functools.wraps(original_process_frame)
+            async def patched_process_frame(self, frame, direction):
+                if getattr(self, "_tracing_enabled", False) and isinstance(frame, AudioRawFrame):
+                    try:
+                        state = getattr(self, "_stt_span_state", None)
+                        if state is not None and (
+                            state["span"] is not None or state["segment_start_time"] is not None
+                        ):
+                            state["audio_chunks"].append(frame.audio)
+                    except Exception as e:
+                        logging.warning(f"Error accumulating STT audio: {e}")
+                return await original_process_frame(self, frame, direction)
+
+            setattr(patched_process_frame, "__stt_tracing_process_frame_wrapped__", True)
+            owner.process_frame = patched_process_frame
+
         def patch_push_frame(owner):
             """Wrap ``owner.push_frame`` to drive the STT span lifecycle.
 
@@ -511,6 +593,7 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
                         model=_get_model_name(service),
                         settings=settings,
                         vad_enabled=getattr(service, "vad_enabled", False),
+                        metadata=getattr(service, "_tracing_metadata", None),
                     )
                 except Exception as e:
                     logging.warning(f"Error setting STT span baseline attributes: {e}")
@@ -590,12 +673,15 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
                     # via the timeout path; re-check.
                     if state["span"] is None:
                         state["segments"] = []
+                        state["audio_chunks"] = []
                         return
                     state["span"].set_attribute("stt.incomplete", True)
+                    flush_stt_audio(service, state["span"], state)
                     state["span"].end()
                     state["span"] = None
                     state["segment_start_time"] = None
                     state["segments"] = []
+                    state["audio_chunks"] = []
                 elif isinstance(frame, MetricsFrame):
                     span = state["span"]
                     if span is None:
@@ -617,16 +703,23 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
                     if frame.user_id:
                         span.set_attribute("user_id", frame.user_id)
                     if frame.finalized:
+                        flush_stt_audio(service, span, state)
                         span.end()
                         state["span"] = None
                         state["segment_start_time"] = None
                         state["segments"] = []
+                        state["audio_chunks"] = []
 
             @functools.wraps(original_push_frame)
             async def patched_push_frame(self, frame, direction=FrameDirection.DOWNSTREAM):
                 state = getattr(self, "_stt_span_state", None)
                 if state is None:
-                    state = {"span": None, "segment_start_time": None, "segments": []}
+                    state = {
+                        "span": None,
+                        "segment_start_time": None,
+                        "segments": [],
+                        "audio_chunks": [],
+                    }
                     self._stt_span_state = state
 
                 if getattr(self, "_tracing_enabled", False):
@@ -680,10 +773,12 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
                     return
                 try:
                     span = state["span"]
+                    flush_stt_audio(self, span, state)
                     span.end(end_time=int(end_time * 1e9))
                     state["span"] = None
                     state["segment_start_time"] = None
                     state["segments"] = []
+                    state["audio_chunks"] = []
                 except Exception as e:
                     logging.warning(f"Error in STT stop_ttfb_metrics tracing: {e}")
 
@@ -704,6 +799,7 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
 
             def __set_name__(self, owner, attr_name):
                 patch_push_frame(owner)
+                patch_process_frame(owner)
                 patch_stop_ttfb_metrics(owner)
                 setattr(owner, attr_name, f)
 

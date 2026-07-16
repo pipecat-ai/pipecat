@@ -11,6 +11,8 @@ attributes to OpenTelemetry spans, following standard semantic conventions
 where applicable and Pipecat-specific conventions for additional context.
 """
 
+import base64
+import json
 from typing import TYPE_CHECKING, Any, Optional
 
 # Import for type checking only
@@ -73,6 +75,8 @@ def add_tts_span_attributes(
     character_count: int | None = None,
     operation_name: str = "tts",
     ttfb: float | None = None,
+    audio_data: bytes | None = None,
+    metadata: dict[str, Any] | None = None,
     **kwargs,
 ) -> None:
     """Add TTS-specific attributes to a span.
@@ -87,6 +91,8 @@ def add_tts_span_attributes(
         character_count: Number of characters in the text.
         operation_name: Name of the operation (default: "tts").
         ttfb: Time to first byte in seconds.
+        audio_data: The synthesized output audio data.
+        metadata: Metadata to add to the span.
         **kwargs: Additional attributes to add.
     """
     # Add standard attributes
@@ -112,6 +118,20 @@ def add_tts_span_attributes(
             if isinstance(value, (str, int, float, bool)):
                 span.set_attribute(f"settings.{key}", value)
 
+    if audio_data is not None:
+        base64_str = base64.b64encode(audio_data).decode("utf-8")
+        span.set_attribute("audio.data_size_bytes", len(audio_data))
+        span.set_attribute(
+            "langfuse.media",
+            json.dumps({"type": "audio", "data": base64_str, "mediaType": "audio/wav"}),
+        )
+        span.set_attribute("output", base64_str)
+
+    if metadata:
+        for key, value in metadata.items():
+            if isinstance(value, (str, int, float, bool)):
+                span.set_attribute(f"metadata.{key}", value)
+
     # Add any additional keyword arguments as attributes
     for key, value in kwargs.items():
         if isinstance(value, (str, int, float, bool)):
@@ -130,6 +150,8 @@ def add_stt_span_attributes(
     settings: Optional["ServiceSettings"] = None,
     vad_enabled: bool = False,
     ttfb: float | None = None,
+    audio_data: bytes | None = None,
+    metadata: dict[str, Any] | None = None,
     **kwargs,
 ) -> None:
     """Add STT-specific attributes to a span.
@@ -146,6 +168,8 @@ def add_stt_span_attributes(
         settings: Service configuration settings.
         vad_enabled: Whether voice activity detection is enabled.
         ttfb: Time to first byte in seconds.
+        audio_data: The input audio data.
+        metadata: Metadata to add to the span.
         **kwargs: Additional attributes to add.
     """
     # Add standard attributes
@@ -175,6 +199,20 @@ def add_stt_span_attributes(
         for key, value in settings.given_fields().items():
             if isinstance(value, (str, int, float, bool)):
                 span.set_attribute(f"settings.{key}", value)
+
+    if audio_data is not None:
+        base64_str = base64.b64encode(audio_data).decode("utf-8")
+        span.set_attribute("audio.data_size_bytes", len(audio_data))
+        span.set_attribute(
+            "langfuse.media",
+            json.dumps({"type": "audio", "data": base64_str, "mediaType": "audio/wav"}),
+        )
+        span.set_attribute("input", base64_str)
+
+    if metadata:
+        for key, value in metadata.items():
+            if isinstance(value, (str, int, float, bool)):
+                span.set_attribute(f"metadata.{key}", value)
 
     # Add any additional keyword arguments as attributes
     for key, value in kwargs.items():
