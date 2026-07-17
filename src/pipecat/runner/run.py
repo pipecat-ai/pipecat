@@ -104,6 +104,7 @@ import os
 import secrets
 import sys
 import time
+import unicodedata
 import uuid
 from contextlib import asynccontextmanager
 from http import HTTPMethod
@@ -348,6 +349,23 @@ def _style_banner_line(text: str) -> str:
     return text
 
 
+def _display_width(text: str) -> int:
+    """Return the number of terminal columns ``text`` occupies.
+
+    Counts East-Asian wide/fullwidth characters (including emoji such as the
+    banner's warning marker) as two columns, and combining marks and variation
+    selectors as zero, so bordered lines align regardless of how a terminal
+    sizes wide glyphs.
+    """
+    width = 0
+    for ch in text:
+        # Combining marks and variation selectors (VS1-VS16) add no width.
+        if unicodedata.combining(ch) or 0xFE00 <= ord(ch) <= 0xFE0F:
+            continue
+        width += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+    return width
+
+
 def _print_dev_runner_banner():
     """Print a bordered banner identifying this as the development runner.
 
@@ -358,16 +376,17 @@ def _print_dev_runner_banner():
     lines = [
         "PIPECAT DEVELOPMENT RUNNER",
         "",
-        "⚠️  For development purposes only.",
+        "🚧 For development purposes only.",
         "",
         "Learn about running bots locally and in production:",
         "https://docs.pipecat.ai/pipecat/deployment/overview",
     ]
-    width = max(len(line) for line in lines)
+    width = max(_display_width(line) for line in lines)
     print()
     print(_style_banner_line("╭" + "─" * (width + 2) + "╮"))
     for line in lines:
-        print(_style_banner_line(f"│ {line.ljust(width)} │"))
+        padding = " " * (width - _display_width(line))
+        print(_style_banner_line(f"│ {line}{padding} │"))
     print(_style_banner_line("╰" + "─" * (width + 2) + "╯"))
 
 
