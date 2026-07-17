@@ -306,15 +306,11 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             context,
             enable_prompt_caching=assert_given(self._settings.enable_prompt_caching),
             system_instruction=effective_instruction,
+            ensure_last_message_is_user=self._should_inject_trailing_user_message(),
         )
         messages = invocation_params["messages"]
         system = invocation_params["system"]
         tools = invocation_params["tools"]
-
-        # Models without assistant-prefill support reject requests that end
-        # with an assistant message.
-        if self._should_inject_trailing_user_message():
-            adapter.ensure_last_message_is_user(messages)
 
         # Build params using the same method as streaming completions
         params = {
@@ -373,11 +369,8 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             context,
             enable_prompt_caching=assert_given(self._settings.enable_prompt_caching),
             system_instruction=assert_given(self._settings.system_instruction),
+            ensure_last_message_is_user=self._should_inject_trailing_user_message(),
         )
-        # Models without assistant-prefill support reject requests that end
-        # with an assistant message.
-        if self._should_inject_trailing_user_message():
-            adapter.ensure_last_message_is_user(params["messages"])
         return params
 
     @traced_llm

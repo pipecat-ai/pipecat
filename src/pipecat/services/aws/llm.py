@@ -297,15 +297,12 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
         )
         adapter = self.get_llm_adapter()
         params = adapter.get_llm_invocation_params(
-            context, system_instruction=effective_instruction
+            context,
+            system_instruction=effective_instruction,
+            ensure_last_message_is_user=self._should_inject_trailing_user_message(),
         )
         messages = params["messages"]
         system = params["system"]  # [{"text": "system message"}] or None
-
-        # Models without assistant-prefill support reject requests that end
-        # with an assistant message.
-        if self._should_inject_trailing_user_message():
-            adapter.ensure_last_message_is_user(messages)
 
         # Prepare request parameters using the same method as streaming
         inference_config = self._build_inference_config()
@@ -425,12 +422,10 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
     def _get_llm_invocation_params(self, context: LLMContext) -> AWSBedrockLLMInvocationParams:
         adapter = self.get_llm_adapter()
         params = adapter.get_llm_invocation_params(
-            context, system_instruction=assert_given(self._settings.system_instruction)
+            context,
+            system_instruction=assert_given(self._settings.system_instruction),
+            ensure_last_message_is_user=self._should_inject_trailing_user_message(),
         )
-        # Models without assistant-prefill support reject requests that end
-        # with an assistant message.
-        if self._should_inject_trailing_user_message():
-            adapter.ensure_last_message_is_user(params["messages"])
         return params
 
     @traced_llm

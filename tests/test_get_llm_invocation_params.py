@@ -1134,50 +1134,74 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][0]["role"], "user")
 
     def test_ensure_last_message_is_user_appends_when_trailing_assistant(self):
-        """Test that ensure_last_message_is_user appends a user message when last message is assistant."""
-        messages = [
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi there!"},
-        ]
-        result = AnthropicLLMAdapter.ensure_last_message_is_user(messages)
-        self.assertEqual(len(result), 3)
-        self.assertEqual(result[-1]["role"], "user")
-        self.assertEqual(result[-1]["content"], [{"type": "text", "text": "."}])
+        """ensure_last_message_is_user=True appends a user message after a trailing assistant."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(
+            context, enable_prompt_caching=False, ensure_last_message_is_user=True
+        )
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertEqual(params["messages"][-1]["content"], [{"type": "text", "text": "."}])
+
+    def test_ensure_last_message_is_user_off_keeps_trailing_assistant(self):
+        """Without the flag (default), a trailing assistant message is preserved."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+        self.assertEqual(len(params["messages"]), 2)
+        self.assertEqual(params["messages"][-1]["role"], "assistant")
 
     def test_ensure_last_message_is_user_noop_when_trailing_user(self):
-        """Test that ensure_last_message_is_user does nothing when last message is already user."""
-        messages = [
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi there!"},
-            {"role": "user", "content": "How are you?"},
-        ]
-        result = AnthropicLLMAdapter.ensure_last_message_is_user(messages)
-        self.assertEqual(len(result), 3)
-        self.assertEqual(result[-1]["role"], "user")
-        self.assertEqual(result[-1]["content"], "How are you?")
+        """ensure_last_message_is_user=True does nothing when the list already ends with a user."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+                {"role": "user", "content": "How are you?"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(
+            context, enable_prompt_caching=False, ensure_last_message_is_user=True
+        )
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertEqual(params["messages"][-1]["content"], "How are you?")
 
     def test_ensure_last_message_is_user_handles_empty_list(self):
-        """Test that ensure_last_message_is_user handles empty message list."""
-        messages = []
-        result = AnthropicLLMAdapter.ensure_last_message_is_user(messages)
-        self.assertEqual(len(result), 0)
+        """ensure_last_message_is_user=True handles an empty context."""
+        params = self.adapter.get_llm_invocation_params(
+            LLMContext(), enable_prompt_caching=False, ensure_last_message_is_user=True
+        )
+        self.assertEqual(len(params["messages"]), 0)
 
-    def test_ensure_last_message_is_user_handles_tool_result_trailing(self):
-        """Test that ensure_last_message_is_user does nothing when last message is a tool_result (user role)."""
-        messages = [
-            {"role": "user", "content": "What's the weather?"},
-            {
-                "role": "assistant",
-                "content": [{"type": "tool_use", "id": "t1", "name": "get_weather", "input": {}}],
-            },
-            {
-                "role": "user",
-                "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "Sunny, 22°C"}],
-            },
-        ]
-        result = AnthropicLLMAdapter.ensure_last_message_is_user(messages)
-        self.assertEqual(len(result), 3)  # No message appended
-        self.assertEqual(result[-1]["role"], "user")
+    def test_ensure_last_message_is_user_noop_when_tool_result_trailing(self):
+        """ensure_last_message_is_user=True does nothing when a tool result (user role) trails."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {"id": "t1", "function": {"name": "get_weather", "arguments": "{}"}}
+                    ],
+                },
+                {"role": "tool", "content": "Sunny, 22°C", "tool_call_id": "t1"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(
+            context, enable_prompt_caching=False, ensure_last_message_is_user=True
+        )
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertEqual(params["messages"][-1]["content"][0]["type"], "tool_result")
 
 
 class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
@@ -1529,51 +1553,67 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][2]["role"], "user")
 
     def test_ensure_last_message_is_user_appends_when_trailing_assistant(self):
-        """Test that ensure_last_message_is_user appends a user message when last message is assistant."""
-        messages = [
-            {"role": "user", "content": [{"text": "Hello"}]},
-            {"role": "assistant", "content": [{"text": "Hi there!"}]},
-        ]
-        result = AWSBedrockLLMAdapter.ensure_last_message_is_user(messages)
-        self.assertEqual(len(result), 3)
-        self.assertEqual(result[-1]["role"], "user")
-        self.assertEqual(result[-1]["content"], [{"text": "."}])
+        """ensure_last_message_is_user=True appends a user message after a trailing assistant."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertEqual(params["messages"][-1]["content"], [{"text": "."}])
+
+    def test_ensure_last_message_is_user_off_keeps_trailing_assistant(self):
+        """Without the flag (default), a trailing assistant message is preserved."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context)
+        self.assertEqual(len(params["messages"]), 2)
+        self.assertEqual(params["messages"][-1]["role"], "assistant")
 
     def test_ensure_last_message_is_user_noop_when_trailing_user(self):
-        """Test that ensure_last_message_is_user does nothing when last message is already user."""
-        messages = [
-            {"role": "user", "content": [{"text": "Hello"}]},
-            {"role": "assistant", "content": [{"text": "Hi there!"}]},
-            {"role": "user", "content": [{"text": "How are you?"}]},
-        ]
-        result = AWSBedrockLLMAdapter.ensure_last_message_is_user(messages)
-        self.assertEqual(len(result), 3)
-        self.assertEqual(result[-1]["role"], "user")
+        """ensure_last_message_is_user=True does nothing when the list already ends with a user."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+                {"role": "user", "content": "How are you?"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][-1]["role"], "user")
 
     def test_ensure_last_message_is_user_handles_empty_list(self):
-        """Test that ensure_last_message_is_user handles empty message list."""
-        messages = []
-        result = AWSBedrockLLMAdapter.ensure_last_message_is_user(messages)
-        self.assertEqual(len(result), 0)
+        """ensure_last_message_is_user=True handles an empty context."""
+        params = self.adapter.get_llm_invocation_params(
+            LLMContext(), ensure_last_message_is_user=True
+        )
+        self.assertEqual(len(params["messages"]), 0)
 
-    def test_ensure_last_message_is_user_handles_tool_result_trailing(self):
-        """Test that ensure_last_message_is_user does nothing when last message is a toolResult (user role)."""
-        messages = [
-            {"role": "user", "content": [{"text": "What's the weather?"}]},
-            {
-                "role": "assistant",
-                "content": [{"toolUse": {"toolUseId": "t1", "name": "get_weather", "input": {}}}],
-            },
-            {
-                "role": "user",
-                "content": [
-                    {"toolResult": {"toolUseId": "t1", "content": [{"text": "Sunny, 22°C"}]}}
-                ],
-            },
-        ]
-        result = AWSBedrockLLMAdapter.ensure_last_message_is_user(messages)
-        self.assertEqual(len(result), 3)  # No message appended
-        self.assertEqual(result[-1]["role"], "user")
+    def test_ensure_last_message_is_user_noop_when_tool_result_trailing(self):
+        """ensure_last_message_is_user=True does nothing when a tool result (user role) trails."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {"id": "t1", "function": {"name": "get_weather", "arguments": "{}"}}
+                    ],
+                },
+                {"role": "tool", "content": "Sunny, 22°C", "tool_call_id": "t1"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertIn("toolResult", params["messages"][-1]["content"][0])
 
 
 class TestPerplexityGetLLMInvocationParams(unittest.TestCase):

@@ -176,7 +176,10 @@ async def test_anthropic_run_inference_with_llm_context():
     assert result == "Hello! How can I help you today?"
     service.get_llm_adapter.assert_called_once()
     mock_adapter.get_llm_invocation_params.assert_called_once_with(
-        mock_context, enable_prompt_caching=False, system_instruction=None
+        mock_context,
+        enable_prompt_caching=False,
+        system_instruction=None,
+        ensure_last_message_is_user=False,
     )
     service._client.beta.messages.create.assert_called_once_with(
         model="claude-3-sonnet-20240229",
@@ -322,7 +325,7 @@ async def test_aws_bedrock_run_inference_with_llm_context():
         assert result == "Hello! How can I help you today?"
         service.get_llm_adapter.assert_called_once()
         mock_adapter.get_llm_invocation_params.assert_called_once_with(
-            mock_context, system_instruction=None
+            mock_context, system_instruction=None, ensure_last_message_is_user=False
         )
 
         # Verify the call includes configured parameters
@@ -466,6 +469,7 @@ async def test_anthropic_run_inference_system_instruction_overrides_context():
         mock_context,
         enable_prompt_caching=False,
         system_instruction="New system instruction",
+        ensure_last_message_is_user=False,
     )
 
 
@@ -598,7 +602,9 @@ async def test_aws_bedrock_run_inference_system_instruction_overrides_context():
         assert result == "Response"
         # Verify the adapter was called with the correct system_instruction
         mock_adapter.get_llm_invocation_params.assert_called_once_with(
-            mock_context, system_instruction="New system instruction"
+            mock_context,
+            system_instruction="New system instruction",
+            ensure_last_message_is_user=False,
         )
 
 
