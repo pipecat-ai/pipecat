@@ -26,7 +26,7 @@ dependencies = [
     "docstring_parser>=0.16,<1",
     "loguru~=0.7.3",
     "Markdown>=3.7,<4",
-    "nltk>=3.9.4,<4",
+    "nltk>=3.10.0,<4",
     "numpy>=1.26.4,<3",
     "Pillow>=11.1.0,<13",
     "protobuf>=5.29.6,<7",
@@ -41,7 +41,6 @@ dependencies = [
     "wait_for2>=0.4.1,<1; python_version<'3.12'",
     "websockets>=13.1",
     "pyyaml>=6,<7",
-    "pyyaml-include>=1.4,<2",
     "num2words>=0.5.14",
     # Required by LocalSmartTurnAnalyzerV3
     # Inlined here instead of using a self-referential extra for Poetry compatibility.
@@ -73,6 +72,7 @@ azure = [ "azure-cognitiveservices-speech>=1.47.0,<2"]
 cartesia = []
 camb = [ "camb-sdk>=1.5.4,<2" ]
 cerebras = []
+crusoe = []
 daily = [ "daily-python>=0.29.0,<1" ]
 deepgram = [ "deepgram-sdk>=6.1.1,<8" ]
 deepseek = []
@@ -106,6 +106,7 @@ mistral = ["mistralai>=2.0.0,<3"]
 mlx-whisper = [ "mlx-whisper~=0.4.2" ]
 moondream = [ "accelerate~=1.10.0", "einops~=0.8.0", "pyvips[binary]~=3.0.0", "timm~=1.0.13", "transformers>=4.48.0,<6" ]
 moonshine = [ "moonshine-voice>=0.0.62" ]
+moq = [ "moq-rs>=0.3.2,<1.0.0", "cryptography>=45.0.0" ]
 nebius = []
 neuphonic = []
 novita = []
@@ -120,7 +121,7 @@ qwen = []
 redis = ["redis[hiredis]>=5.0.0"]
 resembleai = []
 rime = []
-runner = [ "python-dotenv>=1.0.0,<2.0.0", "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<1", "pipecat-ai-prebuilt>=1.0.3"]
+runner = [ "python-dotenv>=1.0.0,<2.0.0", "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<1", "pipecat-ai-prebuilt>=1.0.4"]
 sagemaker = ["aws_sdk_sagemaker_runtime_http2; python_version>='3.12'"]
 sambanova = []
 sarvam = [ "sarvamai==0.1.28" ]
@@ -137,7 +138,8 @@ together = []
 tracing = [ "opentelemetry-sdk>=1.33.0,<2", "opentelemetry-api>=1.33.0,<2", "opentelemetry-instrumentation>=0.54b0,<1" ]
 ultravox = []
 vonage-video-connector = [ "vonage-video-connector~=1.0.2; python_version=='3.13' and platform_system=='Linux'" ]
-webrtc = [ "aiortc>=1.14.0,<2", "opencv-python>=4.11.0.86,<5" ]
+webrtc = [ "aiortc>=1.14.0,<2", "opencv-python-headless>=4.11.0.86,<5" ]
+webrtc-video = [ "pipecat-ai[webrtc]" ]
 websocket = [ "fastapi>=0.115.6,<1" ]
 whisper = [ "faster-whisper~=1.2.1" ]
 xai = []

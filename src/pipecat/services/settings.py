@@ -180,7 +180,7 @@ class ServiceSettings:
     # -- common fields -------------------------------------------------------
 
     model: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    """AI model identifier (e.g. ``"gpt-4o"``, ``"eleven_turbo_v2_5"``).
+    """AI model identifier (e.g. ``"gpt-4o"``, ``"eleven_flash_v2_5"``).
 
     Defaults to ``NOT_GIVEN`` for delta mode.  In store mode, set to a
     model string or ``None`` if the service has no model concept.

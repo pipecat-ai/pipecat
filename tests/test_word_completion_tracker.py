@@ -1159,6 +1159,67 @@ class TestWordCompletionTrackerEmojiInSentence(unittest.TestCase):
         self.assertTrue(tracker.is_complete)
 
 
+class TestWordCompletionTrackerMultiAttributeSsmlTag(unittest.TestCase):
+    """SSML tags whose opening tag contains internal whitespace (e.g. multiple
+    attributes) can arrive split across several TTS word-timestamp events, since
+    some providers tokenize on whitespace without tag awareness. ElevenLabs'
+    phoneme tag (``<phoneme alphabet="ipa" ph="...">word</phoneme>``, see
+    https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices)
+    is a real-world example: the opening tag alone is reported as three separate
+    words (``<phoneme``, ``alphabet="ipa"``, then the closing ``ph="...">word...``).
+    """
+
+    TTS_TEXT = 'My name is <phoneme alphabet="ipa" ph="ʃəˈvɔːn">Siobhan</phoneme>.'
+    # Fragments exactly as ElevenLabs reports them: the multi-attribute opening
+    # tag is split at each internal space into its own "word".
+    WORDS = [
+        "My",
+        "name",
+        "is",
+        "<phoneme",
+        'alphabet="ipa"',
+        'ph="ʃəˈvɔːn">Siobhan</phoneme>.',
+    ]
+
+    def test_tag_fragments_belong_to_the_frame(self):
+        """Each fragment of the still-open tag must be recognised as belonging
+        to this frame rather than routed elsewhere as passthrough."""
+        tracker = WordCompletionTracker(self.TTS_TEXT)
+        for word in self.WORDS[:3]:
+            tracker.add_word_and_check_complete(word)
+        for word in self.WORDS[3:]:
+            self.assertTrue(
+                tracker.word_belongs_here(word),
+                f"{word!r} is part of the open <phoneme> tag and must belong here",
+            )
+            tracker.add_word_and_check_complete(word)
+
+    def test_does_not_force_complete_on_tag_open_fragment(self):
+        """The opening '<phoneme' fragment must not force-complete the slot —
+        the tag isn't closed yet, so 'Siobhan' hasn't been spoken."""
+        tracker = WordCompletionTracker(self.TTS_TEXT)
+        for word in self.WORDS[:3]:
+            tracker.add_word_and_check_complete(word)
+        result = tracker.add_word_and_check_complete("<phoneme")
+        self.assertFalse(result, "tag isn't closed yet; frame must not be complete")
+
+    def test_completes_only_after_closing_fragment(self):
+        """Only the final fragment (which closes the tag) should complete the slot."""
+        tracker = WordCompletionTracker(self.TTS_TEXT)
+        results = [tracker.add_word_and_check_complete(w) for w in self.WORDS]
+        self.assertEqual(results, [False, False, False, False, False, True])
+
+    def test_llm_consumed_maps_tag_fragments_to_original_word(self):
+        """With llm_text tracking, the tag fragments must all map back to the
+        single original word 'Siobhan.' rather than losing the span."""
+        llm_text = "My name is Siobhan."
+        tracker = WordCompletionTracker(self.TTS_TEXT, llm_text=llm_text)
+        for word in self.WORDS[:-1]:
+            tracker.add_word_and_check_complete(word)
+        tracker.add_word_and_check_complete(self.WORDS[-1])
+        self.assertEqual(tracker.get_llm_consumed(), "Siobhan.")
+
+
 class TestWordCompletionTrackerRemainingText(unittest.TestCase):
     """Tests for get_remaining_tts_text() and get_remaining_llm_text().
 
@@ -1958,6 +2019,121 @@ class TestWordCompletionTrackerTransformAtEndOfUtterance(unittest.TestCase):
         self.assertIsNotNone(tracker.get_llm_consumed())
         tracker.add_word_and_check_complete("now")
         self.assertTrue(tracker.is_complete)
+
+
+class TestWordCompletionTrackerTokenChangingReplacements(unittest.TestCase):
+    """Whether get_llm_consumed() preserves the original text when a replacement
+    changes tokenization or case instead of falling back to the spoken word.
+
+    A replacement that splits one word into several (e.g. ``"BODYPUMP"`` ->
+    ``"body pump"``) is tracked as a transformed segment: intermediate words
+    are suppressed (``get_llm_consumed()`` returns None, mirroring how
+    currency expansion already behaves) and the word that completes the
+    segment carries the full original text. A replacement that only changes
+    case or the connector between words (e.g. ``"SQL"`` -> ``"sql"``, or
+    ``"BODYPUMP"`` -> ``"body-pump"``) keeps proportional, per-word tracking,
+    but is validated case- and connector-insensitively so it isn't discarded.
+    Single-word-to-single-word replacements that change the normalized alnum
+    length (e.g. "leisure" -> "lezher") are unaffected and are included here as
+    passing control cases.
+    """
+
+    def test_word_splitting_replacement_commits_original_on_completion(self):
+        # "BODYPUMP" -> "body pump": audio is correct; the segment is tracked
+        # atomically, so "body" is suppressed and "pump" carries the full
+        # original word, matching how currency expansion already behaves.
+        sentence = "Try BODYPUMP on Monday morning."
+        tts_text = "Try body pump on Monday morning."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+
+        tracker.add_word_and_check_complete("Try")
+        tracker.add_word_and_check_complete("body")
+        self.assertIsNone(tracker.get_llm_consumed())  # suppressed mid-transform
+        self.assertTrue(tracker.suppress_in_context())
+
+        tracker.add_word_and_check_complete("pump")
+        self.assertEqual(tracker.get_llm_consumed(), "BODYPUMP")
+        self.assertFalse(tracker.suppress_in_context())
+
+        for word in ["on", "Monday", "morning."]:
+            tracker.add_word_and_check_complete(word)
+        self.assertTrue(tracker.is_complete)
+
+    def test_case_only_replacement_is_not_discarded(self):
+        # "SQL" -> "sql": same single-token structure, only case differs. The
+        # span-containment check is case-insensitive, so it validates.
+        sentence = "Contact SQL support today."
+        tts_text = "Contact sql support today."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+
+        tracker.add_word_and_check_complete("Contact")
+        tracker.add_word_and_check_complete("sql")
+        self.assertEqual(tracker.get_llm_consumed(), "SQL")
+        tracker.add_word_and_check_complete("support")
+        tracker.add_word_and_check_complete("today.")
+        self.assertTrue(tracker.is_complete)
+
+    def test_hyphenated_single_token_replacement_is_not_discarded(self):
+        # "BODYPUMP" -> "body-pump": single token on both sides, only case+shape differ.
+        sentence = "Try BODYPUMP on Monday morning."
+        tts_text = "Try body-pump on Monday morning."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+
+        tracker.add_word_and_check_complete("Try")
+        tracker.add_word_and_check_complete("body-pump")
+        self.assertEqual(tracker.get_llm_consumed(), "BODYPUMP")
+
+    def test_accumulated_llm_text_matches_original_despite_split(self):
+        """The cursor ends up past the full original sentence once the frame
+        completes, even though the replacement split one word into two."""
+        sentence = "Try BODYPUMP on Monday morning."
+        tts_text = "Try body pump on Monday morning."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+        for word in tts_text.split():
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_accumulated_llm_text(), sentence)
+
+    def test_single_word_case_change_with_different_length_still_works(self):
+        """Control case: "HIIT" -> "hit" differs in alnum length, so it takes
+        the atomic transformed-segment path regardless of case."""
+        sentence = "We run HIIT classes on Tuesday."
+        tts_text = "We run hit classes on Tuesday."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+        for word in ["We", "run", "hit"]:
+            tracker.add_word_and_check_complete(word)
+        self.assertIn("HIIT", tracker.get_llm_consumed())
+        for word in ["classes", "on", "Tuesday."]:
+            tracker.add_word_and_check_complete(word)
+        self.assertTrue(tracker.is_complete)
+
+    def test_single_word_pronunciation_replacement_still_works(self):
+        """Control case: a 1-to-1 respelling ("leisure" -> "lezher") that
+        differs in alnum length maps back to the original word correctly."""
+        sentence = "The leisure centre opens at six."
+        tts_text = "The lezher centre opens at six."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+        for word in ["The", "lezher"]:
+            tracker.add_word_and_check_complete(word)
+        self.assertIn("leisure", tracker.get_llm_consumed())
+
+    def test_inline_ipa_tag_does_not_shift_next_word_boundary(self):
+        """An inline IPA substitution ("leisure" -> "<<l|ɛ|ʒ|ə|r>>") normalizes
+        to no alnum content on the TTS side, since normalize()'s tag-stripping
+        regex treats the double angle brackets as a single (malformed) tag.
+        That must not corrupt the word boundary of the following word."""
+        sentence = "The leisure centre opens at six."
+        tts_text = "The <<l|ɛ|ʒ|ə|r>> centre opens at six."
+        tracker = WordCompletionTracker(tts_text, llm_text=sentence, user_facing_text=sentence)
+
+        tracker.add_word_and_check_complete("The")
+        tracker.add_word_and_check_complete("<<l|ɛ|ʒ|ə|r>>")
+        tracker.add_word_and_check_complete("centre")
+        self.assertEqual(
+            tracker.get_llm_consumed(),
+            "centre",
+            "the word following an inline IPA substitution must keep its own span, "
+            "not have letters stolen from it",
+        )
 
 
 if __name__ == "__main__":

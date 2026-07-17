@@ -1268,6 +1268,17 @@
       "location": "pipecat/services/elevenlabs/tts.py"
     },
     {
+      "subject": "ElevenLabsHttpTTSService.pronunciation_dictionary_locators",
+      "module": "pipecat.services.elevenlabs.tts",
+      "kind": "parameter",
+      "deprecated_in": "1.6.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_transforms",
+      "message": "Use the ``text_transforms`` parameter with :func:`pipecat.utils.text.transforms.replace_text` instead. Pronunciation dictionary substitutions can rewrite the spoken words in ways that no longer match the text sent to synthesis, which breaks the alignment-based word-completion tracking used to attribute spoken text back to the conversation context. ``replace_text`` transforms happen client-side, so they're tracked correctly. Will be removed in 2.0.0.",
+      "location": "pipecat/services/elevenlabs/tts.py"
+    },
+    {
       "subject": "ElevenLabsHttpTTSService.voice_id",
       "module": "pipecat.services.elevenlabs.tts",
       "kind": "parameter",
@@ -1323,6 +1334,17 @@
       "location": "pipecat/services/elevenlabs/tts.py"
     },
     {
+      "subject": "ElevenLabsTTSService.pronunciation_dictionary_locators",
+      "module": "pipecat.services.elevenlabs.tts",
+      "kind": "parameter",
+      "deprecated_in": "1.6.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_transforms",
+      "message": "Use the ``text_transforms`` parameter with :func:`pipecat.utils.text.transforms.replace_text` instead. Pronunciation dictionary substitutions can rewrite the spoken words in ways that no longer match the text sent to synthesis, which breaks the alignment-based word-completion tracking used to attribute spoken text back to the conversation context. ``replace_text`` transforms happen client-side, so they're tracked correctly. Will be removed in 2.0.0.",
+      "location": "pipecat/services/elevenlabs/tts.py"
+    },
+    {
       "subject": "ElevenLabsTTSService.voice_id",
       "module": "pipecat.services.elevenlabs.tts",
       "kind": "parameter",
@@ -1331,6 +1353,17 @@
       "relation": "use_existing",
       "replacement": "settings=ElevenLabsTTSService.Settings(voice=...)",
       "message": "Use ``settings=ElevenLabsTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/elevenlabs/tts.py"
+    },
+    {
+      "subject": "PronunciationDictionaryLocator",
+      "module": "pipecat.services.elevenlabs.tts",
+      "kind": "class",
+      "deprecated_in": "1.6.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_transforms",
+      "message": "`PronunciationDictionaryLocator` is deprecated since 1.6.0 and will be removed in 2.0.0. Use `text_transforms` -> `replace_text` instead.",
       "location": "pipecat/services/elevenlabs/tts.py"
     },
     {

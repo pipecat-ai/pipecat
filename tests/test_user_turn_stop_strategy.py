@@ -635,6 +635,47 @@ class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
         self.assertTrue(should_start)
 
+    async def test_reset_mid_utterance_falsely_stops_turn(self):
+        """Test that a mid-utterance reset does not falsely stop the turn.
+
+        ``UserTurnController`` resets all stop strategies when a turn starts
+        (see ``_trigger_user_turn_start``), which can happen right after a
+        ``VADUserStartedSpeakingFrame`` with no matching stop yet — the user
+        is still speaking. ``reset()`` must preserve that live VAD state so a
+        finalized transcript for a mid-utterance segment (as streaming STT
+        services emit) is not treated as the no-VAD fallback and stopped by
+        ``user_speech_timeout`` while the user never stopped talking.
+        """
+        strategy = await self._create_strategy()
+
+        stop_count = 0
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal stop_count
+            stop_count += 1
+
+        # User starts speaking; VAD reports start.
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+
+        # Turn-start reset, as UserTurnController performs when the turn
+        # begins. No VADUserStoppedSpeakingFrame has been received — the
+        # user is still speaking.
+        await strategy.reset()
+
+        # Streaming STT finalizes a mid-utterance segment while the user is
+        # still talking (no VAD stop event was ever emitted).
+        await strategy.process_frame(
+            TranscriptionFrame(
+                text="So I was thinking", user_id="cat", timestamp="", finalized=True
+            )
+        )
+
+        # The user never stopped speaking, so the turn must not stop just
+        # because user_speech_timeout elapses.
+        await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
+        self.assertEqual(stop_count, 0)
+
     async def test_turn_callbacks_clear_stale_text_no_premature_stop(self):
         """Turn callbacks clear stale text and cancel timeouts, preventing premature stop.
 

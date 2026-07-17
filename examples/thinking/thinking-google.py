@@ -68,10 +68,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = GoogleLLMService(
         api_key=os.environ["GOOGLE_API_KEY"],
-        # model="gemini-3-pro-preview", # A more powerful reasoning model, but slower
+        # To use a more powerful (slower) reasoning model, uncomment the pro
+        # model and the thinking_level line below.
+        # model="gemini-3.1-pro-preview",
         settings=GoogleLLMService.Settings(
             thinking=GoogleLLMService.ThinkingConfig(
-                thinking_budget=-1,  # Dynamic thinking
+                thinking_budget=-1,  # Dynamic thinking (default model, Gemini 2.5)
+                # thinking_level="low",  # Gemini 3.x (comment out thinking_budget above)
                 include_thoughts=True,
             ),
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",

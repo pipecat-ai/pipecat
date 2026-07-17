@@ -144,6 +144,59 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertEqual(exp.text_contains, "bar")
         self.assertEqual(exp.eval, "is friendly")
         self.assertIsNone(exp.calls)
+        self.assertFalse(exp.absent)
+
+    def test_absent_expectation_parsed(self):
+        s = EvalScenario.load(
+            _write(
+                """
+                name: absent
+                turns:
+                  - user: "x"
+                    expect:
+                      - event: llm_response
+                        eval: "answers"
+                      - event: llm_response
+                        absent: true
+                        within_ms: 5000
+                """
+            )
+        )
+        exp = s.turns[0].expect[1]
+        self.assertTrue(exp.absent)
+        self.assertEqual(exp.within_ms, 5000)
+
+    def test_absent_rejects_content_checks(self):
+        for extra in ('eval: "repeats itself"', 'text_contains: "again"'):
+            with self.assertRaises(ValueError):
+                EvalScenario.load(
+                    _write(
+                        f"""
+                        name: bad_absent
+                        turns:
+                          - user: "x"
+                            expect:
+                              - event: llm_response
+                                absent: true
+                                {extra}
+                        """
+                    )
+                )
+
+    def test_absent_must_be_boolean(self):
+        with self.assertRaises(ValueError):
+            EvalScenario.load(
+                _write(
+                    """
+                    name: bad_absent_type
+                    turns:
+                      - user: "x"
+                        expect:
+                          - event: llm_response
+                            absent: "yes please"
+                    """
+                )
+            )
 
     def test_function_call_name_args_shorthand(self):
         """A single function_call uses the ``name:``/``args:`` shorthand."""

@@ -13,6 +13,7 @@ from loguru import logger
 from pipecat.audio.vad.vad_analyzer import VAD_STOP_SECS
 from pipecat.frames.frames import (
     Frame,
+    InterimTranscriptionFrame,
     STTMetadataFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
@@ -96,18 +97,32 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
     def wait_for_transcript(self, value: bool) -> None:
         self._wait_for_transcript = value
 
+    async def reset(self):
+        """Reset the strategy to its initial state.
+
+        Note that ``_vad_user_speaking`` is intentionally left untouched: it
+        reflects the live physical VAD state, not turn-scoped bookkeeping.
+        VAD only re-emits a start after a stop, so if the user is still
+        speaking when a turn boundary resets this strategy, clearing the
+        flag would make the strategy believe there's no active VAD reference
+        and fall back to treating any transcript as a standalone utterance.
+        """
+        await super().reset()
+        await self._reset(clear_vad_user_speaking=False)
+
     async def handle_user_turn_started(self):
         """Ready the strategy to detect the end of the turn now starting."""
-        await self._reset()
+        await self.reset()
 
     async def handle_user_turn_stopped(self):
         """Clear per-turn state once the turn has ended."""
-        await self._reset()
+        await self._reset(clear_vad_user_speaking=True)
 
-    async def _reset(self):
-        """Clear per-turn state. Runs at both turn boundaries."""
+    async def _reset(self, *, clear_vad_user_speaking: bool):
+        """Clear per-turn state, optionally resetting the live VAD flag."""
         self._text = ""
-        self._vad_user_speaking = False
+        if clear_vad_user_speaking:
+            self._vad_user_speaking = False
         self._transcript_finalized = False
         self._vad_stopped_time = None
         self._user_speech_wait_done = False
@@ -150,6 +165,18 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self._handle_vad_user_stopped_speaking(frame)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
+        elif isinstance(frame, InterimTranscriptionFrame):
+            # An interim means more transcription is still on the way, so an
+            # earlier finalized transcript no longer covers all of the user's
+            # speech.
+            # Without this, a transcript finalized during a pause too short for
+            # VAD to report a stop (and thus a new start, which is what normally
+            # clears the flag) would leave the flag stale and skip the STT
+            # safety net at the next VAD stop while the tail of the utterance is
+            # still in flight. This can happen when the STT endpointer finalizes
+            # on silences shorter than the VAD stop_secs — e.g. an aggressive
+            # STT endpoint or a manually raised stop_secs.
+            self._transcript_finalized = False
 
         return ProcessFrameResult.CONTINUE
 

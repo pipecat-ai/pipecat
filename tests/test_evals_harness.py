@@ -202,6 +202,42 @@ class _FakeJudge:
         return JudgeVerdict(verdict=v, reason=f"({v})", raw_response="")
 
 
+class TestMatchAbsent(unittest.IsolatedAsyncioTestCase):
+    """An ``absent: true`` expectation passes on a quiet window, fails on arrival."""
+
+    async def test_absent_passes_when_no_event_arrives(self):
+        import time
+
+        s = _session()
+        expectation = EvalExpectation(event="llm_response", absent=True)
+        failure = await s._match_and_verify(expectation, time.monotonic(), 100, 0, 0)
+        self.assertIsNone(failure)
+        self.assertIn("no 'llm_response'", s._last_match_text)
+
+    async def test_absent_fails_when_event_arrives(self):
+        import time
+
+        s = _session()
+        s._queue.put_nowait({"type": "llm_response", "text": "I repeat myself"})
+        expectation = EvalExpectation(event="llm_response", absent=True)
+        failure = await s._match_and_verify(expectation, time.monotonic(), 100, 3, 2)
+        self.assertIsNotNone(failure)
+        self.assertEqual(failure.turn_index, 3)
+        self.assertEqual(failure.expectation_index, 2)
+        self.assertIn("I repeat myself", failure.reason)
+
+    async def test_absent_ignores_other_event_types(self):
+        import time
+
+        s = _session()
+        # Unrelated events in the window must not trip the absence check.
+        s._queue.put_nowait({"type": "user_stopped_speaking"})
+        s._queue.put_nowait({"type": "tts_response", "text": "spoken"})
+        expectation = EvalExpectation(event="llm_response", absent=True)
+        failure = await s._match_and_verify(expectation, time.monotonic(), 100, 0, 0)
+        self.assertIsNone(failure)
+
+
 class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
     """The pass/fail/continue decision over accumulated response text."""
 
@@ -416,9 +452,9 @@ class TestAudioSender(unittest.IsolatedAsyncioTestCase):
 
 
 class TestDTMFSender(unittest.IsolatedAsyncioTestCase):
-    """A dtmf turn sends one RTVI ``dtmf`` message per key."""
+    """A dtmf turn sends one RTVI ``dtmf`` message with all keys."""
 
-    async def test_send_user_dtmf_one_message_per_key(self):
+    async def test_send_user_dtmf_single_message_with_all_keys(self):
         s = _session()
         sent: list[RTVI.Message] = []
 
@@ -428,9 +464,23 @@ class TestDTMFSender(unittest.IsolatedAsyncioTestCase):
         s._send = fake_send
         await s._send_user_dtmf("12#")
 
-        self.assertEqual(len(sent), 3)
-        self.assertTrue(all(m.type == "dtmf" for m in sent))
-        self.assertEqual([m.data["button"] for m in sent], ["1", "2", "#"])
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0].type, "dtmf")
+        self.assertEqual(sent[0].data["buttons"], ["1", "2", "#"])
+
+    async def test_send_user_dtmf_single_key(self):
+        s = _session()
+        sent: list[RTVI.Message] = []
+
+        async def fake_send(message):
+            sent.append(message)
+
+        s._send = fake_send
+        await s._send_user_dtmf("1")
+
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0].type, "dtmf")
+        self.assertEqual(sent[0].data["buttons"], ["1"])
 
 
 def _free_port() -> int:

@@ -45,7 +45,6 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 
 try:
-    import cv2
     from aiortc import VideoStreamTrack
     from aiortc.mediastreams import AudioStreamTrack, MediaStreamError
     from av import AudioFrame, AudioResampler, VideoFrame
@@ -216,13 +215,6 @@ class SmallWebRTCClient:
     messaging through the SmallWebRTCConnection interface.
     """
 
-    FORMAT_CONVERSIONS = {
-        "yuv420p": cv2.COLOR_YUV2RGB_I420,
-        "yuvj420p": cv2.COLOR_YUV2RGB_I420,  # OpenCV treats both the same
-        "nv12": cv2.COLOR_YUV2RGB_NV12,
-        "gray": cv2.COLOR_GRAY2RGB,
-    }
-
     def __init__(self, webrtc_connection: SmallWebRTCConnection, callbacks: SmallWebRTCCallbacks):
         """Initialize the WebRTC client.
 
@@ -279,12 +271,28 @@ class SmallWebRTCClient:
             The converted RGB frame as a NumPy array.
 
         Raises:
+            ImportError: If OpenCV is not installed.
             ValueError: If the format is unsupported.
         """
         if format_name.startswith("rgb"):  # Already in RGB, no conversion needed
             return frame_array
 
-        conversion_code = SmallWebRTCClient.FORMAT_CONVERSIONS.get(format_name)
+        try:
+            import cv2
+        except ModuleNotFoundError as e:
+            raise ImportError(
+                "Receiving non-RGB video frames requires OpenCV. Install it with "
+                '`uv add "pipecat-ai[webrtc-video]"`.'
+            ) from e
+
+        format_conversions = {
+            "yuv420p": cv2.COLOR_YUV2RGB_I420,
+            "yuvj420p": cv2.COLOR_YUV2RGB_I420,  # OpenCV treats both the same
+            "nv12": cv2.COLOR_YUV2RGB_NV12,
+            "gray": cv2.COLOR_GRAY2RGB,
+        }
+
+        conversion_code = format_conversions.get(format_name)
 
         if conversion_code is None:
             raise ValueError(f"Unsupported format: {format_name}")

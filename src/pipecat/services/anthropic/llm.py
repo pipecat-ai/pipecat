@@ -20,6 +20,7 @@ import httpx
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from pipecat.adapters.base_llm_adapter import LLMContextConversionError
 from pipecat.adapters.services.anthropic_adapter import (
     AnthropicLLMAdapter,
     AnthropicLLMInvocationParams,
@@ -501,6 +502,8 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             raise
         except httpx.TimeoutException:
             await self._call_event_handler("on_completion_timeout")
+        except LLMContextConversionError as e:
+            await self.push_error(error_msg=str(e), exception=e)
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:

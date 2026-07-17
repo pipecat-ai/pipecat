@@ -21,6 +21,7 @@ from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from pipecat.adapters.base_llm_adapter import LLMContextConversionError
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.frames.frames import (
     AssistantImageRawFrame,
@@ -606,6 +607,8 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             await self.run_function_calls(function_calls)
         except DeadlineExceeded:
             await self._call_event_handler("on_completion_timeout")
+        except LLMContextConversionError as e:
+            await self.push_error(error_msg=str(e), exception=e)
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:

@@ -157,6 +157,8 @@ suite:
     scenarios: [weather_function_call]
   - bot: function-calling/function-calling-cerebras.py
     scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-crusoe.py
+    scenarios: [weather_function_call]
   - bot: function-calling/function-calling-deepseek.py
     scenarios: [weather_function_call]
   - bot: function-calling/function-calling-fireworks.py
@@ -290,7 +292,7 @@ suite:
   - bot: flows/food_ordering_advanced_functionschema.py
     scenarios: [food_ordering_sushi]
   - bot: flows/multi_worker_handoff.py
-    scenarios: [multi_worker_handoff]
+    scenarios: [multi_worker_handoff, multi_worker_handoff_back_and_forth]
   - bot: flows/patient_intake.py
     scenarios: [patient_intake]
   - bot: flows/restaurant_reservation.py
@@ -301,3 +303,4 @@ suite:
   # three API keys must be set.
   - bot: flows/llm_switching.py
     scenarios: [llm_switching]
+

@@ -27,6 +27,7 @@ For Gemini adapter:
 6. Multiple system instructions: first extracted, later ones converted to user messages
 7. system_instruction overrides context system message, with conflict warnings
 8. Developer messages are converted to user
+9. Malformed messages raise LLMContextConversionError (preserving the underlying cause)
 
 For Anthropic adapter:
 1. LLMStandardMessage objects are converted to Anthropic MessageParam format
@@ -37,6 +38,7 @@ For Anthropic adapter:
 6. Empty text content is converted to "(empty)"
 7. system_instruction overrides context system message, with conflict warnings
 8. Developer messages are converted to user
+9. Malformed messages raise LLMContextConversionError (preserving the underlying cause)
 
 For AWS Bedrock adapter:
 1. LLMStandardMessage objects are converted to AWS Bedrock format
@@ -47,6 +49,7 @@ For AWS Bedrock adapter:
 6. Empty text content is converted to "(empty)"
 7. system_instruction overrides context system message, with conflict warnings
 8. Developer messages are converted to user
+9. Malformed messages raise LLMContextConversionError (preserving the underlying cause)
 
 For OpenAI Responses adapter:
 1. LLMContext messages are converted to Responses API input items
@@ -66,8 +69,9 @@ For BaseLLMAdapter helpers:
 import unittest
 from unittest.mock import patch
 
-from google.genai.types import Content, Part
+from google.genai.types import Content, FunctionCall, FunctionResponse, Part
 
+from pipecat.adapters.base_llm_adapter import LLMContextConversionError
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
@@ -367,6 +371,26 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
     def setUp(self) -> None:
         """Sets up a common adapter instance for all tests."""
         self.adapter = GeminiLLMAdapter()
+
+    def test_malformed_message_raises_conversion_error(self):
+        """Test that a malformed message raises LLMContextConversionError, preserving the underlying cause."""
+        # A data URL with no comma has no base64 payload, so the adapter's
+        # url.split(",")[1] raises IndexError during conversion.
+        malformed_message = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What's in this image?"},
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64"}},
+            ],
+        }
+        context = LLMContext(messages=[malformed_message])
+
+        with self.assertRaises(LLMContextConversionError) as ctx:
+            self.adapter.get_llm_invocation_params(context)
+
+        # The underlying cause is preserved for debugging.
+        self.assertIsInstance(ctx.exception.__cause__, IndexError)
+        self.assertIn("Error mapping context messages to provider format", str(ctx.exception))
 
     def test_standard_messages_converted_to_gemini_format(self):
         """Test that LLMStandardMessage objects are converted to Gemini Content format."""
@@ -723,11 +747,195 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         # Second message (developer) should be converted to user in Google format
         self.assertEqual(params["messages"][1].role, "user")
 
+    # --- _merge_parallel_tool_calls_for_thinking ---
+    #
+    # With thinking enabled, a batch of parallel tool calls arrives split across
+    # separate messages (each call, then its response). The adapter regroups
+    # both sides so the model turn's call count matches the following user
+    # turn's response count.
+
+    def _tool_call_message(self, call_id, *, signature=None):
+        """Build a model Content with a single function_call Part."""
+        part = Part(
+            function_call=FunctionCall(id=call_id, name=f"tool_{call_id}", args={"q": call_id})
+        )
+        if signature:
+            part.thought_signature = signature
+        return Content(role="model", parts=[part])
+
+    def _tool_response_message(self, call_id):
+        """Build a user Content with a single function_response Part."""
+        return Content(
+            role="user",
+            parts=[
+                Part(
+                    function_response=FunctionResponse(
+                        id=call_id, name=f"tool_{call_id}", response={"ok": True}
+                    )
+                )
+            ],
+        )
+
+    def _thought_signature_dict(self, call_id):
+        """Build a thought_signature dict bookmarked to a function call."""
+        return {"signature": f"sig-{call_id}", "bookmark": {"function_call": call_id}}
+
+    def test_merge_parallel_interleaved_calls_and_responses(self):
+        """Parallel calls interleaved with responses merge into one model and one user turn."""
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_response_message("c1"),
+            self._tool_call_message("c2"),
+            self._tool_response_message("c2"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1")], messages
+        )
+
+        self.assertEqual([m.role for m in result], ["model", "user"])
+        self.assertEqual([p.function_call.id for p in result[0].parts], ["c1", "c2"])
+        self.assertEqual([p.function_response.id for p in result[1].parts], ["c1", "c2"])
+
+    def test_merge_batch_ordered_calls_and_responses(self):
+        """Calls grouped first, then responses, still merge into matching turns."""
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_call_message("c2"),
+            self._tool_response_message("c1"),
+            self._tool_response_message("c2"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1")], messages
+        )
+
+        self.assertEqual([m.role for m in result], ["model", "user"])
+        self.assertEqual([p.function_call.id for p in result[0].parts], ["c1", "c2"])
+        self.assertEqual([p.function_response.id for p in result[1].parts], ["c1", "c2"])
+
+    def test_merge_three_parallel_calls(self):
+        """Three parallel calls merge into a single model turn and user turn."""
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_response_message("c1"),
+            self._tool_call_message("c2"),
+            self._tool_response_message("c2"),
+            self._tool_call_message("c3"),
+            self._tool_response_message("c3"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1")], messages
+        )
+
+        self.assertEqual([m.role for m in result], ["model", "user"])
+        self.assertEqual(len(result[0].parts), 3)
+        self.assertEqual(len(result[1].parts), 3)
+
+    def test_merge_single_call_unchanged(self):
+        """A lone signed call and its response pass through as-is."""
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_response_message("c1"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1")], messages
+        )
+
+        self.assertEqual([m.role for m in result], ["model", "user"])
+        self.assertEqual(len(result[0].parts), 1)
+        self.assertEqual(len(result[1].parts), 1)
+
+    def test_merge_sequential_calls_with_signatures_not_merged(self):
+        """Sequential calls (each with its own signature) stay in separate turns."""
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_response_message("c1"),
+            self._tool_call_message("c2", signature="sig-c2"),
+            self._tool_response_message("c2"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1"), self._thought_signature_dict("c2")], messages
+        )
+
+        self.assertEqual([m.role for m in result], ["model", "user", "model", "user"])
+        self.assertTrue(all(len(m.parts) == 1 for m in result))
+
+    def test_merge_mixed_parallel_and_sequential_groups(self):
+        """A parallel group followed by a sequential call are grouped independently."""
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_response_message("c1"),
+            self._tool_call_message("c2"),
+            self._tool_response_message("c2"),
+            self._tool_call_message("c3", signature="sig-c3"),
+            self._tool_response_message("c3"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1"), self._thought_signature_dict("c3")], messages
+        )
+
+        self.assertEqual([m.role for m in result], ["model", "user", "model", "user"])
+        self.assertEqual([len(m.parts) for m in result], [2, 2, 1, 1])
+
+    def test_merge_collects_interleaved_non_tool_message(self):
+        """A non-tool message inside a group is collected and re-emitted after it."""
+        text_message = Content(role="model", parts=[Part(text="thinking out loud")])
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_response_message("c1"),
+            text_message,
+            self._tool_call_message("c2"),
+            self._tool_response_message("c2"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1")], messages
+        )
+
+        # Both calls still merge (and both responses), and the interleaved text
+        # is preserved after the merged group rather than stopping the merge.
+        self.assertEqual([m.role for m in result], ["model", "user", "model"])
+        self.assertEqual([p.function_call.id for p in result[0].parts], ["c1", "c2"])
+        self.assertEqual([p.function_response.id for p in result[1].parts], ["c1", "c2"])
+        self.assertEqual(result[2].parts[0].text, "thinking out loud")
+
+    def test_merge_no_thought_signatures_unchanged(self):
+        """Without any function-call thought signatures, messages pass through unchanged."""
+        messages = [
+            self._tool_call_message("c1"),
+            self._tool_response_message("c1"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking([], messages)
+
+        self.assertEqual(len(result), 2)
+
+    def test_merge_empty_messages(self):
+        """An empty message list returns empty."""
+        self.assertEqual(self.adapter._merge_parallel_tool_calls_for_thinking([], []), [])
+
 
 class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
     def setUp(self) -> None:
         """Sets up a common adapter instance for all tests."""
         self.adapter = AnthropicLLMAdapter()
+
+    def test_malformed_message_raises_conversion_error(self):
+        """Test that a malformed message raises LLMContextConversionError, preserving the underlying cause."""
+        # A data URL with no comma has no base64 payload, so the adapter's
+        # url.split(",")[1] raises IndexError during conversion.
+        malformed_message = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What's in this image?"},
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64"}},
+            ],
+        }
+        context = LLMContext(messages=[malformed_message])
+
+        with self.assertRaises(LLMContextConversionError) as ctx:
+            self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        # The underlying cause is preserved for debugging.
+        self.assertIsInstance(ctx.exception.__cause__, IndexError)
+        self.assertIn("Error mapping context messages to provider format", str(ctx.exception))
 
     def test_standard_messages_converted_to_anthropic_format(self):
         """Test that LLMStandardMessage objects are converted to Anthropic MessageParam format."""
@@ -1094,6 +1302,26 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
     def setUp(self) -> None:
         """Sets up a common adapter instance for all tests."""
         self.adapter = AWSBedrockLLMAdapter()
+
+    def test_malformed_message_raises_conversion_error(self):
+        """Test that a malformed message raises LLMContextConversionError, preserving the underlying cause."""
+        # A data URL with no comma has no base64 payload, so the adapter's
+        # url.split(",")[1] raises IndexError during conversion.
+        malformed_message = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What's in this image?"},
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64"}},
+            ],
+        }
+        context = LLMContext(messages=[malformed_message])
+
+        with self.assertRaises(LLMContextConversionError) as ctx:
+            self.adapter.get_llm_invocation_params(context)
+
+        # The underlying cause is preserved for debugging.
+        self.assertIsInstance(ctx.exception.__cause__, IndexError)
+        self.assertIn("Error mapping context messages to provider format", str(ctx.exception))
 
     def test_standard_messages_converted_to_aws_bedrock_format(self):
         """Test that LLMStandardMessage objects are converted to AWS Bedrock format."""
@@ -2000,6 +2228,52 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(len(params["input"]), 2)
         self.assertEqual(params["input"][0]["role"], "user")
         self.assertEqual(params["input"][1]["type"], "function_call")
+
+    def test_reasoning_message_becomes_reasoning_item(self):
+        """A persisted reasoning message converts to a Responses reasoning item."""
+        reasoning_msg = self.adapter.create_llm_specific_message(
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "summary": [{"type": "summary_text", "text": "Let me think."}],
+                "encrypted_content": "ENCRYPTED",
+            }
+        )
+        context = LLMContext(messages=[reasoning_msg])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(
+            params["input"][0],
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "summary": [{"type": "summary_text", "text": "Let me think."}],
+                "encrypted_content": "ENCRYPTED",
+            },
+        )
+
+    def test_reasoning_precedes_assistant_message(self):
+        """Reasoning round-trips positioned before the assistant reply it produced."""
+        reasoning_msg = self.adapter.create_llm_specific_message(
+            {"type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "ENCRYPTED"}
+        )
+        context = LLMContext(messages=[reasoning_msg, {"role": "assistant", "content": "Hello!"}])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["input"][0]["type"], "reasoning")
+        self.assertEqual(params["input"][1]["role"], "assistant")
+
+    def test_reasoning_without_encrypted_content_omits_field(self):
+        """encrypted_content is optional; omit it rather than send null."""
+        reasoning_msg = self.adapter.create_llm_specific_message(
+            {"type": "reasoning", "id": "rs_2", "summary": []}
+        )
+        context = LLMContext(messages=[reasoning_msg])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["input"][0]["type"], "reasoning")
+        self.assertEqual(params["input"][0]["id"], "rs_2")
+        self.assertNotIn("encrypted_content", params["input"][0])
 
     def test_id_for_llm_specific_messages(self):
         """Adapter identifier is 'openai_responses'."""

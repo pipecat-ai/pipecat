@@ -11,8 +11,9 @@ information to bot functions.
 """
 
 import argparse
+import asyncio
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import WebSocket
 from pydantic import BaseModel, ConfigDict, Field
@@ -259,3 +260,53 @@ class EvalRunnerArguments(RunnerArguments):
 
     host: str = "localhost"
     port: int = 7860
+
+
+@dataclass
+class MOQRunnerArguments(RunnerArguments):
+    """MOQ (Media over QUIC) transport session arguments for the runner.
+
+    The ``ready_event`` and ``cert_fingerprints`` fields are populated
+    automatically by :func:`pipecat.runner.utils.create_transport`; bots
+    don't need to thread them by hand.
+
+    Parameters:
+        host: MOQ relay/server hostname the browser uses to connect.
+        port: MOQ relay/server port.
+        path: MOQ endpoint path on the relay (client mode).
+        namespace: MOQ namespace (like a room identifier).
+        participant_id: This bot's participant id; it broadcasts under
+            ``<namespace>/<participant_id>``.
+        peer_id: The peer's participant id; the bot subscribes to
+            ``<namespace>/<peer_id>``.
+        verify_ssl: Whether to verify SSL certificates (client mode).
+        serve: When True, the bot binds its own MOQ server instead of
+            dialing a relay — useful for local dev with no separate
+            ``moq-relay`` process.
+        serve_bind: Address to bind in serve mode (e.g. ``"[::]:4080"``).
+        serve_tls_host: Hostname used for the generated self-signed cert
+            when no on-disk cert/key is provided.
+        serve_tls_cert: Path to a PEM-encoded TLS cert chain.
+        serve_tls_key: Path to the matching PEM-encoded private key.
+        ready_event: Event the bot fires once it has finished MOQ
+            bring-up. The HTTP ``/start`` endpoint waits on this before
+            telling the browser to open its WebTransport.
+        cert_fingerprints: SHA-256 fingerprints (hex) of the bot's TLS
+            cert chain — populated by the transport in serve mode so
+            ``/api/config`` can hand them to the browser for pinning.
+    """
+
+    host: str
+    port: int
+    path: str = "/moq"
+    namespace: str = "pipecat"
+    participant_id: str = "bot0"
+    peer_id: str = "client0"
+    verify_ssl: bool = True
+    serve: bool = False
+    serve_bind: str | None = None
+    serve_tls_host: str = "localhost"
+    serve_tls_cert: str | None = None
+    serve_tls_key: str | None = None
+    ready_event: asyncio.Event | None = field(default=None, kw_only=True)
+    cert_fingerprints: list[str] = field(default_factory=list, kw_only=True)

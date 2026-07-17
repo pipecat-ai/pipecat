@@ -20,6 +20,7 @@ from typing import Any
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from pipecat.adapters.base_llm_adapter import LLMContextConversionError
 from pipecat.adapters.services.bedrock_adapter import (
     AWSBedrockLLMAdapter,
     AWSBedrockLLMInvocationParams,
@@ -567,6 +568,8 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             raise
         except (TimeoutError, ReadTimeoutError):
             await self._call_event_handler("on_completion_timeout")
+        except LLMContextConversionError as e:
+            await self.push_error(error_msg=str(e), exception=e)
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:

@@ -57,6 +57,20 @@ Supported expectation fields (per event):
                                must satisfy, evaluated by a judge LLM (see
                                :mod:`pipecat.evals.judge`).
 
+    absent: true               invert the expectation: assert that NO event of
+                               this type arrives before the ``within_ms`` budget
+                               expires (default 60s — set ``within_ms`` explicitly
+                               to keep the quiet-window wait short). Matches on
+                               event type only, so it cannot be combined with
+                               ``text_contains``, ``eval:``, or ``calls:``. Used
+                               for duplicate-output regressions::
+
+                                   - event: response
+                                     eval: "answers the question"
+                                   - event: response
+                                     absent: true
+                                     within_ms: 30000
+
 Instead of ``user:``, a turn may press DTMF keys with ``dtmf:`` (the two are
 mutually exclusive — you press keys or you talk)::
 
@@ -130,7 +144,6 @@ from typing import Any
 
 import yaml
 from loguru import logger
-from yamlinclude import YamlIncludeConstructor
 
 from pipecat.audio.dtmf.types import KeypadEntry
 
@@ -164,6 +177,27 @@ yaml.add_implicit_resolver(
     list("-+0123456789"),
     Loader=_ScenarioLoader,
 )
+
+
+def _add_include_constructor(loader_class: type[yaml.SafeLoader], base_dir: Path) -> None:
+    """Register an ``!include <relative-path>`` constructor on ``loader_class``.
+
+    Included files load with the same loader class, so nested includes work and
+    scalars get the same resolver treatment as the top-level document. Paths
+    resolve against ``base_dir`` (the scenario file's directory).
+    """
+
+    def _include(loader: yaml.SafeLoader, node: yaml.Node) -> Any:
+        if not isinstance(node, yaml.ScalarNode):
+            raise yaml.constructor.ConstructorError(
+                None, None, "!include expects a file path", node.start_mark
+            )
+        include_path = base_dir / str(loader.construct_scalar(node))
+        with include_path.open() as f:
+            return yaml.load(f, loader_class)
+
+    loader_class.add_constructor("!include", _include)
+
 
 # Events whose payloads carry bot-generated text the judge can sensibly
 # evaluate. Asserting ``eval:`` on anything else (user transcripts, tool
@@ -211,6 +245,11 @@ class EvalExpectation:
             must satisfy. Evaluated by a judge LLM. Only meaningful on the
             bot-generated text events: ``response``, ``llm_response``, and
             ``tts_response``.
+        absent: When True, the expectation is inverted: it passes only when NO
+            event of this type arrives before the ``within_ms`` budget expires,
+            and fails as soon as one does. Matches on event type only;
+            ``text_contains``, ``eval``, and ``calls`` are not allowed alongside
+            it.
     """
 
     event: str
@@ -218,6 +257,7 @@ class EvalExpectation:
     text_contains: str | None = None
     calls: list[EvalFunctionCall] | None = None
     eval: str | None = None
+    absent: bool = False
 
 
 @dataclass
@@ -361,7 +401,7 @@ class EvalScenario:
         class _Loader(_ScenarioLoader):
             pass
 
-        YamlIncludeConstructor.add_to_loader_class(loader_class=_Loader, base_dir=str(path.parent))
+        _add_include_constructor(_Loader, path.parent)
 
         with path.open() as f:
             data = yaml.load(f, _Loader)
@@ -653,7 +693,24 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
             "unlikely to be meaningful."
         )
 
-    calls = _parse_function_calls(e, event, path, turn_idx, exp_idx)
+    absent = e.get("absent", False)
+    if not isinstance(absent, bool):
+        raise ValueError(
+            f"{path}: turn #{turn_idx} expectation #{exp_idx} 'absent:' must be a boolean"
+        )
+    if absent:
+        # An absent expectation matches on event type only: content and call
+        # checks describe an event that must arrive, which contradicts absence.
+        conflicting = [
+            key for key in ("text_contains", "eval", "calls", "name", "args") if key in e
+        ]
+        if conflicting:
+            raise ValueError(
+                f"{path}: turn #{turn_idx} expectation #{exp_idx} 'absent: true' "
+                f"cannot be combined with {', '.join(repr(k) for k in conflicting)}"
+            )
+
+    calls = _parse_function_calls(e, event, path, turn_idx, exp_idx) if not absent else None
 
     return EvalExpectation(
         event=event,
@@ -661,6 +718,7 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         text_contains=e.get("text_contains"),
         calls=calls,
         eval=criterion,
+        absent=absent,
     )
 
 

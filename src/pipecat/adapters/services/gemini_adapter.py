@@ -14,7 +14,7 @@ from typing import Any, TypedDict, cast
 from loguru import logger
 from openai import NotGiven
 
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
@@ -263,40 +263,45 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         tool_call_id_to_name_mapping = {}
         thought_signature_dicts = []
 
-        # Process each message, converting to Google format as needed
-        for message in remaining_messages:
-            # We have a Google-specific message; this may either be a
-            # thought-signature-containing message that we need to handle in a
-            # special way, or a message already in Google format that we can
-            # use directly
-            if isinstance(message, LLMSpecificMessage):
-                if (
-                    isinstance(message.message, dict)
-                    and message.message.get("type") == "thought_signature"
-                ):
-                    thought_signature_dicts.append(message.message)
+        # Process each message, converting to Google format as needed. A
+        # conversion failure (e.g. a malformed message) is wrapped so it
+        # surfaces with its underlying cause.
+        try:
+            for message in remaining_messages:
+                # We have a Google-specific message; this may either be a
+                # thought-signature-containing message that we need to handle in a
+                # special way, or a message already in Google format that we can
+                # use directly
+                if isinstance(message, LLMSpecificMessage):
+                    if (
+                        isinstance(message.message, dict)
+                        and message.message.get("type") == "thought_signature"
+                    ):
+                        thought_signature_dicts.append(message.message)
+                        continue
+
+                    # Fall back to assuming that the message is already in Google
+                    # format
+                    messages.append(message.message)
                     continue
 
-                # Fall back to assuming that the message is already in Google
-                # format
-                messages.append(message.message)
-                continue
+                # We have a standard universal context message; convert it to
+                # Google format
+                result = self._from_standard_message(
+                    message,
+                    params=self.MessageConversionParams(
+                        tool_call_id_to_name_mapping=tool_call_id_to_name_mapping,
+                    ),
+                )
 
-            # We have a standard universal context message; convert it to
-            # Google format
-            result = self._from_standard_message(
-                message,
-                params=self.MessageConversionParams(
-                    tool_call_id_to_name_mapping=tool_call_id_to_name_mapping,
-                ),
-            )
+                if result.content:
+                    messages.append(result.content)
 
-            if result.content:
-                messages.append(result.content)
-
-            # Merge tool call ID to name mapping
-            if result.tool_call_id_to_name_mapping:
-                tool_call_id_to_name_mapping.update(result.tool_call_id_to_name_mapping)
+                # Merge tool call ID to name mapping
+                if result.tool_call_id_to_name_mapping:
+                    tool_call_id_to_name_mapping.update(result.tool_call_id_to_name_mapping)
+        except Exception as e:
+            raise LLMContextConversionError(e) from e
 
         # Apply thought signatures to the corresponding messages
         self._apply_thought_signatures_to_messages(thought_signature_dicts, messages)
@@ -473,13 +478,20 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
     def _merge_parallel_tool_calls_for_thinking(
         self, thought_signature_dicts: list[dict], messages: list[Content]
     ) -> list[Content]:
-        """Merge parallel tool calls into single Content objects when thinking is enabled.
+        """Merge parallel tool calls and their responses into single Content objects.
 
-        Gemini expects parallel tool calls (multiple function calls made
-        simultaneously) to be in a single Content with multiple function_call
-        Parts. This method takes a list of Content messages, where parallel
-        tool calls may be split across multiple messages, and merges them into
-        single messages.
+        Gemini expects the two sides of a batch of parallel tool calls to each
+        live in a single Content: all the ``function_call`` Parts in one model
+        turn, and all the matching ``function_response`` Parts in the following
+        user turn. It rejects the request when the number of response Parts in
+        the response turn doesn't match the number of call Parts in the call
+        turn. In practice the Vertex AI endpoint enforces this strictly (with a
+        400); the Gemini Developer API is currently more lenient and accepts the
+        split form, but the grouped form is the shape the API documents, so we
+        always produce it. Pipecat's context stores each call (and its response)
+        as its own message, so a batch of parallel calls arrives split across
+        several messages; this method regroups both sides back into a single
+        model turn and a single user turn.
 
         This only has an effect when thought_signatures are present (i.e., when
         thinking is enabled). When thinking is disabled, merging doesn't matter.
@@ -491,9 +503,13 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         - Sequential tool calls: each have their own thought_signature
 
         Algorithm: A tool call message with a thought_signature starts a new
-        parallel group. Any tool call messages after it without a
-        thought_signature get merged into that group, regardless of what
-        messages appear in between.
+        parallel group. Scanning forward, subsequent unsigned tool call messages
+        and their function response messages are merged into the group's single
+        model turn and single user turn respectively, and a fresh
+        thought_signature ends the group. Any other messages that happen to be
+        interleaved are collected and re-emitted after the group, so the
+        regrouping makes as few assumptions as possible about the surrounding
+        message structure.
 
         Args:
             thought_signature_dicts: A list of thought signature dicts, used
@@ -525,6 +541,14 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 and all(getattr(part, "function_call", None) for part in msg.parts)
             )
 
+        def is_tool_response_message(msg: Content) -> bool:
+            """Check if message contains only function_response parts."""
+            return bool(
+                msg.role == "user"
+                and msg.parts
+                and all(getattr(part, "function_response", None) for part in msg.parts)
+            )
+
         def message_has_thought_signature(msg: Content) -> bool:
             """Check if any part in the message has a thought_signature."""
             if msg.parts is None:
@@ -540,27 +564,38 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             # If this is a tool call message with a thought signature, start merging
             if is_tool_call_message(current) and message_has_thought_signature(current):
                 merged_parts = list(current.parts)
+                merged_response_parts = []
                 other_messages = []
                 j = i + 1
 
-                # Scan forward, merging tool calls without signatures, collecting others
+                # Scan forward: merge unsigned tool calls and their responses
+                # into the group, collecting any other interleaved messages to
+                # re-emit afterward. A fresh thought signature ends the group.
                 while j < len(messages):
                     next_msg = messages[j]
                     if is_tool_call_message(next_msg):
                         if message_has_thought_signature(next_msg):
                             # New parallel group starts, stop here
                             break
-                        else:
-                            # Merge this call into the current group
-                            merged_parts.extend(next_msg.parts)
-                            j += 1
+                        # Merge this call into the current group
+                        merged_parts.extend(next_msg.parts)
+                        j += 1
+                    elif is_tool_response_message(next_msg):
+                        # Merge the corresponding response into the group
+                        merged_response_parts.extend(next_msg.parts)
+                        j += 1
                     else:
-                        # Collect non-tool-call message, keep scanning
+                        # Some other message is interleaved within the group;
+                        # collect it and keep scanning for this group's calls
+                        # and responses.
                         other_messages.append(next_msg)
                         j += 1
 
-                # Output merged calls, then collected other messages
+                # Output the merged calls, then the merged responses, then any
+                # other messages that were interleaved within the group.
                 merged_messages.append(Content(role="model", parts=merged_parts))
+                if merged_response_parts:
+                    merged_messages.append(Content(role="user", parts=merged_response_parts))
                 merged_messages.extend(other_messages)
                 i = j
             else:

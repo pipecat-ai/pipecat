@@ -44,6 +44,7 @@ from pipecat.runner.types import (
     EvalRunnerArguments,
     ExotelCallData,
     LiveKitRunnerArguments,
+    MOQRunnerArguments,
     SmallWebRTCRunnerArguments,
     TelnyxCallData,
     VonageRunnerArguments,
@@ -762,5 +763,44 @@ async def create_transport(
             runner_args.token,
             params=params,
         )
+    elif isinstance(runner_args, MOQRunnerArguments):
+        params = _get_transport_params("moq", transport_params)
+
+        from pipecat.transports.moq.transport import MOQParams, MOQTransport
+
+        # Convert TransportParams to MOQParams if needed, applying runner args
+        if not isinstance(params, MOQParams):
+            params = MOQParams(**params.model_dump())
+        params.verify_ssl = runner_args.verify_ssl
+        params.namespace = runner_args.namespace
+        params.participant_id = runner_args.participant_id
+        params.peer_id = runner_args.peer_id
+        params.serve = runner_args.serve
+        params.serve_bind = runner_args.serve_bind
+        params.serve_tls_host = runner_args.serve_tls_host
+        params.serve_tls_cert = runner_args.serve_tls_cert
+        params.serve_tls_key = runner_args.serve_tls_key
+
+        transport = MOQTransport(
+            params=params,
+            host=runner_args.host,
+            port=runner_args.port,
+            path=runner_args.path,
+        )
+
+        # Auto-wire the runner back-channel: when the transport finishes
+        # MOQ bring-up, copy out the cert fingerprints (serve mode) and
+        # signal the runner's ready_event so /start can return. This used
+        # to require boilerplate in every bot example.
+        if runner_args.ready_event is not None:
+
+            @transport.event_handler("on_connected")
+            async def _moq_runner_on_connected(t):
+                runner_args.cert_fingerprints = list(t.cert_fingerprints)
+                if runner_args.ready_event is not None:
+                    runner_args.ready_event.set()
+
+        return transport
+
     else:
         raise ValueError(f"Unsupported runner arguments type: {type(runner_args)}")

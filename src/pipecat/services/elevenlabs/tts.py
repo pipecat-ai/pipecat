@@ -13,6 +13,7 @@ with support for streaming audio, word timestamps, and voice customization.
 import asyncio
 import base64
 import json
+import warnings
 from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
 from typing import (
@@ -181,8 +182,21 @@ def build_elevenlabs_voice_settings(
     return voice_settings or None
 
 
+@deprecated(
+    "`PronunciationDictionaryLocator` is deprecated since 1.6.0 and will be removed in 2.0.0. "
+    "Use `text_transforms` -> `replace_text` instead."
+)
 class PronunciationDictionaryLocator(BaseModel):
     """Locator for a pronunciation dictionary.
+
+    .. deprecated:: 1.6.0
+        Use the ``text_transforms`` parameter with
+        :func:`pipecat.utils.text.transforms.replace_text` instead. Pronunciation
+        dictionary substitutions can rewrite the spoken words in ways that no
+        longer match the text sent to synthesis, which breaks the
+        alignment-based word-completion tracking used to attribute spoken text
+        back to the conversation context. ``replace_text`` transforms happen
+        client-side, so they're tracked correctly. Will be removed in 2.0.0.
 
     Parameters:
         pronunciation_dictionary_id: The ID of the pronunciation dictionary.
@@ -465,7 +479,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
                     Use ``settings=ElevenLabsTTSService.Settings(voice=...)`` instead.
                     Will be removed in 2.0.0.
 
-            model: TTS model to use (e.g., "eleven_turbo_v2_5").
+            model: TTS model to use (e.g., "eleven_flash_v2_5").
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsTTSService.Settings(model=...)`` instead.
@@ -484,6 +498,18 @@ class ElevenLabsTTSService(WebsocketTTSService):
             enable_logging: Whether to enable ElevenLabs server-side logging.
             pronunciation_dictionary_locators: List of pronunciation dictionary
                 locators to use.
+
+                .. deprecated:: 1.6.0
+                    Use the ``text_transforms`` parameter with
+                    :func:`pipecat.utils.text.transforms.replace_text`
+                    instead. Pronunciation dictionary substitutions can
+                    rewrite the spoken words in ways that no longer match
+                    the text sent to synthesis, which breaks the
+                    alignment-based word-completion tracking used to
+                    attribute spoken text back to the conversation context.
+                    ``replace_text`` transforms happen client-side, so
+                    they're tracked correctly. Will be removed in 2.0.0.
+
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
@@ -520,7 +546,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
 
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="eleven_turbo_v2_5",
+            model="eleven_flash_v2_5",
             voice=None,
             language=None,
             stability=None,
@@ -603,6 +629,17 @@ class ElevenLabsTTSService(WebsocketTTSService):
 
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
+        if _pronunciation_dictionary_locators is not None:
+            warnings.warn(
+                "`pronunciation_dictionary_locators` is deprecated since 1.6.0 and will be "
+                "removed in 2.0.0. Use `text_transforms` -> `replace_text` instead. "
+                "Pronunciation dictionary substitutions can rewrite the spoken words in "
+                "ways that no longer match the text sent to synthesis, which breaks the "
+                "alignment-based word-completion tracking used to attribute spoken text "
+                "back to the conversation context.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self._pronunciation_dictionary_locators = _pronunciation_dictionary_locators
 
         self._cumulative_time = 0
@@ -1105,7 +1142,7 @@ class ElevenLabsHttpTTSService(TTSService):
                     Will be removed in 2.0.0.
 
             aiohttp_session: aiohttp ClientSession for HTTP requests.
-            model: TTS model to use (e.g., "eleven_turbo_v2_5").
+            model: TTS model to use (e.g., "eleven_flash_v2_5").
 
                 .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsHttpTTSService.Settings(model=...)`` instead.
@@ -1117,6 +1154,18 @@ class ElevenLabsHttpTTSService(TTSService):
                 Set to False for zero retention mode (enterprise only).
             pronunciation_dictionary_locators: List of pronunciation dictionary
                 locators to use.
+
+                .. deprecated:: 1.6.0
+                    Use the ``text_transforms`` parameter with
+                    :func:`pipecat.utils.text.transforms.replace_text`
+                    instead. Pronunciation dictionary substitutions can
+                    rewrite the spoken words in ways that no longer match
+                    the text sent to synthesis, which breaks the
+                    alignment-based word-completion tracking used to
+                    attribute spoken text back to the conversation context.
+                    ``replace_text`` transforms happen client-side, so
+                    they're tracked correctly. Will be removed in 2.0.0.
+
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
@@ -1136,7 +1185,7 @@ class ElevenLabsHttpTTSService(TTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="eleven_turbo_v2_5",
+            model="eleven_flash_v2_5",
             voice=None,
             language=None,
             optimize_streaming_latency=None,
@@ -1202,6 +1251,17 @@ class ElevenLabsHttpTTSService(TTSService):
 
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
+        if _pronunciation_dictionary_locators is not None:
+            warnings.warn(
+                "`pronunciation_dictionary_locators` is deprecated since 1.6.0 and will be "
+                "removed in 2.0.0. Use `text_transforms` -> `replace_text` instead. "
+                "Pronunciation dictionary substitutions can rewrite the spoken words in "
+                "ways that no longer match the text sent to synthesis, which breaks the "
+                "alignment-based word-completion tracking used to attribute spoken text "
+                "back to the conversation context.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self._pronunciation_dictionary_locators = _pronunciation_dictionary_locators
 
         # Track cumulative time to properly sequence word timestamps across utterances

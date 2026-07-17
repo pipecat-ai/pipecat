@@ -9,13 +9,24 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from openai.types.responses import ResponseCompletedEvent
+from openai.types.responses import (
+    ResponseCompletedEvent,
+    ResponseOutputItemDoneEvent,
+    ResponseReasoningItem,
+    ResponseReasoningSummaryTextDeltaEvent,
+)
 from openai.types.responses.response_usage import (
     InputTokensDetails,
     OutputTokensDetails,
     ResponseUsage,
 )
 
+from pipecat.frames.frames import (
+    LLMMessagesAppendFrame,
+    LLMThoughtEndFrame,
+    LLMThoughtStartFrame,
+    LLMThoughtTextFrame,
+)
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.openai.responses.llm import OpenAIResponsesHttpLLMService
 
@@ -174,3 +185,48 @@ class TestHttpTokenUsageMetrics:
         assert tokens.total_tokens == 0
         assert tokens.cache_read_input_tokens == 0
         assert tokens.reasoning_tokens == 0
+
+
+# ---------------------------------------------------------------------------
+# _process_context — reasoning capture
+# ---------------------------------------------------------------------------
+
+
+class TestHttpReasoningCapture:
+    @pytest.mark.asyncio
+    async def test_summary_streamed_and_reasoning_item_persisted(self):
+        service = _make_service()
+        service.push_frame = AsyncMock()
+        adapter = service.get_llm_adapter()
+        adapter.create_llm_specific_message.side_effect = lambda m: m
+
+        delta1 = MagicMock(spec=ResponseReasoningSummaryTextDeltaEvent)
+        delta1.delta = "Think"
+        delta2 = MagicMock(spec=ResponseReasoningSummaryTextDeltaEvent)
+        delta2.delta = "ing..."
+
+        summary_part = MagicMock()
+        summary_part.text = "Thinking..."
+        item = MagicMock(spec=ResponseReasoningItem)
+        item.id = "rs_1"
+        item.summary = [summary_part]
+        item.encrypted_content = "ENCRYPTED"
+        done = MagicMock(spec=ResponseOutputItemDoneEvent)
+        done.item = item
+
+        await _run(service, delta1, delta2, done)
+
+        pushed = [c.args[0] for c in service.push_frame.call_args_list]
+        assert sum(isinstance(f, LLMThoughtStartFrame) for f in pushed) == 1
+        assert [f.text for f in pushed if isinstance(f, LLMThoughtTextFrame)] == ["Think", "ing..."]
+        assert sum(isinstance(f, LLMThoughtEndFrame) for f in pushed) == 1
+
+        append_frames = [f for f in pushed if isinstance(f, LLMMessagesAppendFrame)]
+        assert len(append_frames) == 1
+        stored = adapter.create_llm_specific_message.call_args[0][0]
+        assert stored == {
+            "type": "reasoning",
+            "id": "rs_1",
+            "summary": [{"type": "summary_text", "text": "Thinking..."}],
+            "encrypted_content": "ENCRYPTED",
+        }

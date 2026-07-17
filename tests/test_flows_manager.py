@@ -23,7 +23,13 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 from pipecat.flows.exceptions import FlowError, FlowTransitionError
 from pipecat.flows.manager import FlowManager, NodeConfig
-from pipecat.flows.types import FlowArgs, FlowResult, FlowsFunctionSchema, flows_tool_options
+from pipecat.flows.types import (
+    NO_RESPONSE,
+    FlowArgs,
+    FlowResult,
+    FlowsFunctionSchema,
+    flows_tool_options,
+)
 from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMMessagesUpdateFrame,
@@ -994,6 +1000,68 @@ class TestFlowManager(unittest.IsolatedAsyncioTestCase):
         await edge_func_2(params_2)
         # Edge functions should set run_llm=False
         self.assertTrue(edge_properties_2 is not None and edge_properties_2.run_llm is False)
+
+    async def test_no_response_function_behavior(self):
+        """A function returning NO_RESPONSE finishes without responding or transitioning."""
+        flow_manager = FlowManager(
+            worker=self.mock_task,
+            llm=self.mock_llm,
+            context_aggregator=self.mock_context_aggregator,
+        )
+        await flow_manager.initialize()
+
+        async def handoff_handler(args):
+            return {"status": "transferred"}, NO_RESPONSE
+
+        node_config: NodeConfig = {
+            "name": "test",
+            "task_messages": [{"role": "developer", "content": "Test"}],
+            "functions": [
+                FlowsFunctionSchema(
+                    name="handoff_function",
+                    description="Hands off without responding",
+                    properties={},
+                    required=[],
+                    handler=handoff_handler,
+                ),
+            ],
+        }
+        await flow_manager.set_node_from_config(node_config)
+        handoff_func = get_advertised_tool_handlers(self.mock_task)["handoff_function"]
+
+        # Nothing should be queued (no context update, no completion) after the
+        # node is set up.
+        self.mock_task.queue_frames.reset_mock()
+        result = None
+        properties = None
+
+        async def callback(res, *, properties=None):
+            nonlocal result
+            result = res
+            self._captured_properties = properties
+
+        self._captured_properties = None
+        params = FunctionCallParams(
+            function_name="handoff_function",
+            tool_call_id="id1",
+            arguments={},
+            llm=None,
+            pipeline_worker=self.mock_task,
+            context=None,
+            result_callback=callback,
+        )
+        await handoff_func(params)
+        properties = self._captured_properties
+
+        # The result is delivered, but with no completion and no transition.
+        self.assertEqual(result, {"status": "transferred"})
+        self.assertIsNotNone(properties)
+        self.assertFalse(properties.run_llm)
+        self.assertIsNone(properties.on_context_updated)
+        # Unlike an edge function, NO_RESPONSE schedules no transition and
+        # writes nothing to the (possibly shared) context.
+        self.assertIsNone(flow_manager._pending_transition)
+        self.mock_task.queue_frames.assert_not_called()
 
     @patch("pipecat.flows.manager.LLMRunFrame")
     async def test_completion_timing(self, mock_llm_run_frame):

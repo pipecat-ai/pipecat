@@ -299,7 +299,7 @@ class TestRoundtrip:
     def test_from_mapping_then_apply_update(self):
         """Simulate the real flow: dict arrives via frame, gets converted, applied."""
         # Simulating current service state
-        current = TTSSettings(model="eleven_turbo_v2_5", voice="alice", language="en")
+        current = TTSSettings(model="eleven_flash_v2_5", voice="alice", language="en")
         current.extra = {"stability": 0.5, "speed": 1.0}
 
         # Incoming dict-based update

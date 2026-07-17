@@ -12,9 +12,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from pipecat.frames.frames import (
+    LLMMessagesAppendFrame,
+    LLMThoughtEndFrame,
+    LLMThoughtStartFrame,
+    LLMThoughtTextFrame,
+)
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
+from pipecat.services.openai.responses.llm import (
+    OpenAIResponsesLLMService,
+    _model_supports_reasoning,
+)
 
 
 def _make_service(**kwargs):
@@ -723,3 +732,237 @@ class TestConnectionLifecycle:
 
         with pytest.raises(ConnectionError):
             await service._ensure_connected()
+
+
+# ---------------------------------------------------------------------------
+# Reasoning — config and param building
+# ---------------------------------------------------------------------------
+
+
+class TestReasoningConfig:
+    def test_config_accepts_object(self):
+        c = OpenAIResponsesLLMService.ReasoningConfig(effort="high", summary="detailed")
+        assert c.effort == "high"
+        assert c.summary == "detailed"
+
+    def test_config_forward_compat_effort(self):
+        """Forward compat: an unknown effort string passes through (`| str`)."""
+        c = OpenAIResponsesLLMService.ReasoningConfig(effort="ultra")
+        assert c.effort == "ultra"
+
+
+class TestReasoningParams:
+    def _params(self, service):
+        return service._build_response_params({"input": []})
+
+    def test_default_model_gets_no_reasoning(self):
+        """The default model (gpt-4.1) does not reason, so no reasoning param is set."""
+        service = _make_service()
+        params = self._params(service)
+        assert "reasoning" not in params
+        assert "include" not in params
+
+    def test_gpt5_series_disabled_by_default(self):
+        """Mainline gpt models from gpt-5 onward default to effort="none"."""
+        # gpt-6.x stands in for a future mainline series we assume will reason.
+        for model in ("gpt-5.4", "gpt-5.5", "gpt-6", "gpt-6.2"):
+            service = _make_service(settings=OpenAIResponsesLLMService.Settings(model=model))
+            params = self._params(service)
+            assert params["reasoning"] == {"effort": "none"}, model
+            assert "include" not in params
+
+    def test_o_series_left_untouched(self):
+        """The o-series reasons but rejects effort="none", so leave it at the default."""
+        service = _make_service(settings=OpenAIResponsesLLMService.Settings(model="o3"))
+        params = self._params(service)
+        assert "reasoning" not in params
+
+    def test_gpt5_chat_variant_left_untouched(self):
+        """The non-reasoning gpt-5-chat variant is excluded from the default-off logic."""
+        service = _make_service(
+            settings=OpenAIResponsesLLMService.Settings(model="gpt-5-chat-latest")
+        )
+        params = self._params(service)
+        assert "reasoning" not in params
+
+    def test_explicit_reasoning_overrides_default(self):
+        """An explicit config is honored as-is (not replaced by the none default)."""
+        service = _make_service(
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-5.5",
+                reasoning=OpenAIResponsesLLMService.ReasoningConfig(effort="high", summary="auto"),
+            )
+        )
+        params = self._params(service)
+        assert params["reasoning"] == {"effort": "high", "summary": "auto"}
+        assert params["include"] == ["reasoning.encrypted_content"]
+
+    def test_empty_reasoning_config_falls_back_to_default(self):
+        """An all-unset config is treated as unconfigured (none default on gpt-5.x)."""
+        service = _make_service(
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-5.5",
+                reasoning=OpenAIResponsesLLMService.ReasoningConfig(),
+            )
+        )
+        params = self._params(service)
+        assert params["reasoning"] == {"effort": "none"}
+        assert "include" not in params
+
+
+class TestModelSupportsReasoning:
+    def test_reasoning_capable_models(self):
+        """The o-series and the mainline gpt series from gpt-5 onward reason."""
+        for model in ("gpt-5", "gpt-5.4", "gpt-5.5", "gpt-6", "gpt-7.1", "o1", "o3", "o4-mini"):
+            assert _model_supports_reasoning(model) is True, model
+
+    def test_known_non_reasoning_models(self):
+        """gpt-4.x and earlier, plus the gpt-5-chat variant, don't reason."""
+        for model in ("gpt-4.1", "gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo", "gpt-5-chat-latest"):
+            assert _model_supports_reasoning(model) is False, model
+
+    def test_unrecognized_models_are_unknown(self):
+        """An unrecognized model returns None so callers can leave it alone."""
+        for model in ("some-custom-model", "llama-3", "mistral-large"):
+            assert _model_supports_reasoning(model) is None, model
+
+
+class TestReasoningUnsupportedWarning:
+    """Reasoning configured on a model that can't use it should log a clear error."""
+
+    def _service_with_reasoning(self, model):
+        return _make_service(
+            settings=OpenAIResponsesLLMService.Settings(
+                model=model,
+                reasoning=OpenAIResponsesLLMService.ReasoningConfig(effort="high"),
+            )
+        )
+
+    def test_warns_on_known_non_reasoning_model(self):
+        service = self._service_with_reasoning("gpt-4.1")
+        with patch("pipecat.services.openai.responses.llm.logger") as mock_logger:
+            service._build_response_params({"input": []})
+        assert mock_logger.error.call_count == 1
+        assert "does not support reasoning" in mock_logger.error.call_args.args[0]
+
+    def test_warns_once_per_model(self):
+        service = self._service_with_reasoning("gpt-4.1")
+        with patch("pipecat.services.openai.responses.llm.logger") as mock_logger:
+            service._build_response_params({"input": []})
+            service._build_response_params({"input": []})
+        assert mock_logger.error.call_count == 1
+
+    def test_no_warning_on_reasoning_capable_model(self):
+        service = self._service_with_reasoning("gpt-5.5")
+        with patch("pipecat.services.openai.responses.llm.logger") as mock_logger:
+            service._build_response_params({"input": []})
+        mock_logger.error.assert_not_called()
+
+    def test_no_warning_on_unrecognized_model(self):
+        """We can't be sure an unrecognized model lacks reasoning, so stay quiet."""
+        service = self._service_with_reasoning("some-custom-model")
+        with patch("pipecat.services.openai.responses.llm.logger") as mock_logger:
+            service._build_response_params({"input": []})
+        mock_logger.error.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _receive_response_events — reasoning capture
+# ---------------------------------------------------------------------------
+
+
+class TestReceiveResponseEventsReasoning:
+    @pytest.mark.asyncio
+    async def test_summary_streamed_and_reasoning_item_persisted(self):
+        service = _make_service()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+        service.push_frame = AsyncMock()
+        adapter = MagicMock()
+        adapter.create_llm_specific_message.side_effect = lambda m: m
+        service.get_llm_adapter = MagicMock(return_value=adapter)
+
+        ws = _ws_events(
+            {"type": "response.output_item.added", "item": {"type": "reasoning", "id": "rs_1"}},
+            {"type": "response.reasoning_summary_text.delta", "delta": "Think"},
+            {"type": "response.reasoning_summary_text.delta", "delta": "ing..."},
+            {
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "summary": [{"type": "summary_text", "text": "Thinking..."}],
+                    "encrypted_content": "ENCRYPTED",
+                },
+            },
+            {
+                "type": "response.completed",
+                "response": {"id": "resp_1", "model": "gpt-5.4-mini", "usage": None},
+            },
+        )
+        service._websocket = ws
+
+        context = MagicMock(spec=LLMContext)
+        await service._receive_response_events(context, [])
+
+        pushed = [c.args[0] for c in service.push_frame.call_args_list]
+        # Thought frames bracket the streamed summary: start, text, text, end.
+        assert sum(isinstance(f, LLMThoughtStartFrame) for f in pushed) == 1
+        assert [f.text for f in pushed if isinstance(f, LLMThoughtTextFrame)] == ["Think", "ing..."]
+        assert sum(isinstance(f, LLMThoughtEndFrame) for f in pushed) == 1
+
+        # The reasoning item is persisted for round-tripping, with its encrypted
+        # content, via an LLMMessagesAppendFrame.
+        append_frames = [f for f in pushed if isinstance(f, LLMMessagesAppendFrame)]
+        assert len(append_frames) == 1
+        stored = adapter.create_llm_specific_message.call_args[0][0]
+        assert stored == {
+            "type": "reasoning",
+            "id": "rs_1",
+            "summary": [{"type": "summary_text", "text": "Thinking..."}],
+            "encrypted_content": "ENCRYPTED",
+        }
+
+    @pytest.mark.asyncio
+    async def test_reasoning_without_encrypted_content_not_persisted(self):
+        """No encrypted content (e.g. effort='none') → nothing to round-trip."""
+        service = _make_service()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+        service.push_frame = AsyncMock()
+        adapter = MagicMock()
+        service.get_llm_adapter = MagicMock(return_value=adapter)
+
+        ws = _ws_events(
+            {
+                "type": "response.output_item.done",
+                "item": {"type": "reasoning", "id": "rs_1", "summary": []},
+            },
+            {
+                "type": "response.completed",
+                "response": {"id": "resp_1", "model": "gpt-5.4-mini", "usage": None},
+            },
+        )
+        service._websocket = ws
+
+        context = MagicMock(spec=LLMContext)
+        await service._receive_response_events(context, [])
+
+        pushed = [c.args[0] for c in service.push_frame.call_args_list]
+        assert not [f for f in pushed if isinstance(f, LLMMessagesAppendFrame)]
+        adapter.create_llm_specific_message.assert_not_called()
+
+
+class TestStartsWithResponseOutputReasoning:
+    def test_reasoning_matches_by_id(self):
+        response_output = [{"type": "reasoning", "id": "rs_1", "encrypted_content": "ENC"}]
+        items = [
+            {"type": "reasoning", "id": "rs_1", "encrypted_content": "ENC"},
+            {"role": "user", "content": "next"},
+        ]
+        assert OpenAIResponsesLLMService._starts_with_response_output(items, response_output)
+
+    def test_reasoning_id_mismatch_rejects(self):
+        response_output = [{"type": "reasoning", "id": "rs_1"}]
+        items = [{"type": "reasoning", "id": "rs_2"}]
+        assert not OpenAIResponsesLLMService._starts_with_response_output(items, response_output)
