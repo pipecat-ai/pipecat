@@ -152,6 +152,20 @@ def _add_token_usage_to_span(span, token_usage):
             )
         if "reasoning_tokens" in token_usage and token_usage["reasoning_tokens"] is not None:
             span.set_attribute("gen_ai.usage.reasoning_tokens", token_usage["reasoning_tokens"])
+        if "input_audio_tokens" in token_usage and token_usage["input_audio_tokens"] is not None:
+            span.set_attribute("gen_ai.usage.audio.input_tokens", token_usage["input_audio_tokens"])
+        if "output_audio_tokens" in token_usage and token_usage["output_audio_tokens"] is not None:
+            span.set_attribute(
+                "gen_ai.usage.audio.output_tokens", token_usage["output_audio_tokens"]
+            )
+        if (
+            "cache_read_input_audio_tokens" in token_usage
+            and token_usage["cache_read_input_audio_tokens"] is not None
+        ):
+            span.set_attribute(
+                "gen_ai.usage.audio.cache_read.input_tokens",
+                token_usage["cache_read_input_audio_tokens"],
+            )
     else:
         # Handle LLMTokenUsage object
         span.set_attribute("gen_ai.usage.input_tokens", getattr(token_usage, "prompt_tokens", 0))
@@ -171,6 +185,20 @@ def _add_token_usage_to_span(span, token_usage):
         reasoning_tokens = getattr(token_usage, "reasoning_tokens", None)
         if reasoning_tokens is not None:
             span.set_attribute("gen_ai.usage.reasoning_tokens", reasoning_tokens)
+
+        input_audio_tokens = getattr(token_usage, "input_audio_tokens", None)
+        if input_audio_tokens is not None:
+            span.set_attribute("gen_ai.usage.audio.input_tokens", input_audio_tokens)
+
+        output_audio_tokens = getattr(token_usage, "output_audio_tokens", None)
+        if output_audio_tokens is not None:
+            span.set_attribute("gen_ai.usage.audio.output_tokens", output_audio_tokens)
+
+        cache_read_input_audio_tokens = getattr(token_usage, "cache_read_input_audio_tokens", None)
+        if cache_read_input_audio_tokens is not None:
+            span.set_attribute(
+                "gen_ai.usage.audio.cache_read.input_tokens", cache_read_input_audio_tokens
+            )
 
 
 def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Callable:
@@ -1378,15 +1406,43 @@ def traced_openai_realtime(operation: str) -> Callable:
                             if evt and hasattr(evt, "response"):
                                 response = evt.response
 
-                                # Token usage - basic attributes for span visibility
+                                # Token usage, including the audio/cached
+                                # breakdown needed for cost attribution
+                                # (realtime audio tokens are priced separately
+                                # from text and cached-audio tokens).
                                 if hasattr(response, "usage"):
                                     usage = response.usage
                                     if hasattr(usage, "input_tokens"):
-                                        operation_attrs["tokens.prompt"] = usage.input_tokens
+                                        operation_attrs["gen_ai.usage.input_tokens"] = (
+                                            usage.input_tokens
+                                        )
                                     if hasattr(usage, "output_tokens"):
-                                        operation_attrs["tokens.completion"] = usage.output_tokens
-                                    if hasattr(usage, "total_tokens"):
-                                        operation_attrs["tokens.total"] = usage.total_tokens
+                                        operation_attrs["gen_ai.usage.output_tokens"] = (
+                                            usage.output_tokens
+                                        )
+                                    input_details = getattr(usage, "input_token_details", None)
+                                    if input_details:
+                                        if input_details.cached_tokens is not None:
+                                            operation_attrs[
+                                                "gen_ai.usage.cache_read.input_tokens"
+                                            ] = input_details.cached_tokens
+                                        if input_details.audio_tokens is not None:
+                                            operation_attrs["gen_ai.usage.audio.input_tokens"] = (
+                                                input_details.audio_tokens
+                                            )
+                                        cached_details = input_details.cached_tokens_details
+                                        if (
+                                            cached_details
+                                            and cached_details.audio_tokens is not None
+                                        ):
+                                            operation_attrs[
+                                                "gen_ai.usage.audio.cache_read.input_tokens"
+                                            ] = cached_details.audio_tokens
+                                    output_details = getattr(usage, "output_token_details", None)
+                                    if output_details and output_details.audio_tokens is not None:
+                                        operation_attrs["gen_ai.usage.audio.output_tokens"] = (
+                                            output_details.audio_tokens
+                                        )
 
                                 # Response status and metadata
                                 if hasattr(response, "status"):
