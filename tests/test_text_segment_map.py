@@ -6,7 +6,74 @@
 
 import unittest
 
-from pipecat.utils.context.text_segment_map import TextSegmentMap
+from pipecat.utils.context.text_segment_map import (
+    TextSegmentMap,
+    _HopKind,
+    _raw_len_for_clean_chars,
+    strip_complete_markup,
+    strip_markup,
+)
+
+
+class TestStripMarkupHelpers(unittest.TestCase):
+    """The markup-stripping primitives behind _classify_hop's markup-stripped
+    matching (strategy 3)."""
+
+    def test_strip_markup_removes_tags(self):
+        self.assertEqual(strip_markup("<b>hi</b> there"), "hi there")
+
+    def test_strip_markup_preserves_non_markup(self):
+        self.assertEqual(strip_markup("1234-5678"), "1234-5678")
+
+    def test_strip_markup_unclosed_tag_swallows_rest(self):
+        # A '<' with no closing '>' consumes to the end (how a mid-tag fragment reads).
+        self.assertEqual(strip_markup("keep <phoneme attr"), "keep ")
+
+    def test_strip_markup_stray_gt_is_kept(self):
+        self.assertEqual(strip_markup("a > b"), "a > b")
+
+    def test_raw_len_maps_clean_prefix_to_raw_offset(self):
+        # "hello" (5 clean chars) ends just before "</speak>" at raw index 12.
+        self.assertEqual(_raw_len_for_clean_chars("<speak>hello</speak>", 5), 12)
+
+    def test_raw_len_identity_without_markup(self):
+        self.assertEqual(_raw_len_for_clean_chars("1234-5678", 9), 9)
+
+    def test_raw_len_zero_or_negative_is_zero(self):
+        self.assertEqual(_raw_len_for_clean_chars("<b>x</b>", 0), 0)
+
+    def test_raw_len_beyond_available_returns_full_length(self):
+        self.assertEqual(_raw_len_for_clean_chars("<b>x</b>", 99), len("<b>x</b>"))
+
+    def test_raw_len_agrees_with_strip_markup(self):
+        # Consuming len(strip_markup(t)) clean chars must land exactly at the raw
+        # offset just past the last clean char: t[:pos] must strip down to the
+        # same clean text (nothing missing), and t[pos] must be either past the
+        # end of t or the start of trailing markup (nothing extra) -- the second
+        # check matters because an implementation that overshoots a few chars
+        # into a still-open trailing tag (short of reaching another clean char)
+        # would still pass the first check alone, since strip_markup() truncates
+        # an over-sliced, still-unclosed tag the same way either way.
+        for t in ["<speak>hello</speak>", "1234-5678", "<a>x</a><b>y</b>", "plain"]:
+            clean = strip_markup(t)
+            pos = _raw_len_for_clean_chars(t, len(clean))
+            self.assertEqual(strip_markup(t[:pos]), clean)
+            self.assertTrue(pos == len(t) or t[pos] == "<")
+
+
+class TestStripCompleteMarkupHelper(unittest.TestCase):
+    """strip_complete_markup() is used on complete texts (TextSegment.is_transformed,
+    WordCompletionTracker's default user_facing_text) where, unlike strip_markup(),
+    a lone unmatched '<' is real content rather than a truncated tag."""
+
+    def test_strip_complete_markup_removes_well_formed_tags(self):
+        self.assertEqual(strip_complete_markup("<b>hi</b> there"), "hi there")
+
+    def test_strip_complete_markup_keeps_unmatched_angle_bracket(self):
+        self.assertEqual(strip_complete_markup("5 < 10"), "5 < 10")
+
+    def test_strip_complete_markup_keeps_emoticon(self):
+        self.assertEqual(strip_complete_markup("I love you <3 always"), "I love you <3 always")
 
 
 class TestTextSegmentMapBuild(unittest.TestCase):
@@ -284,6 +351,35 @@ class TestTextSegmentMapSsmlPhonemeTag(unittest.TestCase):
         smap.advance_word("is")  # prior unchanged segment now fully consumed
         smap.advance_word("<phoneme")  # 0 alnum chars, but inside the transformed segment
         self.assertTrue(smap.in_transformed_segment)
+
+
+class TestTextSegmentMapStrayAngleBracket(unittest.TestCase):
+    """A literal '<' with no matching '>' in ordinary TTS text (e.g. an emoticon
+    like "<3" or a comparison like "5 < 10") is real content, not a truncated
+    SSML tag, so it must not cause a segment to be misclassified as transformed."""
+
+    def test_unchanged_segment_with_stray_angle_bracket_not_flagged_transformed(self):
+        text = "I love you <3 always"
+        smap = TextSegmentMap(text, text)
+        seg = smap._segments[0]
+        self.assertEqual(seg.tts, text)
+        self.assertFalse(seg.is_transformed)
+
+
+class TestClassifyHopLiteralMatchHandlesStrayAngleBracket(unittest.TestCase):
+    """A literal '<3' arriving as its own word-timestamp token (e.g. an emoticon
+    in ordinary text) is placed by _classify_hop's literal-matching strategies
+    (1/2) directly, character for character against the segment's raw
+    remaining text.
+    """
+
+    def test_literal_angle_bracket_word_placed_via_literal_strategy(self):
+        hop = TextSegmentMap._classify_hop("<3 always", "<3")
+        self.assertEqual(hop.kind, _HopKind.PLACED)
+        # seg_chars == len(word) (offset 0 + len("<3")) is literal strategy's
+        # formula; the markup-stripped strategy would compute this differently
+        # (via _raw_len_for_clean_chars), so this pins down *which* strategy matched.
+        self.assertEqual(hop.seg_chars, len("<3"))
 
 
 if __name__ == "__main__":

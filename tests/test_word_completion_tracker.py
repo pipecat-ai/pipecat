@@ -7,6 +7,7 @@
 import unittest
 
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
+from pipecat.utils.text.transforms._alnum_utils import normalize
 
 
 class TestWordCompletionTrackerBasic(unittest.TestCase):
@@ -189,11 +190,11 @@ class TestWordCompletionTrackerReset(unittest.TestCase):
         """reset() resets the llm_text cursor so raw_consumed is correct after replay."""
         raw = "<card>4111</card>"
         tracker = WordCompletionTracker("4111", llm_text=raw)
-        tracker.add_word_and_check_complete("4111")
+        self.assertTrue(tracker.add_word_and_check_complete("4111"))
         self.assertEqual(tracker.get_llm_consumed(), "<card>4111</card>")
         tracker.reset()
-        tracker.add_word_and_check_complete("4111")
         # Cursor restarts from position 0 after reset.
+        self.assertTrue(tracker.add_word_and_check_complete("4111"))
         self.assertEqual(tracker.get_llm_consumed(), "<card>4111</card>")
 
     def test_reset_clears_expected_raw_pos_cursor(self):
@@ -562,7 +563,10 @@ class TestWordCompletionTrackerRealisticSentences(unittest.TestCase):
 
         for word, expected_frame in special_cases:
             tracker_special = WordCompletionTracker(word, llm_text=f"<test>{word}</test>")
-            tracker_special.add_word_and_check_complete(word)
+            self.assertTrue(
+                tracker_special.add_word_and_check_complete(word),
+                f"Special case '{word}': should complete on its only/last word",
+            )
 
             actual_frame = tracker_special.get_word_for_frame()
             self.assertEqual(
@@ -659,7 +663,7 @@ class TestWordCompletionTrackerOverflow(unittest.TestCase):
     def test_no_overflow_when_word_fits_exactly(self):
         """A word that exactly fills remaining slots produces no overflow."""
         tracker = WordCompletionTracker("hello")
-        tracker.add_word_and_check_complete("hello")
+        self.assertTrue(tracker.add_word_and_check_complete("hello"))
         self.assertIsNone(tracker.get_overflow_word())
         self.assertEqual(tracker.get_word_for_frame(), "hello")
 
@@ -675,7 +679,7 @@ class TestWordCompletionTrackerOverflow(unittest.TestCase):
     def test_overflow_with_digits_splits_at_correct_position(self):
         """Split position is computed by alnum count, not byte offset."""
         tracker = WordCompletionTracker("4111")  # 4 alnum chars
-        tracker.add_word_and_check_complete("41111111")
+        self.assertTrue(tracker.add_word_and_check_complete("41111111"))
         self.assertEqual(tracker.get_word_for_frame(), "4111")
         self.assertEqual(tracker.get_overflow_word(), "1111")
 
@@ -684,7 +688,7 @@ class TestWordCompletionTrackerOverflow(unittest.TestCase):
         tracker1 = WordCompletionTracker("hello")
         tracker2 = WordCompletionTracker("world")
 
-        tracker1.add_word_and_check_complete("helloworld")
+        self.assertTrue(tracker1.add_word_and_check_complete("helloworld"))
         overflow = tracker1.get_overflow_word()
         self.assertEqual(overflow, "world")
 
@@ -735,7 +739,7 @@ class TestWordCompletionTrackerMissingWord(unittest.TestCase):
     def test_force_complete_frame_word_is_full_remaining_expected(self):
         """Force-complete with no prior progress: frame_word is the entire expected text."""
         tracker = WordCompletionTracker("number is")
-        tracker.add_word_and_check_complete("4111")
+        self.assertTrue(tracker.add_word_and_check_complete("4111"))
         self.assertEqual(tracker.get_word_for_frame(), "number is")
 
     def test_force_complete_frame_word_is_partial_remaining_expected(self):
@@ -753,7 +757,8 @@ class TestWordCompletionTrackerMissingWord(unittest.TestCase):
         tracker1 = WordCompletionTracker("number is")
         tracker2 = WordCompletionTracker("4111 1111")
 
-        tracker1.add_word_and_check_complete("4111")  # force-completes tracker1
+        # force-completes tracker1
+        self.assertTrue(tracker1.add_word_and_check_complete("4111"))
         overflow = tracker1.get_overflow_word()
         self.assertEqual(overflow, "4111")
 
@@ -786,11 +791,11 @@ class TestWordCompletionTrackerMissingWord(unittest.TestCase):
         tracker2 = WordCompletionTracker("cd")
 
         # Force-complete tracker1 with a wrong word
-        tracker1.add_word_and_check_complete("xyz")
+        self.assertTrue(tracker1.add_word_and_check_complete("xyz"))
         self.assertIsNotNone(tracker1.get_overflow_word())
 
         # tracker2 receives "cd" normally — no overflow
-        tracker2.add_word_and_check_complete("cd")
+        self.assertTrue(tracker2.add_word_and_check_complete("cd"))
         self.assertIsNone(tracker2.get_overflow_word())
 
 
@@ -808,8 +813,10 @@ class TestWordCompletionTrackerLLMText(unittest.TestCase):
         tracker = WordCompletionTracker("hello world", llm_text="hello world")
         tracker.add_word_and_check_complete("hello")
         self.assertEqual(tracker.get_llm_consumed(), "hello")
+        self.assertFalse(tracker.is_complete)
         tracker.add_word_and_check_complete("world")
         self.assertEqual(tracker.get_llm_consumed(), "world")
+        self.assertTrue(tracker.is_complete)
 
     def test_llm_text_opening_tag_included_in_first_word(self):
         """The opening tag preceding content is consumed with the first word."""
@@ -817,6 +824,9 @@ class TestWordCompletionTrackerLLMText(unittest.TestCase):
         tracker = WordCompletionTracker("4111 1111 1111 1111", llm_text=raw)
         tracker.add_word_and_check_complete("4111")
         self.assertEqual(tracker.get_llm_consumed(), "<card>4111")
+        # Confirms this is exercising the mid-frame span (prev_llm_pos : llm_pos)
+        # branch, not the last-word sweep-to-end-of-llm_text branch.
+        self.assertFalse(tracker.is_complete)
 
     def test_llm_text_tag_chars_not_counted_as_alnum(self):
         """Tag chars (c,a,r,d) inside <card> must not burn the alnum budget."""
@@ -827,6 +837,7 @@ class TestWordCompletionTrackerLLMText(unittest.TestCase):
         tracker.add_word_and_check_complete("4111")
         # The full "<card>4111</card>" should be consumed (last word → consume all).
         self.assertEqual(tracker.get_llm_consumed(), "<card>4111</card>")
+        self.assertTrue(tracker.is_complete)
 
     def test_llm_text_four_words_with_card_tags(self):
         """Full card-number scenario: each word maps to its correct raw span."""
@@ -853,6 +864,7 @@ class TestWordCompletionTrackerLLMText(unittest.TestCase):
         tracker = WordCompletionTracker("hello", llm_text=raw)
         tracker.add_word_and_check_complete("hello")
         self.assertEqual(tracker.get_llm_consumed(), "<card>hello</card>")
+        self.assertTrue(tracker.is_complete)
 
     def test_llm_text_mid_frame_word_does_not_consume_closing_tag(self):
         """Non-final words stop before the closing tag; only the last sweeps it up."""
@@ -860,8 +872,10 @@ class TestWordCompletionTrackerLLMText(unittest.TestCase):
         tracker = WordCompletionTracker("hello world", llm_text=raw)
         tracker.add_word_and_check_complete("hello")
         self.assertEqual(tracker.get_llm_consumed(), "<card>hello")
+        self.assertFalse(tracker.is_complete)
         tracker.add_word_and_check_complete("world")
         self.assertEqual(tracker.get_llm_consumed(), "world</card>")
+        self.assertTrue(tracker.is_complete)
 
     def test_llm_text_force_complete_consumes_all_remaining(self):
         """When force-complete fires, all remaining llm_text is consumed at once."""
@@ -1187,12 +1201,16 @@ class TestWordCompletionTrackerMultiAttributeSsmlTag(unittest.TestCase):
         tracker = WordCompletionTracker(self.TTS_TEXT)
         for word in self.WORDS[:3]:
             tracker.add_word_and_check_complete(word)
-        for word in self.WORDS[3:]:
+        for i, word in enumerate(self.WORDS[3:]):
             self.assertTrue(
                 tracker.word_belongs_here(word),
                 f"{word!r} is part of the open <phoneme> tag and must belong here",
             )
-            tracker.add_word_and_check_complete(word)
+            is_complete = tracker.add_word_and_check_complete(word)
+            if i == len(self.WORDS[3:]) - 1:
+                self.assertTrue(is_complete, "closing fragment should complete the frame")
+            else:
+                self.assertFalse(is_complete)
 
     def test_does_not_force_complete_on_tag_open_fragment(self):
         """The opening '<phoneme' fragment must not force-complete the slot —
@@ -1216,7 +1234,7 @@ class TestWordCompletionTrackerMultiAttributeSsmlTag(unittest.TestCase):
         tracker = WordCompletionTracker(self.TTS_TEXT, llm_text=llm_text)
         for word in self.WORDS[:-1]:
             tracker.add_word_and_check_complete(word)
-        tracker.add_word_and_check_complete(self.WORDS[-1])
+        self.assertTrue(tracker.add_word_and_check_complete(self.WORDS[-1]))
         self.assertEqual(tracker.get_llm_consumed(), "Siobhan.")
 
 
@@ -1550,11 +1568,49 @@ class TestUserFacingText(unittest.TestCase):
         self.assertEqual(tracker.get_remaining_user_facing_text(), self.USER_FACING_TEXT)
 
 
+class TestUserFacingTextStrayAngleBracket(unittest.TestCase):
+    """A literal '<' with no matching '>' in tts_text (e.g. an emoticon like "<3")
+    is real content, not a truncated SSML tag. When user_facing_text is omitted,
+    the default derived from tts_text must not silently drop everything after it."""
+
+    def test_default_user_facing_text_keeps_text_after_stray_bracket(self):
+        text = "I love you <3 always"
+        tracker = WordCompletionTracker(text)
+        for word in text.split():
+            tracker.add_word_and_check_complete(word)
+        self.assertTrue(tracker.is_complete)
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), text)
+
+
+class TestWordBelongsHereLiteralAngleBracketWord(unittest.TestCase):
+    """End-to-end companion to
+    TestClassifyHopLiteralMatchHandlesStrayAngleBracket (test_text_segment_map.py):
+    a literal '<3' arriving as its own word-timestamp token, mid-stream, is
+    recognized by literal matching and consumed normally -- not rejected as
+    an unrecognized word, and not force-completing the frame.
+    """
+
+    def test_literal_angle_bracket_word_belongs_and_does_not_force_complete(self):
+        text = "I love you <3 always"
+        tracker = WordCompletionTracker(text)
+        for word in ["I", "love", "you"]:
+            tracker.add_word_and_check_complete(word)
+
+        self.assertTrue(tracker.word_belongs_here("<3"))
+        complete = tracker.add_word_and_check_complete("<3")
+        self.assertFalse(complete)
+        self.assertIsNone(tracker.get_overflow_word())
+
+        complete = tracker.add_word_and_check_complete("always")
+        self.assertTrue(complete)
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), text)
+
+
 class TestWordCompletionTrackerUnicodeSymbolSubstitution(unittest.TestCase):
     """Guards against the regression where ElevenLabs maps Unicode symbols such
     as '→' to ASCII punctuation like '-' in word-timestamp events.
 
-    The literal-substring check in _symbol_word_belongs_here failed to find '-'
+    The literal-substring check in TextSegmentMap._symbol_word_belongs failed to find '-'
     inside '→ Santiago…', which caused premature force-completion of the whole
     frame after 'Paulo' was consumed.  The symbol-substitution fallback (check
     whether the next non-space char in the TTS text is itself a non-alnum symbol)
@@ -1658,11 +1714,11 @@ class TestWordCompletionTrackerCJK(unittest.TestCase):
         samples = ["저는여러분의", "안녕하세요", "어시스턴트"]
         for text in samples:
             raw_count = sum(1 for c in text if c.isalnum())
-            norm_count = len(WordCompletionTracker._normalize(text))
+            norm_count = len(normalize(text))
             self.assertEqual(
                 norm_count,
                 raw_count,
-                f"_normalize({text!r}): got {norm_count} chars, want {raw_count}",
+                f"normalize({text!r}): got {norm_count} chars, want {raw_count}",
             )
 
     def test_korean_force_complete_remaining_text_is_correct(self):
