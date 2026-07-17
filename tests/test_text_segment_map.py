@@ -46,12 +46,19 @@ class TestStripMarkupHelpers(unittest.TestCase):
         self.assertEqual(_raw_len_for_clean_chars("<b>x</b>", 99), len("<b>x</b>"))
 
     def test_raw_len_agrees_with_strip_markup(self):
-        # Consuming len(strip_markup(t)) clean chars must land at/after the last
-        # clean char for any input.
+        # Consuming len(strip_markup(t)) clean chars must land exactly at the raw
+        # offset just past the last clean char: t[:pos] must strip down to the
+        # same clean text (nothing missing), and t[pos] must be either past the
+        # end of t or the start of trailing markup (nothing extra) -- the second
+        # check matters because an implementation that overshoots a few chars
+        # into a still-open trailing tag (short of reaching another clean char)
+        # would still pass the first check alone, since strip_markup() truncates
+        # an over-sliced, still-unclosed tag the same way either way.
         for t in ["<speak>hello</speak>", "1234-5678", "<a>x</a><b>y</b>", "plain"]:
             clean = strip_markup(t)
             pos = _raw_len_for_clean_chars(t, len(clean))
             self.assertEqual(strip_markup(t[:pos]), clean)
+            self.assertTrue(pos == len(t) or t[pos] == "<")
 
 
 class TestStripCompleteMarkupHelper(unittest.TestCase):
