@@ -281,10 +281,7 @@ class File(BaseModel):
 
 
 class SendFileOptions(BaseModel):
-    """Options for sending text input to the LLM.
-
-    Contains options for how the pipeline should process the text input.
-    """
+    """Options for sending a file to the LLM."""
 
     run_immediately: bool = True
     audio_response: bool = True
