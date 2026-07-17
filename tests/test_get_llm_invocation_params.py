@@ -1142,7 +1142,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         result = AnthropicLLMAdapter.ensure_last_message_is_user(messages)
         self.assertEqual(len(result), 3)
         self.assertEqual(result[-1]["role"], "user")
-        self.assertEqual(result[-1]["content"], [{"type": "text", "text": "(continue)"}])
+        self.assertEqual(result[-1]["content"], [{"type": "text", "text": "."}])
 
     def test_ensure_last_message_is_user_noop_when_trailing_user(self):
         """Test that ensure_last_message_is_user does nothing when last message is already user."""
@@ -1537,7 +1537,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         result = AWSBedrockLLMAdapter.ensure_last_message_is_user(messages)
         self.assertEqual(len(result), 3)
         self.assertEqual(result[-1]["role"], "user")
-        self.assertEqual(result[-1]["content"], [{"text": "(continue)"}])
+        self.assertEqual(result[-1]["content"], [{"text": "."}])
 
     def test_ensure_last_message_is_user_noop_when_trailing_user(self):
         """Test that ensure_last_message_is_user does nothing when last message is already user."""
@@ -2709,9 +2709,7 @@ class TestTrailingUserMessageInjection(unittest.TestCase):
         params = service._get_llm_invocation_params(context)
 
         self.assertEqual(params["messages"][-1]["role"], "user")
-        self.assertEqual(
-            params["messages"][-1]["content"], [{"type": "text", "text": "(continue)"}]
-        )
+        self.assertEqual(params["messages"][-1]["content"], [{"type": "text", "text": "."}])
         # The stored context is never mutated — the fix applies to the request only.
         self.assertEqual(context.messages[-1]["role"], "assistant")
 

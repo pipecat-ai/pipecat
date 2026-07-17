@@ -179,7 +179,8 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         Claude 4.6+ models on Bedrock do not support assistant message
         prefilling — the conversation must end with a user turn.  When the
         last message has ``role="assistant"``, a minimal user message is
-        appended so that the Converse API request is accepted.
+        appended so that the Converse API request is accepted. "." represents
+        a language-neutral no-op user turn.
 
         Args:
             messages: The converted message list (may be mutated in-place).
@@ -188,7 +189,7 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
             The same list, possibly with an appended user message.
         """
         if messages and messages[-1]["role"] == "assistant":
-            messages.append({"role": "user", "content": [{"text": "(continue)"}]})
+            messages.append({"role": "user", "content": [{"text": "."}]})
         return messages
 
     def _from_universal_context_message(self, message: LLMContextMessage) -> dict[str, Any]:
