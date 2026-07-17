@@ -1539,22 +1539,8 @@ def traced_openai_realtime(operation: str) -> Callable:
                             **operation_attrs,
                         )
 
-                        # For llm_response operation, also handle token usage metrics
-                        if operation == "llm_response" and hasattr(self, "start_llm_usage_metrics"):
-                            evt = args[0] if args else None
-                            if evt and hasattr(evt, "response") and hasattr(evt.response, "usage"):
-                                usage = evt.response.usage
-                                # Create LLMTokenUsage object
-                                from pipecat.metrics.metrics import LLMTokenUsage
-
-                                tokens = LLMTokenUsage(
-                                    prompt_tokens=getattr(usage, "input_tokens", 0),
-                                    completion_tokens=getattr(usage, "output_tokens", 0),
-                                    total_tokens=getattr(usage, "total_tokens", 0),
-                                )
-                                _add_token_usage_to_span(current_span, tokens)
-
-                            # Capture TTFB metric if available
+                        # Capture TTFB metric if available
+                        if operation == "llm_response":
                             ttfb = getattr(getattr(self, "_metrics", None), "ttfb", None)
                             if ttfb is not None:
                                 current_span.set_attribute("metrics.ttfb", ttfb)
