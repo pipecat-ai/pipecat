@@ -381,5 +381,6 @@ class TestClassifyHopLiteralMatchHandlesStrayAngleBracket(unittest.TestCase):
         # (via _raw_len_for_clean_chars), so this pins down *which* strategy matched.
         self.assertEqual(hop.seg_chars, len("<3"))
 
+
 if __name__ == "__main__":
     unittest.main()
