@@ -174,12 +174,12 @@ class ImageRawFrame:
     """A frame containing a raw image.
 
     Parameters:
-        image: Raw image bytes or a base64-encoded string.
+        image: Raw image bytes.
         size: Image dimensions as (width, height) tuple.
         format: Image format (e.g., 'RGB', 'RGBA').
     """
 
-    image: bytes | str
+    image: bytes
     size: tuple[int, int]
     format: str | None
 

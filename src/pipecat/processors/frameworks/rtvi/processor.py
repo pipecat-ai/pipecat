@@ -588,11 +588,14 @@ class RTVIProcessor(FrameProcessor):
                 size = (file.source.width or 0, file.source.height or 0)
             else:
                 size = (0, 0)
-            if source.startswith("data:"):
-                source = base64.b64decode(source.split("base64,")[1])
+            image_bytes: bytes = (
+                base64.b64decode(source.split("base64,")[1])
+                if isinstance(source, str) and source.startswith("data:")
+                else source  # type: ignore[assignment]
+            )
             file_frame = UserImageRawFrame(
                 text=data.content,
-                image=source,
+                image=image_bytes,
                 size=size,
                 format=file.format,
                 append_to_context=True,
