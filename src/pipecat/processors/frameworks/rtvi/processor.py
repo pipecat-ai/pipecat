@@ -8,8 +8,8 @@
 
 import asyncio
 import base64
-import io
 import os
+import re
 from collections.abc import Mapping
 from typing import Any, Optional
 
@@ -517,16 +517,37 @@ class RTVIProcessor(FrameProcessor):
 
         match file.source:
             case RTVI.FileBytes() as fs:
-                source = fs.bytes
+                source = f"data:{file.format};base64,{fs.bytes}"
             case RTVI.FileUrl() as fs:
                 if not fs.public:
-                    # read bytes from URL and encode to base64
+                    if not fs.url.startswith(("http://", "https://")):
+                        logger.warning(f"Unsupported URL scheme for file fetch: {fs.url!r}")
+                        await self._send_error_response(message_id, "Unsupported URL scheme")
+                        return
+                    _MAX_FILE_BYTES = 50 * 1024 * 1024
                     type = "bytes"
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(fs.url) as response:
-                            content = io.BytesIO(await response.content.read())
-                            base64_string = base64.b64encode(content.getvalue()).decode("utf-8")
-                            source = f"data:{file.format};base64,{base64_string}"
+                    try:
+                        timeout = aiohttp.ClientTimeout(total=30)
+                        async with aiohttp.ClientSession(timeout=timeout) as session:
+                            async with session.get(fs.url) as response:
+                                response.raise_for_status()
+                                raw_bytes = await response.content.read(_MAX_FILE_BYTES + 1)
+                                if len(raw_bytes) > _MAX_FILE_BYTES:
+                                    logger.warning(
+                                        f"File at URL exceeds {_MAX_FILE_BYTES} byte limit"
+                                    )
+                                    await self._send_error_response(message_id, "File too large")
+                                    return
+                                base64_string = base64.b64encode(raw_bytes).decode("utf-8")
+                                source = f"data:{file.format};base64,{base64_string}"
+                    except TimeoutError:
+                        logger.warning(f"Timed out fetching file from URL: {fs.url}")
+                        await self._send_error_response(message_id, "Timed out fetching file")
+                        return
+                    except aiohttp.ClientError as e:
+                        logger.warning(f"Failed to fetch file from URL: {e}")
+                        await self._send_error_response(message_id, f"Failed to fetch file: {e}")
+                        return
                 else:
                     source = fs.url
             case RTVI.FileId() as fs:
@@ -541,9 +562,14 @@ class RTVIProcessor(FrameProcessor):
                     )
                     await self._send_error_response(message_id, "Uploads folder not set")
                     return
+                suffix = fs.id.removeprefix("pipecat:")
+                if not re.fullmatch(r"[0-9a-f]{32}", suffix):
+                    logger.warning(f"Invalid file ID format: {fs.id}")
+                    await self._send_error_response(message_id, "Invalid file ID")
+                    return
                 # read bytes from file system, encode to base64, then delete the file
                 type = "bytes"
-                file_path = os.path.join(self._folder, fs.id.removeprefix("pipecat:"))
+                file_path = os.path.join(self._folder, suffix)
                 with open(file_path, "rb") as f:
                     raw_bytes = f.read()
                     encoded_file = base64.b64encode(raw_bytes).decode("utf-8")
@@ -576,6 +602,7 @@ class RTVIProcessor(FrameProcessor):
                 text=data.content,
                 file=source,
                 type=type,
+                filename=file.name,
                 format=file.format,
                 custom_options=opts.custom_options,
                 append_to_context=True,

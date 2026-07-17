@@ -1883,6 +1883,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             format=frame.format,
             text=frame.text,
             file=frame.file,
+            name=frame.filename,
             #            options=frame.custom_options,
         )
 
