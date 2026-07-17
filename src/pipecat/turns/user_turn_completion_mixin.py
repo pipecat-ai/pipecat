@@ -434,6 +434,13 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             # so the assistant aggregator's ``_user_speaking`` is False by
             # the time a ``FunctionCallResultFrame`` arrives.
             await self._broadcast_turn_completion()
+            # A function call means a fresh post-tool inference is coming, and
+            # that response is expected to speak. Clear the voiced latch so the
+            # ✓ guard in ``_push_turn_text`` does not drop its text. Clearing
+            # here is safe: if the current response already voiced a ✓, its
+            # ``_turn_marker`` is COMPLETE and text streams via the COMPLETE
+            # branch (not the latch guard), so the filler is not truncated.
+            self._user_turn_completion_voiced = False
         elif isinstance(frame, LLMFullResponseStartFrame):
             # A new LLM response is starting. If an incomplete timeout is still
             # pending from a prior ○/◐, the LLM is already re-engaging: either

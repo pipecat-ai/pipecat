@@ -9,6 +9,7 @@ import unittest.mock
 from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import (
+    FunctionCallsStartedFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMarkerFrame,
@@ -320,6 +321,56 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
 
         texts = [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)]
         self.assertEqual(texts, ["First answer", "Second answer"])
+
+    async def test_function_call_resets_completion_latch(self):
+        """A FunctionCallsStartedFrame lets the post-tool inference voice a completion.
+
+        The LLM committing to a tool call means a fresh post-tool response is
+        coming, and that response is expected to speak. Without resetting the
+        latch here, its text would hit the ✓ guard and be dropped.
+        """
+        processor = MockProcessor()
+        processor._user_turn_completion_voiced = True
+        processor.broadcast_frame = AsyncMock()
+
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", AsyncMock()):
+            await processor.push_frame(FunctionCallsStartedFrame(function_calls=[]))
+
+        self.assertFalse(processor._user_turn_completion_voiced)
+
+    async def test_post_tool_response_speaks_after_voiced_filler(self):
+        """Regression test for T-2817: silence after a tool call following a spoken ✓ filler.
+
+        Sequence: the LLM speaks a ✓ acknowledgement ("One moment."), setting the
+        latch; it then commits to a tool call (FunctionCallsStartedFrame); the
+        filler response ends (per-response state reset, latch previously survived);
+        the post-tool inference produces a fresh ✓ with the real answer. Without
+        resetting the latch on the tool-call path, the second response would be
+        silently dropped and the bot would go quiet despite the tool succeeding.
+        """
+        processor = MockProcessor()
+        processor.broadcast_frame = AsyncMock()
+
+        pushed_frames = []
+        with unittest.mock.patch.object(
+            FrameProcessor,
+            "push_frame",
+            AsyncMock(side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)),
+        ):
+            # Filler response: LLM speaks a ✓ acknowledgement, latch is set.
+            await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} One moment.")
+            self.assertTrue(processor._user_turn_completion_voiced)
+
+            # LLM commits to a tool call, then the filler response ends.
+            await processor.push_frame(FunctionCallsStartedFrame(function_calls=[]))
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+            # Post-tool inference: fresh ✓ with the real answer must be spoken.
+            await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Here are the openings.")
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        texts = [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)]
+        self.assertEqual(texts, ["One moment.", "Here are the openings."])
 
 
 class MockLLMService(LLMService):
