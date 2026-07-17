@@ -108,7 +108,21 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         and fall back to treating any transcript as a standalone utterance.
         """
         await super().reset()
+        await self._reset(clear_vad_user_speaking=False)
+
+    async def handle_user_turn_started(self):
+        """Ready the strategy to detect the end of the turn now starting."""
+        await self.reset()
+
+    async def handle_user_turn_stopped(self):
+        """Clear per-turn state once the turn has ended."""
+        await self._reset(clear_vad_user_speaking=True)
+
+    async def _reset(self, *, clear_vad_user_speaking: bool):
+        """Clear per-turn state, optionally resetting the live VAD flag."""
         self._text = ""
+        if clear_vad_user_speaking:
+            self._vad_user_speaking = False
         self._transcript_finalized = False
         self._vad_stopped_time = None
         self._user_speech_wait_done = False

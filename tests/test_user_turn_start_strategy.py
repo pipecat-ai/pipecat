@@ -42,9 +42,9 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(should_start)
 
-        # Reset and check again
+        # A new turn starts; the strategy re-arms.
         should_start = None
-        await strategy.reset()
+        await strategy.handle_user_turn_started()
 
         await strategy.process_frame(BotStartedSpeakingFrame())
         await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))

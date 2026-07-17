@@ -3710,6 +3710,28 @@
       "location": "pipecat/transports/whatsapp/client.py"
     },
     {
+      "subject": "BaseUserTurnStartStrategy.reset",
+      "module": "pipecat.turns.user_start.base_user_turn_start_strategy",
+      "kind": "method",
+      "deprecated_in": "1.6.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "handle_user_turn_started",
+      "message": "Use :meth:`handle_user_turn_started` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/turns/user_start/base_user_turn_start_strategy.py"
+    },
+    {
+      "subject": "BaseUserTurnStopStrategy.reset",
+      "module": "pipecat.turns.user_stop.base_user_turn_stop_strategy",
+      "kind": "method",
+      "deprecated_in": "1.6.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "handle_user_turn_started",
+      "message": "Use :meth:`handle_user_turn_started` and :meth:`handle_user_turn_stopped` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
+    },
+    {
       "subject": "TaskManager.setup",
       "module": "pipecat.utils.asyncio.task_manager",
       "kind": "method",

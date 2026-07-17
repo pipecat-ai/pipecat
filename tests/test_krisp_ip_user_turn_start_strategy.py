@@ -260,7 +260,7 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         finally:
             await strategy.cleanup()
 
-    async def test_reset_method_clears_state(self):
+    async def test_handle_user_turn_started_clears_state(self):
         self.mock_ip_session.process = MagicMock(return_value=0.1)
 
         strategy = self._make_strategy(threshold=0.5)
@@ -270,7 +270,7 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(strategy._speech_active)
             self.assertGreater(len(strategy._audio_buffer), 0)
 
-            await strategy.reset()
+            await strategy.handle_user_turn_started()
 
             self.assertFalse(strategy._speech_active)
             self.assertEqual(len(strategy._audio_buffer), 0)

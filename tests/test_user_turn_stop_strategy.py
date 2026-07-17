@@ -316,8 +316,8 @@ class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
         should_start = None
 
-        # Reset for next turn (in real usage, UserTurnController would do this)
-        await strategy.reset()
+        # Arm for the next turn (the controller notifies stop strategies at turn start)
+        await strategy.handle_user_turn_started()
 
         # S - new turn starts
         await strategy.process_frame(VADUserStartedSpeakingFrame())
@@ -641,11 +641,10 @@ class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         ``UserTurnController`` resets all stop strategies when a turn starts
         (see ``_trigger_user_turn_start``), which can happen right after a
         ``VADUserStartedSpeakingFrame`` with no matching stop yet — the user
-        is still speaking. ``reset()`` unconditionally clears
-        ``_vad_user_speaking``, so a finalized transcript for a mid-utterance
-        segment (as streaming STT services emit) is treated as the no-VAD
-        fallback and the turn is stopped by ``user_speech_timeout`` even
-        though the user never stopped talking.
+        is still speaking. ``reset()`` must preserve that live VAD state so a
+        finalized transcript for a mid-utterance segment (as streaming STT
+        services emit) is not treated as the no-VAD fallback and stopped by
+        ``user_speech_timeout`` while the user never stopped talking.
         """
         strategy = await self._create_strategy()
 
@@ -677,13 +676,13 @@ class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
         self.assertEqual(stop_count, 0)
 
-    async def test_reset_clears_stale_text_no_premature_stop(self):
-        """Test that reset() clears stale text and cancels timeout, preventing premature stop.
+    async def test_turn_callbacks_clear_stale_text_no_premature_stop(self):
+        """Turn callbacks clear stale text and cancel timeouts, preventing premature stop.
 
-        Reproduces the bug from issue #4053: after turn 1 completes and
-        reset() is called, a late transcription sets _text. If reset() is
-        called again at turn 2 start, the stale _text should be cleared
-        so no premature stop occurs on VAD stop.
+        Reproduces the bug from issue #4053: after turn 1 completes and the
+        stop callback runs, a late transcription sets _text. Arming at turn 2
+        start (handle_user_turn_started) should clear the stale _text so no
+        premature stop occurs on VAD stop.
         """
         strategy = await self._create_strategy()
 
@@ -701,14 +700,14 @@ class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
         self.assertEqual(stop_count, 1)
 
-        # Reset after turn 1 (as controller would do at turn stop)
-        await strategy.reset()
+        # Turn 1 ends (as the controller notifies stop strategies at turn stop)
+        await strategy.handle_user_turn_stopped()
 
         # === Late transcription arrives between turns ===
         await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))
 
-        # Reset at turn 2 start (the fix: controller now resets stop strategies at turn start)
-        await strategy.reset()
+        # Turn 2 arms (the controller notifies stop strategies at turn start)
+        await strategy.handle_user_turn_started()
 
         # === Turn 2: S-T-E (transcription arrives during turn) ===
         await strategy.process_frame(VADUserStartedSpeakingFrame())

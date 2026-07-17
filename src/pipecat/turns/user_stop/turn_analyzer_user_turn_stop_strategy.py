@@ -95,9 +95,25 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
     def wait_for_transcript(self, value: bool) -> None:
         self._wait_for_transcript = value
 
-    async def reset(self):
-        """Reset the strategy to its initial state."""
-        await super().reset()
+    async def handle_user_turn_started(self):
+        """Ready the strategy to detect the end of the turn now starting."""
+        await self._reset()
+
+    async def handle_user_turn_stopped(self):
+        """Clear the analyzer's buffered speech when the turn ends.
+
+        Beyond the usual per-turn reset, drop the analyzer's buffered speech
+        state so a stale silence timer can't fire a phantom end-of-turn after
+        an externally-ended turn (for example a forced stop while a mute
+        strategy held audio back). The analyzer already clears itself on its
+        own COMPLETE, so the clear is a no-op on the normal path; the
+        pre-speech buffer refills continuously before the next turn starts.
+        """
+        await self._reset()
+        self._turn_analyzer.clear()
+
+    async def _reset(self):
+        """Clear per-turn bookkeeping. Runs at both turn boundaries."""
         self._text = ""
         self._turn_complete = False
         self._vad_user_speaking = False
