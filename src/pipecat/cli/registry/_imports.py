@@ -87,6 +87,7 @@ IMPORTS = {
     # LLM Services
     "anthropic_llm": ["from pipecat.services.anthropic.llm import AnthropicLLMService"],
     "aws_bedrock_llm": ["from pipecat.services.aws.llm import AWSBedrockLLMService"],
+    "atlascloud_llm": ["from pipecat.services.atlascloud.llm import AtlasCloudLLMService"],
     "azure_llm": ["from pipecat.services.azure.llm import AzureLLMService"],
     "cerebras_llm": ["from pipecat.services.cerebras.llm import CerebrasLLMService"],
     "crusoe_llm": ["from pipecat.services.crusoe.llm import CrusoeLLMService"],

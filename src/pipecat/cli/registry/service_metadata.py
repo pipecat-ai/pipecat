@@ -479,6 +479,16 @@ class ServiceRegistry:
             manual_config=True,
         ),
         ServiceDefinition(
+            value="atlascloud_llm",
+            label="Atlas Cloud",
+            package="pipecat-ai[atlascloud]",
+            class_name=["AtlasCloudLLMService"],
+            env_prefix="ATLASCLOUD",
+            include_params=["api_key"],
+            settings_params=["model", "system_instruction"],
+            param_defaults={"model": "qwen/qwen3.5-flash"},
+        ),
+        ServiceDefinition(
             value="azure_llm",
             label="Azure OpenAI",
             package="pipecat-ai[azure]",
