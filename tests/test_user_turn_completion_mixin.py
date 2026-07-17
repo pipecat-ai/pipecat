@@ -372,6 +372,36 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         texts = [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)]
         self.assertEqual(texts, ["One moment.", "Here are the openings."])
 
+    async def test_tool_call_allows_only_one_extra_completion(self):
+        """A tool call grants exactly ONE extra spoken completion, then re-latches.
+
+        Clearing the latch on FunctionCallsStartedFrame lets the post-tool
+        response speak, but that response's own ✓ re-arms the latch, so a later
+        stray inference in the same turn is still dropped. This guards against
+        the reset accidentally widening into an open-ended window.
+        """
+        processor = MockProcessor()
+        processor.broadcast_frame = AsyncMock()
+
+        pushed_frames = []
+        with unittest.mock.patch.object(
+            FrameProcessor,
+            "push_frame",
+            AsyncMock(side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)),
+        ):
+            await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} One moment.")
+            await processor.push_frame(FunctionCallsStartedFrame(function_calls=[]))
+            await processor.push_frame(LLMFullResponseEndFrame())
+            await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Here are the openings.")
+            await processor.push_frame(LLMFullResponseEndFrame())
+            # Stray acoustic-detector inference, same turn, no new tool call.
+            await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Duplicate!")
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        texts = [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)]
+        self.assertEqual(texts, ["One moment.", "Here are the openings."])
+        self.assertTrue(processor._user_turn_completion_voiced)
+
 
 class MockLLMService(LLMService):
     """Minimal LLM service for testing system_instruction composition."""
