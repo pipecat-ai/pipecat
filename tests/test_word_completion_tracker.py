@@ -1565,6 +1565,30 @@ class TestUserFacingTextStrayAngleBracket(unittest.TestCase):
         self.assertEqual(tracker.get_accumulated_user_facing_text(), text)
 
 
+class TestWordBelongsHereLiteralAngleBracketWord(unittest.TestCase):
+    """End-to-end companion to
+    TestClassifyHopLiteralMatchHandlesStrayAngleBracket (test_text_segment_map.py):
+    a literal '<3' arriving as its own word-timestamp token, mid-stream, is
+    recognized by literal matching and consumed normally -- not rejected as
+    an unrecognized word, and not force-completing the frame.
+    """
+
+    def test_literal_angle_bracket_word_belongs_and_does_not_force_complete(self):
+        text = "I love you <3 always"
+        tracker = WordCompletionTracker(text)
+        for word in ["I", "love", "you"]:
+            tracker.add_word_and_check_complete(word)
+
+        self.assertTrue(tracker.word_belongs_here("<3"))
+        complete = tracker.add_word_and_check_complete("<3")
+        self.assertFalse(complete)
+        self.assertIsNone(tracker.get_overflow_word())
+
+        complete = tracker.add_word_and_check_complete("always")
+        self.assertTrue(complete)
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), text)
+
+
 class TestWordCompletionTrackerUnicodeSymbolSubstitution(unittest.TestCase):
     """Guards against the regression where ElevenLabs maps Unicode symbols such
     as '→' to ASCII punctuation like '-' in word-timestamp events.

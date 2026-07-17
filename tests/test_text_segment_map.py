@@ -8,6 +8,7 @@ import unittest
 
 from pipecat.utils.context.text_segment_map import (
     TextSegmentMap,
+    _HopKind,
     _raw_len_for_clean_chars,
     strip_complete_markup,
     strip_markup,
@@ -357,6 +358,21 @@ class TestTextSegmentMapStrayAngleBracket(unittest.TestCase):
         self.assertEqual(seg.tts, text)
         self.assertFalse(seg.is_transformed)
 
+
+class TestClassifyHopLiteralMatchHandlesStrayAngleBracket(unittest.TestCase):
+    """A literal '<3' arriving as its own word-timestamp token (e.g. an emoticon
+    in ordinary text) is placed by _classify_hop's literal-matching strategies
+    (1/2) directly, character for character against the segment's raw
+    remaining text.
+    """
+
+    def test_literal_angle_bracket_word_placed_via_literal_strategy(self):
+        hop = TextSegmentMap._classify_hop("<3 always", "<3")
+        self.assertEqual(hop.kind, _HopKind.PLACED)
+        # seg_chars == len(word) (offset 0 + len("<3")) is literal strategy's
+        # formula; the markup-stripped strategy would compute this differently
+        # (via _raw_len_for_clean_chars), so this pins down *which* strategy matched.
+        self.assertEqual(hop.seg_chars, len("<3"))
 
 if __name__ == "__main__":
     unittest.main()
