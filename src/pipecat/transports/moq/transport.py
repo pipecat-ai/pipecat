@@ -15,7 +15,10 @@ pipecat Frame pipeline.
 
 Each participant publishes under a per-participant broadcast path
 ``<namespace>/<participant_id>`` (e.g. ``pipecat/bot0``); the bot
-subscribes to the peer at ``<namespace>/<peer_id>``. Audio rides on a
+subscribes to the peer at ``<namespace>/<peer_id>``. That layer assumes
+both peers agree on a namespace up front; when the paths are instead
+assigned externally, ``publish_path``/``subscribe_path`` set them
+directly and the namespace is unused. Audio rides on a
 single Opus track; RTVI JSON rides on a fixed-name ``transcript.json.z``
 track carried by moq's JSON stream helper (``publish_json_stream`` /
 ``subscribe_json_stream``). The stream is an ordered, lossless append-log
@@ -37,19 +40,18 @@ Daily and WebSocket transports.
 
 Two modes:
 
-- **Server mode** (``serve=True``, currently the only supported mode):
-  the bot binds its own UDP socket via ``moq.Server`` and accepts the
-  browser's direct connection. Removes the need for a separate
-  ``moq-relay`` process for local dev. The self-signed cert fingerprints
-  are exposed via :attr:`MOQTransport.cert_fingerprints` so a browser
-  can pin them.
-- **Client mode** (default): MoQ client mode is not yet supported. The
-  bot would dial a relay at ``relay_url`` (or the constructor's
-  ``host``/``port``/``path``); transport-level wiring exists but the
-  runner blocks this mode at arg-parse time until the cert-fingerprint
-  plumbing to the browser is finished and we've validated the flow
-  against an external relay. See
-  :func:`pipecat.runner.moq._validate_moq_args` for the guard.
+- **Server mode** (``serve=True``): the bot binds its own UDP socket via
+  ``moq.Server`` and accepts the browser's direct connection. Removes
+  the need for a separate ``moq-relay`` process for local dev. The
+  self-signed cert fingerprints are exposed via
+  :attr:`MOQTransport.cert_fingerprints` so a browser can pin them.
+- **Client mode** (``serve=False``): the bot dials a relay at
+  ``relay_url`` (or the constructor's ``host``/``port``/``path``) and
+  the browser dials the same relay independently. Neither peer needs a
+  reachable address, so this is the mode that works when the bot sits
+  behind NAT. Both peers must agree on the namespace, since that's what
+  they rendezvous on — the dev runner mints a random one per session
+  and hands it to the browser (see :mod:`pipecat.runner.moq`).
 """
 
 import asyncio
@@ -222,6 +224,13 @@ class MOQParams(TransportParams):
             ``<namespace>/<participant_id>``.
         peer_id: The id of the peer (browser/client) the bot subscribes
             to: ``<namespace>/<peer_id>``.
+        publish_path: Full broadcast path to publish on, overriding
+            ``<namespace>/<participant_id>``. Set this when the paths come
+            from somewhere other than a shared namespace, e.g. a relay that
+            routes on a path prefix and derives the bot's path from the
+            peer's rather than rendezvousing both on a namespace.
+        subscribe_path: Full broadcast path to subscribe to, overriding
+            ``<namespace>/<peer_id>``. See :attr:`publish_path`.
         audio_out_track: Name of the bot's outgoing audio track.
         transcript_track: Name of the bot's outgoing transcript track. A
             fixed-name JSON stream track carrying RTVI messages as a
@@ -278,6 +287,8 @@ class MOQParams(TransportParams):
     namespace: str = DEFAULT_NAMESPACE
     participant_id: str = DEFAULT_PARTICIPANT_ID
     peer_id: str = DEFAULT_PEER_ID
+    publish_path: str | None = None
+    subscribe_path: str | None = None
     audio_out_track: str = DEFAULT_AUDIO_OUT_TRACK
     transcript_track: str = DEFAULT_TRANSCRIPT_TRACK
     verify_ssl: bool = True
@@ -399,8 +410,11 @@ class MOQTransportClient:
 
         self._cert_fingerprints: list[str] = []
 
-        self._broadcast_path = f"{params.namespace}/{params.participant_id}"
-        self._peer_broadcast_path = f"{params.namespace}/{params.peer_id}"
+        # `<namespace>/<id>` is a convenience layer over the paths: it only
+        # works when both peers agree on a namespace up front. Callers whose
+        # paths are assigned externally set them directly instead.
+        self._broadcast_path = params.publish_path or f"{params.namespace}/{params.participant_id}"
+        self._peer_broadcast_path = params.subscribe_path or f"{params.namespace}/{params.peer_id}"
         self._cleaned_up = False
         # Number of input/output transports currently holding the session
         # open. Both call :meth:`connect` on start and :meth:`stop`/
