@@ -207,6 +207,7 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
 
         def end_tts_span(service, context_id, *, interrupted=False):
             """End the TTS span for ``context_id`` if still open. Idempotent."""
+            getattr(service, "_tts_texts", {}).pop(context_id, None)
             entry = service._tts_spans.pop(context_id, None)
             if not entry:
                 return
@@ -217,6 +218,17 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                 span.end()
             except Exception as e:
                 logging.warning(f"Error closing TTS span: {e}")
+
+        def apply_text_attributes(span, texts):
+            """Set the accumulated text attributes on a TTS span.
+
+            One audio context (and thus one span) typically receives
+            several ``run_tts`` calls — one per aggregated sentence — so
+            the attributes always reflect the full accumulated text, not
+            just the latest call.
+            """
+            span.set_attribute("text", " ".join(texts))
+            span.set_attribute("metrics.character_count", sum(len(t) for t in texts))
 
         def install_audio_context_patches(service):
             """Install per-instance wrappers on the audio-context methods.
@@ -257,6 +269,7 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                 return
             service.__tts_tracing_patches_installed__ = True
             service._tts_spans = {}
+            service._tts_texts = {}
 
             orig_create = service.create_audio_context
             orig_append = service.append_to_audio_context
@@ -282,6 +295,14 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                             settings=settings,
                             operation_name="tts",
                         )
+
+                        # Apply any text buffered by run_tts before the span
+                        # existed — some services (e.g. the ElevenLabs
+                        # websocket path) create the audio context inside
+                        # run_tts, after the text-attach hook has run.
+                        texts = service._tts_texts.get(context_id)
+                        if texts:
+                            apply_text_attributes(span, texts)
                     except Exception as e:
                         logging.warning(f"Error opening TTS span: {e}")
                 return await orig_create(context_id)
@@ -293,6 +314,7 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                         if isinstance(frame, TTSStoppedFrame):
                             entry["span"].end()
                             service._tts_spans.pop(context_id, None)
+                            service._tts_texts.pop(context_id, None)
                     except Exception as e:
                         logging.warning(f"Error updating TTS span: {e}")
                 return await orig_append(context_id, frame)
@@ -319,6 +341,7 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                     logging.warning(f"Error recording TTS ttfb from MetricsFrame: {e}")
 
             async def traced_remove_audio_context(context_id):
+                service._tts_texts.pop(context_id, None)
                 entry = service._tts_spans.pop(context_id, None)
                 if entry:
                     try:
@@ -364,16 +387,28 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
             owner.setup = patched_setup
 
         def attach_run_tts_attributes(service, text, args, kwargs):
-            """Attach text-specific attributes to the in-flight TTS span."""
+            """Attach text-specific attributes to the in-flight TTS span.
+
+            Texts accumulate per audio context: with sentence aggregation,
+            one span covers several ``run_tts`` calls. The text may also
+            arrive before the span exists — some services create the audio
+            context inside ``run_tts`` — in which case it is buffered here
+            and applied by ``create_audio_context`` once the span opens.
+            """
             if not getattr(service, "_tracing_enabled", False):
                 return
             try:
+                if not text:
+                    return
+                buffers = getattr(service, "_tts_texts", None)
+                if buffers is None:
+                    return
                 context_id = args[0] if args else kwargs.get("context_id")
+                texts = buffers.setdefault(context_id, [])
+                texts.append(text)
                 entry = getattr(service, "_tts_spans", {}).get(context_id)
-                if entry and text:
-                    span = entry["span"]
-                    span.set_attribute("text", text)
-                    span.set_attribute("metrics.character_count", len(text))
+                if entry:
+                    apply_text_attributes(entry["span"], texts)
             except Exception as e:
                 logging.warning(f"Error attaching TTS text to span: {e}")
 
@@ -381,9 +416,10 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
             """Build the wrapper around ``run_tts`` that adds per-call attributes.
 
             Span lifetime is owned by the audio-context patches. This
-            wrapper only attaches the text and character count to the
-            span that was opened by ``create_audio_context`` just
-            before ``run_tts`` was invoked.
+            wrapper only records the call's text against the audio
+            context, accumulating across calls; the attributes land on
+            the span opened by ``create_audio_context`` whether that
+            happened before this call or happens inside it.
             """
             if is_async_generator:
 
