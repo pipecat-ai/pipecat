@@ -324,26 +324,38 @@ def _print_security_status(args: argparse.Namespace):
         print("   → Allowed origins: all (no restriction)")
 
 
+def _style_banner_line(text: str) -> str:
+    """Apply the development-runner banner's style (dim cyan) to one line.
+
+    Returns the text unchanged when stdout is not a TTY (e.g. redirected or
+    captured) or ``NO_COLOR`` is set, so escape codes never leak into logs.
+    """
+    if sys.stdout.isatty() and not os.environ.get("NO_COLOR"):
+        return f"\033[2;36m{text}\033[0m"  # dim + cyan
+    return text
+
+
 def _print_dev_runner_banner():
     """Print a bordered banner identifying this as the development runner.
 
     It points out the runner is for development purposes only and links to the
-    deployment docs.
+    deployment docs. Rendered dim so it doesn't compete with the connection
+    details that follow.
     """
     lines = [
         "PIPECAT DEVELOPMENT RUNNER",
         "",
-        "For development purposes only.",
+        "⚠️  For development purposes only.",
         "",
         "Learn about running bots locally and in production:",
         "https://docs.pipecat.ai/pipecat/deployment/overview",
     ]
     width = max(len(line) for line in lines)
     print()
-    print("╭" + "─" * (width + 2) + "╮")
+    print(_style_banner_line("╭" + "─" * (width + 2) + "╮"))
     for line in lines:
-        print(f"│ {line.ljust(width)} │")
-    print("╰" + "─" * (width + 2) + "╯")
+        print(_style_banner_line(f"│ {line.ljust(width)} │"))
+    print(_style_banner_line("╰" + "─" * (width + 2) + "╯"))
 
 
 def _print_startup_message(args: argparse.Namespace):
