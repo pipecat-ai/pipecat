@@ -372,7 +372,7 @@ def _print_dev_runner_banner():
     doesn't compete with the connection details that follow.
     """
     lines = [
-        "ᓚᘏᗢ💻 PIPECAT DEVELOPMENT RUNNER",
+        "ᓚᘏᗢ PIPECAT DEVELOPMENT RUNNER",
         "",
         "Learn about running bots locally and in production:",
         "https://docs.pipecat.ai/pipecat/deployment/overview",
