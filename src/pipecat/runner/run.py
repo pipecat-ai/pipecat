@@ -352,10 +352,9 @@ def _style_banner_line(text: str) -> str:
 def _display_width(text: str) -> int:
     """Return the number of terminal columns ``text`` occupies.
 
-    Counts East-Asian wide/fullwidth characters (including emoji such as the
-    banner's warning marker) as two columns, and combining marks and variation
-    selectors as zero, so bordered lines align regardless of how a terminal
-    sizes wide glyphs.
+    Counts East-Asian wide/fullwidth characters (including emoji) as two
+    columns, and combining marks and variation selectors as zero, so bordered
+    lines align regardless of how a terminal sizes wide glyphs.
     """
     width = 0
     for ch in text:
@@ -369,14 +368,11 @@ def _display_width(text: str) -> int:
 def _print_dev_runner_banner():
     """Print a bordered banner identifying this as the development runner.
 
-    It points out the runner is for development purposes only and links to the
-    deployment docs. Rendered dim so it doesn't compete with the connection
-    details that follow.
+    Names the runner and links to the deployment docs. Rendered dim so it
+    doesn't compete with the connection details that follow.
     """
     lines = [
-        "PIPECAT DEVELOPMENT RUNNER",
-        "",
-        "🚧 For development purposes only.",
+        "ᓚᘏᗢ💻 PIPECAT DEVELOPMENT RUNNER",
         "",
         "Learn about running bots locally and in production:",
         "https://docs.pipecat.ai/pipecat/deployment/overview",
