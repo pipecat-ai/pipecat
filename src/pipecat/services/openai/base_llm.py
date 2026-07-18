@@ -19,6 +19,7 @@ import httpx
 from loguru import logger
 from openai import (
     NOT_GIVEN,
+    APIConnectionError,
     APITimeoutError,
     AsyncOpenAI,
     AsyncStream,
@@ -210,6 +211,208 @@ def _recover_leaked_tool_call(content: str, known_names):
         if m:
             return name, {}, m.start(), m.end()
     return None
+
+
+# Reasoning markup a thinking model leaks into ``delta.content``. Gemma-4's
+# canonical form is the ``<|thought|>…<|/thought|>`` special token (which the
+# server-side ``--reasoning-parser gemma4`` separates into ``reasoning_content``),
+# but the model also emits TEXTUAL pseudo-tags no server parser catches — run
+# 2002 streamed a plain ``<thought`` + English CoT straight to TTS and the
+# caller heard ~46s of "Analyze the user input…" read aloud. Other model
+# families use ``<think>`` / ``<thinking>``. Tags may or may not be piped,
+# may lack the closing ``>``, and can be split across stream chunks.
+# Tag-word terminator: not a LOWERCASE word char. A plain \b would reject a
+# ">"-less opener glued straight onto the CoT ("<thoughtThinking Process:"),
+# while a lowercase lookahead still protects prose ("<thoughts", "<thoughtful").
+# The lookahead's class is scoped case-SENSITIVE ((?-i:…)) — under the
+# pattern-wide IGNORECASE it would otherwise reject uppercase too.
+_REASONING_OPEN_RE = re.compile(
+    r"<\|?(?:thought|thinking|think)(?!(?-i:[a-z0-9_]))\|?>?", re.IGNORECASE
+)
+# The CLOSER requires its terminating ``>`` (unlike the opener, whose ``>`` is
+# optional to match run 2002's ">"-less pseudo-tag). Two reasons: (a) a closer
+# split across per-token deltas ("</thought" + ">") must never half-match and
+# leak the residual ">" into speech, and (b) held CoT prose that merely
+# MENTIONS a closer ("if we emit </think here…") must not end the hold and
+# stream the rest of the reasoning. A ">"-less closer therefore never matches:
+# the block simply holds to end of stream, where the CoT-signature flush drops
+# it and the empty-completion retry regenerates — degraded but never spoken.
+_REASONING_CLOSE_RE = re.compile(r"<\|?/(?:thought|thinking|think)\b\|?>", re.IGNORECASE)
+# Canonical complete tag forms, used to decide whether a chunk-final fragment
+# ("<thou", or a full-but-extendable match like "<thought" that may still grow
+# its "|>"/">") must be held back until more of the stream arrives.
+_REASONING_TAG_FORMS = (
+    "<|thought|>",
+    "<|thinking|>",
+    "<|think|>",
+    "<thought>",
+    "<thinking>",
+    "<think>",
+)
+
+
+def _could_grow_into_reasoning_tag(fragment: str) -> bool:
+    """True if ``fragment`` (starting at ``<``) is a proper prefix of a tag form."""
+    low = fragment.lower()
+    return any(form.startswith(low) and form != low for form in _REASONING_TAG_FORMS)
+
+
+# What genuine leaked reasoning looks like right after the opening tag —
+# Gemma-4's CoT always leads with an English "Thinking Process:" preamble
+# (optionally wrapped in markdown emphasis). Used ONLY to classify a block that
+# never closed: an opener followed by this is a run-to-limit thought (discard);
+# an opener followed by anything else is the model going straight to its answer
+# behind a lone opener (keep the answer). Mirrors the aggregate-level heuristic
+# in the API layer's delivery sanitizer.
+_REASONING_COT_SIGNATURE_RE = re.compile(
+    r"^\s*[*_#`\s]*thinking\s+process\b", re.IGNORECASE
+)
+
+
+class ReasoningTagGate:
+    """Stateful stream filter that keeps model reasoning out of visible text.
+
+    Everything downstream of the LLM service — TTS, the assistant context
+    aggregator, transcripts, the run-page feed — consumes ``LLMTextFrame``
+    chunks, and the per-sentence sanitizers there are stateless: the interior
+    sentences of a chain-of-thought block carry no marker at all, so once the
+    opening tag has streamed past, nothing downstream can tell reasoning from
+    speech. This gate is the single stateful choke point: feed every content
+    delta through :meth:`feed` and push only what comes back.
+
+    States: ``detect`` (start of stream / after a closed block — buffer until
+    the text is classified as a reasoning opener or real content), ``hold``
+    (after an opener — text is withheld, not yet judged: a closing tag proves
+    it was reasoning and discards it, releasing what follows), ``pass`` (real
+    content — emit, watching for a mid-stream opener and holding back a
+    chunk-final fragment that could still grow into a tag).
+
+    A block that never closes is judged at :meth:`flush`: a CoT signature
+    ("Thinking Process…") means run-to-limit reasoning — discarded, so the
+    caller treats the completion like an empty one and retries. Anything else
+    means the model answered directly behind a lone opener (a real Gemma-4
+    no-thinking-mode artifact) — the withheld text IS the reply and is
+    released. Holding costs latency only on turns that emit an opener at all;
+    normal turns stream through immediately.
+    """
+
+    # Longest closer form ("<|/thinking|>") — the overlap a windowed re-scan of
+    # newly held text needs so a closer spanning the window edge still matches.
+    _CLOSER_OVERLAP = 13
+
+    def __init__(self):
+        self._mode = "detect"
+        self._buf = ""
+        # Hold-mode scan cursor: text below this offset was already searched
+        # for a closer, so each feed re-scans only the new tail (+ overlap)
+        # instead of the whole held block — O(n) over a long run-to-limit CoT.
+        self._held_scanned = 0
+        self.visible_text = ""
+        self.suppressed_chars = 0
+        self.suppressed_preview = ""
+
+    def _suppress(self, text: str):
+        self.suppressed_chars += len(text)
+        if len(self.suppressed_preview) < 120:
+            self.suppressed_preview += text[: 120 - len(self.suppressed_preview)]
+
+    def feed(self, delta: str) -> str:
+        """Consume one content delta; return the part safe to emit (often "")."""
+        if not delta:
+            return ""
+        self._buf += delta
+        out = []
+        while self._buf:
+            if self._mode == "hold":
+                # The closer regex requires its terminating ">", so a closer
+                # arriving split across deltas ("</thought" + ">") simply
+                # doesn't match yet — keep holding until it completes (or the
+                # stream ends and flush judges the block).
+                m = _REASONING_CLOSE_RE.search(
+                    self._buf, max(0, self._held_scanned - self._CLOSER_OVERLAP)
+                )
+                if m:
+                    # The closer proves everything before it was reasoning.
+                    self._suppress(self._buf[: m.end()])
+                    self._buf = self._buf[m.end() :]
+                    self._held_scanned = 0
+                    self._mode = "detect"
+                    continue
+                self._held_scanned = len(self._buf)
+                break  # withhold until a closer or end of stream
+            elif self._mode == "detect":
+                probe = self._buf.lstrip()
+                if not probe:
+                    break  # only whitespace so far — wait
+                if not probe.startswith("<"):
+                    self._mode = "pass"
+                    continue
+                m = _REASONING_OPEN_RE.match(probe)
+                if (
+                    m
+                    and m.end() == len(probe)
+                    and _could_grow_into_reasoning_tag(m.group(0))
+                ):
+                    # A chunk-final match that may still be growing ("<thought"
+                    # → "<thought>", "<think" → "<thinking>"): committing now
+                    # would leave the tag's residue (">"/"ing>") to leak as
+                    # speech on the next delta. Wait for more of the stream.
+                    break
+                if m:
+                    consumed = (len(self._buf) - len(probe)) + m.end()
+                    self._suppress(self._buf[:consumed])
+                    self._buf = self._buf[consumed:]
+                    self._mode = "hold"
+                    continue
+                if _could_grow_into_reasoning_tag(probe):
+                    break  # "<thou" — wait for more before deciding
+                self._mode = "pass"
+                continue
+            else:  # pass
+                m = _REASONING_OPEN_RE.search(self._buf)
+                if (
+                    m
+                    and m.end() == len(self._buf)
+                    and _could_grow_into_reasoning_tag(m.group(0))
+                ):
+                    # Same still-growing guard as detect: emit what precedes
+                    # the candidate tag, hold the fragment itself.
+                    out.append(self._buf[: m.start()])
+                    self._buf = self._buf[m.start() :]
+                    break
+                if m:
+                    out.append(self._buf[: m.start()])
+                    self._suppress(self._buf[m.start() : m.end()])
+                    self._buf = self._buf[m.end() :]
+                    self._mode = "hold"
+                    continue
+                i = self._buf.rfind("<")
+                if i != -1 and _could_grow_into_reasoning_tag(self._buf[i:]):
+                    out.append(self._buf[:i])
+                    self._buf = self._buf[i:]
+                else:
+                    out.append(self._buf)
+                    self._buf = ""
+                break
+        emitted = "".join(out)
+        self.visible_text += emitted
+        return emitted
+
+    def flush(self) -> str:
+        """End of stream: settle whatever is still buffered.
+
+        In ``hold`` (an opener with no closer): a CoT signature marks the text
+        as run-to-limit reasoning — dropped; otherwise it is the model's reply
+        behind a lone opener — released. In ``detect``/``pass`` the buffer was
+        only a *potential* tag fragment; the stream is over, so it is ordinary
+        text and is emitted.
+        """
+        tail, self._buf = self._buf, ""
+        if self._mode == "hold" and _REASONING_COT_SIGNATURE_RE.match(tail):
+            self._suppress(tail)
+            return ""
+        self.visible_text += tail
+        return tail
 
 
 @dataclass
@@ -543,19 +746,61 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             params.pop("tools", None)
             params.pop("tool_choice", None)
 
+        # Final empty retry: the identical context has already produced every
+        # previous attempt's empty completion, and a deterministic-ish model
+        # (Gemma-4 emptied 4x in a row on run 2000) will just reproduce it.
+        # Append an ephemeral instruction so the prompt differs and explicitly
+        # demands text. Request-only — params["messages"] is rebuilt from the
+        # context per call, so the shared context is never polluted.
+        if getattr(self, "_empty_retry_depth", 0) >= MAX_EMPTY_COMPLETION_RETRIES:
+            nudge = (
+                # Routing nodes keep tool_choice="required" through retries —
+                # there the empty was a swallowed malformed call, so demand a
+                # correct call, not prose.
+                "(Your previous replies were empty. Emit the required tool "
+                "call correctly now.)"
+                if params.get("tools")
+                # Everything generated here is SPOKEN to the caller — the
+                # nudge must forbid meta-commentary or the model narrates its
+                # own state aloud ("Note to user: the model was instructed…",
+                # observed live on a stress run).
+                else "(Your previous replies were empty and the caller is "
+                "still waiting. Say the next thing to the caller NOW, in the "
+                "conversation's language. Output ONLY the words the caller "
+                "should hear — no notes, no explanations, no mention of "
+                "instructions or internal state, no English unless the "
+                "conversation is in English.)"
+            )
+            params["messages"] = list(params.get("messages") or []) + [
+                {"role": "user", "content": nudge}
+            ]
+
+        async def _create():
+            # One reconnect retry: a transient connection blip otherwise kills
+            # the whole turn (run 1999 — APIConnectionError → dead air).
+            try:
+                return await self._client.chat.completions.create(**params)
+            except APIConnectionError:
+                logger.warning(
+                    f"{self}: connection error on completion request — "
+                    f"retrying once on a fresh connection"
+                )
+                await asyncio.sleep(0.3)
+                return await self._client.chat.completions.create(**params)
+
         if self._retry_on_timeout:
             try:
                 chunks = await asyncio.wait_for(
-                    self._client.chat.completions.create(**params), timeout=self._retry_timeout_secs
+                    _create(), timeout=self._retry_timeout_secs
                 )
                 return chunks
             except (TimeoutError, APITimeoutError):
                 # Retry, this time without a timeout so we get a response
                 logger.debug(f"{self}: Retrying chat completion due to timeout")
-                chunks = await self._client.chat.completions.create(**params)
+                chunks = await _create()
                 return chunks
         else:
-            chunks = await self._client.chat.completions.create(**params)
+            chunks = await _create()
             return chunks
 
     def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
@@ -636,7 +881,23 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         # LLM completion
         response = await self._client.chat.completions.create(**params)
 
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+        # Same reasoning hygiene as the streaming path: a thinking model can
+        # prefix its answer with a <thought>/<think> block, which would poison
+        # every out-of-band consumer (variable extraction JSON, call tagging,
+        # DNC classification, summaries). One whole-string pass through the
+        # gate applies identical semantics: closed blocks dropped, run-to-limit
+        # CoT dropped, a direct answer behind a lone opener kept.
+        if content and "<" in content:
+            gate = ReasoningTagGate()
+            cleaned = gate.feed(content) + gate.flush()
+            if gate.suppressed_chars:
+                logger.warning(
+                    f"{self}: suppressed {gate.suppressed_chars} chars of leaked "
+                    f"model reasoning from run_inference output"
+                )
+            content = cleaned
+        return content
 
     @traced_llm
     async def _process_context(self, context: LLMContext):
@@ -650,6 +911,11 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         # Accumulate streamed content so we can recover a tool call the model
         # emitted as plain text instead of a structured tool_calls delta.
         content_buffer = ""
+        # Keep leaked chain-of-thought (<thought>/<think> blocks) out of every
+        # downstream consumer: only what the gate emits is pushed as text.
+        # ``content_buffer`` stays RAW so tool-call recovery still sees a call
+        # written inside a reasoning block.
+        reasoning_gate = ReasoningTagGate()
 
         # Reset pending function calls when processing a new context
         self._pending_function_calls = []
@@ -782,9 +1048,11 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                         # Keep iterating through the response to collect all the argument fragments
                         arguments += tool_call.function.arguments
                 elif chunk.choices[0].delta.content:
-                    text_generated_signal = True
                     content_buffer += chunk.choices[0].delta.content
-                    await self._push_llm_text(chunk.choices[0].delta.content)
+                    visible_delta = reasoning_gate.feed(chunk.choices[0].delta.content)
+                    if visible_delta:
+                        text_generated_signal = True
+                        await self._push_llm_text(visible_delta)
 
                 # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
                 # we need to get LLMTextFrame for the transcript
@@ -811,27 +1079,58 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         # guard exists to stop. So when the guard is active, do NOT recover: let the
         # leaked syntax stay plain text (stripped from speech downstream) and end the
         # turn on the model's words.
+        # Release any held-back stream tail, then settle what is actually
+        # VISIBLE this turn. Reasoning the gate suppressed exists in the raw
+        # buffer but was never pushed downstream — every "did we say anything /
+        # what did we say" signal below must use the visible text, or a
+        # thought-only completion counts as a spoken reply and the turn dies
+        # silently.
+        gate_tail = reasoning_gate.flush()
+        if gate_tail:
+            text_generated_signal = True
+            await self._push_llm_text(gate_tail)
+        visible_text = reasoning_gate.visible_text
+        if reasoning_gate.suppressed_chars:
+            logger.warning(
+                f"{self}: suppressed {reasoning_gate.suppressed_chars} chars of "
+                f"leaked model reasoning from the stream "
+                f"(starts: {reasoning_gate.suppressed_preview[:80]!r})"
+            )
+
         loop_guard_tripped = (
             self._tool_call_rounds_this_turn >= self._max_tool_call_rounds_per_turn
         )
-        # EMPTY-GENERATION RETRY: no text and no tool call = a dead turn — the
-        # caller hears silence and unanswered messages pile up (two consecutive
-        # empty completions swallowed a booking slot and a phone number on a live
-        # flow; wf15 run 1893 stalled at the party node after ONE empty + one
-        # failed retry). A single retry is not enough for a model that empties
-        # transiently (Gemma-4): retry up to MAX_EMPTY_COMPLETION_RETRIES, each a
-        # fresh attempt on the same context, before giving up to idle handling.
-        # Healthy turns never reach here, so this adds latency only to a turn that
-        # would otherwise have gone silent.
+        # Recover a call the model wrote as prose (structured tool_calls empty).
+        # Runs on the RAW buffer: a call written inside a reasoning block is
+        # still a real call. Hoisted above the empty-retry so a thought-only
+        # completion that DID decide on a call executes it instead of burning a
+        # retry on a fresh generation.
+        recovered = None
+        if not function_name and content_buffer and not loop_guard_tripped:
+            recovered = _recover_leaked_tool_call(
+                content_buffer, [n for n in self._functions.keys() if n]
+            )
+        # EMPTY-GENERATION RETRY: no visible text and no tool call = a dead
+        # turn — the caller hears silence and unanswered messages pile up (two
+        # consecutive empty completions swallowed a booking slot and a phone
+        # number on a live flow; wf15 run 1893 stalled at the party node after
+        # ONE empty + one failed retry). A completion that was ONLY suppressed
+        # reasoning is just as dead as a truly empty one. A single retry is not
+        # enough for a model that empties transiently (Gemma-4): retry up to
+        # MAX_EMPTY_COMPLETION_RETRIES, each a fresh attempt on the same
+        # context, before giving up to idle handling. Healthy turns never reach
+        # here, so this adds latency only to a turn that would otherwise have
+        # gone silent.
         if (
             not function_name
-            and not content_buffer.strip()
+            and not recovered
+            and not visible_text.strip()
             and getattr(self, "_empty_retry_depth", 0) < MAX_EMPTY_COMPLETION_RETRIES
         ):
             self._empty_retry_depth = getattr(self, "_empty_retry_depth", 0) + 1
             try:
                 logger.warning(
-                    f"{self}: empty completion (no text, no tool calls) — "
+                    f"{self}: empty completion (no visible text, no tool calls) — "
                     f"retry {self._empty_retry_depth}/{MAX_EMPTY_COMPLETION_RETRIES}"
                 )
                 await self._process_context(context)
@@ -840,41 +1139,44 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             return
 
         # What the caller actually HEARS this turn. For a recovered leaked call
-        # this is the buffer minus the call syntax — the raw buffer ends with
-        # "[transition_to_x()]", which masks the real tail of the spoken reply
-        # (a trailing "?" that downstream open-question guards key on).
-        spoken_text = content_buffer
-        if not function_name and content_buffer and not loop_guard_tripped:
-            recovered = _recover_leaked_tool_call(
-                content_buffer, [n for n in self._functions.keys() if n]
+        # this is the visible text minus the call syntax — the raw form ends
+        # with "[transition_to_x()]", which masks the real tail of the spoken
+        # reply (a trailing "?" that downstream open-question guards key on).
+        spoken_text = visible_text
+        if recovered:
+            rec_name, rec_args, rec_start, rec_end = recovered
+            function_name = rec_name
+            arguments = json.dumps(rec_args)
+            tool_call_id = f"recovered_{func_idx}"
+            logger.warning(
+                f"{self}: recovered tool call '{rec_name}' emitted as plain "
+                f"text (structured tool_calls was empty)"
             )
-            if recovered:
-                rec_name, rec_args, rec_start, rec_end = recovered
-                function_name = rec_name
-                arguments = json.dumps(rec_args)
-                tool_call_id = f"recovered_{func_idx}"
-                logger.warning(
-                    f"{self}: recovered tool call '{rec_name}' emitted as plain "
-                    f"text (structured tool_calls was empty)"
-                )
-                # If the call was the only SPEAKABLE content, downstream stripping
-                # leaves nothing to play — so no BotStoppedSpeakingFrame will fire
-                # to flush a deferred call and the transition would be silently
-                # dropped at the next generation. Judge the remainder's
-                # speakability, not mere non-emptiness: a markdown fence /
-                # "tool_code" label / stray punctuation around the recovered call
-                # all strip to silence downstream (run 96 fence precedent).
-                remainder = (content_buffer[:rec_start] + content_buffer[rec_end:]).strip()
-                # Fence/label residue around the recovered call is never
-                # spoken — exclude it from the spoken-text signal too, or a
-                # trailing ``` masks the reply's real tail (the engine's
-                # open-question end guard keys on a trailing "?").
-                spoken_text = re.sub(
-                    r"`{2,}[ \t]*[A-Za-z_][\w-]*|`{2,}|\btool_code\b", "", remainder
-                ).strip()
-                speakable = re.sub(r"[\s.,;:!?\-–—'\"()\[\]]+", "", spoken_text)
-                if not speakable:
-                    text_generated_signal = False
+            # If the call was the only SPEAKABLE content, downstream stripping
+            # leaves nothing to play — so no BotStoppedSpeakingFrame will fire
+            # to flush a deferred call and the transition would be silently
+            # dropped at the next generation. Judge the remainder's
+            # speakability, not mere non-emptiness: a markdown fence /
+            # "tool_code" label / stray punctuation around the recovered call
+            # all strip to silence downstream (run 96 fence precedent).
+            # ``rec_start``/``rec_end`` index the RAW buffer; the call may sit
+            # inside a suppressed reasoning block and not appear in the visible
+            # text at all, so remove it from the visible text by value.
+            call_text = content_buffer[rec_start:rec_end]
+            remainder = visible_text
+            if call_text and call_text in remainder:
+                remainder = remainder.replace(call_text, " ")
+            remainder = remainder.strip()
+            # Fence/label residue around the recovered call is never
+            # spoken — exclude it from the spoken-text signal too, or a
+            # trailing ``` masks the reply's real tail (the engine's
+            # open-question end guard keys on a trailing "?").
+            spoken_text = re.sub(
+                r"`{2,}[ \t]*[A-Za-z_][\w-]*|`{2,}|\btool_code\b", "", remainder
+            ).strip()
+            speakable = re.sub(r"[\s.,;:!?\-–—'\"()\[\]]+", "", spoken_text)
+            if not speakable:
+                text_generated_signal = False
 
         # if we got a function name and arguments, check to see if it's a function with
         # a registered handler. If so, run the registered callback, save the result to
@@ -960,8 +1262,11 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             # sees "silent", lets the destination node generate, and the caller
             # hears TWO replies for one turn). True only for real, non-whitespace
             # prose, matching the defer condition below.
+            # Visible text only: suppressed reasoning never reached TTS, so a
+            # thought-only completion must count as silent here or the deferred
+            # call below waits forever for a BotStoppedSpeakingFrame.
             self._last_generation_had_text = bool(
-                text_generated_signal and content_buffer.strip()
+                text_generated_signal and visible_text.strip()
             )
             # The words themselves, for guards that need more than the bool —
             # e.g. the workflow engine's open-question end guard reads the
@@ -973,10 +1278,11 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             )
 
             # If text was generated, defer function calls until after TTS plays
-            # Otherwise, execute them immediately. Whitespace-only content never
-            # reaches TTS, so no BotStoppedSpeakingFrame would ever flush the
-            # deferred calls — treat it as no text and run them now.
-            if text_generated_signal and content_buffer.strip():
+            # Otherwise, execute them immediately. Whitespace-only or fully
+            # suppressed (reasoning-only) content never reaches TTS, so no
+            # BotStoppedSpeakingFrame would ever flush the deferred calls —
+            # treat it as no text and run them now.
+            if text_generated_signal and visible_text.strip():
                 self._pending_function_calls = function_calls
                 logger.debug(
                     f"{self}: Deferring {len(function_calls)} function calls until after TTS"
