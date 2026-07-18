@@ -297,7 +297,9 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
         )
         adapter = self.get_llm_adapter()
         params = adapter.get_llm_invocation_params(
-            context, system_instruction=effective_instruction
+            context,
+            system_instruction=effective_instruction,
+            ensure_last_message_is_user=self._should_inject_trailing_user_message(),
         )
         messages = params["messages"]
         system = params["system"]  # [{"text": "system message"}] or None
@@ -383,10 +385,46 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             }
         }
 
+    # Claude models known to support assistant message prefilling (a request
+    # whose message list ends with an assistant message). Anthropic dropped
+    # prefill support starting with the 4.6-generation models, so this is a
+    # frozen legacy set: any Claude model NOT matching is assumed to reject
+    # prefill and gets a trailing user message injected when needed.
+    _PREFILL_SUPPORTED_PATTERNS = (
+        "claude-2",
+        "claude-instant",
+        "claude-3",
+        "claude-opus-4-0",
+        "claude-opus-4-1",
+        "claude-sonnet-4-0",
+        "claude-sonnet-4-5",
+        "claude-haiku-4-5",
+    )
+
+    def _should_inject_trailing_user_message(self) -> bool:
+        """Whether to fix up requests whose message list ends with an assistant message.
+
+        Claude models without assistant-prefill support reject such requests,
+        so injection is on for any Claude model not known to support prefill.
+        Non-Claude Bedrock models are left untouched. Subclasses with exotic
+        model naming can override ``_PREFILL_SUPPORTED_PATTERNS``.
+
+        Bedrock model identifiers typically look like
+        ``us.anthropic.claude-sonnet-4-6-v1:0`` or
+        ``anthropic.claude-opus-4-6-v1:0``, so patterns are matched as
+        substrings.
+        """
+        model = self._settings.model or ""
+        if "claude" not in model:
+            return False
+        return not any(p in model for p in self._PREFILL_SUPPORTED_PATTERNS)
+
     def _get_llm_invocation_params(self, context: LLMContext) -> AWSBedrockLLMInvocationParams:
         adapter = self.get_llm_adapter()
         params = adapter.get_llm_invocation_params(
-            context, system_instruction=assert_given(self._settings.system_instruction)
+            context,
+            system_instruction=assert_given(self._settings.system_instruction),
+            ensure_last_message_is_user=self._should_inject_trailing_user_message(),
         )
         return params
 

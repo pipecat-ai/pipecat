@@ -1297,6 +1297,76 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(len(params["messages"]), 1)
         self.assertEqual(params["messages"][0]["role"], "user")
 
+    def test_ensure_last_message_is_user_appends_when_trailing_assistant(self):
+        """ensure_last_message_is_user=True appends a user message after a trailing assistant."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(
+            context, enable_prompt_caching=False, ensure_last_message_is_user=True
+        )
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertEqual(params["messages"][-1]["content"], [{"type": "text", "text": "."}])
+
+    def test_ensure_last_message_is_user_off_keeps_trailing_assistant(self):
+        """Without the flag (default), a trailing assistant message is preserved."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+        self.assertEqual(len(params["messages"]), 2)
+        self.assertEqual(params["messages"][-1]["role"], "assistant")
+
+    def test_ensure_last_message_is_user_noop_when_trailing_user(self):
+        """ensure_last_message_is_user=True does nothing when the list already ends with a user."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+                {"role": "user", "content": "How are you?"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(
+            context, enable_prompt_caching=False, ensure_last_message_is_user=True
+        )
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertEqual(params["messages"][-1]["content"], "How are you?")
+
+    def test_ensure_last_message_is_user_handles_empty_list(self):
+        """ensure_last_message_is_user=True handles an empty context."""
+        params = self.adapter.get_llm_invocation_params(
+            LLMContext(), enable_prompt_caching=False, ensure_last_message_is_user=True
+        )
+        self.assertEqual(len(params["messages"]), 0)
+
+    def test_ensure_last_message_is_user_noop_when_tool_result_trailing(self):
+        """ensure_last_message_is_user=True does nothing when a tool result (user role) trails."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {"id": "t1", "function": {"name": "get_weather", "arguments": "{}"}}
+                    ],
+                },
+                {"role": "tool", "content": "Sunny, 22°C", "tool_call_id": "t1"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(
+            context, enable_prompt_caching=False, ensure_last_message_is_user=True
+        )
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertEqual(params["messages"][-1]["content"][0]["type"], "tool_result")
+
 
 class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
     def setUp(self) -> None:
@@ -1645,6 +1715,69 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         params = self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(params["messages"][2]["role"], "user")
+
+    def test_ensure_last_message_is_user_appends_when_trailing_assistant(self):
+        """ensure_last_message_is_user=True appends a user message after a trailing assistant."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertEqual(params["messages"][-1]["content"], [{"text": "."}])
+
+    def test_ensure_last_message_is_user_off_keeps_trailing_assistant(self):
+        """Without the flag (default), a trailing assistant message is preserved."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context)
+        self.assertEqual(len(params["messages"]), 2)
+        self.assertEqual(params["messages"][-1]["role"], "assistant")
+
+    def test_ensure_last_message_is_user_noop_when_trailing_user(self):
+        """ensure_last_message_is_user=True does nothing when the list already ends with a user."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+                {"role": "user", "content": "How are you?"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][-1]["role"], "user")
+
+    def test_ensure_last_message_is_user_handles_empty_list(self):
+        """ensure_last_message_is_user=True handles an empty context."""
+        params = self.adapter.get_llm_invocation_params(
+            LLMContext(), ensure_last_message_is_user=True
+        )
+        self.assertEqual(len(params["messages"]), 0)
+
+    def test_ensure_last_message_is_user_noop_when_tool_result_trailing(self):
+        """ensure_last_message_is_user=True does nothing when a tool result (user role) trails."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {"id": "t1", "function": {"name": "get_weather", "arguments": "{}"}}
+                    ],
+                },
+                {"role": "tool", "content": "Sunny, 22°C", "tool_call_id": "t1"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertIn("toolResult", params["messages"][-1]["content"][0])
 
 
 class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
@@ -2709,6 +2842,106 @@ class TestBaseLLMAdapterHelpers(unittest.TestCase):
         )
 
         self.assertIsNone(result)
+
+
+class TestTrailingUserMessageInjection(unittest.TestCase):
+    """Model gating for the no-prefill trailing-user-message injection.
+
+    Claude 4.6+ models reject requests whose message list ends with an
+    assistant message. Injection must default to ON for any model not known
+    to support prefill (so future models are covered) and stay OFF for the
+    frozen legacy set that still supports prefill.
+    """
+
+    def _anthropic(self, **settings):
+        from pipecat.services.anthropic.llm import AnthropicLLMService
+
+        return AnthropicLLMService(
+            api_key="test-key", settings=AnthropicLLMService.Settings(**settings)
+        )
+
+    def _bedrock(self, **settings):
+        from pipecat.services.aws.llm import AWSBedrockLLMService
+
+        return AWSBedrockLLMService(
+            aws_region="us-east-1", settings=AWSBedrockLLMService.Settings(**settings)
+        )
+
+    def test_anthropic_no_prefill_models_inject(self):
+        """Models without prefill support — including unknown future ones — inject."""
+        for model in (
+            "claude-sonnet-4-6",
+            "claude-opus-4-6",
+            "claude-opus-4-8",
+            "claude-sonnet-5",  # hypothetical future model: must default to inject
+        ):
+            service = self._anthropic(model=model)
+            self.assertTrue(service._should_inject_trailing_user_message(), model)
+
+    def test_anthropic_legacy_prefill_models_do_not_inject(self):
+        """Models known to support prefill are left untouched."""
+        for model in (
+            "claude-haiku-4-5-20251001",
+            "claude-sonnet-4-5",
+            "claude-opus-4-1",
+            "claude-3-7-sonnet-latest",
+        ):
+            service = self._anthropic(model=model)
+            self.assertFalse(service._should_inject_trailing_user_message(), model)
+
+    def test_prefill_patterns_overridable_by_subclass(self):
+        """Deployments with exotic model naming can override the pattern set."""
+        from pipecat.services.anthropic.llm import AnthropicLLMService
+
+        class CustomService(AnthropicLLMService):
+            _PREFILL_SUPPORTED_PATTERNS = ("my-claude-proxy",)
+
+        service = CustomService(
+            api_key="test-key", settings=CustomService.Settings(model="my-claude-proxy-v2")
+        )
+        self.assertFalse(service._should_inject_trailing_user_message())
+
+    def test_anthropic_invocation_params_append_trailing_user(self):
+        """A trailing assistant message gets a user message appended, request-only."""
+        service = self._anthropic(model="claude-sonnet-4-6")
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hold on a second."},
+                {"role": "assistant", "content": "◐"},
+            ]
+        )
+        params = service._get_llm_invocation_params(context)
+
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertEqual(params["messages"][-1]["content"], [{"type": "text", "text": "."}])
+        # The stored context is never mutated — the fix applies to the request only.
+        self.assertEqual(context.messages[-1]["role"], "assistant")
+
+    def test_anthropic_invocation_params_untouched_when_prefill_supported(self):
+        """Legacy prefill-supporting models keep the trailing assistant message."""
+        service = self._anthropic(model="claude-haiku-4-5")
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hold on a second."},
+                {"role": "assistant", "content": "◐"},
+            ]
+        )
+        params = service._get_llm_invocation_params(context)
+
+        self.assertEqual(params["messages"][-1]["role"], "assistant")
+
+    def test_bedrock_gate_by_model(self):
+        """Bedrock IDs match by substring; non-Claude models never inject."""
+        cases = {
+            "us.anthropic.claude-sonnet-4-6-v1:0": True,
+            "anthropic.claude-opus-4-8-v1:0": True,
+            "us.anthropic.claude-haiku-4-5-v1:0": False,
+            "anthropic.claude-3-7-sonnet-20250219-v1:0": False,
+            "amazon.nova-pro-v1:0": False,
+        }
+        for model, expected in cases.items():
+            service = self._bedrock(model=model)
+            self.assertEqual(service._should_inject_trailing_user_message(), expected, model)
 
 
 if __name__ == "__main__":
