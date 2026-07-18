@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     UserStartedSpeakingFrame,
     UserTurnInferenceCompletedFrame,
+    UserTurnStopTimeoutFrame,
     VADUserStartedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -183,6 +184,13 @@ class UserTurnCompletionConfig:
         incomplete_long_timeout: Seconds to wait after long incomplete (◐) before prompting.
         incomplete_short_prompt: Custom prompt when short timeout expires.
         incomplete_long_prompt: Custom prompt when long timeout expires.
+        reprompt_on_turn_stop_timeout: When True, if a user turn is finalized by
+            the aggregator's ``user_turn_stop_timeout`` safety net and the LLM
+            never produced a completion marker (✓/○/◐) for the turn, force a
+            single re-prompt (using ``incomplete_short_prompt``) so the model
+            commits to a response instead of the turn ending silently. Skipped
+            when a ✓ was already voiced this turn or an ○/◐ re-prompt is already
+            pending. Defaults to False (no behavior change).
     """
 
     instructions: str | None = None
@@ -190,6 +198,7 @@ class UserTurnCompletionConfig:
     incomplete_long_timeout: float = 10.0
     incomplete_short_prompt: str | None = None
     incomplete_long_prompt: str | None = None
+    reprompt_on_turn_stop_timeout: bool = False
 
     @property
     def completion_instructions(self) -> str:
@@ -358,6 +367,37 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             # Timeout was cancelled (user spoke or interruption)
             pass
 
+    async def _maybe_reprompt_on_turn_stop_timeout(self):
+        """Force one re-prompt when a turn times out with no completion.
+
+        Triggered by ``UserTurnStopTimeoutFrame`` — the user turn was finalized
+        by the aggregator's ``user_turn_stop_timeout`` safety net (no stop
+        strategy fired). If turn-completion filtering is active and the LLM never
+        produced a ✓ this turn, the turn would otherwise end with no response and
+        the bot goes silent. Re-prompt with the short incomplete prompt so the
+        model commits to a ✓ answer.
+
+        Opt-in via ``UserTurnCompletionConfig.reprompt_on_turn_stop_timeout``.
+        Skipped when a ✓ was already voiced this turn or an ○/◐ re-prompt is
+        already pending (that path drives the recovery instead).
+        """
+        if not self._user_turn_completion_config.reprompt_on_turn_stop_timeout:
+            return
+        if self._user_turn_completion_voiced:
+            return
+        if self._incomplete_timeout_task and not self._incomplete_timeout_task.done():
+            return
+
+        logger.debug(
+            "User turn stop timeout with no completion marker — re-prompting for a ✓ response"
+        )
+        await self._turn_reset()
+        prompt = self._user_turn_completion_config.short_prompt
+        await self.push_frame(
+            LLMMessagesAppendFrame(messages=[{"role": "developer", "content": prompt}])
+        )
+        await self.push_frame(LLMRunFrame())
+
     async def _turn_reset(self):
         """Reset turn completion state between responses.
 
@@ -378,6 +418,18 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
                 "The system prompt may be missing turn completion instructions."
             )
             await self.push_frame(LLMTextFrame(self._turn_text_buffer))
+        elif self._turn_marker is None:
+            # No marker AND no text: the model returned an empty / marker-less
+            # completion, so nothing is pushed and the turn produces no response.
+            # Warn so this failure mode is visible — it otherwise looks like the
+            # bot silently ignored the user. If turns then stall on the
+            # user_turn_stop_timeout, enable
+            # ``UserTurnCompletionConfig.reprompt_on_turn_stop_timeout``.
+            logger.warning(
+                f"{self}: filter_incomplete_user_turns is enabled but the LLM returned an "
+                "empty completion with no turn marker (✓/○/◐); no response will be produced "
+                "for this turn."
+            )
 
         self._turn_text_buffer = ""
         self._turn_marker = None
@@ -417,6 +469,14 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
 
         # Pass frame to parent
         await super().process_frame(frame, direction)
+
+        # The user turn was finalized by user_turn_stop_timeout (no stop
+        # strategy fired). Recover if the LLM never produced a completion for
+        # the turn. Handled after forwarding so downstream consumers still see
+        # the timeout frame before any re-prompt runs. Opt-in — see
+        # UserTurnCompletionConfig.reprompt_on_turn_stop_timeout.
+        if isinstance(frame, UserTurnStopTimeoutFrame):
+            await self._maybe_reprompt_on_turn_stop_timeout()
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame downstream, resetting turn state at end of each LLM response.

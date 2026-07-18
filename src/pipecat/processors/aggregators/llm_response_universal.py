@@ -70,6 +70,7 @@ from pipecat.frames.frames import (
     UserSpeakingFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    UserTurnStopTimeoutFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -1273,6 +1274,15 @@ class LLMUserAggregator(LLMContextAggregator):
             return
 
         await self._maybe_emit_user_turn_stopped(strategy)
+
+        # A ``None`` strategy means the turn was finalized by
+        # ``user_turn_stop_timeout``, not by a stop strategy. Signal downstream
+        # turn-completion-aware services so they can recover if the LLM never
+        # produced a completion marker this turn (otherwise the turn ends with
+        # no response). Broadcast after the turn text is flushed so a re-prompt
+        # runs against the full context.
+        if strategy is None:
+            await self.broadcast_frame(UserTurnStopTimeoutFrame)
 
     async def _on_reset_aggregation(
         self, controller: UserTurnController, strategy: BaseUserTurnStartStrategy
