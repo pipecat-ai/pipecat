@@ -150,3 +150,61 @@ def test_pre_speech_buffer_trim_still_bounds_growth():
     # well below 50 entries. We're conservative — anything < 50 proves the
     # trim ran.
     assert len(analyzer._audio_buffer) < 50
+
+
+def test_clear_prevents_stale_stop_secs_completion():
+    """clear() after an externally-ended turn must kill the stale silence timer.
+
+    Regression for the phantom end-of-turn: a turn force-ended mid-speech
+    (e.g. a max-speech cap plus a mute strategy) leaves _speech_triggered
+    True with buffered audio. Without clear(), post-unmute silence
+    accumulates until stop_secs fires a spurious COMPLETE during the bot's
+    speech.
+    """
+    params = SmartTurnParams(stop_secs=0.2)
+    analyzer = _RecordingSmartTurn(sample_rate=16_000, params=params)
+    analyzer.set_sample_rate(16_000)
+
+    chunk_size = 320  # 20 ms @ 16 kHz
+    speech = np.array([16_000] * chunk_size, dtype=np.int16)
+    silence = np.zeros(chunk_size, dtype=np.int16)
+
+    # Mid-speech state: speech triggered, no COMPLETE yet.
+    for _ in range(4):
+        analyzer.append_audio(_pcm_bytes(speech), is_speech=True)
+    assert analyzer.speech_triggered
+
+    # The turn is ended externally: the strategy's handle_user_turn_stopped
+    # callback calls clear().
+    analyzer.clear()
+    assert not analyzer.speech_triggered
+
+    # Ambient silence well past stop_secs (0.6 s vs 0.2 s). Without the
+    # clear, this returned COMPLETE: the phantom stop.
+    for _ in range(30):
+        state = analyzer.append_audio(_pcm_bytes(silence), is_speech=False)
+        assert state == EndOfTurnState.INCOMPLETE
+
+
+def test_clear_drops_pre_clear_audio_from_next_segment():
+    """After clear(), the next prediction must only see post-clear audio."""
+    analyzer = _RecordingSmartTurn(sample_rate=16_000, params=SmartTurnParams())
+    analyzer.set_sample_rate(16_000)
+
+    chunk_size = 320
+    old = np.full(chunk_size, 1_000, dtype=np.int16)
+    new = np.full(chunk_size, 2_000, dtype=np.int16)
+
+    # Audio from the force-ended turn.
+    for _ in range(4):
+        analyzer.append_audio(_pcm_bytes(old), is_speech=True)
+    analyzer.clear()
+
+    # The next turn's audio, fed continuously as usual.
+    for _ in range(4):
+        analyzer.append_audio(_pcm_bytes(new), is_speech=True)
+
+    analyzer._process_speech_segment(analyzer._audio_buffer)
+    assert analyzer.captured_segment is not None
+    # Only the post-clear constant may appear in the segment.
+    assert np.allclose(analyzer.captured_segment, 2_000 / 32768.0)

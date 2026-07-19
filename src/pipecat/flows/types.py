@@ -237,13 +237,33 @@ class NodeConfig(TypedDict, total=False):
     respond_immediately: bool
 
 
+class _NoResponse:
+    """Type of the :data:`NO_RESPONSE` sentinel."""
+
+    def __repr__(self) -> str:
+        return "NO_RESPONSE"
+
+
+NO_RESPONSE = _NoResponse()
+"""Function return value (in the "next node" slot) indicating "don't immediately respond".
+
+Return ``(result, NO_RESPONSE)`` from a "consolidated" function when the bot
+should remain silent after the function finishes, rather than immediately
+responding. The function result will make it into the context, but the next
+response will be triggered by something else, like a user utterance.
+
+For functions that transition to another node,
+``NodeConfig.respond_immediately`` provides the equivalent control.
+"""
+
+
 # ``ConsolidatedFunctionResult`` is the public return-type alias for "direct"
 # functions. It must be defined **after** ``NodeConfig`` and without a string
 # forward reference: ``get_type_hints()`` on a user-defined direct function
 # resolves names against the user's module globals, not this module's, so a
 # ``"NodeConfig"`` forward reference here would fail unless the user happened
 # to import ``NodeConfig`` themselves.
-ConsolidatedFunctionResult = tuple[Any, NodeConfig | None]
+ConsolidatedFunctionResult = tuple[Any, NodeConfig | None | _NoResponse]
 """Return type for "consolidated" functions.
 
 Return type for "consolidated" functions that do either or both of:
@@ -252,8 +272,11 @@ Return type for "consolidated" functions that do either or both of:
 
 The first tuple element is the function-call result delivered to the LLM.
 Any JSON-serializable value is accepted (matching Pipecat's upstream
-``FunctionCallResultCallback`` contract). Pass ``None`` to signal a
-transition-only handler; FlowManager substitutes an acknowledgement result.
+``FunctionCallResultCallback`` contract). The second element is the next node
+to transition to, ``None`` to stay on the current node and respond, or
+:data:`NO_RESPONSE` to finish without transitioning or responding. Pass a
+``None`` *result* to signal a transition-only handler; FlowManager substitutes
+an acknowledgement result.
 """
 
 

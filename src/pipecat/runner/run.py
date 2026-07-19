@@ -56,8 +56,9 @@ Multiple transport example::
 Supported transports:
 
 - Daily - Creates rooms and tokens, runs bot as participant
-- WebRTC - Provides local WebRTC interface with prebuilt UI
+- MOQ - Media over QUIC, connects to a MOQ relay for pub/sub streaming
 - Telephony - Handles webhook and WebSocket connections for Twilio, Telnyx, Plivo, Exotel
+- WebRTC - Provides local WebRTC interface with prebuilt UI
 
 The ``/start`` endpoint accepts::
 
@@ -79,12 +80,15 @@ The ``/start`` endpoint accepts::
 To run locally:
 
 - All transports (default): ``python bot.py``
-- WebRTC only: ``python bot.py -t webrtc``
-- ESP32: ``python bot.py -t webrtc --esp32 --host 192.168.1.100``
 - Daily only: ``python bot.py -t daily``
 - Daily (direct, testing only): ``python bot.py -d``
-- Telephony: ``python bot.py -t twilio -x your_username.ngrok.io``
+- ESP32: ``python bot.py -t webrtc --esp32 --host 192.168.1.100``
 - Exotel: ``python bot.py -t exotel`` (no proxy needed, but ngrok connection to HTTP 7860 is required)
+- MOQ (bot is the server, local dev): ``python bot.py -t moq`` (``--moq-serve`` and
+  ``--moq-tls-generate localhost`` are the defaults)
+- MOQ (dial an external relay): MoQ client mode is not yet supported.
+- Telephony: ``python bot.py -t twilio -x your_username.ngrok.io``
+- WebRTC only: ``python bot.py -t webrtc``
 - WhatsApp: ``python bot.py --whatsapp``
 """
 
@@ -100,6 +104,7 @@ import os
 import secrets
 import sys
 import time
+import unicodedata
 import uuid
 from contextlib import asynccontextmanager
 from http import HTTPMethod
@@ -110,9 +115,16 @@ import aiohttp
 from fastapi.responses import FileResponse, Response
 from loguru import logger
 
+from pipecat.runner.moq import (
+    DEFAULT_MOQ_CONNECT,
+    DEFAULT_MOQ_SERVE_BIND,
+    _build_moq_client_config,
+    _validate_moq_args,
+)
 from pipecat.runner.types import (
     DailyRunnerArguments,
     EvalRunnerArguments,
+    MOQRunnerArguments,
     RunnerArguments,
     SmallWebRTCRunnerArguments,
     VonageRunnerArguments,
@@ -146,12 +158,14 @@ TRANSPORT_ROUTE_DEPENDENCIES = {
     "webrtc": ("aiortc",),
     "telephony": ("fastapi", "websockets"),
     "websocket": ("fastapi", "websockets"),
+    "moq": ("moq", "cryptography"),
 }
 TRANSPORT_INSTALL_HINTS = {
     "daily": "install pipecat-ai[daily]",
     "webrtc": "install pipecat-ai[webrtc]",
     "telephony": "install pipecat-ai[websocket]",
     "websocket": "install pipecat-ai[websocket]",
+    "moq": "install pipecat-ai[moq]",
 }
 
 # Mirror Pipecat Cloud's 4-hour max session limit so dev rooms get cleaned up.
@@ -230,7 +244,7 @@ def _runner_url(args: argparse.Namespace) -> str:
 
 def _transport_status_lists() -> tuple[list[str], list[str]]:
     """Return enabled and disabled transport labels for the startup banner."""
-    transports = ["daily", "webrtc", "telephony", "websocket"]
+    transports = ["daily", "webrtc", "telephony", "websocket", "moq"]
     enabled = []
     disabled = []
 
@@ -324,6 +338,54 @@ def _print_security_status(args: argparse.Namespace):
         print("   → Allowed origins: all (no restriction)")
 
 
+def _style_banner_line(text: str) -> str:
+    """Apply the development-runner banner's style (dim cyan) to one line.
+
+    Returns the text unchanged when stdout is not a TTY (e.g. redirected or
+    captured) or ``NO_COLOR`` is set, so escape codes never leak into logs.
+    """
+    if sys.stdout.isatty() and not os.environ.get("NO_COLOR"):
+        return f"\033[2;36m{text}\033[0m"  # dim + cyan
+    return text
+
+
+def _display_width(text: str) -> int:
+    """Return the number of terminal columns ``text`` occupies.
+
+    Counts East-Asian wide/fullwidth characters (including emoji) as two
+    columns, and combining marks and variation selectors as zero, so bordered
+    lines align regardless of how a terminal sizes wide glyphs.
+    """
+    width = 0
+    for ch in text:
+        # Combining marks and variation selectors (VS1-VS16) add no width.
+        if unicodedata.combining(ch) or 0xFE00 <= ord(ch) <= 0xFE0F:
+            continue
+        width += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+    return width
+
+
+def _print_dev_runner_banner():
+    """Print a bordered banner identifying this as the development runner.
+
+    Names the runner and links to the deployment docs. Rendered dim so it
+    doesn't compete with the connection details that follow.
+    """
+    lines = [
+        "ᓚᘏᗢ PIPECAT DEVELOPMENT RUNNER",
+        "",
+        "Learn about running bots locally and in production:",
+        "https://docs.pipecat.ai/pipecat/deployment/overview",
+    ]
+    width = max(_display_width(line) for line in lines)
+    print()
+    print(_style_banner_line("╭" + "─" * (width + 2) + "╮"))
+    for line in lines:
+        padding = " " * (width - _display_width(line))
+        print(_style_banner_line(f"│ {line}{padding} │"))
+    print(_style_banner_line("╰" + "─" * (width + 2) + "╯"))
+
+
 def _print_startup_message(args: argparse.Namespace):
     """Print connection information for the development runner."""
     print()
@@ -380,6 +442,17 @@ def _print_startup_message(args: argparse.Namespace):
     elif args.transport == "vonage":
         print()
         print("🚀 Bot ready!")
+    elif args.transport == "moq":
+        print("🚀 Bot ready! (MoQ)")
+        if not _transport_routes_enabled("moq"):
+            print(f"   → MoQ disabled ({TRANSPORT_INSTALL_HINTS['moq']})")
+        else:
+            print(f"   → Open: {_runner_url(args)}")
+            if args.moq_serve:
+                print(f"   → MoQ server: bot serving on {args.moq_bind} (no separate relay needed)")
+            else:
+                print(f"   → Relay: {args.moq_host}:{args.moq_port}{args.moq_path}")
+            print(f"   → Namespace: {args.moq_namespace}")
     print()
 
 
@@ -547,7 +620,7 @@ def _setup_unified_start_route(
     When ``-t`` was passed on the command line, requests for any other transport
     are rejected with HTTP 400.
     """
-    ALL_TRANSPORTS = ["webrtc", "daily", *TELEPHONY_TRANSPORTS, "websocket"]
+    ALL_TRANSPORTS = ["webrtc", "daily", *TELEPHONY_TRANSPORTS, "websocket", "moq"]
 
     @app.get("/status")
     async def status():
@@ -568,6 +641,9 @@ def _setup_unified_start_route(
         dailyToken: str | None
         wsUrl: str | None
         token: str | None
+        # MoQ-specific. Carries everything the browser needs to construct
+        # an `@pipecat-ai/moq-transport` instance.
+        moq: dict[str, Any] | None
 
     @app.post("/start")
     async def start_agent(request: Request):
@@ -718,6 +794,49 @@ def _setup_unified_start_route(
                 wsUrl=f"{scheme}://{args.host}:{args.port}/ws-client",
                 sessionId=session_id,
                 token=token,
+            )
+
+        elif transport == "moq":
+            # MoQ: spawn the bot and wait for it to finish MoQ bring-up
+            # before returning, so the browser's connection arrives at a
+            # server that is ready to accept it.
+            namespace = request_data.get("namespace", args.moq_namespace)
+            body = request_data.get("body", {})
+            session_id = str(uuid.uuid4())
+            bot_module = _get_bot_module()
+
+            ready_event = asyncio.Event()
+            runner_args = MOQRunnerArguments(
+                host=args.moq_host,
+                port=args.moq_port,
+                path=args.moq_path,
+                namespace=namespace,
+                participant_id=args.moq_bot_id,
+                peer_id=args.moq_client_id,
+                verify_ssl=not args.moq_tls_insecure,
+                serve=args.moq_serve,
+                serve_bind=args.moq_bind,
+                serve_tls_host=args.moq_tls_host,
+                serve_tls_cert=args.moq_tls_cert,
+                serve_tls_key=args.moq_tls_key,
+                body=body,
+                session_id=session_id,
+                ready_event=ready_event,
+            )
+            runner_args.cli_args = args
+
+            asyncio.create_task(bot_module.bot(runner_args))
+            try:
+                await asyncio.wait_for(ready_event.wait(), timeout=15.0)
+            except TimeoutError:
+                raise HTTPException(
+                    status_code=504,
+                    detail="Bot did not become ready within 15s",
+                )
+
+            return StartBotResult(
+                sessionId=session_id,
+                moq=_build_moq_client_config(args, namespace, runner_args.cert_fingerprints),
             )
 
         else:
@@ -1436,7 +1555,7 @@ def main(parser: argparse.ArgumentParser | None = None):
         "-t",
         "--transport",
         type=str,
-        choices=["daily", "eval", "vonage", "webrtc", "websocket", *TELEPHONY_TRANSPORTS],
+        choices=["daily", "eval", "moq", "vonage", "webrtc", "websocket", *TELEPHONY_TRANSPORTS],
         default=None,
         help=(
             "Restrict the server to a single transport and set it as the default for /start. "
@@ -1510,6 +1629,107 @@ def main(parser: argparse.ArgumentParser | None = None):
         ),
     )
 
+    # MOQ-specific arguments.
+    #
+    # Mode is selected by --moq-serve:
+    #   server (--moq-serve): bot binds its own UDP socket at --moq-bind and
+    #                         needs --moq-tls-cert/--moq-tls-key (prod) or
+    #                         --moq-tls-generate <hostname> (dev).
+    #   client: bot dials a relay at --moq-connect. MoQ client mode is
+    #           not yet supported — the flags below are kept for forward
+    #           compat but blocked at validation time; see
+    #           runner/moq.py::_validate_moq_args.
+    parser.add_argument(
+        "--moq-connect",
+        type=str,
+        default=None,
+        metavar="URL",
+        help=(
+            "MoQ client mode is not yet supported. When it is: relay URL the bot "
+            f"dials in client mode (default: {DEFAULT_MOQ_CONNECT}). "
+            "Format: <scheme>://<host>[:port]<path>. Pass --moq-serve for server mode."
+        ),
+    )
+    parser.add_argument(
+        "--moq-bind",
+        type=str,
+        default=None,
+        metavar="ADDR:PORT",
+        help=(
+            f"Local socket bind address. Server mode default: {DEFAULT_MOQ_SERVE_BIND}. "
+            "(Client mode: ephemeral if omitted; MoQ client mode is not yet supported.)"
+        ),
+    )
+    parser.add_argument(
+        "--moq-serve",
+        action="store_true",
+        default=True,
+        help=(
+            "Run the bot as a MOQ server — the bot binds its own UDP socket and "
+            "accepts the browser's direct connection (no separate moq-relay needed). "
+            "Requires --moq-tls-cert/--moq-tls-key (production) or "
+            "--moq-tls-generate <hostname> (self-signed dev cert). On by default, "
+            "since MoQ client mode isn't supported yet."
+        ),
+    )
+    parser.add_argument(
+        "--moq-namespace",
+        type=str,
+        default="pipecat",
+        help="MOQ namespace/room (default: pipecat)",
+    )
+    parser.add_argument(
+        "--moq-bot-id",
+        type=str,
+        default="bot0",
+        help="This bot's participant id; broadcasts under <namespace>/<bot-id> (default: bot0)",
+    )
+    parser.add_argument(
+        "--moq-client-id",
+        type=str,
+        default="client0",
+        help="Peer client's participant id the bot subscribes to (default: client0)",
+    )
+    parser.add_argument(
+        "--moq-tls-cert",
+        type=str,
+        default=None,
+        metavar="PEM",
+        help=(
+            "Path to a PEM-encoded TLS certificate chain. In server mode, used as the "
+            "listening server's cert (pair with --moq-tls-key). (Client-mode use — "
+            "sending the fingerprint to the browser for WebTransport cert pinning — is "
+            "future work; MoQ client mode is not yet supported.)"
+        ),
+    )
+    parser.add_argument(
+        "--moq-tls-key",
+        type=str,
+        default=None,
+        metavar="PEM",
+        help=("Path to the PEM-encoded private key matching --moq-tls-cert (server mode)."),
+    )
+    parser.add_argument(
+        "--moq-tls-insecure",
+        action="store_true",
+        default=False,
+        help=(
+            "MoQ client mode is not yet supported. When it is: dev only, disable TLS "
+            "certificate verification when dialing the relay. Ignored in server mode."
+        ),
+    )
+    parser.add_argument(
+        "--moq-tls-generate",
+        type=str,
+        default=None,
+        metavar="HOSTNAME",
+        help=(
+            "Server mode, dev only: generate a self-signed TLS cert for HOSTNAME. "
+            "Defaults to a self-signed cert for localhost when no TLS config is "
+            "given at all. Mutually exclusive with --moq-tls-cert/--moq-tls-key."
+        ),
+    )
+
     args = parser.parse_args()
 
     # Validate and clean proxy hostname
@@ -1524,6 +1744,14 @@ def main(parser: argparse.ArgumentParser | None = None):
             logger.error("--direct flag only works with Daily transport (-t daily)")
             return
 
+    # Resolve MoQ args (parses --moq-connect, applies serve-mode defaults,
+    # warns on conflicting flags). Stashes derived host/port/path/bind on `args`.
+    # Always run this — not just for -t moq — so args.moq_host etc. are populated
+    # whenever a client requests the moq transport at /start, even when the runner
+    # supports all transports (args.transport is None).
+    if not _validate_moq_args(args):
+        return
+
     # Validate ESP32 requirements
     if args.esp32 and args.host == "localhost":
         logger.error("For ESP32, you need to specify `--host IP` so we can do SDP munging.")
@@ -1535,6 +1763,9 @@ def main(parser: argparse.ArgumentParser | None = None):
     # Log level
     logger.remove()
     logger.add(sys.stderr, level="TRACE" if args.verbose else "DEBUG")
+
+    # Print overall dev runner banner
+    _print_dev_runner_banner()
 
     # Handle direct Daily connection (no FastAPI server)
     if args.direct:

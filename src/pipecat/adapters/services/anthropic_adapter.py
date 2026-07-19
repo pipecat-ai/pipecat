@@ -75,6 +75,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         context: LLMContext,
         enable_prompt_caching: bool,
         system_instruction: str | None = None,
+        ensure_last_message_is_user: bool = False,
     ) -> AnthropicLLMInvocationParams:
         """Get Anthropic-specific LLM invocation parameters from a universal LLM context.
 
@@ -83,6 +84,10 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             enable_prompt_caching: Whether prompt caching should be enabled.
             system_instruction: Optional system instruction from service settings
                 or ``run_inference``.
+            ensure_last_message_is_user: Whether to append a minimal user message
+                when the converted message list ends with an assistant message.
+                Required by models without assistant-prefill support, which
+                reject requests ending with an assistant message.
 
         Returns:
             Dictionary of parameters for invoking Anthropic's LLM API.
@@ -90,6 +95,8 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         converted = self._from_universal_context_messages(
             self.get_messages(context), system_instruction=system_instruction
         )
+        if ensure_last_message_is_user:
+            self._ensure_last_message_is_user(converted.messages)
         system = self._resolve_system_instruction(
             converted.system if is_given(converted.system) else None,
             system_instruction,
@@ -210,6 +217,25 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                 message["content"] = [{"type": "text", "text": "(empty)"}]
 
         return self.ConvertedMessages(messages=messages, system=system)
+
+    @staticmethod
+    def _ensure_last_message_is_user(messages: list[MessageParam]) -> list[MessageParam]:
+        """Ensure the message list does not end with an assistant message.
+
+        Models without assistant-prefill support reject requests ending with
+        an assistant message. When the last message has ``role="assistant"``,
+        a minimal user message is appended so that the API request is
+        accepted. "." represents a language-neutral no-op user turn.
+
+        Args:
+            messages: The converted message list (may be mutated in-place).
+
+        Returns:
+            The same list, possibly with an appended user message.
+        """
+        if messages and messages[-1]["role"] == "assistant":
+            messages.append({"role": "user", "content": [{"type": "text", "text": "."}]})
+        return messages
 
     def _from_universal_context_message(self, message: LLMContextMessage) -> MessageParam:
         if isinstance(message, LLMSpecificMessage):

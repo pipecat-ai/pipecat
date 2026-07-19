@@ -69,7 +69,7 @@ For BaseLLMAdapter helpers:
 import unittest
 from unittest.mock import patch
 
-from google.genai.types import Content, Part
+from google.genai.types import Content, FunctionCall, FunctionResponse, Part
 
 from pipecat.adapters.base_llm_adapter import LLMContextConversionError
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -747,6 +747,170 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         # Second message (developer) should be converted to user in Google format
         self.assertEqual(params["messages"][1].role, "user")
 
+    # --- _merge_parallel_tool_calls_for_thinking ---
+    #
+    # With thinking enabled, a batch of parallel tool calls arrives split across
+    # separate messages (each call, then its response). The adapter regroups
+    # both sides so the model turn's call count matches the following user
+    # turn's response count.
+
+    def _tool_call_message(self, call_id, *, signature=None):
+        """Build a model Content with a single function_call Part."""
+        part = Part(
+            function_call=FunctionCall(id=call_id, name=f"tool_{call_id}", args={"q": call_id})
+        )
+        if signature:
+            part.thought_signature = signature
+        return Content(role="model", parts=[part])
+
+    def _tool_response_message(self, call_id):
+        """Build a user Content with a single function_response Part."""
+        return Content(
+            role="user",
+            parts=[
+                Part(
+                    function_response=FunctionResponse(
+                        id=call_id, name=f"tool_{call_id}", response={"ok": True}
+                    )
+                )
+            ],
+        )
+
+    def _thought_signature_dict(self, call_id):
+        """Build a thought_signature dict bookmarked to a function call."""
+        return {"signature": f"sig-{call_id}", "bookmark": {"function_call": call_id}}
+
+    def test_merge_parallel_interleaved_calls_and_responses(self):
+        """Parallel calls interleaved with responses merge into one model and one user turn."""
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_response_message("c1"),
+            self._tool_call_message("c2"),
+            self._tool_response_message("c2"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1")], messages
+        )
+
+        self.assertEqual([m.role for m in result], ["model", "user"])
+        self.assertEqual([p.function_call.id for p in result[0].parts], ["c1", "c2"])
+        self.assertEqual([p.function_response.id for p in result[1].parts], ["c1", "c2"])
+
+    def test_merge_batch_ordered_calls_and_responses(self):
+        """Calls grouped first, then responses, still merge into matching turns."""
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_call_message("c2"),
+            self._tool_response_message("c1"),
+            self._tool_response_message("c2"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1")], messages
+        )
+
+        self.assertEqual([m.role for m in result], ["model", "user"])
+        self.assertEqual([p.function_call.id for p in result[0].parts], ["c1", "c2"])
+        self.assertEqual([p.function_response.id for p in result[1].parts], ["c1", "c2"])
+
+    def test_merge_three_parallel_calls(self):
+        """Three parallel calls merge into a single model turn and user turn."""
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_response_message("c1"),
+            self._tool_call_message("c2"),
+            self._tool_response_message("c2"),
+            self._tool_call_message("c3"),
+            self._tool_response_message("c3"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1")], messages
+        )
+
+        self.assertEqual([m.role for m in result], ["model", "user"])
+        self.assertEqual(len(result[0].parts), 3)
+        self.assertEqual(len(result[1].parts), 3)
+
+    def test_merge_single_call_unchanged(self):
+        """A lone signed call and its response pass through as-is."""
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_response_message("c1"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1")], messages
+        )
+
+        self.assertEqual([m.role for m in result], ["model", "user"])
+        self.assertEqual(len(result[0].parts), 1)
+        self.assertEqual(len(result[1].parts), 1)
+
+    def test_merge_sequential_calls_with_signatures_not_merged(self):
+        """Sequential calls (each with its own signature) stay in separate turns."""
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_response_message("c1"),
+            self._tool_call_message("c2", signature="sig-c2"),
+            self._tool_response_message("c2"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1"), self._thought_signature_dict("c2")], messages
+        )
+
+        self.assertEqual([m.role for m in result], ["model", "user", "model", "user"])
+        self.assertTrue(all(len(m.parts) == 1 for m in result))
+
+    def test_merge_mixed_parallel_and_sequential_groups(self):
+        """A parallel group followed by a sequential call are grouped independently."""
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_response_message("c1"),
+            self._tool_call_message("c2"),
+            self._tool_response_message("c2"),
+            self._tool_call_message("c3", signature="sig-c3"),
+            self._tool_response_message("c3"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1"), self._thought_signature_dict("c3")], messages
+        )
+
+        self.assertEqual([m.role for m in result], ["model", "user", "model", "user"])
+        self.assertEqual([len(m.parts) for m in result], [2, 2, 1, 1])
+
+    def test_merge_collects_interleaved_non_tool_message(self):
+        """A non-tool message inside a group is collected and re-emitted after it."""
+        text_message = Content(role="model", parts=[Part(text="thinking out loud")])
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_response_message("c1"),
+            text_message,
+            self._tool_call_message("c2"),
+            self._tool_response_message("c2"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1")], messages
+        )
+
+        # Both calls still merge (and both responses), and the interleaved text
+        # is preserved after the merged group rather than stopping the merge.
+        self.assertEqual([m.role for m in result], ["model", "user", "model"])
+        self.assertEqual([p.function_call.id for p in result[0].parts], ["c1", "c2"])
+        self.assertEqual([p.function_response.id for p in result[1].parts], ["c1", "c2"])
+        self.assertEqual(result[2].parts[0].text, "thinking out loud")
+
+    def test_merge_no_thought_signatures_unchanged(self):
+        """Without any function-call thought signatures, messages pass through unchanged."""
+        messages = [
+            self._tool_call_message("c1"),
+            self._tool_response_message("c1"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking([], messages)
+
+        self.assertEqual(len(result), 2)
+
+    def test_merge_empty_messages(self):
+        """An empty message list returns empty."""
+        self.assertEqual(self.adapter._merge_parallel_tool_calls_for_thinking([], []), [])
+
 
 class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
     def setUp(self) -> None:
@@ -1133,6 +1297,76 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(len(params["messages"]), 1)
         self.assertEqual(params["messages"][0]["role"], "user")
 
+    def test_ensure_last_message_is_user_appends_when_trailing_assistant(self):
+        """ensure_last_message_is_user=True appends a user message after a trailing assistant."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(
+            context, enable_prompt_caching=False, ensure_last_message_is_user=True
+        )
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertEqual(params["messages"][-1]["content"], [{"type": "text", "text": "."}])
+
+    def test_ensure_last_message_is_user_off_keeps_trailing_assistant(self):
+        """Without the flag (default), a trailing assistant message is preserved."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+        self.assertEqual(len(params["messages"]), 2)
+        self.assertEqual(params["messages"][-1]["role"], "assistant")
+
+    def test_ensure_last_message_is_user_noop_when_trailing_user(self):
+        """ensure_last_message_is_user=True does nothing when the list already ends with a user."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+                {"role": "user", "content": "How are you?"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(
+            context, enable_prompt_caching=False, ensure_last_message_is_user=True
+        )
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertEqual(params["messages"][-1]["content"], "How are you?")
+
+    def test_ensure_last_message_is_user_handles_empty_list(self):
+        """ensure_last_message_is_user=True handles an empty context."""
+        params = self.adapter.get_llm_invocation_params(
+            LLMContext(), enable_prompt_caching=False, ensure_last_message_is_user=True
+        )
+        self.assertEqual(len(params["messages"]), 0)
+
+    def test_ensure_last_message_is_user_noop_when_tool_result_trailing(self):
+        """ensure_last_message_is_user=True does nothing when a tool result (user role) trails."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {"id": "t1", "function": {"name": "get_weather", "arguments": "{}"}}
+                    ],
+                },
+                {"role": "tool", "content": "Sunny, 22°C", "tool_call_id": "t1"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(
+            context, enable_prompt_caching=False, ensure_last_message_is_user=True
+        )
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertEqual(params["messages"][-1]["content"][0]["type"], "tool_result")
+
 
 class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
     def setUp(self) -> None:
@@ -1481,6 +1715,69 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         params = self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(params["messages"][2]["role"], "user")
+
+    def test_ensure_last_message_is_user_appends_when_trailing_assistant(self):
+        """ensure_last_message_is_user=True appends a user message after a trailing assistant."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertEqual(params["messages"][-1]["content"], [{"text": "."}])
+
+    def test_ensure_last_message_is_user_off_keeps_trailing_assistant(self):
+        """Without the flag (default), a trailing assistant message is preserved."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context)
+        self.assertEqual(len(params["messages"]), 2)
+        self.assertEqual(params["messages"][-1]["role"], "assistant")
+
+    def test_ensure_last_message_is_user_noop_when_trailing_user(self):
+        """ensure_last_message_is_user=True does nothing when the list already ends with a user."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+                {"role": "user", "content": "How are you?"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][-1]["role"], "user")
+
+    def test_ensure_last_message_is_user_handles_empty_list(self):
+        """ensure_last_message_is_user=True handles an empty context."""
+        params = self.adapter.get_llm_invocation_params(
+            LLMContext(), ensure_last_message_is_user=True
+        )
+        self.assertEqual(len(params["messages"]), 0)
+
+    def test_ensure_last_message_is_user_noop_when_tool_result_trailing(self):
+        """ensure_last_message_is_user=True does nothing when a tool result (user role) trails."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {"id": "t1", "function": {"name": "get_weather", "arguments": "{}"}}
+                    ],
+                },
+                {"role": "tool", "content": "Sunny, 22°C", "tool_call_id": "t1"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertIn("toolResult", params["messages"][-1]["content"][0])
 
 
 class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
@@ -2545,6 +2842,106 @@ class TestBaseLLMAdapterHelpers(unittest.TestCase):
         )
 
         self.assertIsNone(result)
+
+
+class TestTrailingUserMessageInjection(unittest.TestCase):
+    """Model gating for the no-prefill trailing-user-message injection.
+
+    Claude 4.6+ models reject requests whose message list ends with an
+    assistant message. Injection must default to ON for any model not known
+    to support prefill (so future models are covered) and stay OFF for the
+    frozen legacy set that still supports prefill.
+    """
+
+    def _anthropic(self, **settings):
+        from pipecat.services.anthropic.llm import AnthropicLLMService
+
+        return AnthropicLLMService(
+            api_key="test-key", settings=AnthropicLLMService.Settings(**settings)
+        )
+
+    def _bedrock(self, **settings):
+        from pipecat.services.aws.llm import AWSBedrockLLMService
+
+        return AWSBedrockLLMService(
+            aws_region="us-east-1", settings=AWSBedrockLLMService.Settings(**settings)
+        )
+
+    def test_anthropic_no_prefill_models_inject(self):
+        """Models without prefill support — including unknown future ones — inject."""
+        for model in (
+            "claude-sonnet-4-6",
+            "claude-opus-4-6",
+            "claude-opus-4-8",
+            "claude-sonnet-5",  # hypothetical future model: must default to inject
+        ):
+            service = self._anthropic(model=model)
+            self.assertTrue(service._should_inject_trailing_user_message(), model)
+
+    def test_anthropic_legacy_prefill_models_do_not_inject(self):
+        """Models known to support prefill are left untouched."""
+        for model in (
+            "claude-haiku-4-5-20251001",
+            "claude-sonnet-4-5",
+            "claude-opus-4-1",
+            "claude-3-7-sonnet-latest",
+        ):
+            service = self._anthropic(model=model)
+            self.assertFalse(service._should_inject_trailing_user_message(), model)
+
+    def test_prefill_patterns_overridable_by_subclass(self):
+        """Deployments with exotic model naming can override the pattern set."""
+        from pipecat.services.anthropic.llm import AnthropicLLMService
+
+        class CustomService(AnthropicLLMService):
+            _PREFILL_SUPPORTED_PATTERNS = ("my-claude-proxy",)
+
+        service = CustomService(
+            api_key="test-key", settings=CustomService.Settings(model="my-claude-proxy-v2")
+        )
+        self.assertFalse(service._should_inject_trailing_user_message())
+
+    def test_anthropic_invocation_params_append_trailing_user(self):
+        """A trailing assistant message gets a user message appended, request-only."""
+        service = self._anthropic(model="claude-sonnet-4-6")
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hold on a second."},
+                {"role": "assistant", "content": "◐"},
+            ]
+        )
+        params = service._get_llm_invocation_params(context)
+
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertEqual(params["messages"][-1]["content"], [{"type": "text", "text": "."}])
+        # The stored context is never mutated — the fix applies to the request only.
+        self.assertEqual(context.messages[-1]["role"], "assistant")
+
+    def test_anthropic_invocation_params_untouched_when_prefill_supported(self):
+        """Legacy prefill-supporting models keep the trailing assistant message."""
+        service = self._anthropic(model="claude-haiku-4-5")
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hold on a second."},
+                {"role": "assistant", "content": "◐"},
+            ]
+        )
+        params = service._get_llm_invocation_params(context)
+
+        self.assertEqual(params["messages"][-1]["role"], "assistant")
+
+    def test_bedrock_gate_by_model(self):
+        """Bedrock IDs match by substring; non-Claude models never inject."""
+        cases = {
+            "us.anthropic.claude-sonnet-4-6-v1:0": True,
+            "anthropic.claude-opus-4-8-v1:0": True,
+            "us.anthropic.claude-haiku-4-5-v1:0": False,
+            "anthropic.claude-3-7-sonnet-20250219-v1:0": False,
+            "amazon.nova-pro-v1:0": False,
+        }
+        for model, expected in cases.items():
+            service = self._bedrock(model=model)
+            self.assertEqual(service._should_inject_trailing_user_message(), expected, model)
 
 
 if __name__ == "__main__":

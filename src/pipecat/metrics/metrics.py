@@ -80,6 +80,10 @@ class LLMTokenUsage(BaseModel):
         total_tokens: Total number of tokens used (prompt + completion).
         cache_read_input_tokens: Number of tokens read from cache, if applicable.
         cache_creation_input_tokens: Number of tokens used to create cache entries, if applicable.
+        reasoning_tokens: Number of completion tokens used for reasoning, if applicable.
+        input_audio_tokens: Number of prompt tokens that were audio, if applicable.
+        output_audio_tokens: Number of completion tokens that were audio, if applicable.
+        cache_read_input_audio_tokens: Number of cache-read tokens that were audio, if applicable.
     """
 
     prompt_tokens: int
@@ -88,6 +92,9 @@ class LLMTokenUsage(BaseModel):
     cache_read_input_tokens: int | None = None
     cache_creation_input_tokens: int | None = None
     reasoning_tokens: int | None = None
+    input_audio_tokens: int | None = None
+    output_audio_tokens: int | None = None
+    cache_read_input_audio_tokens: int | None = None
 
 
 class LLMUsageMetricsData(MetricsData):

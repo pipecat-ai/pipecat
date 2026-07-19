@@ -167,7 +167,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.cleanup()
 
-    async def test_reset_preserves_inactive_state(self):
+    async def test_turn_start_preserves_inactive_state(self):
         strategy = self._create_strategy()
         await self._setup_strategy(strategy)
 
@@ -176,7 +176,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(strategy.state, _WakeState.AWAKE)
 
-        await strategy.reset()
+        await strategy.handle_user_turn_started()
         self.assertEqual(strategy.state, _WakeState.AWAKE)
 
         await strategy.cleanup()
@@ -266,8 +266,8 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.cleanup()
 
-    async def test_single_activation_stays_inactive_after_reset(self):
-        """In single activation mode, reset() keeps INACTIVE so the current turn can finish."""
+    async def test_single_activation_stays_inactive_after_turn_start(self):
+        """In single activation mode, the turn-start callback keeps INACTIVE so the current turn can finish."""
         strategy = self._create_strategy(single_activation=True, timeout=0.5)
         await self._setup_strategy(strategy)
 
@@ -278,8 +278,8 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.AWAKE)
 
-        # Simulate turn start (controller calls reset on all start strategies).
-        await strategy.reset()
+        # Simulate turn start (the controller notifies all start strategies).
+        await strategy.handle_user_turn_started()
         # State remains INACTIVE so frames continue to flow.
         self.assertEqual(strategy.state, _WakeState.AWAKE)
 

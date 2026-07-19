@@ -29,7 +29,7 @@ def _get_provider_name_from_service_name(service_name: str) -> str:
     """Extract the standardized gen_ai.provider.name value from a service class name.
 
     Source:
-    https://opentelemetry.io/docs/specs/semconv/attributes-registry/gen-ai/
+    https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/registry/attributes/gen-ai.md
 
     Uses standard OTel names where possible, with special case mappings for
     service names that don't follow the pattern.
@@ -44,12 +44,13 @@ def _get_provider_name_from_service_name(service_name: str) -> str:
         # AWS
         "AWSBedrockLLMService": "aws.bedrock",
         # Azure
-        "AzureLLMService": "az.ai.openai",
+        "AzureLLMService": "azure.ai.openai",
         # Google
         "GoogleLLMService": "gcp.gemini",
         "GoogleVertexLLMService": "gcp.vertex_ai",
         # Others
-        "GrokLLMService": "xai",
+        "GrokLLMService": "x_ai",
+        "MistralLLMService": "mistral_ai",
     }
 
     if service_name in SPECIAL_CASE_MAPPINGS:

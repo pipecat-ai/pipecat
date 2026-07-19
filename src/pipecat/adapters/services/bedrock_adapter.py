@@ -48,7 +48,11 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         return "aws"
 
     def get_llm_invocation_params(
-        self, context: LLMContext, *, system_instruction: str | None = None
+        self,
+        context: LLMContext,
+        *,
+        system_instruction: str | None = None,
+        ensure_last_message_is_user: bool = False,
     ) -> AWSBedrockLLMInvocationParams:
         """Get AWS Bedrock-specific LLM invocation parameters from a universal LLM context.
 
@@ -56,6 +60,10 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
             context: The LLM context containing messages, tools, etc.
             system_instruction: Optional system instruction from service settings
                 or ``run_inference``.
+            ensure_last_message_is_user: Whether to append a minimal user message
+                when the converted message list ends with an assistant message.
+                Required by models without assistant-prefill support, which
+                reject requests ending with an assistant message.
 
         Returns:
             Dictionary of parameters for invoking AWS Bedrock's LLM API.
@@ -63,6 +71,8 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         converted = self._from_universal_context_messages(
             self.get_messages(context), system_instruction=system_instruction
         )
+        if ensure_last_message_is_user:
+            self._ensure_last_message_is_user(converted.messages)
         effective_system = self._resolve_system_instruction(
             converted.system,
             system_instruction,
@@ -171,6 +181,25 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                 message["content"] = [{"type": "text", "text": "(empty)"}]
 
         return self.ConvertedMessages(messages=messages, system=system)
+
+    @staticmethod
+    def _ensure_last_message_is_user(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Ensure the message list does not end with an assistant message.
+
+        Models without assistant-prefill support reject requests ending with
+        an assistant message. When the last message has ``role="assistant"``,
+        a minimal user message is appended so that the Converse API request is
+        accepted. "." represents a language-neutral no-op user turn.
+
+        Args:
+            messages: The converted message list (may be mutated in-place).
+
+        Returns:
+            The same list, possibly with an appended user message.
+        """
+        if messages and messages[-1]["role"] == "assistant":
+            messages.append({"role": "user", "content": [{"text": "."}]})
+        return messages
 
     def _from_universal_context_message(self, message: LLMContextMessage) -> dict[str, Any]:
         if isinstance(message, LLMSpecificMessage):
