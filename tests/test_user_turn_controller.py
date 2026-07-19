@@ -5,12 +5,15 @@
 #
 
 import asyncio
+import time
 import unittest
 import warnings
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
+from pipecat.audio.turn.base_turn_analyzer import EndOfTurnState
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -588,6 +591,51 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
 
         await strategy.handle_user_turn_stopped()
         analyzer.clear.assert_called_once()
+
+    async def test_stt_timeout_accounts_for_analysis_time(self):
+        """The STT safety-net timeout discounts time spent in end-of-turn analysis.
+
+        ML-based analyzers spend real wall-clock time inside
+        analyze_end_of_turn(); that time has already elapsed when the timeout
+        task is armed, so it must be subtracted along with the VAD stop_secs.
+        """
+        analysis_secs = 0.5
+
+        analyzer = MagicMock()
+
+        async def slow_analyze():
+            await asyncio.sleep(analysis_secs)
+            return EndOfTurnState.COMPLETE, None
+
+        analyzer.analyze_end_of_turn = slow_analyze
+        analyzer.cleanup = AsyncMock()
+
+        strategy = TurnAnalyzerUserTurnStopStrategy(turn_analyzer=analyzer)
+        await strategy.setup(self.task_manager)
+
+        stopped = asyncio.Event()
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_stop(strategy, params):
+            stopped.set()
+
+        # STT p99 budget of 1s, of which 0.1s of VAD silence already elapsed.
+        await strategy.process_frame(STTMetadataFrame(service_name="stt", ttfs_p99_latency=1.0))
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        start = time.perf_counter()
+        await strategy.process_frame(VADUserStoppedSpeakingFrame(stop_secs=0.1))
+        # Non-finalized transcript: turn stop waits on the safety-net timeout.
+        await strategy.process_frame(TranscriptionFrame("hello", "user", "ts"))
+
+        await asyncio.wait_for(stopped.wait(), timeout=2.0)
+        elapsed = time.perf_counter() - start
+
+        # The remaining budget is 1.0 - 0.1 (stop_secs) - 0.5 (analysis) =
+        # 0.4s, so the stop lands around 0.5 + 0.4 = 0.9s. Without
+        # discounting the analysis time it would land around 1.4s.
+        self.assertLess(elapsed, 1.15)
+
+        await strategy.cleanup()
 
     async def test_deferred_forwards_both_callbacks(self):
         """The deferred() wrapper forwards both callbacks to its inner strategy."""

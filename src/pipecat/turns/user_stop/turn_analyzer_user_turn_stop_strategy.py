@@ -7,6 +7,7 @@
 """User turn stop strategy based on turn detection analyzers."""
 
 import asyncio
+import time
 
 from loguru import logger
 
@@ -219,15 +220,20 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._stop_secs = frame.stop_secs
         self._vad_stopped_time = frame.timestamp
 
+        analysis_start = time.perf_counter()
         state, prediction = await self._turn_analyzer.analyze_end_of_turn()
+        analysis_secs = time.perf_counter() - analysis_start
         await self._handle_prediction_result(prediction)
 
         # The user stopped speaking and the turn is complete, we now need to
         # wait for transcriptions.
         self._turn_complete = state == EndOfTurnState.COMPLETE
 
-        # Start the STT timeout (adjusted by VAD stop_secs since that time already elapsed)
-        timeout = max(0, self._stt_timeout - self._stop_secs)
+        # Start the STT timeout, discounting the time that already elapsed
+        # since the user actually stopped speaking: the VAD stop_secs silence
+        # window plus the end-of-turn analysis that just ran (ML analyzers
+        # spend wall-clock time on inference).
+        timeout = max(0, self._stt_timeout - self._stop_secs - analysis_secs)
 
         if not self._stop_secs_warned:
             if self._stop_secs != VAD_STOP_SECS:
