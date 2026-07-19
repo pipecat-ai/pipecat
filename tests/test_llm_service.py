@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -13,17 +14,22 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.frames.frames import (
+    Frame,
     FunctionCallFromLLM,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
+    InterruptionFrame,
     LLMContextFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     LLMSetToolsFrame,
 )
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
+from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.turns.user_mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
 
 
@@ -320,6 +326,136 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
             muted = await strategy.process_frame(frame)
 
         self.assertFalse(muted)
+
+
+class DispatchingMockLLMService(MockLLMService):
+    """Mock LLM service that emits a canned batch of function calls per context frame."""
+
+    def __init__(self, *, calls_per_context, **kwargs):
+        super().__init__(**kwargs)
+        self._calls_per_context = list(calls_per_context)
+        self._context_count = 0
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, LLMContextFrame):
+            calls = self._calls_per_context[self._context_count]
+            self._context_count += 1
+            await self.push_frame(LLMFullResponseStartFrame())
+            await self.run_function_calls(
+                [
+                    FunctionCallFromLLM(
+                        function_name=name,
+                        tool_call_id=f"call_{self._context_count}_{i}",
+                        arguments={},
+                        context=frame.context,
+                    )
+                    for i, name in enumerate(calls)
+                ]
+            )
+            await self.push_frame(LLMFullResponseEndFrame())
+        else:
+            await self.push_frame(frame, direction)
+
+
+class TestFunctionCallsOnInterruption(unittest.IsolatedAsyncioTestCase):
+    """Function calls from an interrupted generation must not execute (#4997)."""
+
+    async def test_in_flight_function_call_cancelled_on_interruption(self):
+        executed = []
+        service = DispatchingMockLLMService(calls_per_context=[["end_call"]])
+
+        async def end_call(params):
+            await asyncio.sleep(0.5)
+            executed.append("end_call")
+            await params.result_callback("done")
+
+        service.register_function("end_call", end_call)
+
+        await run_test(
+            service,
+            frames_to_send=[
+                LLMContextFrame(LLMContext()),
+                SleepFrame(0.2),
+                InterruptionFrame(),
+                SleepFrame(0.5),
+            ],
+        )
+
+        self.assertEqual(executed, [])
+
+    async def test_queued_sequential_function_call_cancelled_on_interruption(self):
+        """A queued call from the interrupted generation must not run afterwards."""
+        executed = []
+        cancelled = []
+        service = DispatchingMockLLMService(
+            calls_per_context=[["slow_lookup", "end_call"]], run_in_parallel=False
+        )
+
+        async def slow_lookup(params):
+            await asyncio.sleep(0.5)
+            executed.append("slow_lookup")
+            await params.result_callback("done")
+
+        async def end_call(params):
+            executed.append("end_call")
+            await params.result_callback("done")
+
+        service.register_function("slow_lookup", slow_lookup, cancel_on_interruption=False)
+        service.register_function("end_call", end_call)
+
+        @service.event_handler("on_function_calls_cancelled")
+        async def on_cancelled(service, function_calls):
+            cancelled.extend(fc.function_name for fc in function_calls)
+
+        await run_test(
+            service,
+            frames_to_send=[
+                LLMContextFrame(LLMContext()),
+                SleepFrame(0.2),
+                InterruptionFrame(),
+                SleepFrame(0.8),
+            ],
+        )
+
+        # The async call (cancel_on_interruption=False) survives the
+        # interruption; the queued end_call from the interrupted generation
+        # must be cancelled instead of executing.
+        self.assertEqual(executed, ["slow_lookup"])
+        self.assertEqual(cancelled, ["end_call"])
+
+    async def test_sequential_runner_survives_interruption(self):
+        """Calls from a generation after the interruption still execute."""
+        executed = []
+        service = DispatchingMockLLMService(
+            calls_per_context=[["slow_lookup"], ["greet"]], run_in_parallel=False
+        )
+
+        async def slow_lookup(params):
+            await asyncio.sleep(0.5)
+            executed.append("slow_lookup")
+            await params.result_callback("done")
+
+        async def greet(params):
+            executed.append("greet")
+            await params.result_callback("done")
+
+        service.register_function("slow_lookup", slow_lookup)
+        service.register_function("greet", greet)
+
+        await run_test(
+            service,
+            frames_to_send=[
+                LLMContextFrame(LLMContext()),
+                SleepFrame(0.2),
+                InterruptionFrame(),
+                SleepFrame(0.2),
+                LLMContextFrame(LLMContext()),
+                SleepFrame(0.5),
+            ],
+        )
+
+        self.assertEqual(executed, ["greet"])
 
 
 class TestAppendSystemInstruction(unittest.IsolatedAsyncioTestCase):

@@ -624,6 +624,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             await self.push_frame(LLMTextFrame(text))
 
     async def _handle_interruptions(self, _: InterruptionFrame):
+        # Flush queued calls first so the sequential runner can't dequeue a
+        # call from the interrupted generation while the in-flight one is
+        # being cancelled below.
+        await self._cancel_queued_function_calls()
         for function_name, entry in self._functions.items():
             if entry.cancel_on_interruption:
                 await self._cancel_function_call(function_name)
@@ -1295,8 +1299,17 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             self._function_call_tasks[task] = runner_item
             # Since we run tasks sequentially we don't need to call
             # task.add_done_callback(self._function_call_task_finished).
-            await task
-            del self._function_call_tasks[task]
+            try:
+                await task
+            except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if current and current.cancelling():
+                    # The runner itself is being cancelled; the in-flight task
+                    # stays in _function_call_tasks so cleanup() cancels it.
+                    raise
+                # Only the function call was cancelled (e.g. on interruption);
+                # keep serving queued calls.
+            self._function_call_tasks.pop(task, None)
 
     async def _run_parallel_function_calls(self, runner_items: Sequence[FunctionCallRunnerItem]):
         tasks = []
@@ -1551,6 +1564,51 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             properties=FunctionCallResultProperties(run_llm=True),
         )
 
+    async def _cancel_queued_function_calls(self):
+        """Cancel function calls that are queued but not yet started.
+
+        Only applies to sequential execution (``run_in_parallel=False``):
+        queued calls whose registry entry has ``cancel_on_interruption=True``
+        are dropped, while async calls (``cancel_on_interruption=False``)
+        remain queued.
+        """
+        if not self._sequential_runner_task:
+            return
+
+        cancelled: list[FunctionCallRunnerItem] = []
+        kept: list[FunctionCallRunnerItem] = []
+        while not self._sequential_runner_queue.empty():
+            runner_item = self._sequential_runner_queue.get_nowait()
+            if runner_item.registry_item.cancel_on_interruption:
+                cancelled.append(runner_item)
+            else:
+                kept.append(runner_item)
+        for runner_item in kept:
+            self._sequential_runner_queue.put_nowait(runner_item)
+
+        cancelled_items = []
+        for runner_item in cancelled:
+            name = runner_item.function_name
+            tool_call_id = runner_item.tool_call_id
+
+            logger.debug(f"{self} Cancelling queued function call [{name}:{tool_call_id}]...")
+
+            await self.broadcast_frame(
+                FunctionCallCancelFrame, function_name=name, tool_call_id=tool_call_id
+            )
+
+            cancelled_items.append(
+                FunctionCallFromLLM(
+                    function_name=runner_item.function_name,
+                    tool_call_id=runner_item.tool_call_id,
+                    arguments=runner_item.arguments,
+                    context=runner_item.context,
+                )
+            )
+
+        if cancelled_items:
+            await self._call_event_handler("on_function_calls_cancelled", cancelled_items)
+
     async def _cancel_function_calls_by_tool_call_id(self, tool_call_id: str):
         """Cancel in-progress function call tasks by their tool_call_id.
 
@@ -1559,7 +1617,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         """
         cancelled_tasks = set()
         cancelled_items = []
-        for task, runner_item in self._function_call_tasks.items():
+        # Snapshot first: cancel_task awaits, during which the sequential
+        # runner may remove finished tasks from _function_call_tasks.
+        for task, runner_item in list(self._function_call_tasks.items()):
             if runner_item.tool_call_id == tool_call_id:
                 name = runner_item.function_name
                 tool_call_id = runner_item.tool_call_id
@@ -1597,7 +1657,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
     async def _cancel_function_call(self, function_name: str | None):
         cancelled_tasks = set()
         cancelled_items = []
-        for task, runner_item in self._function_call_tasks.items():
+        # Snapshot first: cancel_task awaits, during which the sequential
+        # runner may remove finished tasks from _function_call_tasks.
+        for task, runner_item in list(self._function_call_tasks.items()):
             if runner_item.registry_item.function_name == function_name:
                 name = runner_item.function_name
                 tool_call_id = runner_item.tool_call_id
