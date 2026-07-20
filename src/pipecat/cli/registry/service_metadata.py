@@ -737,6 +737,15 @@ class ServiceRegistry:
             settings_params=["voice"],
         ),
         ServiceDefinition(
+            value="deepgram_flux_tts",
+            label="Deepgram Flux",
+            package="pipecat-ai[deepgram]",
+            class_name=["DeepgramFluxTTSService"],
+            env_prefix="DEEPGRAM",
+            include_params=["api_key"],
+            settings_params=["voice"],
+        ),
+        ServiceDefinition(
             value="deepgram_sagemaker_tts",
             label="Deepgram SageMaker",
             package="pipecat-ai[deepgram,sagemaker]",
