@@ -300,8 +300,8 @@ class MOQRunnerArguments(RunnerArguments):
     port: int
     path: str = "/moq"
     namespace: str = "pipecat"
-    participant_id: str = "bot0"
-    peer_id: str = "client0"
+    participant_id: str = "response"
+    peer_id: str = "request"
     verify_ssl: bool = True
     serve: bool = False
     serve_bind: str | None = None

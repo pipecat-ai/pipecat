@@ -271,8 +271,8 @@ class TestCertHashHelpers(unittest.TestCase):
         args.moq_path = "/"
         args.moq_serve = True
         args.moq_tls_cert = None  # serve-mode: no PEM on disk
-        args.moq_client_id = "client0"
-        args.moq_bot_id = "bot0"
+        args.moq_client_id = "request"
+        args.moq_bot_id = "response"
 
         digest = bytes(range(32))
         cfg = _build_moq_client_config(args, namespace="pipecat", cert_fingerprints=[digest.hex()])
@@ -304,8 +304,8 @@ class TestCertHashHelpers(unittest.TestCase):
             args.moq_path = "/moq"
             args.moq_serve = False
             args.moq_tls_cert = pem_path
-            args.moq_client_id = "client0"
-            args.moq_bot_id = "bot0"
+            args.moq_client_id = "request"
+            args.moq_bot_id = "response"
 
             cfg = _build_moq_client_config(args, namespace="pipecat", cert_fingerprints=[])
             self.assertEqual(cfg["certHash"], expected)
@@ -321,8 +321,8 @@ class TestCertHashHelpers(unittest.TestCase):
         args.moq_path = "/moq"
         args.moq_serve = False
         args.moq_tls_cert = None
-        args.moq_client_id = "client0"
-        args.moq_bot_id = "bot0"
+        args.moq_client_id = "request"
+        args.moq_bot_id = "response"
 
         cfg = _build_moq_client_config(args, namespace="pipecat", cert_fingerprints=None)
         self.assertIsNone(cfg["certHash"])
@@ -344,8 +344,8 @@ def _moq_args(**overrides) -> argparse.Namespace:
         moq_tls_key=None,
         moq_tls_generate=None,
         moq_tls_insecure=False,
-        moq_bot_id="bot0",
-        moq_client_id="client0",
+        moq_bot_id="response",
+        moq_client_id="request",
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -519,7 +519,7 @@ class TestMOQTransportInit(unittest.TestCase):
         return transport._client._broadcast_path, transport._client._peer_broadcast_path
 
     def test_explicit_paths_override_the_namespace_layer(self):
-        """``publish_path``/``subscribe_path`` win over ``<namespace>/<id>``.
+        """``response_path``/``request_path`` win over ``<namespace>/<id>``.
 
         The namespace model needs both peers to agree on a namespace up
         front. That works when one side hands the other a config blob, but
@@ -531,8 +531,8 @@ class TestMOQTransportInit(unittest.TestCase):
             namespace="ignored",
             participant_id="ignored",
             peer_id="ignored",
-            publish_path="room1/agent.hang",
-            subscribe_path="room1.hang",
+            response_path="room1/agent.hang",
+            request_path="room1.hang",
         )
         self.assertEqual(publish, "room1/agent.hang")
         self.assertEqual(subscribe, "room1.hang")
@@ -547,7 +547,7 @@ class TestMOQTransportInit(unittest.TestCase):
             namespace="myroom",
             participant_id="alice",
             peer_id="bob",
-            publish_path="somewhere/else",
+            response_path="somewhere/else",
         )
         self.assertEqual(publish, "somewhere/else")
         self.assertEqual(subscribe, "myroom/bob")
@@ -556,7 +556,7 @@ class TestMOQTransportInit(unittest.TestCase):
             namespace="myroom",
             participant_id="alice",
             peer_id="bob",
-            subscribe_path="somewhere/else",
+            request_path="somewhere/else",
         )
         self.assertEqual(publish, "myroom/alice")
         self.assertEqual(subscribe, "somewhere/else")
@@ -564,8 +564,8 @@ class TestMOQTransportInit(unittest.TestCase):
     def test_paths_default_to_the_namespace_layer(self):
         """Unset (the default), the namespace model is unchanged."""
         publish, subscribe = self._paths_for()
-        self.assertEqual(publish, "pipecat/bot0")
-        self.assertEqual(subscribe, "pipecat/client0")
+        self.assertEqual(publish, "pipecat/response")
+        self.assertEqual(subscribe, "pipecat/request")
 
     def test_cert_fingerprints_initially_empty(self):
         """Serve-mode cert fingerprints get populated by ``_run()`` once

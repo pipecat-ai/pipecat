@@ -26,7 +26,7 @@ def _new_session_namespace() -> str:
     """Mint an unguessable namespace for a single client-mode session.
 
     Client mode dials a shared relay, so the namespace is all that keeps
-    one session's broadcasts (``<namespace>/bot0``) from colliding with
+    one session's broadcasts (``<namespace>/response``) from colliding with
     another's. On an anonymous relay (e.g. ``cdn.moq.dev/anon``) there is
     no authentication either, so the namespace doubles as the session's
     only access control: it must be unguessable, not merely unique.
