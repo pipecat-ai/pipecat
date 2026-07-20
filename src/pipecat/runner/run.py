@@ -774,7 +774,7 @@ def _setup_unified_start_route(
                 peer_id=args.moq_client_id,
                 verify_ssl=not args.moq_tls_insecure,
                 serve=args.moq_serve,
-                serve_bind=args.moq_bind,
+                bind=args.moq_bind,
                 serve_tls_host=args.moq_tls_host,
                 serve_tls_cert=args.moq_tls_cert,
                 serve_tls_key=args.moq_tls_key,
@@ -1614,8 +1614,9 @@ def main(parser: argparse.ArgumentParser | None = None):
         default=None,
         metavar="ADDR:PORT",
         help=(
-            f"Server mode only: local socket bind address (default: {DEFAULT_MOQ_SERVE_BIND}). "
-            "Client mode always binds an ephemeral port."
+            "Local UDP bind address. Serve mode: the listen address "
+            f"(default: {DEFAULT_MOQ_SERVE_BIND}). Client mode: the dial "
+            "source address (an ephemeral port if unset)."
         ),
     )
     parser.add_argument(

@@ -283,7 +283,9 @@ class MOQRunnerArguments(RunnerArguments):
         serve: When True, the bot binds its own MOQ server instead of
             dialing a relay — useful for local dev with no separate
             ``moq-relay`` process.
-        serve_bind: Address to bind in serve mode (e.g. ``"[::]:4080"``).
+        bind: Local UDP bind address — the listen address in serve mode
+            (e.g. ``"[::]:4080"``), the dial source address in client mode
+            (ephemeral if unset).
         serve_tls_host: Hostname used for the generated self-signed cert
             when no on-disk cert/key is provided.
         serve_tls_cert: Path to a PEM-encoded TLS cert chain.
@@ -304,7 +306,7 @@ class MOQRunnerArguments(RunnerArguments):
     peer_id: str = "request"
     verify_ssl: bool = True
     serve: bool = False
-    serve_bind: str | None = None
+    bind: str | None = None
     serve_tls_host: str = "localhost"
     serve_tls_cert: str | None = None
     serve_tls_key: str | None = None
