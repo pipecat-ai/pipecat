@@ -248,8 +248,11 @@ class MOQParams(TransportParams):
             announced before giving up.
         serve: When ``True``, the bot binds its own UDP socket and accepts
             incoming MOQ sessions instead of dialing a relay.
-        serve_bind: Address to bind in serve mode (e.g. ``"[::]:4080"``).
-            Defaults to ``"[::]:<port>"`` based on the constructor's port.
+        bind: Local UDP socket bind address. In serve mode it's the
+            listen address (e.g. ``"[::]:4080"``), defaulting to
+            ``"[::]:<port>"`` from the constructor's port. In client mode
+            it's the source address to dial from; unset binds an
+            ephemeral port.
         serve_tls_host: Hostname to use in the generated self-signed
             certificate when ``serve_tls_cert``/``serve_tls_key`` aren't
             provided. The browser pins this cert via its SHA-256
@@ -300,7 +303,7 @@ class MOQParams(TransportParams):
     verify_ssl: bool = True
     connection_timeout: float = 30.0
     serve: bool = False
-    serve_bind: str | None = None
+    bind: str | None = None
     serve_tls_host: str = "localhost"
     serve_tls_cert: str | None = None
     serve_tls_key: str | None = None
@@ -355,7 +358,7 @@ class MOQTransportClient:
         self,
         params: MOQParams,
         url: str,
-        serve_bind: str,
+        bind: str | None,
         callbacks: MOQCallbacks,
     ):
         """Initialize the MOQ transport client.
@@ -369,12 +372,13 @@ class MOQTransportClient:
         Args:
             params: MOQ configuration parameters.
             url: Full relay URL to dial in client mode.
-            serve_bind: Address to bind in serve mode.
+            bind: Local UDP bind address (serve: listen address; client:
+                source address, ephemeral if ``None``).
             callbacks: Event/data callbacks back to the owning transport.
         """
         self._params = params
         self._url = url
-        self._serve_bind = serve_bind
+        self._bind = bind
         self._callbacks = callbacks
 
         self._connection_task: asyncio.Task | None = None
@@ -619,7 +623,7 @@ class MOQTransportClient:
         origin = moq.OriginProducer()
 
         if self._params.serve:
-            ctx_label = f"serving {self._serve_bind} as {self._broadcast_path}"
+            ctx_label = f"serving {self._bind} as {self._broadcast_path}"
         else:
             ctx_label = f"connecting to {self._url} as {self._broadcast_path}"
         logger.debug(f"MOQ: {ctx_label}")
@@ -690,6 +694,9 @@ class MOQTransportClient:
         subscribe so the rest of ``_run`` is shape-identical.
         """
         if self._params.serve:
+            # Serve mode always resolves a concrete listen address (the
+            # constructor defaults it); only client mode leaves it None.
+            assert self._bind is not None, "serve mode requires a bind address"
             tls_kwargs: dict = {}
             if self._params.serve_tls_cert and self._params.serve_tls_key:
                 tls_kwargs["tls_cert"] = [self._params.serve_tls_cert]
@@ -697,15 +704,18 @@ class MOQTransportClient:
             else:
                 tls_kwargs["tls_generate"] = [self._params.serve_tls_host]
             return moq.Server(
-                self._serve_bind,
+                self._bind,
                 publish=origin,
                 subscribe=origin,
                 **tls_kwargs,
             )
 
+        # ``bind`` is optional here: unset dials from an ephemeral source
+        # port; set pins a specific local address/port.
         return moq.Client(
             self._url,
             tls_verify=self._params.verify_ssl,
+            bind=self._bind,
             publish=origin,
             subscribe=origin,
         )
@@ -1279,10 +1289,13 @@ class MOQTransport(BaseTransport):
             on_audio_received=self._on_audio_received,
             on_message_received=self._on_message_received,
         )
+        # Serve mode needs a concrete listen address; client mode passes
+        # the optional local bind straight through (``None`` = ephemeral).
+        bind = params.bind or (f"[::]:{port}" if params.serve else None)
         self._client = MOQTransportClient(
             params=params,
             url=params.relay_url or f"https://{host}:{port}{path}",
-            serve_bind=params.serve_bind or f"[::]:{port}",
+            bind=bind,
             callbacks=callbacks,
         )
 

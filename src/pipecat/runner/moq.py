@@ -135,10 +135,6 @@ def _validate_moq_args(args: argparse.Namespace) -> bool:
         client_host = parsed.hostname
         client_path = parsed.path or DEFAULT_MOQ_PATH
 
-        if args.moq_bind:
-            logger.warning(
-                "--moq-bind is ignored in client mode (the socket binds to an ephemeral port)"
-            )
         if has_generate:
             logger.warning("--moq-tls-generate is ignored — only used in server mode")
         if has_key and not has_cert:
