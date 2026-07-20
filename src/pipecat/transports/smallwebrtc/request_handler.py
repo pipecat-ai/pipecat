@@ -241,13 +241,30 @@ class SmallWebRTCRequestHandler:
             raise
 
     async def handle_patch_request(self, request: SmallWebRTCPatchRequest):
-        """Handle a SmallWebRTC patch candidate request."""
+        """Handle a SmallWebRTC patch candidate request.
+
+        Empty ``candidate`` strings (RFC 8838 end-of-candidates markers) are
+        ignored; the remaining candidates are added to the peer connection.
+
+        Args:
+            request: The patch request containing the peer connection ID and
+                the ICE candidates to add.
+
+        Raises:
+            HTTPException: If no peer connection matches the request's ``pc_id``.
+        """
         peer_connection = self._pcs_map.get(request.pc_id)
 
         if not peer_connection:
             raise HTTPException(status_code=404, detail="Peer connection not found")
 
         for c in request.candidates:
+            if not c.candidate:
+                # Per RFC 8838, an empty candidate string signals the peer is
+                # done gathering candidates for this media line; there is no
+                # candidate to add.
+                logger.trace(f"Ignoring end-of-candidates marker for mid: {c.sdp_mid}")
+                continue
             candidate = candidate_from_sdp(c.candidate)
             candidate.sdpMid = c.sdp_mid
             candidate.sdpMLineIndex = c.sdp_mline_index
