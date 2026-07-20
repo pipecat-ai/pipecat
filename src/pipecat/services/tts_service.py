@@ -209,6 +209,8 @@ class TTSService(AIService):
             pause_frame_processing: Whether to pause frame processing during audio generation.
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.
                 This helps prevent some TTS services from vocalizing trailing punctuation (e.g., "dot").
+                Only applied in sentence aggregation mode; when streaming tokens, the incoming
+                text's own whitespace is preserved.
             sample_rate: Output sample rate for generated audio.
             skip_aggregator_types: List of aggregation types that should not be spoken.
             text_transforms: A list of callables to transform text before just before sending it
@@ -516,7 +518,10 @@ class TTSService(AIService):
         Returns:
             The prepared text with transformations applied.
         """
-        if self._append_trailing_space and not text.endswith(" "):
+        # A trailing space only makes sense on sentence-sized inputs. When
+        # streaming tokens, the incoming text's own whitespace is authoritative:
+        # appending a space to every token would split words across tokens.
+        if self._append_trailing_space and not self._is_streaming_tokens and not text.endswith(" "):
             return text + " "
         return text
 
