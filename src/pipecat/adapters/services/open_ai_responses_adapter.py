@@ -80,7 +80,10 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
 
         params: OpenAIResponsesLLMInvocationParams = {
             "input": input_items,
-            "tools": self.from_standard_tools(context.tools),
+            # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
+            "tools": cast(
+                "list[ToolParam] | OpenAINotGiven", self.from_standard_tools(context.tools)
+            ),
         }
 
         if system_instruction:

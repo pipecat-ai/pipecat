@@ -54,6 +54,11 @@ class ResampyResampler(BaseAudioResampler):
         if in_rate == out_rate:
             return audio
         audio_data = np.frombuffer(audio, dtype=np.int16)
-        resampled_audio = resampy.resample(audio_data, in_rate, out_rate, filter="kaiser_fast")
+        resampled_audio = resampy.resample(
+            audio_data,  # pyright: ignore[reportArgumentType] -- int16 is supported at runtime
+            in_rate,
+            out_rate,
+            filter="kaiser_fast",
+        )
         result = resampled_audio.astype(np.int16).tobytes()
         return result
