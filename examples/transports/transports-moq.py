@@ -15,21 +15,11 @@ Requirements:
         --extra openai --extra runner
 
 Usage:
-    # Local dev — bot is its own MOQ server, mints a self-signed cert
-    # for `localhost`, browser pins the fingerprint via /api/config.
-    # No separate relay needed:
-    uv run python examples/transports/transports-moq.py \\
-        -t moq --moq-serve --moq-tls-generate localhost
+    uv run python examples/transports/transports-moq.py
 
-    # Connect to a remote relay (CA-signed cert, no pinning needed):
-    uv run python examples/transports/transports-moq.py \\
-        -t moq --moq-connect https://moq.example.com:4080/moq
-
-    # With a custom namespace (different "room"):
-    uv run python examples/transports/transports-moq.py \\
-        -t moq --moq-serve --moq-tls-generate localhost --moq-namespace my-room
-
-    # Then open http://localhost:7860 and click Connect.
+    # Open http://localhost:7860
+    # Important!: Choose `Media over QUIC` from the top left dropdown menu
+    # click Connect
 """
 
 import os
