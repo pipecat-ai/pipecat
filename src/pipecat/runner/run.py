@@ -1690,14 +1690,14 @@ def main(parser: argparse.ArgumentParser | None = None):
     parser.add_argument(
         "--moq-bot-id",
         type=str,
-        default="bot0",
-        help="This bot's participant id; broadcasts under <namespace>/<bot-id> (default: bot0)",
+        default="response",
+        help="This bot's participant id; it publishes under <namespace>/<bot-id> (default: response, the direction the bot carries)",
     )
     parser.add_argument(
         "--moq-client-id",
         type=str,
-        default="client0",
-        help="Peer client's participant id the bot subscribes to (default: client0)",
+        default="request",
+        help="The peer's participant id; the bot subscribes to <namespace>/<client-id> (default: request)",
     )
     parser.add_argument(
         "--moq-tls-cert",
