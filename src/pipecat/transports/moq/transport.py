@@ -14,10 +14,13 @@ resampling for raw audio tracks. This module just wires it into the
 pipecat Frame pipeline.
 
 Each participant publishes under a per-participant broadcast path
-``<namespace>/<participant_id>`` (e.g. ``pipecat/bot0``); the bot
-subscribes to the peer at ``<namespace>/<peer_id>``. That layer assumes
+``<namespace>/<participant_id>`` (e.g. ``pipecat/response``); the bot
+subscribes to the peer at ``<namespace>/<peer_id>`` (e.g.
+``pipecat/request``). The ids default to the direction each side carries
+-- the bot's own broadcast is the ``response``, the peer's the
+``request``. That layer assumes
 both peers agree on a namespace up front; when the paths are instead
-assigned externally, ``publish_path``/``subscribe_path`` set them
+assigned externally, ``response_path``/``request_path`` set them
 directly and the namespace is unused. Audio rides on a
 single Opus track; RTVI JSON rides on a fixed-name ``transcript.json.z``
 track carried by moq's JSON stream helper (``publish_json_stream`` /
@@ -144,8 +147,8 @@ def _install_moq_task_exception_filter() -> None:
 
 
 DEFAULT_NAMESPACE = "pipecat"
-DEFAULT_PARTICIPANT_ID = "bot0"
-DEFAULT_PEER_ID = "client0"
+DEFAULT_PARTICIPANT_ID = "response"
+DEFAULT_PEER_ID = "request"
 DEFAULT_AUDIO_OUT_TRACK = "bot-audio"
 # Fixed-name JSON side-channel track (cf. ``catalog.json``). Carries RTVI
 # events as a lossless, ordered append-log via moq's JSON stream helper —
@@ -197,7 +200,7 @@ class MOQTrack:
     """Identifies a MOQ track for event callbacks.
 
     Parameters:
-        broadcast_path: The full broadcast path (e.g. ``pipecat/bot0``).
+        broadcast_path: The full broadcast path (e.g. ``pipecat/response``).
         name: The track name (e.g. ``bot-audio``).
         track_type: The track media type.
     """
@@ -221,16 +224,19 @@ class MOQParams(TransportParams):
             ``host``/``port``/``path``. Ignored in serve mode.
         namespace: Top-level namespace shared by all participants.
         participant_id: This bot's id; the bot publishes under
-            ``<namespace>/<participant_id>``.
+            ``<namespace>/<participant_id>``. Defaults to ``response``,
+            the direction the bot's own broadcast carries.
         peer_id: The id of the peer (browser/client) the bot subscribes
-            to: ``<namespace>/<peer_id>``.
-        publish_path: Full broadcast path to publish on, overriding
-            ``<namespace>/<participant_id>``. Set this when the paths come
-            from somewhere other than a shared namespace, e.g. a relay that
-            routes on a path prefix and derives the bot's path from the
-            peer's rather than rendezvousing both on a namespace.
-        subscribe_path: Full broadcast path to subscribe to, overriding
-            ``<namespace>/<peer_id>``. See :attr:`publish_path`.
+            to: ``<namespace>/<peer_id>``. Defaults to ``request``.
+        response_path: Full broadcast path the bot publishes on (its
+            responses), overriding ``<namespace>/<participant_id>``. Set
+            this when the paths come from somewhere other than a shared
+            namespace, e.g. a relay that routes on a path prefix and
+            derives the bot's path from the peer's rather than
+            rendezvousing both on a namespace.
+        request_path: Full broadcast path the bot subscribes to (incoming
+            requests), overriding ``<namespace>/<peer_id>``. See
+            :attr:`response_path`.
         audio_out_track: Name of the bot's outgoing audio track.
         transcript_track: Name of the bot's outgoing transcript track. A
             fixed-name JSON stream track carrying RTVI messages as a
@@ -287,8 +293,8 @@ class MOQParams(TransportParams):
     namespace: str = DEFAULT_NAMESPACE
     participant_id: str = DEFAULT_PARTICIPANT_ID
     peer_id: str = DEFAULT_PEER_ID
-    publish_path: str | None = None
-    subscribe_path: str | None = None
+    response_path: str | None = None
+    request_path: str | None = None
     audio_out_track: str = DEFAULT_AUDIO_OUT_TRACK
     transcript_track: str = DEFAULT_TRANSCRIPT_TRACK
     verify_ssl: bool = True
@@ -413,8 +419,8 @@ class MOQTransportClient:
         # `<namespace>/<id>` is a convenience layer over the paths: it only
         # works when both peers agree on a namespace up front. Callers whose
         # paths are assigned externally set them directly instead.
-        self._broadcast_path = params.publish_path or f"{params.namespace}/{params.participant_id}"
-        self._peer_broadcast_path = params.subscribe_path or f"{params.namespace}/{params.peer_id}"
+        self._broadcast_path = params.response_path or f"{params.namespace}/{params.participant_id}"
+        self._peer_broadcast_path = params.request_path or f"{params.namespace}/{params.peer_id}"
         self._cleaned_up = False
         # Number of input/output transports currently holding the session
         # open. Both call :meth:`connect` on start and :meth:`stop`/
