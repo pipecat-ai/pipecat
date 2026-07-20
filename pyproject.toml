@@ -161,7 +161,7 @@ dev = [
     "grpcio-tools>=1.67.1,<2",
     "pip-tools~=7.5.3",
     "pre-commit~=4.5.1",
-    "pyright==1.1.408",
+    "pyright==1.1.411",
     "pytest>=9.0.0,<10",
     "pytest-asyncio>=1.0.0,<2",
     "pytest-aiohttp>=1.0.0,<2",

@@ -78,7 +78,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             "system_instruction": effective_system,
             "messages": converted.messages,
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
-            "tools": self.from_standard_tools(context.tools),
+            "tools": cast("list[Any] | NotGiven", self.from_standard_tools(context.tools)),
         }
 
     def to_provider_tools_format(self, tools_schema: ToolsSchema) -> list[dict[str, Any]]:
@@ -563,7 +563,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
             # If this is a tool call message with a thought signature, start merging
             if is_tool_call_message(current) and message_has_thought_signature(current):
-                merged_parts = list(current.parts)
+                merged_parts = list(current.parts or [])
                 merged_response_parts = []
                 other_messages = []
                 j = i + 1
@@ -578,11 +578,11 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                             # New parallel group starts, stop here
                             break
                         # Merge this call into the current group
-                        merged_parts.extend(next_msg.parts)
+                        merged_parts.extend(next_msg.parts or [])
                         j += 1
                     elif is_tool_response_message(next_msg):
                         # Merge the corresponding response into the group
-                        merged_response_parts.extend(next_msg.parts)
+                        merged_response_parts.extend(next_msg.parts or [])
                         j += 1
                     else:
                         # Some other message is interleaved within the group;
