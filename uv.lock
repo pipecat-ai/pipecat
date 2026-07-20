@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -5122,7 +5122,7 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["kokoro"], marker = "extra == 'evals'" },
     { name = "pipecat-ai", extras = ["moonshine"], marker = "extra == 'evals'" },
     { name = "pipecat-ai", extras = ["webrtc"], marker = "extra == 'webrtc-video'" },
-    { name = "pipecat-ai-prebuilt", marker = "extra == 'runner'", specifier = ">=1.0.4" },
+    { name = "pipecat-ai-prebuilt", marker = "extra == 'runner'", specifier = ">=1.0.5" },
     { name = "piper-tts", marker = "extra == 'piper'", specifier = ">=1.3.0,<2" },
     { name = "protobuf", specifier = ">=5.29.6,<7" },
     { name = "protobuf", marker = "extra == 'nvidia'", specifier = ">=6.31.1,<7" },
@@ -5192,14 +5192,14 @@ docs = [
 
 [[package]]
 name = "pipecat-ai-prebuilt"
-version = "1.0.4"
+version = "1.0.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastapi", extra = ["all"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ec/b1/6851573a72ea20d6641acb05b98c7cea96bf7edab2cbbb44639a307f688f/pipecat_ai_prebuilt-1.0.4.tar.gz", hash = "sha256:6a3b04d03f83a0538f9bd70a1683364230840a0b34cdd8f39ccc337ca7468efb", size = 413274, upload-time = "2026-07-16T18:50:11.967Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/bd/17/3400108d390ef6fce66ae7ffe544541d6121ac6201182c737f3dd6e93a54/pipecat_ai_prebuilt-1.0.5.tar.gz", hash = "sha256:eee9e337fcd629e7d07d8cb0f0497de20a697b55f2b11505bf589397c6165c3d", size = 513198, upload-time = "2026-07-20T13:40:09.012Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7c/fe/9ea25c13fffa180bc988c4c1db4208ef5c53de63c887fcc5171aff103002/pipecat_ai_prebuilt-1.0.4-py3-none-any.whl", hash = "sha256:4b31b8408f2ebf4eebdf0edc84583232b82a4ab7a2bee010eb0dcc85c0b039d2", size = 413572, upload-time = "2026-07-16T18:50:10.272Z" },
+    { url = "https://files.pythonhosted.org/packages/d4/5e/159eededb2aa02640839d575853da36787dc0ae935cc19c07941c7e3ebd0/pipecat_ai_prebuilt-1.0.5-py3-none-any.whl", hash = "sha256:28eac25c16b2e8d34480edb15debc46ff425a3d077d78193417fd97f437d0380", size = 514703, upload-time = "2026-07-20T13:40:07.576Z" },
 ]
 
 [[package]]
