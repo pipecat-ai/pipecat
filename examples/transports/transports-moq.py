@@ -15,31 +15,16 @@ Requirements:
         --extra openai --extra runner
 
 Usage:
-    # Local dev (default) — bot is its own MOQ server, mints a
-    # self-signed cert for `localhost`, browser pins the fingerprint.
-    # No separate relay needed, works offline:
+    # Local dev — bot is its own MOQ server, mints a self-signed cert
+    # for `localhost`, browser pins the fingerprint. No relay needed:
     uv run python examples/transports/transports-moq.py -t moq
 
-    # Client mode — naming a relay makes the bot and the browser both
-    # dial it and rendezvous there, so neither needs a reachable
-    # address. Each session gets its own random namespace:
-    uv run python examples/transports/transports-moq.py \\
-        -t moq --moq-connect https://cdn.moq.dev/anon
-
-    # Any other relay works the same way:
+    # Client mode — dial an external relay instead (works behind NAT,
+    # since neither the bot nor the browser needs a reachable address):
     uv run python examples/transports/transports-moq.py \\
         -t moq --moq-connect https://moq.example.com:4080/moq
 
-    # With a fixed namespace (a well-known "room" both sides agree on):
-    uv run python examples/transports/transports-moq.py \\
-        -t moq --moq-connect https://cdn.moq.dev/anon --moq-namespace my-room
-
     # Then open http://localhost:7860 and click Connect.
-
-Note:
-    ``https://cdn.moq.dev/anon`` is a public, unauthenticated relay meant
-    for development. Anything published there is readable by anyone who
-    knows the namespace, so use your own relay for production.
 """
 
 import os
