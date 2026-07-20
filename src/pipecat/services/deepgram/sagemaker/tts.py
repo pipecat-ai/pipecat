@@ -342,7 +342,6 @@ class DeepgramSageMakerTTSService(TTSService):
             Frame: TTSStartedFrame, then None (audio comes asynchronously via
             the response processor).
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
         if self._client is None:
             logger.warning(f"{self}: client unavailable, skipping TTS")
             yield ErrorFrame(error="client unavailable")

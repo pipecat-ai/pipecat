@@ -365,8 +365,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        logger.debug(f"Generating TTS: [{text}]")
-
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
@@ -571,8 +569,6 @@ class NeuphonicHttpTTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech and status information.
         """
-        logger.debug(f"Generating TTS: [{text}]")
-
         url = f"{self._base_url}/sse/speak/{self._settings.language}"
 
         headers = {

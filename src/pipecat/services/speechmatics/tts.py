@@ -178,7 +178,6 @@ class SpeechmaticsTTSService(TTSService):
             Frame: Audio frames containing the synthesized speech.
         """
         # Log the TTS started frame
-        logger.debug(f"{self}: Generating TTS [{text}]")
 
         # HTTP headers
         headers = {

@@ -244,7 +244,6 @@ class OpenAITTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech data.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
         voice = assert_given(self._settings.voice)
         if voice is None:
             yield ErrorFrame(error="OpenAI TTS voice must be specified")

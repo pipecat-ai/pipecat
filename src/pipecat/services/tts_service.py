@@ -485,6 +485,8 @@ class TTSService(AIService):
         """Run text-to-speech synthesis on the provided text.
 
         This method must be implemented by subclasses to provide actual TTS functionality.
+        The base class logs the synthesized text before invoking this method, so
+        implementations should not log it again.
 
         Args:
             text: The text to synthesize into speech.
@@ -1123,6 +1125,13 @@ class TTSService(AIService):
             else None,
             append_to_context=self._tts_contexts[context_id].append_to_context,
         )
+
+        # When streaming tokens, per-call logs are kept at trace level; the
+        # accumulated turn text is logged at debug level at flush time.
+        if self._is_streaming_tokens:
+            logger.trace(f"{self}: Generating TTS [{prepared_text}]")
+        else:
+            logger.debug(f"{self}: Generating TTS [{prepared_text}]")
 
         await self.tts_process_generator(context_id, self.run_tts(prepared_text, context_id))
 

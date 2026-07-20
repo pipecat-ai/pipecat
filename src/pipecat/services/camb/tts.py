@@ -347,8 +347,6 @@ class CambTTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         # Validate text length
         if len(text) > 3000:
             logger.warning("Text too long for Camb.ai TTS (max 3000 chars), truncating")

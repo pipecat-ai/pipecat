@@ -445,8 +445,6 @@ class AsyncAITTSService(WebsocketTTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
@@ -624,8 +622,6 @@ class AsyncAIHttpTTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
             voice_config = {"mode": "id", "id": self._settings.voice}
 

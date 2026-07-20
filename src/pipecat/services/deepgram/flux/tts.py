@@ -386,13 +386,6 @@ class DeepgramFluxTTSService(InterruptibleTTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech, plus start/stop frames.
         """
-        # When streaming tokens, the base class logs the accumulated turn text
-        # at flush time, so per-token logs are kept at trace level.
-        if self._is_streaming_tokens:
-            logger.trace(f"{self}: Generating TTS [{text}]")
-        else:
-            logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
                 # Full disconnect/connect cycle: after a server-initiated close

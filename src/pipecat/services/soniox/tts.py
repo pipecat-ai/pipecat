@@ -616,11 +616,6 @@ class SonioxTTSService(WebsocketTTSService):
             ``None`` — audio frames are delivered out of band via the receive
             task and the audio-context queue.
         """
-        if self._is_streaming_tokens:
-            logger.trace(f"{self}: Generating TTS [{text}]")
-        else:
-            logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
