@@ -170,8 +170,6 @@ class PiperTTSService(TTSService):
                     return
                 yield item.audio_int16_bytes
 
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
             await self.start_tts_usage_metrics(text)
 
@@ -287,7 +285,6 @@ class PiperHttpTTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech and status frames.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
         headers = {
             "Content-Type": "application/json",
         }

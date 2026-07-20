@@ -321,8 +321,6 @@ class DeepgramTTSService(WebsocketTTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech, plus start/stop frames.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
             # Reconnect if the websocket is closed
             if not self._websocket or self._websocket.state is State.CLOSED:
@@ -437,8 +435,6 @@ class DeepgramHttpTTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech, plus start/stop frames.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         # Build URL with parameters
         url = f"{self._base_url}/v1/speak"
 

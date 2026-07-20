@@ -210,8 +210,6 @@ class XTTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         if not self._studio_speakers:
             logger.error(f"{self} no studio speakers available")
             return

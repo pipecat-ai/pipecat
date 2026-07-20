@@ -469,8 +469,6 @@ class SmallestTTSService(InterruptibleTTSService):
         Yields:
             Frame: Audio arrives via WebSocket receive task.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()

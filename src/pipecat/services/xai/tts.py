@@ -251,8 +251,6 @@ class XAIHttpTTSService(TTSService):
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using xAI's TTS API."""
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()
             self._session_owner = True
@@ -614,8 +612,6 @@ class XAITTSService(WebsocketTTSService):
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate TTS audio from text using xAI's streaming WebSocket API."""
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()

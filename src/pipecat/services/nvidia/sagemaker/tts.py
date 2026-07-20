@@ -175,8 +175,6 @@ class NvidiaSageMakerHTTPTTSService(TTSService):
         Yields:
             :class:`TTSAudioRawFrame` chunks of signed 16-bit mono PCM.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         text = text.strip()
         if not text or not any(c.isalnum() for c in text):
             return
@@ -485,8 +483,6 @@ class NvidiaSageMakerTTSService(InterruptibleTTSService):
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Send text to NIM; audio arrives asynchronously via _receive_messages."""
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         text = text.strip()
         if not text or not any(c.isalnum() for c in text):
             return

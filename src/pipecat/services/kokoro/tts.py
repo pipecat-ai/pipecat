@@ -218,8 +218,6 @@ class KokoroTTSService(TTSService):
             context_id: Unique identifier for this TTS context.
 
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
             await self.start_tts_usage_metrics(text)
 
