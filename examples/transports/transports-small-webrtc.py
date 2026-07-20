@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI
 from fastapi.responses import RedirectResponse
 from loguru import logger
-from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
+from pipecat_ai_prebuilt.frontend import PipecatPrebuiltUI
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
@@ -47,7 +47,7 @@ ice_servers = [
 ]
 
 # Mount the frontend at /
-app.mount("/client", SmallWebRTCPrebuiltUI)
+app.mount("/client", PipecatPrebuiltUI)
 
 
 async def run_example(webrtc_connection: SmallWebRTCConnection):
