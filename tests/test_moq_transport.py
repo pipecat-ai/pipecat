@@ -518,6 +518,31 @@ class TestMOQTransportInit(unittest.TestCase):
             transport = MOQTransport(params=params, host="localhost", port=4080)
         return transport._client._broadcast_path, transport._client._peer_broadcast_path
 
+    def _bind_for(self, **kwargs):
+        params = MOQParams(audio_in_enabled=True, audio_out_enabled=True, **kwargs)
+        with patch("pipecat.transports.moq.transport.moq") as moq_mock:
+            moq_mock.BroadcastProducer.return_value = MagicMock()
+            transport = MOQTransport(params=params, host="localhost", port=4080)
+        return transport._client._bind
+
+    def test_serve_mode_defaults_the_bind_to_the_port(self):
+        """Serve mode needs a concrete listen address; unset, it falls
+        back to the constructor's port."""
+        self.assertEqual(self._bind_for(serve=True), "[::]:4080")
+
+    def test_serve_mode_honors_an_explicit_bind(self):
+        self.assertEqual(self._bind_for(serve=True, bind="[::]:9000"), "[::]:9000")
+
+    def test_client_mode_binds_ephemeral_by_default(self):
+        """None means moq.Client picks an ephemeral source port — the
+        port default is serve-only and must not leak into client mode."""
+        self.assertIsNone(self._bind_for(serve=False))
+
+    def test_client_mode_honors_an_explicit_bind(self):
+        """A chosen, non-ephemeral source port is valid when dialing a
+        relay — it isn't ignored."""
+        self.assertEqual(self._bind_for(serve=False, bind="[::]:9000"), "[::]:9000")
+
     def test_explicit_paths_override_the_namespace_layer(self):
         """``response_path``/``request_path`` win over ``<namespace>/<id>``.
 

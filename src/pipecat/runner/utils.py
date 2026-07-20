@@ -776,7 +776,7 @@ async def create_transport(
         params.participant_id = runner_args.participant_id
         params.peer_id = runner_args.peer_id
         params.serve = runner_args.serve
-        params.serve_bind = runner_args.serve_bind
+        params.bind = runner_args.bind
         params.serve_tls_host = runner_args.serve_tls_host
         params.serve_tls_cert = runner_args.serve_tls_cert
         params.serve_tls_key = runner_args.serve_tls_key
