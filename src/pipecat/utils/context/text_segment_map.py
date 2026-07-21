@@ -8,6 +8,7 @@
 
 import difflib
 import re
+import unicodedata
 from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -386,11 +387,18 @@ class TextSegmentMap:
     def _commit_raw_span(self, seg: TextSegment, new_pos: int) -> None:
         """Advance the raw cursor to *new_pos* in *seg*, moving the semantic cursors.
 
-        For an unchanged segment, ``user_facing_pos``/``llm_pos`` advance
-        proportionally to the alphanumeric content just consumed -- never snapped
-        to ``original_end`` (which would overshoot a segment ending in trailing
-        whitespace). A transformed segment holds those cursors until it fully
-        completes, then jumps them to the end of its original span in one step.
+        For an unchanged segment ``user_facing_pos`` tracks the consumed content
+        directly (its original side is byte-identical to its TTS side): a word
+        with alphanumeric content advances proportionally via
+        :func:`advance_by_alnums` (which also absorbs punctuation attached to the
+        word, e.g. the ``?`` in ``"you?"``); a word carrying no alnum budget -- a
+        punctuation token set off from its word by a space (French ``"va ?"``,
+        ``"Attention :"``) -- advances straight to the consumed end instead, so it
+        drains from the remaining text immediately rather than lagging a word
+        behind. Either way the cursor stops before trailing whitespace, which is
+        the separator owned by the following token. A transformed segment holds
+        these cursors until it fully completes, then jumps them to the end of its
+        original span in one step.
         """
         if seg.is_transformed:
             # A trailing markup-only remainder (e.g. a closing tag) never arrives
@@ -402,9 +410,22 @@ class TextSegmentMap:
                 new_pos = len(seg.tts)
         else:
             n_alnum = len(normalize(seg.tts[self._seg_raw_pos : new_pos]))
-            self._user_facing_pos = advance_by_alnums(
-                self._original_text, self._user_facing_pos, n_alnum
-            )
+            if n_alnum:
+                self._user_facing_pos = advance_by_alnums(
+                    self._original_text, self._user_facing_pos, n_alnum
+                )
+            else:
+                # Zero-alnum consumed span: a whitespace-separated punctuation
+                # token (French " :", " ?"). advance_by_alnums has no budget to
+                # move, so without this the cursor would stall before the mark
+                # until a later alnum word swept past it -- showing it one word
+                # late in progressive captions, and never draining it at all for a
+                # mid-sentence ":" / ";". Advance to the consumed end minus any
+                # trailing whitespace (the separator owned by the following token,
+                # e.g. the space after "is " in "Your balance is $42.50", held
+                # until the next segment absorbs it). original == tts here, so the
+                # offset is exact.
+                self._user_facing_pos = seg.original_start + len(seg.tts[:new_pos].rstrip())
             self._llm_pos = advance_by_alnums(self._llm_text, self._llm_pos, n_alnum)
 
         self._seg_raw_pos = new_pos
@@ -582,14 +603,42 @@ class TextSegmentMap:
 
         Not simply "cursor past the last segment": a frame whose remaining
         content is entirely punctuation/markup (zero alphanumeric chars) is
-        already complete even if its raw text hasn't been walked yet.
+        already complete even if its raw text hasn't been walked yet -- with one
+        exception. Trailing punctuation separated from the preceding word by
+        whitespace (e.g. the ``?`` in the French ``"Comment ça va ?"``) is
+        emitted by the TTS as its own word-timestamp token, so the frame is not
+        complete until that token arrives (see :meth:`_pending_separated_punctuation`).
+        Punctuation attached directly to the last word (``"you?"``) was already
+        consumed with it, and trailing markup (closing tags) never arrives as its
+        own token, so neither holds completion open.
         """
         if self._seg_idx >= len(self._segments):
             return True
         seg = self._segments[self._seg_idx]
         if normalize(seg.tts[self._seg_raw_pos :]):
             return False
+        if self._pending_separated_punctuation(seg.tts[self._seg_raw_pos :]):
+            return False
         return all(not normalize(s.tts) for s in self._segments[self._seg_idx + 1 :])
+
+    @staticmethod
+    def _pending_separated_punctuation(remaining: str) -> bool:
+        """True when *remaining* is a whitespace-separated trailing punctuation token.
+
+        The TTS emits punctuation set off from its word by a space (French/other
+        locales: ``"va ?"``, ``"Bonjour !"``) as its own word-timestamp event, so
+        the segment must stay open until it arrives. Restricted to Unicode
+        punctuation (category ``P*``): a trailing emoji or symbol (e.g. ``"day! 😊"``,
+        ``"→"``) is never spoken as its own token, so it must not hold completion
+        open. Markup-only remainders (a closing tag) are stripped first since they
+        never arrive as their own token either. Called only once no alphanumeric
+        content remains.
+        """
+        stripped_markup = strip_complete_markup(remaining)
+        if not stripped_markup[:1].isspace():
+            return False
+        content = stripped_markup.strip()
+        return bool(content) and unicodedata.category(content[0]).startswith("P")
 
     @property
     def in_transformed_segment(self) -> bool:
