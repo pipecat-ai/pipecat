@@ -2192,5 +2192,87 @@ class TestWordCompletionTrackerTokenChangingReplacements(unittest.TestCase):
         )
 
 
+class TestWordCompletionTrackerSpaceBeforePunctuation(unittest.TestCase):
+    """Typography that separates a word from its terminal punctuation by a space.
+
+    French (and other locales) put a space before ``?`` ``!`` ``:`` ``;`` --
+    e.g. "Comment ça va ?". advance_by_alnums stops at that space, so once the
+    final alnum word is spoken the cursor must still be snapped to end-of-text:
+    otherwise the remaining text never empties, the segment stays "in-progress"
+    forever, and RTVI clients that commit captions on the "completed" status
+    drop the sentence when the next one begins.
+    """
+
+    def test_question_mark_completes_and_empties_remaining(self):
+        tracker = WordCompletionTracker("Comment ça va ?")
+        tracker.add_word_and_check_complete("Comment")
+        tracker.add_word_and_check_complete("ça")
+        self.assertFalse(tracker.add_word_and_check_complete("va"))
+        self.assertEqual(tracker.get_remaining_user_facing_text(strip=False), " ?")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "Comment ça va")
+        self.assertTrue(tracker.add_word_and_check_complete("?"))
+
+    def test_exclamation_mark_completes_and_empties_remaining(self):
+        tracker = WordCompletionTracker("Bonjour !")
+        self.assertFalse(tracker.add_word_and_check_complete("Bonjour"))
+        self.assertEqual(tracker.get_remaining_user_facing_text(strip=False), " !")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "Bonjour")
+        self.assertTrue(tracker.add_word_and_check_complete("!"))
+
+    def test_no_break_space_before_question_mark(self):
+        tracker = WordCompletionTracker("Ça va ?")
+        tracker.add_word_and_check_complete("Ça")
+        self.assertFalse(tracker.add_word_and_check_complete("va"))
+        self.assertEqual(tracker.get_remaining_user_facing_text(strip=False), " ?")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "Ça va")
+        self.assertTrue(tracker.add_word_and_check_complete(" ?"))
+
+    def test_user_facing_text_carries_trailing_mark(self):
+        tracker = WordCompletionTracker(
+            "Comment ça va ?",
+            user_facing_text="Comment ça va ?",
+        )
+        tracker.add_word_and_check_complete("Comment")
+        tracker.add_word_and_check_complete("ça")
+        self.assertFalse(tracker.add_word_and_check_complete("va"))
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "Comment ça va")
+        self.assertTrue(tracker.add_word_and_check_complete("?"))
+
+    def test_english_trailing_punctuation_unchanged(self):
+        """The no-space English case still completes exactly as before."""
+        tracker = WordCompletionTracker("How are you?")
+        tracker.add_word_and_check_complete("How")
+        tracker.add_word_and_check_complete("are")
+        self.assertTrue(tracker.add_word_and_check_complete("you"))
+        self.assertEqual(tracker.get_remaining_user_facing_text(strip=False), "")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "How are you?")
+
+    def test_mid_sentence_colon_drains_immediately(self):
+        """A separated ``:`` mid-sentence appears in the caption as soon as it is spoken.
+
+        Unlike a terminal mark, a mid-sentence ``:`` (or ``;``) is followed by
+        more content in the same segment, so the cursor must advance past it on
+        its own word rather than lagging until the next alnum word sweeps by.
+        """
+        tracker = WordCompletionTracker("Attention : ceci est un test")
+        tracker.add_word_and_check_complete("Attention")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "Attention")
+        tracker.add_word_and_check_complete(":")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "Attention :")
+        tracker.add_word_and_check_complete("ceci")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "Attention : ceci")
+
+    def test_multi_sentence_question_mark_drains_immediately(self):
+        """A separated ``?`` between two sentences in one chunk drains on its own word."""
+        tracker = WordCompletionTracker("Comment ça va ? Bien merci.")
+        for word in ("Comment", "ça", "va"):
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "Comment ça va")
+        self.assertFalse(tracker.add_word_and_check_complete("?"))
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "Comment ça va ?")
+        tracker.add_word_and_check_complete("Bien")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "Comment ça va ? Bien")
+
+
 if __name__ == "__main__":
     unittest.main()

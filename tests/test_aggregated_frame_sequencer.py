@@ -831,6 +831,88 @@ class TestAggregatedTextProgressFrame(unittest.TestCase):
         # Sanity: tts accumulated includes the opening tag and would be different
         self.assertNotEqual(p.accumulated_text, tracker.get_accumulated_tts_text())
 
+    def test_french_space_before_question_mark_word_by_word(self):
+        """Trailing space-separated punctuation ("Comment ça va ?") completes the slot.
+
+        French typography sets terminal ``?`` off from its word with a space, and
+        the TTS emits that ``?`` as its own word-timestamp event. The slot must
+        stay open until the ``?`` arrives, and the final progress frame must carry
+        the full sentence as ``accumulated_text`` with an empty ``remaining_text``
+        -- otherwise RTVI clients committing captions on the completed sentence
+        would drop the ``?``.
+        """
+        seq = _seq()
+        frame = _spoken_frame("Comment ça va ?")
+        seq.register_spoken(frame, "ctx1", _tracker("Comment ça va ?"), append_to_context=True)
+
+        steps = [
+            ("Comment", "Comment", " ça va ?"),
+            ("ça", "Comment ça", " va ?"),
+            ("va", "Comment ça va", " ?"),
+            ("?", "Comment ça va ?", ""),
+        ]
+        for word, exp_acc, exp_rem in steps:
+            result = seq.process_word(word, pts=10, context_id="ctx1")
+            word_frames = [f for f in result if isinstance(f, TTSTextFrame)]
+            self.assertEqual([f.text for f in word_frames], [word])
+            progress = [f for f in result if isinstance(f, AggregatedTextProgressFrame)]
+            self.assertEqual(len(progress), 1, f"expected 1 progress frame after '{word}'")
+            self.assertEqual(progress[0].accumulated_text, exp_acc)
+            self.assertEqual(progress[0].remaining_text, exp_rem)
+
+        # The "va" (last alnum) word must NOT complete the slot; only "?" does.
+        self.assertEqual(seq._slots, [])
+
+    def test_french_same_sentence_twice_word_by_word(self):
+        """Two consecutive identical French sentences each complete on their own ``?``.
+
+        Reproduces the double ``TTSSpeakFrame("Comment ça va ?")`` scenario: both
+        sentences occupy their own slot/context and stream in word by word. Each
+        must complete only when its trailing ``?`` arrives, and every progress
+        frame must be attributed to the sentence's own context -- the second
+        sentence's words must not leak into the first slot or vice versa.
+        """
+        seq = _seq()
+        sentence = "Comment ça va ?"
+        seq.register_spoken(_spoken_frame(sentence), "ctx1", _tracker(sentence), True)
+        seq.register_spoken(_spoken_frame(sentence), "ctx2", _tracker(sentence), True)
+
+        steps = [
+            ("Comment", "Comment", " ça va ?"),
+            ("ça", "Comment ça", " va ?"),
+            ("va", "Comment ça va", " ?"),
+            ("?", "Comment ça va ?", ""),
+        ]
+
+        # First sentence: consumes ctx1, ctx2 stays queued behind it.
+        for word, exp_acc, exp_rem in steps:
+            result = seq.process_word(word, pts=10, context_id="ctx1")
+            word_frames = [f for f in result if isinstance(f, TTSTextFrame)]
+            self.assertEqual([f.text for f in word_frames], [word])
+            self.assertTrue(all(f.context_id == "ctx1" for f in word_frames))
+            progress = [f for f in result if isinstance(f, AggregatedTextProgressFrame)]
+            self.assertEqual(len(progress), 1)
+            self.assertEqual(progress[0].context_id, "ctx1")
+            self.assertEqual(progress[0].accumulated_text, exp_acc)
+            self.assertEqual(progress[0].remaining_text, exp_rem)
+
+        # ctx1 is complete and swept; ctx2 is now the active slot.
+        self.assertEqual(len(seq._slots), 1)
+
+        # Second sentence: consumes ctx2 and empties the queue.
+        for word, exp_acc, exp_rem in steps:
+            result = seq.process_word(word, pts=20, context_id="ctx2")
+            word_frames = [f for f in result if isinstance(f, TTSTextFrame)]
+            self.assertEqual([f.text for f in word_frames], [word])
+            self.assertTrue(all(f.context_id == "ctx2" for f in word_frames))
+            progress = [f for f in result if isinstance(f, AggregatedTextProgressFrame)]
+            self.assertEqual(len(progress), 1)
+            self.assertEqual(progress[0].context_id, "ctx2")
+            self.assertEqual(progress[0].accumulated_text, exp_acc)
+            self.assertEqual(progress[0].remaining_text, exp_rem)
+
+        self.assertEqual(seq._slots, [])
+
     def test_card_scenario_word_by_word(self):
         """Progress accumulated/remaining track user_facing_text through all four digit groups."""
         seq = _seq()
