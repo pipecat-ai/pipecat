@@ -8,6 +8,7 @@
 
 import asyncio
 import io
+import json
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -453,6 +454,52 @@ def test_language_code_with_language_detection_warns():
     assert _query(service)["language_code"] == ["es"]
     assert _query(service)["language_detection"] == ["true"]
     assert "mutually exclusive" in sink.getvalue()
+
+
+# --- prompt + keyterms_prompt ---
+
+
+def test_prompt_and_keyterms_sent_together_for_universal_3_5_pro():
+    # U3 Pro models accept both parameters in the same session; the server
+    # is the authority on their compatibility.
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(
+            model="universal-3-5-pro",
+            prompt="Some context for the session.",
+            keyterms_prompt=["alpha", "beta"],
+        ),
+    )
+    query = _query(service)
+    assert query["prompt"] == ["Some context for the session."]
+    assert query["keyterms_prompt"] == [json.dumps(["alpha", "beta"])]
+
+
+def test_prompt_and_keyterms_sent_together_for_u3_rt_pro():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(
+            model="u3-rt-pro",
+            prompt="Some context for the session.",
+            keyterms_prompt=["alpha", "beta"],
+        ),
+    )
+    query = _query(service)
+    assert query["prompt"] == ["Some context for the session."]
+    assert query["keyterms_prompt"] == [json.dumps(["alpha", "beta"])]
+
+
+def test_prompt_and_keyterms_raise_for_universal_streaming():
+    # Older models keep the client-side mutual-exclusivity check.
+    with pytest.raises(ValueError, match="only U3 Pro models"):
+        AssemblyAISTTService(
+            api_key="test-key",
+            settings=AssemblyAISTTService.Settings(
+                model="universal-streaming-english",
+                prompt="Some context for the session.",
+                keyterms_prompt=["alpha", "beta"],
+            ),
+        )
 
 
 # --- update_agent_context() ---

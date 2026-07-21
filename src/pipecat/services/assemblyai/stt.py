@@ -124,7 +124,8 @@ class AssemblyAISTTSettings(STTSettings):
             end-of-turn.
         keyterms_prompt: List of key terms to guide transcription.
         prompt: Optional text prompt to guide the transcription. Only
-            used when model is "u3-rt-pro".
+            applicable to U3 Pro models; may be combined with
+            ``keyterms_prompt`` on those models.
         language_detection: Enable automatic language detection.
         language_code: Customer-declared audio language as an ISO code (e.g.
             "en", "es", "fr"). On U3 Pro models, a tier-1 code
@@ -355,9 +356,14 @@ class AssemblyAISTTService(WebsocketSTTService):
                 f"or use model='u3-rt-pro'."
             )
 
-        if default_settings.prompt is not None and default_settings.keyterms_prompt is not None:
+        if (
+            not is_u3_pro
+            and default_settings.prompt is not None
+            and default_settings.keyterms_prompt is not None
+        ):
             raise ValueError(
-                "The prompt and keyterms_prompt parameters cannot be used in the same request. "
+                f"The prompt and keyterms_prompt parameters cannot be used in the same request "
+                f"with model {default_settings.model}; only U3 Pro models support combining them. "
                 "Please choose either one or the other based on your use case. When you use "
                 "keyterms_prompt, your boosted words are appended to the default prompt automatically. "
                 "Or to boost within prompt: <prompt> + Make sure to boost the words <keyterms> "
