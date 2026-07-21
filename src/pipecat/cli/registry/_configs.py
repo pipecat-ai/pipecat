@@ -132,6 +132,15 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "baseten_llm": (
+        "BasetenLLMService(\n"
+        '        api_key=os.getenv("BASETEN_API_KEY"),\n'
+        "        settings=BasetenLLMService.Settings(\n"
+        '            model=os.getenv("BASETEN_MODEL"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "cerebras_llm": (
         "CerebrasLLMService(\n"
         '        api_key=os.getenv("CEREBRAS_API_KEY"),\n'

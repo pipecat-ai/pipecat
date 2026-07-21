@@ -488,6 +488,15 @@ class ServiceRegistry:
             settings_params=["model", "system_instruction"],
         ),
         ServiceDefinition(
+            value="baseten_llm",
+            label="Baseten",
+            package="pipecat-ai[baseten]",
+            class_name=["BasetenLLMService"],
+            env_prefix="BASETEN",
+            include_params=["api_key"],
+            settings_params=["model", "system_instruction"],
+        ),
+        ServiceDefinition(
             value="cerebras_llm",
             label="Cerebras",
             package="pipecat-ai[cerebras]",
