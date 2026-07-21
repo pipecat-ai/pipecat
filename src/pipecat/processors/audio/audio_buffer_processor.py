@@ -357,7 +357,13 @@ class AudioBufferProcessor(FrameProcessor):
                     )
                     # Silence padded by capture time is ground truth; make
                     # sure the arrival-pacing reconciliation never trims it.
-                    self._user_gap_tracker.reset(buffer_len=len(self._user_audio_buffer))
+                    # Anchor at the post-append length (this frame's audio is
+                    # appended below) so that if capture-time metadata later
+                    # disappears mid-stream, the wall-clock reconciliation
+                    # does not start one frame behind and over-trim.
+                    self._user_gap_tracker.reset(
+                        buffer_len=len(self._user_audio_buffer) + len(resampled)
+                    )
                 else:
                     # Insert silence for any wall-clock gap since the user buffer was
                     # last written (covers muted microphone and other silent periods).
@@ -406,7 +412,10 @@ class AudioBufferProcessor(FrameProcessor):
                     self._position_buffer_by_capture_time(
                         self._bot_audio_buffer, self._bot_capture_tracker, capture_time_ns
                     )
-                    self._bot_gap_tracker.reset(buffer_len=len(self._bot_audio_buffer))
+                    # Anchor at the post-append length, same as the user track.
+                    self._bot_gap_tracker.reset(
+                        buffer_len=len(self._bot_audio_buffer) + len(resampled)
+                    )
                 else:
                     # Insert silence for any wall-clock gap since the bot buffer was
                     # last written (covers idle periods between bot utterances, e.g.

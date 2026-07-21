@@ -1306,6 +1306,25 @@ class TestCaptureTimePositioning(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(p._user_gap_tracker.silence_len, 0)
         await p.cleanup()
 
+    async def test_gap_tracker_anchored_at_post_append_length(self):
+        """The gap tracker anchor must include the frame appended after the reset.
+
+        If it anchored at the pre-append length and capture-time metadata later
+        disappeared mid-stream, the wall-clock reconciliation would start one
+        frame behind the real buffer length and could over-trim injected
+        silence on the next stall+burst.
+        """
+        p = await _make_processor()
+
+        await self._send_user_frame(p, self._FRAME, 0)
+        self.assertEqual(p._user_gap_tracker.expected_len, float(len(p._user_audio_buffer)))
+
+        bot_frame = OutputAudioRawFrame(audio=self._FRAME, sample_rate=16000, num_channels=1)
+        bot_frame.metadata["audio_capture_time_ns"] = 0
+        await p.process_frame(bot_frame, FrameDirection.DOWNSTREAM)
+        self.assertEqual(p._bot_gap_tracker.expected_len, float(len(p._bot_audio_buffer)))
+        await p.cleanup()
+
     async def test_buffer_flush_resets_capture_anchor(self):
         """After a flush the capture anchor re-anchors on the next frame.
 
