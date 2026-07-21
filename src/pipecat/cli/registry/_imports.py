@@ -88,6 +88,7 @@ IMPORTS = {
     "anthropic_llm": ["from pipecat.services.anthropic.llm import AnthropicLLMService"],
     "aws_bedrock_llm": ["from pipecat.services.aws.llm import AWSBedrockLLMService"],
     "azure_llm": ["from pipecat.services.azure.llm import AzureLLMService"],
+    "baseten_llm": ["from pipecat.services.baseten.llm import BasetenLLMService"],
     "cerebras_llm": ["from pipecat.services.cerebras.llm import CerebrasLLMService"],
     "crusoe_llm": ["from pipecat.services.crusoe.llm import CrusoeLLMService"],
     "deepseek_llm": ["from pipecat.services.deepseek.llm import DeepSeekLLMService"],

@@ -155,6 +155,8 @@ suite:
       - weather_and_restaurant
   - bot: function-calling/function-calling-azure.py
     scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-baseten.py
+    scenarios: [weather_function_call]
   - bot: function-calling/function-calling-cerebras.py
     scenarios: [weather_function_call]
   - bot: function-calling/function-calling-crusoe.py
