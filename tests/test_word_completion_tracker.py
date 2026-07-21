@@ -2274,5 +2274,160 @@ class TestWordCompletionTrackerSpaceBeforePunctuation(unittest.TestCase):
         self.assertEqual(tracker.get_accumulated_user_facing_text(), "Comment ça va ? Bien")
 
 
+class TestWordCompletionTrackerAddedTerminalPunctuation(unittest.TestCase):
+    """Some TTS providers append terminal punctuation absent from the source text.
+
+    e.g. reading a multi-line list of options, a provider may speak each line as
+    its own sentence and report a word-timestamp word like "account." even though
+    the source text has "account" followed by a newline, not a period. Without
+    tolerating this, the tracker permanently desyncs on the first such word and
+    every later word is rejected too.
+    """
+
+    SENTENCE = (
+        "To better assist you, please choose one of the following options:\n\n"
+        "        A. I need help with my account\n"
+        "        B. I have a question about billing\n"
+        "        C. I need technical support\n\n"
+        "        Which option fits your needs best?"
+    )
+
+    # Words as Cartesia (and similar providers) report them: a period appended
+    # to the last word of each list line, which the source text does not have.
+    TTS_WORDS = [
+        "To",
+        "better",
+        "assist",
+        "you,",
+        "please",
+        "choose",
+        "one",
+        "of",
+        "the",
+        "following",
+        "options:",
+        "A.",
+        "I",
+        "need",
+        "help",
+        "with",
+        "my",
+        "account.",
+        "B.",
+        "I",
+        "have",
+        "a",
+        "question",
+        "about",
+        "billing.",
+        "C.",
+        "I",
+        "need",
+        "technical",
+        "support.",
+        "Which",
+        "option",
+        "fits",
+        "your",
+        "needs",
+        "best?",
+    ]
+
+    def test_all_words_recognised_despite_added_period(self):
+        """No word should be rejected just because the TTS added a period."""
+        tracker = WordCompletionTracker(
+            self.SENTENCE, llm_text=self.SENTENCE, user_facing_text=self.SENTENCE
+        )
+        for word in self.TTS_WORDS:
+            self.assertTrue(
+                tracker.word_belongs_here(word),
+                f"word {word!r} should be recognised despite the added period",
+            )
+            tracker.add_word_and_check_complete(word)
+
+    def test_completes_after_last_word(self):
+        """The tracker must reach completion once the final word arrives."""
+        tracker = WordCompletionTracker(
+            self.SENTENCE, llm_text=self.SENTENCE, user_facing_text=self.SENTENCE
+        )
+        for word in self.TTS_WORDS[:-1]:
+            self.assertFalse(tracker.add_word_and_check_complete(word))
+        self.assertTrue(tracker.add_word_and_check_complete(self.TTS_WORDS[-1]))
+
+    def test_no_force_complete_desync(self):
+        """Once desynced, every later word used to fail too -- verify recovery.
+
+        The bug produced a permanent desync: the first mismatched word forced
+        the segment map's cursor to stall, so every subsequent word was also
+        rejected as not belonging. Asserting on the middle-of-list words (not
+        just the last) guards against a fix that only patches the first hop.
+        """
+        tracker = WordCompletionTracker(
+            self.SENTENCE, llm_text=self.SENTENCE, user_facing_text=self.SENTENCE
+        )
+        for word in self.TTS_WORDS[:17]:  # up to "my", just before "account."
+            tracker.add_word_and_check_complete(word)
+        for word in self.TTS_WORDS[17:]:  # "account." onward
+            self.assertTrue(
+                tracker.word_belongs_here(word),
+                f"word {word!r} incorrectly rejected after the 'account.' hop",
+            )
+            tracker.add_word_and_check_complete(word)
+
+
+class TestWordCompletionTrackerCaseFolding(unittest.TestCase):
+    """Some TTS providers lowercase a word in word-timestamp events.
+
+    e.g. an acronym like "SQL" in the source text may be reported back as
+    "sql". Without tolerating this, the tracker desyncs the same way it did
+    for added terminal punctuation.
+    """
+
+    SENTENCE = "Please open the SQL database now."
+    TTS_WORDS = ["Please", "open", "the", "sql", "database", "now."]
+
+    def test_all_words_recognised_despite_case_difference(self):
+        tracker = WordCompletionTracker(self.SENTENCE)
+        for word in self.TTS_WORDS:
+            self.assertTrue(
+                tracker.word_belongs_here(word),
+                f"word {word!r} should be recognised despite the case difference",
+            )
+            tracker.add_word_and_check_complete(word)
+
+    def test_completes_after_last_word(self):
+        tracker = WordCompletionTracker(self.SENTENCE)
+        for word in self.TTS_WORDS[:-1]:
+            self.assertFalse(tracker.add_word_and_check_complete(word))
+        self.assertTrue(tracker.add_word_and_check_complete(self.TTS_WORDS[-1]))
+
+
+class TestWordCompletionTrackerAccentFolding(unittest.TestCase):
+    """Some TTS providers strip diacritics from a word in word-timestamp events.
+
+    e.g. "café" in the source text may be reported back as "cafe". Without
+    tolerating this, the tracker desyncs the same way it did for added
+    terminal punctuation.
+    """
+
+    SENTENCE = "Bienvenue au café parisien."
+    TTS_WORDS = ["Bienvenue", "au", "cafe", "parisien."]
+
+    def test_all_words_recognised_despite_accent_difference(self):
+        tracker = WordCompletionTracker(self.SENTENCE)
+        for word in self.TTS_WORDS:
+            self.assertTrue(
+                tracker.word_belongs_here(word),
+                f"word {word!r} should be recognised despite the accent difference",
+            )
+            tracker.add_word_and_check_complete(word)
+
+    def test_completes_after_last_word(self):
+        tracker = WordCompletionTracker(self.SENTENCE)
+        for word in self.TTS_WORDS[:-1]:
+            self.assertFalse(tracker.add_word_and_check_complete(word))
+        self.assertTrue(tracker.add_word_and_check_complete(self.TTS_WORDS[-1]))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -13,7 +13,12 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from pipecat.utils.text.transforms._alnum_utils import advance_by_alnums, normalize
+from pipecat.utils.text.transforms._alnum_utils import (
+    advance_by_alnums,
+    fold_case_and_accents,
+    normalize,
+    strip_trailing_punctuation,
+)
 
 
 def _iter_clean_chars(text: str) -> Iterator[tuple[int, str]]:
@@ -196,11 +201,15 @@ class TextSegmentMap:
     Callers drive the map word-by-word: :meth:`word_belongs_current_segment`
     asks whether a raw word-timestamp token plausibly continues the remaining
     TTS text, and :meth:`advance_word` consumes it. Both match the token against
-    the segment's remaining raw text directly -- literally, or (as a stateless
-    fallback) with markup stripped from both sides -- so a token that is a
-    fragment of a still-open SSML tag (e.g. an attribute-only word from a
-    multi-attribute tag some TTS providers split across several word-timestamp
-    events) needs no special tag parsing.
+    the segment's remaining raw text directly -- literally, then (as stateless
+    fallbacks, recomputed fresh each call) with the word's own trailing
+    punctuation stripped, with both sides case/accent-folded, or with markup
+    stripped from both sides -- so a token that adds punctuation or changes
+    case/diacritics the source text doesn't have, or is a fragment of a still-
+    open SSML tag (e.g. an attribute-only word from a multi-attribute tag some
+    TTS providers split across several word-timestamp events), needs no special
+    handling from the caller. See :meth:`_classify_hop` for the full ordered
+    list of fallbacks.
 
     Example::
 
@@ -323,6 +332,69 @@ class TextSegmentMap:
         self._last_overflow: str | None = None
 
     @staticmethod
+    def _literal_hop(
+        candidates: list[tuple[str, int]],
+        remaining_word: str,
+        require_word_boundary: bool = False,
+    ) -> "_Hop | None":
+        """Try PLACED/CROSSES of *remaining_word* against *candidates*, literally.
+
+        Shared by the raw and case/accent-folded passes in :meth:`_classify_hop`
+        -- both compare the same way, just on different (length-preserving)
+        transforms of the text, so the offsets this returns are valid for
+        whichever text produced *candidates* and *remaining_word*.
+
+        Tries an as-is match first, then retries with the word's own trailing
+        punctuation removed (some TTS providers add terminal punctuation the
+        original text doesn't have, e.g. reading a list item -- ``"my
+        account"`` -- as its own sentence, ``"account."``). The segment's own
+        punctuation is untouched either way and is still picked up verbatim by
+        the next word.
+
+        Args:
+            candidates: ``(text, offset)`` pairs to match *remaining_word*
+                against, tried in order.
+            remaining_word: The word (or its trailing-punctuation-stripped
+                variant) to match.
+            require_word_boundary: When True, a ``PLACED`` match is only
+                accepted if it ends at a word boundary in the candidate (the
+                candidate is fully consumed, or the next character is not
+                alphanumeric) -- rejecting a short word that only happens to
+                be a prefix of a longer one (e.g. ``"account"`` inside
+                ``"Accountant"``). Used by the case/accent-folded pass, where
+                folding can otherwise turn a same-case mismatch into a
+                spurious mid-word prefix match; the raw pass leaves this off
+                to preserve its existing case-sensitive matching.
+
+        Returns:
+            A ``PLACED`` or ``CROSSES`` hop, or ``None`` if nothing matched.
+        """
+        trimmed_word = strip_trailing_punctuation(remaining_word)
+        words = (
+            (remaining_word,)
+            if trimmed_word == remaining_word
+            else (
+                remaining_word,
+                trimmed_word,
+            )
+        )
+        for word in words:
+            if not word:
+                continue
+            for candidate, offset in candidates:
+                if candidate.startswith(word):
+                    lands_mid_word = (
+                        require_word_boundary
+                        and len(word) < len(candidate)
+                        and candidate[len(word)].isalnum()
+                    )
+                    if not lands_mid_word:
+                        return _Hop(_HopKind.PLACED, seg_chars=offset + len(word))
+                elif candidate and word.startswith(candidate):
+                    return _Hop(_HopKind.CROSSES, word_chars=len(candidate))
+        return None
+
+    @staticmethod
     def _classify_hop(segment_remaining: str, remaining_word: str) -> _Hop:
         """Decide where *remaining_word* goes against this segment's remaining raw text.
 
@@ -330,9 +402,20 @@ class TextSegmentMap:
         word is checked with three matching strategies, in order:
 
         1. Literal, as-is: for providers whose word tokens carry their own
-           surrounding whitespace (e.g. Inworld's ``" world"``).
-        2. Literal, with the segment's leading whitespace stripped: the common
-           case where the word omits the separating space.
+           surrounding whitespace (e.g. Inworld's ``" world"``), optionally with
+           the segment's leading whitespace stripped, and with the word's own
+           trailing punctuation removed (see :meth:`_literal_hop`).
+        2. Same as 1, with both sides case- and accent-folded: for a provider
+           that lowercases a word or strips its diacritics in word-timestamp
+           events (e.g. ``"SQL"`` -> ``"sql"``, ``"café"`` -> ``"cafe"``).
+           Folding is a length-preserving, per-character transform (unlike
+           :func:`normalize`, it never drops or merges characters), so an
+           offset found against the folded text applies unchanged to the
+           original. Folding erases case, which could otherwise turn a short
+           word into a spurious mid-word prefix match against a longer one
+           (e.g. folded ``"account"`` against ``"Accountant"``); a
+           ``PLACED`` match is only accepted here if it lands on a word
+           boundary (see :meth:`_literal_hop`'s ``require_word_boundary``).
         3. Markup-stripped on both sides: for a provider that wraps the word
            token in tags absent from ``tts_text`` (or vice versa). Recomputed
            fresh each call -- no persisted tag state.
@@ -358,15 +441,24 @@ class TextSegmentMap:
         stripped = segment_remaining.lstrip()
         lead_ws = len(segment_remaining) - len(stripped)
 
-        # Strategies 1 and 2: literal match, as-is then whitespace-stripped.
+        # Strategy 1: literal match, as-is then whitespace-stripped.
         candidates = [(segment_remaining, 0)]
         if lead_ws:
             candidates.append((stripped, lead_ws))
-        for candidate, offset in candidates:
-            if candidate.startswith(remaining_word):
-                return _Hop(_HopKind.PLACED, seg_chars=offset + len(remaining_word))
-            if candidate and remaining_word.startswith(candidate):
-                return _Hop(_HopKind.CROSSES, word_chars=len(candidate))
+        hop = TextSegmentMap._literal_hop(candidates, remaining_word)
+        if hop is not None:
+            return hop
+
+        # Strategy 2: same candidates, case/accent-folded. require_word_boundary
+        # guards against folding turning a short word into a false mid-word
+        # prefix match against a longer one that only differs in case.
+        folded_word = fold_case_and_accents(remaining_word)
+        folded_candidates = [(fold_case_and_accents(c), offset) for c, offset in candidates]
+        hop = TextSegmentMap._literal_hop(
+            folded_candidates, folded_word, require_word_boundary=True
+        )
+        if hop is not None:
+            return hop
 
         # Strategy 3: markup-stripped match.
         clean_word = strip_markup(remaining_word)

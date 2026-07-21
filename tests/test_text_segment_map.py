@@ -382,5 +382,35 @@ class TestClassifyHopLiteralMatchHandlesStrayAngleBracket(unittest.TestCase):
         self.assertEqual(hop.seg_chars, len("<3"))
 
 
+class TestClassifyHopCaseFoldRequiresWordBoundary(unittest.TestCase):
+    """The case/accent-folded fallback strategy must not PLACE a word mid-word.
+
+    Folding erases case before the prefix (startswith) match, so a short word
+    that is only a case-insensitive prefix of a longer word (e.g. "account" vs
+    "Accountant") must not be accepted -- that would silently corrupt the
+    cursor by landing inside the longer word instead of at a real boundary.
+    """
+
+    def test_short_word_not_placed_inside_longer_word_via_case_fold(self):
+        hop = TextSegmentMap._classify_hop(" Accountant", "account")
+        self.assertNotEqual(
+            hop.kind, _HopKind.PLACED, "must not match 'account' mid-word inside 'Accountant'"
+        )
+
+        smap = TextSegmentMap("Please talk to the Accountant", "Please talk to the Accountant")
+        for word in ("Please", "talk", "to", "the"):
+            smap.advance_word(word)
+        self.assertFalse(smap.word_belongs_current_segment("account"))
+
+    def test_whole_word_case_fold_still_matches_at_boundary(self):
+        smap = TextSegmentMap("Please open the SQL database", "Please open the SQL database")
+        for word in ("Please", "open", "the"):
+            smap.advance_word(word)
+
+        self.assertTrue(smap.word_belongs_current_segment("sql"))
+        smap.advance_word("sql")
+        self.assertTrue(smap.word_belongs_current_segment("database"))
+
+
 if __name__ == "__main__":
     unittest.main()
