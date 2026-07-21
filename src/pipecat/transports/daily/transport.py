@@ -44,12 +44,14 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
     SpriteFrame,
     StartFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     UserAudioRawFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
@@ -1984,6 +1986,12 @@ class DailyInputTransport(BaseInputTransport):
         """
         await self.push_frame(frame)
 
+    async def push_stt_metadata_frame(self):
+        """Broadcast STT metadata for Daily's built-in transcription (Deepgram)."""
+        await self.broadcast_frame(
+            STTMetadataFrame, service_name=self.name, ttfs_p99_latency=DEEPGRAM_TTFS_P99
+        )
+
     async def push_app_message(self, message: Any, sender: str):
         """Push an application message as an urgent transport frame.
 
@@ -2848,6 +2856,7 @@ class DailyTransport(BaseTransport):
 
     async def _on_joined(self, data):
         """Handle room joined events."""
+        transcription_started = False
         if self._params.transcription_enabled:
             # We report an error because we are starting transcription
             # internally and if it fails we need to know.
@@ -2855,11 +2864,15 @@ class DailyTransport(BaseTransport):
             error = await self.start_transcription(settings)
             if error:
                 await self._on_error(f"Unable to start transcription: {error}")
+            else:
+                transcription_started = True
         await self._call_event_handler("on_joined", data)
         # Also call on_connected for compatibility with other transports
         await self._call_event_handler("on_connected", data)
         if self._input:
             await self._input.push_frame(BotConnectedFrame())
+            if transcription_started:
+                await self._input.push_stt_metadata_frame()
 
     async def _on_left(self):
         """Handle room left events."""
