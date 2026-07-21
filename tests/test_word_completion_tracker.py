@@ -2375,5 +2375,59 @@ class TestWordCompletionTrackerAddedTerminalPunctuation(unittest.TestCase):
             tracker.add_word_and_check_complete(word)
 
 
+class TestWordCompletionTrackerCaseFolding(unittest.TestCase):
+    """Some TTS providers lowercase a word in word-timestamp events.
+
+    e.g. an acronym like "SQL" in the source text may be reported back as
+    "sql". Without tolerating this, the tracker desyncs the same way it did
+    for added terminal punctuation.
+    """
+
+    SENTENCE = "Please open the SQL database now."
+    TTS_WORDS = ["Please", "open", "the", "sql", "database", "now."]
+
+    def test_all_words_recognised_despite_case_difference(self):
+        tracker = WordCompletionTracker(self.SENTENCE)
+        for word in self.TTS_WORDS:
+            self.assertTrue(
+                tracker.word_belongs_here(word),
+                f"word {word!r} should be recognised despite the case difference",
+            )
+            tracker.add_word_and_check_complete(word)
+
+    def test_completes_after_last_word(self):
+        tracker = WordCompletionTracker(self.SENTENCE)
+        for word in self.TTS_WORDS[:-1]:
+            self.assertFalse(tracker.add_word_and_check_complete(word))
+        self.assertTrue(tracker.add_word_and_check_complete(self.TTS_WORDS[-1]))
+
+
+class TestWordCompletionTrackerAccentFolding(unittest.TestCase):
+    """Some TTS providers strip diacritics from a word in word-timestamp events.
+
+    e.g. "café" in the source text may be reported back as "cafe". Without
+    tolerating this, the tracker desyncs the same way it did for added
+    terminal punctuation.
+    """
+
+    SENTENCE = "Bienvenue au café parisien."
+    TTS_WORDS = ["Bienvenue", "au", "cafe", "parisien."]
+
+    def test_all_words_recognised_despite_accent_difference(self):
+        tracker = WordCompletionTracker(self.SENTENCE)
+        for word in self.TTS_WORDS:
+            self.assertTrue(
+                tracker.word_belongs_here(word),
+                f"word {word!r} should be recognised despite the accent difference",
+            )
+            tracker.add_word_and_check_complete(word)
+
+    def test_completes_after_last_word(self):
+        tracker = WordCompletionTracker(self.SENTENCE)
+        for word in self.TTS_WORDS[:-1]:
+            self.assertFalse(tracker.add_word_and_check_complete(word))
+        self.assertTrue(tracker.add_word_and_check_complete(self.TTS_WORDS[-1]))
+
+
 if __name__ == "__main__":
     unittest.main()
