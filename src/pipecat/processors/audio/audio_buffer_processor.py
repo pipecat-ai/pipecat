@@ -76,38 +76,48 @@ class _SilenceGapTracker:
 class _CaptureTimeTracker:
     """Capture-timestamp bookkeeping for one track buffer (user or bot).
 
-    Anchors the track to the first capture-stamped frame seen (its ``pts``
-    and the buffer length at that moment). Subsequent frames are placed at
-    ``base_len + (pts - base_pts)`` converted to bytes, so gaps and bursts
-    are resolved by when the audio was captured on the client, not by when
-    it arrived over the network.
+    Anchors the track to the first capture-stamped frame seen (its capture
+    time in nanoseconds and the buffer length at that moment). Subsequent
+    frames are placed at ``base_len + (capture_ns - base_capture_ns)``
+    converted to bytes, so gaps and bursts are resolved by when the audio was
+    captured on the client, not by when it arrived over the network.
+
+    The capture time comes from a transport that actually knows it (e.g.
+    ``TwilioFrameSerializer`` records Twilio's per-message ``timestamp`` in
+    ``frame.metadata["audio_capture_time_ns"]``), never from the generic
+    ``frame.pts`` field, whose units vary by transport.
     """
 
     def __init__(self):
-        self.base_pts: int | None = None
+        self.base_capture_ns: int | None = None
         self.base_len: int = 0
 
     def reset(self):
         """Clear the anchor so the tracker re-anchors on the next frame."""
-        self.base_pts = None
+        self.base_capture_ns = None
         self.base_len = 0
 
-    def target_len(self, pts: int, buffer_len: int, bytes_per_second: int) -> int:
-        """Buffer length (in bytes) where audio captured at ``pts`` belongs.
+    def target_len(self, capture_time_ns: int, buffer_len: int, bytes_per_second: int) -> int:
+        """Buffer length (in bytes) where audio captured at ``capture_time_ns`` belongs.
 
         Anchors on first use, in which case the target is the current buffer
-        length (the frame is simply appended).
+        length (the frame is simply appended). Also re-anchors if capture time
+        moves backwards (e.g. a Twilio stream restarts and its timestamp resets
+        to 0), so a stale anchor can never stop gap padding for the rest of the
+        session.
 
         Args:
-            pts: Capture timestamp of the incoming frame, in nanoseconds.
+            capture_time_ns: Capture timestamp of the incoming frame, in nanoseconds.
             buffer_len: Current buffer length in bytes (used to anchor).
             bytes_per_second: Byte rate of the (resampled) track audio.
         """
-        if self.base_pts is None:
-            self.base_pts = pts
+        if self.base_capture_ns is None or capture_time_ns < self.base_capture_ns:
+            self.base_capture_ns = capture_time_ns
             self.base_len = buffer_len
             return buffer_len
-        offset_bytes = int((pts - self.base_pts) * bytes_per_second / 1_000_000_000)
+        offset_bytes = int(
+            (capture_time_ns - self.base_capture_ns) * bytes_per_second / 1_000_000_000
+        )
         return self.base_len + offset_bytes
 
 
@@ -143,11 +153,15 @@ class AudioBufferProcessor(FrameProcessor):
     trim genuine idle-gap silence for. User audio is unaffected either way,
     since it always arrives paced by the client.
 
-    Frames that carry a capture timestamp (``pts``, e.g. stamped by
+    Frames that carry a capture timestamp in
+    ``frame.metadata["audio_capture_time_ns"]`` (e.g. recorded by
     ``TwilioFrameSerializer`` from Twilio's per-message ``timestamp``) are
     positioned by capture time instead, which does not depend on arrival
     pacing at all. This matters for WebSocket transports, where audio arrives
-    at whatever rate the network and client produce.
+    at whatever rate the network and client produce. The generic ``frame.pts``
+    field is intentionally not used for this: its units vary by transport
+    (some set it in samples, not nanoseconds), so it is not a reliable
+    capture-time signal.
     """
 
     def __init__(
@@ -332,13 +346,14 @@ class AudioBufferProcessor(FrameProcessor):
             # Ignoring in case we don't have audio
             if len(resampled) > 0:
                 now = time.monotonic()
-                if frame.pts is not None:
-                    # The frame carries a capture timestamp (e.g. stamped by
+                capture_time_ns = frame.metadata.get("audio_capture_time_ns")
+                if capture_time_ns is not None:
+                    # The frame carries a capture timestamp (e.g. recorded by
                     # TwilioFrameSerializer from Twilio's per-message
                     # "timestamp"). Place the audio by capture time; arrival
                     # pacing is meaningless over WebSocket transports.
                     self._position_buffer_by_capture_time(
-                        self._user_audio_buffer, self._user_capture_tracker, frame.pts
+                        self._user_audio_buffer, self._user_capture_tracker, capture_time_ns
                     )
                     # Silence padded by capture time is ground truth; make
                     # sure the arrival-pacing reconciliation never trims it.
@@ -385,10 +400,11 @@ class AudioBufferProcessor(FrameProcessor):
             # Ignoring in case we don't have audio
             if len(resampled) > 0:
                 now = time.monotonic()
-                if frame.pts is not None:
+                capture_time_ns = frame.metadata.get("audio_capture_time_ns")
+                if capture_time_ns is not None:
                     # Same capture-time placement as the user track above.
                     self._position_buffer_by_capture_time(
-                        self._bot_audio_buffer, self._bot_capture_tracker, frame.pts
+                        self._bot_audio_buffer, self._bot_capture_tracker, capture_time_ns
                     )
                     self._bot_gap_tracker.reset(buffer_len=len(self._bot_audio_buffer))
                 else:
@@ -449,19 +465,19 @@ class AudioBufferProcessor(FrameProcessor):
         self,
         buffer: bytearray,
         capture_tracker: _CaptureTimeTracker,
-        pts: int,
+        capture_time_ns: int,
     ):
         """Pad a buffer so incoming audio lands at its client capture time.
 
         Called before adding new audio when the frame carries a capture
-        timestamp (``pts``), e.g. stamped by ``TwilioFrameSerializer`` from
-        Twilio's per-message ``timestamp``. The capture time says exactly
-        where the audio belongs in the recording, so gaps do not need to be
-        inferred from arrival pacing: a muted mic shows up as a jump in
-        ``pts`` (silence is padded in), while stalled audio delivered late in
-        a burst keeps contiguous ``pts`` values (nothing to pad or trim).
-        This removes the muted-mic vs stalled-audio ambiguity that arrival
-        pacing cannot resolve over WebSocket transports.
+        timestamp in ``frame.metadata["audio_capture_time_ns"]``, e.g. recorded
+        by ``TwilioFrameSerializer`` from Twilio's per-message ``timestamp``.
+        The capture time says exactly where the audio belongs in the recording,
+        so gaps do not need to be inferred from arrival pacing: a muted mic
+        shows up as a jump in capture time (silence is padded in), while
+        stalled audio delivered late in a burst keeps contiguous capture times
+        (nothing to pad or trim). This removes the muted-mic vs stalled-audio
+        ambiguity that arrival pacing cannot resolve over WebSocket transports.
 
         Only pads, never trims: if the buffer is already at or past the
         capture position (cross-track sync padding, resampler jitter), the
@@ -472,13 +488,13 @@ class AudioBufferProcessor(FrameProcessor):
         Args:
             buffer: The audio buffer to pad (user or bot).
             capture_tracker: Capture-timestamp tracking state for this buffer.
-            pts: Capture timestamp of the incoming frame, in nanoseconds.
+            capture_time_ns: Capture timestamp of the incoming frame, in nanoseconds.
         """
         if self._sample_rate == 0:
             return
 
         bytes_per_second = self._sample_rate * 2
-        target_len = capture_tracker.target_len(pts, len(buffer), bytes_per_second)
+        target_len = capture_tracker.target_len(capture_time_ns, len(buffer), bytes_per_second)
         gap_bytes = target_len - len(buffer)
         if gap_bytes > 0.2 * bytes_per_second:  # 200 ms threshold, same as the gap fill
             gap_bytes -= gap_bytes % 2  # keep 16-bit alignment

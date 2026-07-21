@@ -116,11 +116,13 @@ mute-gap silence and bring back issue #4561.
 The fix: position audio by a capture timestamp from the client instead of
 inferring it from arrival pacing. Twilio media messages send a `timestamp`
 (ms since stream start) with every media message; `TwilioFrameSerializer`
-stamps it onto the frame's `pts` and `AudioBufferProcessor` places the audio
-at that capture time (`_CaptureTimeTracker` /
-`_position_buffer_by_capture_time`). A mute shows up as a jump in `pts`
-(silence padded in); stalled audio keeps contiguous `pts` (nothing padded,
-nothing trimmed). Frames without `pts` keep the arrival-pacing behavior.
+records it in `frame.metadata["audio_capture_time_ns"]` and
+`AudioBufferProcessor` places the audio at that capture time
+(`_CaptureTimeTracker` / `_position_buffer_by_capture_time`). A mute shows up
+as a jump in capture time (silence padded in); stalled audio keeps contiguous
+capture times (nothing padded, nothing trimmed). Frames without that metadata
+keep the arrival-pacing behavior. The metadata key is used rather than the
+generic `frame.pts`, which transports set in varying units (e.g. samples).
 
 `websocket_repro.py` demonstrates both cases. Before the capture-time fix:
 

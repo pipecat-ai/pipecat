@@ -1197,15 +1197,18 @@ class TestStallBurstReconciliation(unittest.IsolatedAsyncioTestCase):
 
 
 class TestCaptureTimePositioning(unittest.IsolatedAsyncioTestCase):
-    """Tests for capture-timestamp (pts) positioning.
+    """Tests for capture-timestamp positioning.
 
-    Frames that carry a capture timestamp (``pts``, e.g. stamped by
+    Frames that carry a capture timestamp in
+    ``frame.metadata["audio_capture_time_ns"]`` (e.g. recorded by
     ``TwilioFrameSerializer`` from Twilio's per-message ``timestamp``) are
     placed in the buffer by capture time instead of arrival pacing. This
     removes the muted-mic vs stalled-audio ambiguity over WebSocket
-    transports: a mute shows up as a jump in pts (silence is padded in),
-    while late audio delivered in a burst keeps contiguous pts values
-    (nothing to pad, and never anything to trim).
+    transports: a mute shows up as a jump in capture time (silence is padded
+    in), while late audio delivered in a burst keeps contiguous capture times
+    (nothing to pad, and never anything to trim). The generic ``frame.pts``
+    field is intentionally NOT the trigger, since transports set it in varying
+    units; see ``test_raw_pts_without_metadata_uses_arrival_pacing``.
     """
 
     # 16-bit mono at 16 kHz → 2 bytes per sample
@@ -1214,14 +1217,18 @@ class TestCaptureTimePositioning(unittest.IsolatedAsyncioTestCase):
     _FRAME = b"\x11\x22" * 320  # 640 bytes == 20 ms
     _FRAME_NS = 20 * 1_000_000  # 20 ms in nanoseconds
 
-    async def _send_user_frame(self, processor: AudioBufferProcessor, audio: bytes, pts: int):
+    async def _send_user_frame(
+        self, processor: AudioBufferProcessor, audio: bytes, capture_time_ns: int
+    ):
         frame = InputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1)
-        frame.pts = pts
+        frame.metadata["audio_capture_time_ns"] = capture_time_ns
         await processor.process_frame(frame, FrameDirection.DOWNSTREAM)
 
-    async def _send_bot_frame(self, processor: AudioBufferProcessor, audio: bytes, pts: int):
+    async def _send_bot_frame(
+        self, processor: AudioBufferProcessor, audio: bytes, capture_time_ns: int
+    ):
         frame = OutputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1)
-        frame.pts = pts
+        frame.metadata["audio_capture_time_ns"] = capture_time_ns
         await processor.process_frame(frame, FrameDirection.DOWNSTREAM)
 
     async def test_pts_gap_pads_silence(self):
@@ -1310,9 +1317,9 @@ class TestCaptureTimePositioning(unittest.IsolatedAsyncioTestCase):
         p = await _make_processor(buffer_size=len(audio))
 
         frame = InputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1)
-        frame.pts = 10_000_000_000  # 10 s into the stream
+        frame.metadata["audio_capture_time_ns"] = 10_000_000_000  # 10 s into the stream
         await p.process_frame(frame, FrameDirection.DOWNSTREAM)  # hits buffer_size → flush
-        self.assertIsNone(p._user_capture_tracker.base_pts)
+        self.assertIsNone(p._user_capture_tracker.base_capture_ns)
 
         # The next frame re-anchors: appended at position 0, no 10 s pad.
         # Keep it below buffer_size so it does not trigger another flush.
@@ -1325,12 +1332,12 @@ class TestCaptureTimePositioning(unittest.IsolatedAsyncioTestCase):
         """stop_recording must clear the capture-timestamp anchors."""
         p = await _make_processor()
         await self._send_user_frame(p, self._FRAME, 0)
-        self.assertIsNotNone(p._user_capture_tracker.base_pts)
+        self.assertIsNotNone(p._user_capture_tracker.base_capture_ns)
 
         await p.stop_recording()
 
-        self.assertIsNone(p._user_capture_tracker.base_pts)
-        self.assertIsNone(p._bot_capture_tracker.base_pts)
+        self.assertIsNone(p._user_capture_tracker.base_capture_ns)
+        self.assertIsNone(p._bot_capture_tracker.base_capture_ns)
         await p.cleanup()
 
     async def test_bot_pts_gap_pads_silence(self):
@@ -1364,6 +1371,64 @@ class TestCaptureTimePositioning(unittest.IsolatedAsyncioTestCase):
         expected_silence = int((1.0 - frame_duration) * self._BYTES_PER_SECOND)
         expected_silence -= expected_silence % 2
         self.assertEqual(len(p._user_audio_buffer), expected_silence + len(self._FRAME))
+        await p.cleanup()
+
+    async def test_raw_pts_without_metadata_uses_arrival_pacing(self):
+        """A frame with frame.pts set but no capture-time metadata must NOT
+        take the capture-time path.
+
+        Transports like SmallWebRTC stamp frame.pts on input audio in their
+        own units (samples, not nanoseconds). Keying capture positioning off
+        raw pts would (mis)route that audio through _position_buffer_by_capture_time
+        and, with the wrong units, silently stop padding gaps: the #4561
+        too-short regression. Only the explicit metadata key may trigger it.
+        """
+        p = await _make_processor()
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            p._last_user_buffer_update_time = 0.0
+            mock_time.monotonic.return_value = 1.0  # 1-second arrival gap
+            frame = InputAudioRawFrame(audio=self._FRAME, sample_rate=16000, num_channels=1)
+            frame.pts = 12345  # sample-unit pts, as a WebRTC transport would set
+            # No frame.metadata["audio_capture_time_ns"].
+            await p.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        # Arrival pacing ran (silence padded for the 1 s gap) and the capture
+        # tracker never anchored.
+        frame_duration = len(self._FRAME) / self._BYTES_PER_SECOND
+        expected_silence = int((1.0 - frame_duration) * self._BYTES_PER_SECOND)
+        expected_silence -= expected_silence % 2
+        self.assertEqual(len(p._user_audio_buffer), expected_silence + len(self._FRAME))
+        self.assertIsNone(p._user_capture_tracker.base_capture_ns)
+        await p.cleanup()
+
+    async def test_capture_time_reset_reanchors_on_backwards_jump(self):
+        """A backwards capture time (e.g. a Twilio stream restart resetting the
+        timestamp to 0) re-anchors instead of stopping all future gap padding.
+        """
+        p = await _make_processor()
+
+        # Anchor deep into the stream, then a later frame contiguous with it.
+        await self._send_user_frame(p, self._FRAME, 10_000_000_000)
+        await self._send_user_frame(p, self._FRAME, 10_000_000_000 + self._FRAME_NS)
+        len_before = len(p._user_audio_buffer)
+
+        # Stream restarts: capture time drops back to 0. This re-anchors
+        # (base_len = the buffer length now, base_capture_ns = 0), so the frame
+        # is simply appended: no negative offset, no wedged state.
+        await self._send_user_frame(p, self._FRAME, 0)
+        self.assertEqual(p._user_capture_tracker.base_capture_ns, 0)
+        self.assertEqual(len(p._user_audio_buffer), len_before + len(self._FRAME))
+
+        # A real 1 s gap after the restart still pads. The target is absolute
+        # from the re-anchor (base_len == len_before), so the restart frame's
+        # own audio sits inside that 1 s window: final length is base_len + 1 s
+        # + this frame, not an extra frame on top.
+        await self._send_user_frame(p, self._FRAME, 1_000_000_000)
+        self.assertEqual(
+            len(p._user_audio_buffer),
+            len_before + self._BYTES_PER_SECOND + len(self._FRAME),
+        )
         await p.cleanup()
 
 

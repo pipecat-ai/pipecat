@@ -20,9 +20,9 @@ which is issue #4561 all over again.
 The fix (Filipi's review on PR #5071): position audio by a capture timestamp
 from the client instead of inferring it from arrival pacing. Twilio media
 messages carry a ``timestamp`` field (ms since stream start). The serializer
-stamps it onto the frame's ``pts`` and the processor places the audio at that
-capture time. Transports without a timestamp keep the arrival-pacing
-behavior.
+records it in ``frame.metadata["audio_capture_time_ns"]`` and the processor
+places the audio at that capture time. Transports without that metadata keep
+the arrival-pacing behavior.
 
 This script drives the REAL ``TwilioFrameSerializer.deserialize`` with
 scripted Twilio-format ``media`` JSON messages (real base64 u-law payloads
@@ -255,10 +255,10 @@ async def main():
     print()
     print(
         "The recorded track should match the real timeline in both scenarios.\n"
-        "Without capture-time (pts) positioning, the mute-gap scenario comes out\n"
+        "Without capture-time positioning, the mute-gap scenario comes out\n"
         "SHORT: the burst arrival is read as a stall catch-up and the mute-gap\n"
-        "silence is trimmed away (issue #4561 again). With pts positioning both\n"
-        "scenarios match the timeline."
+        "silence is trimmed away (issue #4561 again). With capture-time\n"
+        "positioning both scenarios match the timeline."
     )
 
 

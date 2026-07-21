@@ -303,14 +303,18 @@ class TwilioFrameSerializer(FrameSerializer):
             )
 
             # Twilio media messages carry the capture time ("timestamp", ms
-            # since stream start). Stamp it onto the frame's pts (nanoseconds)
-            # so downstream processors can place the audio by capture time
-            # instead of arrival time (e.g. AudioBufferProcessor's silence-gap
-            # handling). Left as None when the field is missing or malformed.
+            # since stream start). Record it in frame metadata (nanoseconds) so
+            # downstream processors can place the audio by capture time instead
+            # of arrival time (e.g. AudioBufferProcessor's silence-gap handling).
+            # We deliberately do NOT overload frame.pts: pts is a general
+            # presentation timestamp that other transports set in their own
+            # units (e.g. samples), so a dedicated metadata key keeps this
+            # capture-time signal unambiguous. Omitted when the field is missing
+            # or malformed.
             timestamp_ms = message["media"].get("timestamp")
             if timestamp_ms is not None:
                 try:
-                    audio_frame.pts = int(timestamp_ms) * 1_000_000
+                    audio_frame.metadata["audio_capture_time_ns"] = int(timestamp_ms) * 1_000_000
                 except (TypeError, ValueError):
                     pass
 
