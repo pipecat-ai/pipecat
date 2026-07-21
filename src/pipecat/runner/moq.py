@@ -41,24 +41,15 @@ def _validate_moq_args(args: argparse.Namespace) -> bool:
     ``args.moq_bind`` (defaulted in serve mode), ``args.moq_tls_host`` (the
     hostname presented to the browser).
     """
-    # ------------------------------------------------------------------
-    # TODO: MoQ client mode is not yet supported. The wiring exists but
-    # hasn't been shaken out — the cert-fingerprint plumbing to the
-    # browser is the missing piece for self-signed local relays, and we
-    # haven't validated the flow against a public relay. Fail loudly at
-    # arg-parse time so users get a clear message instead of a downstream
-    # DNS or TLS error. Every --moq-connect / --moq-tls-insecure /
-    # client-mode branch below is preserved so the switchover is a
-    # one-line delete of this guard once client mode is ready.
-    if not args.moq_serve:
-        logger.error(
-            "MoQ client mode is not yet supported. "
-            "Pass --moq-serve to run the bot as its own MoQ server "
-            "(with --moq-tls-generate <hostname> for a self-signed dev cert, or "
-            "--moq-tls-cert/--moq-tls-key for a CA-signed one)."
-        )
-        return False
-    # ------------------------------------------------------------------
+    # Resolve the mode. ``--moq-serve``/``--no-moq-serve`` sets it
+    # explicitly; when unset, default to client mode if a relay URL was
+    # given (``--moq-connect``) and server mode otherwise — the
+    # zero-config local-dev default, where the bot hosts its own relay.
+    if args.moq_serve is None:
+        args.moq_serve = args.moq_connect is None
+
+    # Populated only for a unix-socket client dial (see below); None otherwise.
+    args.moq_relay_url = None
 
     has_cert = bool(args.moq_tls_cert)
     has_key = bool(args.moq_tls_key)
@@ -112,6 +103,21 @@ def _validate_moq_args(args: argparse.Namespace) -> bool:
         # Client mode.
         connect = args.moq_connect or DEFAULT_MOQ_CONNECT
         parsed = urlparse(connect)
+
+        if parsed.scheme.lower() == "unix":
+            # Unix-domain-socket dial to a co-located relay (e.g. a sidecar
+            # moq-relay). The bot reaches the relay over the socket with no
+            # TLS and no host/port; the full URL is the dial target passed
+            # straight to moq.Client. The browser can't use a unix socket —
+            # it needs the relay's network endpoint, supplied separately
+            # (see _build_moq_client_config).
+            args.moq_relay_url = connect
+            args.moq_host = None
+            args.moq_port = None
+            args.moq_path = None
+            args.moq_tls_host = None
+            return True
+
         if not parsed.hostname:
             logger.error(
                 f"--moq-connect must be a full URL with a host "
@@ -201,8 +207,12 @@ def _build_moq_client_config(
     pipe it into ``MoqTransport``'s constructor without a separate fetch.
 
     In serve mode the bot just minted (or loaded) its own cert; we use
-    the fingerprint it reported (passed via ``cert_fingerprints``).
-    Otherwise we fall back to the PEM file at ``--moq-tls-cert``.
+    the fingerprint it reported (passed via ``cert_fingerprints``). In
+    client mode against a self-signed relay, the relay's fingerprint comes
+    from ``--moq-tls-fingerprint`` (hex, as advertised by moq-relay at
+    ``GET /certificate.sha256``), or is computed from the PEM at
+    ``--moq-tls-cert``. A CA-signed relay needs none of these — ``certHash``
+    stays ``None`` and the browser trusts the relay's chain normally.
 
     Track names aren't pinned here — the bot publishes a catalog at
     runtime and the browser reads whatever it advertises (codec, sample
@@ -212,15 +222,32 @@ def _build_moq_client_config(
     # certHash must be set ONLY for self-signed certs. It purposely
     # doesn't work with valid CA-signed TLS certificates.
     cert_hash: str | None = None
+    fingerprint = getattr(args, "moq_tls_fingerprint", None)
     if args.moq_serve and cert_fingerprints:
         cert_hash = _hex_to_b64(cert_fingerprints[0])
+    elif fingerprint:
+        cert_hash = _hex_to_b64(fingerprint)
     elif getattr(args, "moq_tls_cert", None):
         cert_hash = _cert_hash_from_pem(args.moq_tls_cert)
 
-    # WebTransport always uses HTTPS — even for self-signed dev relays,
-    # the cert is pinned via `certHash` below.
+    # The bot may dial the relay over a unix socket (co-located sidecar),
+    # but the browser needs the relay's NETWORK endpoint — which isn't
+    # derivable from a socket path. Emit None so the config never carries a
+    # bogus URL; the client app supplies the relay's network URL itself.
+    relay_url = getattr(args, "moq_relay_url", None)
+    if isinstance(relay_url, str) and relay_url.startswith("unix:"):
+        browser_relay_url = None
+        logger.warning(
+            "MoQ unix-socket dial: browser relayUrl can't be derived from a socket "
+            "path; point the client at the relay's network endpoint separately."
+        )
+    else:
+        # WebTransport always uses HTTPS — even for self-signed dev relays,
+        # the cert is pinned via `certHash` below.
+        browser_relay_url = f"https://{args.moq_host}:{args.moq_port}{args.moq_path}"
+
     return {
-        "relayUrl": f"https://{args.moq_host}:{args.moq_port}{args.moq_path}",
+        "relayUrl": browser_relay_url,
         "certHash": cert_hash,
         "serve": args.moq_serve,
         "namespace": namespace,
