@@ -4,17 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import argparse
-import asyncio
 import os
-from contextlib import asynccontextmanager
 
-import uvicorn
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI
-from fastapi.responses import RedirectResponse
 from loguru import logger
-from pipecat_ai_prebuilt.frontend import PipecatPrebuiltUI
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
@@ -25,43 +18,19 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.runner.types import RunnerArguments
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.smallwebrtc.connection import IceServer, SmallWebRTCConnection
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
-app = FastAPI()
 
-# Store connections by pc_id
-pcs_map: dict[str, SmallWebRTCConnection] = {}
-
-ice_servers = [
-    IceServer(
-        urls="stun:stun.l.google.com:19302",
-    )
-]
-
-# Mount the frontend at /
-app.mount("/client", PipecatPrebuiltUI)
-
-
-async def run_example(webrtc_connection: SmallWebRTCConnection):
-    logger.info(f"Starting bot")
-
-    # Create a transport using the WebRTC connection
-    transport = SmallWebRTCTransport(
-        webrtc_connection=webrtc_connection,
-        params=TransportParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-        ),
-    )
-
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
     tts = CartesiaTTSService(
@@ -118,64 +87,29 @@ async def run_example(webrtc_connection: SmallWebRTCConnection):
         logger.info(f"Client disconnected")
         await worker.cancel()
 
-    runner = WorkerRunner(handle_sigint=False)
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.add_workers(worker)
     await runner.run()
 
 
-@app.get("/", include_in_schema=False)
-async def root_redirect():
-    return RedirectResponse(url="/client/")
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat runner."""
+    webrtc_connection: SmallWebRTCConnection = runner_args.webrtc_connection
 
+    # Create a transport using the WebRTC connection
+    transport = SmallWebRTCTransport(
+        webrtc_connection=webrtc_connection,
+        params=TransportParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+        ),
+    )
 
-@app.post("/api/offer")
-async def offer(request: dict, background_tasks: BackgroundTasks):
-    pc_id = request.get("pc_id")
-
-    if pc_id and pc_id in pcs_map:
-        pipecat_connection = pcs_map[pc_id]
-        logger.info(f"Reusing existing connection for pc_id: {pc_id}")
-        await pipecat_connection.renegotiate(
-            sdp=request["sdp"],
-            type=request["type"],
-            restart_pc=request.get("restart_pc", False),
-        )
-    else:
-        pipecat_connection = SmallWebRTCConnection(ice_servers)
-        await pipecat_connection.initialize(sdp=request["sdp"], type=request["type"])
-
-        @pipecat_connection.event_handler("closed")
-        async def handle_disconnected(webrtc_connection: SmallWebRTCConnection):
-            logger.info(f"Discarding peer connection for pc_id: {webrtc_connection.pc_id}")
-            pcs_map.pop(webrtc_connection.pc_id, None)
-
-        # Run example function with SmallWebRTC transport arguments.
-        background_tasks.add_task(run_example, pipecat_connection)
-
-    answer = pipecat_connection.get_answer()
-    # Updating the peer connection inside the map
-    pcs_map[answer["pc_id"]] = pipecat_connection
-
-    return answer
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    yield  # Run app
-    coros = [pc.disconnect() for pc in pcs_map.values()]
-    await asyncio.gather(*coros)
-    pcs_map.clear()
+    await run_bot(transport, runner_args)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Pipecat Bot Runner")
-    parser.add_argument(
-        "--host", default="localhost", help="Host for HTTP server (default: localhost)"
-    )
-    parser.add_argument(
-        "--port", type=int, default=7860, help="Port for HTTP server (default: 7860)"
-    )
-    args = parser.parse_args()
+    from pipecat.runner.run import main
 
-    uvicorn.run(app, host=args.host, port=args.port)
+    main()
