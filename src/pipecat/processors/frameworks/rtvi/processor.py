@@ -82,6 +82,8 @@ class RTVIProcessor(FrameProcessor):
         self._bot_ready = False
         self._client_ready = False
         self._client_ready_id = ""
+        # Mute messages buffered before client-ready; replayed by set_client_ready().
+        self._pending_mute_messages: list[tuple[BaseModel, bool]] = []
         # Default to 0.0.0 to indicate unknown version.
         self._client_version = [0, 0, 0]
         self._llm_skip_tts: bool = False  # Keep in sync with llm_service.py's configuration.
@@ -129,6 +131,7 @@ class RTVIProcessor(FrameProcessor):
         """Mark the client as ready and trigger the ready event."""
         self._client_ready = True
         await self._call_event_handler("on_client_ready")
+        await self._flush_pending_mute_messages()
 
     async def set_bot_ready(self, about: Mapping[str, Any] | None = None):
         """Mark the bot as ready and send the bot-ready message.
@@ -169,11 +172,32 @@ class RTVIProcessor(FrameProcessor):
         await self._send_error_frame(ErrorFrame(error=error))
 
     async def push_transport_message(self, model: BaseModel, exclude_none: bool = True):
-        """Push a transport message frame."""
+        """Push a transport message frame.
+
+        Mute-state messages sent before the client-ready handshake are buffered
+        and replayed by :meth:`set_client_ready`. Mute is sticky state, so a
+        transition emitted before the client subscribes to the transport would
+        otherwise be dropped and leave the client's mute state desynced.
+
+        Args:
+            model: The message to send.
+            exclude_none: Whether to exclude None values from the model dump.
+        """
+        if not self._client_ready and isinstance(
+            model, (RTVI.UserMuteStartedMessage, RTVI.UserMuteStoppedMessage)
+        ):
+            self._pending_mute_messages.append((model, exclude_none))
+            return
         frame = OutputTransportMessageUrgentFrame(
             message=model.model_dump(exclude_none=exclude_none)
         )
         await self.push_frame(frame)
+
+    async def _flush_pending_mute_messages(self):
+        """Replay mute-state messages buffered before the client became ready."""
+        pending, self._pending_mute_messages = self._pending_mute_messages, []
+        for model, exclude_none in pending:
+            await self.push_transport_message(model, exclude_none)
 
     async def handle_message(self, message: RTVI.Message):
         """Handle an incoming RTVI message.
