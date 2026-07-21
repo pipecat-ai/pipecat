@@ -201,11 +201,15 @@ class TextSegmentMap:
     Callers drive the map word-by-word: :meth:`word_belongs_current_segment`
     asks whether a raw word-timestamp token plausibly continues the remaining
     TTS text, and :meth:`advance_word` consumes it. Both match the token against
-    the segment's remaining raw text directly -- literally, or (as a stateless
-    fallback) with markup stripped from both sides -- so a token that is a
-    fragment of a still-open SSML tag (e.g. an attribute-only word from a
-    multi-attribute tag some TTS providers split across several word-timestamp
-    events) needs no special tag parsing.
+    the segment's remaining raw text directly -- literally, then (as stateless
+    fallbacks, recomputed fresh each call) with the word's own trailing
+    punctuation stripped, with both sides case/accent-folded, or with markup
+    stripped from both sides -- so a token that adds punctuation or changes
+    case/diacritics the source text doesn't have, or is a fragment of a still-
+    open SSML tag (e.g. an attribute-only word from a multi-attribute tag some
+    TTS providers split across several word-timestamp events), needs no special
+    handling from the caller. See :meth:`_classify_hop` for the full ordered
+    list of fallbacks.
 
     Example::
 
@@ -328,7 +332,11 @@ class TextSegmentMap:
         self._last_overflow: str | None = None
 
     @staticmethod
-    def _literal_hop(candidates: list[tuple[str, int]], remaining_word: str) -> "_Hop | None":
+    def _literal_hop(
+        candidates: list[tuple[str, int]],
+        remaining_word: str,
+        require_word_boundary: bool = False,
+    ) -> "_Hop | None":
         """Try PLACED/CROSSES of *remaining_word* against *candidates*, literally.
 
         Shared by the raw and case/accent-folded passes in :meth:`_classify_hop`
@@ -342,6 +350,21 @@ class TextSegmentMap:
         account"`` -- as its own sentence, ``"account."``). The segment's own
         punctuation is untouched either way and is still picked up verbatim by
         the next word.
+
+        Args:
+            candidates: ``(text, offset)`` pairs to match *remaining_word*
+                against, tried in order.
+            remaining_word: The word (or its trailing-punctuation-stripped
+                variant) to match.
+            require_word_boundary: When True, a ``PLACED`` match is only
+                accepted if it ends at a word boundary in the candidate (the
+                candidate is fully consumed, or the next character is not
+                alphanumeric) -- rejecting a short word that only happens to
+                be a prefix of a longer one (e.g. ``"account"`` inside
+                ``"Accountant"``). Used by the case/accent-folded pass, where
+                folding can otherwise turn a same-case mismatch into a
+                spurious mid-word prefix match; the raw pass leaves this off
+                to preserve its existing case-sensitive matching.
 
         Returns:
             A ``PLACED`` or ``CROSSES`` hop, or ``None`` if nothing matched.
@@ -360,8 +383,14 @@ class TextSegmentMap:
                 continue
             for candidate, offset in candidates:
                 if candidate.startswith(word):
-                    return _Hop(_HopKind.PLACED, seg_chars=offset + len(word))
-                if candidate and word.startswith(candidate):
+                    lands_mid_word = (
+                        require_word_boundary
+                        and len(word) < len(candidate)
+                        and candidate[len(word)].isalnum()
+                    )
+                    if not lands_mid_word:
+                        return _Hop(_HopKind.PLACED, seg_chars=offset + len(word))
+                elif candidate and word.startswith(candidate):
                     return _Hop(_HopKind.CROSSES, word_chars=len(candidate))
         return None
 
@@ -370,7 +399,7 @@ class TextSegmentMap:
         """Decide where *remaining_word* goes against this segment's remaining raw text.
 
         Purely positional/textual -- no tag-name parsing or cross-call state. The
-        word is checked with four matching strategies, in order:
+        word is checked with three matching strategies, in order:
 
         1. Literal, as-is: for providers whose word tokens carry their own
            surrounding whitespace (e.g. Inworld's ``" world"``), optionally with
@@ -382,8 +411,11 @@ class TextSegmentMap:
            Folding is a length-preserving, per-character transform (unlike
            :func:`normalize`, it never drops or merges characters), so an
            offset found against the folded text applies unchanged to the
-           original -- it can't match across a word/punctuation boundary that
-           wasn't already a candidate in strategy 1.
+           original. Folding erases case, which could otherwise turn a short
+           word into a spurious mid-word prefix match against a longer one
+           (e.g. folded ``"account"`` against ``"Accountant"``); a
+           ``PLACED`` match is only accepted here if it lands on a word
+           boundary (see :meth:`_literal_hop`'s ``require_word_boundary``).
         3. Markup-stripped on both sides: for a provider that wraps the word
            token in tags absent from ``tts_text`` (or vice versa). Recomputed
            fresh each call -- no persisted tag state.
@@ -417,10 +449,14 @@ class TextSegmentMap:
         if hop is not None:
             return hop
 
-        # Strategy 2: same candidates, case/accent-folded.
+        # Strategy 2: same candidates, case/accent-folded. require_word_boundary
+        # guards against folding turning a short word into a false mid-word
+        # prefix match against a longer one that only differs in case.
         folded_word = fold_case_and_accents(remaining_word)
         folded_candidates = [(fold_case_and_accents(c), offset) for c, offset in candidates]
-        hop = TextSegmentMap._literal_hop(folded_candidates, folded_word)
+        hop = TextSegmentMap._literal_hop(
+            folded_candidates, folded_word, require_word_boundary=True
+        )
         if hop is not None:
             return hop
 

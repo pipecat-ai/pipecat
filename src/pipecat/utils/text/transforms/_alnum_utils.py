@@ -83,10 +83,12 @@ def normalize(text: str) -> str:
         if not char.isalnum():
             continue
         if char.isalpha():
+            # Letters, including CJK and Hangul (both alphabetic per
+            # str.isalpha()): fold accents, a no-op for scripts that have none.
             result.append(_fold_accented_char(char))
         else:
-            # Regular numbers, CJK, Hangul, etc. are kept unchanged (except
-            # lowercase conversion, a no-op for characters with no case).
+            # Digits and other alnum-but-not-alphabetic characters: no case or
+            # accent to fold, so keep as-is (lowercase conversion is a no-op).
             result.append(char.lower())
     return "".join(result)
 
