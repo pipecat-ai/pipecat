@@ -10,6 +10,21 @@ import re
 import unicodedata
 
 
+def strip_trailing_punctuation(text: str) -> str:
+    """Remove punctuation only at the very end of *text*.
+
+    Args:
+        text: Input text to trim.
+
+    Returns:
+        *text* with any trailing run of Unicode punctuation characters removed.
+    """
+    i = len(text)
+    while i > 0 and unicodedata.category(text[i - 1]).startswith("P"):
+        i -= 1
+    return text[:i]
+
+
 def normalize(text: str) -> str:
     """Strip XML/HTML tags then keep only lowercase alphanumeric characters.
 

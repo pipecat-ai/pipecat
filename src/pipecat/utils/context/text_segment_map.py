@@ -13,7 +13,11 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from pipecat.utils.text.transforms._alnum_utils import advance_by_alnums, normalize
+from pipecat.utils.text.transforms._alnum_utils import (
+    advance_by_alnums,
+    normalize,
+    strip_trailing_punctuation,
+)
 
 
 def _iter_clean_chars(text: str) -> Iterator[tuple[int, str]]:
@@ -327,20 +331,26 @@ class TextSegmentMap:
         """Decide where *remaining_word* goes against this segment's remaining raw text.
 
         Purely positional/textual -- no tag-name parsing or cross-call state. The
-        word is checked with three matching strategies, in order:
+        word is checked with four matching strategies, in order:
 
         1. Literal, as-is: for providers whose word tokens carry their own
            surrounding whitespace (e.g. Inworld's ``" world"``).
         2. Literal, with the segment's leading whitespace stripped: the common
            case where the word omits the separating space.
-        3. Markup-stripped on both sides: for a provider that wraps the word
+        3. Same as 1 and 2, but with the word's own trailing punctuation
+           removed: some TTS providers add terminal punctuation the original
+           text doesn't have (e.g. reading a list item -- ``"my account"`` --
+           as its own sentence, ``"account."``). The segment's actual
+           punctuation is untouched by this and is still picked up verbatim by
+           the next word.
+        4. Markup-stripped on both sides: for a provider that wraps the word
            token in tags absent from ``tts_text`` (or vice versa). Recomputed
            fresh each call -- no persisted tag state.
 
-        Strategies 1 and 2 yield :attr:`_HopKind.PLACED` (word fits inside this
+        Strategies 1-3 yield :attr:`_HopKind.PLACED` (word fits inside this
         segment) or :attr:`_HopKind.CROSSES` (the segment's remaining text is
         only a prefix of the word, which spills into the next segment). Strategy
-        3 only yields ``PLACED``.
+        4 only yields ``PLACED``.
 
         If none match, the outcome is structural:
 
@@ -368,7 +378,18 @@ class TextSegmentMap:
             if candidate and remaining_word.startswith(candidate):
                 return _Hop(_HopKind.CROSSES, word_chars=len(candidate))
 
-        # Strategy 3: markup-stripped match.
+        # Strategy 3: same candidates, with the word's own trailing punctuation
+        # removed. The trimmed word is a prefix of remaining_word, so word_chars
+        # computed against it is still a valid split point for remaining_word.
+        trimmed_word = strip_trailing_punctuation(remaining_word)
+        if trimmed_word and trimmed_word != remaining_word:
+            for candidate, offset in candidates:
+                if candidate.startswith(trimmed_word):
+                    return _Hop(_HopKind.PLACED, seg_chars=offset + len(trimmed_word))
+                if candidate and trimmed_word.startswith(candidate):
+                    return _Hop(_HopKind.CROSSES, word_chars=len(candidate))
+
+        # Strategy 4: markup-stripped match.
         clean_word = strip_markup(remaining_word)
         if clean_word and strip_markup(stripped).startswith(clean_word):
             raw_len = _raw_len_for_clean_chars(stripped, len(clean_word))
