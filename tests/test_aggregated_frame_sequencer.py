@@ -527,6 +527,93 @@ class TestForceComplete(unittest.IsolatedAsyncioTestCase):
 
 
 # ---------------------------------------------------------------------------
+# Late words after force_complete (back-to-back turn double-emit guard)
+# ---------------------------------------------------------------------------
+
+
+class TestLateWordsAfterForceComplete(unittest.IsolatedAsyncioTestCase):
+    """Late word-timestamps arriving after context teardown must not re-emit the turn.
+
+    Regression for the back-to-back (superseding) double-emit seen with word-timestamp
+    services (e.g. Cartesia) in non-streaming SENTENCE mode: on two LLM responses with
+    no user turn between, the second turn's async word timestamps land *after*
+    force_complete() has already emitted the slots' remaining text and emptied the queue.
+    Without a guard those late words fall through to the passthrough branch and emit the
+    turn's text a second time, even though the audio was synthesized once.
+    """
+
+    CTX = "ctx-B"
+    SENTENCES = ["I'm sorry to hear that.", "Please tell me your PIN."]
+
+    async def _register(self, seq):
+        for s in self.SENTENCES:
+            await seq.register_spoken(_spoken_frame(s), self.CTX, s, append_to_context=True)
+
+    @staticmethod
+    def _joined(frames):
+        return "".join(f.text for f in frames if isinstance(f, TTSTextFrame)).replace(" ", "")
+
+    async def test_force_complete_then_late_words_emit_turn_once(self):
+        seq = _seq()
+        await self._register(seq)
+
+        emitted = seq.force_complete(last_word_pts=1000)  # teardown wins the race
+        pts = 2000
+        for s in self.SENTENCES:
+            for w in s.split():
+                emitted += seq.process_word(w, pts, self.CTX)  # late words
+                pts += 100
+
+        marker = "".join(self.SENTENCES).replace(" ", "")
+        self.assertEqual(
+            self._joined(emitted).count(marker),
+            1,
+            "turn text was emitted more than once: late words after force_complete "
+            "were re-emitted as passthrough",
+        )
+
+    async def test_late_words_after_teardown_are_dropped(self):
+        seq = _seq()
+        await self._register(seq)
+        seq.force_complete(last_word_pts=1000)  # empties the queue, records the context
+
+        for w in "I'm sorry to hear that.".split():
+            self.assertEqual(seq.process_word(w, pts=2000, context_id=self.CTX), [])
+
+    async def test_normal_completion_then_force_complete_emits_once(self):
+        """Regression guard: words that complete slots before teardown emit exactly once."""
+        seq = _seq()
+        await self._register(seq)
+
+        emitted = []
+        pts = 100
+        for s in self.SENTENCES:
+            for w in s.split():
+                emitted += seq.process_word(w, pts, self.CTX)
+                pts += 100
+        emitted += seq.force_complete(last_word_pts=pts)  # nothing left to complete
+
+        marker = "".join(self.SENTENCES).replace(" ", "")
+        self.assertEqual(self._joined(emitted).count(marker), 1)
+
+    async def test_new_slot_for_context_reenables_words(self):
+        """Re-registering a slot under a force-completed context clears the drop flag.
+
+        A word for that context is only stale until the context is used again; once a
+        fresh slot is registered under the same id, its words must flow normally.
+        """
+        seq = _seq()
+        await seq.register_spoken(_spoken_frame("hello"), self.CTX, "hello", True)
+        seq.force_complete(last_word_pts=10)  # records self.CTX as force-completed
+        # Same context id reused for a new turn.
+        await seq.register_spoken(_spoken_frame("world"), self.CTX, "world", True)
+
+        result = seq.process_word("world", pts=20, context_id=self.CTX)
+        word_frames = [f for f in result if isinstance(f, TTSTextFrame)]
+        self.assertEqual([f.text for f in word_frames], ["world"])
+
+
+# ---------------------------------------------------------------------------
 # clear
 # ---------------------------------------------------------------------------
 

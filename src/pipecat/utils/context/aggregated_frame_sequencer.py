@@ -236,6 +236,10 @@ class AggregatedFrameSequencer:
         self._slots: list[_AggregatedFrameSlot] = []
         self._context_append_to_context: dict[str, bool] = {}
         self._buffered_words: list[tuple[str, int, str | None, bool]] = []
+        # Contexts whose spoken slots were force-completed at teardown. Late
+        # word-timestamps for these are stale and dropped (non-streaming path); see
+        # the guard in :meth:`process_word`.
+        self._force_completed_contexts: set[str] = set()
 
     async def register_spoken(
         self,
@@ -418,6 +422,23 @@ class AggregatedFrameSequencer:
             )
             return []
 
+        # Drop a late word for a context already force-completed at teardown.
+        # force_complete() emits each remaining slot's text once and empties the queue;
+        # a word-timestamp the TTS server delivers after that (as happens on back-to-back
+        # turns, where the async timestamp stream lands after the context has torn down)
+        # would otherwise reach the passthrough branch below and re-emit the turn's text
+        # a second time, even though the audio was synthesized once. Streaming mode has
+        # its own buffering for the no-active-slot case, so this only guards non-streaming.
+        if (
+            not self._streaming
+            and context_id is not None
+            and context_id in self._force_completed_contexts
+        ):
+            logger.debug(
+                f"{self._name} Dropping late word '{word}' for force-completed context {context_id}"
+            )
+            return []
+
         active = self._get_active_slot()
         is_complete = False
         raw_overflow_word = None
@@ -559,6 +580,7 @@ class AggregatedFrameSequencer:
         frames: list[Frame] = []
         for slot in self._slots:
             if slot.spoken and not slot.complete:
+                self._force_completed_contexts.add(slot.context_id)
                 if slot.tracker:
                     remaining_text = slot.tracker.get_remaining_tts_text()
                     raw_remaining = slot.tracker.get_remaining_llm_text()
@@ -591,6 +613,7 @@ class AggregatedFrameSequencer:
         self._slots.clear()
         self._context_append_to_context.clear()
         self._buffered_words.clear()
+        self._force_completed_contexts.clear()
         self._streaming_slot_meta = None
         # Re-create the aggregator for a clean state (sync; avoids an async reset).
         self._parallel = _ParallelSentenceAggregator() if self._streaming else None
@@ -613,6 +636,8 @@ class AggregatedFrameSequencer:
         :meth:`_promote` once a streamed sentence's boundary is confirmed.
         """
         self._context_append_to_context[context_id] = append_to_context
+        # A fresh slot for this context means it is live again: allow its words.
+        self._force_completed_contexts.discard(context_id)
         self._slots.append(
             _AggregatedFrameSlot(
                 frame=frame,
