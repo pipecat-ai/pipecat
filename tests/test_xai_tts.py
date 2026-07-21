@@ -44,6 +44,7 @@ async def test_run_xai_tts_success(aiohttp_client):
     """xAI TTS should send the documented request body and emit PCM frames."""
 
     request_bodies = []
+    pcm_audio = b"\x00\x01\x02\x03" * 1024
 
     async def handler(request):
         request_bodies.append(await request.json())
@@ -54,9 +55,10 @@ async def test_run_xai_tts_success(aiohttp_client):
             headers={"Content-Type": "audio/pcm"},
         )
         await response.prepare(request)
-        await response.write(b"\x00\x01\x02\x03" * 1024)
+        # Split mid-sample to check that emitted frames stay sample-aligned.
+        await response.write(pcm_audio[:2047])
         await asyncio.sleep(0.01)
-        await response.write(b"\x04\x05\x06\x07" * 1024)
+        await response.write(pcm_audio[2047:])
         await response.write_eof()
         return response
 
@@ -88,6 +90,8 @@ async def test_run_xai_tts_success(aiohttp_client):
     assert audio_frames
     assert all(frame.sample_rate == 24000 for frame in audio_frames)
     assert all(frame.num_channels == 1 for frame in audio_frames)
+    assert all(len(frame.audio) % 2 == 0 for frame in audio_frames)
+    assert b"".join(frame.audio for frame in audio_frames) == pcm_audio
 
     assert len(request_bodies) == 1
     assert request_bodies[0] == {

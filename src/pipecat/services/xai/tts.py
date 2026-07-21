@@ -277,7 +277,6 @@ class XAIHttpTTSService(TTSService):
             "Content-Type": "application/json",
         }
 
-        measuring_ttfb = True
         try:
             async with self._session.post(
                 self._base_url, json=payload, headers=headers
@@ -291,18 +290,14 @@ class XAIHttpTTSService(TTSService):
 
                 await self.start_tts_usage_metrics(text)
 
-                async for chunk in response.content.iter_chunked(self.chunk_size):
-                    if not chunk:
-                        continue
-                    if measuring_ttfb:
-                        await self.stop_ttfb_metrics()
-                        measuring_ttfb = False
-                    yield TTSAudioRawFrame(
-                        chunk,
-                        self.sample_rate,
-                        1,
-                        context_id=context_id,
-                    )
+                # xAI chops the stream at arbitrary byte boundaries, so let the
+                # iterator helper keep emitted frames sample-aligned.
+                async for frame in self._stream_audio_frames_from_iterator(
+                    response.content.iter_chunked(self.chunk_size),
+                    context_id=context_id,
+                ):
+                    await self.stop_ttfb_metrics()
+                    yield frame
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
