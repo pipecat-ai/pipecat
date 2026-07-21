@@ -77,6 +77,8 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._stop_secs: float = 0.0  # VAD stop_secs from VADUserStoppedSpeakingFrame
 
         self._stop_secs_warned: bool = False
+        self._stt_metadata_seen: bool = False
+        self._no_stt_metadata_warned: bool = False
 
         self._text = ""
         self._turn_complete = False
@@ -155,6 +157,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self._start(frame)
         elif isinstance(frame, STTMetadataFrame):
             self._stt_timeout = frame.ttfs_p99_latency
+            self._stt_metadata_seen = True
             self._stop_secs_warned = False
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             await self._handle_vad_user_started_speaking(frame)
@@ -255,6 +258,19 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         """Handle user transcription."""
+        if not self._stt_metadata_seen and not self._no_stt_metadata_warned:
+            self._no_stt_metadata_warned = True
+            logger.warning(
+                f"{self}: receiving transcripts but no STTMetadataFrame has been "
+                f"seen. Without it the STT p99 grace window is 0s, so turn-end "
+                f"timing can be unreliable and the bot may respond before the "
+                f"user finishes. This usually means transcription is coming from "
+                f"the transport (for example Daily transcription_enabled=True) "
+                f"instead of a Pipecat STT service in the pipeline. Add a Pipecat "
+                f"STT service (for example DeepgramSTTService) to the pipeline so "
+                f"this strategy receives STTMetadataFrame and finalized transcripts."
+            )
+
         # We don't really care about the content.
         self._text = frame.text
         if frame.finalized:
