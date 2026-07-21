@@ -18,7 +18,7 @@ be driven from inside the process. So this eval drives the same in-process
 pipeline as ``websocket_repro.py`` and applies the duration assertion directly,
 matching the approach of ``eval_duration_drift.py``.
 
-Both scenarios pass with the capture-timestamp (pts) positioning fix. Checked
+Both scenarios pass with the capture-timestamp positioning fix. Checked
 out without it (the previous commit on this branch), the mute-gap scenario
 FAILS: the burst arrival is read as a stall catch-up and about 2 s of the
 genuine 3 s mute gap gets trimmed (issue #4561 again), so the recording comes
