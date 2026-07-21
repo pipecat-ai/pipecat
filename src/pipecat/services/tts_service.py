@@ -51,7 +51,6 @@ from pipecat.services.settings import TTSSettings, is_given
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
-from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.frame_queue import FrameQueue
 from pipecat.utils.text.base_text_filter import BaseTextFilter
@@ -302,10 +301,14 @@ class TTSService(AIService):
         # until all preceding spoken slots are complete, then flushed downstream so
         # their append_to_context=True arrives at the assistant aggregator in the
         # correct order relative to the TTSTextFrames from spoken sentences.
-        # Tracks all AggregatedTextFrame slots (spoken and skipped) in order.
-        # Skipped frames are held until preceding spoken slots complete, ensuring
-        # append_to_context=True reaches the assistant aggregator in the right order.
-        self._aggregated_frame_sequencer = AggregatedFrameSequencer(name=str(self))
+        #
+        # In streaming (TOKEN) mode the sequencer regroups tokens back into
+        # sentences, which relies on the whole turn sharing one context ID; this is
+        # only sound with reuse_context_id_within_turn=True (see the sequencer's
+        # `streaming` docstring).
+        self._aggregated_frame_sequencer = AggregatedFrameSequencer(
+            name=str(self), streaming=self._is_streaming_tokens
+        )
 
         self._resampler = create_stream_resampler()
 
@@ -731,6 +734,13 @@ class TTSService(AIService):
                     )
                 )
 
+            # Force-promote any sentence still pending in the sequencer (streaming
+            # mode only; a no-op otherwise) — handles a response that ends with no
+            # terminal punctuation.
+            await self._push_sequencer_frames(
+                await self._aggregated_frame_sequencer.finalize(), self._turn_context_id
+            )
+
             # We pause processing incoming frames if the LLM response included
             # text (it might be that it's only a function calling response). We
             # pause to avoid audio overlapping.
@@ -985,15 +995,37 @@ class TTSService(AIService):
                 includes_inter_frame_spaces,
             )
 
+    async def _push_sequencer_frames(self, frames: list[Frame], context_id: str | None):
+        """Emit frames returned by the aggregated-frame sequencer in audio order.
+
+        In streaming (TOKEN) mode these frames — a promoted sentence anchor and any
+        replayed word/progress frames — describe an audio context whose audio and
+        word frames are emitted by the dedicated audio-context task. Routing them
+        through that context's queue keeps a single consumer emitting everything in
+        order; pushing directly here would let them race the audio-context task.
+        When the context is gone (or the sequencer is non-streaming), push directly.
+
+        Args:
+            frames: Frames returned by register_spoken/register_skipped/finalize.
+            context_id: The context these frames belong to.
+        """
+        for f in frames:
+            if self._is_streaming_tokens and self.audio_context_available(context_id):
+                await self.append_to_audio_context(context_id, f)
+            else:
+                await self.push_frame(f)
+
     async def _push_frame_respecting_previous_aggregated_frame(
         self, frame: AggregatedTextFrame, context_id: str
     ):
         # Enqueue the skipped frame; returns it immediately if no spoken slot
         # precedes it, or holds it until the sequencer can flush it in order.
-        for f in self._aggregated_frame_sequencer.register_skipped(
-            frame, context_id, self._transport_destination
-        ):
-            await self.push_frame(f)
+        await self._push_sequencer_frames(
+            await self._aggregated_frame_sequencer.register_skipped(
+                frame, context_id, self._transport_destination
+            ),
+            context_id,
+        )
 
     async def _push_tts_frames(
         self,
@@ -1112,18 +1144,19 @@ class TTSService(AIService):
         # Register this spoken frame so the sequencer can track its completion
         # and unblock any skipped frames queued behind it. Word-timestamp services
         # complete the slot via process_word; push_text_frames services complete it
-        # below after the TTSTextFrame is appended to the audio context.
-        self._aggregated_frame_sequencer.register_spoken(
-            src_frame,
-            context_id,
-            tracker=WordCompletionTracker(
+        # below after the TTSTextFrame is appended to the audio context. When
+        # streaming tokens, the sequencer accumulates this call's text into a
+        # pending sentence internally and only registers a real slot once a
+        # sentence boundary is detected.
+        await self._push_sequencer_frames(
+            await self._aggregated_frame_sequencer.register_spoken(
+                src_frame,
+                context_id,
                 prepared_text,
-                llm_text=src_frame.raw_text or src_frame.text,
-                user_facing_text=src_frame.text,
-            )
-            if not self._push_text_frames
-            else None,
-            append_to_context=self._tts_contexts[context_id].append_to_context,
+                append_to_context=self._tts_contexts[context_id].append_to_context,
+                build_tracker=not self._push_text_frames,
+            ),
+            context_id,
         )
 
         # When streaming tokens, per-call logs are kept at trace level; the
