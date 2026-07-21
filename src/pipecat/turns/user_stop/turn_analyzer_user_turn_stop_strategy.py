@@ -258,7 +258,11 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         """Handle user transcription."""
-        if not self._stt_metadata_seen and not self._no_stt_metadata_warned:
+        if (
+            self._wait_for_transcript
+            and not self._stt_metadata_seen
+            and not self._no_stt_metadata_warned
+        ):
             self._no_stt_metadata_warned = True
             logger.warning(
                 f"{self}: receiving transcripts but no STTMetadataFrame has been "

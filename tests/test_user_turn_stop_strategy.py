@@ -6,7 +6,7 @@
 
 import asyncio
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from pipecat.frames.frames import (
     InterimTranscriptionFrame,
@@ -22,6 +22,7 @@ from pipecat.turns.user_stop import (
     ExternalUserTurnCompletionStopStrategy,
     ExternalUserTurnStopStrategy,
     SpeechTimeoutUserTurnStopStrategy,
+    TurnAnalyzerUserTurnStopStrategy,
 )
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
@@ -796,6 +797,55 @@ class TestSpeechTimeoutStopSecsWarnings(unittest.IsolatedAsyncioTestCase):
         await strategy.process_frame(VADUserStartedSpeakingFrame())
         await strategy.process_frame(VADUserStoppedSpeakingFrame(stop_secs=0.2))
 
+        mock_logger.warning.assert_not_called()
+
+
+class TestTurnAnalyzerMissingSTTMetadataWarning(unittest.IsolatedAsyncioTestCase):
+    """Tests for the one-time missing STTMetadataFrame warning."""
+
+    async def asyncSetUp(self) -> None:
+        self.task_manager = TaskManager()
+        self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
+
+    async def _create_strategy(self, wait_for_transcript=True):
+        strategy = TurnAnalyzerUserTurnStopStrategy(
+            turn_analyzer=MagicMock(), wait_for_transcript=wait_for_transcript
+        )
+        await strategy.setup(self.task_manager)
+        return strategy
+
+    @patch("pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy.logger")
+    async def test_warns_once_when_no_stt_metadata(self, mock_logger):
+        strategy = await self._create_strategy(wait_for_transcript=True)
+
+        # First transcript without any prior STTMetadataFrame triggers the warning.
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))
+        self.assertEqual(mock_logger.warning.call_count, 1)
+        self.assertIn("no STTMetadataFrame", mock_logger.warning.call_args[0][0])
+
+        # A second transcript does not warn again.
+        await strategy.process_frame(
+            TranscriptionFrame(text="How are you?", user_id="cat", timestamp="")
+        )
+        self.assertEqual(mock_logger.warning.call_count, 1)
+
+    @patch("pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy.logger")
+    async def test_no_warning_when_wait_for_transcript_false(self, mock_logger):
+        strategy = await self._create_strategy(wait_for_transcript=False)
+
+        # In realtime speech-to-speech mode transcripts don't gate turn-end
+        # timing, so a missing STTMetadataFrame is expected: no warning.
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))
+        mock_logger.warning.assert_not_called()
+
+    @patch("pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy.logger")
+    async def test_no_warning_when_stt_metadata_seen(self, mock_logger):
+        strategy = await self._create_strategy(wait_for_transcript=True)
+
+        await strategy.process_frame(
+            STTMetadataFrame(service_name="test", ttfs_p99_latency=STT_TIMEOUT)
+        )
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))
         mock_logger.warning.assert_not_called()
 
 
