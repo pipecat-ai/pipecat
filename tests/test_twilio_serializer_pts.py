@@ -67,7 +67,7 @@ class TestTwilioMediaCaptureTime(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(frame.metadata.get(_METADATA_KEY))
 
     async def test_integer_timestamp_accepted(self):
-        # Twilio documents the field as a string, but accept a raw number too.
+        # Twilio documents the field as a string, but we accept a raw number too.
         frame = await self.serializer.deserialize(media_message(timestamp=160))
         self.assertIsInstance(frame, InputAudioRawFrame)
         self.assertEqual(frame.metadata.get(_METADATA_KEY), 160 * 1_000_000)
