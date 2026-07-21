@@ -38,6 +38,11 @@ than the real call.
 - `stall_burst_before_fix.wav` / `stall_burst_after_fix.wav`: the recorded
   track from the stall+burst scenario, captured against the code before and
   after the fix in this PR (see below).
+- `websocket_repro.py`: the WebSocket-side counterpart (see "WebSocket
+  transports" below). Drives the real `TwilioFrameSerializer.deserialize`
+  with scripted Twilio media messages into a real `AudioBufferProcessor`.
+- `eval_websocket_duration.py`: asserts recorded duration stays within
+  ±0.25 s of the real call timeline for the WebSocket scenarios.
 
 ## Run
 
@@ -98,3 +103,42 @@ original gap-fill behavior for a genuine gap (muted mic, idle bot, the
 "concatenated utterances" bug #4561 that PR #4567 fixed) is unchanged. See
 `_SilenceGapTracker` and `_fill_buffer_silence_gap` in
 `src/pipecat/processors/audio/audio_buffer_processor.py`.
+
+## WebSocket transports
+
+The trim above assumes audio arrives paced to real time. That holds for
+WebRTC (jitter-buffered), but not for WebSocket transports: audio arrives at
+whatever rate the network and the client produce. A genuine mute gap followed
+by audio that arrives in a burst is indistinguishable, by arrival pacing
+alone, from a stall followed by a catch-up burst, so the trim would eat the
+mute-gap silence and bring back issue #4561.
+
+The fix: position audio by a capture timestamp from the client instead of
+inferring it from arrival pacing. Twilio media messages send a `timestamp`
+(ms since stream start) with every media message; `TwilioFrameSerializer`
+stamps it onto the frame's `pts` and `AudioBufferProcessor` places the audio
+at that capture time (`_CaptureTimeTracker` /
+`_position_buffer_by_capture_time`). A mute shows up as a jump in `pts`
+(silence padded in); stalled audio keeps contiguous `pts` (nothing padded,
+nothing trimmed). Frames without `pts` keep the arrival-pacing behavior.
+
+`websocket_repro.py` demonstrates both cases. Before the capture-time fix:
+
+```
+scenario                       real audio  timeline  recorded    drift
+------------------------------------------------------------------------
+mute gap + burst arrival           3.790s    7.000s    5.003s  -1.997s
+network stall + late burst         1.895s    2.000s    1.939s  -0.061s
+```
+
+After:
+
+```
+scenario                       real audio  timeline  recorded    drift
+------------------------------------------------------------------------
+mute gap + burst arrival           3.790s    7.000s    6.895s  -0.105s
+network stall + late burst         1.895s    2.000s    1.895s  -0.105s
+```
+
+(The residual -0.105 s is audio the u-law stream resampler loses at warm-up,
+visible in the "real audio" column; it is not a positioning error.)

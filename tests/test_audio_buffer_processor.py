@@ -1196,5 +1196,176 @@ class TestStallBurstReconciliation(unittest.IsolatedAsyncioTestCase):
         await p.cleanup()
 
 
+class TestCaptureTimePositioning(unittest.IsolatedAsyncioTestCase):
+    """Tests for capture-timestamp (pts) positioning.
+
+    Frames that carry a capture timestamp (``pts``, e.g. stamped by
+    ``TwilioFrameSerializer`` from Twilio's per-message ``timestamp``) are
+    placed in the buffer by capture time instead of arrival pacing. This
+    removes the muted-mic vs stalled-audio ambiguity over WebSocket
+    transports: a mute shows up as a jump in pts (silence is padded in),
+    while late audio delivered in a burst keeps contiguous pts values
+    (nothing to pad, and never anything to trim).
+    """
+
+    # 16-bit mono at 16 kHz → 2 bytes per sample
+    _BYTES_PER_SECOND = 16000 * 2
+    # One 20 ms frame of non-zero audio (distinguishable from injected silence).
+    _FRAME = b"\x11\x22" * 320  # 640 bytes == 20 ms
+    _FRAME_NS = 20 * 1_000_000  # 20 ms in nanoseconds
+
+    async def _send_user_frame(self, processor: AudioBufferProcessor, audio: bytes, pts: int):
+        frame = InputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1)
+        frame.pts = pts
+        await processor.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+    async def _send_bot_frame(self, processor: AudioBufferProcessor, audio: bytes, pts: int):
+        frame = OutputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1)
+        frame.pts = pts
+        await processor.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+    async def test_pts_gap_pads_silence(self):
+        """A 1 s jump in capture time pads ~1 s of silence before the audio."""
+        p = await _make_processor()
+
+        await self._send_user_frame(p, self._FRAME, 0)
+        await self._send_user_frame(p, self._FRAME, 1_000_000_000)
+
+        # Frame at pts=0 anchors at position 0; frame at pts=1 s belongs at
+        # exactly 1 s worth of bytes.
+        one_second = self._BYTES_PER_SECOND
+        self.assertEqual(len(p._user_audio_buffer), one_second + len(self._FRAME))
+        self.assertEqual(bytes(p._user_audio_buffer[: len(self._FRAME)]), self._FRAME)
+        silence_region = bytes(p._user_audio_buffer[len(self._FRAME) : one_second])
+        self.assertTrue(all(b == 0 for b in silence_region))
+        self.assertEqual(bytes(p._user_audio_buffer[one_second:]), self._FRAME)
+        await p.cleanup()
+
+    async def test_pts_contiguous_burst_adds_no_silence(self):
+        """Contiguous capture timestamps delivered in a burst add no silence.
+
+        This is the stalled-delivery case: the audio existed on the wire and
+        arrived late, so pts values are contiguous and the recording must
+        contain only the real audio, with no phantom silence.
+        """
+        p = await _make_processor()
+
+        for i in range(25):
+            await self._send_user_frame(p, self._FRAME, i * self._FRAME_NS)
+
+        self.assertEqual(bytes(p._user_audio_buffer), self._FRAME * 25)
+        await p.cleanup()
+
+    async def test_pts_mute_gap_preserved_despite_burst_arrival(self):
+        """The #4561 regression case: a genuine mute gap survives a burst.
+
+        The user speaks, mutes for 1 s, then the resumed audio arrives in a
+        back-to-back burst. Arrival pacing reads this as a stall catch-up and
+        trims the gap silence; capture timestamps say the gap is real, so
+        every byte of it must be preserved.
+        """
+        p = await _make_processor()
+
+        await self._send_user_frame(p, self._FRAME, 0)
+        # Resumed audio: pts jumps 1 s, then continues contiguously. All of
+        # it is delivered back-to-back (a WebSocket burst).
+        for i in range(10):
+            await self._send_user_frame(p, self._FRAME, 1_000_000_000 + i * self._FRAME_NS)
+
+        one_second = self._BYTES_PER_SECOND
+        self.assertEqual(len(p._user_audio_buffer), one_second + 10 * len(self._FRAME))
+        silence_region = bytes(p._user_audio_buffer[len(self._FRAME) : one_second])
+        self.assertTrue(all(b == 0 for b in silence_region))
+        self.assertEqual(bytes(p._user_audio_buffer[one_second:]), self._FRAME * 10)
+        await p.cleanup()
+
+    async def test_pts_never_trims_when_buffer_ahead(self):
+        """A duplicate/late capture timestamp appends without trimming."""
+        p = await _make_processor()
+
+        await self._send_user_frame(p, self._FRAME, 0)
+        await self._send_user_frame(p, self._FRAME, 0)  # duplicate pts
+
+        self.assertEqual(bytes(p._user_audio_buffer), self._FRAME * 2)
+        await p.cleanup()
+
+    async def test_pts_padding_is_not_trimmable(self):
+        """Silence padded by capture time must not be trimmable by the gap fill."""
+        p = await _make_processor()
+
+        await self._send_user_frame(p, self._FRAME, 0)
+        await self._send_user_frame(p, self._FRAME, 1_000_000_000)
+
+        self.assertEqual(p._user_gap_tracker.silence_len, 0)
+        await p.cleanup()
+
+    async def test_buffer_flush_resets_capture_anchor(self):
+        """After a flush the capture anchor re-anchors on the next frame.
+
+        Without the reset, the stale anchor would place post-flush audio at
+        the absolute capture offset, padding the emptied buffer with the
+        whole recording's worth of silence again.
+        """
+        audio = b"\x01\x02\x03\x04\x05\x06\x07\x08"  # 8 bytes == buffer_size
+        p = await _make_processor(buffer_size=len(audio))
+
+        frame = InputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1)
+        frame.pts = 10_000_000_000  # 10 s into the stream
+        await p.process_frame(frame, FrameDirection.DOWNSTREAM)  # hits buffer_size → flush
+        self.assertIsNone(p._user_capture_tracker.base_pts)
+
+        # The next frame re-anchors: appended at position 0, no 10 s pad.
+        # Keep it below buffer_size so it does not trigger another flush.
+        small = b"\x11\x22"
+        await self._send_user_frame(p, small, 10_020_000_000)
+        self.assertEqual(bytes(p._user_audio_buffer), small)
+        await p.cleanup()
+
+    async def test_stop_recording_resets_capture_anchor(self):
+        """stop_recording must clear the capture-timestamp anchors."""
+        p = await _make_processor()
+        await self._send_user_frame(p, self._FRAME, 0)
+        self.assertIsNotNone(p._user_capture_tracker.base_pts)
+
+        await p.stop_recording()
+
+        self.assertIsNone(p._user_capture_tracker.base_pts)
+        self.assertIsNone(p._bot_capture_tracker.base_pts)
+        await p.cleanup()
+
+    async def test_bot_pts_gap_pads_silence(self):
+        """Mirror of the capture-time gap padding on the bot buffer path."""
+        p = await _make_processor()
+
+        await self._send_bot_frame(p, self._FRAME, 0)
+        await self._send_bot_frame(p, self._FRAME, 1_000_000_000)
+
+        one_second = self._BYTES_PER_SECOND
+        self.assertEqual(len(p._bot_audio_buffer), one_second + len(self._FRAME))
+        silence_region = bytes(p._bot_audio_buffer[len(self._FRAME) : one_second])
+        self.assertTrue(all(b == 0 for b in silence_region))
+        self.assertEqual(bytes(p._bot_audio_buffer[one_second:]), self._FRAME)
+        await p.cleanup()
+
+    async def test_pts_none_still_uses_arrival_pacing(self):
+        """Frames without pts keep the arrival-pacing gap fill unchanged."""
+        p = await _make_processor()
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            p._last_user_buffer_update_time = 0.0
+            mock_time.monotonic.return_value = 1.0  # 1-second gap, no pts
+            await p.process_frame(
+                InputAudioRawFrame(audio=self._FRAME, sample_rate=16000, num_channels=1),
+                FrameDirection.DOWNSTREAM,
+            )
+
+        # Same result the pacing path has always produced for a 1 s gap.
+        frame_duration = len(self._FRAME) / self._BYTES_PER_SECOND
+        expected_silence = int((1.0 - frame_duration) * self._BYTES_PER_SECOND)
+        expected_silence -= expected_silence % 2
+        self.assertEqual(len(p._user_audio_buffer), expected_silence + len(self._FRAME))
+        await p.cleanup()
+
+
 if __name__ == "__main__":
     unittest.main()
