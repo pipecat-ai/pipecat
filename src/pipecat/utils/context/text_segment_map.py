@@ -416,15 +416,12 @@ class TextSegmentMap:
                 )
             else:
                 # Zero-alnum consumed span: a whitespace-separated punctuation
-                # token (French " :", " ?"). advance_by_alnums has no budget to
-                # move, so without this the cursor would stall before the mark
-                # until a later alnum word swept past it -- showing it one word
-                # late in progressive captions, and never draining it at all for a
-                # mid-sentence ":" / ";". Advance to the consumed end minus any
-                # trailing whitespace (the separator owned by the following token,
-                # e.g. the space after "is " in "Your balance is $42.50", held
-                # until the next segment absorbs it). original == tts here, so the
-                # offset is exact.
+                # token (French " :", " ?"). Advance straight to the consumed
+                # end so the mark drains immediately, stopping before any trailing
+                # whitespace -- the separator owned by the following token
+                # (e.g. the space after "is " in "Your balance is $42.50",
+                # held until the next segment absorbs it). original == tts
+                # here, so the offset is exact.
                 self._user_facing_pos = seg.original_start + len(seg.tts[:new_pos].rstrip())
             self._llm_pos = advance_by_alnums(self._llm_text, self._llm_pos, n_alnum)
 
