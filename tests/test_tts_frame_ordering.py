@@ -1872,6 +1872,30 @@ async def test_isolated_tts_speak_frame_finalizes_in_token_mode():
 
 
 @pytest.mark.asyncio
+async def test_tts_speak_frame_emits_single_anchor_in_token_mode():
+    """A TTSSpeakFrame in TOKEN mode must emit exactly one will_be_spoken anchor.
+
+    In streaming mode the sequencer regroups tokens into a sentence and emits that
+    sentence as the anchor. The raw src_frame must not also be pushed, or the
+    listener sees a duplicate "new segment" for the same text.
+    """
+    tts = _MockTokenStreamingWSTTSService(
+        word_times_per_call=[[("hello", 0.0), ("world", 0.2)]],
+        text_aggregation_mode=TextAggregationMode.TOKEN,
+    )
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[TTSSpeakFrame(text="hello world", append_to_context=False)],
+    )
+    anchors = [
+        f
+        for f in frames_received[0]
+        if type(f) is AggregatedTextFrame and f.will_be_spoken and f.text == "hello world"
+    ]
+    assert len(anchors) == 1, f"Expected exactly one anchor, got {len(anchors)}"
+
+
+@pytest.mark.asyncio
 async def test_concurrent_tts_speak_frames_dont_cross_contaminate():
     """Two back-to-back TTSSpeakFrames stay in their own contexts.
 

@@ -1127,15 +1127,21 @@ class TTSService(AIService):
         src_frame.context_id = context_id
         src_frame.will_be_spoken = True
 
-        # Route AggregatedTextFrame through the serialization queue so it is emitted
-        # immediately before the TTSStartedFrame of the audio context it describes,
-        # rather than racing ahead of audio frames from a previous context.
-        if not self.audio_context_available(context_id):
-            await self._serialization_queue.put(src_frame)
-        # Otherwise, if the context already exists, we append the AggregatedTextFrame
-        # to the existing context queue.
-        else:
-            await self.append_to_audio_context(context_id, src_frame)
+        # In streaming (TOKEN) mode this src_frame is a single token, not the unit the
+        # listener cares about: the sequencer regroups tokens into a sentence and emits
+        # that sentence as the will_be_spoken anchor (see _promote). Pushing src_frame
+        # too would emit a second, redundant anchor (for a TTSSpeakFrame, an exact
+        # duplicate). So only the non-streaming path pushes src_frame here.
+        if not self._is_streaming_tokens:
+            # Route AggregatedTextFrame through the serialization queue so it is emitted
+            # immediately before the TTSStartedFrame of the audio context it describes,
+            # rather than racing ahead of audio frames from a previous context.
+            if not self.audio_context_available(context_id):
+                await self._serialization_queue.put(src_frame)
+            # Otherwise, if the context already exists, we append the AggregatedTextFrame
+            # to the existing context queue.
+            else:
+                await self.append_to_audio_context(context_id, src_frame)
 
         # Note: Text transformations are meant to only affect the text sent to the TTS for
         # TTS-specific purposes. This allows for explicit TTS modifications (e.g., inserting
