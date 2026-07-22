@@ -486,16 +486,19 @@ class DeepgramFluxSTTBase(STTService):
 
         Called when a ConfigureSuccess/ConfigureFailure arrives. If fields were
         coalesced into ``_configure_pending_fields`` while this Configure was in
-        flight, immediately sends a follow-up Configure covering all of them.
-        Safe to call with nothing in flight (e.g. a stray/duplicate ack), which
-        is a no-op.
+        flight, immediately sends a follow-up Configure covering all of them —
+        unless the transport has since gone inactive, in which case the pending
+        fields are simply dropped, since a reconnect re-applies current settings
+        via the connection URL anyway. Safe to call with nothing in flight (e.g.
+        a stray/duplicate ack), which is a no-op.
         """
         self._configure_in_flight = False
         self._configure_sent_at = None
         if self._configure_pending_fields is not None:
             fields = self._configure_pending_fields
             self._configure_pending_fields = None
-            await self._send_configure(fields)
+            if self._transport_is_active():
+                await self._send_configure(fields)
 
     def _reset_configure_state(self):
         """Clear Configure-serialization state during teardown.

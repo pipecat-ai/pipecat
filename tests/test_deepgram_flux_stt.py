@@ -37,6 +37,7 @@ def _make_fake_flux_service():
             self._configure_in_flight = False
             self._configure_sent_at = None
             self._configure_pending_fields = None
+            self._active = True
             self.sent_messages = []
             self.errors = []
 
@@ -47,7 +48,7 @@ def _make_fake_flux_service():
             self.sent_messages.append(message)
 
         def _transport_is_active(self) -> bool:
-            return True
+            return self._active
 
         async def _connect(self):
             pass
@@ -140,6 +141,27 @@ async def test_send_configure_supersedes_stale_in_flight_instead_of_coalescing()
     await service._send_configure({"eager_eot_threshold"})
 
     assert len(service.sent_messages) == 2
+    assert service._configure_pending_fields is None
+
+
+@pytest.mark.asyncio
+async def test_on_configure_acked_drops_pending_fields_when_transport_inactive():
+    """An ack shouldn't try to flush a pending update once the transport is dead.
+
+    Otherwise the flush's send raises inside _handle_message, which both
+    swallows whatever error/success handling comes after it and (without a
+    reconnect to clean up afterwards) leaves _configure_in_flight stuck True.
+    """
+    service = _make_fake_flux_service()
+
+    await service._send_configure({"eot_threshold"})
+    await service._send_configure({"eager_eot_threshold"})  # coalesced
+
+    service._active = False  # transport has gone away before the ack arrives
+    await service._handle_message({"type": "ConfigureSuccess"})
+
+    assert len(service.sent_messages) == 1  # the pending Configure was not sent
+    assert not service._configure_in_flight
     assert service._configure_pending_fields is None
 
 
