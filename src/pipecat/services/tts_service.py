@@ -877,6 +877,22 @@ class TTSService(AIService):
         if isinstance(frame, (TTSStartedFrame, TTSStoppedFrame, TTSAudioRawFrame, TTSTextFrame)):
             frame.transport_destination = self._transport_destination
 
+        # The will_be_spoken AggregatedTextFrame is the "new segment" announcement whose
+        # segment_id the per-word progress frames reference. Those progress frames carry a
+        # PTS and travel the transport's clock queue; the announcement itself has no PTS and
+        # would take the audio (sync) queue, so for a context whose audio is delayed behind
+        # another context's, its clock-queued progress can be delivered before it. Stamp it
+        # with the same baseline the first word will use so it rides the clock queue too,
+        # sorted immediately before its first progress frame (ties broken by push order).
+        # Only on the word-timestamp path (push_text_frames services have no progress frames).
+        if (
+            isinstance(frame, AggregatedTextFrame)
+            and frame.will_be_spoken
+            and frame.pts is None
+            and not self._push_text_frames
+        ):
+            frame.pts = max(self._word_last_pts, self.get_clock().get_time())
+
         await super().push_frame(frame, direction)
 
     async def _stream_audio_frames_from_iterator(

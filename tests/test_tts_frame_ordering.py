@@ -1908,5 +1908,49 @@ async def test_concurrent_tts_speak_frames_dont_cross_contaminate():
     assert len(by_context) == 2
 
 
+@pytest.mark.asyncio
+async def test_aggregated_anchor_pts_precedes_its_progress_per_context():
+    """Each context's "new segment" anchor must sort before its own progress frames.
+
+    On a word-timestamp service the per-word AggregatedTextProgressFrames carry a PTS
+    (clock queue). The anchor AggregatedTextFrame (will_be_spoken) must be stamped with
+    a PTS no later than its first progress frame, so at the transport it rides the same
+    clock queue and is delivered before the progress that references its segment_id —
+    even when a second context's audio is delayed behind the first.
+
+    Regression: previously the anchor had pts=None (audio/sync queue), letting a
+    later context's clock-queued progress overtake its own anchor.
+    """
+    tts = _MockPerCallWordTimestampWSTTSService(
+        word_times_per_call=[
+            [("Comment", 0.0), ("ca", 0.2), ("va", 0.4)],
+            [("Bom", 0.0), ("jour", 0.2)],
+        ]
+    )
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[
+            TTSSpeakFrame(text="Comment ca va", append_to_context=False),
+            TTSSpeakFrame(text="Bom jour", append_to_context=False),
+        ],
+    )
+    down = frames_received[0]
+
+    anchors = [f for f in down if type(f) is AggregatedTextFrame and f.will_be_spoken]
+    progress = [f for f in down if isinstance(f, AggregatedTextProgressFrame)]
+    assert len(anchors) == 2, f"Expected one anchor per context, got {len(anchors)}"
+
+    for anchor in anchors:
+        # The anchor must carry a PTS so it rides the clock queue with its progress.
+        assert anchor.pts is not None, f"Anchor {anchor.text!r} must have a PTS"
+        seg_progress = [p for p in progress if p.segment_id == anchor.id]
+        assert seg_progress, f"No progress frames found for anchor {anchor.text!r}"
+        first_progress_pts = min(p.pts for p in seg_progress)
+        assert anchor.pts <= first_progress_pts, (
+            f"Anchor {anchor.text!r} pts {anchor.pts} must be <= its first progress pts "
+            f"{first_progress_pts} so it is delivered before its own progress"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
