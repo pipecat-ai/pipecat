@@ -1202,7 +1202,7 @@ class TTSService(AIService):
         if not self._is_streaming_tokens:
             await self.stop_processing_metrics()
 
-        if self._push_text_frames:
+        if self._push_text_frames and not self._is_streaming_tokens:
             # In TTS services that support word timestamps, the TTSTextFrames
             # are pushed as words are spoken. However, in the case where the TTS service
             # does not support word timestamps (i.e. _push_text_frames is True), we send
@@ -1210,6 +1210,11 @@ class TTSService(AIService):
             # This way, if we are interrupted, the text is not added to the assistant
             # context and the context that IS added does not include TTS-specific tags
             # or transformations.
+            #
+            # In streaming (TOKEN) mode this is handled instead by the sequencer's
+            # per-sentence promotion (see AggregatedFrameSequencer._promote): a call
+            # here represents a single token, not the sentence-level unit this frame
+            # should carry.
             frame = TTSTextFrame(text, aggregated_by=type)
             frame.will_be_spoken = True
             frame.includes_inter_frame_spaces = includes_inter_frame_spaces
