@@ -123,6 +123,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             keyterm=[],
             min_confidence=None,
             language_hints=None,
+            numerals=None,
         )
 
         # Apply settings delta

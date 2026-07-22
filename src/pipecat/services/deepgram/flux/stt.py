@@ -197,6 +197,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             eot_timeout_ms=None,
             keyterm=[],
             min_confidence=None,
+            numerals=None,
             language_hints=None,
         )
 
