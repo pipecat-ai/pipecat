@@ -93,8 +93,6 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
                 (default False).
             tag: List of tags to label requests for identification during usage reporting.
             min_confidence: Optional. Minimum confidence required confidence to create a TranscriptionFrame
-            numerals: Optional. Converts spoken numbers to numeral form in transcripts.
-                For Flux, this is set at connection time and cannot be toggled mid-stream.
         """
 
         eager_eot_threshold: float | None = None
@@ -104,7 +102,6 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
         mip_opt_out: bool | None = None
         tag: list = []
         min_confidence: float | None = None  # New parameter
-        numerals: bool | None = None
 
     def __init__(
         self,
@@ -220,8 +217,6 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
                 if params.tag and tag is None:
                     tag = params.tag
                 default_settings.min_confidence = params.min_confidence
-                if params.numerals is not None:
-                    default_settings.numerals = params.numerals
                 if params.mip_opt_out is not None:
                     mip_opt_out = params.mip_opt_out
 
