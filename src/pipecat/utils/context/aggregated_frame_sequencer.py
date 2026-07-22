@@ -610,6 +610,11 @@ class AggregatedFrameSequencer:
         all now-unblocked skipped frames. Slots for other contexts still in flight are
         left untouched so their own word events (or their own force_complete) finish them.
 
+        Audio contexts are drained one at a time in registration order (a context's whole
+        ``_handle_audio_context`` runs, ending with its own force_complete, before the next
+        starts), so an earlier context is never still open here — every earlier context has
+        already been force-completed by the time this one ends.
+
         The context is fully done once this returns, so its live-context and pending
         state are forgotten — any word that arrives afterwards is dropped as stale.
 
