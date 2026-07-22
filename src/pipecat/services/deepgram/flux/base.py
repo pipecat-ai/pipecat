@@ -123,6 +123,9 @@ class DeepgramFluxSTTSettings(STTSettings):
             confidence (default 5000).
         keyterm: Keyterms to boost recognition accuracy for specialized terminology.
         min_confidence: Minimum confidence required to create a TranscriptionFrame.
+        numerals: Convert spoken numbers to numeral form (e.g. "twenty three" -> "23").
+            On Flux this is configured at connection time only and cannot be
+            changed mid-stream via ``Configure``.
         language_hints: Languages to bias transcription toward. Only honored by the
             ``flux-general-multi`` model. An empty list clears any active hints;
             ``None``/``NOT_GIVEN`` means no hints (auto-detect). Can be updated
@@ -134,6 +137,7 @@ class DeepgramFluxSTTSettings(STTSettings):
     eot_timeout_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     keyterm: list | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_confidence: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    numerals: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language_hints: list[Language] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -276,6 +280,11 @@ class DeepgramFluxSTTBase(STTService):
 
         if self._settings.eot_timeout_ms is not None:
             params.append(f"eot_timeout_ms={self._settings.eot_timeout_ms}")
+
+        # Flux numerals are set via query parameter at connect-time only.
+        numerals = assert_given(self._settings.numerals)
+        if numerals is not None:
+            params.append(f"numerals={str(numerals).lower()}")
 
         if self._mip_opt_out is not None:
             params.append(f"mip_opt_out={str(self._mip_opt_out).lower()}")
