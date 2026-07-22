@@ -11,6 +11,8 @@ import unittest
 from typing import Any
 
 import pytest
+from websockets.exceptions import ConnectionClosedOK
+from websockets.frames import Close
 from websockets.protocol import State
 
 from pipecat.services.elevenlabs.tts import (
@@ -396,6 +398,47 @@ async def test_http_payload_includes_previous_text_when_supported():
 async def test_http_payload_omits_previous_text_for_eleven_v3():
     payload = await _http_payload_for_model("eleven_v3")
     assert "previous_text" not in payload
+
+
+# ---------------------------------------------------------------------------
+# Disconnect vs server-initiated close race
+#
+# When the server closes the websocket first (normal during teardown), the
+# close-handshake send in _disconnect_websocket raises ConnectionClosed. That
+# must not be reported as a pipeline error: a non-fatal ErrorFrame here can
+# e.g. trigger a spurious ServiceSwitcherStrategyFailover switch on shutdown.
+# ---------------------------------------------------------------------------
+
+
+class _ClosedWebSocket:
+    """Websocket stand-in whose sends fail with a normal close."""
+
+    state = State.OPEN
+
+    async def send(self, data: str):
+        raise ConnectionClosedOK(Close(1001, "going away"), Close(1001, "going away"), True)
+
+    async def close(self):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_disconnect_does_not_push_error_when_server_closed_first():
+    """A ConnectionClosed during the disconnect handshake is not a pipeline error."""
+    service = _make_service()
+    service._websocket = _ClosedWebSocket()
+
+    errors = []
+
+    async def push_error(error_msg=None, exception=None):
+        errors.append(error_msg)
+
+    service.push_error = push_error
+
+    await service._disconnect_websocket()
+
+    assert errors == []
+    assert service._websocket is None
 
 
 if __name__ == "__main__":

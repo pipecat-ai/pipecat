@@ -839,6 +839,12 @@ class ElevenLabsTTSService(WebsocketTTSService):
                     )
                 await websocket.close()
                 logger.debug("Disconnected from ElevenLabs")
+        except websockets.ConnectionClosed as e:
+            # The server closed the connection first — normal during teardown, or a race
+            # on the closing handshake. The connection is gone either way; this is not a
+            # pipeline error, so don't push an ErrorFrame (which would e.g. trigger a
+            # spurious ServiceSwitcherStrategyFailover switch during shutdown).
+            logger.debug(f"{self} websocket already closed during disconnect: {e}")
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
