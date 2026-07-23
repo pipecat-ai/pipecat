@@ -598,6 +598,54 @@ async def test_http_push_text_llm_response_end_after_tts_text():
 
 
 @pytest.mark.asyncio
+async def test_second_turn_start_does_not_race_ahead_of_first_turn_completion():
+    """LLMFullResponseStartFrame for a new turn must not race ahead of the
+    previous turn's still-draining audio context.
+
+    Regression test for a pause_frame_processing=False service (e.g. Cartesia):
+    since that service's frame-processing loop is never paused while audio is
+    in flight, a second turn's LLMFullResponseStartFrame can be dequeued and
+    processed while the first turn's audio context (delivered asynchronously,
+    here after a short delay) is still draining. Before routing it through the
+    serialization queue, that Start frame would be pushed immediately — ahead
+    of the first turn's TTSStoppedFrame/LLMFullResponseEndFrame — which is
+    exactly the ordering downstream consumers like LLMAssistantAggregator rely
+    on turns never violating.
+    """
+    tts = MockWebSocketTTSService()
+
+    frames_to_send = [
+        LLMFullResponseStartFrame(),
+        TextFrame(text="Hello there."),
+        LLMFullResponseEndFrame(),
+        LLMFullResponseStartFrame(),
+        TextFrame(text="World."),
+        LLMFullResponseEndFrame(),
+    ]
+    frames_received = await run_test(tts, frames_to_send=frames_to_send)
+    down = frames_received[0]
+
+    relevant = [
+        f
+        for f in down
+        if isinstance(f, (LLMFullResponseStartFrame, TTSStoppedFrame, LLMFullResponseEndFrame))
+    ]
+    type_names = [type(f).__name__ for f in relevant]
+
+    assert type_names == [
+        "LLMFullResponseStartFrame",
+        "TTSStoppedFrame",
+        "LLMFullResponseEndFrame",
+        "LLMFullResponseStartFrame",
+        "TTSStoppedFrame",
+        "LLMFullResponseEndFrame",
+    ], (
+        "The second turn's LLMFullResponseStartFrame raced ahead of the first "
+        f"turn's completion. Got: {type_names}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_http_word_timestamps_verbatim_tokens():
     """HTTP path: text, PTS order, and text-before-audio are all verified.
 
