@@ -236,8 +236,17 @@ class TaskManager(BaseTaskManager):
         except TimeoutError:
             logger.warning(f"{name}: timed out waiting for task to cancel")
         except asyncio.CancelledError:
-            # Here are sure the task is cancelled properly.
-            pass
+            current = asyncio.current_task()
+            if current is not None and current.cancelling() > 0:
+                # This CancelledError is the caller's OWN cancellation,
+                # delivered while suspended waiting for `task` — it must
+                # propagate, not be swallowed. Swallowing it makes the caller
+                # survive its own cancellation: a service awaiting
+                # cancel_task() from a `finally` block resumes as if it was
+                # never cancelled, and a reconnect loop then reconnects after
+                # having been cancelled, leaving an orphaned task behind.
+                raise
+            # Otherwise `task` itself was cancelled properly.
         except Exception as e:
             tb = traceback.extract_tb(e.__traceback__)
             last = tb[-1]
