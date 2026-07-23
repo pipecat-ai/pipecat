@@ -347,6 +347,7 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
 
         self.assertEqual(params["messages"][0]["role"], "user")
         self.assertEqual(params["messages"][0]["content"], "Extra context.")
+        self.assertEqual(context.get_messages()[0]["role"], "developer")
 
     def test_developer_conversion_does_not_affect_other_roles(self):
         """convert_developer_to_user only affects developer messages, not system/user/assistant."""
