@@ -8,6 +8,8 @@
 
 import asyncio
 
+from loguru import logger
+
 from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
@@ -304,6 +306,13 @@ class UserTurnController(BaseObject):
         # Inference-triggered fires only while a turn is active. The turn
         # remains active afterward — only `on_user_turn_stopped` flips state.
         if not self._user_turn:
+            return
+
+        if self._user_speaking:
+            logger.debug(
+                f"{self}: User turn inference trigger ignored while user is speaking "
+                f"(strategy: {strategy})"
+            )
             return
 
         # Re-arm the stop watchdog so a stuck turn (inference fired but
