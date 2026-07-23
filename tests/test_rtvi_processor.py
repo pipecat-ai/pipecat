@@ -4,9 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import base64
+import tempfile
 import unittest
+import uuid
 import warnings
-from unittest.mock import AsyncMock, Mock
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 from pydantic import ValidationError
 
@@ -16,6 +20,8 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputDTMFFrame,
     InputTransportStartAudioStreamingFrame,
+    UserFileRawFrame,
+    UserImageRawFrame,
 )
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 
@@ -224,6 +230,265 @@ class TestRTVIDTMF(unittest.IsolatedAsyncioTestCase):
     def test_dtmf_input_data_rejects_legacy_button_field(self):
         with self.assertRaises(ValidationError):
             RTVI.DTMFInputData.model_validate({"button": "1"})
+
+
+class TestRTVISendFile(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.processor = RTVIProcessor()
+        self.processor.push_frame = AsyncMock()
+        self.processor._send_error_response = AsyncMock()
+        self.processor.interrupt_bot = AsyncMock()
+
+    async def asyncTearDown(self):
+        await self.processor.cleanup()
+
+    def _make_send_file_data(self, source, *, fmt="application/pdf", name=None, content=""):
+        return RTVI.SendFileData(
+            content=content,
+            file=RTVI.File(format=fmt, name=name, source=source),
+            options=RTVI.SendFileOptions(run_immediately=False, audio_response=True),
+        )
+
+    def _pushed_frames(self):
+        return [c.args[0] for c in self.processor.push_frame.call_args_list]
+
+    # -- FileBytes ------------------------------------------------------------
+
+    async def test_file_bytes_pdf_pushes_user_file_frame(self):
+        raw = b"%PDF-1.4 fake content"
+        b64 = base64.b64encode(raw).decode()
+        data = self._make_send_file_data(RTVI.FileBytes(bytes=b64), fmt="application/pdf")
+        await self.processor._handle_send_file(data, "msg-1")
+
+        frames = self._pushed_frames()
+        self.assertEqual(len(frames), 1)
+        self.assertIsInstance(frames[0], UserFileRawFrame)
+        self.assertEqual(frames[0].file, f"data:application/pdf;base64,{b64}")
+        self.assertEqual(frames[0].format, "application/pdf")
+
+    async def test_file_bytes_pdf_stores_filename(self):
+        raw = b"%PDF-1.4 fake content"
+        b64 = base64.b64encode(raw).decode()
+        data = self._make_send_file_data(
+            RTVI.FileBytes(bytes=b64), fmt="application/pdf", name="report.pdf"
+        )
+        await self.processor._handle_send_file(data, "msg-1")
+
+        frames = self._pushed_frames()
+        self.assertEqual(frames[0].filename, "report.pdf")
+
+    async def test_file_bytes_image_pushes_user_image_frame_with_bytes(self):
+        raw = b"\x89PNG\r\n\x1a\n fake png"
+        b64 = base64.b64encode(raw).decode()
+        data = self._make_send_file_data(RTVI.FileBytes(bytes=b64), fmt="image/png")
+        await self.processor._handle_send_file(data, "msg-1")
+
+        frames = self._pushed_frames()
+        self.assertEqual(len(frames), 1)
+        self.assertIsInstance(frames[0], UserImageRawFrame)
+        self.assertIsInstance(frames[0].image, bytes)
+        self.assertEqual(frames[0].image, raw)
+
+    # -- FileUrl (public) -----------------------------------------------------
+
+    async def test_file_url_public_pushes_user_file_frame_with_url_source(self):
+        data = self._make_send_file_data(
+            RTVI.FileUrl(url="https://example.com/doc.pdf", public=True),
+            fmt="application/pdf",
+        )
+        await self.processor._handle_send_file(data, "msg-1")
+
+        frames = self._pushed_frames()
+        self.assertEqual(len(frames), 1)
+        self.assertIsInstance(frames[0], UserFileRawFrame)
+        self.assertEqual(frames[0].type, "url")
+        self.assertEqual(frames[0].file, "https://example.com/doc.pdf")
+
+    # -- FileUrl (private — mocked fetch) -------------------------------------
+
+    async def test_file_url_private_fetches_and_wraps_as_data_url(self):
+        raw = b"%PDF-1.4 fetched content"
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.content.read = AsyncMock(return_value=raw)
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "pipecat.processors.frameworks.rtvi.processor.aiohttp.ClientSession",
+            return_value=mock_session,
+        ):
+            data = self._make_send_file_data(
+                RTVI.FileUrl(url="https://example.com/private.pdf", public=False),
+                fmt="application/pdf",
+            )
+            await self.processor._handle_send_file(data, "msg-1")
+
+        frames = self._pushed_frames()
+        self.assertEqual(len(frames), 1)
+        self.assertIsInstance(frames[0], UserFileRawFrame)
+        expected_b64 = base64.b64encode(raw).decode()
+        self.assertEqual(frames[0].file, f"data:application/pdf;base64,{expected_b64}")
+
+    async def test_file_url_private_bad_scheme_sends_error(self):
+        data = self._make_send_file_data(
+            RTVI.FileUrl(url="file:///etc/passwd", public=False),
+            fmt="application/pdf",
+        )
+        await self.processor._handle_send_file(data, "msg-1")
+
+        self.processor._send_error_response.assert_called_once()
+        self.assertEqual(len(self._pushed_frames()), 0)
+
+    async def test_file_url_private_http_error_sends_error(self):
+        import aiohttp
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock(
+            side_effect=aiohttp.ClientResponseError(MagicMock(), (), status=404)
+        )
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "pipecat.processors.frameworks.rtvi.processor.aiohttp.ClientSession",
+            return_value=mock_session,
+        ):
+            data = self._make_send_file_data(
+                RTVI.FileUrl(url="https://example.com/missing.pdf", public=False),
+                fmt="application/pdf",
+            )
+            await self.processor._handle_send_file(data, "msg-1")
+
+        self.processor._send_error_response.assert_called_once()
+        self.assertEqual(len(self._pushed_frames()), 0)
+
+    async def test_file_url_private_timeout_sends_error(self):
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock(side_effect=TimeoutError())
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "pipecat.processors.frameworks.rtvi.processor.aiohttp.ClientSession",
+            return_value=mock_session,
+        ):
+            data = self._make_send_file_data(
+                RTVI.FileUrl(url="https://slow.example.com/file.pdf", public=False),
+                fmt="application/pdf",
+            )
+            await self.processor._handle_send_file(data, "msg-1")
+
+        self.processor._send_error_response.assert_called_once()
+        error_msg = self.processor._send_error_response.call_args[0][1]
+        self.assertIn("Timed out", error_msg)
+        self.assertEqual(len(self._pushed_frames()), 0)
+
+    async def test_file_url_private_oversized_sends_error(self):
+        raw = b"x" * (50 * 1024 * 1024 + 1)
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.content.read = AsyncMock(return_value=raw)
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "pipecat.processors.frameworks.rtvi.processor.aiohttp.ClientSession",
+            return_value=mock_session,
+        ):
+            data = self._make_send_file_data(
+                RTVI.FileUrl(url="https://example.com/huge.pdf", public=False),
+                fmt="application/pdf",
+            )
+            await self.processor._handle_send_file(data, "msg-1")
+
+        self.processor._send_error_response.assert_called_once()
+        error_msg = self.processor._send_error_response.call_args[0][1]
+        self.assertIn("too large", error_msg)
+        self.assertEqual(len(self._pushed_frames()), 0)
+
+    # -- FileId ---------------------------------------------------------------
+
+    async def test_file_id_valid_reads_file_and_deletes_it(self):
+        raw = b"%PDF-1.4 uploaded content"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_id = uuid.uuid4().hex
+            file_path = Path(tmpdir) / file_id
+            file_path.write_bytes(raw)
+
+            self.processor._folder = tmpdir
+            data = self._make_send_file_data(
+                RTVI.FileId(id=f"pipecat:{file_id}"), fmt="application/pdf"
+            )
+            await self.processor._handle_send_file(data, "msg-1")
+
+            self.assertFalse(file_path.exists(), "file should be deleted after read")
+
+        frames = self._pushed_frames()
+        self.assertEqual(len(frames), 1)
+        self.assertIsInstance(frames[0], UserFileRawFrame)
+        expected_b64 = base64.b64encode(raw).decode()
+        self.assertEqual(frames[0].file, f"data:application/pdf;base64,{expected_b64}")
+
+    async def test_file_id_path_traversal_sends_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.processor._folder = tmpdir
+            data = self._make_send_file_data(
+                RTVI.FileId(id="pipecat:../../../etc/passwd"), fmt="application/pdf"
+            )
+            await self.processor._handle_send_file(data, "msg-1")
+
+        self.processor._send_error_response.assert_called_once()
+        self.assertEqual(len(self._pushed_frames()), 0)
+
+    async def test_file_id_absolute_path_sends_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.processor._folder = tmpdir
+            data = self._make_send_file_data(
+                RTVI.FileId(id="pipecat:/etc/passwd"), fmt="application/pdf"
+            )
+            await self.processor._handle_send_file(data, "msg-1")
+
+        self.processor._send_error_response.assert_called_once()
+        self.assertEqual(len(self._pushed_frames()), 0)
+
+    async def test_file_id_missing_pipecat_prefix_sends_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.processor._folder = tmpdir
+            data = self._make_send_file_data(RTVI.FileId(id="some-other-id"), fmt="application/pdf")
+            await self.processor._handle_send_file(data, "msg-1")
+
+        self.processor._send_error_response.assert_called_once()
+        self.assertEqual(len(self._pushed_frames()), 0)
+
+    async def test_file_id_no_uploads_folder_sends_error(self):
+        data = self._make_send_file_data(
+            RTVI.FileId(id=f"pipecat:{uuid.uuid4().hex}"), fmt="application/pdf"
+        )
+        await self.processor._handle_send_file(data, "msg-1")
+
+        self.processor._send_error_response.assert_called_once()
+        self.assertEqual(len(self._pushed_frames()), 0)
 
 
 if __name__ == "__main__":
