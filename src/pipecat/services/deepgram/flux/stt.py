@@ -363,6 +363,10 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
                 self._last_stt_time = None
 
             self._connection_established_event.clear()
+            # Discard any in-flight/pending Configure — the connection is going
+            # away (including ahead of a reconnect), so it can no longer be
+            # acked or sent; a reconnect re-applies settings via the URL.
+            self._reset_configure_state()
             await self.stop_all_metrics()
 
             if self._websocket:

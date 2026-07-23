@@ -160,6 +160,11 @@ class DeepgramFluxSTTBase(STTService):
         "language_hints",
     }
     _MULTILINGUAL_MODEL = "flux-general-multi"
+    # How long an in-flight Configure is trusted before a new update supersedes
+    # it outright. Flux caps the number of un-acked Configure messages, so at
+    # most one is ever in flight; this bounds how long a missing ack can block
+    # later updates from ever being sent.
+    _CONFIGURE_ACK_TIMEOUT = 5.0
 
     def __init__(
         self,
@@ -197,6 +202,16 @@ class DeepgramFluxSTTBase(STTService):
 
         # Connection readiness: Flux sends a "Connected" message when ready
         self._connection_established_event = asyncio.Event()
+
+        # Configure serialization: Flux caps the number of un-acked Configure
+        # messages, so we only allow one in flight at a time. A Configure sent
+        # while one is already in flight is coalesced into
+        # `_configure_pending_fields` instead, and sent once the in-flight one
+        # is acked (see `_on_configure_acked`) — only the latest settings
+        # matter, so there's no need to replay every intermediate update.
+        self._configure_in_flight = False
+        self._configure_sent_at: float | None = None
+        self._configure_pending_fields: set[str] | None = None
 
         # Watchdog state — see _watchdog_task_handler for details
         self._last_stt_time: float | None = None
@@ -416,9 +431,28 @@ class DeepgramFluxSTTBase(STTService):
         Builds a Configure JSON message containing only the fields that changed
         and sends it over the existing connection.
 
+        At most one Configure is ever in flight, since Flux caps the number of
+        un-acked Configure messages. If one is already in flight, ``fields`` is
+        merged into the pending set and sent once the in-flight one is acked
+        (see ``_on_configure_acked``) instead of being sent now — the message is
+        always built from the current settings, so only the latest values ever
+        need to go out. An in-flight Configure older than
+        ``_CONFIGURE_ACK_TIMEOUT`` is treated as lost so a missing ack can't
+        permanently block later updates.
+
         Args:
             fields: Set of changed field names to include in the message.
         """
+        if self._configure_in_flight:
+            assert self._configure_sent_at is not None
+            if time.monotonic() - self._configure_sent_at < self._CONFIGURE_ACK_TIMEOUT:
+                self._configure_pending_fields = (self._configure_pending_fields or set()) | fields
+                return
+            logger.warning(
+                f"{self}: timed out after {self._CONFIGURE_ACK_TIMEOUT}s waiting for "
+                "Configure ack; sending the next Configure anyway"
+            )
+
         message: dict[str, Any] = {"type": "Configure"}
 
         if "keyterm" in fields:
@@ -449,8 +483,41 @@ class DeepgramFluxSTTBase(STTService):
                 else:
                     message["language_hints"] = _prepare_language_hints(hints)
 
+        self._configure_in_flight = True
+        self._configure_sent_at = time.monotonic()
         logger.debug(f"{self}: sending Configure message: {message}")
         await self._transport_send_json(message)
+
+    async def _on_configure_acked(self):
+        """Mark the in-flight Configure as acked and flush any pending update.
+
+        Called when a ConfigureSuccess/ConfigureFailure arrives. If fields were
+        coalesced into ``_configure_pending_fields`` while this Configure was in
+        flight, immediately sends a follow-up Configure covering all of them —
+        unless the transport has since gone inactive, in which case the pending
+        fields are simply dropped, since a reconnect re-applies current settings
+        via the connection URL anyway. Safe to call with nothing in flight (e.g.
+        a stray/duplicate ack), which is a no-op.
+        """
+        self._configure_in_flight = False
+        self._configure_sent_at = None
+        if self._configure_pending_fields is not None:
+            fields = self._configure_pending_fields
+            self._configure_pending_fields = None
+            if self._transport_is_active():
+                await self._send_configure(fields)
+
+    def _reset_configure_state(self):
+        """Clear Configure-serialization state during teardown.
+
+        Called when the connection is torn down (including ahead of a
+        reconnect), since any in-flight or pending Configure can no longer be
+        acked or sent on a dead connection. A reconnect re-applies the current
+        settings via the connection URL, so nothing needs to be replayed.
+        """
+        self._configure_in_flight = False
+        self._configure_sent_at = None
+        self._configure_pending_fields = None
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply a settings delta.
@@ -527,11 +594,13 @@ class DeepgramFluxSTTBase(STTService):
                 await self._handle_turn_info(data)
             case FluxMessageType.CONFIGURE_SUCCESS:
                 logger.info(f"{self}: Configure accepted: {data}")
+                await self._on_configure_acked()
             case FluxMessageType.CONFIGURE_FAILURE:
                 error_code = data.get("error_code", "unknown")
                 description = data.get("description", "no description")
                 error_msg = f"Configure rejected: [{error_code}] {description}"
                 logger.warning(f"{self}: {error_msg}")
+                await self._on_configure_acked()
                 await self.push_error(error_msg=error_msg)
 
     async def _handle_connection_established(self):
