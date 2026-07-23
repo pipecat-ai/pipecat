@@ -142,6 +142,8 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                             source["data"] = "..."
                     if item.get("type") == "thinking" and item.get("signature"):
                         item["signature"] = "..."
+                    if item.get("type") == "document":
+                        item["source"]["data"] = "..."
             messages_for_logging.append(msg)
         return messages_for_logging
 
@@ -354,6 +356,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             if content == "":
                 content = "(empty)"
         elif isinstance(content, list):
+            new_content = []
             for item in content:
                 # fix empty text
                 if item["type"] == "text" and item["text"] == "":
@@ -379,8 +382,45 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                         }
                         del item["image_url"]
                     else:
-                        url = item["image_url"]["url"]
-                        logger.warning(f"Unsupported 'image_url': {url}")
+                        logger.warning(f"Unsupported 'image_url': {item['image_url']['url']}")
+                        continue
+                if item["type"] == "file_url":
+                    f_data = item["file"]
+                    if f_data["mime_type"].startswith("image/"):
+                        item["type"] = "image"
+                        item["source"] = {
+                            "type": "url",
+                            "url": f_data["url"],
+                        }
+                        del item["file"]
+                    elif f_data["mime_type"] == "application/pdf":
+                        item["type"] = "document"
+                        item["source"] = {
+                            "type": "url",
+                            "url": f_data["url"],
+                        }
+                        del item["file"]
+                    else:
+                        logger.warning(
+                            f"Unsupported 'file_url' MIME type: {f_data['mime_type']} for URL: {f_data['url']}"
+                        )
+                        continue
+                if item["type"] == "file":
+                    f_data = item["file"]
+                    if f_data["mime_type"] != "application/pdf":
+                        logger.warning(f"Unsupported 'file' MIME type: {f_data['mime_type']}")
+                        continue
+
+                    item["type"] = "document"
+                    item["source"] = {
+                        "type": "base64",
+                        "media_type": f_data["mime_type"],
+                        "data": f_data["file_data"].split(",")[1],
+                    }
+                    del item["file"]
+                new_content.append(item)
+            content = new_content
+            msg["content"] = content
 
             # In the case where there's a single image in the list (like what
             # would result from a UserImageRawFrame), ensure that the image

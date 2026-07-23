@@ -25,6 +25,18 @@ from pipecat.processors.aggregators.llm_context import (
     LLMStandardMessage,
 )
 
+_MIME_TO_BEDROCK_FORMAT: dict[str, str] = {
+    "application/pdf": "pdf",
+    "text/csv": "csv",
+    "application/msword": "doc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "application/vnd.ms-excel": "xls",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+    "text/html": "html",
+    "text/plain": "txt",
+    "text/markdown": "md",
+}
+
 
 class AWSBedrockLLMInvocationParams(TypedDict):
     """Context-based parameters for invoking AWS Bedrock's LLM API."""
@@ -115,6 +127,8 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                     for item in msg["content"]:
                         if item.get("image"):
                             item["image"]["source"]["bytes"] = "..."
+                        if item.get("document"):
+                            item["document"]["source"]["bytes"] = "..."
             messages_for_logging.append(msg)
         return messages_for_logging
 
@@ -321,6 +335,44 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                     else:
                         url = item["image_url"]["url"]
                         logger.warning(f"Unsupported 'image_url': {url}")
+                elif item["type"] == "file":
+                    f_data = item["file"]
+                    mime_type = f_data["mime_type"]
+                    bedrock_format = _MIME_TO_BEDROCK_FORMAT.get(mime_type)
+                    if bedrock_format is None:
+                        logger.warning(f"Unsupported 'file' MIME type for Bedrock: {mime_type}")
+                        continue
+                    file_data_url = f_data["file_data"]
+                    raw_bytes = base64.b64decode(file_data_url.split(",")[1])
+                    new_content.append(
+                        {
+                            "document": {
+                                "name": f_data["filename"] or "document",
+                                "format": bedrock_format,
+                                "source": {"bytes": raw_bytes},
+                            }
+                        }
+                    )
+                elif item["type"] == "file_url":
+                    f_data = item["file"]
+                    url = f_data["url"]
+                    if url.startswith("s3://"):
+                        mime_type = f_data["mime_type"]
+                        bedrock_format = _MIME_TO_BEDROCK_FORMAT.get(mime_type)
+                        if bedrock_format is None:
+                            logger.warning(f"Unsupported 'file' MIME type for Bedrock: {mime_type}")
+                            continue
+                        new_content.append(
+                            {
+                                "document": {
+                                    "name": f_data["filename"] or "document",
+                                    "format": bedrock_format,
+                                    "source": {"s3Location": {"uri": url}},
+                                }
+                            }
+                        )
+                    else:
+                        logger.warning(f"Bedrock only supports S3 URLs for file sources: {url}")
 
             # In the case where there's a single image in the list (like what
             # would result from a UserImageRawFrame), ensure that the image

@@ -8,6 +8,7 @@
 
 from typing import Any, TypedDict, TypeGuard, TypeVar, cast
 
+from loguru import logger
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.chat import (
     ChatCompletionMessageParam,
@@ -204,11 +205,37 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
         result = []
         for message in messages:
             if isinstance(message, LLMSpecificMessage):
-                # Extract the actual message content from LLMSpecificMessage
                 result.append(message.message)
             else:
-                # Standard message, pass through unchanged
-                result.append(_openai_from_llm_standard_message(message))
+                msg = dict(_openai_from_llm_standard_message(message))
+                content = msg.get("content")
+                if isinstance(content, list):
+                    new_content = []
+                    for item in content:
+                        if item["type"] == "file":
+                            f_data = item["file"]
+                            mime_type = f_data["mime_type"]
+                            if mime_type == "application/pdf":
+                                item = {
+                                    "type": "file",
+                                    "file": {
+                                        "filename": f_data["filename"],
+                                        "file_data": f_data["file_data"],
+                                    },
+                                }
+                            else:
+                                logger.warning(
+                                    f"Unsupported 'file' MIME type for OpenAI: {mime_type}"
+                                )
+                                continue
+                        elif item["type"] == "file_url":
+                            logger.warning(
+                                f"OpenAI does not support URL-based files: {item['file']['url']}"
+                            )
+                            continue
+                        new_content.append(item)
+                    msg["content"] = new_content
+                result.append(cast("ChatCompletionMessageParam", msg))
 
         if convert_developer_to_user:
             for msg in result:

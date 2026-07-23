@@ -8,9 +8,12 @@
 
 import asyncio
 import base64
+import os
+import re
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Optional
 
+import aiohttp
 from loguru import logger
 from pydantic import BaseModel, ValidationError
 
@@ -32,6 +35,8 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
     StartFrame,
     SystemFrame,
+    UserFileRawFrame,
+    UserImageRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import (
@@ -59,6 +64,7 @@ class RTVIProcessor(FrameProcessor):
         self,
         *,
         transport: BaseTransport | None = None,
+        uploads_folder: str | None = None,
         **kwargs,
     ):
         """Initialize the RTVI processor.
@@ -74,10 +80,14 @@ class RTVIProcessor(FrameProcessor):
                     :class:`InputTransportStartAudioStreamingFrame`) pushed
                     downstream. For client-ready audio gating, set
                     ``audio_in_stream_on_start=False`` on the transport params.
+            uploads_folder: Path to folder where client uploads (e.g. POST /files) are
+                stored; required for send-file with /files/ URLs. Use
+                runner_uploads_folder() when using the development runner.
 
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
+        self._folder = uploads_folder or ""
 
         self._bot_ready = False
         self._client_ready = False
@@ -363,6 +373,9 @@ class RTVIProcessor(FrameProcessor):
                 case "send-text":
                     data = RTVI.SendTextData.model_validate(message.data)
                     await self._handle_send_text(data)
+                case "send-file":
+                    data = RTVI.SendFileData.model_validate(message.data)
+                    await self._handle_send_file(data, message.id)
                 case "raw-audio" | "raw-audio-batch":
                     await self._handle_audio_buffer(message.data)
                 case "dtmf":
@@ -370,6 +383,7 @@ class RTVIProcessor(FrameProcessor):
                     await self._handle_dtmf(data)
 
                 case _:
+                    logger.warning(f"Unsupported RTVI message type: {message.type}")
                     await self._send_error_response(message.id, f"Unsupported type {message.type}")
 
         except ValidationError as e:
@@ -488,6 +502,125 @@ class RTVIProcessor(FrameProcessor):
             run_llm=opts.run_immediately,
         )
         await self.push_frame(text_frame)
+        if toggle_skip_tts:
+            output_frame = LLMConfigureOutputFrame(skip_tts=cur_llm_skip_tts)
+            await self.push_frame(output_frame)
+
+    async def _handle_send_file(self, data: RTVI.SendFileData, message_id: str):
+        """Handle a send-file message from the client."""
+        file = data.file
+        source = None
+        type = file.source.type
+        opts = data.options if data.options is not None else RTVI.SendFileOptions()
+
+        logger.debug(f"Handling file from RTVI: format={file.format}, type={type}")
+
+        match file.source:
+            case RTVI.FileBytes() as fs:
+                source = f"data:{file.format};base64,{fs.bytes}"
+            case RTVI.FileUrl() as fs:
+                if not fs.public:
+                    if not fs.url.startswith(("http://", "https://")):
+                        logger.warning(f"Unsupported URL scheme for file fetch: {fs.url!r}")
+                        await self._send_error_response(message_id, "Unsupported URL scheme")
+                        return
+                    _MAX_FILE_BYTES = 50 * 1024 * 1024
+                    type = "bytes"
+                    try:
+                        timeout = aiohttp.ClientTimeout(total=30)
+                        async with aiohttp.ClientSession(timeout=timeout) as session:
+                            async with session.get(fs.url) as response:
+                                response.raise_for_status()
+                                raw_bytes = await response.content.read(_MAX_FILE_BYTES + 1)
+                                if len(raw_bytes) > _MAX_FILE_BYTES:
+                                    logger.warning(
+                                        f"File at URL exceeds {_MAX_FILE_BYTES} byte limit"
+                                    )
+                                    await self._send_error_response(message_id, "File too large")
+                                    return
+                                base64_string = base64.b64encode(raw_bytes).decode("utf-8")
+                                source = f"data:{file.format};base64,{base64_string}"
+                    except TimeoutError:
+                        logger.warning(f"Timed out fetching file from URL: {fs.url}")
+                        await self._send_error_response(message_id, "Timed out fetching file")
+                        return
+                    except aiohttp.ClientError as e:
+                        logger.warning(f"Failed to fetch file from URL: {e}")
+                        await self._send_error_response(message_id, f"Failed to fetch file: {e}")
+                        return
+                else:
+                    source = fs.url
+            case RTVI.FileId() as fs:
+                if not fs.id.startswith("pipecat:"):
+                    logger.warning(f"Unsupported file ID: {fs.id}")
+                    await self._send_error_response(message_id, f"Unsupported file ID: {fs.id}")
+                    return
+                if not self._folder:
+                    logger.warning(
+                        "Send-file with a pipecat id requires uploads_folder on RTVIProcessor "
+                        "(e.g. uploads_folder=runner_uploads_folder())."
+                    )
+                    await self._send_error_response(message_id, "Uploads folder not set")
+                    return
+                suffix = fs.id.removeprefix("pipecat:")
+                if not re.fullmatch(r"[0-9a-f]{32}", suffix):
+                    logger.warning(f"Invalid file ID format: {fs.id}")
+                    await self._send_error_response(message_id, "Invalid file ID")
+                    return
+                # read bytes from file system, encode to base64, then delete the file
+                type = "bytes"
+                file_path = os.path.join(self._folder, suffix)
+                with open(file_path, "rb") as f:
+                    raw_bytes = f.read()
+                    encoded_file = base64.b64encode(raw_bytes).decode("utf-8")
+                    source = f"data:{file.format};base64,{encoded_file}"
+                try:
+                    os.remove(file_path)
+                except OSError as e:
+                    logger.warning(f"Failed to remove uploaded file {file_path}: {e}")
+            case _:
+                logger.warning(f"Unsupported file source type: {file.source.type}")
+                return
+
+        if file.format.startswith("image/") and type != "url":
+            # Only access width/height if the original source is FileBytes (not FileUrl/FileId)
+            if isinstance(file.source, RTVI.FileBytes):
+                size = (file.source.width or 0, file.source.height or 0)
+            else:
+                size = (0, 0)
+            image_bytes: bytes = (
+                base64.b64decode(source.split("base64,")[1])
+                if isinstance(source, str) and source.startswith("data:")
+                else source  # type: ignore[assignment]
+            )
+            file_frame = UserImageRawFrame(
+                text=data.content,
+                image=image_bytes,
+                size=size,
+                format=file.format,
+                append_to_context=True,
+            )
+        else:
+            file_frame = UserFileRawFrame(
+                text=data.content,
+                file=source,
+                type=type,
+                filename=file.name,
+                format=file.format,
+                custom_options=opts.custom_options,
+                append_to_context=True,
+            )
+
+        if opts.run_immediately:
+            await self.interrupt_bot()
+
+        cur_llm_skip_tts = self._llm_skip_tts
+        should_skip_tts = not opts.audio_response
+        toggle_skip_tts = cur_llm_skip_tts != should_skip_tts
+        if toggle_skip_tts:
+            output_frame = LLMConfigureOutputFrame(skip_tts=should_skip_tts)
+            await self.push_frame(output_frame)
+        await self.push_frame(file_frame)
         if toggle_skip_tts:
             output_frame = LLMConfigureOutputFrame(skip_tts=cur_llm_skip_tts)
             await self.push_frame(output_frame)
