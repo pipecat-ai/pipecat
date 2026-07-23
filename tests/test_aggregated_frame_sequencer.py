@@ -300,6 +300,19 @@ class TestProcessWordBasic(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].text, "zzz")
 
+    async def test_none_context_word_completes_registered_slot(self):
+        # Legacy providers register slots under real context IDs but emit word
+        # events with context_id=None; an untagged word must still land on (and
+        # complete) the active slot rather than passing through beside it.
+        seq = _seq()
+        await seq.register_spoken(_spoken_frame("hello"), "ctx1", "hello", True)
+        result = seq.process_word("hello", pts=1, context_id=None)
+        word_frames = [f for f in result if isinstance(f, TTSTextFrame)]
+        self.assertEqual([f.text for f in word_frames], ["hello"])
+        self.assertEqual(word_frames[0].context_id, "ctx1")
+        # The completed slot flushed out; nothing is left pending.
+        self.assertEqual(seq._slots, [])
+
 
 # ---------------------------------------------------------------------------
 # process_word — raw_text propagation
@@ -552,6 +565,20 @@ class TestForceComplete(unittest.IsolatedAsyncioTestCase):
 
         result = seq.process_word("hello", pts=5, context_id="ctx1")
         self.assertEqual(result, [])
+
+    async def test_second_force_complete_for_same_context_is_a_noop(self):
+        """A repeated force_complete for an already-completed context emits nothing.
+
+        The service force-completes a context both when handling ``TTSStoppedFrame``
+        and again after the audio-context loop ends, so the second call must find
+        no matching slots and no live context state.
+        """
+        seq = _seq()
+        await seq.register_spoken(_spoken_frame("hello"), "ctx1", "hello", True)
+        first = seq.force_complete("ctx1", last_word_pts=0)
+        self.assertEqual({f.text for f in first if isinstance(f, TTSTextFrame)}, {"hello"})
+
+        self.assertEqual(seq.force_complete("ctx1", last_word_pts=10), [])
 
 
 # ---------------------------------------------------------------------------
@@ -1614,6 +1641,31 @@ class TestClearResetsStreamingState(unittest.IsolatedAsyncioTestCase):
         await _stream(seq, "ctx1", "Bye", "!", " Ok")
         self.assertEqual(len(seq._slots), 1)
         self.assertEqual(seq._slots[0].frame.text, "Bye!")
+
+    async def test_clear_wipes_all_concurrent_contexts(self):
+        """An interruption with two contexts in flight wipes every context's state.
+
+        ctx1 has a promoted slot and remains live for later word timestamps; ctx2
+        still has a pending sentence and a buffered word. clear() must reset all of
+        it at once, and a late word from either context is then dropped as stale.
+        """
+        seq = _seq(streaming=True)
+        await _stream(seq, "ctx1", "Hello")
+        await _stream(seq, "ctx2", "World")
+        await seq.finalize("ctx1")  # promoted slot; ctx1 stays live for later words
+        seq.process_word("World", pts=1, context_id="ctx2")  # buffered: ctx2 still pending
+        self.assertEqual(len(seq._buffered_words), 1)
+
+        seq.clear()
+
+        self.assertEqual(seq._slots, [])
+        self.assertEqual(seq._streaming_contexts, {})
+        self.assertEqual(seq._context_append_to_context, {})
+        self.assertEqual(seq._buffered_words, [])
+        # Delayed words from both wiped contexts are stale and dropped.
+        self.assertEqual(seq.process_word("Hello", pts=2, context_id="ctx1"), [])
+        self.assertEqual(seq.process_word("World", pts=2, context_id="ctx2"), [])
+        self.assertEqual(await seq.finalize("ctx2"), [])
 
 
 # ---------------------------------------------------------------------------
