@@ -344,6 +344,9 @@ class ProjectGenerator:
         elif self.config.realtime_service:
             services["realtime"] = self.config.realtime_service
 
+        if self.config.video_service:
+            services["video"] = self.config.video_service
+
         # Extract all required extras
         extras = ServiceLoader.extract_extras_for_services(services)
 
