@@ -1401,6 +1401,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._paired_user_aggregator = _paired_user_aggregator
 
         self._function_calls_in_progress: dict[str, FunctionCallInProgressFrame | None] = {}
+        # Sibling tool_call_ids announced together in the same
+        # FunctionCallsStartedFrame, keyed by tool_call_id. Used to detect
+        # the last-to-complete call in a parallel-tool-call group even when
+        # a sibling hasn't reached FunctionCallInProgressFrame yet (siblings
+        # run as independent tasks with no ordering guarantee between them).
+        self._function_call_siblings: dict[str, tuple[str, ...]] = {}
         self._function_calls_image_results: dict[str, UserImageRawFrame] = {}
         self._context_updated_tasks: set[asyncio.Task] = set()
 
@@ -1659,8 +1665,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _handle_function_calls_started(self, frame: FunctionCallsStartedFrame):
         function_names = [f"{f.function_name}:{f.tool_call_id}" for f in frame.function_calls]
         logger.debug(f"{self} FunctionCallsStartedFrame: {function_names}")
+        tool_call_ids = tuple(f.tool_call_id for f in frame.function_calls)
         for function_call in frame.function_calls:
             self._function_calls_in_progress[function_call.tool_call_id] = None
+            self._function_call_siblings[function_call.tool_call_id] = tool_call_ids
 
     async def _handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
         logger.debug(
@@ -1742,17 +1750,27 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 # to complete. If group_id is set, only consider sibling calls;
                 # otherwise always execute as soon as we receive the result.
                 if group_id:
+                    # Siblings are tracked by tool_call_id presence in
+                    # `_function_calls_in_progress` (removed only once their
+                    # result is processed), not by whether they've already
+                    # reached FunctionCallInProgressFrame. Parallel calls run
+                    # as independent tasks, so a fast sibling's result can
+                    # arrive before a slow sibling's in-progress frame does;
+                    # filtering on the in-progress value would treat that
+                    # slow sibling as already done and run the LLM early.
+                    siblings = self._function_call_siblings.get(frame.tool_call_id, ())
                     run_llm = not any(
-                        f is not None
-                        and f.group_id == group_id
-                        # We are now able to receive "updates", so the current
-                        # frame can still be in the in progress list, and we need to
-                        # ignore it.
-                        and f.tool_call_id != frame.tool_call_id
-                        for f in self._function_calls_in_progress.values()
+                        tool_call_id != frame.tool_call_id
+                        and tool_call_id in self._function_calls_in_progress
+                        for tool_call_id in siblings
                     )
                 else:
                     run_llm = True
+
+        if is_final:
+            # Safe to drop this call's own sibling-group entry now that the
+            # last-to-complete check above has used it.
+            self._function_call_siblings.pop(frame.tool_call_id, None)
 
         if run_llm and not self._user_speaking:
             await self._maybe_push_context_after_function_result()
@@ -1825,6 +1843,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """
         is_async = not in_progress_frame.cancel_on_interruption
         del self._function_calls_in_progress[frame.tool_call_id]
+        # Note: `_function_call_siblings[frame.tool_call_id]` is intentionally
+        # left in place here — `_handle_function_call_result` still needs it
+        # (after this call returns) to look up this call's own sibling group
+        # for the last-to-complete check. It's popped there once that's done.
 
         result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
 
@@ -1847,6 +1869,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             # Update context with the function call cancellation
             self._update_function_call_result(frame.function_name, frame.tool_call_id, "CANCELLED")
             del self._function_calls_in_progress[frame.tool_call_id]
+            self._function_call_siblings.pop(frame.tool_call_id, None)
 
     async def _handle_user_image_frame(self, frame: UserImageRawFrame):
         image_appended = False
