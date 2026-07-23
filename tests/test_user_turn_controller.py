@@ -7,10 +7,12 @@
 import asyncio
 import unittest
 import warnings
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
+from pipecat.audio.turn.base_turn_analyzer import EndOfTurnState
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -599,6 +601,116 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
 
         await strategy.handle_user_turn_stopped()
         analyzer.clear.assert_called_once()
+
+    def _make_turn_analyzer_strategy(self, *, inference_secs: float, **kwargs):
+        """Build a TurnAnalyzerUserTurnStopStrategy whose analyzer takes real time.
+
+        Returns (strategy, released) where ``released`` is an asyncio.Event set
+        when the strategy fires on_user_turn_stopped.
+        """
+        analyzer = MagicMock()
+
+        async def slow_analyze():
+            await asyncio.sleep(inference_secs)
+            return (EndOfTurnState.COMPLETE, None)
+
+        analyzer.analyze_end_of_turn = slow_analyze
+        analyzer.cleanup = AsyncMock()
+
+        strategy = TurnAnalyzerUserTurnStopStrategy(turn_analyzer=analyzer, **kwargs)
+
+        released = asyncio.Event()
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            released.set()
+
+        return strategy, released
+
+    async def test_stt_timeout_anchored_to_speech_end(self):
+        """The STT safety-net timeout doesn't grow with analyzer inference time.
+
+        The p99 budget is anchored at the end of the user's speech
+        (VAD stop timestamp minus stop_secs). Time the analyzer spends in
+        analyze_end_of_turn() must come out of that budget, not extend it.
+        """
+        inference_secs = 0.3
+        stop_secs = 0.2
+        stt_p99 = 0.6  # deadline: 0.4s after the VAD stop frame is created
+
+        strategy, released = self._make_turn_analyzer_strategy(inference_secs=inference_secs)
+        await strategy.setup(self.task_manager)
+        await strategy.process_frame(STTMetadataFrame(service_name="stt", ttfs_p99_latency=stt_p99))
+        await strategy.process_frame(VADUserStartedSpeakingFrame(start_secs=stop_secs))
+
+        start = asyncio.get_running_loop().time()
+        vad_stop = VADUserStoppedSpeakingFrame(stop_secs=stop_secs)
+        vad_task = asyncio.create_task(strategy.process_frame(vad_stop))
+        # A non-finalized transcript arrives well within the budget.
+        await strategy.process_frame(
+            TranscriptionFrame(user_id="", text="hello", timestamp="now", finalized=False)
+        )
+        await vad_task
+
+        await asyncio.wait_for(released.wait(), timeout=2.0)
+        elapsed = asyncio.get_running_loop().time() - start
+
+        # Unanchored, release would come at inference + (p99 - stop_secs) = 0.7s.
+        # Anchored, it comes at p99 - stop_secs = 0.4s after the VAD stop frame.
+        self.assertLess(elapsed, 0.55)
+        self.assertGreaterEqual(elapsed, inference_secs)
+
+        await strategy.cleanup()
+
+    async def test_finalized_transcript_during_inference_releases_immediately(self):
+        """A transcript that finalizes mid-inference releases the turn right after.
+
+        Transcripts are data frames and VAD stop is a system frame, so they are
+        processed on different tasks and can interleave with the
+        analyze_end_of_turn() await. Once the analyzer's verdict lands, the
+        already-finalized transcript must release the turn immediately instead
+        of waiting out the safety-net timer.
+        """
+        inference_secs = 0.3
+        stt_p99 = 5.0  # timer far out, so an immediate release is unambiguous
+
+        strategy, released = self._make_turn_analyzer_strategy(inference_secs=inference_secs)
+        await strategy.setup(self.task_manager)
+        await strategy.process_frame(STTMetadataFrame(service_name="stt", ttfs_p99_latency=stt_p99))
+        await strategy.process_frame(VADUserStartedSpeakingFrame(start_secs=0.2))
+
+        vad_task = asyncio.create_task(
+            strategy.process_frame(VADUserStoppedSpeakingFrame(stop_secs=0.2))
+        )
+        await asyncio.sleep(inference_secs / 3)  # land mid-inference
+        await strategy.process_frame(
+            TranscriptionFrame(user_id="", text="hello", timestamp="now", finalized=True)
+        )
+        await vad_task
+
+        await asyncio.wait_for(released.wait(), timeout=1.0)
+
+        await strategy.cleanup()
+
+    async def test_no_wait_for_transcript_releases_on_verdict(self):
+        """With wait_for_transcript=False the verdict alone releases the turn.
+
+        No transcript is ever sent; release must follow analyze_end_of_turn()
+        directly rather than the STT safety-net timer.
+        """
+        stt_p99 = 5.0
+
+        strategy, released = self._make_turn_analyzer_strategy(
+            inference_secs=0.1, wait_for_transcript=False
+        )
+        await strategy.setup(self.task_manager)
+        await strategy.process_frame(STTMetadataFrame(service_name="stt", ttfs_p99_latency=stt_p99))
+        await strategy.process_frame(VADUserStartedSpeakingFrame(start_secs=0.2))
+        await strategy.process_frame(VADUserStoppedSpeakingFrame(stop_secs=0.2))
+
+        await asyncio.wait_for(released.wait(), timeout=1.0)
+
+        await strategy.cleanup()
 
 
 if __name__ == "__main__":
