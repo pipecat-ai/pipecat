@@ -211,7 +211,9 @@ def parse_start_end_tags(
         start_tag_count = text[current_tag_index:].count(start_tag)
         end_tag_count = text[current_tag_index:].count(end_tag)
         if start_tag_count == 0 and end_tag_count == 0:
-            return (None, current_tag_index)
+            # Neither tag of this pair is present; keep checking the other
+            # pairs instead of giving up on the whole list.
+            continue
         elif start_tag_count > end_tag_count:
             return ((start_tag, end_tag), len(text))
         elif start_tag_count == end_tag_count:
