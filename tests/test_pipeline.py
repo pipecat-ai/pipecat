@@ -127,6 +127,56 @@ class TestParallelPipeline(unittest.IsolatedAsyncioTestCase):
             ignore_start=False,
         )
 
+    async def test_parallel_internal_lifecycle_frame_does_not_corrupt_synchronization(self):
+        """A lifecycle frame (e.g. EndFrame) pushed internally by a branch
+        processor should not be mistaken for the real, externally-arriving
+        lifecycle frame's synchronization completing. Otherwise it can
+        escape downstream before that real frame does, violating pipeline
+        lifecycle ordering (e.g. an EndFrame arriving before the StartFrame
+        it was supposed to follow).
+
+        Regression test for https://github.com/pipecat-ai/pipecat/issues/4834.
+        """
+
+        class EmitEndFrameOnStartProcessor(FrameProcessor):
+            """Pushes its own internal EndFrame right after handling StartFrame."""
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                await self.push_frame(frame, direction)
+                if isinstance(frame, StartFrame):
+                    await self.push_frame(EndFrame())
+
+        class DelayedStartIdentityFilter(FrameProcessor):
+            """Delays handling StartFrame so the other branch's internally-
+            pushed EndFrame reaches the parallel pipeline well before this
+            branch's StartFrame completes synchronization."""
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, StartFrame):
+                    await asyncio.sleep(0.05)
+                await self.push_frame(frame, direction)
+
+        pipeline = ParallelPipeline(
+            [EmitEndFrameOnStartProcessor()],
+            [DelayedStartIdentityFilter()],
+        )
+
+        frames_to_send = [TextFrame(text="Hello!"), EndFrame()]
+
+        # The real StartFrame must always be pushed downstream before the
+        # internally-pushed EndFrame, regardless of the delay on the other
+        # branch. The final EndFrame is the one we sent above.
+        expected_down_frames = [StartFrame, EndFrame, TextFrame, EndFrame]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+            ignore_start=False,
+            send_end_frame=False,
+        )
+
 
 class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
     async def test_task_single(self):
