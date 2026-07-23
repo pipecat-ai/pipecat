@@ -42,8 +42,9 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
     For services that support finalization (TranscriptionFrame.finalized=True),
     the turn can be triggered immediately once the finalized transcript is
-    received. Otherwise, an STT timeout (adjusted by VAD stop_secs) is used
-    as a fallback.
+    received. Otherwise, an STT timeout is used as a fallback: the turn is
+    released once ``ttfs_p99_latency`` has elapsed since the end of the user's
+    speech (as reported by VAD, discounting its ``stop_secs`` silence window).
     """
 
     def __init__(
@@ -220,17 +221,21 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._stop_secs = frame.stop_secs
         self._vad_stopped_time = frame.timestamp
 
-        analyze_start = time.monotonic()
+        # The STT p99 budget is measured from when the user actually stopped
+        # speaking, which VAD only reports stop_secs later. Anchoring the
+        # safety net to that absolute deadline keeps the wait fixed no matter
+        # how long end-of-turn analysis (e.g. ML inference) takes before the
+        # timer is armed.
+        stt_deadline = frame.timestamp - frame.stop_secs + self._stt_timeout
+
         state, prediction = await self._turn_analyzer.analyze_end_of_turn()
-        analyze_elapsed = time.monotonic() - analyze_start
         await self._handle_prediction_result(prediction)
 
         # The user stopped speaking and the turn is complete, we now need to
         # wait for transcriptions.
         self._turn_complete = state == EndOfTurnState.COMPLETE
 
-        # Start the STT timeout (adjusted by VAD stop_secs and turn-analyzer since that time already elapsed
-        timeout = max(0, self._stt_timeout - self._stop_secs - analyze_elapsed)
+        timeout = max(0, stt_deadline - time.time())
 
         if not self._stop_secs_warned:
             if self._stop_secs != VAD_STOP_SECS:
@@ -255,6 +260,12 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._timeout_task = self.task_manager.create_task(
             self._timeout_handler(timeout), f"{self}::_timeout_handler"
         )
+
+        # A finalized transcript (or COMPLETE itself, when wait_for_transcript
+        # is False) may already have satisfied the trigger conditions while the
+        # analyzer was running. The analyzer's verdict is only known now, so
+        # re-check here rather than wait out the safety-net timer.
+        await self._maybe_trigger_user_turn_stopped()
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         """Handle user transcription."""
