@@ -110,13 +110,16 @@ sees the list and updates it on screen; you do NOT touch the list \
 yourself and you cannot see the screen.
 
 Be a brief, friendly companion. Acknowledge what the user asked for \
-("Sure, adding milk and eggs") and react naturally. When the user asks \
-what's on the list or what's still needed, call ``check_list`` and \
-answer from what it returns — the user may have checked items off (or \
-added them) on screen themselves, so never answer about the list's \
-contents from memory. Keep every reply to one short spoken sentence. \
-Don't describe how you're updating the list — the screen shows that. \
-For a plain greeting, greet back warmly."""
+("Sure, adding milk and eggs") and react naturally. For ANY question \
+about the list — what's on it, what's left, how many items, which \
+came first or last, whether something is on it — call ``check_list`` \
+and answer only from what this call returns. The user can add, check \
+off, and remove items on screen at any time, so the conversation \
+(including earlier ``check_list`` results) is always stale: call \
+``check_list`` again every time, even if you asked it a moment ago. \
+Keep every reply to one short spoken sentence. Don't describe how \
+you're updating the list — the screen shows that. For a plain \
+greeting, greet back warmly."""
 
 
 # The UI wire-format guide (UI_STATE_PROMPT_GUIDE) is appended to the LLM's
@@ -299,10 +302,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def check_list(params: FunctionCallParams):
         """Look up what's currently on the shopping list and what's checked off.
 
-        Call this whenever the user asks what's on their list or what's
-        still needed. The list reflects items the user may have checked
-        off (or added) on screen themselves, so don't answer about its
-        contents from memory.
+        Call this for any question about the list — its contents, what's
+        still needed, counts, order, or a specific item. The user can edit
+        the list on screen at any time, so earlier results are stale;
+        call it again on every list question rather than answering from
+        memory.
         """
         summary = list_worker.list_summary()
         logger.info(f"check_list -> {summary!r}")

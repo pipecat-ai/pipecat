@@ -131,7 +131,6 @@ class MistralTTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech data.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
         try:
             await self.start_tts_usage_metrics(text)
 

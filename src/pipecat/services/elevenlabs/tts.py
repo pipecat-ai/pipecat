@@ -13,6 +13,7 @@ with support for streaming audio, word timestamps, and voice customization.
 import asyncio
 import base64
 import json
+import warnings
 from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
 from typing import (
@@ -181,8 +182,21 @@ def build_elevenlabs_voice_settings(
     return voice_settings or None
 
 
+@deprecated(
+    "`PronunciationDictionaryLocator` is deprecated since 1.6.0 and will be removed in 2.0.0. "
+    "Use `text_transforms` -> `replace_text` instead."
+)
 class PronunciationDictionaryLocator(BaseModel):
     """Locator for a pronunciation dictionary.
+
+    .. deprecated:: 1.6.0
+        Use the ``text_transforms`` parameter with
+        :func:`pipecat.utils.text.transforms.replace_text` instead. Pronunciation
+        dictionary substitutions can rewrite the spoken words in ways that no
+        longer match the text sent to synthesis, which breaks the
+        alignment-based word-completion tracking used to attribute spoken text
+        back to the conversation context. ``replace_text`` transforms happen
+        client-side, so they're tracked correctly. Will be removed in 2.0.0.
 
     Parameters:
         pronunciation_dictionary_id: The ID of the pronunciation dictionary.
@@ -484,6 +498,18 @@ class ElevenLabsTTSService(WebsocketTTSService):
             enable_logging: Whether to enable ElevenLabs server-side logging.
             pronunciation_dictionary_locators: List of pronunciation dictionary
                 locators to use.
+
+                .. deprecated:: 1.6.0
+                    Use the ``text_transforms`` parameter with
+                    :func:`pipecat.utils.text.transforms.replace_text`
+                    instead. Pronunciation dictionary substitutions can
+                    rewrite the spoken words in ways that no longer match
+                    the text sent to synthesis, which breaks the
+                    alignment-based word-completion tracking used to
+                    attribute spoken text back to the conversation context.
+                    ``replace_text`` transforms happen client-side, so
+                    they're tracked correctly. Will be removed in 2.0.0.
+
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
@@ -603,6 +629,17 @@ class ElevenLabsTTSService(WebsocketTTSService):
 
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
+        if _pronunciation_dictionary_locators is not None:
+            warnings.warn(
+                "`pronunciation_dictionary_locators` is deprecated since 1.6.0 and will be "
+                "removed in 2.0.0. Use `text_transforms` -> `replace_text` instead. "
+                "Pronunciation dictionary substitutions can rewrite the spoken words in "
+                "ways that no longer match the text sent to synthesis, which breaks the "
+                "alignment-based word-completion tracking used to attribute spoken text "
+                "back to the conversation context.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self._pronunciation_dictionary_locators = _pronunciation_dictionary_locators
 
         self._cumulative_time = 0
@@ -987,8 +1024,6 @@ class ElevenLabsTTSService(WebsocketTTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
@@ -1117,6 +1152,18 @@ class ElevenLabsHttpTTSService(TTSService):
                 Set to False for zero retention mode (enterprise only).
             pronunciation_dictionary_locators: List of pronunciation dictionary
                 locators to use.
+
+                .. deprecated:: 1.6.0
+                    Use the ``text_transforms`` parameter with
+                    :func:`pipecat.utils.text.transforms.replace_text`
+                    instead. Pronunciation dictionary substitutions can
+                    rewrite the spoken words in ways that no longer match
+                    the text sent to synthesis, which breaks the
+                    alignment-based word-completion tracking used to
+                    attribute spoken text back to the conversation context.
+                    ``replace_text`` transforms happen client-side, so
+                    they're tracked correctly. Will be removed in 2.0.0.
+
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
@@ -1202,6 +1249,17 @@ class ElevenLabsHttpTTSService(TTSService):
 
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
+        if _pronunciation_dictionary_locators is not None:
+            warnings.warn(
+                "`pronunciation_dictionary_locators` is deprecated since 1.6.0 and will be "
+                "removed in 2.0.0. Use `text_transforms` -> `replace_text` instead. "
+                "Pronunciation dictionary substitutions can rewrite the spoken words in "
+                "ways that no longer match the text sent to synthesis, which breaks the "
+                "alignment-based word-completion tracking used to attribute spoken text "
+                "back to the conversation context.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self._pronunciation_dictionary_locators = _pronunciation_dictionary_locators
 
         # Track cumulative time to properly sequence word timestamps across utterances
@@ -1359,8 +1417,6 @@ class ElevenLabsHttpTTSService(TTSService):
         Yields:
             Frame: Audio and control frames containing the synthesized speech.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         # Use the with-timestamps endpoint
         url = f"{self._base_url}/v1/text-to-speech/{self._settings.voice}/stream/with-timestamps"
 

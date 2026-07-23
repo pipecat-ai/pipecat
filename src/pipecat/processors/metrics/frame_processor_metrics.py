@@ -237,6 +237,12 @@ class FrameProcessorMetrics(BaseObject):
             logstr += f", cache read input tokens: {tokens.cache_read_input_tokens}"
         if tokens.reasoning_tokens:
             logstr += f", reasoning tokens: {tokens.reasoning_tokens}"
+        if tokens.input_audio_tokens:
+            logstr += f", input audio tokens: {tokens.input_audio_tokens}"
+        if tokens.output_audio_tokens:
+            logstr += f", output audio tokens: {tokens.output_audio_tokens}"
+        if tokens.cache_read_input_audio_tokens:
+            logstr += f", cache read input audio tokens: {tokens.cache_read_input_audio_tokens}"
         logger.debug(logstr)
         value = LLMUsageMetricsData(
             processor=self._processor_name(), model=self._model_name(), value=tokens

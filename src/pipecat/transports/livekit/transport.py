@@ -20,6 +20,7 @@ from typing import Any
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -29,6 +30,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     ImageRawFrame,
+    InputDTMFFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
@@ -114,6 +116,7 @@ class LiveKitCallbacks(BaseModel):
         on_audio_track_unsubscribed: Called when an audio track is unsubscribed.
         on_data_received: Called when data is received from a participant.
         on_first_participant_joined: Called when the first participant joins.
+        on_dtmf_event: Called when a SIP DTMF tone is received.
     """
 
     on_connected: Callable[[], Awaitable[None]]
@@ -127,6 +130,7 @@ class LiveKitCallbacks(BaseModel):
     on_video_track_unsubscribed: Callable[[str], Awaitable[None]]
     on_data_received: Callable[[bytes, str], Awaitable[None]]
     on_first_participant_joined: Callable[[str], Awaitable[None]]
+    on_dtmf_event: Callable[[Any], Awaitable[None]]
 
 
 class LiveKitTransportClient:
@@ -224,6 +228,7 @@ class LiveKitTransportClient:
         self.room.on("data_received")(self._on_data_received_wrapper)
         self.room.on("connected")(self._on_connected_wrapper)
         self.room.on("disconnected")(self._on_disconnected_wrapper)
+        self.room.on("sip_dtmf_received")(self._on_sip_dtmf_received_wrapper)
 
     async def cleanup(self):
         """Cleanup client resources."""
@@ -482,6 +487,13 @@ class LiveKitTransportClient:
             self._async_on_disconnected(), f"{self}::_async_on_disconnected"
         )
 
+    def _on_sip_dtmf_received_wrapper(self, dtmf: rtc.SipDTMF):
+        """Wrapper for inbound SIP DTMF events."""
+        self._task_manager.create_task(
+            self._async_on_sip_dtmf_received(dtmf),
+            f"{self}::_async_on_sip_dtmf_received",
+        )
+
     # Async methods for event handling
     async def _async_on_participant_connected(self, participant: rtc.RemoteParticipant):
         """Handle participant connected events."""
@@ -609,6 +621,19 @@ class LiveKitTransportClient:
         self._connected = False
         logger.info(f"Disconnected from {self._room_name}. Reason: {reason}")
         await self._callbacks.on_disconnected()
+
+    async def _async_on_sip_dtmf_received(self, dtmf: rtc.SipDTMF):
+        """Handle inbound SIP DTMF events from LiveKit telephony."""
+        participant = getattr(dtmf, "participant", None)
+        participant_id = getattr(participant, "sid", None) if participant else None
+        data = {
+            "tone": dtmf.digit,
+            "digit": dtmf.digit,
+            "code": dtmf.code,
+            "participant_id": participant_id,
+        }
+        logger.debug(f"{self} SIP DTMF event: {data}")
+        await self._callbacks.on_dtmf_event(data)
 
     async def _process_audio_stream(self, audio_stream: rtc.AudioStream, participant_id: str):
         """Process incoming audio stream from a participant."""
@@ -1028,6 +1053,10 @@ class LiveKitTransport(BaseTransport):
       Args: (participant_id: str)
     - on_data_received: Called when data is received from a participant.
       Args: (data: bytes, participant_id: str)
+    - on_dtmf_event: Called when a SIP DTMF tone is received from a participant.
+      Args: (data: dict) with keys ``tone``/``digit``, ``code``, and
+      ``participant_id``. Also pushes an ``InputDTMFFrame`` so
+      ``DTMFAggregator`` works on LiveKit SIP calls.
 
     Example::
 
@@ -1073,6 +1102,7 @@ class LiveKitTransport(BaseTransport):
             on_video_track_unsubscribed=self._on_video_track_unsubscribed,
             on_data_received=self._on_data_received,
             on_first_participant_joined=self._on_first_participant_joined,
+            on_dtmf_event=self._on_dtmf_event,
         )
         self._params = params or LiveKitParams()
 
@@ -1095,6 +1125,7 @@ class LiveKitTransport(BaseTransport):
         self._register_event_handler("on_participant_left")
         self._register_event_handler("on_call_state_updated")
         self._register_event_handler("on_before_disconnect", sync=True)
+        self._register_event_handler("on_dtmf_event")
 
     def input(self) -> LiveKitInputTransport:
         """Get the input transport for receiving media and events.
@@ -1239,6 +1270,27 @@ class LiveKitTransport(BaseTransport):
         if self._input:
             await self._input.push_app_message(data.decode(), participant_id)
         await self._call_event_handler("on_data_received", data, participant_id)
+
+    async def _on_dtmf_event(self, data: Any):
+        """Handle inbound SIP DTMF events.
+
+        Mirrors Daily transport behavior: expose ``on_dtmf_event`` to user code
+        and push ``InputDTMFFrame`` so ``DTMFAggregator`` can consume digits.
+        """
+        logger.debug(f"{self} DTMF event: {data}")
+        await self._call_event_handler("on_dtmf_event", data)
+
+        tone = data.get("tone") if isinstance(data, dict) else None
+        if tone is None or self._input is None:
+            return
+
+        try:
+            button = KeypadEntry(tone)
+        except ValueError:
+            logger.warning(f"{self} Ignoring unsupported DTMF tone: {tone!r}")
+            return
+
+        await self._input.push_frame(InputDTMFFrame(button=button))
 
     async def send_message(self, message: str, participant_id: str | None = None):
         """Send a message to participants in the room.

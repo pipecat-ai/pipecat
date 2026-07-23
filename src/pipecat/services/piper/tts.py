@@ -46,6 +46,14 @@ class PiperTTSService(TTSService):
     Provides local text-to-speech synthesis using Piper voice models. Automatically
     downloads voice models if not already present and resamples audio output to
     match the configured sample rate.
+
+    .. note::
+        This service runs Piper in-process via the ``piper-tts`` package (the
+        ``piper`` extra), which is **GPL-3.0 licensed**. Distributing an
+        application that includes it may subject the application to the GPL's
+        source-disclosure terms. To keep Piper out of your application's
+        license scope, use :class:`PiperHttpTTSService` instead, which talks to
+        a separately installed Piper HTTP server.
     """
 
     Settings = PiperTTSSettings
@@ -162,8 +170,6 @@ class PiperTTSService(TTSService):
                     return
                 yield item.audio_int16_bytes
 
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
             await self.start_tts_usage_metrics(text)
 
@@ -279,7 +285,6 @@ class PiperHttpTTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech and status frames.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
         headers = {
             "Content-Type": "application/json",
         }

@@ -631,7 +631,6 @@ class RimeTTSService(WebsocketTTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
@@ -823,8 +822,6 @@ class RimeHttpTTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         headers = {
             "Accept": "audio/pcm",
             "Authorization": f"Bearer {self._api_key}",
@@ -1199,7 +1196,6 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()

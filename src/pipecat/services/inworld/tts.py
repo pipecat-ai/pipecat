@@ -344,8 +344,6 @@ class InworldHttpTTSService(TTSService):
         Returns:
             An asynchronous generator of frames.
         """
-        logger.debug(f"{self}: Generating TTS [{text}] (streaming={self._streaming})")
-
         self._current_run_had_timestamps = False
 
         audio_config = {

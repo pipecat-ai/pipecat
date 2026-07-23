@@ -6,6 +6,7 @@
 
 """OpenAI Responses API adapter for Pipecat."""
 
+import copy
 from typing import Any, Required, TypedDict, cast
 
 from openai._types import NotGiven as OpenAINotGiven
@@ -79,7 +80,10 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
 
         params: OpenAIResponsesLLMInvocationParams = {
             "input": input_items,
-            "tools": self.from_standard_tools(context.tools),
+            # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
+            "tools": cast(
+                "list[ToolParam] | OpenAINotGiven", self.from_standard_tools(context.tools)
+            ),
         }
 
         if system_instruction:
@@ -140,7 +144,8 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
     def get_messages_for_logging(self, context: LLMContext) -> list[dict[str, Any]]:
         """Get messages from context in a format ready for logging.
 
-        Binary data (images, audio) is replaced with short placeholders.
+        Binary data (images, audio) is replaced with short placeholders, and
+        reasoning messages' encrypted payloads are elided.
 
         Args:
             context: The LLM context containing messages.
@@ -148,10 +153,20 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
         Returns:
             List of messages in a format ready for logging.
         """
-        return cast(
-            list[dict[str, Any]],
-            self.get_messages(context, truncate_large_values=True),
-        )
+        # Sanitize messages for logging
+        messages_for_logging: list[dict[str, Any]] = []
+        for message in self.get_messages(context, truncate_large_values=True):
+            if isinstance(message, LLMSpecificMessage):
+                # Responses-specific messages are reasoning items (see
+                # _BaseOpenAIResponsesLLMService._append_reasoning_message).
+                # Elide the encrypted payload, which is opaque noise in logs.
+                msg: dict[str, Any] = copy.deepcopy(message.message)
+                if isinstance(msg, dict) and msg.get("encrypted_content"):
+                    msg["encrypted_content"] = "..."
+                messages_for_logging.append(msg)
+            else:
+                messages_for_logging.append(cast(dict[str, Any], message))
+        return messages_for_logging
 
     def _convert_messages_to_input(
         self, messages: list[LLMContextMessage]

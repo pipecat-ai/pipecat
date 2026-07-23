@@ -202,6 +202,15 @@ class MetricsLogObserver(BaseObserver):
         if usage.reasoning_tokens is not None:
             details.append(f"reasoning: {usage.reasoning_tokens}")
 
+        if usage.input_audio_tokens is not None:
+            details.append(f"input_audio: {usage.input_audio_tokens}")
+
+        if usage.output_audio_tokens is not None:
+            details.append(f"output_audio: {usage.output_audio_tokens}")
+
+        if usage.cache_read_input_audio_tokens is not None:
+            details.append(f"cache_read_audio: {usage.cache_read_input_audio_tokens}")
+
         usage_str = ", ".join(details)
 
         logger.debug(

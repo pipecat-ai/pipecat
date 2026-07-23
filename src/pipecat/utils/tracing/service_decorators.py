@@ -119,6 +119,45 @@ def _get_parent_service_context(self):
     return context_api.get_current()
 
 
+def _get_system_instruction(service, context) -> str | None:
+    """Resolve the effective system instruction for tracing (internal use only).
+
+    System instructions can live on the LLM service (``settings.system_instruction``,
+    the norm — and the composed source of truth, see
+    ``LLMService._compose_system_instruction``) or be supplied as an initial
+    system message in the context. The service setting takes priority,
+    matching service behavior.
+
+    Args:
+        service: The LLM service instance.
+        context: The universal ``LLMContext``, or None.
+
+    Returns:
+        The system instruction text, or None if none is present.
+    """
+    if hasattr(service, "_settings") and getattr(service._settings, "system_instruction", None):
+        return service._settings.system_instruction
+
+    if not context:
+        return None
+
+    # Fall back to extracting from context messages
+    ctx_messages = context.get_messages()
+    if ctx_messages:
+        first = ctx_messages[0]
+        if isinstance(first, dict) and first.get("role") == "system":
+            content = first.get("content")
+            if isinstance(content, str):
+                return content
+            elif isinstance(content, list):
+                return " ".join(
+                    part.get("text", "")
+                    for part in content
+                    if isinstance(part, dict) and part.get("type") == "text"
+                )
+    return None
+
+
 def _add_token_usage_to_span(span, token_usage):
     """Add token usage metrics to a span (internal use only).
 
@@ -151,7 +190,23 @@ def _add_token_usage_to_span(span, token_usage):
                 token_usage["cache_creation_input_tokens"],
             )
         if "reasoning_tokens" in token_usage and token_usage["reasoning_tokens"] is not None:
-            span.set_attribute("gen_ai.usage.reasoning_tokens", token_usage["reasoning_tokens"])
+            span.set_attribute(
+                "gen_ai.usage.reasoning.output_tokens", token_usage["reasoning_tokens"]
+            )
+        if "input_audio_tokens" in token_usage and token_usage["input_audio_tokens"] is not None:
+            span.set_attribute("gen_ai.usage.audio.input_tokens", token_usage["input_audio_tokens"])
+        if "output_audio_tokens" in token_usage and token_usage["output_audio_tokens"] is not None:
+            span.set_attribute(
+                "gen_ai.usage.audio.output_tokens", token_usage["output_audio_tokens"]
+            )
+        if (
+            "cache_read_input_audio_tokens" in token_usage
+            and token_usage["cache_read_input_audio_tokens"] is not None
+        ):
+            span.set_attribute(
+                "gen_ai.usage.audio.cache_read.input_tokens",
+                token_usage["cache_read_input_audio_tokens"],
+            )
     else:
         # Handle LLMTokenUsage object
         span.set_attribute("gen_ai.usage.input_tokens", getattr(token_usage, "prompt_tokens", 0))
@@ -170,7 +225,21 @@ def _add_token_usage_to_span(span, token_usage):
 
         reasoning_tokens = getattr(token_usage, "reasoning_tokens", None)
         if reasoning_tokens is not None:
-            span.set_attribute("gen_ai.usage.reasoning_tokens", reasoning_tokens)
+            span.set_attribute("gen_ai.usage.reasoning.output_tokens", reasoning_tokens)
+
+        input_audio_tokens = getattr(token_usage, "input_audio_tokens", None)
+        if input_audio_tokens is not None:
+            span.set_attribute("gen_ai.usage.audio.input_tokens", input_audio_tokens)
+
+        output_audio_tokens = getattr(token_usage, "output_audio_tokens", None)
+        if output_audio_tokens is not None:
+            span.set_attribute("gen_ai.usage.audio.output_tokens", output_audio_tokens)
+
+        cache_read_input_audio_tokens = getattr(token_usage, "cache_read_input_audio_tokens", None)
+        if cache_read_input_audio_tokens is not None:
+            span.set_attribute(
+                "gen_ai.usage.audio.cache_read.input_tokens", cache_read_input_audio_tokens
+            )
 
 
 def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Callable:
@@ -207,6 +276,7 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
 
         def end_tts_span(service, context_id, *, interrupted=False):
             """End the TTS span for ``context_id`` if still open. Idempotent."""
+            getattr(service, "_tts_texts", {}).pop(context_id, None)
             entry = service._tts_spans.pop(context_id, None)
             if not entry:
                 return
@@ -217,6 +287,17 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                 span.end()
             except Exception as e:
                 logging.warning(f"Error closing TTS span: {e}")
+
+        def apply_text_attributes(span, texts):
+            """Set the accumulated text attributes on a TTS span.
+
+            One audio context (and thus one span) typically receives
+            several ``run_tts`` calls — one per aggregated sentence — so
+            the attributes always reflect the full accumulated text, not
+            just the latest call.
+            """
+            span.set_attribute("text", " ".join(texts))
+            span.set_attribute("metrics.character_count", sum(len(t) for t in texts))
 
         def install_audio_context_patches(service):
             """Install per-instance wrappers on the audio-context methods.
@@ -257,6 +338,7 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                 return
             service.__tts_tracing_patches_installed__ = True
             service._tts_spans = {}
+            service._tts_texts = {}
 
             orig_create = service.create_audio_context
             orig_append = service.append_to_audio_context
@@ -282,6 +364,14 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                             settings=settings,
                             operation_name="tts",
                         )
+
+                        # Apply any text buffered by run_tts before the span
+                        # existed — some services (e.g. the ElevenLabs
+                        # websocket path) create the audio context inside
+                        # run_tts, after the text-attach hook has run.
+                        texts = service._tts_texts.get(context_id)
+                        if texts:
+                            apply_text_attributes(span, texts)
                     except Exception as e:
                         logging.warning(f"Error opening TTS span: {e}")
                 return await orig_create(context_id)
@@ -293,6 +383,7 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                         if isinstance(frame, TTSStoppedFrame):
                             entry["span"].end()
                             service._tts_spans.pop(context_id, None)
+                            service._tts_texts.pop(context_id, None)
                     except Exception as e:
                         logging.warning(f"Error updating TTS span: {e}")
                 return await orig_append(context_id, frame)
@@ -319,6 +410,7 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                     logging.warning(f"Error recording TTS ttfb from MetricsFrame: {e}")
 
             async def traced_remove_audio_context(context_id):
+                service._tts_texts.pop(context_id, None)
                 entry = service._tts_spans.pop(context_id, None)
                 if entry:
                     try:
@@ -364,16 +456,28 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
             owner.setup = patched_setup
 
         def attach_run_tts_attributes(service, text, args, kwargs):
-            """Attach text-specific attributes to the in-flight TTS span."""
+            """Attach text-specific attributes to the in-flight TTS span.
+
+            Texts accumulate per audio context: with sentence aggregation,
+            one span covers several ``run_tts`` calls. The text may also
+            arrive before the span exists — some services create the audio
+            context inside ``run_tts`` — in which case it is buffered here
+            and applied by ``create_audio_context`` once the span opens.
+            """
             if not getattr(service, "_tracing_enabled", False):
                 return
             try:
+                if not text:
+                    return
+                buffers = getattr(service, "_tts_texts", None)
+                if buffers is None:
+                    return
                 context_id = args[0] if args else kwargs.get("context_id")
+                texts = buffers.setdefault(context_id, [])
+                texts.append(text)
                 entry = getattr(service, "_tts_spans", {}).get(context_id)
-                if entry and text:
-                    span = entry["span"]
-                    span.set_attribute("text", text)
-                    span.set_attribute("metrics.character_count", len(text))
+                if entry:
+                    apply_text_attributes(entry["span"], texts)
             except Exception as e:
                 logging.warning(f"Error attaching TTS text to span: {e}")
 
@@ -381,9 +485,10 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
             """Build the wrapper around ``run_tts`` that adds per-call attributes.
 
             Span lifetime is owned by the audio-context patches. This
-            wrapper only attaches the text and character count to the
-            span that was opened by ``create_audio_context`` just
-            before ``run_tts`` was invoked.
+            wrapper only records the call's text against the audio
+            context, accumulating across calls; the attributes land on
+            the span opened by ``create_audio_context`` whether that
+            happened before this call or happens inside it.
             """
             if is_async_generator:
 
@@ -835,27 +940,7 @@ def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Call
 
                             # Handle system message for different services
                             # settings.system_instruction takes priority (matches service behavior)
-                            system_message = None
-                            if hasattr(self, "_settings") and getattr(
-                                self._settings, "system_instruction", None
-                            ):
-                                system_message = self._settings.system_instruction
-                            else:
-                                # Fall back to extracting from context messages
-                                ctx_messages = context.get_messages()
-                                if ctx_messages:
-                                    first = ctx_messages[0]
-                                    if isinstance(first, dict) and first.get("role") == "system":
-                                        content = first.get("content")
-                                        if isinstance(content, str):
-                                            system_message = content
-                                        elif isinstance(content, list):
-                                            system_message = " ".join(
-                                                part.get("text", "")
-                                                for part in content
-                                                if isinstance(part, dict)
-                                                and part.get("type") == "text"
-                                            )
+                            system_message = _get_system_instruction(self, context)
 
                             # Use given_fields() defensively in case a service doesn't
                             # initialize all settings.
@@ -935,6 +1020,27 @@ def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Call
     if func is not None:
         return decorator(func)
     return decorator
+
+
+def _gemini_audio_modality_tokens(details) -> int | None:
+    """Get the AUDIO token count from a Gemini modality breakdown, if reported.
+
+    Duck-typed (``entry.modality`` / ``entry.token_count``) so this module
+    doesn't depend on Google types. Gemini omits modalities with no tokens
+    (and omits the list entirely when there is no breakdown), so absence
+    means "not reported" rather than zero.
+
+    Args:
+        details: A modality breakdown from usage metadata, e.g.
+            ``prompt_tokens_details``.
+
+    Returns:
+        The AUDIO token count, or ``None`` if not reported.
+    """
+    for entry in details or []:
+        if getattr(getattr(entry, "modality", None), "value", None) == "AUDIO":
+            return entry.token_count
+    return None
 
 
 def traced_gemini_live(operation: str) -> Callable:
@@ -1059,25 +1165,16 @@ def traced_gemini_live(operation: str) -> Callable:
                                     if tools_list:
                                         operation_attrs["tools"] = tools_list
 
-                            # Capture system instruction information
-                            system_instruction = getattr(self, "_system_instruction", None)
+                            # Capture the effective system instruction:
+                            # settings.system_instruction takes priority, else
+                            # an initial system message from the context.
+                            system_instruction = _get_system_instruction(
+                                self, getattr(self, "_context", None)
+                            )
                             if system_instruction:
-                                operation_attrs["system_instruction"] = system_instruction[
+                                operation_attrs["gen_ai.system_instructions"] = system_instruction[
                                     :500
                                 ]  # Truncate if very long
-
-                            # Capture context system instructions if available
-                            if hasattr(self, "_context") and self._context:
-                                try:
-                                    context_system = self._context.extract_system_instructions()
-                                    if context_system:
-                                        operation_attrs["context_system_instruction"] = (
-                                            context_system[:500]
-                                        )  # Truncate if very long
-                                except Exception as e:
-                                    logging.warning(
-                                        f"Error extracting context system instructions: {e}"
-                                    )
 
                         elif operation == "llm_tool_call" and args:
                             # Extract tool call information
@@ -1106,65 +1203,74 @@ def traced_gemini_live(operation: str) -> Callable:
                                     except Exception:
                                         operation_attrs["tool.arguments"] = str(call.args)[:1000]
 
-                        elif operation == "llm_tool_result" and args:
-                            # Extract tool result information
-                            tool_result_message = args[0] if args else None
-                            if tool_result_message and isinstance(tool_result_message, dict):
-                                # Extract the tool call information
-                                tool_call_id = tool_result_message.get("tool_call_id")
-                                tool_call_name = tool_result_message.get("tool_call_name")
-                                result_content = tool_result_message.get("content")
-
+                        elif operation == "llm_tool_result" and len(args) >= 3:
+                            # _tool_result(self, tool_call_id, tool_call_name, result); its
+                            # positional args, in order. ``result`` is expected to be
+                            # Gemini's FunctionResponse.response payload (a dict), but is
+                            # validated at runtime rather than assumed.
+                            tool_call_id, tool_call_name, result = args[0], args[1], args[2]
+                            try:
                                 if tool_call_id:
                                     operation_attrs["tool.call_id"] = tool_call_id
                                 if tool_call_name:
                                     operation_attrs["tool.function_name"] = tool_call_name
-
-                                # Parse and capture the result
-                                if result_content:
-                                    try:
-                                        result = json.loads(result_content)
-                                        # Serialize the result, truncating if too long
-                                        result_str = json.dumps(result)
-                                        if len(result_str) > 2000:  # Larger limit for results
-                                            result_str = result_str[:2000] + "..."
-                                        operation_attrs["tool.result"] = result_str
-
-                                        # Add result status/success indicator if present
-                                        if isinstance(result, dict):
-                                            if "error" in result:
-                                                operation_attrs["tool.result_status"] = "error"
-                                            elif "success" in result:
-                                                operation_attrs["tool.result_status"] = "success"
-                                            else:
-                                                operation_attrs["tool.result_status"] = "completed"
-
-                                    except json.JSONDecodeError:
-                                        operation_attrs["tool.result"] = (
-                                            f"Invalid JSON: {str(result_content)[:500]}"
-                                        )
-                                        operation_attrs["tool.result_status"] = "parse_error"
-                                    except Exception as e:
-                                        operation_attrs["tool.result"] = (
-                                            f"Error processing result: {str(e)}"
-                                        )
-                                        operation_attrs["tool.result_status"] = "processing_error"
+                                if isinstance(result, dict):
+                                    result_str = json.dumps(result)
+                                    if len(result_str) > 2000:  # larger limit for results
+                                        result_str = result_str[:2000] + "..."
+                                    operation_attrs["tool.result"] = result_str
+                                    if "error" in result:
+                                        operation_attrs["tool.result_status"] = "error"
+                                    elif "success" in result:
+                                        operation_attrs["tool.result_status"] = "success"
+                                    else:
+                                        operation_attrs["tool.result_status"] = "completed"
+                            except Exception as e:
+                                logging.warning(
+                                    f"Error capturing tool result attributes for tracing: {e}"
+                                )
 
                         elif operation == "llm_response" and args:
                             # Extract usage and response metadata from turn complete event
                             msg = args[0] if args else None
+
                             if msg and hasattr(msg, "usage_metadata") and msg.usage_metadata:
                                 usage = msg.usage_metadata
-
-                                # Token usage - basic attributes for span visibility
-                                if hasattr(usage, "prompt_token_count"):
-                                    operation_attrs["tokens.prompt"] = usage.prompt_token_count or 0
-                                if hasattr(usage, "response_token_count"):
-                                    operation_attrs["tokens.completion"] = (
-                                        usage.response_token_count or 0
+                                operation_attrs["gen_ai.usage.input_tokens"] = (
+                                    usage.prompt_token_count or 0
+                                )
+                                operation_attrs["gen_ai.usage.output_tokens"] = (
+                                    usage.response_token_count or 0
+                                )
+                                if usage.cached_content_token_count is not None:
+                                    operation_attrs["gen_ai.usage.cache_read.input_tokens"] = (
+                                        usage.cached_content_token_count
                                     )
-                                if hasattr(usage, "total_token_count"):
-                                    operation_attrs["tokens.total"] = usage.total_token_count or 0
+                                if usage.thoughts_token_count is not None:
+                                    operation_attrs["gen_ai.usage.reasoning_tokens"] = (
+                                        usage.thoughts_token_count
+                                    )
+                                input_audio_tokens = _gemini_audio_modality_tokens(
+                                    usage.prompt_tokens_details
+                                )
+                                if input_audio_tokens is not None:
+                                    operation_attrs["gen_ai.usage.audio.input_tokens"] = (
+                                        input_audio_tokens
+                                    )
+                                output_audio_tokens = _gemini_audio_modality_tokens(
+                                    usage.response_tokens_details
+                                )
+                                if output_audio_tokens is not None:
+                                    operation_attrs["gen_ai.usage.audio.output_tokens"] = (
+                                        output_audio_tokens
+                                    )
+                                cached_audio_tokens = _gemini_audio_modality_tokens(
+                                    usage.cache_tokens_details
+                                )
+                                if cached_audio_tokens is not None:
+                                    operation_attrs[
+                                        "gen_ai.usage.audio.cache_read.input_tokens"
+                                    ] = cached_audio_tokens
 
                             # Get output text and modality from service state
                             text = getattr(self, "_bot_text_buffer", "")
@@ -1199,21 +1305,6 @@ def traced_gemini_live(operation: str) -> Callable:
                             settings=settings,
                             **operation_attrs,
                         )
-
-                        # For llm_response operation, also handle token usage metrics
-                        if operation == "llm_response" and hasattr(self, "start_llm_usage_metrics"):
-                            msg = args[0] if args else None
-                            if msg and hasattr(msg, "usage_metadata") and msg.usage_metadata:
-                                usage = msg.usage_metadata
-                                # Create LLMTokenUsage object
-                                from pipecat.metrics.metrics import LLMTokenUsage
-
-                                tokens = LLMTokenUsage(
-                                    prompt_tokens=usage.prompt_token_count or 0,
-                                    completion_tokens=usage.response_token_count or 0,
-                                    total_tokens=usage.total_token_count or 0,
-                                )
-                                _add_token_usage_to_span(current_span, tokens)
 
                         # Capture TTFB metric if available
                         ttfb = getattr(getattr(self, "_metrics", None), "ttfb", None)
@@ -1359,15 +1450,43 @@ def traced_openai_realtime(operation: str) -> Callable:
                             if evt and hasattr(evt, "response"):
                                 response = evt.response
 
-                                # Token usage - basic attributes for span visibility
+                                # Token usage, including the audio/cached
+                                # breakdown needed for cost attribution
+                                # (realtime audio tokens are priced separately
+                                # from text and cached-audio tokens).
                                 if hasattr(response, "usage"):
                                     usage = response.usage
                                     if hasattr(usage, "input_tokens"):
-                                        operation_attrs["tokens.prompt"] = usage.input_tokens
+                                        operation_attrs["gen_ai.usage.input_tokens"] = (
+                                            usage.input_tokens
+                                        )
                                     if hasattr(usage, "output_tokens"):
-                                        operation_attrs["tokens.completion"] = usage.output_tokens
-                                    if hasattr(usage, "total_tokens"):
-                                        operation_attrs["tokens.total"] = usage.total_tokens
+                                        operation_attrs["gen_ai.usage.output_tokens"] = (
+                                            usage.output_tokens
+                                        )
+                                    input_details = getattr(usage, "input_token_details", None)
+                                    if input_details:
+                                        if input_details.cached_tokens is not None:
+                                            operation_attrs[
+                                                "gen_ai.usage.cache_read.input_tokens"
+                                            ] = input_details.cached_tokens
+                                        if input_details.audio_tokens is not None:
+                                            operation_attrs["gen_ai.usage.audio.input_tokens"] = (
+                                                input_details.audio_tokens
+                                            )
+                                        cached_details = input_details.cached_tokens_details
+                                        if (
+                                            cached_details
+                                            and cached_details.audio_tokens is not None
+                                        ):
+                                            operation_attrs[
+                                                "gen_ai.usage.audio.cache_read.input_tokens"
+                                            ] = cached_details.audio_tokens
+                                    output_details = getattr(usage, "output_token_details", None)
+                                    if output_details and output_details.audio_tokens is not None:
+                                        operation_attrs["gen_ai.usage.audio.output_tokens"] = (
+                                            output_details.audio_tokens
+                                        )
 
                                 # Response status and metadata
                                 if hasattr(response, "status"):
@@ -1432,22 +1551,8 @@ def traced_openai_realtime(operation: str) -> Callable:
                             **operation_attrs,
                         )
 
-                        # For llm_response operation, also handle token usage metrics
-                        if operation == "llm_response" and hasattr(self, "start_llm_usage_metrics"):
-                            evt = args[0] if args else None
-                            if evt and hasattr(evt, "response") and hasattr(evt.response, "usage"):
-                                usage = evt.response.usage
-                                # Create LLMTokenUsage object
-                                from pipecat.metrics.metrics import LLMTokenUsage
-
-                                tokens = LLMTokenUsage(
-                                    prompt_tokens=getattr(usage, "input_tokens", 0),
-                                    completion_tokens=getattr(usage, "output_tokens", 0),
-                                    total_tokens=getattr(usage, "total_tokens", 0),
-                                )
-                                _add_token_usage_to_span(current_span, tokens)
-
-                            # Capture TTFB metric if available
+                        # Capture TTFB metric if available
+                        if operation == "llm_response":
                             ttfb = getattr(getattr(self, "_metrics", None), "ttfb", None)
                             if ttfb is not None:
                                 current_span.set_attribute("metrics.ttfb", ttfb)

@@ -678,8 +678,6 @@ class NvidiaTTSService(TTSService):
                 self._start_synthesis_stream(context_id)
                 logger.trace(f"{self}: Started synthesis stream for context {context_id}")
 
-            logger.debug(f"{self}: Generating TTS [{text}]")
-
             state = self._stream_state
             if state is None:
                 raise RuntimeError("Synthesis stream not started")
@@ -702,8 +700,6 @@ class NvidiaTTSService(TTSService):
             await self.create_audio_context(context_id)
             await self.start_ttfb_metrics()
             yield TTSStartedFrame(context_id=context_id)
-
-        logger.debug(f"{self}: Generating TTS [{text}]")
 
         chunks = [
             chunk for chunk in self._split_text_into_chunks(text) if any(c.isalnum() for c in chunk)

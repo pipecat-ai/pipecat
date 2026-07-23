@@ -163,7 +163,7 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
             self.id_for_llm_specific_messages, truncate_large_values=truncate_large_values
         )
 
-    def from_standard_tools(self, tools: Any) -> list[Any] | NotGiven:
+    def from_standard_tools(self, tools: Any) -> list[Any] | NotGiven | None:
         """Convert tools from standard format to provider format.
 
         Built-in tools are automatically merged into the schema before conversion so that every
@@ -174,7 +174,7 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
 
         Returns:
             List of tools converted to provider format, or original tools
-            if not in standard format.
+            (possibly ``None``) if not in standard format.
         """
         if self._builtin_tools:
             if isinstance(tools, ToolsSchema):

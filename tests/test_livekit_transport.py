@@ -54,6 +54,7 @@ class TestLiveKitVideoStreamMemoryLeak(unittest.IsolatedAsyncioTestCase):
             on_video_track_unsubscribed=AsyncMock(),
             on_data_received=AsyncMock(),
             on_first_participant_joined=AsyncMock(),
+            on_dtmf_event=AsyncMock(),
         )
         client = LiveKitTransportClient(
             url="wss://test.livekit.cloud",
@@ -154,6 +155,7 @@ class TestLiveKitAudioStreamLeakOnUnsubscribe(unittest.IsolatedAsyncioTestCase):
             on_video_track_unsubscribed=AsyncMock(),
             on_data_received=AsyncMock(),
             on_first_participant_joined=AsyncMock(),
+            on_dtmf_event=AsyncMock(),
         )
         client = LiveKitTransportClient(
             url="wss://test.livekit.cloud",
@@ -276,6 +278,108 @@ class TestLiveKitAudioStreamLeakOnUnsubscribe(unittest.IsolatedAsyncioTestCase):
         await client._async_on_track_unsubscribed(track, pub, participant)
         mock_stream.aclose.assert_awaited_once()
         self.assertNotIn(participant.sid, client._video_streams)
+
+
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitSipDtmfInput(unittest.IsolatedAsyncioTestCase):
+    """Inbound SIP DTMF should surface as InputDTMFFrame (#4436)."""
+
+    def _create_client(self) -> LiveKitTransportClient:
+        params = LiveKitParams()
+        callbacks = LiveKitCallbacks(
+            on_connected=AsyncMock(),
+            on_disconnected=AsyncMock(),
+            on_before_disconnect=AsyncMock(),
+            on_participant_connected=AsyncMock(),
+            on_participant_disconnected=AsyncMock(),
+            on_audio_track_subscribed=AsyncMock(),
+            on_audio_track_unsubscribed=AsyncMock(),
+            on_video_track_subscribed=AsyncMock(),
+            on_video_track_unsubscribed=AsyncMock(),
+            on_data_received=AsyncMock(),
+            on_first_participant_joined=AsyncMock(),
+            on_dtmf_event=AsyncMock(),
+        )
+        client = LiveKitTransportClient(
+            url="wss://test.livekit.cloud",
+            token="test-token",
+            room_name="test-room",
+            params=params,
+            callbacks=callbacks,
+            transport_name="test-transport",
+        )
+        client._task_manager = MagicMock()
+        return client
+
+    async def test_sip_dtmf_forwards_digit_to_callback(self):
+        """Room sip_dtmf_received events are normalized and forwarded."""
+        client = self._create_client()
+        participant = MagicMock()
+        participant.sid = "sip-participant-1"
+        dtmf = MagicMock()
+        dtmf.digit = "5"
+        dtmf.code = 5
+        dtmf.participant = participant
+
+        await client._async_on_sip_dtmf_received(dtmf)
+
+        client._callbacks.on_dtmf_event.assert_awaited_once_with(
+            {
+                "tone": "5",
+                "digit": "5",
+                "code": 5,
+                "participant_id": "sip-participant-1",
+            }
+        )
+
+    async def test_transport_dtmf_event_pushes_input_frame(self):
+        """Transport pushes InputDTMFFrame so DTMFAggregator can consume digits."""
+        from pipecat.audio.dtmf.types import KeypadEntry
+        from pipecat.frames.frames import InputDTMFFrame
+        from pipecat.transports.livekit.transport import LiveKitTransport
+
+        transport = LiveKitTransport(
+            url="wss://test.livekit.cloud",
+            token="test-token",
+            room_name="test-room",
+        )
+        transport._input = MagicMock()
+        transport._input.push_frame = AsyncMock()
+        transport._call_event_handler = AsyncMock()
+
+        data = {
+            "tone": "1",
+            "digit": "1",
+            "code": 1,
+            "participant_id": "sip-participant-1",
+        }
+        await transport._on_dtmf_event(data)
+
+        transport._call_event_handler.assert_awaited_once_with("on_dtmf_event", data)
+        transport._input.push_frame.assert_awaited_once()
+        frame = transport._input.push_frame.await_args.args[0]
+        self.assertIsInstance(frame, InputDTMFFrame)
+        self.assertEqual(frame.button, KeypadEntry.ONE)
+
+    async def test_transport_ignores_unsupported_dtmf_tone(self):
+        """Unsupported tones are logged and do not push a frame."""
+        from pipecat.transports.livekit.transport import LiveKitTransport
+
+        transport = LiveKitTransport(
+            url="wss://test.livekit.cloud",
+            token="test-token",
+            room_name="test-room",
+        )
+        transport._input = MagicMock()
+        transport._input.push_frame = AsyncMock()
+        transport._call_event_handler = AsyncMock()
+
+        await transport._on_dtmf_event(
+            {"tone": "A", "digit": "A", "code": 12, "participant_id": "p1"}
+        )
+
+        transport._call_event_handler.assert_awaited_once()
+        transport._input.push_frame.assert_not_awaited()
 
 
 if __name__ == "__main__":

@@ -336,8 +336,6 @@ class AWSPollyTTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
             # Construct the parameters dictionary
             ssml = self._construct_ssml(text)

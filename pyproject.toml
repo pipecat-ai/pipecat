@@ -26,7 +26,7 @@ dependencies = [
     "docstring_parser>=0.16,<1",
     "loguru~=0.7.3",
     "Markdown>=3.7,<4",
-    "nltk>=3.9.4,<4",
+    "nltk>=3.10.0,<4",
     "numpy>=1.26.4,<3",
     "Pillow>=11.1.0,<13",
     "protobuf>=5.29.6,<7",
@@ -41,7 +41,6 @@ dependencies = [
     "wait_for2>=0.4.1,<1; python_version<'3.12'",
     "websockets>=13.1",
     "pyyaml>=6,<7",
-    "pyyaml-include>=1.4,<2",
     "num2words>=0.5.14",
     # Required by LocalSmartTurnAnalyzerV3
     # Inlined here instead of using a self-referential extra for Poetry compatibility.
@@ -70,9 +69,11 @@ asyncai = []
 aws = [ "aiobotocore>=3,<4" ]
 aws-nova-sonic = [ "aws_sdk_bedrock_runtime~=0.4.0; python_version>='3.12'" ]
 azure = [ "azure-cognitiveservices-speech>=1.47.0,<2"]
+baseten = []
 cartesia = []
 camb = [ "camb-sdk>=1.5.4,<2" ]
 cerebras = []
+crusoe = []
 daily = [ "daily-python>=0.29.0,<1" ]
 deepgram = [ "deepgram-sdk>=6.1.1,<8" ]
 deepseek = []
@@ -106,6 +107,7 @@ mistral = ["mistralai>=2.0.0,<3"]
 mlx-whisper = [ "mlx-whisper~=0.4.2" ]
 moondream = [ "accelerate~=1.10.0", "einops~=0.8.0", "pyvips[binary]~=3.0.0", "timm~=1.0.13", "transformers>=4.48.0,<6" ]
 moonshine = [ "moonshine-voice>=0.0.62" ]
+moq = [ "moq-rs>=0.3.2,<1.0.0", "cryptography>=45.0.0" ]
 nebius = []
 neuphonic = []
 novita = []
@@ -120,7 +122,7 @@ qwen = []
 redis = ["redis[hiredis]>=5.0.0"]
 resembleai = []
 rime = []
-runner = [ "python-dotenv>=1.0.0,<2.0.0", "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<1", "pipecat-ai-prebuilt>=1.0.3"]
+runner = [ "python-dotenv>=1.0.0,<2.0.0", "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<1", "pipecat-ai-prebuilt>=1.0.5"]
 sagemaker = ["aws_sdk_sagemaker_runtime_http2; python_version>='3.12'"]
 sambanova = []
 sarvam = [ "sarvamai==0.1.28" ]
@@ -160,7 +162,7 @@ dev = [
     "grpcio-tools>=1.67.1,<2",
     "pip-tools~=7.5.3",
     "pre-commit~=4.5.1",
-    "pyright==1.1.408",
+    "pyright==1.1.411",
     "pytest>=9.0.0,<10",
     "pytest-asyncio>=1.0.0,<2",
     "pytest-aiohttp>=1.0.0,<2",

@@ -828,8 +828,6 @@ class GoogleHttpTTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
             # Check if the voice is a Chirp voice (including Chirp 3) or Journey voice
             voice_name = assert_given(self._settings.voice)
@@ -1162,8 +1160,6 @@ class GoogleTTSService(GoogleBaseTTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech as it's generated.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
             # Build voice selection params
             if self._voice_cloning_key:

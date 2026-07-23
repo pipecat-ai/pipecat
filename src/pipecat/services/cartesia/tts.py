@@ -705,11 +705,6 @@ class CartesiaTTSService(WebsocketTTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        if not self._is_streaming_tokens:
-            logger.debug(f"{self}: Generating TTS [{text}]")
-        else:
-            logger.trace(f"{self}: Generating TTS [{text}]")
-
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
@@ -908,8 +903,6 @@ class CartesiaHttpTTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
             if self._session is None:
                 raise RuntimeError("HTTP session is not initialized; call start() before run_tts()")

@@ -10,6 +10,56 @@ import re
 import unicodedata
 
 
+def strip_trailing_punctuation(text: str) -> str:
+    """Remove punctuation only at the very end of *text*.
+
+    Args:
+        text: Input text to trim.
+
+    Returns:
+        *text* with any trailing run of Unicode punctuation characters removed.
+    """
+    i = len(text)
+    while i > 0 and unicodedata.category(text[i - 1]).startswith("P"):
+        i -= 1
+    return text[:i]
+
+
+def _fold_accented_char(char: str) -> str:
+    """Lowercase *char*, reduced to its base letter if it carries a combining accent.
+
+    NFD decomposes an accented character into a base letter plus a combining
+    mark (e.g. ``é`` -> ``e`` + ``◌́``, category ``Mn``); dropping the mark
+    keeps only the base letter. Always returns exactly one character, so
+    callers can rely on a 1:1 length mapping with the input.
+    """
+    nfd = unicodedata.normalize("NFD", char)
+    if len(nfd) >= 2 and unicodedata.category(nfd[1]) == "Mn":
+        return nfd[0].lower()
+    return char.lower()
+
+
+def fold_case_and_accents(text: str) -> str:
+    """Lowercase letters and strip accents, preserving every other character 1:1.
+
+    Unlike :func:`normalize`, this never removes or merges characters --
+    punctuation, spaces, and markup are passed through unchanged, and each
+    output character corresponds to exactly the same-index input character. A
+    raw offset computed against the folded text therefore applies unchanged to
+    the original, so callers can use it as a drop-in transform before a
+    position-based literal comparison, without the risk of a fully-normalized
+    (whitespace/punctuation-stripped) comparison matching across a boundary
+    that wasn't already a candidate in the untransformed comparison.
+
+    Args:
+        text: Input text to fold.
+
+    Returns:
+        *text* with letters case- and accent-folded; same length as *text*.
+    """
+    return "".join(_fold_accented_char(ch) if ch.isalpha() else ch for ch in text)
+
+
 def normalize(text: str) -> str:
     """Strip XML/HTML tags then keep only lowercase alphanumeric characters.
 
@@ -32,31 +82,13 @@ def normalize(text: str) -> str:
         # Keep only letters and numbers.
         if not char.isalnum():
             continue
-        # NFD decomposes accented characters into:
-        #   é -> e + ◌́
-        #   ã -> a + ◌̃
-        #
-        # Non-accented characters usually stay unchanged.
-        nfd = unicodedata.normalize("NFD", char)
-        # Unicode category "Mn" means:
-        #   Mark, Nonspacing
-        #
-        # These are combining accent marks that modify
-        # the previous character but are not standalone.
-        #
-        # Example:
-        #   "é" becomes:
-        #       nfd[0] = "e"
-        #       nfd[1] = "◌́"  (category = "Mn")
-        #
-        # If the second character is a combining accent,
-        # keep only the base letter.
-        if len(nfd) >= 2 and unicodedata.category(nfd[1]) == "Mn":
-            # Accented letter: keep the base character only (drops the combining mark).
-            result.append(nfd[0].lower())
+        if char.isalpha():
+            # Letters, including CJK and Hangul (both alphabetic per
+            # str.isalpha()): fold accents, a no-op for scripts that have none.
+            result.append(_fold_accented_char(char))
         else:
-            # Regular ASCII, numbers, CJK, Hangul, etc.
-            # are kept unchanged (except lowercase conversion).
+            # Digits and other alnum-but-not-alphabetic characters: no case or
+            # accent to fold, so keep as-is (lowercase conversion is a no-op).
             result.append(char.lower())
     return "".join(result)
 

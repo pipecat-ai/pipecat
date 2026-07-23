@@ -132,11 +132,29 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "baseten_llm": (
+        "BasetenLLMService(\n"
+        '        api_key=os.getenv("BASETEN_API_KEY"),\n'
+        "        settings=BasetenLLMService.Settings(\n"
+        '            model=os.getenv("BASETEN_MODEL"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "cerebras_llm": (
         "CerebrasLLMService(\n"
         '        api_key=os.getenv("CEREBRAS_API_KEY"),\n'
         "        settings=CerebrasLLMService.Settings(\n"
         '            model=os.getenv("CEREBRAS_MODEL"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "crusoe_llm": (
+        "CrusoeLLMService(\n"
+        '        api_key=os.getenv("CRUSOE_API_KEY"),\n'
+        "        settings=CrusoeLLMService.Settings(\n"
+        '            model=os.getenv("CRUSOE_MODEL"),\n'
         '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
         "        ),\n"
         "    )\n"
@@ -359,6 +377,14 @@ SERVICE_CONFIGS = {
         "DeepgramTTSService(\n"
         '        api_key=os.getenv("DEEPGRAM_API_KEY"),\n'
         "        settings=DeepgramTTSService.Settings(\n"
+        '            voice=os.getenv("DEEPGRAM_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "deepgram_flux_tts": (
+        "DeepgramFluxTTSService(\n"
+        '        api_key=os.getenv("DEEPGRAM_API_KEY"),\n'
+        "        settings=DeepgramFluxTTSService.Settings(\n"
         '            voice=os.getenv("DEEPGRAM_VOICE_ID"),\n'
         "        ),\n"
         "    )\n"
