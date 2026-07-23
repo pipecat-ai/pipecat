@@ -1065,6 +1065,48 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         assert context.messages[0]["content"] == "Hello Pipecat."
         assert context.messages[1]["content"] == "How are you?"
 
+    async def test_overlapping_response_start_flushes_previous_aggregation(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("[tag] Great"),
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("[tag] thanks, just to confirm."),
+            LLMFullResponseEndFrame(),
+        ]
+        expected_down_frames = [
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+
+        self.assertEqual(
+            [message["content"] for message in context.messages],
+            ["[tag] Great", "[tag] thanks, just to confirm."],
+        )
+        self.assertEqual(
+            [message.content for message in stop_messages],
+            [
+                "[tag] Great",
+                "[tag] thanks, just to confirm.",
+            ],
+        )
+        self.assertTrue(stop_messages[0].interrupted)
+        self.assertFalse(stop_messages[1].interrupted)
+
     async def test_multiple_responses_interruption(self):
         context = LLMContext()
         aggregator = LLMAssistantAggregator(context)
