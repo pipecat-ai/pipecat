@@ -186,6 +186,13 @@ The bots pick their LLM from `$LLM_PROVIDER` (default `openai_responses`;
 (also `google`, `aws`). `llm_switching` needs OpenAI, Google, and Anthropic
 keys all set. `warm_transfer.py` (Daily + a live human agent) isn't covered.
 
+`food_ordering_realtime.py` runs the same flow on a speech-to-speech model
+(OpenAI Realtime / gpt-realtime) with its own audio-mode scenario,
+`food_ordering_pizza_realtime`. The Realtime API supports text input and
+text-only output, but the Pipecat service doesn't implement text-driven turns
+yet, so the text-only flows scenarios don't apply to it for now (see the
+scenario file for details).
+
 ## Adding coverage
 
 - New bot: add an entry to `manifest.yaml` (`bot:` + the `scenarios:` it should run).

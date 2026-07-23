@@ -306,3 +306,13 @@ suite:
   - bot: flows/llm_switching.py
     scenarios: [llm_switching]
 
+  #
+  # Flows + realtime (speech-to-speech) models: the same flow as
+  # food_ordering.py, but the LLM is OpenAI Realtime (gpt-realtime) — audio
+  # in/out, no STT/TTS. Runs its own audio-mode scenario: the service doesn't
+  # implement text-driven turns yet (see the scenario file), so the text-only
+  # flows scenarios don't apply.
+  #
+  - bot: flows/food_ordering_realtime.py
+    scenarios: [food_ordering_pizza_realtime]
+
