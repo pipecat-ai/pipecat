@@ -780,6 +780,9 @@ async def create_transport(
         params.serve_tls_host = runner_args.serve_tls_host
         params.serve_tls_cert = runner_args.serve_tls_cert
         params.serve_tls_key = runner_args.serve_tls_key
+        if runner_args.relay_url:
+            # Full dial URL (e.g. a unix:// socket) overrides host/port/path.
+            params.relay_url = runner_args.relay_url
 
         transport = MOQTransport(
             params=params,

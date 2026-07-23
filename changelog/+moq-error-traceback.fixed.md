@@ -1,0 +1,1 @@
+- Fixed `MOQTransport` errors not logging a traceback. The error handler passed `exc_info=True` to Loguru, which ignores that keyword, so MoQ session failures were logged as a single line with no stack trace. It now uses `logger.opt(exception=True)`, so the full traceback is captured.
