@@ -1,0 +1,1 @@
+- Added speaker diarization output to `SonioxSTTService`: when `enable_speaker_diarization` is set, transcripts are split into one frame per speaker run with `user_id` set to the speaker, and the optional `speaker_format` setting (e.g. `"{speaker}: {text}"`) prefixes each run's text so speaker labels reach the LLM.

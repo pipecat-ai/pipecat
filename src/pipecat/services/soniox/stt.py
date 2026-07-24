@@ -223,6 +223,31 @@ def _language_from_tokens(tokens: list[dict]) -> Language | None:
     return language_counts.most_common(1)[0][0]
 
 
+def _has_speakers(tokens: list[dict]) -> bool:
+    """Return whether any token carries diarization speaker metadata."""
+    return any(token.get("speaker") is not None for token in tokens)
+
+
+def _group_by_speaker(tokens: list[dict]) -> list[list[dict]]:
+    """Group ordered tokens into contiguous runs that share a speaker value.
+
+    Tokens without a ``speaker`` value form their own run(s) and are never
+    merged with a neighboring speaker.
+    """
+    runs: list[list[dict]] = []
+    last_speaker: Any = None
+    started = False
+    for token in tokens:
+        speaker = token.get("speaker")
+        if not started or speaker != last_speaker:
+            runs.append([token])
+            last_speaker = speaker
+            started = True
+        else:
+            runs[-1].append(token)
+    return runs
+
+
 @dataclass
 class SonioxSTTSettings(STTSettings):
     """Settings for SonioxSTTService.
@@ -234,6 +259,11 @@ class SonioxSTTSettings(STTSettings):
             context_version 1 and SonioxContextObject for models with
             context_version 2.
         enable_speaker_diarization: Whether to enable speaker diarization.
+        speaker_format: Format string applied to each speaker's text when diarization
+            is enabled, e.g. ``"{speaker}: {text}"``. Available substitutions are
+            ``{speaker}`` and ``{text}``. Defaults to ``None`` (no prefix). This is
+            how speaker labels reach the LLM — the user turn aggregator builds its
+            message from text only, so ``user_id`` alone is not enough.
         enable_language_identification: Whether to enable language identification.
         max_endpoint_delay_ms: Max ms before endpoint detection finalizes the turn (500-3000).
         endpoint_sensitivity: Endpoint detection sensitivity (-1.0 to 1.0); higher finalizes sooner.
@@ -251,6 +281,7 @@ class SonioxSTTSettings(STTSettings):
     language_hints_strict: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     context: SonioxContextObject | str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_speaker_diarization: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_language_identification: bool | None | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
@@ -337,6 +368,7 @@ class SonioxSTTService(WebsocketSTTService):
             language_hints_strict=None,
             context=None,
             enable_speaker_diarization=False,
+            speaker_format=None,
             enable_language_identification=False,
             max_endpoint_delay_ms=None,
             endpoint_sensitivity=None,
@@ -469,7 +501,8 @@ class SonioxSTTService(WebsocketSTTService):
         """
         changed = await super()._update_settings(delta)
 
-        if changed:
+        # speaker_format is purely local text formatting; don't reconnect for it.
+        if changed.keys() - {"speaker_format"}:
             await self._request_reconnect()
 
         return changed
@@ -654,6 +687,47 @@ class SonioxSTTService(WebsocketSTTService):
             return self._websocket
         raise Exception("Websocket not connected")
 
+    def _format_speaker_text(self, speaker: Any, text: str) -> str:
+        """Apply the ``speaker_format`` template for a run with a known speaker."""
+        fmt = self._settings.speaker_format
+        if fmt and speaker is not None:
+            return fmt.format(speaker=speaker, text=text)
+        return text
+
+    async def _push_speaker_frame(self, run: list[dict], finalized: bool) -> None:
+        """Push one transcription frame for a single speaker run.
+
+        Args:
+            run: Ordered tokens sharing one speaker value.
+            finalized: True for a finalized ``TranscriptionFrame``, False for an
+                interim ``InterimTranscriptionFrame``.
+        """
+        speaker = run[0].get("speaker")
+        text = "".join(token["text"] for token in run)
+        user_id = str(speaker) if speaker is not None else self._user_id
+        formatted = self._format_speaker_text(speaker, text)
+        timestamp = time_now_iso8601()
+        if finalized:
+            await self.push_frame(
+                TranscriptionFrame(
+                    text=formatted,
+                    user_id=user_id,
+                    timestamp=timestamp,
+                    language=_language_from_tokens(run),
+                    result=run,
+                    finalized=True,
+                )
+            )
+        else:
+            await self.push_frame(
+                InterimTranscriptionFrame(
+                    text=formatted,
+                    user_id=user_id,
+                    timestamp=timestamp,
+                    result=run,
+                )
+            )
+
     async def _receive_messages(self):
         """Receive and process websocket messages.
 
@@ -664,21 +738,28 @@ class SonioxSTTService(WebsocketSTTService):
 
         async def send_endpoint_transcript():
             if self._final_transcription_buffer:
-                text = "".join(map(lambda token: token["text"], self._final_transcription_buffer))
-                language = _language_from_tokens(self._final_transcription_buffer)
-                # Soniox only pushes TranscriptionFrame when an end token is received,
-                # so every TranscriptionFrame is inherently finalized
-                await self.push_frame(
-                    TranscriptionFrame(
-                        text=text,
-                        user_id=self._user_id,
-                        timestamp=time_now_iso8601(),
-                        language=language,
-                        result=self._final_transcription_buffer,
-                        finalized=True,
+                tokens = self._final_transcription_buffer
+                full_text = "".join(token["text"] for token in tokens)
+                full_language = _language_from_tokens(tokens)
+                if _has_speakers(tokens):
+                    # One finalized frame per speaker run; user_id carries the
+                    # speaker (for RTVI) and speaker_format carries it to the LLM.
+                    for run in _group_by_speaker(tokens):
+                        await self._push_speaker_frame(run, finalized=True)
+                else:
+                    # Soniox only pushes TranscriptionFrame when an end token is
+                    # received, so every TranscriptionFrame is inherently finalized
+                    await self.push_frame(
+                        TranscriptionFrame(
+                            text=full_text,
+                            user_id=self._user_id,
+                            timestamp=time_now_iso8601(),
+                            language=full_language,
+                            result=tokens,
+                            finalized=True,
+                        )
                     )
-                )
-                await self._handle_transcription(text, is_final=True, language=language)
+                await self._handle_transcription(full_text, is_final=True, language=full_language)
                 await self.stop_processing_metrics()
                 self._final_transcription_buffer = []
 
@@ -721,24 +802,23 @@ class SonioxSTTService(WebsocketSTTService):
                     else:
                         non_final_transcription.append(token)
 
-                if self._final_transcription_buffer or non_final_transcription:
-                    final_text = "".join(
-                        map(lambda token: token["text"], self._final_transcription_buffer)
-                    )
-                    non_final_text = "".join(
-                        map(lambda token: token["text"], non_final_transcription)
-                    )
-
-                    await self.push_frame(
-                        InterimTranscriptionFrame(
-                            # Even final tokens are sent as interim tokens as we want to send
-                            # nicely formatted messages - therefore waiting for the endpoint.
-                            text=final_text + non_final_text,
-                            user_id=self._user_id,
-                            timestamp=time_now_iso8601(),
-                            result=self._final_transcription_buffer + non_final_transcription,
+                combined = self._final_transcription_buffer + non_final_transcription
+                if combined:
+                    if _has_speakers(combined):
+                        for run in _group_by_speaker(combined):
+                            await self._push_speaker_frame(run, finalized=False)
+                    else:
+                        # Even final tokens are sent as interim tokens as we want to send
+                        # nicely formatted messages - therefore waiting for the endpoint.
+                        text = "".join(token["text"] for token in combined)
+                        await self.push_frame(
+                            InterimTranscriptionFrame(
+                                text=text,
+                                user_id=self._user_id,
+                                timestamp=time_now_iso8601(),
+                                result=combined,
+                            )
                         )
-                    )
 
                 error_code = content.get("error_code")
                 error_message = content.get("error_message")
