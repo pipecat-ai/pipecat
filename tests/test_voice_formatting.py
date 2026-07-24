@@ -375,6 +375,16 @@ class TestExpandCurrency(unittest.IsolatedAsyncioTestCase):
         self.assertIn("one thousand dollars", result)
         self.assertIn("fifty cents", result)
 
+    async def test_extra_fractional_digits_not_leaked(self):
+        # Regression: a fraction with 3+ digits must be fully consumed by the match,
+        # read to cent precision, with no stray digit glued onto the subunit word.
+        result = await expand_currency("The item costs $5.500 today", "*")
+        self.assertEqual(result, "The item costs five dollars and fifty cents today")
+        self.assertNotIn("cents0", result)
+        # Sub-cent precision is dropped (read like a 2-digit amount), not spoken.
+        self.assertEqual(await expand_currency("$3.567", "*"), "three dollars and fifty-six cents")
+        self.assertEqual(await expand_currency("£1.999", "*"), "one pound and ninety-nine pence")
+
 
 class TestNormalizeDates(unittest.IsolatedAsyncioTestCase):
     async def test_iso_date(self):
