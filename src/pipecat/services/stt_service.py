@@ -233,7 +233,7 @@ class STTService(AIService):
         """
         return self._sample_rate
 
-    def _record_stt_audio_usage(self, audio: bytes):
+    def _record_stt_audio_usage(self, audio: bytes | bytearray):
         """Accumulate client-measured audio seconds for usage metrics.
 
         Args:
@@ -849,6 +849,11 @@ class SegmentedSTTService(STTService):
 
     async def _handle_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         self._user_speaking = False
+
+        # Report usage for the raw segment before transcription so tracing can
+        # attach it to the STT span the resulting TranscriptionFrame closes.
+        self._record_stt_audio_usage(self._audio_buffer)
+        await self.emit_stt_usage_metrics()
 
         if self.wants_wav_segments:
             content = io.BytesIO()
