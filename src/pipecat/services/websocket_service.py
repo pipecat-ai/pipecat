@@ -17,7 +17,7 @@ from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 from websockets.protocol import State
 
 from pipecat.frames.frames import ErrorFrame
-from pipecat.utils.network import exponential_backoff_time
+from pipecat.utils.network import QuickFailureTracker, exponential_backoff_time
 
 
 class WebsocketService(ABC):
@@ -27,13 +27,6 @@ class WebsocketService(ABC):
     exponential backoff, connection verification, and error handling.
     Subclasses implement service-specific connection and message handling logic.
     """
-
-    # Rapid failure detection: when a server accepts the WebSocket handshake but
-    # immediately closes the connection (e.g. invalid API key, policy rejection),
-    # exponential backoff won't help because the handshake keeps succeeding. We
-    # detect this by tracking how long the connection survives after being established.
-    _MIN_STABLE_CONNECTION_DURATION = 5.0  # seconds
-    _MAX_CONSECUTIVE_QUICK_FAILURES = 3
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
         """Initialize the websocket service.
@@ -46,7 +39,12 @@ class WebsocketService(ABC):
         self._reconnect_on_error = reconnect_on_error
         self._reconnect_in_progress: bool = False
         self._disconnecting: bool = False
-        self._quick_failure_count: int = 0
+        # Rapid failure detection: when a server accepts the WebSocket handshake
+        # but immediately closes the connection (e.g. invalid API key, policy
+        # rejection), exponential backoff won't help because the handshake keeps
+        # succeeding. We detect this by tracking how long the connection
+        # survives after being established.
+        self._quick_failure_tracker = QuickFailureTracker()
         self._last_connect_time: float = 0.0
 
     async def _verify_connection(self) -> bool:
@@ -169,24 +167,23 @@ class WebsocketService(ABC):
         # because the handshake keeps succeeding — we need to stop the loop.
         if self._last_connect_time > 0:
             connection_duration = time.monotonic() - self._last_connect_time
-            if connection_duration < self._MIN_STABLE_CONNECTION_DURATION:
-                self._quick_failure_count += 1
+            result = self._quick_failure_tracker.record(connection_duration)
+            if result.is_quick_failure:
                 logger.warning(
                     f"{self} connection lasted only {connection_duration:.1f}s "
-                    f"({self._quick_failure_count}/{self._MAX_CONSECUTIVE_QUICK_FAILURES} "
+                    f"({self._quick_failure_tracker.count}/"
+                    f"{self._quick_failure_tracker.max_consecutive_failures} "
                     f"consecutive quick failures)"
                 )
-                if self._quick_failure_count >= self._MAX_CONSECUTIVE_QUICK_FAILURES:
-                    msg = (
-                        f"{self} connection failed {self._MAX_CONSECUTIVE_QUICK_FAILURES} "
-                        f"times immediately after connecting"
-                    )
-                    logger.error(msg)
-                    await report_error(ErrorFrame(msg))
-                    return False
-            else:
-                # Connection was stable — reset the counter.
-                self._quick_failure_count = 0
+            if result.should_give_up:
+                msg = (
+                    f"{self} connection failed "
+                    f"{self._quick_failure_tracker.max_consecutive_failures} "
+                    f"times immediately after connecting"
+                )
+                logger.error(msg)
+                await report_error(ErrorFrame(msg))
+                return False
 
         # Log the message
         logger.warning(error_message)
@@ -249,7 +246,7 @@ class WebsocketService(ABC):
         additional setup required.
         """
         self._disconnecting = False
-        self._quick_failure_count = 0
+        self._quick_failure_tracker.reset()
 
     async def _disconnect(self):
         """Disconnect from the service and set disconnecting flag.

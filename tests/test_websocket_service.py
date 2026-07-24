@@ -198,7 +198,7 @@ async def test_quick_failures_emit_error(service, report_error):
 
     await service._receive_task_handler(report_error)
 
-    assert call_count == service._MAX_CONSECUTIVE_QUICK_FAILURES
+    assert call_count == service._quick_failure_tracker.max_consecutive_failures
     report_error.assert_called_once()
     error_frame = report_error.call_args[0][0]
     assert isinstance(error_frame, ErrorFrame)
@@ -276,11 +276,11 @@ async def test_disconnect_prevents_reconnection(service, report_error):
 
 @pytest.mark.asyncio
 async def test_connect_resets_state(service):
-    """_connect() resets _disconnecting and _quick_failure_count."""
+    """_connect() resets _disconnecting and the quick-failure tracker."""
     service._disconnecting = True
-    service._quick_failure_count = 5
+    service._quick_failure_tracker.count = 5
 
     await service._connect()
 
     assert service._disconnecting is False
-    assert service._quick_failure_count == 0
+    assert service._quick_failure_tracker.count == 0
