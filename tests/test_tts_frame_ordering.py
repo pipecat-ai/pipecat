@@ -966,20 +966,23 @@ async def test_raw_text_propagated_to_tts_text_frames():
 
 @pytest.mark.asyncio
 async def test_overflow_word_spanning_two_aggregated_frames():
-    """A single TTS token straddling two AggregatedTextFrame boundaries produces
-    two correctly-attributed TTSTextFrames.
+    """A single TTS token straddling two same-turn sentence slots produces two frames.
 
-    Setup:
+    Setup (one LLM turn, so both sentences share the turn's context ID under
+    reuse_context_id_within_turn):
         Frame 1: AggregatedTextFrame("abc", SENTENCE)
         Frame 2: AggregatedTextFrame("def", SENTENCE)
 
-    The TTS for frame 1 returns the single token "abcdef", which overshoots
-    frame 1 by three characters. _emit_overflow_word splits it:
-        TTSTextFrame("abc")  — frame 1's portion (context_id = ctx1)
-        TTSTextFrame("def")  — overflow attributed to frame 2 (context_id = ctx2)
+    The TTS for frame 1 returns the single token "abcdef", which overshoots frame 1
+    by three characters. The overflow is sliced and routed to frame 2's slot (the
+    next incomplete slot of the same context):
+        TTSTextFrame("abc")  — frame 1's portion
+        TTSTextFrame("def")  — overflow attributed to frame 2
 
-    Frame 2 receives no word-timestamp events because the overflow already
-    consumed its expected text.
+    Frame 2 receives no word-timestamp events because the overflow already consumed
+    its expected text. A single word-timestamp token only ever spans slots within one
+    context — separate contexts are independent syntheses — so both frames carry the
+    same context ID.
     """
     tts = _MockPerCallWordTimestampHttpTTSService(
         word_times_per_call=[
@@ -990,8 +993,10 @@ async def test_overflow_word_spanning_two_aggregated_frames():
     frames_received = await run_test(
         tts,
         frames_to_send=[
+            LLMFullResponseStartFrame(),
             AggregatedTextFrame("abc", AggregationType.SENTENCE),
             AggregatedTextFrame("def", AggregationType.SENTENCE),
+            LLMFullResponseEndFrame(),
         ],
     )
     word_frames = [f for f in frames_received[0] if isinstance(f, TTSTextFrame)]
@@ -999,8 +1004,8 @@ async def test_overflow_word_spanning_two_aggregated_frames():
     assert [f.text for f in word_frames] == ["abc", "def"], (
         f"Expected ['abc', 'def'] but got {[f.text for f in word_frames]}"
     )
-    assert word_frames[0].context_id != word_frames[1].context_id, (
-        "Overflow TTSTextFrame must carry frame 2's context_id, not frame 1's"
+    assert word_frames[0].context_id == word_frames[1].context_id, (
+        "Overflow within a turn stays in the same context"
     )
 
 
@@ -1842,6 +1847,133 @@ async def test_token_mode_coarse_chunk_straddling_sentence_boundary():
     assert concatenate_aggregated_text(parts) == "Hey there! I'm here.", (
         f"Assistant context must keep spaces; got {concatenate_aggregated_text(parts)!r}"
     )
+
+
+@pytest.mark.asyncio
+async def test_isolated_tts_speak_frame_finalizes_in_token_mode():
+    """A lone TTSSpeakFrame in TOKEN mode must still emit its words.
+
+    A TTSSpeakFrame is a self-contained sentence with no following token to confirm
+    its boundary, so without an explicit finalize its pending sentence would never be
+    promoted and no TTSTextFrame would be emitted.
+    """
+    tts = _MockTokenStreamingWSTTSService(
+        word_times_per_call=[[("hello", 0.0), ("world", 0.2)]],
+        text_aggregation_mode=TextAggregationMode.TOKEN,
+    )
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[TTSSpeakFrame(text="hello world", append_to_context=False)],
+    )
+    word_frames = [f for f in frames_received[0] if isinstance(f, TTSTextFrame)]
+    assert [f.text for f in word_frames] == ["hello", "world"], (
+        f"Expected ['hello', 'world'] but got {[f.text for f in word_frames]}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_tts_speak_frame_emits_single_anchor_in_token_mode():
+    """A TTSSpeakFrame in TOKEN mode must emit exactly one will_be_spoken anchor.
+
+    In streaming mode the sequencer regroups tokens into a sentence and emits that
+    sentence as the anchor. The raw src_frame must not also be pushed, or the
+    listener sees a duplicate "new segment" for the same text.
+    """
+    tts = _MockTokenStreamingWSTTSService(
+        word_times_per_call=[[("hello", 0.0), ("world", 0.2)]],
+        text_aggregation_mode=TextAggregationMode.TOKEN,
+    )
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[TTSSpeakFrame(text="hello world", append_to_context=False)],
+    )
+    anchors = [
+        f
+        for f in frames_received[0]
+        if type(f) is AggregatedTextFrame and f.will_be_spoken and f.text == "hello world"
+    ]
+    assert len(anchors) == 1, f"Expected exactly one anchor, got {len(anchors)}"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_tts_speak_frames_dont_cross_contaminate():
+    """Two back-to-back TTSSpeakFrames stay in their own contexts.
+
+    Each utterance opens its own audio context. Completing the first must not truncate
+    or steal words from the second: each context's words are emitted under its own
+    context ID, in order, with nothing crossing over.
+    """
+    tts = _MockTokenStreamingWSTTSService(
+        word_times_per_call=[
+            [("Comment", 0.0), ("ça", 0.2), ("va", 0.4)],
+            [("Bom", 0.0), ("jour", 0.2)],
+        ],
+        text_aggregation_mode=TextAggregationMode.TOKEN,
+    )
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[
+            TTSSpeakFrame(text="Comment ça va", append_to_context=False),
+            TTSSpeakFrame(text="Bom jour", append_to_context=False),
+        ],
+    )
+    down = frames_received[0]
+    word_frames = [f for f in down if isinstance(f, TTSTextFrame)]
+
+    # Each context emits exactly its own words, in order.
+    by_context: dict[str, list[str]] = {}
+    for f in word_frames:
+        by_context.setdefault(f.context_id, []).append(f.text)
+    grouped = list(by_context.values())
+    assert grouped == [["Comment", "ça", "va"], ["Bom", "jour"]], (
+        f"Words must stay grouped per context in order; got {grouped}"
+    )
+    # Two distinct contexts, no cross-contamination.
+    assert len(by_context) == 2
+
+
+@pytest.mark.asyncio
+async def test_aggregated_anchor_pts_precedes_its_progress_per_context():
+    """Each context's "new segment" anchor must sort before its own progress frames.
+
+    On a word-timestamp service the per-word AggregatedTextProgressFrames carry a PTS
+    (clock queue). The anchor AggregatedTextFrame (will_be_spoken) must be stamped with
+    a PTS no later than its first progress frame, so at the transport it rides the same
+    clock queue and is delivered before the progress that references its segment_id —
+    even when a second context's audio is delayed behind the first.
+
+    Regression: previously the anchor had pts=None (audio/sync queue), letting a
+    later context's clock-queued progress overtake its own anchor.
+    """
+    tts = _MockPerCallWordTimestampWSTTSService(
+        word_times_per_call=[
+            [("Comment", 0.0), ("ca", 0.2), ("va", 0.4)],
+            [("Bom", 0.0), ("jour", 0.2)],
+        ]
+    )
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[
+            TTSSpeakFrame(text="Comment ca va", append_to_context=False),
+            TTSSpeakFrame(text="Bom jour", append_to_context=False),
+        ],
+    )
+    down = frames_received[0]
+
+    anchors = [f for f in down if type(f) is AggregatedTextFrame and f.will_be_spoken]
+    progress = [f for f in down if isinstance(f, AggregatedTextProgressFrame)]
+    assert len(anchors) == 2, f"Expected one anchor per context, got {len(anchors)}"
+
+    for anchor in anchors:
+        # The anchor must carry a PTS so it rides the clock queue with its progress.
+        assert anchor.pts is not None, f"Anchor {anchor.text!r} must have a PTS"
+        seg_progress = [p for p in progress if p.segment_id == anchor.id]
+        assert seg_progress, f"No progress frames found for anchor {anchor.text!r}"
+        first_progress_pts = min(p.pts for p in seg_progress)
+        assert anchor.pts <= first_progress_pts, (
+            f"Anchor {anchor.text!r} pts {anchor.pts} must be <= its first progress pts "
+            f"{first_progress_pts} so it is delivered before its own progress"
+        )
 
 
 if __name__ == "__main__":

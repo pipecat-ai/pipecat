@@ -738,7 +738,8 @@ class TTSService(AIService):
             # mode only; a no-op otherwise) — handles a response that ends with no
             # terminal punctuation.
             await self._push_sequencer_frames(
-                await self._aggregated_frame_sequencer.finalize(), self._turn_context_id
+                await self._aggregated_frame_sequencer.finalize(self._turn_context_id),
+                self._turn_context_id,
             )
 
             # We pause processing incoming frames if the LLM response included
@@ -791,6 +792,14 @@ class TTSService(AIService):
                 AggregatedTextFrame(frame.text, AggregationType.SENTENCE, raw_text=frame.text),
                 append_tts_text_to_context=frame.append_to_context,
                 push_assistant_aggregation=push_assistant_aggregation,
+            )
+            # Force-promote the utterance's pending sentence into a real slot (streaming
+            # mode only; a no-op otherwise). A TTSSpeakFrame is a self-contained sentence
+            # with no following token to confirm its boundary, so without this it would
+            # stay buffered and never be spoken.
+            await self._push_sequencer_frames(
+                await self._aggregated_frame_sequencer.finalize(self._turn_context_id),
+                self._turn_context_id,
             )
             await self.on_turn_context_completed()
             # We pause processing incoming frames because we are sending data to
@@ -867,6 +876,22 @@ class TTSService(AIService):
 
         if isinstance(frame, (TTSStartedFrame, TTSStoppedFrame, TTSAudioRawFrame, TTSTextFrame)):
             frame.transport_destination = self._transport_destination
+
+        # The will_be_spoken AggregatedTextFrame is the "new segment" announcement whose
+        # segment_id the per-word progress frames reference. Those progress frames carry a
+        # PTS and travel the transport's clock queue; the announcement itself has no PTS and
+        # would take the audio (sync) queue, so for a context whose audio is delayed behind
+        # another context's, its clock-queued progress can be delivered before it. Stamp it
+        # with the same baseline the first word will use so it rides the clock queue too,
+        # sorted immediately before its first progress frame (ties broken by push order).
+        # Only on the word-timestamp path (push_text_frames services have no progress frames).
+        if (
+            isinstance(frame, AggregatedTextFrame)
+            and frame.will_be_spoken
+            and frame.pts is None
+            and not self._push_text_frames
+        ):
+            frame.pts = max(self._word_last_pts, self.get_clock().get_time())
 
         await super().push_frame(frame, direction)
 
@@ -1102,15 +1127,21 @@ class TTSService(AIService):
         src_frame.context_id = context_id
         src_frame.will_be_spoken = True
 
-        # Route AggregatedTextFrame through the serialization queue so it is emitted
-        # immediately before the TTSStartedFrame of the audio context it describes,
-        # rather than racing ahead of audio frames from a previous context.
-        if not self.audio_context_available(context_id):
-            await self._serialization_queue.put(src_frame)
-        # Otherwise, if the context already exists, we append the AggregatedTextFrame
-        # to the existing context queue.
-        else:
-            await self.append_to_audio_context(context_id, src_frame)
+        # In streaming (TOKEN) mode this src_frame is a single token, not the unit the
+        # listener cares about: the sequencer regroups tokens into a sentence and emits
+        # that sentence as the will_be_spoken anchor (see _promote). Pushing src_frame
+        # too would emit a second, redundant anchor (for a TTSSpeakFrame, an exact
+        # duplicate). So only the non-streaming path pushes src_frame here.
+        if not self._is_streaming_tokens:
+            # Route AggregatedTextFrame through the serialization queue so it is emitted
+            # immediately before the TTSStartedFrame of the audio context it describes,
+            # rather than racing ahead of audio frames from a previous context.
+            if not self.audio_context_available(context_id):
+                await self._serialization_queue.put(src_frame)
+            # Otherwise, if the context already exists, we append the AggregatedTextFrame
+            # to the existing context queue.
+            else:
+                await self.append_to_audio_context(context_id, src_frame)
 
         # Note: Text transformations are meant to only affect the text sent to the TTS for
         # TTS-specific purposes. This allows for explicit TTS modifications (e.g., inserting
@@ -1526,14 +1557,18 @@ class TTSService(AIService):
             frame.pts = self._word_last_pts
             await self.push_frame(frame)
 
-    async def _apply_force_complete(self):
-        """Force-complete all incomplete spoken slots and push any unblocked skipped frames.
+    async def _apply_force_complete(self, context_id: str):
+        """Force-complete a context's spoken slots and push any unblocked skipped frames.
 
         Called at end-of-context to handle TTS providers that silently drop word-timestamp
-        events. Emits a TTSTextFrame for any remaining unspoken text, then flushes skipped
-        frames that were blocked by those incomplete slots.
+        events. Emits a TTSTextFrame for any remaining unspoken text in this context, then
+        flushes skipped frames that were blocked by those incomplete slots. Slots for
+        other contexts still in flight are left untouched.
+
+        Args:
+            context_id: The audio context that has ended.
         """
-        for f in self._aggregated_frame_sequencer.force_complete(self._word_last_pts):
+        for f in self._aggregated_frame_sequencer.force_complete(context_id, self._word_last_pts):
             if isinstance(f, TTSTextFrame):
                 self._word_last_pts = f.pts
             await self.push_frame(f)
@@ -1581,7 +1616,7 @@ class TTSService(AIService):
                             frame.append_to_context = tts_context.append_to_context
                     elif isinstance(frame, TTSStoppedFrame):
                         # Checking if we have any remaining spoken slots before pushing the TTSStoppedFrame
-                        await self._apply_force_complete()
+                        await self._apply_force_complete(context_id)
 
                         should_push_stop_frame = False
                         # Setting the last word timestamp as the TTSStoppedFrame PTS
@@ -1600,7 +1635,7 @@ class TTSService(AIService):
                     should_push_stop_frame = False
                 break
 
-        await self._apply_force_complete()
+        await self._apply_force_complete(context_id)
 
         if should_push_stop_frame and self._push_stop_frames:
             await self.push_frame(TTSStoppedFrame(context_id=context_id))

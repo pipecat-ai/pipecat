@@ -182,6 +182,39 @@ class _AggregatedFrameSlot:
     includes_inter_frame_spaces: bool = False
 
 
+@dataclass
+class _BufferedWord:
+    """A word-timestamp event held until the slot it belongs to is promoted.
+
+    In streaming mode a word can arrive before the sentence it belongs to has been
+    promoted into a real slot. The event is parked here and replayed once a matching
+    slot appears (see :meth:`AggregatedFrameSequencer._drain_buffered_words`).
+    """
+
+    word: str
+    pts: int
+    context_id: str | None
+    includes_inter_frame_spaces: bool
+
+
+@dataclass
+class _StreamingContext:
+    """Per-context streaming (TOKEN-mode) state.
+
+    Each concurrently-live audio context keeps its own token→sentence aggregator and
+    the slot metadata a promoted sentence needs, so two contexts in flight at once
+    never share one pending-sentence buffer.
+
+    Parameters:
+        aggregator: Groups this context's streamed tokens back into sentences.
+        append_to_context: Whether word frames built for a promoted sentence should
+            carry ``append_to_context=True``. Turn-constant for the context.
+    """
+
+    aggregator: "_ParallelSentenceAggregator"
+    append_to_context: bool
+
+
 class AggregatedFrameSequencer:
     """Sequences AggregatedTextFrame slots to preserve TTS context ordering.
 
@@ -196,6 +229,21 @@ class AggregatedFrameSequencer:
     are async because — when the sequencer is built with ``streaming=True`` — they
     drive an async :class:`_ParallelSentenceAggregator` to group streamed tokens into
     sentences.
+
+    Contexts can be in flight concurrently (e.g. two back-to-back ``TTSSpeakFrame``
+    utterances on a websocket TTS service whose ``run_tts`` returns before synthesis
+    finishes). State is organised in three tiers so concurrent contexts never bleed
+    into each other:
+
+    - ``_slots``: the single global ordered timeline across all contexts. Ordering is
+      the whole point of the sequencer, so this stays one list.
+    - ``_context_append_to_context``: a per-context flag whose presence also marks the
+      context as *live* — an entry existing is the "process this context's words"
+      signal in :meth:`process_word`'s stale gate. Created at slot registration,
+      removed when the context is fully done (:meth:`force_complete`).
+    - ``_streaming_contexts``: transient per-context pending-sentence state
+      (:class:`_StreamingContext`), present only while a sentence is being accumulated
+      from tokens. Released at end of text input (:meth:`finalize`).
 
     Example::
 
@@ -228,14 +276,13 @@ class AggregatedFrameSequencer:
         """
         self._name = name
         self._streaming = streaming
-        self._parallel = _ParallelSentenceAggregator() if streaming else None
-        # context_id + append_to_context of the most recent streamed token,
-        # used as slot metadata when a sentence built from earlier tokens is
-        # promoted (turn-constant, so the latest values are correct).
-        self._streaming_slot_meta: tuple[str, bool] | None = None
         self._slots: list[_AggregatedFrameSlot] = []
         self._context_append_to_context: dict[str, bool] = {}
-        self._buffered_words: list[tuple[str, int, str | None, bool]] = []
+        # Transient per-context pending-sentence state, keyed by context ID. An entry
+        # exists only while a sentence is being accumulated from tokens for that
+        # context (streaming mode only). Aggregators are created lazily per context.
+        self._streaming_contexts: dict[str, _StreamingContext] = {}
+        self._buffered_words: list[_BufferedWord] = []
 
     async def register_spoken(
         self,
@@ -299,13 +346,14 @@ class AggregatedFrameSequencer:
             )
             return []
 
-        assert self._parallel is not None
-        self._streaming_slot_meta = (context_id, append_to_context)
+        sc = self._streaming_contexts.setdefault(
+            context_id, _StreamingContext(_ParallelSentenceAggregator(), append_to_context)
+        )
         frames: list[Frame] = []
-        async for agg in self._parallel.aggregate(
+        async for agg in sc.aggregator.aggregate(
             tts_text, frame.raw_text or frame.text, frame.text
         ):
-            frames.extend(self._promote(agg))
+            frames.extend(self._promote(agg, context_id, sc.append_to_context))
         return frames
 
     async def register_skipped(
@@ -316,8 +364,8 @@ class AggregatedFrameSequencer:
     ) -> list[Frame]:
         """Register a skipped AggregatedTextFrame and attempt an immediate flush.
 
-        Any sentence still pending in the parallel aggregator is finalized first, so
-        a real spoken slot exists immediately before the skipped slot in the queue —
+        Any sentence still pending for this context is finalized first, so a real
+        spoken slot exists immediately before the skipped slot in the queue —
         :meth:`flush`'s "stop at first incomplete spoken slot" logic then blocks
         this skipped frame correctly until that sentence is actually spoken.
 
@@ -337,7 +385,7 @@ class AggregatedFrameSequencer:
             slot is still incomplete — the promoted-sentence frame can still be
             returned in that case, so the list is not necessarily empty when blocked.
         """
-        frames = await self.finalize()
+        frames = await self.finalize(context_id)
         frame.context_id = context_id
         self._slots.append(
             _AggregatedFrameSlot(
@@ -350,21 +398,31 @@ class AggregatedFrameSequencer:
         frames.extend(self.flush())
         return frames
 
-    async def finalize(self) -> list[Frame]:
-        """Force-promote any still-pending sentence into a real slot.
+    async def finalize(self, context_id: str | None) -> list[Frame]:
+        """Force-promote a context's still-pending sentence into a real slot.
 
-        Called at true end-of-turn (no more tokens are coming), to handle a
-        response that ends with no terminal punctuation. A no-op when nothing
-        is pending (or the sequencer is not streaming).
+        Called at end of text input for a context (no more tokens are coming), to
+        handle a response that ends with no terminal punctuation. The context's
+        pending-sentence state is released here; its ``_context_append_to_context``
+        entry is deliberately kept, since word-timestamp events for the just-promoted
+        slot still arrive later (during audio playback) and must be recognised as
+        live. A no-op when nothing is pending for the context (or the sequencer is
+        not streaming).
+
+        Args:
+            context_id: The context whose pending sentence should be finalized.
 
         Returns:
             Frames unblocked by finalizing (e.g. buffered words that can now
             be replayed against the newly-registered slot).
         """
-        if self._parallel is None:
+        if not self._streaming or context_id is None:
             return []
-        agg = await self._parallel.flush()
-        return self._promote(agg) if agg else []
+        sc = self._streaming_contexts.pop(context_id, None)
+        if sc is None:
+            return []
+        agg = await sc.aggregator.flush()
+        return self._promote(agg, context_id, sc.append_to_context) if agg else []
 
     def process_word(
         self,
@@ -375,11 +433,13 @@ class AggregatedFrameSequencer:
     ) -> list[Frame]:
         """Process one word-timestamp event and return frames to push downstream.
 
-        Locates the active (first incomplete spoken) slot with a tracker, advances it
-        by the incoming word, and builds a :class:`TTSTextFrame`. Handles:
+        Locates the active slot (the first incomplete spoken slot with a tracker for
+        this ``context_id``), advances it by the incoming word, and builds a
+        :class:`TTSTextFrame`. Handles:
 
-        - Words from a context that was never registered or was wiped by
-          :meth:`clear` on interruption: dropped as stale (returns an empty list).
+        - Words from a context that was never registered, was wiped by :meth:`clear`
+          on interruption, or has already completed (:meth:`force_complete` removes
+          its entry): dropped as stale (returns an empty list).
         - Normal words that fit entirely within the active slot.
         - Overflow words straddling two slot boundaries.
         - Force-complete when the TTS drops an event (word belongs to the next slot).
@@ -397,20 +457,19 @@ class AggregatedFrameSequencer:
         Returns:
             Ordered list of frames (TTSTextFrame and/or AggregatedTextFrame) to push.
         """
-        # Drop words from contexts we never registered or that were wiped by clear()
-        # on interruption. Such a word is stale (e.g. delayed word-timestamps the TTS
-        # server delivers seconds after the context was cancelled); emitting it would
-        # interleave it into the current turn's transcript. A None context_id is left
-        # untouched: services without audio contexts legitimately use the passthrough
-        # path below. A word for the context currently streaming a pending sentence
-        # (no slot promoted yet) is not stale — it's handled by the buffering below.
-        is_current_streaming_ctx = (
-            self._streaming_slot_meta is not None and context_id == self._streaming_slot_meta[0]
-        )
+        # Drop words from contexts we never registered, that were wiped by clear() on
+        # interruption, or that have already fully completed (force_complete removes the
+        # entry). Such a word is stale (e.g. delayed word-timestamps the TTS server
+        # delivers seconds after the context was cancelled); emitting it would interleave
+        # it into the current turn's transcript. A None context_id is left untouched:
+        # services without audio contexts legitimately use the passthrough path below. A
+        # word for a context still streaming a pending sentence (no slot promoted yet) is
+        # not stale — it's handled by the buffering below.
+        is_pending_streaming_ctx = context_id in self._streaming_contexts
         if (
             context_id is not None
             and context_id not in self._context_append_to_context
-            and not is_current_streaming_ctx
+            and not is_pending_streaming_ctx
         ):
             logger.debug(
                 f"{self._name} Dropping stale word '{word}' from unknown/cleared "
@@ -418,13 +477,13 @@ class AggregatedFrameSequencer:
             )
             return []
 
-        active = self._get_active_slot()
+        active = self._get_active_slot(context_id)
         is_complete = False
         raw_overflow_word = None
 
         if active and active.tracker:
             if not active.tracker.word_belongs_here(word):
-                next_slot = self._get_next_active_slot(active)
+                next_slot = self._get_next_active_slot(active, context_id)
                 word_fits_next = (
                     next_slot is not None
                     and next_slot.tracker is not None
@@ -433,7 +492,7 @@ class AggregatedFrameSequencer:
                 if not word_fits_next:
                     if self._streaming:
                         self._buffered_words.append(
-                            (word, pts, context_id, includes_inter_frame_spaces)
+                            _BufferedWord(word, pts, context_id, includes_inter_frame_spaces)
                         )
                         return []
                     logger.warning(
@@ -452,7 +511,9 @@ class AggregatedFrameSequencer:
             is_complete = active.tracker.add_word_and_check_complete(word)
             raw_overflow_word = active.tracker.get_overflow_word()
         elif self._streaming and active is None:
-            self._buffered_words.append((word, pts, context_id, includes_inter_frame_spaces))
+            self._buffered_words.append(
+                _BufferedWord(word, pts, context_id, includes_inter_frame_spaces)
+            )
             return []
 
         # Give preference to the per-call flag; fall back to the slot's flag.
@@ -540,15 +601,25 @@ class AggregatedFrameSequencer:
                 break  # spoken but not yet complete — wait
         return frames
 
-    def force_complete(self, last_word_pts: int) -> list[Frame]:
-        """Force-complete all incomplete spoken slots and flush skipped frames.
+    def force_complete(self, context_id: str, last_word_pts: int) -> list[Frame]:
+        """Force-complete a context's incomplete spoken slots and flush skipped frames.
 
         Called at the end of an audio context to handle TTS providers that silently drop
         word-timestamp events. Emits a TTSTextFrame for any remaining unspoken text in
-        each incomplete slot, marks it complete, then flushes all now-unblocked skipped
-        frames.
+        each incomplete slot *belonging to this context*, marks it complete, then flushes
+        all now-unblocked skipped frames. Slots for other contexts still in flight are
+        left untouched so their own word events (or their own force_complete) finish them.
+
+        Audio contexts are drained one at a time in registration order (a context's whole
+        ``_handle_audio_context`` runs, ending with its own force_complete, before the next
+        starts), so an earlier context is never still open here — every earlier context has
+        already been force-completed by the time this one ends.
+
+        The context is fully done once this returns, so its live-context and pending
+        state are forgotten — any word that arrives afterwards is dropped as stale.
 
         Args:
+            context_id: The audio context that has ended.
             last_word_pts: PTS of the last received word frame, used as the PTS for
                 force-completed frames and forwarded to :meth:`flush`.
 
@@ -558,7 +629,7 @@ class AggregatedFrameSequencer:
         """
         frames: list[Frame] = []
         for slot in self._slots:
-            if slot.spoken and not slot.complete:
+            if slot.spoken and not slot.complete and slot.context_id == context_id:
                 if slot.tracker:
                     remaining_text = slot.tracker.get_remaining_tts_text()
                     raw_remaining = slot.tracker.get_remaining_llm_text()
@@ -584,6 +655,9 @@ class AggregatedFrameSequencer:
                         )
                 slot.complete = True
         frames.extend(self.flush(last_word_pts=last_word_pts))
+        # Context is fully done: forget it so any later word is dropped as stale.
+        self._context_append_to_context.pop(context_id, None)
+        self._streaming_contexts.pop(context_id, None)
         return frames
 
     def clear(self) -> None:
@@ -591,9 +665,7 @@ class AggregatedFrameSequencer:
         self._slots.clear()
         self._context_append_to_context.clear()
         self._buffered_words.clear()
-        self._streaming_slot_meta = None
-        # Re-create the aggregator for a clean state (sync; avoids an async reset).
-        self._parallel = _ParallelSentenceAggregator() if self._streaming else None
+        self._streaming_contexts.clear()
 
     # -------------------------------------------------------------------------
     # Internal helpers
@@ -623,13 +695,15 @@ class AggregatedFrameSequencer:
             )
         )
 
-    def _promote(self, agg: _ParallelAggregation) -> list[Frame]:
+    def _promote(
+        self, agg: _ParallelAggregation, context_id: str, append_to_context: bool
+    ) -> list[Frame]:
         """Turn a completed parallel-aggregated sentence into a real spoken slot.
 
         Builds the real WordCompletionTracker and an ``AggregationType.SENTENCE``
         AggregatedTextFrame from the three aggregated text channels, appends the
-        slot using the last streamed slot metadata, then replays any words that
-        were buffered waiting for it.
+        slot for ``context_id``, then replays any words that were buffered waiting
+        for it.
 
         The sentence frame is **emitted downstream** (first in the returned list)
         with ``will_be_spoken=True``: it is the streaming-mode equivalent of the
@@ -644,15 +718,19 @@ class AggregatedFrameSequencer:
         :meth:`process_word` from ``add_word_timestamps``, never from the incoming
         LLM token's own inter-frame-space flag.
 
+        Args:
+            agg: The completed sentence, in the three parallel text channels.
+            context_id: The context the promoted slot belongs to.
+            append_to_context: Whether word frames for the slot append to context.
+
         Returns:
             The sentence frame followed by any frames unblocked by replaying
             previously-buffered words. Empty if the aggregated text is entirely
-            whitespace, or no slot metadata is set.
+            whitespace.
         """
-        if not agg.user_facing_text.strip() or self._streaming_slot_meta is None:
+        if not agg.user_facing_text.strip():
             return []
 
-        context_id, append_to_context = self._streaming_slot_meta
         frame = AggregatedTextFrame(
             agg.user_facing_text, AggregationType.SENTENCE, raw_text=agg.llm_text or None
         )
@@ -676,25 +754,41 @@ class AggregatedFrameSequencer:
         buffered = self._buffered_words
         self._buffered_words = []
         frames: list[Frame] = []
-        for word, pts, context_id, includes_inter_frame_spaces in buffered:
-            frames.extend(self.process_word(word, pts, context_id, includes_inter_frame_spaces))
+        for w in buffered:
+            frames.extend(
+                self.process_word(w.word, w.pts, w.context_id, w.includes_inter_frame_spaces)
+            )
         return frames
 
-    def _get_active_slot(self) -> _AggregatedFrameSlot | None:
-        """Return the first incomplete spoken slot that has a tracker."""
+    def _slot_matches_context(self, slot: _AggregatedFrameSlot, context_id: str | None) -> bool:
+        """Whether *slot* is an eligible active slot for *context_id*.
+
+        A ``None`` context_id (legacy providers with no per-context word tagging, where
+        concurrency can't occur) matches any slot, preserving the untargeted behaviour.
+        Otherwise word routing is scoped to the slot's own context so concurrently-live
+        contexts never consume each other's words.
+        """
+        if not (slot.spoken and not slot.complete and slot.tracker is not None):
+            return False
+        return context_id is None or slot.context_id == context_id
+
+    def _get_active_slot(self, context_id: str | None = None) -> _AggregatedFrameSlot | None:
+        """Return the first incomplete spoken slot with a tracker for *context_id*."""
         return next(
-            (s for s in self._slots if s.spoken and not s.complete and s.tracker is not None),
+            (s for s in self._slots if self._slot_matches_context(s, context_id)),
             None,
         )
 
-    def _get_next_active_slot(self, current: _AggregatedFrameSlot) -> _AggregatedFrameSlot | None:
-        """Return the first incomplete spoken slot with a tracker after *current*."""
+    def _get_next_active_slot(
+        self, current: _AggregatedFrameSlot, context_id: str | None = None
+    ) -> _AggregatedFrameSlot | None:
+        """Return the first incomplete spoken slot with a tracker for *context_id* after *current*."""
         found = False
         for s in self._slots:
             if s is current:
                 found = True
                 continue
-            if found and s.spoken and not s.complete and s.tracker is not None:
+            if found and self._slot_matches_context(s, context_id):
                 return s
         return None
 
