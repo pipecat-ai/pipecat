@@ -501,11 +501,22 @@ class SmallWebRTCClient:
     ):
         """Send an application message through the WebRTC connection.
 
+        Messages sent before the data channel is open (e.g. while the peer
+        connection is still being established) are buffered by the connection
+        and flushed, in order, once the channel opens.
+
         Args:
             frame: The message frame to send.
         """
-        if self._can_send():
-            self._webrtc_connection.send_app_message(frame.message)
+        if self.is_closing:
+            message_type = (
+                frame.message.get("type", "unknown")
+                if isinstance(frame.message, dict)
+                else type(frame.message).__name__
+            )
+            logger.debug(f"Discarding app message '{message_type}': peer connection is closing.")
+            return
+        self._webrtc_connection.send_app_message(frame.message)
 
     async def _handle_client_connected(self):
         """Handle client connection establishment."""

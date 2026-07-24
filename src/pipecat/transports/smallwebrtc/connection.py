@@ -331,6 +331,12 @@ class SmallWebRTCConnection(BaseObject):
         def on_datachannel(channel):
             self._data_channel = channel
 
+            # A channel created by the remote peer is already open when aiortc
+            # emits "datachannel" (readyState is set before the event), so no
+            # "open" event will follow — flush immediately in that case.
+            if channel.readyState == "open":
+                self._flush_message_queue()
+
             # Flush queued messages once the data channel is open
             @channel.on("open")
             async def on_open():
