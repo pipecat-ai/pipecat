@@ -41,8 +41,11 @@ import pytest
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     ControlFrame,
     DataFrame,
+    ErrorFrame,
     Frame,
     InterruptionFrame,
     LLMAssistantPushAggregationFrame,
@@ -334,6 +337,55 @@ class MockWebSocketPauseTTSServiceZeroAudioCompletion(TTSService):
         self.create_task(
             _deliver_zero_audio_completion(), name=f"mock_ws_pause_zero_audio_{context_id}"
         )
+        if False:
+            yield
+
+
+class MockWebSocketPauseTTSServiceLongPlayback(TTSService):
+    """Simulates a streaming WebSocket TTS service (pause_frame_processing=True)
+    whose audio context completes quickly (as ElevenLabs-style providers
+    typically report isFinal shortly after the last text is sent), but whose
+    actual playback — tracked independently by the output transport — keeps
+    going past pause_watchdog_timeout_s after the turn's LLMFullResponseEndFrame
+    pauses frame processing.
+
+    Does NOT override on_audio_context_completed(), matching
+    ElevenLabsTTSService's actual override (resets alignment state but never
+    resumes frame processing) — only BotStoppedSpeakingFrame from the output
+    transport does that, once real playback finishes. The test injects
+    BotStartedSpeakingFrame and BotStoppedSpeakingFrame directly to model the
+    output transport's behavior without a real transport in the pipeline.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            push_start_frame=True,
+            push_text_frames=False,
+            pause_frame_processing=True,
+            pause_watchdog_timeout_s=0.2,
+            sample_rate=_SAMPLE_RATE,
+            **kwargs,
+        )
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        async def _deliver_audio():
+            await asyncio.sleep(0.01)
+            await self.append_to_audio_context(
+                context_id,
+                TTSAudioRawFrame(
+                    audio=_FAKE_AUDIO,
+                    sample_rate=_SAMPLE_RATE,
+                    num_channels=1,
+                    context_id=context_id,
+                ),
+            )
+            await self.append_to_audio_context(context_id, TTSStoppedFrame(context_id=context_id))
+            await self.remove_audio_context(context_id)
+
+        self.create_task(_deliver_audio(), name=f"mock_ws_pause_long_playback_{context_id}")
         if False:
             yield
 
@@ -1468,6 +1520,66 @@ async def test_no_deadlock_on_zero_audio_context_completion():
     assert any(f.label == "after_completion" for f in foo_frames), (
         "FooFrame after zero-audio context completion was not received — "
         "pipeline deadlocked (missing resume-on-zero-audio guard)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_no_spurious_watchdog_on_long_streaming_turn():
+    """A long streaming turn whose audio is still playing past
+    pause_watchdog_timeout_s after the pause must not trip the watchdog.
+
+    Timeline:
+    1. LLM response -> _processing_text=True.
+    2. BotStartedSpeakingFrame arrives *before* LLMFullResponseEndFrame —
+       streaming TTS starts playback while the LLM is still generating, and
+       the output transport only sends this frame once per turn.
+    3. LLMFullResponseEndFrame -> pause_processing_frames() called. Audio for
+       this turn was already confirmed, so no watchdog should be armed.
+    4. More than pause_watchdog_timeout_s (0.2s here) elapses with no
+       BotStoppedSpeakingFrame yet — this must NOT force-resume or push an
+       ErrorFrame; playback is still legitimately in progress.
+    5. BotStoppedSpeakingFrame finally arrives (playback finished) and
+       resumes frame processing normally; FooFrame must arrive afterward.
+    """
+    tts = MockWebSocketPauseTTSServiceLongPlayback()
+
+    frames_to_send = [
+        LLMFullResponseStartFrame(),
+        TextFrame(text="Hello, this is a long multi-sentence response."),
+        # Let LLMFullResponseStartFrame/TextFrame (ControlFrame/DataFrame,
+        # handled by the process task) actually finish processing before
+        # BotStartedSpeakingFrame arrives. BotStartedSpeakingFrame is a
+        # SystemFrame handled inline by the input task, so it would otherwise
+        # jump ahead of same-queued-but-not-yet-processed non-system frames
+        # — an ordering quirk of the test harness sending everything nearly
+        # simultaneously, not a real possibility in production, where
+        # processing a plain LLMFullResponseStartFrame/TextFrame takes far
+        # less time than a network round trip to start audio playback.
+        SleepFrame(sleep=0.05),
+        BotStartedSpeakingFrame(),
+        SleepFrame(sleep=0.05),
+        LLMFullResponseEndFrame(),
+        SleepFrame(sleep=0.3),  # longer than pause_watchdog_timeout_s=0.2
+        BotStoppedSpeakingFrame(),
+        FooFrame(label="after_stop"),
+    ]
+
+    frames_received = await asyncio.wait_for(
+        run_test(tts, frames_to_send=frames_to_send),
+        timeout=3.0,
+    )
+
+    down, up = frames_received
+    error_frames = [f for f in up if isinstance(f, ErrorFrame)]
+    assert not error_frames, (
+        f"Spurious pause-watchdog ErrorFrame(s) during in-progress playback: {error_frames} — "
+        "the watchdog must not arm when audio was already confirmed before the pause"
+    )
+
+    foo_frames = [f for f in down if isinstance(f, FooFrame)]
+    assert any(f.label == "after_stop" for f in foo_frames), (
+        "FooFrame after BotStoppedSpeakingFrame was not received — "
+        "pipeline never resumed after the pause"
     )
 
 
