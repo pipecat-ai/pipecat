@@ -671,14 +671,14 @@ class DeepgramSTTService(STTService):
                     await connection.start_listening()
             except ApiError as e:
                 if e.status_code is not None and 400 <= e.status_code < 500:
-                    msg = f"{self}: Deepgram rejected the connection (status {e.status_code}): {e}"
+                    msg = f"Deepgram rejected the connection (status {e.status_code}): {e}"
                     await self.push_error(error_msg=msg, exception=e)
                     return
                 logger.warning(f"{self}: Connection lost, will retry: {e}")
-                await self.push_error(error_msg=f"{self}: connection error: {e}", exception=e)
+                await self.push_error(error_msg=f"connection error: {e}", exception=e)
             except Exception as e:
                 logger.warning(f"{self}: Connection lost, will retry: {e}")
-                await self.push_error(error_msg=f"{self}: connection error: {e}", exception=e)
+                await self.push_error(error_msg=f"connection error: {e}", exception=e)
             finally:
                 self._connection_ready.clear()
                 self._connection = None
@@ -689,14 +689,13 @@ class DeepgramSTTService(STTService):
             result = self._quick_failure_tracker.record(duration)
             if result.should_give_up:
                 msg = (
-                    f"{self}: connection failed "
+                    "connection failed "
                     f"{self._quick_failure_tracker.max_consecutive_failures} times "
                     "immediately after connecting"
                 )
                 await self.push_error(error_msg=msg)
                 return
-            if result.is_quick_failure:
-                await asyncio.sleep(exponential_backoff_time(self._quick_failure_tracker.count))
+            await asyncio.sleep(exponential_backoff_time(self._quick_failure_tracker.count))
 
     async def _keepalive_handler(self):
         """Periodically send KeepAlive frames to prevent server-side timeout.

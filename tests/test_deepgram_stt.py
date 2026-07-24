@@ -217,3 +217,41 @@ async def test_connection_handler_resets_quick_failure_count_after_stable_connec
     # If the counter had NOT been reset after the stable connection, giving up
     # would have happened after just 1 more quick failure (2 total attempts).
     assert mock_client.listen.v1.connect.call_count == 4
+
+
+@pytest.mark.asyncio
+async def test_connection_handler_backs_off_after_non_quick_failure(monkeypatch):
+    """A failure that isn't a quick failure (lasted >= min_stable_duration)
+    must still back off before retrying, instead of busy-looping with no delay."""
+    sleep_calls = []
+
+    async def fake_sleep(duration):
+        sleep_calls.append(duration)
+        if len(sleep_calls) >= 2:
+            # Stand in for the task being cancelled, e.g. by _disconnect(),
+            # so the `while True` loop under test terminates.
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr("pipecat.services.deepgram.stt.asyncio.sleep", fake_sleep)
+    service = _make_bare_service()
+
+    fake_time = MagicMock()
+    # Each attempt "lasts" 10s (>= min_stable_duration), so is never a quick failure.
+    times = iter([0, 10, 10, 20, 20, 30])
+    fake_time.monotonic.side_effect = lambda: next(times)
+    monkeypatch.setattr("pipecat.services.deepgram.stt.time", fake_time)
+
+    mock_client = MagicMock()
+    mock_client.listen.v1.connect = MagicMock(
+        side_effect=[
+            _failing_connect_cm(ConnectionError("drop 1")),
+            _failing_connect_cm(ConnectionError("drop 2")),
+            _failing_connect_cm(ConnectionError("drop 3")),
+        ]
+    )
+    service._client = mock_client
+
+    with contextlib.suppress(asyncio.CancelledError):
+        await service._connection_handler()
+
+    assert sleep_calls == [4, 4]  # exponential_backoff_time's min_wait, not skipped
