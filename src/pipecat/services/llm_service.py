@@ -323,6 +323,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # typed for callers that opt into `LLMService[XAdapter]`.
         self._adapter = cast(TAdapter, self.adapter_class())
         self._functions: dict[str | None, FunctionCallRegistryItem] = {}
+        # Objects that own registered tool handlers and opted into having their
+        # close() called at service teardown (see _record_tool_session_owner).
+        self._tool_session_owners: list[Any] = []
         # Names we've already warned about for a redundant manual registration
         # (an explicit register_function call for a tool whose advertised
         # FunctionSchema already carries a handler), so the warning fires once
@@ -463,12 +466,18 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         await self._cancel_summary_task()
 
     async def cleanup(self):
-        """Release LLM service resources at teardown."""
+        """Release LLM service resources at teardown.
+
+        Besides this service's own tasks, closes any tool-session owners
+        (e.g. MCP clients) whose registered handlers opted into automatic
+        close at teardown.
+        """
         await super().cleanup()
         if not self._run_in_parallel:
             await self._cancel_sequential_runner_task()
         await self._cancel_summary_task()
         await self._cancel_all_function_call_tasks()
+        await self._close_tool_session_owners()
 
     def append_system_instruction(self, instruction: str) -> None:
         """Append durable text to the system instruction, preserving the user's prompt.
@@ -804,6 +813,34 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 function_name, timeout_secs, handler, "_pipecat_timeout_secs", default=None
             ),
         )
+        self._record_tool_session_owner(handler)
+
+    def _record_tool_session_owner(self, handler: Any) -> None:
+        """Track handler owners that opted into close() at service teardown.
+
+        An object that owns registered tool handlers as bound methods (e.g.
+        ``MCPClient``) can set ``_pipecat_close_on_teardown = True`` to have its
+        ``close()`` awaited when this service is cleaned up — the hook the
+        pipeline guarantees to run at teardown — so its session is released
+        without the developer wiring close() manually. Owners are kept for the
+        service's lifetime even if their tools are later unregistered: the
+        session may outlive any one tool's advertisement, and close() is
+        expected to be idempotent.
+        """
+        owner = getattr(handler, "__self__", None)
+        if owner is None or not getattr(owner, "_pipecat_close_on_teardown", False):
+            return
+        if owner not in self._tool_session_owners:
+            self._tool_session_owners.append(owner)
+
+    async def _close_tool_session_owners(self) -> None:
+        """Close recorded tool-session owners; errors are logged, not raised."""
+        owners, self._tool_session_owners = self._tool_session_owners, []
+        for owner in owners:
+            try:
+                await owner.close()
+            except Exception as e:
+                logger.error(f"{self} error closing tool session owner {owner}: {e}")
 
     @deprecated(
         "`LLMService.register_direct_function` is deprecated since 1.4.0 and will be removed in "
