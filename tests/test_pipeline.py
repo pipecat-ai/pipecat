@@ -8,6 +8,7 @@ import asyncio
 import io
 import time
 import unittest
+from collections.abc import AsyncGenerator
 
 from loguru import logger
 
@@ -18,9 +19,12 @@ from pipecat.frames.frames import (
     Frame,
     HeartbeatFrame,
     InputAudioRawFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     StartFrame,
     StopFrame,
     TextFrame,
+    TTSStoppedFrame,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
@@ -29,6 +33,7 @@ from pipecat.pipeline.worker import PipelineParams, PipelineWorker, WorkerParams
 from pipecat.processors.filters.frame_filter import FrameFilter
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import HeartbeatsObserver, run_test
 from pipecat.utils.asyncio.task_manager import TaskManager
 
@@ -750,6 +755,67 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         await start_received.wait()
         await worker.cancel()
         await asyncio.wait_for(run_task, timeout=1.0)
+
+        assert worker.has_finished()
+
+    async def test_task_end_frame_blocked_by_paused_tts_service(self):
+        """TTSService pauses its process queue while audio is in flight
+        (pause_frame_processing=True) and is normally unpaused by a
+        BotStoppedSpeakingFrame — a SystemFrame, so it bypasses the pause via
+        the input task instead of queuing behind it — sent by the output
+        transport once it confirms audio actually played.
+
+        Here, a TTS context completes (isFinal) having produced zero
+        TTSAudioRawFrames, so the transport's BotStoppedSpeakingFrame gate
+        (`_tts_audio_received`) never opens and no resume signal arrives. This
+        test has no transport, so no BotStoppedSpeakingFrame or
+        BotStartedSpeakingFrame is ever sent, modeling that gap directly.
+
+        The terminal EndFrame is a ControlFrame, so it queues behind the pause
+        and never reaches the sink, and _wait_for_pipeline_end's EndFrame
+        branch has no timeout (unlike the CancelFrame branch) — so
+        TTSService's pause watchdog must force-resume after
+        pause_watchdog_timeout_s for PipelineWorker.run() to return.
+        """
+
+        class TTSZeroAudioNoResume(TTSService):
+            def __init__(self, **kwargs):
+                super().__init__(
+                    push_start_frame=True,
+                    push_text_frames=False,
+                    pause_frame_processing=True,
+                    pause_watchdog_timeout_s=0.2,
+                    sample_rate=16000,
+                    **kwargs,
+                )
+
+            def can_generate_metrics(self) -> bool:
+                return False
+
+            async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+                # Provider reports the context finished (isFinal) with no
+                # audio — same as ElevenLabsTTSService against a
+                # quota-exhausted key.
+                await self.append_to_audio_context(
+                    context_id, TTSStoppedFrame(context_id=context_id)
+                )
+                await self.remove_audio_context(context_id)
+                if False:
+                    yield
+
+        pipeline = Pipeline([TTSZeroAudioNoResume()])
+        worker = PipelineWorker(pipeline, cancel_timeout_secs=0.2)
+
+        await worker.queue_frames(
+            [
+                LLMFullResponseStartFrame(),
+                TextFrame(text="hi"),
+                LLMFullResponseEndFrame(),
+                EndFrame(),
+            ]
+        )
+
+        await asyncio.wait_for(worker.run(WorkerParams(task_manager=TaskManager())), timeout=1.0)
 
         assert worker.has_finished()
 

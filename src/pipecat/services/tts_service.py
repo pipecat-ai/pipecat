@@ -160,6 +160,9 @@ class TTSService(AIService):
         silence_time_s: float = 2.0,
         # if True, we will pause processing frames while we are receiving audio
         pause_frame_processing: bool = False,
+        # if pause_frame_processing is True, force-resume if no BotStartedSpeakingFrame
+        # arrives within this many seconds of pausing
+        pause_watchdog_timeout_s: float = 3.0,
         # if True, append a trailing space to text before sending to TTS
         # (helps prevent some TTS services from vocalizing trailing punctuation)
         append_trailing_space: bool = False,
@@ -206,6 +209,14 @@ class TTSService(AIService):
             push_silence_after_stop: Whether to push silence audio after TTSStoppedFrame.
             silence_time_s: Duration of silence to push when push_silence_after_stop is True.
             pause_frame_processing: Whether to pause frame processing during audio generation.
+            pause_watchdog_timeout_s: When pause_frame_processing is True, force-resume frame
+                processing (and report a non-fatal error) if no BotStartedSpeakingFrame confirms
+                audio is playing for the current turn within this many seconds of pausing. Not
+                armed when audio was already confirmed before the pause (the common case for
+                streaming TTS, where playback starts while the LLM is still generating). Guards
+                against a context completing with no audio (e.g. a quota-exhausted TTS provider
+                reporting success with zero bytes), or a BotStoppedSpeakingFrame race that leaves
+                the pause permanently latched.
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.
                 This helps prevent some TTS services from vocalizing trailing punctuation (e.g., "dot").
                 Only applied in sentence aggregation mode; when streaming tokens, the incoming
@@ -283,6 +294,15 @@ class TTSService(AIService):
         self._push_silence_after_stop: bool = push_silence_after_stop
         self._silence_time_s: float = silence_time_s
         self._pause_frame_processing: bool = pause_frame_processing
+        self._pause_watchdog_timeout_s: float = pause_watchdog_timeout_s
+        self._pause_watchdog_task: asyncio.Task | None = None
+        # Whether the bot is currently speaking. Set on BotStartedSpeakingFrame,
+        # cleared on BotStoppedSpeakingFrame and InterruptionFrame. Lets
+        # _maybe_pause_frame_processing() know this turn's audio already
+        # started before skipping the watchdog — see its docstring. Also used
+        # by InterruptibleTTSService to decide whether an interruption needs a
+        # reconnect.
+        self._bot_speaking: bool = False
         self._append_trailing_space: bool = append_trailing_space
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
@@ -577,6 +597,7 @@ class TTSService(AIService):
         """Release TTS resources at teardown."""
         await super().cleanup()
         await self._stop_audio_context_task()
+        await self._cancel_pause_watchdog()
 
     def add_text_transformer(
         self,
@@ -830,7 +851,15 @@ class TTSService(AIService):
                     )
                 delta = type(self._settings).from_mapping(frame.settings)
                 await self._update_settings(delta)
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            # Audio is confirmed playing for this turn, so no watchdog is
+            # needed — the ordinary BotStoppedSpeakingFrame path below will
+            # resume once playback finishes.
+            self._bot_speaking = True
+            await self._cancel_pause_watchdog()
+            await self.push_frame(frame, direction)
         elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
             await self._maybe_resume_frame_processing()
             await self.push_frame(frame, direction)
         else:
@@ -965,6 +994,7 @@ class TTSService(AIService):
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         self._processing_text = False
         self._sent_non_whitespace_in_context = False
+        self._bot_speaking = False
         await self._text_aggregator.handle_interruption()
         for filter in self._text_filters:
             await filter.handle_interruption()
@@ -1002,10 +1032,45 @@ class TTSService(AIService):
     async def _maybe_pause_frame_processing(self):
         if self._processing_text and self._pause_frame_processing:
             await self.pause_processing_frames()
+            await self._cancel_pause_watchdog()
+            if not self._bot_speaking:
+                # Streaming TTS (e.g. ElevenLabs, Deepgram) usually starts
+                # playback — and so BotStartedSpeakingFrame — while the LLM is
+                # still generating, i.e. before this pause happens. In that
+                # case audio for this turn is already confirmed and the
+                # ordinary BotStoppedSpeakingFrame path will resume once
+                # playback finishes.
+                #
+                # Otherwise, force-resume if no BotStartedSpeakingFrame
+                # confirms audio is actually playing (e.g. a context completes
+                # with zero audio, or a BotStoppedSpeakingFrame race left this
+                # pause permanently latched), so the pause can never deadlock
+                # the pipeline.
+                self._pause_watchdog_task = self.create_task(
+                    self._pause_watchdog_handler(), name="pause_watchdog"
+                )
 
     async def _maybe_resume_frame_processing(self):
+        await self._cancel_pause_watchdog()
         if self._pause_frame_processing:
             await self.resume_processing_frames()
+
+    async def _cancel_pause_watchdog(self):
+        if self._pause_watchdog_task:
+            await self.cancel_task(self._pause_watchdog_task)
+            self._pause_watchdog_task = None
+
+    async def _pause_watchdog_handler(self):
+        await asyncio.sleep(self._pause_watchdog_timeout_s)
+        self._pause_watchdog_task = None
+        msg = (
+            f"{self} no BotStartedSpeakingFrame within "
+            f"{self._pause_watchdog_timeout_s}s of pausing frame processing "
+            f"(e.g. a TTS context completed with no audio) — force-resuming"
+        )
+        logger.warning(msg)
+        await self.resume_processing_frames()
+        await self.push_error(msg)
 
     async def _process_text_frame(self, frame: TextFrame):
         async for aggregate in self._text_aggregator.aggregate(frame.text):
@@ -1785,14 +1850,24 @@ class InterruptibleTTSService(WebsocketTTSService):
         """
         super().__init__(**kwargs)
 
-        # Indicates if the bot is speaking. If the bot is not speaking we don't
-        # need to reconnect when the user speaks. If the bot is speaking and the
-        # user interrupts we need to reconnect.
-        self._bot_speaking = False
+        # True once run_tts has been invoked (TTSStartedFrame pushed) for the
+        # current turn but before BotStartedSpeakingFrame confirms playback —
+        # the narrow window where _bot_speaking (which only reflects confirmed
+        # playback, and also gates TTSService's pause watchdog) can't yet tell
+        # a reconnect is needed. Kept separate from _bot_speaking so this
+        # early, unconfirmed marker never suppresses the watchdog for a turn
+        # that ends up producing no audio.
+        self._tts_started: bool = False
 
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
+        # If the bot is not speaking we don't need to reconnect when the user
+        # speaks. If the bot is speaking and the user interrupts we need to
+        # reconnect. Captured before calling super(), which clears
+        # _bot_speaking as part of its own interruption handling.
+        should_reconnect = self._bot_speaking or self._tts_started
+        self._tts_started = False
         await super()._handle_interruption(frame, direction)
-        if self._bot_speaking:
+        if should_reconnect:
             await self._disconnect()
             await self._connect()
 
@@ -1806,12 +1881,12 @@ class InterruptibleTTSService(WebsocketTTSService):
         # This prevents a race condition in cases where run_tts has been invoked but the
         # BotStartedSpeakingFrame has not yet been received, which could allow stale audio to leak through.
         if isinstance(frame, TTSStartedFrame):
-            self._bot_speaking = True
+            self._tts_started = True
 
         await super().push_frame(frame, direction)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames with bot speaking state tracking.
+        """Process frames, resetting per-turn reconnect tracking on a new turn.
 
         Args:
             frame: The frame to process.
@@ -1819,10 +1894,14 @@ class InterruptibleTTSService(WebsocketTTSService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, BotStartedSpeakingFrame):
-            self._bot_speaking = True
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            self._bot_speaking = False
+        if isinstance(frame, BotStoppedSpeakingFrame):
+            # The turn ended normally; nothing left to reconnect for.
+            self._tts_started = False
+        elif isinstance(frame, LLMFullResponseStartFrame):
+            # Safety net for a previous turn that never produced audio (e.g.
+            # force-resumed by TTSService's pause watchdog), so
+            # BotStoppedSpeakingFrame never arrived to clear it above.
+            self._tts_started = False
 
 
 @deprecated(
