@@ -60,6 +60,7 @@ try:
         GenerateContentConfig,
         GenerateContentResponse,
         HttpOptions,
+        SafetySetting,
     )
 
     # Temporary hack to be able to process Nano Banana returned images.
@@ -107,22 +108,36 @@ class GoogleLLMSettings(LLMSettings):
 
     Parameters:
         thinking: Thinking configuration.
+        safety_settings: Content safety filters, as a list of
+            :class:`~google.genai.types.SafetySetting`. Each entry pairs a harm
+            category with the threshold at which content is blocked. Categories
+            left unspecified keep the Gemini API defaults.
     """
 
     thinking: Union["GoogleLLMService.ThinkingConfig", None, _NotGiven] = field(
         default_factory=lambda: NOT_GIVEN
     )
+    safety_settings: list[SafetySetting] | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
     @classmethod
     def from_mapping(cls, settings):
-        """Convert a plain dict to settings, coercing thinking dicts.
+        """Convert a plain dict to settings, coercing thinking and safety dicts.
 
-        For backward compatibility, a ``thinking`` value that is a plain dict
-        is converted to a :class:`GoogleLLMService.ThinkingConfig`.
+        For backward compatibility, a ``thinking`` value that is a plain dict is
+        converted to a :class:`GoogleLLMService.ThinkingConfig`, and any
+        ``safety_settings`` entry that is a plain dict is converted to a
+        :class:`~google.genai.types.SafetySetting`.
         """
         instance = super().from_mapping(settings)
         if is_given(instance.thinking) and isinstance(instance.thinking, dict):
             instance.thinking = GoogleLLMService.ThinkingConfig(**instance.thinking)
+        if is_given(instance.safety_settings) and instance.safety_settings:
+            instance.safety_settings = [
+                SafetySetting(**entry) if isinstance(entry, dict) else entry
+                for entry in instance.safety_settings
+            ]
         return instance
 
 
@@ -231,6 +246,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
             thinking=None,
+            safety_settings=None,
             extra={},
         )
 
@@ -361,6 +377,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                 "top_p": self._settings.top_p,
                 "top_k": self._settings.top_k,
                 "max_output_tokens": self._settings.max_tokens,
+                "safety_settings": assert_given(self._settings.safety_settings),
                 "tools": tools,
                 "tool_config": tool_config,
             }.items()
