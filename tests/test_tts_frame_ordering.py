@@ -296,6 +296,48 @@ class MockWebSocketPauseTTSServiceNoAudio(TTSService):
             yield
 
 
+class MockWebSocketPauseTTSServiceZeroAudioCompletion(TTSService):
+    """Simulates a WebSocket TTS service (pause_frame_processing=True) whose
+    provider accepts the request and reports the context as successfully
+    completed (isFinal) but never sends any audio bytes — e.g. a quota-
+    exhausted provider that still accepts the connection.
+
+    Does NOT override on_audio_context_completed(), matching
+    ElevenLabsTTSService's actual override: it resets alignment state but never
+    calls _maybe_resume_frame_processing(). Because no TTSAudioRawFrame is ever
+    produced, the output transport's BotStartedSpeakingFrame/
+    BotStoppedSpeakingFrame never fire in production either, so nothing resumes
+    frame processing after pause_processing_frames() latches — until
+    TTSService's own pause watchdog force-resumes after pause_watchdog_timeout_s.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            push_start_frame=True,
+            push_text_frames=False,
+            pause_frame_processing=True,
+            pause_watchdog_timeout_s=0.2,
+            sample_rate=_SAMPLE_RATE,
+            **kwargs,
+        )
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        async def _deliver_zero_audio_completion():
+            await asyncio.sleep(0.01)
+            # Provider reports the context finished (isFinal) with no audio.
+            await self.append_to_audio_context(context_id, TTSStoppedFrame(context_id=context_id))
+            await self.remove_audio_context(context_id)
+
+        self.create_task(
+            _deliver_zero_audio_completion(), name=f"mock_ws_pause_zero_audio_{context_id}"
+        )
+        if False:
+            yield
+
+
 class _MockWordTimestampHttpTTSService(TTSService):
     """HTTP-style TTS: yields audio synchronously, calls add_word_timestamps first.
 
@@ -1387,6 +1429,50 @@ async def test_no_deadlock_on_interrupt_before_audio_with_uninterruptible():
     assert any(f.label == "after_interrupt" for f in foo_frames), (
         "FooFrame after interruption was not received — pipeline deadlocked "
         "(missing _maybe_resume_frame_processing() in _handle_interruption)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_no_deadlock_on_zero_audio_context_completion():
+    """A context that completes (TTSStoppedFrame) having produced zero
+    TTSAudioRawFrames must not deadlock the pipeline.
+
+    Timeline:
+    1. LLM response -> _processing_text=True.
+    2. LLMFullResponseEndFrame -> pause_processing_frames() called, starting
+       the pause watchdog.
+    3. Provider reports the context finished with no audio (TTSStoppedFrame,
+       zero TTSAudioRawFrame). on_audio_context_completed() is a no-op here,
+       matching ElevenLabsTTSService's actual override.
+    4. No BotStartedSpeakingFrame/BotStoppedSpeakingFrame ever arrives — in
+       production the output transport only sends them once TTS audio was
+       actually received, and this test models that absence directly by never
+       sending either.
+    5. The pause watchdog (pause_watchdog_timeout_s=0.2 here) fires with no
+       BotStartedSpeakingFrame seen, force-resumes frame processing, and
+       reports a non-fatal error. FooFrame must arrive downstream within the
+       timeout.
+    """
+    tts = MockWebSocketPauseTTSServiceZeroAudioCompletion()
+
+    frames_to_send = [
+        LLMFullResponseStartFrame(),
+        TextFrame(text="Hello."),
+        LLMFullResponseEndFrame(),
+        SleepFrame(sleep=0.1),  # let the zero-audio completion play out
+        FooFrame(label="after_completion"),
+    ]
+
+    frames_received = await asyncio.wait_for(
+        run_test(tts, frames_to_send=frames_to_send),
+        timeout=3.0,
+    )
+
+    down = frames_received[0]
+    foo_frames = [f for f in down if isinstance(f, FooFrame)]
+    assert any(f.label == "after_completion" for f in foo_frames), (
+        "FooFrame after zero-audio context completion was not received — "
+        "pipeline deadlocked (missing resume-on-zero-audio guard)"
     )
 
 

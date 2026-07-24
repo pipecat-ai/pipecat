@@ -160,6 +160,9 @@ class TTSService(AIService):
         silence_time_s: float = 2.0,
         # if True, we will pause processing frames while we are receiving audio
         pause_frame_processing: bool = False,
+        # if pause_frame_processing is True, force-resume if no BotStartedSpeakingFrame
+        # arrives within this many seconds of pausing
+        pause_watchdog_timeout_s: float = 3.0,
         # if True, append a trailing space to text before sending to TTS
         # (helps prevent some TTS services from vocalizing trailing punctuation)
         append_trailing_space: bool = False,
@@ -206,6 +209,11 @@ class TTSService(AIService):
             push_silence_after_stop: Whether to push silence audio after TTSStoppedFrame.
             silence_time_s: Duration of silence to push when push_silence_after_stop is True.
             pause_frame_processing: Whether to pause frame processing during audio generation.
+            pause_watchdog_timeout_s: When pause_frame_processing is True, force-resume frame
+                processing (and report a non-fatal error) if no BotStartedSpeakingFrame arrives
+                within this many seconds of pausing. Guards against a context completing with no
+                audio (e.g. a quota-exhausted TTS provider reporting success with zero bytes), or
+                a BotStoppedSpeakingFrame race that leaves the pause permanently latched.
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.
                 This helps prevent some TTS services from vocalizing trailing punctuation (e.g., "dot").
                 Only applied in sentence aggregation mode; when streaming tokens, the incoming
@@ -283,6 +291,8 @@ class TTSService(AIService):
         self._push_silence_after_stop: bool = push_silence_after_stop
         self._silence_time_s: float = silence_time_s
         self._pause_frame_processing: bool = pause_frame_processing
+        self._pause_watchdog_timeout_s: float = pause_watchdog_timeout_s
+        self._pause_watchdog_task: asyncio.Task | None = None
         self._append_trailing_space: bool = append_trailing_space
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
@@ -577,6 +587,7 @@ class TTSService(AIService):
         """Release TTS resources at teardown."""
         await super().cleanup()
         await self._stop_audio_context_task()
+        await self._cancel_pause_watchdog()
 
     def add_text_transformer(
         self,
@@ -825,6 +836,12 @@ class TTSService(AIService):
                     )
                 delta = type(self._settings).from_mapping(frame.settings)
                 await self._update_settings(delta)
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            # Audio is confirmed playing, so the pause watchdog no longer needs
+            # to force-resume — the ordinary BotStoppedSpeakingFrame path below
+            # will do it once playback finishes.
+            await self._cancel_pause_watchdog()
+            await self.push_frame(frame, direction)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._maybe_resume_frame_processing()
             await self.push_frame(frame, direction)
@@ -997,10 +1014,36 @@ class TTSService(AIService):
     async def _maybe_pause_frame_processing(self):
         if self._processing_text and self._pause_frame_processing:
             await self.pause_processing_frames()
+            # Force-resume if no BotStartedSpeakingFrame confirms audio is
+            # actually playing (e.g. a context completes with zero audio, or a
+            # BotStoppedSpeakingFrame race left this pause permanently
+            # latched), so the pause can never deadlock the pipeline.
+            await self._cancel_pause_watchdog()
+            self._pause_watchdog_task = self.create_task(
+                self._pause_watchdog_handler(), name="pause_watchdog"
+            )
 
     async def _maybe_resume_frame_processing(self):
+        await self._cancel_pause_watchdog()
         if self._pause_frame_processing:
             await self.resume_processing_frames()
+
+    async def _cancel_pause_watchdog(self):
+        if self._pause_watchdog_task:
+            await self.cancel_task(self._pause_watchdog_task)
+            self._pause_watchdog_task = None
+
+    async def _pause_watchdog_handler(self):
+        await asyncio.sleep(self._pause_watchdog_timeout_s)
+        self._pause_watchdog_task = None
+        msg = (
+            f"{self} no BotStartedSpeakingFrame within "
+            f"{self._pause_watchdog_timeout_s}s of pausing frame processing "
+            f"(e.g. a TTS context completed with no audio) — force-resuming"
+        )
+        logger.warning(msg)
+        await self.resume_processing_frames()
+        await self.push_error(msg)
 
     async def _process_text_frame(self, frame: TextFrame):
         async for aggregate in self._text_aggregator.aggregate(frame.text):
