@@ -375,7 +375,7 @@ class NvidiaSageMakerTTSService(InterruptibleTTSService):
 
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         self._reset_audio_buffer()
-        if self._bot_speaking and self._client:
+        if (self._bot_speaking or self._tts_started) and self._client:
             logger.debug(
                 f"{self}: interruption detected, sending input_text.done and waiting for speech.completed"
             )
