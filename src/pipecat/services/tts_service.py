@@ -717,7 +717,12 @@ class TTSService(AIService):
             # New LLM turn → assign a fresh context ID shared by all sentences
             self._turn_context_id = self.create_context_id()
             await self.on_turn_context_created(self._turn_context_id)
-            await self.push_frame(frame, direction)
+            # Route through the serialization queue so this frame is emitted only
+            # after any earlier audio context already queued has fully drained,
+            # rather than racing ahead of it (e.g. a new turn starting via
+            # LLMMessagesAppendFrame while the previous turn's audio is still
+            # playing out downstream).
+            await self._serialization_queue.put(frame)
         elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             # Flush any remaining text (including text waiting for lookahead)
             remaining = await self._text_aggregator.flush()
@@ -1541,24 +1546,32 @@ class TTSService(AIService):
 
         Called at the end of an audio context (either on clean completion timeout or
         when the context queue is drained). Resets the PTS baseline so the next turn
-        starts fresh. If an LLM response is still marked as in-progress and text frames
-        are not being pushed (which would have already emitted the frame), the end
-        frame held for ``context_id`` is re-pushed with the PTS of the last word frame.
+        starts fresh. If text frames are not being pushed directly (which would have
+        already emitted the frame), the end frame held for ``context_id`` is re-pushed
+        with the PTS of the last word frame.
+
+        The lookup is keyed by ``context_id`` since multiple audio contexts (and
+        therefore multiple held end frames) can be in flight concurrently — each
+        context's own completion must re-push its own frame independently.
 
         Args:
             context_id: The audio context that just ended, used to look up the held
                 LLMFullResponseEndFrame.
         """
         await self.reset_word_timestamps()
-        # If self._push_text_frames is True, we have already pushed the original LLMFullResponseEndFrame
-        if self._llm_response_started and not self._push_text_frames:
+        if self._push_text_frames:
+            # We have already pushed the original LLMFullResponseEndFrame.
+            return
+        # Re-push the original end frame held in process_frame (preserving its
+        # id) rather than a new one, so observers that dedup by frame.id don't
+        # see a second LLM-response end. Fall back to a fresh frame if an LLM
+        # response was started but none was held for this context (e.g.
+        # _turn_context_id was unset when the end frame arrived).
+        frame = self._pending_llm_response_end_frames.pop(context_id, None)
+        if frame is None and self._llm_response_started:
+            frame = LLMFullResponseEndFrame()
+        if frame is not None:
             self._llm_response_started = False
-            # Re-push the original end frame held in process_frame (preserving its
-            # id) rather than a new one, so observers that dedup by frame.id don't
-            # see a second LLM-response end. Fall back to a fresh frame if absent.
-            frame = self._pending_llm_response_end_frames.pop(context_id, None) or (
-                LLMFullResponseEndFrame()
-            )
             frame.pts = self._word_last_pts
             await self.push_frame(frame)
 
