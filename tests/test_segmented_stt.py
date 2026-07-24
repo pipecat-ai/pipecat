@@ -41,6 +41,9 @@ def _make_capturing_service(wants_wav: bool | None = None) -> SegmentedSTTServic
             super().__init__(sample_rate=SAMPLE_RATE, **kwargs)
             self.captured: list[bytes] = []
 
+        def can_generate_metrics(self) -> bool:
+            return True
+
         async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
             self.captured.append(audio)
             return
@@ -91,3 +94,33 @@ async def test_passthrough_mode_preserves_exact_pcm():
     assert len(service.captured) == 1
     # Raw PCM, byte-for-byte: no WAV header prepended.
     assert service.captured[0] == PCM
+
+
+@pytest.mark.asyncio
+async def test_segment_emits_usage_for_raw_buffer_duration():
+    from pipecat.frames.frames import MetricsFrame
+    from pipecat.metrics.metrics import STTUsageMetricsData
+    from pipecat.pipeline.worker import PipelineParams
+
+    # WAV mode: usage must measure the raw PCM buffer, not the WAV container.
+    service = _make_capturing_service()
+
+    received_down, _ = await run_test(
+        service,
+        frames_to_send=[
+            VADUserStartedSpeakingFrame(),
+            InputAudioRawFrame(audio=PCM, sample_rate=SAMPLE_RATE, num_channels=1),
+            VADUserStoppedSpeakingFrame(),
+        ],
+        pipeline_params=PipelineParams(enable_usage_metrics=True),
+    )
+
+    usage_data = [
+        d
+        for f in received_down
+        if isinstance(f, MetricsFrame)
+        for d in f.data
+        if isinstance(d, STTUsageMetricsData)
+    ]
+    assert len(usage_data) == 1
+    assert usage_data[0].value.audio_seconds == pytest.approx(len(PCM) / (SAMPLE_RATE * 2))
