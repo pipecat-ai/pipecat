@@ -63,6 +63,8 @@ Reports that appear machine-generated and unverified may be closed with a single
 
 Reports without a runnable reproduction get the `needs-repro` label and one comment asking for it. If no reproduction (or a clear explanation of why one isn't possible) is added within 30 days, the issue is closed automatically. Closed issues can always be reopened once a reproduction is available.
 
+If you respond on a `needs-repro` issue, any comment resets the 30-day clock. When a maintainer reviews your response and confirms it includes a runnable reproduction, they relabel the issue `repro-provided`, which takes it out of the auto-close pool and into the review queue. If what you added still isn't a runnable reproduction, the `needs-repro` label stays and the clock keeps running.
+
 ## Changelog Entries
 
 Every pull request that makes a user-facing change should include a changelog entry. We use a changelog fragment system to avoid merge conflicts.
