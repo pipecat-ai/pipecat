@@ -209,10 +209,15 @@ class _StreamingContext:
         aggregator: Groups this context's streamed tokens back into sentences.
         append_to_context: Whether word frames built for a promoted sentence should
             carry ``append_to_context=True``. Turn-constant for the context.
+        build_tracker: Whether a promoted sentence should get a
+            :class:`WordCompletionTracker` (word-timestamp services) or complete
+            immediately on promotion (push_text_frames=True services). Turn-constant
+            for the context.
     """
 
     aggregator: "_ParallelSentenceAggregator"
     append_to_context: bool
+    build_tracker: bool
 
 
 class AggregatedFrameSequencer:
@@ -303,11 +308,12 @@ class AggregatedFrameSequencer:
         (word-timestamp services) or :meth:`complete_spoken_slot`
         (push_text_frames=True services).
 
-        When the sequencer is non-streaming, or streaming without a tracker
-        (push_text_frames=True providers), this registers a slot immediately. When
-        streaming with a tracker, the call instead feeds this token to the
-        :class:`_ParallelSentenceAggregator` and only registers a real slot once a
-        sentence boundary is confirmed there.
+        When the sequencer is non-streaming, this registers a slot immediately. When
+        streaming — whether or not ``build_tracker`` is set — the call instead feeds
+        this token to the :class:`_ParallelSentenceAggregator` and only registers a
+        real slot once a sentence boundary is confirmed there; a push_text_frames=True
+        (no-tracker) slot completes immediately on promotion (see :meth:`_promote`)
+        since there is no word-timestamp signal to complete it progressively.
 
         Args:
             frame: The AggregatedTextFrame being spoken (one token when streaming).
@@ -326,11 +332,11 @@ class AggregatedFrameSequencer:
                 :meth:`process_word`'s per-call flag.
 
         Returns:
-            Frames unblocked by this call (buffered words replayed once a pending
-            sentence promotes). Always empty for the non-streaming and
-            no-tracker cases.
+            Frames unblocked by this call (a promoted sentence and/or buffered words
+            replayed once a pending sentence promotes). Always empty for the
+            non-streaming case.
         """
-        if not self._streaming or not build_tracker:
+        if not self._streaming:
             self._append_spoken_slot(
                 frame,
                 context_id,
@@ -347,13 +353,14 @@ class AggregatedFrameSequencer:
             return []
 
         sc = self._streaming_contexts.setdefault(
-            context_id, _StreamingContext(_ParallelSentenceAggregator(), append_to_context)
+            context_id,
+            _StreamingContext(_ParallelSentenceAggregator(), append_to_context, build_tracker),
         )
         frames: list[Frame] = []
         async for agg in sc.aggregator.aggregate(
             tts_text, frame.raw_text or frame.text, frame.text
         ):
-            frames.extend(self._promote(agg, context_id, sc.append_to_context))
+            frames.extend(self._promote(agg, context_id, sc.append_to_context, sc.build_tracker))
         return frames
 
     async def register_skipped(
@@ -422,7 +429,7 @@ class AggregatedFrameSequencer:
         if sc is None:
             return []
         agg = await sc.aggregator.flush()
-        return self._promote(agg, context_id, sc.append_to_context) if agg else []
+        return self._promote(agg, context_id, sc.append_to_context, sc.build_tracker) if agg else []
 
     def process_word(
         self,
@@ -557,9 +564,14 @@ class AggregatedFrameSequencer:
     def complete_spoken_slot(self) -> list[Frame]:
         """Mark the first pending spoken slot complete and flush unblocked skipped frames.
 
-        Used by push_text_frames=True services: after the TTSTextFrame has been appended
-        to the audio context, this marks the spoken slot done and releases any skipped
-        frames waiting behind it.
+        Used by push_text_frames=True services: non-streaming callers invoke this
+        directly after appending the unit's TTSTextFrame to the audio context;
+        :meth:`_promote` calls it internally for a streaming (no-tracker) sentence,
+        immediately on promotion. Only ever targets a build_tracker=False slot (a
+        word-timestamp slot completes via :meth:`process_word` instead), so "first
+        pending" is always the caller's own slot even with multiple contexts in
+        flight — such slots complete synchronously, one at a time, in the same
+        call chain that registers them.
 
         Returns:
             AggregatedTextFrame(s) that are now unblocked and should be pushed.
@@ -696,14 +708,17 @@ class AggregatedFrameSequencer:
         )
 
     def _promote(
-        self, agg: _ParallelAggregation, context_id: str, append_to_context: bool
+        self,
+        agg: _ParallelAggregation,
+        context_id: str,
+        append_to_context: bool,
+        build_tracker: bool,
     ) -> list[Frame]:
         """Turn a completed parallel-aggregated sentence into a real spoken slot.
 
-        Builds the real WordCompletionTracker and an ``AggregationType.SENTENCE``
-        AggregatedTextFrame from the three aggregated text channels, appends the
-        slot for ``context_id``, then replays any words that were buffered waiting
-        for it.
+        Builds an ``AggregationType.SENTENCE`` AggregatedTextFrame from the three
+        aggregated text channels and appends the slot for ``context_id``, then
+        replays any words that were buffered waiting for it.
 
         The sentence frame is **emitted downstream** (first in the returned list)
         with ``will_be_spoken=True``: it is the streaming-mode equivalent of the
@@ -711,7 +726,20 @@ class AggregatedFrameSequencer:
         the initial ``spoken_status="new"`` event whose ``segment_id`` the
         subsequent progress frames (built from this same frame's id) reference.
         ``append_to_context`` is False on it — the conversation context is built
-        from the per-word TTSTextFrames, not this announcement.
+        from the per-word TTSTextFrames (or, for push_text_frames=True services,
+        the whole-sentence TTSTextFrame built below), not this announcement.
+
+        When ``build_tracker`` is True (word-timestamp services), the slot gets a
+        real :class:`WordCompletionTracker` and completes progressively as
+        :meth:`process_word` events arrive. When False (push_text_frames=True
+        services, e.g. streamed-token providers with no word-timestamp signal),
+        the slot gets no tracker and is completed immediately: by the time a
+        sentence promotes (confirmed only by the *next* sentence's first token, or
+        by :meth:`finalize` at end of turn), every token making it up has already
+        been sent to the TTS, so there is nothing further to wait for. A
+        whole-sentence TTSTextFrame is built here to carry that content into the
+        conversation context, mirroring the single TTSTextFrame a non-streaming
+        push_text_frames=True service emits per unit.
 
         The slot's ``includes_inter_frame_spaces`` is left False: for a streamed
         (TOKEN-mode) sentence, per-word CJK spacing is stamped by
@@ -722,11 +750,14 @@ class AggregatedFrameSequencer:
             agg: The completed sentence, in the three parallel text channels.
             context_id: The context the promoted slot belongs to.
             append_to_context: Whether word frames for the slot append to context.
+            build_tracker: Whether the slot should track word completion, or
+                complete immediately (push_text_frames=True services).
 
         Returns:
-            The sentence frame followed by any frames unblocked by replaying
-            previously-buffered words. Empty if the aggregated text is entirely
-            whitespace.
+            The sentence frame, followed — for push_text_frames=True services — by
+            the whole-sentence TTSTextFrame and any skipped frames it unblocks,
+            followed by any frames unblocked by replaying previously-buffered
+            words. Empty if the aggregated text is entirely whitespace.
         """
         if not agg.user_facing_text.strip():
             return []
@@ -737,11 +768,28 @@ class AggregatedFrameSequencer:
         frame.context_id = context_id
         frame.will_be_spoken = True
         frame.append_to_context = False
-        tracker = WordCompletionTracker(
-            agg.tts_text, llm_text=agg.llm_text or None, user_facing_text=agg.user_facing_text
+        tracker = (
+            WordCompletionTracker(
+                agg.tts_text, llm_text=agg.llm_text or None, user_facing_text=agg.user_facing_text
+            )
+            if build_tracker
+            else None
         )
         self._append_spoken_slot(frame, context_id, tracker, append_to_context, False)
-        return [frame, *self._drain_buffered_words()]
+        frames: list[Frame] = [frame]
+
+        if not build_tracker:
+            word_frame = TTSTextFrame(
+                agg.user_facing_text, AggregationType.SENTENCE, raw_text=agg.llm_text or None
+            )
+            word_frame.context_id = context_id
+            word_frame.will_be_spoken = True
+            word_frame.append_to_context = append_to_context
+            frames.append(word_frame)
+            frames.extend(self.complete_spoken_slot())
+
+        frames.extend(self._drain_buffered_words())
+        return frames
 
     def _drain_buffered_words(self) -> list[Frame]:
         """Replay previously-buffered word events now that a new slot may match them.

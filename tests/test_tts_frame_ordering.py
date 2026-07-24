@@ -1120,6 +1120,59 @@ class _MockTokenStreamingWSTTSService(TTSService):
         self.create_task(_close(), name=f"mock_token_close_{ctx}")
 
 
+class _MockTokenStreamingPushTextWSTTSService(TTSService):
+    """WebSocket-style TOKEN-streaming TTS with no word-timestamp support (e.g.
+    DeepgramFluxTTSService): one run_tts() call per token, all sharing one audio
+    context, push_text_frames=True.
+
+    Mirrors _MockTokenStreamingWSTTSService but run_tts() never calls
+    add_word_timestamps — audio just appears asynchronously, exercising the
+    push_text_frames=True + TOKEN-streaming combination where the sequencer has
+    no per-word signal and must complete each promoted sentence immediately.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            push_start_frame=True,
+            push_text_frames=True,
+            pause_frame_processing=False,
+            sample_rate=_SAMPLE_RATE,
+            **kwargs,
+        )
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        async def _deliver():
+            await asyncio.sleep(0.01)
+            await self.append_to_audio_context(
+                context_id,
+                TTSAudioRawFrame(
+                    audio=_FAKE_AUDIO,
+                    sample_rate=_SAMPLE_RATE,
+                    num_channels=1,
+                    context_id=context_id,
+                ),
+            )
+
+        self.create_task(_deliver(), name=f"mock_token_push_text_deliver_{context_id}")
+        if False:
+            yield
+
+    async def flush_audio(self, context_id: str | None = None):
+        ctx = context_id or self.get_active_audio_context_id()
+        if not ctx or not self.audio_context_available(ctx):
+            return
+
+        async def _close():
+            await asyncio.sleep(0.02)
+            await self.append_to_audio_context(ctx, TTSStoppedFrame(context_id=ctx))
+            await self.remove_audio_context(ctx)
+
+        self.create_task(_close(), name=f"mock_token_push_text_close_{ctx}")
+
+
 # ---------------------------------------------------------------------------
 # Tests: _force_complete_spoken_slots — TTSTextFrame emission for dropped timestamps
 # ---------------------------------------------------------------------------
@@ -1929,6 +1982,99 @@ async def test_concurrent_tts_speak_frames_dont_cross_contaminate():
         f"Words must stay grouped per context in order; got {grouped}"
     )
     # Two distinct contexts, no cross-contamination.
+    assert len(by_context) == 2
+
+
+@pytest.mark.asyncio
+async def test_token_mode_push_text_frames_groups_into_sentences():
+    """TOKEN mode + push_text_frames=True must track whole sentences, not tokens.
+
+    Regression: a push_text_frames=True (no word-timestamp) service in TOKEN mode
+    used to register one spoken slot per token and never emit a will_be_spoken
+    "new segment" anchor at all (only non-streaming and tracker-based streaming went
+    through sentence promotion). Two tokens are streamed individually here but must
+    be tracked, anchored, and completed as one sentence.
+    """
+    tts = _MockTokenStreamingPushTextWSTTSService(text_aggregation_mode=TextAggregationMode.TOKEN)
+    frames_to_send = [
+        LLMFullResponseStartFrame(),
+        TextFrame(text="Hi"),
+        TextFrame(text=" there."),
+        LLMFullResponseEndFrame(),
+    ]
+    frames_received = await run_test(tts, frames_to_send=frames_to_send)
+    down = frames_received[0]
+
+    # --- One SENTENCE anchor for the whole response, not one per token ---
+    sentence_frames = [
+        f
+        for f in down
+        if type(f) is AggregatedTextFrame and f.aggregated_by == AggregationType.SENTENCE
+    ]
+    assert [f.text for f in sentence_frames] == ["Hi there."], (
+        f"Expected one sentence-level anchor, got {[f.text for f in sentence_frames]}"
+    )
+    assert sentence_frames[0].will_be_spoken
+    assert not sentence_frames[0].append_to_context
+
+    # --- One TTSTextFrame carrying the whole sentence into the context ---
+    context_frames = [f for f in down if isinstance(f, TTSTextFrame) and f.append_to_context]
+    assert [f.text for f in context_frames] == ["Hi there."], (
+        f"Expected one whole-sentence TTSTextFrame, got {[f.text for f in context_frames]}"
+    )
+    assert context_frames[0].will_be_spoken
+
+
+@pytest.mark.asyncio
+async def test_token_mode_push_text_frames_speak_frame_emits_single_anchor():
+    """A TTSSpeakFrame in TOKEN mode + push_text_frames=True emits exactly one anchor.
+
+    Mirrors test_tts_speak_frame_emits_single_anchor_in_token_mode for the
+    push_text_frames=True (no word-timestamp) path.
+    """
+    tts = _MockTokenStreamingPushTextWSTTSService(text_aggregation_mode=TextAggregationMode.TOKEN)
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[TTSSpeakFrame(text="hello world", append_to_context=False)],
+    )
+    down = frames_received[0]
+    anchors = [
+        f
+        for f in down
+        if type(f) is AggregatedTextFrame and f.will_be_spoken and f.text == "hello world"
+    ]
+    assert len(anchors) == 1, f"Expected exactly one anchor, got {len(anchors)}"
+    context_frames = [f for f in down if isinstance(f, TTSTextFrame) and f.text == "hello world"]
+    assert len(context_frames) == 1, (
+        f"Expected exactly one whole-utterance TTSTextFrame, got {len(context_frames)}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_token_mode_push_text_frames_concurrent_speak_frames_dont_cross_contaminate():
+    """Two back-to-back TTSSpeakFrames stay in their own contexts (push_text_frames=True).
+
+    Mirrors test_concurrent_tts_speak_frames_dont_cross_contaminate for the
+    push_text_frames=True (no word-timestamp) path.
+    """
+    tts = _MockTokenStreamingPushTextWSTTSService(text_aggregation_mode=TextAggregationMode.TOKEN)
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[
+            TTSSpeakFrame(text="Comment ça va", append_to_context=False),
+            TTSSpeakFrame(text="Bom jour", append_to_context=False),
+        ],
+    )
+    down = frames_received[0]
+    word_frames = [f for f in down if isinstance(f, TTSTextFrame)]
+
+    by_context: dict[str, list[str]] = {}
+    for f in word_frames:
+        by_context.setdefault(f.context_id, []).append(f.text)
+    grouped = list(by_context.values())
+    assert grouped == [["Comment ça va"], ["Bom jour"]], (
+        f"Each utterance must stay a single whole-sentence frame in its own context; got {grouped}"
+    )
     assert len(by_context) == 2
 
 

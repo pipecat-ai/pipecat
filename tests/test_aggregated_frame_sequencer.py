@@ -1378,18 +1378,30 @@ class TestRegisterSpokenStreaming(unittest.IsolatedAsyncioTestCase):
         word_frames = [f for f in result if isinstance(f, TTSTextFrame)]
         self.assertEqual(word_frames[0].text, "five")
 
-    async def test_no_tracker_registers_each_token_immediately(self):
-        # streaming + build_tracker=False (push_text_frames=True): per-token slots.
+    async def test_no_tracker_still_groups_into_sentences(self):
+        # streaming + build_tracker=False (push_text_frames=True): tokens are still
+        # grouped into sentences, not registered as one slot per token. The promoted
+        # slot completes immediately (no tracker to progress it), so it's swept from
+        # _slots as soon as it promotes.
         seq = _seq(streaming=True)
         await seq.register_spoken(
             _spoken_frame("Hi"), "ctx1", "Hi", append_to_context=True, build_tracker=False
         )
-        self.assertEqual(len(seq._slots), 1)
-        self.assertIsNone(seq._slots[0].tracker)
-        await seq.register_spoken(
-            _spoken_frame(" there"), "ctx1", " there", append_to_context=True, build_tracker=False
-        )
-        self.assertEqual(len(seq._slots), 2)
+        self.assertEqual(seq._slots, [])  # nothing promoted yet
+        result = []
+        for t in (" there", "!", " How"):
+            result += await seq.register_spoken(
+                _spoken_frame(t), "ctx1", t, append_to_context=True, build_tracker=False
+            )
+        self.assertEqual(seq._slots, [])  # promoted and immediately completed
+        agg_frames = [f for f in result if type(f) is AggregatedTextFrame]
+        word_frames = [f for f in result if isinstance(f, TTSTextFrame)]
+        self.assertEqual([f.text for f in agg_frames], ["Hi there!"])
+        self.assertTrue(agg_frames[0].will_be_spoken)
+        self.assertFalse(agg_frames[0].append_to_context)
+        self.assertEqual([f.text for f in word_frames], ["Hi there!"])
+        self.assertTrue(word_frames[0].will_be_spoken)
+        self.assertTrue(word_frames[0].append_to_context)
 
 
 # ---------------------------------------------------------------------------
