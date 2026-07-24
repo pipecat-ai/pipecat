@@ -606,9 +606,8 @@ async def test_second_turn_start_does_not_race_ahead_of_first_turn_completion():
     since that service's frame-processing loop is never paused while audio is
     in flight, a second turn's LLMFullResponseStartFrame can be dequeued and
     processed while the first turn's audio context (delivered asynchronously,
-    here after a short delay) is still draining. Before routing it through the
-    serialization queue, that Start frame would be pushed immediately — ahead
-    of the first turn's TTSStoppedFrame/LLMFullResponseEndFrame — which is
+    here after a short delay) is still draining. The Start frame must still be
+    emitted only after the first turn's TTSStoppedFrame/LLMFullResponseEndFrame —
     exactly the ordering downstream consumers like LLMAssistantAggregator rely
     on turns never violating.
     """
