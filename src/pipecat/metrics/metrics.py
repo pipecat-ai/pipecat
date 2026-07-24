@@ -107,6 +107,30 @@ class LLMUsageMetricsData(MetricsData):
     value: LLMTokenUsage
 
 
+class STTUsage(BaseModel):
+    """Usage statistics for STT operations.
+
+    Reports raw usage, not cost. Values are incremental deltas since the
+    previous usage report; consumers sum them across a session.
+
+    Parameters:
+        audio_seconds: Client-measured seconds of audio submitted to the
+            service since the last usage report.
+    """
+
+    audio_seconds: float
+
+
+class STTUsageMetricsData(MetricsData):
+    """Speech-to-Text usage metrics data.
+
+    Parameters:
+        value: Usage statistics for the STT operation.
+    """
+
+    value: STTUsage
+
+
 class TTSUsageMetricsData(MetricsData):
     """Text-to-Speech usage metrics data.
 

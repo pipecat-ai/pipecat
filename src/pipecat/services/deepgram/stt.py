@@ -711,6 +711,9 @@ class DeepgramSTTService(STTService):
                 if from_finalize:
                     self.confirm_finalize()
                 if len(transcript) > 0:
+                    # Report usage before the transcription frame so tracing can
+                    # attach it to the STT span the frame closes.
+                    await self.emit_stt_usage_metrics()
                     await self.push_frame(
                         TranscriptionFrame(
                             transcript,

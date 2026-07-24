@@ -242,6 +242,19 @@ def _add_token_usage_to_span(span, token_usage):
             )
 
 
+def _add_stt_usage_to_span(span, usage):
+    """Add STT usage metrics to a span (internal use only).
+
+    Args:
+        span: The span to add usage metrics to.
+        usage: ``STTUsage`` object with audio seconds.
+    """
+    if not is_tracing_available() or usage is None:
+        return
+
+    span.set_attribute("metrics.audio_seconds", usage.audio_seconds)
+
+
 def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Callable:
     """Trace TTS service methods with TTS-specific attributes.
 
@@ -540,6 +553,8 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
     - Transcription text and final status
     - Language information
     - Performance metrics like TTFB
+    - Usage metrics (audio seconds) when the service reports them via
+      ``start_stt_usage_metrics``
 
     The span is scoped to one STT segment, from
     ``VADUserStartedSpeakingFrame`` (or the first ``TranscriptionFrame``
@@ -563,6 +578,20 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
         return _noop_decorator if func is None else _noop_decorator(func)
 
     def decorator(f):
+        def attach_pending_usage(state):
+            """Attach accumulated usage to the open span and clear it.
+
+            Called at every span-close site so usage can't bleed into a
+            later span. Usage is accumulated (rather than attached as it
+            arrives) because services emit it just before pushing the
+            finalized transcript — at which point the span may not be
+            open yet — and a single span may cover several usage events.
+            """
+            usage = state.get("pending_usage")
+            if usage is not None:
+                _add_stt_usage_to_span(state["span"], usage)
+                state["pending_usage"] = None
+
         def patch_push_frame(owner):
             """Wrap ``owner.push_frame`` to drive the STT span lifecycle.
 
@@ -697,6 +726,7 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
                         state["segments"] = []
                         return
                     state["span"].set_attribute("stt.incomplete", True)
+                    attach_pending_usage(state)
                     state["span"].end()
                     state["span"] = None
                     state["segment_start_time"] = None
@@ -722,6 +752,7 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
                     if frame.user_id:
                         span.set_attribute("user_id", frame.user_id)
                     if frame.finalized:
+                        attach_pending_usage(state)
                         span.end()
                         state["span"] = None
                         state["segment_start_time"] = None
@@ -731,7 +762,12 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
             async def patched_push_frame(self, frame, direction=FrameDirection.DOWNSTREAM):
                 state = getattr(self, "_stt_span_state", None)
                 if state is None:
-                    state = {"span": None, "segment_start_time": None, "segments": []}
+                    state = {
+                        "span": None,
+                        "segment_start_time": None,
+                        "segments": [],
+                        "pending_usage": None,
+                    }
                     self._stt_span_state = state
 
                 if getattr(self, "_tracing_enabled", False):
@@ -785,6 +821,7 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
                     return
                 try:
                     span = state["span"]
+                    attach_pending_usage(state)
                     span.end(end_time=int(end_time * 1e9))
                     state["span"] = None
                     state["segment_start_time"] = None
@@ -795,21 +832,60 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
             setattr(patched_stop, "__stt_tracing_stop_ttfb_wrapped__", True)
             owner.stop_ttfb_metrics = patched_stop
 
+        def patch_start_stt_usage_metrics(owner):
+            """Wrap ``owner.start_stt_usage_metrics`` to accumulate usage for the span.
+
+            Usage is merged into the span state's ``pending_usage`` and
+            attached when the span closes (see ``attach_pending_usage``).
+            Values are summed across events.
+            """
+            original_start = owner.start_stt_usage_metrics
+            if getattr(original_start, "__stt_tracing_usage_wrapped__", False):
+                return
+
+            @functools.wraps(original_start)
+            async def patched_start(self, usage):
+                await original_start(self, usage)
+                if not getattr(self, "_tracing_enabled", False):
+                    return
+                try:
+                    state = getattr(self, "_stt_span_state", None)
+                    if state is None:
+                        state = {
+                            "span": None,
+                            "segment_start_time": None,
+                            "segments": [],
+                            "pending_usage": None,
+                        }
+                        self._stt_span_state = state
+                    pending = state.get("pending_usage")
+                    if pending is None:
+                        state["pending_usage"] = usage.model_copy()
+                    else:
+                        pending.audio_seconds += usage.audio_seconds
+                except Exception as e:
+                    logging.warning(f"Error in STT usage tracing: {e}")
+
+            setattr(patched_start, "__stt_tracing_usage_wrapped__", True)
+            owner.start_stt_usage_metrics = patched_start
+
         class _TracedSTTDescriptor:
             """Class-level descriptor that wires up STT tracing at class definition time.
 
             ``__set_name__`` fires when the class body finishes evaluating,
             giving us a chance to wrap the owner's ``push_frame`` so that
             VAD, transcription, and finalization events drive the span
-            lifecycle, and to wrap ``stop_ttfb_metrics`` so the
-            TTFB-timeout path can attach metrics and close the span when
-            no finalized transcript ever arrives. The decorated method
+            lifecycle, to wrap ``stop_ttfb_metrics`` so the TTFB-timeout
+            path can attach metrics and close the span when no finalized
+            transcript ever arrives, and to wrap ``start_stt_usage_metrics``
+            so usage lands on the span at close. The decorated method
             itself runs unchanged.
             """
 
             def __set_name__(self, owner, attr_name):
                 patch_push_frame(owner)
                 patch_stop_ttfb_metrics(owner)
+                patch_start_stt_usage_metrics(owner)
                 setattr(owner, attr_name, f)
 
         return _TracedSTTDescriptor()
