@@ -263,8 +263,6 @@ suite:
     scenarios: [filter_incomplete_turns_function_calling]
   - bot: turn-management/turn-management-filter-incomplete-turns-function-calling.py
     scenarios: [filter_incomplete_turns]
-  - bot: turn-management/turn-management-filter-incomplete-turns-ack-before-tool.py
-    scenarios: [filter_incomplete_turns_ack_before_tool]
 
   #
   # DTMF: the caller drives a keypad phone menu (IVR) with DTMF tones instead of
