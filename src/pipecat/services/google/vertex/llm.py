@@ -140,6 +140,7 @@ class GoogleVertexLLMService(GoogleLLMService):
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
             thinking=None,
+            safety_settings=None,
             extra={},
         )
 
