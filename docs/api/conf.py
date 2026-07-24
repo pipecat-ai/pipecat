@@ -60,6 +60,8 @@ autodoc_default_options = {
 
 # Mock imports for optional dependencies
 autodoc_mock_imports = [
+    # Hecttor - not publicly available, installed manually
+    "hecttor_sdk",
     # Krisp - has build issues on some platforms
     "krisp_audio",
     # System-specific GUI libraries
