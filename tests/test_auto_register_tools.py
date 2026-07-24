@@ -654,5 +654,108 @@ class TestAsyncToolCancellationPruning(unittest.TestCase):
         self.assertIn(CANCEL_ASYNC_TOOL_NAME, service._functions)
 
 
+class TestRebindChangedAdvertisedHandler(unittest.TestCase):
+    """Re-advertising a name with a different handler rebinds the auto-registered entry.
+
+    Regression test for the case where two consecutive advertised tool sets carry
+    the same tool name but different handlers (e.g. a fresh per-node closure after
+    a Flows transition). The new handler must take effect, not be silently dropped.
+    """
+
+    def _service(self) -> LLMService:
+        return LLMService()
+
+    def _capture_debug(self):
+        sink = io.StringIO()
+        handler_id = logger.add(sink, level="DEBUG", format="{message}")
+        return sink, handler_id
+
+    @staticmethod
+    def _named_direct_function(name: str, marker: str):
+        """Build a distinct direct function advertised under ``name``."""
+
+        async def fn(params: FunctionCallParams, value: str):
+            """Do a thing.
+
+            Args:
+                value: A value.
+            """
+            await params.result_callback({"marker": marker})
+
+        fn.__name__ = name
+        return fn
+
+    def test_rebinds_changed_handler_for_still_advertised_direct_function(self):
+        service = self._service()
+        first = self._named_direct_function("switch", "A")
+        second = self._named_direct_function("switch", "B")
+        service._sync_registered_tool_handlers([first])
+        self.assertIs(service._functions["switch"].handler.function, first)
+        # Re-advertise the same name with a different handler — it must rebind.
+        service._sync_registered_tool_handlers([second])
+        self.assertIs(service._functions["switch"].handler.function, second)
+        # Still managed by the advertised set, so it stays prunable.
+        self.assertTrue(service._functions["switch"].auto_registered)
+
+    def test_rebinds_changed_schema_handler_for_still_advertised_name(self):
+        service = self._service()
+
+        async def handler_a(params: FunctionCallParams):
+            await params.result_callback({"marker": "A"})
+
+        async def handler_b(params: FunctionCallParams):
+            await params.result_callback({"marker": "B"})
+
+        def schema(handler):
+            return FunctionSchema(
+                name="x", description="d", properties={}, required=[], handler=handler
+            )
+
+        service._sync_registered_tool_handlers([schema(handler_a)])
+        self.assertIs(service._functions["x"].handler, handler_a)
+        # The issue's exact repro: same name, new handler on the next advertised set.
+        service._sync_registered_tool_handlers([schema(handler_b)])
+        self.assertIs(service._functions["x"].handler, handler_b)
+        self.assertTrue(service._functions["x"].auto_registered)
+
+    def test_repeated_identical_schema_handler_does_not_churn(self):
+        service = self._service()
+        service._sync_registered_tool_handlers([lookup_order_schema()])
+        sink, handler_id = self._capture_debug()
+        try:
+            # The handler object is unchanged across frames, so no rebind should happen.
+            service._sync_registered_tool_handlers([lookup_order_schema()])
+        finally:
+            logger.remove(handler_id)
+        self.assertIs(service._functions["lookup_order"].handler, lookup_order_handler)
+        self.assertNotIn("rebound", sink.getvalue())
+
+    def test_explicit_registration_not_rebound_by_advertised_handler(self):
+        service = self._service()
+
+        async def explicit_handler(params: FunctionCallParams):
+            await params.result_callback({})
+
+        async def advertised_handler(params: FunctionCallParams):
+            await params.result_callback({})
+
+        def schema(handler):
+            return FunctionSchema(
+                name="lookup_order", description="d", properties={}, required=[], handler=handler
+            )
+
+        service.register_function("lookup_order", explicit_handler)
+        sink = io.StringIO()
+        handler_id = logger.add(sink, level="WARNING", format="{message}")
+        try:
+            service._sync_registered_tool_handlers([schema(advertised_handler)])
+        finally:
+            logger.remove(handler_id)
+        # Explicit registration wins; the advertised handler does not rebind it.
+        self.assertIs(service._functions["lookup_order"].handler, explicit_handler)
+        self.assertFalse(service._functions["lookup_order"].auto_registered)
+        self.assertIn("unnecessary", sink.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
