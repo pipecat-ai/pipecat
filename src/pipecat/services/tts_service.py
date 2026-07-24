@@ -1514,10 +1514,9 @@ class TTSService(AIService):
         already emitted the frame), the end frame held for ``context_id`` is re-pushed
         with the PTS of the last word frame.
 
-        The lookup is keyed by ``context_id`` rather than gated on a single shared
-        "response started" flag, since multiple audio contexts (and therefore
-        multiple held end frames) can be in flight concurrently — each context's
-        own completion must re-push its own frame independently.
+        The lookup is keyed by ``context_id`` since multiple audio contexts (and
+        therefore multiple held end frames) can be in flight concurrently — each
+        context's own completion must re-push its own frame independently.
 
         Args:
             context_id: The audio context that just ended, used to look up the held
