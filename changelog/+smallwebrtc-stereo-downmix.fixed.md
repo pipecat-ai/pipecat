@@ -1,0 +1,3 @@
+Fixed `SmallWebRTCTransport` input audio being read as half-speed garbage when
+`audio_in_sample_rate` matches the wire rate (48000): stereo frames bypassed
+the mono-downmixing resampler and their interleaved bytes were labeled mono.

@@ -408,10 +408,13 @@ class SmallWebRTCClient:
                 await asyncio.sleep(0.01)
                 continue
 
-            # Resample if needed, otherwise use the frame as-is
+            # Resample if needed, otherwise use the frame as-is. The resampler
+            # also downmixes to mono, so non-mono frames must go through it
+            # even when the rate already matches (aiortc decodes to stereo) —
+            # otherwise interleaved stereo bytes get labeled as mono PCM.
             frames_to_process = (
                 self._audio_in_resampler.resample(frame)
-                if frame.sample_rate != self._in_sample_rate
+                if frame.sample_rate != self._in_sample_rate or frame.layout.name != "mono"
                 else [frame]
             )
 
