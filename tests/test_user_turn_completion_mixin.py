@@ -339,11 +339,11 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         self.assertFalse(processor._user_turn_completion_voiced)
 
     async def test_post_tool_response_speaks_after_voiced_filler(self):
-        """Regression test for T-2817: silence after a tool call following a spoken ✓ filler.
+        """Regression test for #5063: silence after a tool call following a spoken ✓ filler.
 
         Sequence: the LLM speaks a ✓ acknowledgement ("One moment."), setting the
         latch; it then commits to a tool call (FunctionCallsStartedFrame); the
-        filler response ends (per-response state reset, latch previously survived);
+        filler response ends (per-response state resets; the latch is per-turn);
         the post-tool inference produces a fresh ✓ with the real answer. Without
         resetting the latch on the tool-call path, the second response would be
         silently dropped and the bot would go quiet despite the tool succeeding.
