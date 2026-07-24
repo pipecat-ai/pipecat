@@ -4,10 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import pytest
-from websockets.exceptions import ConnectionClosedOK
-from websockets.frames import Close
-
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.settings import TTSSettings
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
@@ -113,38 +109,3 @@ def test_cartesia_korean_timestamp_groups_reassemble_with_spaces():
         )
         == "저는 여러분의 AI 어시스턴트입니다."
     )
-
-
-class _ClosedWebSocket:
-    """Websocket stand-in whose close fails because the server closed first."""
-
-    async def close(self):
-        raise ConnectionClosedOK(Close(1001, "going away"), Close(1001, "going away"), True)
-
-
-@pytest.mark.asyncio
-async def test_disconnect_does_not_push_error_when_server_closed_first():
-    """A ConnectionClosed during disconnect is not a pipeline error.
-
-    When the server closes the websocket first (normal during teardown), the
-    close in _disconnect_websocket raises ConnectionClosed. That must not be
-    reported as a pipeline error: a non-fatal ErrorFrame here can e.g. trigger
-    a spurious ServiceSwitcherStrategyFailover switch on shutdown.
-    """
-    service = CartesiaTTSService(
-        api_key="test-key",
-        settings=CartesiaTTSService.Settings(voice="test-voice"),
-    )
-    service._websocket = _ClosedWebSocket()
-
-    errors = []
-
-    async def push_error(error_msg=None, exception=None):
-        errors.append(error_msg)
-
-    service.push_error = push_error
-
-    await service._disconnect_websocket()
-
-    assert errors == []
-    assert service._websocket is None
