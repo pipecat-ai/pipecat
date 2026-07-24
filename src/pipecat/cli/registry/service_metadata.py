@@ -376,6 +376,14 @@ class ServiceRegistry:
             include_params=["api_key"],
         ),
         ServiceDefinition(
+            value="modulate_stt",
+            label="Modulate",
+            package="pipecat-ai[modulate]",
+            class_name=["ModulateSTTService"],
+            env_prefix="MODULATE",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
             value="nvidia_stt",
             label="NVIDIA",
             package="pipecat-ai[nvidia]",
