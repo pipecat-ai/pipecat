@@ -127,6 +127,7 @@ class RTVIProcessor(FrameProcessor):
 
     async def set_client_ready(self):
         """Mark the client as ready and trigger the ready event."""
+        logger.debug(f"{self}: client is ready")
         self._client_ready = True
         await self._call_event_handler("on_client_ready")
 
