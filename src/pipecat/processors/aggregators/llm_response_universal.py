@@ -1413,6 +1413,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # arriving in the same speaking window are bundled into a single deferred push.
         self._push_context_on_bot_stopped_speaking: bool = False
 
+        # When a function call result arrives before the LLM completes its response, we defer
+        # the LLM re-invocation until the full response has arrived when LLMFullResponseEndFrame
+        # frame is received
+        self._push_context_on_llm_full_response_ended: bool = False
+
         self._assistant_turn_start_timestamp = ""
 
         self._thought_append_to_context = False
@@ -1458,6 +1463,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await super().reset()
         await self._reset_thought_aggregation()  # Just to be safe
         self._push_context_on_bot_stopped_speaking = False
+        self._push_context_on_llm_full_response_ended = False
 
     async def _reset_thought_aggregation(self):
         """Reset the thought aggregation state."""
@@ -1597,10 +1603,16 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if not self._aggregation:
             return ""
 
+        should_push_context = self._push_context_on_llm_full_response_ended == True
+
         aggregation = self.aggregation_string()
         await self.reset()
 
         self._context.add_message({"role": "assistant", "content": aggregation})
+
+        if should_push_context and not self._user_speaking:
+            logger.debug(f"{self}: LLM full response ended — pushing deferred context frame!")
+            await self.push_context_frame(FrameDirection.UPSTREAM)
 
         # Push context frame
         await self.push_context_frame()
@@ -1619,6 +1631,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """
         await super().push_context_frame(direction)
         self._push_context_on_bot_stopped_speaking = False
+        self._push_context_on_llm_full_response_ended = False
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
         await self.push_context_frame(FrameDirection.UPSTREAM)
@@ -1794,6 +1807,14 @@ class LLMAssistantAggregator(LLMContextAggregator):
             # being queued between an LLM response start and end frame.
             logger.debug(f"{self}: Bot is speaking — deferring context frame push.")
             self._push_context_on_bot_stopped_speaking = True
+        elif self._aggregation:
+            # Defer pushing the context frame until the current LLM response is completed
+            # and the aggregated context has been committed. This happens when a very fast
+            # tool call finishes before a slow model completes its last response lines
+            logger.debug(
+                f"{self}: LLM response has not completed yet - deferring context frame push."
+            )
+            self._push_context_on_llm_full_response_ended = True
         else:
             logger.debug(f"{self}: Pushing context frame!")
             await self.push_context_frame(FrameDirection.UPSTREAM)
