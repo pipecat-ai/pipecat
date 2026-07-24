@@ -7,7 +7,7 @@
 """Deepgram speech-to-text service implementation."""
 
 import asyncio
-import inspect
+import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field, fields
 from typing import Any
@@ -41,12 +41,8 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 try:
     from deepgram import AsyncDeepgramClient
     from deepgram.core.events import EventType
-    from deepgram.listen.v1.types import (
-        ListenV1CloseStream,
-        ListenV1Finalize,
-        ListenV1KeepAlive,
-        ListenV1Results,
-    )
+    from deepgram.core.request_options import RequestOptions
+    from deepgram.listen.v1.types import ListenV1Results
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Deepgram, you need to `uv add "pipecat-ai[deepgram]"`.')
@@ -436,16 +432,12 @@ class DeepgramSTTService(STTService):
                 from deepgram import DeepgramClientEnvironment
 
                 ws_url, http_url = _derive_deepgram_urls(base_url)
-                env_kwargs: dict[str, str] = {
-                    "base": http_url,
-                    "production": ws_url,
-                    "agent": ws_url,
-                }
-                # deepgram-sdk 7.2.0 added a required `agent_rest` kwarg; older
-                # 6.x releases do not accept it. Pass it only when present.
-                if "agent_rest" in inspect.signature(DeepgramClientEnvironment).parameters:
-                    env_kwargs["agent_rest"] = http_url
-                environment = DeepgramClientEnvironment(**env_kwargs)
+                environment = DeepgramClientEnvironment(
+                    base=http_url,
+                    production=ws_url,
+                    agent=ws_url,
+                    agent_rest=http_url,
+                )
                 self._client = AsyncDeepgramClient(api_key=api_key, environment=environment)
             except Exception:
                 logger.warning(
@@ -457,7 +449,13 @@ class DeepgramSTTService(STTService):
 
         self._connection = None
         self._connection_task = None
+        self._audio_sender_task = None
+        self._watchdog_task = None
         self._connection_ready = asyncio.Event()
+        self._disconnecting = False
+        self._audio_queue: asyncio.Queue[bytes] = asyncio.Queue()
+        self._last_sent_time: float = 0.0
+        self._handler_id: int = 0
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -533,7 +531,7 @@ class DeepgramSTTService(STTService):
         await self._disconnect()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
-        """Send audio data to Deepgram for transcription.
+        """Enqueue audio for sending to Deepgram.
 
         Args:
             audio: Raw audio bytes to transcribe.
@@ -541,20 +539,23 @@ class DeepgramSTTService(STTService):
         Yields:
             Frame: None (transcription results come via WebSocket callbacks).
         """
-        if self._connection:
-            try:
-                await self._connection.send_media(audio)
-            except Exception as e:
-                logger.warning(f"{self}: send_media failed, connection will reconnect: {e}")
-                self._connection = None
+        await self._audio_queue.put(audio)
         yield None
 
-    def _build_connect_kwargs(self) -> dict:
-        """Build keyword arguments for ``client.listen.v1.connect()`` from current settings."""
+    def _build_connect_kwargs(self) -> tuple[dict, RequestOptions | None]:
+        """Build arguments for ``client.listen.v1.connect()`` from current settings.
+
+        Returns a (kwargs, request_options) tuple. ``kwargs`` contains the
+        parameters accepted directly by the v7 ``connect()`` method. Any
+        unrecognised keys (from ``settings.extra`` or ``addons``) are placed in
+        ``request_options["additional_query_parameters"]`` so the SDK still
+        forwards them as query-string parameters.
+        """
         kwargs = {}
+        extra_query_params: dict = {}
         s = self._settings
 
-        # Declared Deepgram-specific fields
+        # Declared Deepgram-specific fields — all are known v7 connect() params.
         for f in fields(s):
             if f.name in ("model", "language", "extra") or f.name.startswith("_"):
                 continue
@@ -592,31 +593,45 @@ class DeepgramSTTService(STTService):
         if self._mip_opt_out is not None:
             kwargs["mip_opt_out"] = str(self._mip_opt_out).lower()
 
-        # Any remaining values in extra (that didn't map to declared fields)
+        # Any remaining values in settings.extra and addons are not in the v7
+        # connect() signature; route them through request_options.
         for key, value in s.extra.items():
             if value is not None:
                 if isinstance(value, list):
-                    kwargs[key] = value
+                    extra_query_params[key] = value
                 elif isinstance(value, bool):
-                    kwargs[key] = str(value).lower()
+                    extra_query_params[key] = str(value).lower()
                 else:
-                    kwargs[key] = str(value)
+                    extra_query_params[key] = str(value)
 
         if self._addons:
             for key, value in self._addons.items():
-                kwargs[key] = str(value)
+                extra_query_params[key] = str(value)
 
-        return kwargs
+        request_options: RequestOptions | None = (
+            RequestOptions(additional_query_parameters=extra_query_params)
+            if extra_query_params
+            else None
+        )
+        return kwargs, request_options
 
     async def _connect(self):
         logger.debug("Connecting to Deepgram")
+        self._disconnecting = False
+        self._audio_queue = asyncio.Queue()
+        self._handler_id += 1
         self._connection_task = self.create_task(self._connection_handler())
+        self._audio_sender_task = self.create_task(
+            self._audio_sender_handler(), f"{self}::audio_sender"
+        )
+        self._watchdog_task = self.create_task(self._watchdog_handler(), f"{self}::watchdog")
 
     async def _disconnect(self):
         if not self._connection_task:
             return
 
         logger.debug("Disconnecting from Deepgram")
+        self._disconnecting = True
         # Clear _connection and _connection_ready first to prevent run_stt
         # from sending audio during the close handshake, and to ensure any
         # concurrent _do_reconnect() waiter sees a clean state before the
@@ -626,66 +641,137 @@ class DeepgramSTTService(STTService):
         self._connection = None
 
         if connection:
-            await connection.send_close_stream(ListenV1CloseStream(type="CloseStream"))
+            await connection.send_close_stream()
 
-        await self.cancel_task(self._connection_task)
-        self._connection_task = None
+        # Both tasks are cancelled without awaiting for the same reason: if the
+        # WebSocket connection is dead, send_media() and websockets' close
+        # handshake can block for many seconds and won't respond to CancelledError
+        # promptly. Fire-and-forget; each task cleans itself
+        # up via the task manager's done callback when it eventually exits.
+        if self._audio_sender_task:
+            self._audio_sender_task.cancel()
+            self._audio_sender_task = None
+
+        if self._watchdog_task:
+            await self.cancel_task(self._watchdog_task)
+            self._watchdog_task = None
+
+        # _handler_id prevents the stale connection task from touching the new
+        # connection's state once it eventually exits.
+        if self._connection_task:
+            self._connection_task.cancel()
+            self._connection_task = None
 
     async def _connection_handler(self):
-        """Manages the full WebSocket lifecycle inside a single async with block.
+        """Manages a single WebSocket connection lifetime.
 
-        Reconnects automatically after transient errors. Exits cleanly when
-        the task is cancelled (i.e. on stop/cancel).
+        Exits cleanly when cancelled (intentional stop/cancel). For unexpected
+        drops, reconnection is driven by _on_close.
         """
-        while True:
-            connect_kwargs = self._build_connect_kwargs()
-            keepalive_task = None
-            try:
-                async with self._client.listen.v1.connect(**connect_kwargs) as connection:
-                    self._connection = connection
-                    self._connection_ready.set()
-                    connection.on(EventType.MESSAGE, self._on_message)
-                    connection.on(EventType.ERROR, self._on_error)
+        logger.info(f"{self}: connecting")
+        connect_kwargs, request_options = self._build_connect_kwargs()
+        handler_id = self._handler_id
+        try:
+            async with self._client.listen.v1.connect(
+                **connect_kwargs, request_options=request_options
+            ) as connection:
+                self._connection = connection
+                connection.on(EventType.OPEN, self._on_open)
+                connection.on(EventType.MESSAGE, self._on_message)
+                connection.on(EventType.ERROR, self._on_error)
+                connection.on(EventType.CLOSE, self._on_close)
 
-                    logger.debug(f"{self}: Websocket connection initialized")
-
-                    keepalive_task = self.create_task(
-                        self._keepalive_handler(), f"{self}::keepalive"
-                    )
-                    await connection.start_listening()
-            except Exception as e:
-                logger.warning(f"{self}: Connection lost, will retry: {e}")
-            finally:
+                await connection.start_listening()
+        except Exception as e:
+            logger.warning(f"{self}: Connection failed: {e}")
+        finally:
+            # Only touch shared state if we are still the current handler.
+            # A stale task can outlive _disconnect() — _handler_id tells us apart.
+            if self._handler_id == handler_id:
                 self._connection_ready.clear()
                 self._connection = None
-                if keepalive_task:
-                    await self.cancel_task(keepalive_task)
 
-    async def _keepalive_handler(self):
-        """Periodically send KeepAlive frames to prevent server-side timeout.
+    async def _audio_sender_handler(self):
+        """Drain the audio queue and forward each chunk to Deepgram.
 
-        Deepgram closes inactive connections after 10 seconds (NET-0001 error).
-        Sending every 5 seconds stays within the recommended 3-5 second interval.
+        This is the only coroutine that writes audio to the WebSocket, eliminating
+        concurrent-write races between audio and keepalive frames.
         """
         while True:
-            await asyncio.sleep(5)
+            audio = await self._audio_queue.get()
+            if self._connection and self._connection_ready.is_set():
+                try:
+                    await self._connection.send_media(audio)
+                    self._last_sent_time = time.monotonic()
+                except Exception as e:
+                    logger.warning(f"{self}: send_media failed: {e}")
+                    self._connection = None
+            # If not connected, drop the chunk — the base class buffers frames
+            # during reconnect and will replay them via run_stt() once ready.
+            self._audio_queue.task_done()
+
+    async def _watchdog_handler(self):
+        """Detect a stuck send_media or idle connection and act accordingly.
+
+        Checks every 500 ms. If nothing has been sent for more than 1 second:
+        - Queue non-empty  → send_media is likely blocked → trigger reconnect.
+        - Queue empty      → connection is idle → send a KeepAlive.
+
+        Deepgram closes inactive connections after 10 s (NET-0001). Sending a
+        KeepAlive when idle keeps the session alive without racing with audio.
+        """
+        stuck_threshold = 1.0
+        check_interval = 0.5
+        while not self._disconnecting:
+            await asyncio.sleep(check_interval)
+            if not self._connection_ready.is_set():
+                continue
+            if time.monotonic() - self._last_sent_time <= stuck_threshold:
+                continue
+            if not self._audio_queue.empty():
+                # Items are waiting but nothing has been sent — sender is stuck.
+                logger.warning(f"{self}: watchdog detected stuck send_media, reconnecting")
+                self._connection = None
+                self.create_task(self._reconnect())
+                return
+            # Idle connection — send a KeepAlive to prevent server-side timeout.
             if self._connection:
                 try:
-                    await self._connection.send_keep_alive(ListenV1KeepAlive(type="KeepAlive"))
-                    logger.trace(f"{self}: Sent keepalive")
+                    await asyncio.wait_for(self._connection.send_keep_alive(), timeout=1.0)
+                    self._last_sent_time = time.monotonic()
+                except TimeoutError:
+                    logger.warning(f"{self}: keepalive timed out, reconnecting")
+                    self._connection = None
+                    self.create_task(self._reconnect())
+                    return
                 except Exception as e:
-                    logger.warning(f"{self}: Keepalive failed: {e}")
+                    logger.warning(f"{self}: keepalive failed: {e}")
 
     async def _start_metrics(self):
         """Start processing metrics collection for this utterance."""
         await self.start_processing_metrics()
 
+    async def _on_open(self, open):
+        logger.debug(f"{self}: connection opened")
+        self._last_sent_time = time.monotonic()
+        self._connection_ready.set()
+
     async def _on_error(self, error):
-        logger.warning(f"{self} connection error, will retry: {error}")
+        logger.warning(f"{self} connection error: {error}")
         await self.push_error(error_msg=f"{error}")
         await self.stop_all_metrics()
-        # Reconnection is handled automatically by the retry loop in
-        # _connection_handler once start_listening() exits after the error.
+        # _on_close always follows an error and will drive reconnection.
+
+    async def _on_close(self, close):
+        logger.debug(f"{self}: connection closed")
+        self._connection = None
+        if not self._disconnecting and not self._reconnecting:
+            # Schedule reconnect as a separate task and return immediately so
+            # _connection_handler can finish __aexit__ cleanly. Awaiting
+            # _reconnect() here would call _disconnect() while
+            # _connection_handler is still alive, hitting the same
+            # self-cancellation/timeout issue as the keepalive handler.
+            self.create_task(self._reconnect())
 
     @traced_stt
     async def _handle_transcription(
@@ -756,5 +842,5 @@ class DeepgramSTTService(STTService):
             # Mark that we're awaiting a from_finalize response
             if self._connection:
                 self.request_finalize()
-                await self._connection.send_finalize(ListenV1Finalize(type="Finalize"))
+                await self._connection.send_finalize()
                 logger.trace(f"Triggered finalize event on: {frame.name=}, {direction=}")
