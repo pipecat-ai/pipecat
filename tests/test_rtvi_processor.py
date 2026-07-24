@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputDTMFFrame,
     InputTransportStartAudioStreamingFrame,
+    OutputTransportMessageUrgentFrame,
 )
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 
@@ -184,6 +185,47 @@ class TestRTVIFrameBasedAudio(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(pushed), 1)
         self.assertIsInstance(pushed[0], InputAudioRawFrame)
         self.assertEqual(pushed[0].sample_rate, 16000)
+
+
+class TestRTVIMuteBeforeClientReady(unittest.IsolatedAsyncioTestCase):
+    """Mute messages emitted before client-ready are buffered, then replayed."""
+
+    def setUp(self):
+        self.processor = RTVIProcessor()
+        self.processor.push_frame = AsyncMock()
+
+    async def asyncTearDown(self):
+        await self.processor.cleanup()
+
+    def _sent_message_types(self):
+        return [
+            c.args[0].message["type"]
+            for c in self.processor.push_frame.call_args_list
+            if isinstance(c.args[0], OutputTransportMessageUrgentFrame)
+        ]
+
+    async def test_mute_before_client_ready_is_buffered_not_sent(self):
+        await self.processor.push_transport_message(RTVI.UserMuteStartedMessage())
+        self.assertEqual(self._sent_message_types(), [])
+        self.assertEqual(len(self.processor._pending_mute_messages), 1)
+
+    async def test_client_ready_flushes_buffered_mute_in_order(self):
+        await self.processor.push_transport_message(RTVI.UserMuteStartedMessage())
+        await self.processor.push_transport_message(RTVI.UserMuteStoppedMessage())
+        await self.processor.set_client_ready()
+        self.assertEqual(self._sent_message_types(), ["user-mute-started", "user-mute-stopped"])
+        self.assertEqual(self.processor._pending_mute_messages, [])
+
+    async def test_mute_after_client_ready_is_sent_immediately(self):
+        await self.processor.set_client_ready()
+        await self.processor.push_transport_message(RTVI.UserMuteStartedMessage())
+        self.assertEqual(self._sent_message_types(), ["user-mute-started"])
+        self.assertEqual(self.processor._pending_mute_messages, [])
+
+    async def test_non_mute_message_before_client_ready_is_not_buffered(self):
+        await self.processor.push_transport_message(RTVI.ServerMessage(data={}))
+        self.assertEqual(self._sent_message_types(), ["server-message"])
+        self.assertEqual(self.processor._pending_mute_messages, [])
 
 
 class TestRTVIDTMF(unittest.IsolatedAsyncioTestCase):
