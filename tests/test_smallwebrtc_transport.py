@@ -4,9 +4,21 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for the SmallWebRTC transport client iterators.
+"""Tests for the SmallWebRTC transport client.
 
-Covers the `MediaStreamError` handling in
+Covers app-message delivery in `SmallWebRTCClient.send_message` /
+`SmallWebRTCConnection.send_app_message`:
+
+1. **Pre-open buffering** — messages sent before the data channel is open
+   (including before the peer connection is established) are queued and
+   flushed, in order, once the channel opens. A channel created by the
+   remote peer arrives from aiortc already open, so the flush must fire on
+   channel arrival, not only on the "open" event.
+
+2. **Closing discard** — messages sent while the connection is closing are
+   discarded.
+
+And the `MediaStreamError` handling in
 `SmallWebRTCClient.read_audio_frame` and `read_video_frame`:
 
 1. **Park on dead track** — when the underlying aiortc track is permanently
@@ -22,6 +34,7 @@ Covers the `MediaStreamError` handling in
 
 import asyncio
 import fractions
+import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock
 
@@ -37,11 +50,110 @@ pytest.importorskip("av")
 from aiortc.mediastreams import MediaStreamError  # noqa: E402
 from av import AudioFrame, VideoFrame  # noqa: E402
 
+from pipecat.frames.frames import OutputTransportMessageUrgentFrame  # noqa: E402
+from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection  # noqa: E402
 from pipecat.transports.smallwebrtc.transport import (  # noqa: E402
     CAM_VIDEO_SOURCE,
     SCREEN_VIDEO_SOURCE,
+    SmallWebRTCCallbacks,
     SmallWebRTCClient,
 )
+
+
+class FakeDataChannel:
+    """Stands in for an aiortc `RTCDataChannel` received from the remote peer."""
+
+    def __init__(self, ready_state="open"):
+        self.readyState = ready_state
+        self.sent = []
+        self._handlers = {}
+
+    def send(self, message):
+        self.sent.append(message)
+
+    def on(self, event):
+        def register(handler):
+            self._handlers[event] = handler
+            return handler
+
+        return register
+
+    async def fire(self, event):
+        await self._handlers[event]()
+
+    @property
+    def sent_types(self):
+        return [json.loads(m)["type"] for m in self.sent]
+
+
+async def _noop(*args):
+    pass
+
+
+def _make_client():
+    connection = SmallWebRTCConnection()
+    callbacks = SmallWebRTCCallbacks(
+        on_app_message=_noop, on_client_connected=_noop, on_client_disconnected=_noop
+    )
+    return SmallWebRTCClient(connection, callbacks), connection
+
+
+def _message(message_type):
+    return OutputTransportMessageUrgentFrame(message={"type": message_type})
+
+
+class TestSendMessage(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.client, self.connection = _make_client()
+
+    async def asyncTearDown(self):
+        await self.connection._pc.close()
+
+    async def test_queues_before_connection_and_flushes_on_channel_arrival(self):
+        """Messages sent pre-connect are buffered and flushed in order.
+
+        The data channel is created by the remote peer, so aiortc emits
+        "datachannel" with the channel already open and no "open" event
+        follows — the flush must happen on arrival.
+        """
+        for message_type in ("user-mute-started", "metrics", "bot-ready"):
+            await self.client.send_message(_message(message_type))
+        self.assertEqual(len(self.connection._outgoing_messages_queue), 3)
+
+        channel = FakeDataChannel()
+        self.connection._pc.emit("datachannel", channel)
+
+        self.assertEqual(channel.sent_types, ["user-mute-started", "metrics", "bot-ready"])
+        self.assertEqual(self.connection._outgoing_messages_queue, [])
+
+    async def test_flushes_on_open_event_when_channel_arrives_connecting(self):
+        """A channel that arrives before opening flushes when "open" fires."""
+        await self.client.send_message(_message("user-mute-started"))
+
+        channel = FakeDataChannel(ready_state="connecting")
+        self.connection._pc.emit("datachannel", channel)
+        self.assertEqual(channel.sent, [])
+
+        channel.readyState = "open"
+        await channel.fire("open")
+        self.assertEqual(channel.sent_types, ["user-mute-started"])
+
+    async def test_sends_directly_when_channel_open(self):
+        channel = FakeDataChannel()
+        self.connection._pc.emit("datachannel", channel)
+
+        await self.client.send_message(_message("server-message"))
+        self.assertEqual(channel.sent_types, ["server-message"])
+        self.assertEqual(self.connection._outgoing_messages_queue, [])
+
+    async def test_discards_when_closing(self):
+        channel = FakeDataChannel()
+        self.connection._pc.emit("datachannel", channel)
+        self.client._closing = True
+
+        await self.client.send_message(_message("server-message"))
+        self.assertEqual(channel.sent, [])
+        self.assertEqual(self.connection._outgoing_messages_queue, [])
 
 
 def _make_audio_self(track):
