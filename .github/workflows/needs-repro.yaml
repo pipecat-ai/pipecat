@@ -1,0 +1,33 @@
+name: Close issues waiting on a reproduction
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          # Only issues labeled `needs-repro` are eligible; everything else is untouched.
+          only-issue-labels: "needs-repro"
+          stale-issue-message: ""
+          days-before-issue-stale: 30
+          days-before-issue-close: 0
+          days-before-pr-stale: -1
+          days-before-pr-close: -1
+          # Any activity on the issue (e.g. a comment with the repro) resets the
+          # 30-day clock, so only silent issues are closed.
+          close-issue-message: >
+            Closing this issue because no runnable reproduction was added within 30
+            days of the `needs-repro` label. See the "Filing Bug Reports" section of
+            CONTRIBUTING.md for what we need. If you can provide a minimal
+            reproduction (or logs, timestamps, and session IDs for issues that can't
+            be reproduced in code), please comment and we'll reopen it.
+          close-issue-label: "closed-needs-repro"
+          labels-to-remove-when-stale: "needs-repro"
