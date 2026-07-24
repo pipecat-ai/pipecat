@@ -135,7 +135,7 @@ class TaskManager(BaseTaskManager):
         """
         self._context = context
         self._loop = loop or asyncio.get_running_loop()
-        self._tasks: dict[str, TaskData] = {}
+        self._tasks: dict[asyncio.Task, TaskData] = {}
 
     @deprecated(
         "`TaskManager.setup` is deprecated since 1.5.0 and will be removed in 2.0.0. "
@@ -266,8 +266,7 @@ class TaskManager(BaseTaskManager):
         Args:
             task_data: The task metadata.
         """
-        name = task_data.task.get_name()
-        self._tasks[name] = task_data
+        self._tasks[task_data.task] = task_data
 
     def _task_done_handler(self, task: asyncio.Task):
         """Handle task completion by removing the task from the registry.
@@ -277,6 +276,6 @@ class TaskManager(BaseTaskManager):
         """
         name = task.get_name()
         try:
-            del self._tasks[name]
+            del self._tasks[task]
         except KeyError as e:
             logger.trace(f"{name}: unable to remove task data (already removed?): {e}")

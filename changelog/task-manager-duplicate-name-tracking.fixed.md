@@ -1,0 +1,1 @@
+- Fixed a bug in `TaskManager` where concurrently running tasks that shared a name (for example the tasks created for parallel function calls) evicted one another from the internal registry, causing `current_tasks()` to undercount live tasks and skewing dangling-task diagnostics.
