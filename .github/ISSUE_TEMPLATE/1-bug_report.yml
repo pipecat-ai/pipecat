@@ -68,7 +68,7 @@ body:
       description: >
         A small, runnable script that shows the bug: a single-file bot, or a test
         using `run_test()` from `pipecat.tests.utils`. Reports without runnable code
-        get the `needs-repro` label and are closed after 14 days if none is provided.
+        get the `needs-repro` label and are closed after 30 days if none is provided.
         If you truly can't reproduce it in code (e.g. it only happens on rare live
         calls), say so here and include everything you have: logs, timestamps,
         session IDs, and your pipeline setup.
@@ -123,7 +123,7 @@ body:
         AI tools are welcome for writing up a report, but a human must stand behind
         it. See the "Filing Bug Reports" section in CONTRIBUTING.md.
       options:
-        - label: I have personally reproduced this issue on the `main` branch.
+        - label: I have personally reproduced this issue on the latest Pipecat release (or `main`).
           required: true
         - label: I have searched existing issues for this bug.
           required: true

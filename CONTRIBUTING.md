@@ -43,7 +43,7 @@ A good bug report is one a maintainer can act on. The single most useful thing y
 ### What we require
 
 - A minimal reproducible example (runnable code, not just prose). If the bug truly can't be captured in code (for example, it only shows up on rare live calls), say so and include everything you have: logs, timestamps, session IDs, and your pipeline setup.
-- Confirmation that you reproduced the issue yourself on the `main` branch.
+- Confirmation that you reproduced the issue yourself on the latest Pipecat release (or `main`).
 
 ### What gets your report looked at faster
 
@@ -61,7 +61,7 @@ Reports that appear machine-generated and unverified may be closed with a single
 
 ### Triage of incomplete reports
 
-Reports without a runnable reproduction get the `needs-repro` label and one comment asking for it. If no reproduction (or a clear explanation of why one isn't possible) is added within 14 days, the issue is closed automatically. Closed issues can always be reopened once a reproduction is available.
+Reports without a runnable reproduction get the `needs-repro` label and one comment asking for it. If no reproduction (or a clear explanation of why one isn't possible) is added within 30 days, the issue is closed automatically. Closed issues can always be reopened once a reproduction is available.
 
 ## Changelog Entries
 
