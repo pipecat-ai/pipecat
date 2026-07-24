@@ -595,17 +595,24 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             messages = self._context.get_messages()
             current_count = len(messages)
             if current_count > self._last_context_message_count:
+                new_messages = messages[self._last_context_message_count :]
                 last_msg = messages[-1]
                 self._last_context_message_count = current_count
 
                 # When server-side VAD handled this turn, the server already
-                # has the user's audio and auto-created a response.  Skip
-                # sending a duplicate text item + response.create.
-                if self._server_vad_handled_turn:
+                # has the user's audio and auto-created a response. Skip the
+                # corresponding context message, but do not consume this marker
+                # for assistant/tool updates that can arrive before the deferred
+                # realtime transcript.
+                server_user_message_added = any(
+                    isinstance(message, Mapping) and message.get("role") == "user"
+                    for message in new_messages
+                )
+                if self._server_vad_handled_turn and server_user_message_added:
                     self._server_vad_handled_turn = False
                     return
 
-                if last_msg.get("role") == "user":
+                if isinstance(last_msg, Mapping) and last_msg.get("role") == "user":
                     content = last_msg.get("content", "")
                     if isinstance(content, list):
                         content = " ".join(
@@ -636,7 +643,10 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         Args:
             event: The client event to send.
         """
-        await self._ws_send(event.model_dump(exclude_none=True))
+        message = event.model_dump(exclude_none=True, by_alias=True)
+        if isinstance(event, events.SessionUpdateEvent):
+            logger.debug(f"{self} sending session.update: {json.dumps(message)}")
+        await self._ws_send(message)
 
     async def _connect(self):
         """Establish WebSocket connection to Inworld."""
@@ -741,7 +751,12 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         if settings.tools and isinstance(settings.tools, ToolsSchema):
             settings.tools = adapter.from_standard_tools(settings.tools)
 
-        settings.provider_data = {"metadata": {"sdk": "pipecat-realtime"}}
+        provider_data = dict(settings.provider_data or {})
+        metadata = dict(provider_data.get("metadata") or {})
+        metadata["sdk"] = "pipecat-realtime"
+        provider_data["metadata"] = metadata
+        provider_data["auto_tool_response"] = False # Set to false because Pipecat creates a tool response from client
+        settings.provider_data = provider_data
 
         await self.send_client_event(events.SessionUpdateEvent(session=settings))
 

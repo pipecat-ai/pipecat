@@ -206,6 +206,31 @@ class TestInworldRealtimeServiceToolSync(
             settings=mod.InworldRealtimeLLMService.Settings(session_properties=sp),
         )
 
+    async def test_session_update_serializes_provider_data(self):
+        mod = pytest.importorskip("pipecat.services.inworld.realtime.llm")
+        events = pytest.importorskip("pipecat.services.inworld.realtime.events")
+        provider_data = {"stt": {"voice_profile": True}}
+        sp = events.SessionProperties(provider_data=provider_data)
+        service = mod.InworldRealtimeLLMService(
+            api_key="test-key",
+            settings=mod.InworldRealtimeLLMService.Settings(session_properties=sp),
+        )
+        service._ws_send = AsyncMock()
+
+        await service._send_session_update()
+
+        message = service._ws_send.await_args.args[0]
+        self.assertNotIn("provider_data", message["session"])
+        self.assertEqual(
+            message["session"]["providerData"],
+            {
+                "stt": {"voice_profile": True},
+                "metadata": {"sdk": "pipecat-realtime"},
+                "auto_tool_response": False,
+            },
+        )
+        self.assertEqual(service._settings.session_properties.provider_data, provider_data)
+
 
 if __name__ == "__main__":
     unittest.main()

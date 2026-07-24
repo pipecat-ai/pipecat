@@ -192,7 +192,7 @@ class SessionProperties(BaseModel):
     """
 
     # Needed to support ToolSchema in tools field.
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True)
 
     type: str | None = "realtime"
     model: str | None = None
@@ -204,7 +204,7 @@ class SessionProperties(BaseModel):
     # tools (the validator below normalizes that to a ToolsSchema); a list of
     # provider-native InworldTool objects passes through.
     tools: ToolsSchema | list[FunctionSchema | DirectFunction] | list[InworldTool] | None = None
-    provider_data: dict[str, Any] | None = None
+    provider_data: dict[str, Any] | None = Field(default=None, alias="providerData")
 
     @field_validator("tools", mode="before")
     @classmethod
