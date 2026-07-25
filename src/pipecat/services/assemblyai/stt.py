@@ -1045,6 +1045,9 @@ class AssemblyAISTTService(WebsocketSTTService):
                 if finalize_confirmed:
                     self.confirm_finalize()
                 logger.debug(f'{self} Transcript: "{transcript_text}"')
+                # Report usage before the transcription frame so tracing can
+                # attach it to the STT span the frame closes.
+                await self.emit_stt_usage_metrics()
                 await self.push_frame(
                     TranscriptionFrame(
                         transcript_text,
@@ -1073,6 +1076,9 @@ class AssemblyAISTTService(WebsocketSTTService):
             # so UserStartedSpeakingFrame is guaranteed to be broadcast first.
             if is_final_turn:
                 # AssemblyAI controls finalization, just mark as finalized
+                # Report usage before the transcription frame so tracing can
+                # attach it to the STT span the frame closes.
+                await self.emit_stt_usage_metrics()
                 await self.push_frame(
                     TranscriptionFrame(
                         transcript_text,

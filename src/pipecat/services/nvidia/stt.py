@@ -610,6 +610,9 @@ class NvidiaSTTService(STTService):
                 if result.is_final:
                     await self.stop_processing_metrics()
                     logger.debug(f"Transcription: [{transcript}]")
+                    # Report usage before the transcription frame so tracing
+                    # can attach it to the STT span the frame closes.
+                    await self.emit_stt_usage_metrics()
                     await self.push_frame(
                         TranscriptionFrame(
                             transcript,

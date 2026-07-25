@@ -378,6 +378,9 @@ class SmallestSTTService(WebsocketSTTService):
             await self.stop_processing_metrics()
             logger.debug(f"Smallest final transcript: [{text}]")
             await self._handle_transcription(text, True, data.get("language"))
+            # Report usage before the transcription frame so tracing can
+            # attach it to the STT span the frame closes.
+            await self.emit_stt_usage_metrics()
             await self.push_frame(
                 TranscriptionFrame(
                     text,

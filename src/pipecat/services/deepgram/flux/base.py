@@ -331,6 +331,9 @@ class DeepgramFluxSTTBase(STTService):
         num_samples = int(self.sample_rate * duration_secs)
         silence = b"\x00" * (num_samples * sample_width * num_channels)
         await self._transport_send_audio(silence)
+        # Watchdog silence is real audio submitted to the service, so it
+        # counts toward usage.
+        self._record_stt_audio_usage(silence)
 
     async def _watchdog_task_handler(self):
         """Prevent dangling turns by sending silence when audio stops flowing.
@@ -766,6 +769,9 @@ class DeepgramFluxSTTBase(STTService):
         if not min_confidence or (
             average_confidence is not None and average_confidence > min_confidence
         ):
+            # Report usage before the transcription frame so tracing can
+            # attach it to the STT span the frame closes.
+            await self.emit_stt_usage_metrics()
             # EndOfTurn means Flux has determined the turn is complete,
             # so this TranscriptionFrame is always finalized
             await self.push_frame(

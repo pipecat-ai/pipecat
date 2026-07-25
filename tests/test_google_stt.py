@@ -45,6 +45,8 @@ async def test_google_final_result_emits_finalized_transcription_frame():
     service._user_id = "user"
     service._last_transcript_was_final = False
     service._get_language_codes = lambda: ["en-US"]
+    service._stt_usage_pending_seconds = 0.0
+    service._enable_usage_metrics = False
 
     frames = []
     transcriptions = []

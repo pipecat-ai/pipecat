@@ -325,6 +325,10 @@ class NvidiaSageMakerSTTService(STTService):
                     transcript = msg.get("transcript", "")
                     if transcript.strip():
                         logger.debug(f"{self}: received final transcription: {transcript}")
+                        # Report usage before the transcription frame so
+                        # tracing can attach it to the STT span the frame
+                        # closes.
+                        await self.emit_stt_usage_metrics()
                         await self.push_frame(
                             TranscriptionFrame(
                                 transcript,

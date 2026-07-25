@@ -480,6 +480,9 @@ class DeepgramSageMakerSTTService(STTService):
             from_finalize = parsed.get("from_finalize", False)
             if from_finalize:
                 self.confirm_finalize()
+            # Report usage before the transcription frame so tracing can
+            # attach it to the STT span the frame closes.
+            await self.emit_stt_usage_metrics()
             await self.push_frame(
                 TranscriptionFrame(
                     transcript,

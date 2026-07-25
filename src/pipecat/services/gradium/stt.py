@@ -528,6 +528,9 @@ class GradiumSTTService(WebsocketSTTService):
         # Technically `_settings.language` could be a raw string, but Language
         # is a StrEnum so downstream handles either.
         language = cast("Language | None", assert_given(self._settings.language))
+        # Report usage before the transcription frame so tracing can attach
+        # it to the STT span the frame closes.
+        await self.emit_stt_usage_metrics()
         await self.push_frame(
             TranscriptionFrame(
                 text,

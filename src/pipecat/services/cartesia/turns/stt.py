@@ -383,6 +383,9 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         num_samples = int(self.sample_rate * duration_secs)
         silence = b"\x00" * (num_samples * sample_width * num_channels)
         await self.send_with_retry(silence, self._report_error)
+        # Watchdog silence is real audio submitted to the service, so it
+        # counts toward usage.
+        self._record_stt_audio_usage(silence)
 
     async def _watchdog_task_handler(self):
         """Prevent dangling turns by sending silence when audio stops flowing.
@@ -518,6 +521,9 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         # avoid an empty user message downstream; the lifecycle frames below
         # still fire so the turn closes cleanly.
         if transcript:
+            # Report usage before the transcription frame so tracing can
+            # attach it to the STT span the frame closes.
+            await self.emit_stt_usage_metrics()
             await self.push_frame(
                 TranscriptionFrame(
                     transcript,

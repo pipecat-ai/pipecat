@@ -697,6 +697,10 @@ class GladiaSTTService(WebsocketSTTService):
                     transcript = utterance["text"]
                     is_final = content["data"]["is_final"]
                     if is_final:
+                        # Report usage before the transcription frame so
+                        # tracing can attach it to the STT span the frame
+                        # closes.
+                        await self.emit_stt_usage_metrics()
                         await self.push_frame(
                             TranscriptionFrame(
                                 transcript,

@@ -360,6 +360,9 @@ class AzureSTTService(STTService):
             asyncio.run_coroutine_threadsafe(
                 self._handle_transcription(event.result.text, True, language), self.get_event_loop()
             )
+            # Report usage before the transcription frame so tracing can attach
+            # it to the STT span the frame closes (submissions run in order).
+            asyncio.run_coroutine_threadsafe(self.emit_stt_usage_metrics(), self.get_event_loop())
             asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
 
     def _on_handle_recognizing(self, event):
