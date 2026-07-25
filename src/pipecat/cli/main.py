@@ -211,6 +211,24 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+def _warn_about_stale_hub_index():
+    """Print a one-line notice when the local Context Hub index needs a refresh.
+
+    A stale index is invisible until a coding agent cites an API that has since
+    changed, so it is worth surfacing on the way past. Silent unless an index
+    exists, written to stderr so it never lands in parsed stdout, and swallowed
+    on any failure — a hint must not break the command the user asked for.
+    """
+    try:
+        from pipecat.cli.hub_status import freshness_warning
+
+        warning = freshness_warning()
+    except Exception:
+        return
+    if warning:
+        print(f"⚠ {warning}", file=sys.stderr)
+
+
 def run():
     """Console-script entry point; degrades gracefully when the ``cli`` extra is absent."""
     try:
@@ -218,6 +236,10 @@ def run():
     except ImportError:
         print(_INSTALL_HINT, file=sys.stderr)
         raise SystemExit(1)
+    # Here rather than in the group callback: click answers a bare `--help`
+    # eagerly, without ever invoking the callback, so a check placed there would
+    # miss it. This runs for every invocation of the console script.
+    _warn_about_stale_hub_index()
     app()
 
 
