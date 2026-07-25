@@ -112,16 +112,16 @@ def _build_app():
     # `eval` is a first-party sub-Typer group, built in (not a plugin extension).
     app.add_typer(eval_app, name="eval")
 
-    # Discover CLI extensions (e.g. `cloud` from pipecatcloud). The entry-point
-    # group is intentionally still named
-    # "pipecat_cli.extensions" for backward compatibility — renaming it would force
-    # every plugin to re-release. (A future rename to "pipecat.cli.extensions" is a
-    # separate, coordinated change.)
-    # Load each plugin in isolation. A plugin is third-party code imported on every
+    # Discover CLI extensions (e.g. `cloud` from pipecatcloud). The entry-point group
+    # is intentionally still named "pipecat_cli.extensions" for backward compatibility
+    # — renaming it would force every plugin to re-release. (A future rename to
+    # "pipecat.cli.extensions" is a separate, coordinated change.)
+    #
+    # Each plugin loads in isolation. A plugin is third-party code imported on every
     # invocation, so an unguarded load lets one bad install (missing transitive
-    # dependency, version conflict, stale wheel) take down the entire CLI —
-    # including commands that have nothing to do with it, like `pipecat init`.
-    # Skip the broken one, say so, and carry on.
+    # dependency, version conflict, stale wheel) take down the entire CLI — including
+    # commands that have nothing to do with it, like `pipecat init`. Skip the broken
+    # one, say so, and carry on.
     extensions: list[tuple[str, typer.Typer]] = []
     installed_plugins: list[str] = []
     for ep in importlib_metadata.entry_points(group="pipecat_cli.extensions"):
