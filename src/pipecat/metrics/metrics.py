@@ -113,6 +113,12 @@ class STTUsage(BaseModel):
     Reports raw usage, not cost. Values are incremental deltas since the
     previous usage report; consumers sum them across a session.
 
+    Continuous STT services stream all input audio (including silence), so
+    their summed ``audio_seconds`` approximates the stream duration — which
+    is what most streaming providers bill. Segmented STT services submit
+    only the detected speech segments, so their sum covers just those
+    segments.
+
     Parameters:
         audio_seconds: Client-measured seconds of audio submitted to the
             service since the last usage report.
