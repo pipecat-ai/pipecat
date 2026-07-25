@@ -1412,7 +1412,7 @@ class TTSService(AIService):
             logger.trace(f"{self} appending audio {frame} to audio context {context_id}")
             await self._audio_contexts[context_id].put(frame)
         # In case the frame is None, we should not recreate the context.
-        elif context_id == self._turn_context_id and frame:
+        elif frame and self._can_recreate_audio_context(context_id):
             # Sometimes the HTTP service can take more than 3 seconds without sending any audio
             # So we are now recreating the context id while we are in the same turn
             logger.debug(f"{self} recreating audio context {context_id}")
@@ -1421,6 +1421,23 @@ class TTSService(AIService):
             await self._audio_contexts[context_id].put(frame)
         else:
             logger.debug(f"{self} unable to append audio to context {context_id}")
+
+    def _can_recreate_audio_context(self, context_id: str) -> bool:
+        """Whether a missing audio context may be transparently recreated on append.
+
+        Guards the recreate branch in ``append_to_audio_context`` so that audio
+        arriving after its context was torn down (e.g. by the idle timeout in
+        ``_handle_audio_context``) is not silently dropped. Defaults to the
+        current turn's context; subclasses may widen this to cover contexts whose
+        teardown is deferred past end-of-turn.
+
+        Args:
+            context_id: The context that audio is being appended to.
+
+        Returns:
+            True if the context may be recreated to receive the appended frame.
+        """
+        return context_id == self._turn_context_id
 
     async def remove_audio_context(self, context_id: str | None):
         """Remove an existing audio context.

@@ -746,6 +746,18 @@ class InworldTTSService(WebsocketTTSService):
         self._context_texts: dict[str, str] = {}
         self._contexts_with_timestamps: set[str] = set()
 
+        # Contexts that have received their first audioChunk. Used to decide
+        # whether closing at end of turn is safe: once audio is streaming, the
+        # server orders contextClosed after the last byte.
+        self._contexts_with_first_audio: set[str] = set()
+
+        # Contexts whose end-of-turn close was deferred because no audio had
+        # arrived yet — closing then would let contextClosed overtake the first
+        # audioChunk and drop the whole utterance. The close is sent once the
+        # first chunk arrives; until then these contexts may be recreated so
+        # audio outliving the idle timeout still plays.
+        self._contexts_pending_close: set[str] = set()
+
         # Init-only config (not runtime-updatable).
         self._audio_encoding = encoding
         self._audio_sample_rate = 0  # Set in start()
@@ -862,15 +874,38 @@ class InworldTTSService(WebsocketTTSService):
     async def on_turn_context_completed(self):
         """Close the server-side context at end of turn.
 
-        Sends close_context so contextClosed arrives immediately after the
-        last audio byte.
+        When audio is already streaming, closing now is safe: the server orders
+        contextClosed after the last audio byte. But when synthesis is still
+        buffered (no audioChunk yet), an immediate close lets contextClosed
+        overtake the first chunk, tearing down the local context so the whole
+        utterance is dropped. In that case the close is deferred until the first
+        chunk arrives (see _receive_messages).
         """
         ctx_id = self._turn_context_id
         await super().on_turn_context_completed()
-        await self._close_context(ctx_id)
+        if ctx_id and ctx_id not in self._contexts_with_first_audio:
+            logger.debug(f"{self}: Deferring close of {ctx_id} until first audio arrives")
+            self._contexts_pending_close.add(ctx_id)
+        else:
+            await self._close_context(ctx_id)
+
+    def _can_recreate_audio_context(self, context_id: str) -> bool:
+        """Also allow recreating contexts whose end-of-turn close is deferred.
+
+        A deferred-close context has outlived the turn cursor, so the base guard
+        alone would drop its late audio; permit recreation until the close is
+        actually sent.
+        """
+        return super()._can_recreate_audio_context(context_id) or (
+            context_id in self._contexts_pending_close
+        )
 
     async def on_audio_context_interrupted(self, context_id: str):
         """Callback invoked when an audio context has been interrupted."""
+        # Drop any deferred-close state so a late chunk can't resurrect a
+        # context the user has already barged in over.
+        self._contexts_pending_close.discard(context_id)
+        self._contexts_with_first_audio.discard(context_id)
         await self._maybe_push_fallback_text(context_id)
         await self._close_context(context_id)
         await super().on_audio_context_interrupted(context_id)
@@ -938,6 +973,9 @@ class InworldTTSService(WebsocketTTSService):
         if self._keepalive_task:
             await self.cancel_task(self._keepalive_task)
             self._keepalive_task = None
+
+        self._contexts_pending_close.clear()
+        self._contexts_with_first_audio.clear()
 
         await self._disconnect_websocket()
 
@@ -1073,7 +1111,13 @@ class InworldTTSService(WebsocketTTSService):
                 frame = TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=ctx_id)
 
                 if ctx_id:
+                    first_audio = ctx_id not in self._contexts_with_first_audio
+                    self._contexts_with_first_audio.add(ctx_id)
                     await self.append_to_audio_context(ctx_id, frame)
+                    # Audio is now streaming, so a deferred close is safe to send.
+                    if first_audio and ctx_id in self._contexts_pending_close:
+                        self._contexts_pending_close.discard(ctx_id)
+                        await self._close_context(ctx_id)
 
             # timestampInfo is inside audioChunk
             timestamp_info = audio_chunk.get("timestampInfo")
@@ -1095,6 +1139,9 @@ class InworldTTSService(WebsocketTTSService):
             # Handle context closed - context no longer exists on server
             if "contextClosed" in result:
                 logger.debug(f"{self}: Context closed on server: {ctx_id}")
+                if ctx_id:
+                    self._contexts_pending_close.discard(ctx_id)
+                    self._contexts_with_first_audio.discard(ctx_id)
                 await self._maybe_push_fallback_text(ctx_id)
                 await self.stop_ttfb_metrics()
                 await self.append_to_audio_context(ctx_id, TTSStoppedFrame(context_id=ctx_id))
