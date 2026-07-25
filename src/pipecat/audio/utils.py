@@ -122,6 +122,65 @@ def normalize_value(value, min_value, max_value):
     return normalized_clamped
 
 
+# Loudness meters keyed by (sample_rate, block_size). Both values fully
+# determine the meter and its K-weighting filters, so a meter can be reused
+# across calls instead of being rebuilt on every audio frame.
+_loudness_meters: dict[tuple[int, float], pyln.Meter] = {}
+
+
+def _const_coefficients(coefficients):
+    """Return a zero-argument callable that always yields ``coefficients``.
+
+    Used to freeze a pyloudnorm ``IIRfilter``'s coefficient generation so the
+    K-weighting biquads are computed once instead of on every access.
+
+    Args:
+        coefficients: The precomputed ``(b, a)`` biquad coefficients to return.
+
+    Returns:
+        A callable taking no arguments that returns ``coefficients``.
+    """
+    return lambda: coefficients
+
+
+def _get_loudness_meter(sample_rate: int, block_size: float) -> pyln.Meter:
+    """Return a cached loudness meter for a given sample rate and block size.
+
+    ``calculate_audio_volume`` runs on every VAD frame (~31 times per second per
+    audio stream), and a fresh :class:`pyloudnorm.Meter` was previously built on
+    each call. A meter depends only on ``(sample_rate, block_size)``, so it is
+    built once and reused.
+
+    ``pyloudnorm``'s ``IIRfilter.a`` and ``.b`` are properties that regenerate
+    the biquad coefficients on every access, and ``apply_filter`` reads both, so
+    the K-weighting coefficients were being recomputed four times per call. The
+    coefficients depend only on the filter's fixed construction parameters, so
+    they are memoized on the cached meter. The value returned by
+    :meth:`pyloudnorm.Meter.integrated_loudness` is unchanged.
+
+    Args:
+        sample_rate: Sample rate of the audio in Hz.
+        block_size: Loudness gating block size in seconds.
+
+    Returns:
+        A cached, reusable loudness meter.
+    """
+    meter = _loudness_meters.get((sample_rate, block_size))
+    if meter is None:
+        meter = pyln.Meter(sample_rate, block_size=block_size)
+        # Freeze each K-weighting filter's coefficients. If a future pyloudnorm
+        # changes these internals, the plain cached meter is still correct.
+        try:
+            for filter_stage in meter._filters.values():
+                filter_stage.generate_coefficients = _const_coefficients(
+                    filter_stage.generate_coefficients()
+                )
+        except (AttributeError, TypeError):
+            pass
+        _loudness_meters[(sample_rate, block_size)] = meter
+    return meter
+
+
 def calculate_audio_volume(audio: bytes, sample_rate: int) -> float:
     """Calculate the loudness level of audio data using EBU R128 standard.
 
@@ -139,7 +198,7 @@ def calculate_audio_volume(audio: bytes, sample_rate: int) -> float:
     audio_float = audio_np.astype(np.float64)
 
     block_size = audio_np.size / sample_rate
-    meter = pyln.Meter(sample_rate, block_size=block_size)
+    meter = _get_loudness_meter(sample_rate, block_size)
     loudness = meter.integrated_loudness(audio_float)
 
     # Loudness goes from -20 to 80 (more or less), where -20 is quiet and 80 is
