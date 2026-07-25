@@ -423,6 +423,58 @@ async def test_soniox_turn_detection_error_closes_open_turn(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_endpoint_transcript_emits_usage_before_transcription_frame(monkeypatch):
+    from pipecat.frames.frames import MetricsFrame
+    from pipecat.metrics.metrics import STTUsageMetricsData
+
+    service = SonioxSTTService(api_key="test-key")
+    service._enable_usage_metrics = True
+    pushed_frames = []
+
+    async def fake_push_frame(frame, direction=None):
+        pushed_frames.append(frame)
+
+    async def fake_noop(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(service, "push_frame", fake_push_frame)
+    monkeypatch.setattr(service, "_handle_transcription", fake_noop)
+    monkeypatch.setattr(service, "start_processing_metrics", fake_noop)
+    monkeypatch.setattr(service, "stop_processing_metrics", fake_noop)
+
+    # Simulate audio previously submitted to the service.
+    service._stt_usage_pending_seconds = 2.5
+
+    messages = [
+        json.dumps(
+            {
+                "tokens": [
+                    {"text": "Hello.", "is_final": True},
+                    {"text": END_TOKEN, "is_final": True},
+                ]
+            }
+        ),
+        json.dumps({"tokens": [], "finished": True}),
+    ]
+    service._websocket = _FakeWebsocket(messages)
+
+    await service._receive_messages()
+
+    frame_types = [type(frame) for frame in pushed_frames]
+    assert MetricsFrame in frame_types
+    assert TranscriptionFrame in frame_types
+    # Usage must precede the transcript so tracing can attach it to the span
+    # the finalized TranscriptionFrame closes.
+    assert frame_types.index(MetricsFrame) < frame_types.index(TranscriptionFrame)
+
+    metrics_frame = pushed_frames[frame_types.index(MetricsFrame)]
+    data = metrics_frame.data[0]
+    assert isinstance(data, STTUsageMetricsData)
+    assert data.value.audio_seconds == 2.5
+    assert service._stt_usage_pending_seconds == 0.0
+
+
+@pytest.mark.asyncio
 async def test_receive_messages_allows_final_transcription_without_language(monkeypatch):
     service = SonioxSTTService(api_key="test-key")
     pushed_frames = []

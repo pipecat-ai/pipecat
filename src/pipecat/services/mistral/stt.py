@@ -283,6 +283,10 @@ class MistralSTTService(STTService):
 
                 elif isinstance(event, TranscriptionStreamDone):
                     if event.text:
+                        # Report usage before the transcription frame so
+                        # tracing can attach it to the STT span the frame
+                        # closes.
+                        await self.emit_stt_usage_metrics()
                         await self.push_frame(
                             TranscriptionFrame(
                                 event.text,

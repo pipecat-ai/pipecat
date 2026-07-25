@@ -373,6 +373,9 @@ class XAISTTService(WebsocketSTTService):
             return
         language = language if language is not None else self._language_for_frame()
 
+        # Report usage before the transcription frame so tracing can attach
+        # it to the STT span the frame closes.
+        await self.emit_stt_usage_metrics()
         await self.push_frame(
             TranscriptionFrame(
                 text,

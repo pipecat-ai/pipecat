@@ -1046,6 +1046,10 @@ class SpeechmaticsSTTService(STTService):
             logger.debug(f"{self} interim transcript: {[f.text for f in frames]}")
 
         # Send the frames
+        if finalized:
+            # Report usage before the transcription frames so tracing can
+            # attach it to the STT span they close.
+            await self.emit_stt_usage_metrics()
         for frame in frames:
             await self.push_frame(frame)
 

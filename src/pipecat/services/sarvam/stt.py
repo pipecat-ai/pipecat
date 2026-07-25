@@ -835,6 +835,9 @@ class SarvamSTTService(STTService):
                 if transcript and transcript.strip():
                     # Record tracing for this transcription event
                     await self._handle_transcription(transcript, True, language)
+                    # Report usage before the transcription frame so tracing
+                    # can attach it to the STT span the frame closes.
+                    await self.emit_stt_usage_metrics()
                     await self.push_frame(
                         TranscriptionFrame(
                             transcript,

@@ -951,6 +951,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
         finalized = self._commit_strategy == CommitStrategy.MANUAL
 
+        # Report usage before the transcription frame so tracing can attach
+        # it to the STT span the frame closes.
+        await self.emit_stt_usage_metrics()
         await self.push_frame(
             TranscriptionFrame(
                 text,
@@ -997,6 +1000,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
         # This message is sent after committed_transcript when include_timestamps=true.
         # It contains the full transcript data including text and word-level timestamps.
+        await self.emit_stt_usage_metrics()
         await self.push_frame(
             TranscriptionFrame(
                 text,
