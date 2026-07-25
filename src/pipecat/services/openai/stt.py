@@ -150,6 +150,17 @@ class OpenAISTTService(BaseWhisperSTTService):
             **kwargs,
         )
 
+    def _model_family(self) -> str | None:
+        """Model whose capabilities shape the transcription request.
+
+        On OpenAI the configured model is itself the family. Subclasses pointing
+        at a deployment whose name doesn't identify the model override this.
+
+        Returns:
+            The model identifier to check capabilities against.
+        """
+        return self._settings.model
+
     async def _transcribe(self, audio: bytes) -> Transcription:
         assert self._settings.language is not None
 
@@ -162,7 +173,7 @@ class OpenAISTTService(BaseWhisperSTTService):
 
         if self._include_prob_metrics:
             # GPT-4o-transcribe models only support logprobs (not verbose_json)
-            if self._settings.model in ("gpt-4o-transcribe", "gpt-4o-mini-transcribe"):
+            if self._model_family() in ("gpt-4o-transcribe", "gpt-4o-mini-transcribe"):
                 kwargs["response_format"] = "json"
                 kwargs["include"] = ["logprobs"]
             else:
