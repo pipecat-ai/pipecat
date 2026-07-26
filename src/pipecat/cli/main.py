@@ -175,7 +175,15 @@ def _build_app():
         app.command(
             cmd_name,
             help=f"{help_text} (requires {package})",
-            context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+            # An empty help_option_names lets `--help` reach the stub too. Otherwise
+            # `pipecat <plugin> --help` — the natural thing to type after spotting the
+            # command in `pipecat --help` — renders an empty options panel and says
+            # nothing about installing it, while every other invocation explains.
+            context_settings={
+                "ignore_unknown_options": True,
+                "allow_extra_args": True,
+                "help_option_names": [],
+            },
         )(_make_extension_stub(cmd_name, package))
 
     def version_callback(value: bool):

@@ -85,6 +85,15 @@ class TestEnableHint:
         assert "No such command" not in result.output
         assert f"--with {package}" in result.output
 
+    def test_help_on_an_uninstalled_plugin_explains_how_to_install(self, name, package, help_text):
+        """`--help` is the natural thing to type after spotting the command in
+        `pipecat --help`. Without an empty help_option_names it renders an empty
+        options panel and says nothing about installing the plugin.
+        """
+        _skip_if_installed(name)
+        result = runner.invoke(app, [name, "--help"])
+        assert f"--with {package}" in result.output
+
     def test_enable_hint_shows_both_install_forms(self, name, package, help_text):
         hint = _enable_hint(name, package)
         assert f'uv tool install "pipecat-ai[cli]" --with {package}' in hint
