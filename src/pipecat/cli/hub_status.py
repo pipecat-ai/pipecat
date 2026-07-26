@@ -195,8 +195,9 @@ def freshness_warning(cwd: Path | None = None) -> str | None:
             "so coding agents get current Pipecat context."
         )
     if threshold > 0 and age >= threshold:
+        days = round(age)
         return (
-            f"Pipecat Context Hub index is {age:.0f} days old — run "
+            f"Pipecat Context Hub index is {days} day{'' if days == 1 else 's'} old — run "
             "`pipecat mcp refresh` so coding agents don't cite stale APIs."
         )
 
