@@ -95,7 +95,7 @@ You have live sources for current truth — never substitute your memory. Use th
    - **Verify a specific API** (as you write): `check_deprecation` — **run on any symbol you're unsure about** (the stale-training antidote, e.g. `PipelineTask`→`PipelineWorker`); `search_api` / `get_code_snippet` — exact current signatures and usage. Examples can lag the framework — `check_deprecation` any symbol you copy from one.
 
    The index is **local** — check `get_hub_status` for `last_refresh_at`, and refresh (`pipecat mcp refresh`, or `uvx pipecat-ai-context-hub@latest refresh`) when it's stale or after a Pipecat version bump.
-2. **No MCP? Query the same index from your shell** — same handlers, same JSON. If `pipecat --help` lists an `mcp` command, use that; otherwise `uvx` works with no install at all:
+2. **No MCP? Query the same index from your shell** — same handlers, same JSON. Check once with `pipecat mcp --help`: it lists the commands when the plugin is installed, and tells you how to install it when not. Don't infer this from `pipecat --help`, where `mcp` is listed either way — that is what makes it discoverable. If it isn't installed, the `uvx` form below needs no install at all.
    ```bash
    pipecat mcp search-docs "turn detection"                      # learn a concept
    pipecat mcp check-deprecation PipelineTask                    # the reflex check; <1s
@@ -105,7 +105,7 @@ You have live sources for current truth — never substitute your memory. Use th
 
    uvx pipecat-ai-context-hub search-docs "turn detection"       # same, without the CLI
    ```
-   Stdout is the tool's JSON. **Exit 2 means the local index isn't built yet** — run `pipecat mcp refresh` (or `uvx pipecat-ai-context-hub@latest refresh`) once; it downloads local models and indexes the sources, so allow several minutes. Then re-run the query. Afterwards, **set up future sessions**: `pipecat mcp install` registers the MCP server with your agent and builds the index in one step. Without the CLI, do it by hand — `claude mcp add pipecat-context-hub -- uvx pipecat-ai-context-hub serve` (Codex: same args, `codex mcp add`). Either way a newly added MCP server loads at the *next* session start, never mid-session — so keep using the shell commands for the current one.
+   Stdout is the tool's JSON. **Exit 2 means the local index isn't built yet** — run `pipecat mcp refresh` (or `uvx pipecat-ai-context-hub@latest refresh`) once; it downloads local models and indexes the sources, so allow several minutes. Then re-run the query. Tell the user `pipecat mcp install` wires the MCP server up for future sessions — but keep using these shell commands for the current one, since an MCP server only loads at session start, never mid-session.
 3. **Installed package source** — the pinned version is on disk; the code cannot be stale. Read it when the index is ambiguous:
    ```bash
    python -c "import pipecat, os; print(os.path.dirname(pipecat.__file__))"

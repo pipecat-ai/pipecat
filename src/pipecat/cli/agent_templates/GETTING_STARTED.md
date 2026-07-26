@@ -16,18 +16,8 @@ uv tool install "pipecat-ai[cli]" --with pipecat-ai-context-hub
 pipecat mcp install
 ```
 
-`install` registers the MCP server with each coding agent it finds and builds
-the index — a few minutes the first time, since it downloads local models. Use
-`pipecat mcp install --print-config` first if you'd rather see what it will
-register before it does anything.
-
-Without the CLI, the same thing by hand:
-
-```bash
-uvx pipecat-ai-context-hub@latest refresh
-claude mcp add pipecat-context-hub -- uvx pipecat-ai-context-hub serve   # Claude Code
-codex mcp add pipecat-context-hub -- uvx pipecat-ai-context-hub serve    # Codex
-```
+`install` registers the MCP server with each coding agent it finds and builds the
+index, which takes a few minutes the first time since it downloads local models.
 
 MCP servers load at session start, so do this *before* opening the coding
 session.
