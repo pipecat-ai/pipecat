@@ -94,23 +94,27 @@ You have live sources for current truth — never substitute your memory. Use th
    - **Learn the concept** (before building something unfamiliar): `search_docs` — how a capability works (the Learn guides) and how to use an optional feature (the Fundamentals guides — recording, transcripts, metrics, idle detection, muting, IVR, voicemail, …); `get_doc` — read a page in full. `search_examples` / `get_example` — a working implementation to start from. When asked for a feature, search it rather than guess.
    - **Verify a specific API** (as you write): `check_deprecation` — **run on any symbol you're unsure about** (the stale-training antidote, e.g. `PipelineTask`→`PipelineWorker`); `search_api` / `get_code_snippet` — exact current signatures and usage. Examples can lag the framework — `check_deprecation` any symbol you copy from one.
 
-   The index is **local** — check `get_hub_status` for `last_refresh_at`, and refresh (`uvx pipecat-ai-context-hub@latest refresh`) when it's stale or after a Pipecat version bump.
-2. **No MCP? Query the same index from your shell** — zero setup beyond `uv`:
+   The index is **local** — check `get_hub_status` for `last_refresh_at`, and refresh (`pipecat mcp refresh`, or `uvx pipecat-ai-context-hub@latest refresh`) when it's stale or after a Pipecat version bump.
+2. **No MCP? Query the same index from your shell** — same handlers, same JSON. If `pipecat --help` lists an `mcp` command, use that; otherwise `uvx` works with no install at all:
    ```bash
-   uvx pipecat-ai-context-hub search-docs "turn detection"       # learn a concept
-   uvx pipecat-ai-context-hub check-deprecation PipelineTask     # the reflex check; <1s
-   uvx pipecat-ai-context-hub search-api "EvalTransportParams"
-   uvx pipecat-ai-context-hub search-examples "twilio bot" --domain backend
-   uvx pipecat-ai-context-hub status                             # index health / freshness
+   pipecat mcp search-docs "turn detection"                      # learn a concept
+   pipecat mcp check-deprecation PipelineTask                    # the reflex check; <1s
+   pipecat mcp search-api "EvalTransportParams"
+   pipecat mcp search-examples "twilio bot" --domain backend
+   pipecat mcp status                                            # index health / freshness
+
+   uvx pipecat-ai-context-hub search-docs "turn detection"       # same, without the CLI
    ```
-   Stdout is the tool's JSON. **Exit 2 means the local index isn't built yet** — run `uvx pipecat-ai-context-hub@latest refresh` once (downloads the package + local models and indexes the sources; allow several minutes), then re-run the query. Afterwards, **set up future sessions** with your agent's MCP command — `claude mcp add pipecat-context-hub -- uvx pipecat-ai-context-hub serve` (Codex: same args, `codex mcp add`). A newly added MCP server loads at the *next* session start, never mid-session — so keep using the CLI for the current one.
+   Stdout is the tool's JSON. **Exit 2 means the local index isn't built yet** — run `pipecat mcp refresh` (or `uvx pipecat-ai-context-hub@latest refresh`) once; it downloads local models and indexes the sources, so allow several minutes. Then re-run the query. Afterwards, **set up future sessions**: `pipecat mcp install` registers the MCP server with your agent and builds the index in one step. Without the CLI, do it by hand — `claude mcp add pipecat-context-hub -- uvx pipecat-ai-context-hub serve` (Codex: same args, `codex mcp add`). Either way a newly added MCP server loads at the *next* session start, never mid-session — so keep using the shell commands for the current one.
 3. **Installed package source** — the pinned version is on disk; the code cannot be stale. Read it when the index is ambiguous:
    ```bash
    python -c "import pipecat, os; print(os.path.dirname(pipecat.__file__))"
    ```
 4. **`llms.txt`** — machine-readable docs index at `https://docs.pipecat.ai/llms.txt` (full content: `llms-full.txt`). The last resort when nothing local works.
 
-(Naming: the *package* is `pipecat-ai-context-hub`; the command and MCP server are `pipecat-context-hub`. Both spellings of the command work once installed.)
+> `pipecat mcp` is an **optional plugin**, not bundled with `pipecat-ai[cli]`. Install it alongside: `uv tool install "pipecat-ai[cli]" --with pipecat-ai-context-hub`. (Without it, `pipecat mcp` lists in `--help` but prints how to enable it when run.) Note `--with` *replaces* the tool environment, so repeat any plugin you already have — e.g. `--with pipecatcloud --with pipecat-ai-context-hub`.
+
+(Naming: the *package* is `pipecat-ai-context-hub`; the standalone command and MCP server are `pipecat-context-hub`; mounted in the CLI it is `pipecat mcp`. All resolve to the same tool.)
 
 For browsing examples directly, the **`pipecat-examples` repo** groups demos by category in its README (telephony, vision, etc.); `scripts/demos.json` lists each example's run command.
 

@@ -35,6 +35,10 @@ _INSTALL_HINT = (
 # prints how to enable the plugin. Only first-party plugins belong here.
 _KNOWN_EXTENSIONS: dict[str, tuple[str, str]] = {
     "cloud": ("pipecatcloud", "Deploy and manage bots on Pipecat Cloud"),
+    "mcp": (
+        "pipecat-ai-context-hub",
+        "Query current Pipecat docs, examples, and API source from a coding agent",
+    ),
 }
 
 
