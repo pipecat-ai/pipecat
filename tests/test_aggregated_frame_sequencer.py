@@ -39,6 +39,7 @@ from pipecat.utils.context.aggregated_frame_sequencer import (
     _ParallelSentenceAggregator,
 )
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
+from pipecat.utils.text.word_timestamp_utils import merge_punct_tokens
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -584,6 +585,123 @@ class TestForceComplete(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 # clear
 # ---------------------------------------------------------------------------
+
+
+class TestWordsAfterUnrepeatedPunctuation(unittest.IsolatedAsyncioTestCase):
+    """End-to-end: a provider whose word-timestamp events don't repeat punctuation
+    attached to the previous word (e.g. Inworld reporting "Yeah" then "I" for
+    "Yeah, I can do that.").
+
+    Every word after the comma must be attributed to the slot -- carrying its
+    raw_text into the conversation context -- rather than falling through to the
+    passthrough path, which loses raw_text and strands the slot so force_complete
+    re-emits (or discards) the rest of the sentence.
+    """
+
+    SENTENCE = "Yeah, I can do that. "
+    WORDS = ["Yeah", "I", "can", "do", "that"]
+
+    async def test_every_word_is_attributed_to_the_slot(self):
+        seq = _seq()
+        await seq.register_spoken(
+            _spoken_frame(self.SENTENCE, raw_text=self.SENTENCE),
+            "ctx1",
+            self.SENTENCE,
+            append_to_context=True,
+        )
+
+        emitted = []
+        for word in self.WORDS:
+            frames = seq.process_word(word, pts=10, context_id="ctx1")
+            emitted.extend(f for f in frames if isinstance(f, TTSTextFrame))
+
+        self.assertEqual([f.text for f in emitted], self.WORDS)
+        # A passthrough frame carries no raw_text; every word here should have one.
+        for frame in emitted:
+            self.assertIsNotNone(
+                frame.raw_text, f"'{frame.text}' lost raw_text (emitted as passthrough)"
+            )
+
+    async def test_force_complete_has_nothing_left_to_emit(self):
+        seq = _seq()
+        await seq.register_spoken(
+            _spoken_frame(self.SENTENCE, raw_text=self.SENTENCE),
+            "ctx1",
+            self.SENTENCE,
+            append_to_context=True,
+        )
+        for word in self.WORDS:
+            seq.process_word(word, pts=10, context_id="ctx1")
+
+        # The slot completed through the words themselves, so the end of the audio
+        # context has no remaining text to re-emit or discard.
+        self.assertEqual(seq.force_complete("ctx1", last_word_pts=20), [])
+
+
+class TestTokenizationShapeResilience(unittest.IsolatedAsyncioTestCase):
+    """One sentence, tokenized the many ways real providers report it.
+
+    Providers differ in where punctuation, spacing and casing land in the
+    word-timestamp stream. Whatever the shape, the text reassembled for the
+    conversation context must come back as the original sentence.
+
+    Raw provider tokens are passed through :func:`merge_punct_tokens` first,
+    mirroring the service layer: punctuation-only tokens are collapsed into the
+    preceding word before the sequencer ever sees them.
+    """
+
+    SENTENCE = "Yeah, I can do that. "
+
+    SHAPES = {
+        "punctuation omitted entirely": ["Yeah", "I", "can", "do", "that"],
+        "punctuation attached to word": ["Yeah,", "I", "can", "do", "that."],
+        "tokens carry leading spaces": ["Yeah,", " I", " can", " do", " that."],
+        "tokens carry trailing spaces": ["Yeah, ", "I ", "can ", "do ", "that. "],
+        "punctuation as its own token": ["Yeah", ",", "I", "can", "do", "that", "."],
+        "punctuation leads next token": ["Yeah", ", I", "can", "do", "that", "."],
+        "lowercased by provider": ["yeah", "i", "can", "do", "that"],
+        "uppercased by provider": ["YEAH", "I", "CAN", "DO", "THAT"],
+        "trailing period only": ["Yeah", "I", "can", "do", "that."],
+    }
+
+    @staticmethod
+    def _assemble_context(frames) -> str:
+        """Reassemble what the context aggregator would write for these frames.
+
+        A word frame contributes its ``raw_text`` (the span of original text it
+        was attributed to) when it has one, falling back to the spoken text.
+        """
+        parts = [
+            TextPartForConcatenation(
+                f.raw_text if f.raw_text else f.text,
+                includes_inter_part_spaces=f.includes_inter_frame_spaces,
+            )
+            for f in frames
+            if isinstance(f, TTSTextFrame)
+        ]
+        return concatenate_aggregated_text(parts)
+
+    async def _run_shape(self, words: list[str]) -> str:
+        seq = _seq()
+        await seq.register_spoken(
+            _spoken_frame(self.SENTENCE, raw_text=self.SENTENCE),
+            "ctx1",
+            self.SENTENCE,
+            append_to_context=True,
+        )
+        merged = [w for w, _ in merge_punct_tokens([(w, 0.0) for w in words])]
+        frames = []
+        for word in merged:
+            frames.extend(seq.process_word(word, pts=10, context_id="ctx1"))
+        # End of the audio context: emit anything the provider never reported
+        # (e.g. a trailing period that never arrives as its own token).
+        frames.extend(seq.force_complete("ctx1", last_word_pts=20))
+        return self._assemble_context(frames)
+
+    async def test_context_reconstructs_for_every_shape(self):
+        for name, words in self.SHAPES.items():
+            with self.subTest(shape=name):
+                self.assertEqual(await self._run_shape(words), self.SENTENCE.strip())
 
 
 class TestClear(unittest.IsolatedAsyncioTestCase):

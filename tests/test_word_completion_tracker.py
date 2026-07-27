@@ -40,13 +40,56 @@ class TestWordCompletionTrackerBasic(unittest.TestCase):
         self.assertTrue(result)
         self.assertTrue(tracker.is_complete)
 
+    def test_late_word_after_completion_does_not_overflow_to_next_slot(self):
+        """A duplicate or late word-timestamp event arriving once the frame's TTS
+        text is fully consumed must be dropped outright.
+
+        Routing it as overflow instead would hand it to the next slot, duplicating
+        the word into the following sentence's transcript. The return value alone
+        does not distinguish the two paths -- both report complete -- so the
+        overflow and frame-word outputs are what pin this.
+        """
+        tracker = WordCompletionTracker("Hello world")
+        tracker.add_word_and_check_complete("Hello")
+        tracker.add_word_and_check_complete("world")
+
+        self.assertTrue(tracker.add_word_and_check_complete("extra"))
+        self.assertIsNone(tracker.get_overflow_word(), "late word must not leak to the next slot")
+        self.assertIsNone(tracker.get_word_for_frame())
+
 
 class TestWordCompletionTrackerNormalization(unittest.TestCase):
     def test_punctuation_ignored_in_expected(self):
-        """Punctuation in the source text is stripped before comparison."""
+        """Punctuation in the source text is stripped before comparison.
+
+        Also asserts each word actually belonged and was consumed normally
+        (rather than the second word silently force-completing the tracker) --
+        force-complete also leaves ``is_complete`` True, so it alone would not
+        catch a regression here.
+        """
         tracker = WordCompletionTracker("Hello, world!")
+        self.assertTrue(tracker.word_belongs_here("Hello"))
         tracker.add_word_and_check_complete("Hello")
+        self.assertEqual(tracker.get_word_for_frame(), "Hello")
+        self.assertTrue(tracker.word_belongs_here("world"))
         tracker.add_word_and_check_complete("world")
+        self.assertEqual(tracker.get_word_for_frame(), "world")
+        self.assertTrue(tracker.is_complete)
+
+    def test_word_after_unrepeated_comma_belongs_and_is_consumed(self):
+        """A word immediately following punctuation the TTS provider didn't
+        repeat as its own token (e.g. Inworld reporting "Yeah" then "I" for
+        "Yeah, I can do that.") must be recognised and consumed normally, not
+        dropped via force-complete.
+        """
+        tracker = WordCompletionTracker("Yeah, I can do that.")
+        for word in ("Yeah", "I", "can", "do"):
+            self.assertTrue(tracker.word_belongs_here(word), f"'{word}' should belong here")
+            self.assertFalse(tracker.add_word_and_check_complete(word))
+            self.assertEqual(tracker.get_word_for_frame(), word)
+        self.assertTrue(tracker.word_belongs_here("that"))
+        self.assertTrue(tracker.add_word_and_check_complete("that"))
+        self.assertEqual(tracker.get_word_for_frame(), "that")
         self.assertTrue(tracker.is_complete)
 
     def test_punctuation_ignored_in_words(self):
@@ -797,6 +840,94 @@ class TestWordCompletionTrackerMissingWord(unittest.TestCase):
         # tracker2 receives "cd" normally — no overflow
         self.assertTrue(tracker2.add_word_and_check_complete("cd"))
         self.assertIsNone(tracker2.get_overflow_word())
+
+
+class TestPunctuationLeadingTheNextToken(unittest.TestCase):
+    """A provider that reports punctuation with the *following* word (", I") rather
+    than the preceding one ("Yeah,").
+
+    Punctuation trailing a word is swept into that word's attributed span, so a
+    token leading with it presents the same punctuation a second time. The
+    duplicate is dropped from the frame word; the attribution is kept.
+    """
+
+    SENTENCE = "Yeah, I can do that. "
+
+    def test_duplicate_punctuation_is_dropped_from_the_frame_word(self):
+        tracker = WordCompletionTracker(
+            self.SENTENCE, llm_text=self.SENTENCE, user_facing_text=self.SENTENCE
+        )
+        tracker.add_word_and_check_complete("Yeah")
+        # The comma is attributed here, with the word it trails.
+        self.assertEqual(tracker.get_llm_consumed(), "Yeah,")
+
+        tracker.add_word_and_check_complete(", I")
+        self.assertEqual(tracker.get_word_for_frame(), "I", "comma must not be emitted twice")
+        self.assertEqual(tracker.get_llm_consumed(), "I")
+
+    def test_remaining_words_still_track(self):
+        tracker = WordCompletionTracker(
+            self.SENTENCE, llm_text=self.SENTENCE, user_facing_text=self.SENTENCE
+        )
+        for word in ("Yeah", ", I", "can", "do"):
+            self.assertTrue(tracker.word_belongs_here(word), f"{word!r} should belong")
+            tracker.add_word_and_check_complete(word)
+        self.assertTrue(tracker.add_word_and_check_complete("that"))
+
+
+class TestTransformFollowedByUnrepeatedPunctuation(unittest.TestCase):
+    """A text transform and punctuation the provider doesn't repeat, back to back.
+
+    The comma sits at the end of the transformed span's original text ("$42.50,"),
+    so the word after it has to be placed by skipping punctuation that the segment
+    map reached via the transform's atomic cursor jump rather than a normal word
+    advance.
+    """
+
+    TTS_TEXT = "Your balance is forty two dollars and fifty cents, and it is ready"
+    ORIGINAL = "Your balance is $42.50, and it is ready"
+
+    def test_words_after_the_transform_are_attributed(self):
+        tracker = WordCompletionTracker(
+            self.TTS_TEXT, llm_text=self.ORIGINAL, user_facing_text=self.ORIGINAL
+        )
+        words = [
+            "Your",
+            "balance",
+            "is",
+            "forty",
+            "two",
+            "dollars",
+            "and",
+            "fifty",
+            "cents",
+            "and",
+            "it",
+            "is",
+            "ready",
+        ]
+        for word in words:
+            self.assertTrue(tracker.word_belongs_here(word), f"{word!r} should belong")
+            tracker.add_word_and_check_complete(word)
+        self.assertTrue(tracker.is_complete)
+
+    def test_transformed_span_is_attributed_atomically(self):
+        """The expansion's original text is attributed once, on the word that
+        completes it -- and the word right after the comma resumes normally.
+        """
+        tracker = WordCompletionTracker(
+            self.TTS_TEXT, llm_text=self.ORIGINAL, user_facing_text=self.ORIGINAL
+        )
+        for word in ("Your", "balance", "is", "forty", "two", "dollars", "and", "fifty"):
+            tracker.add_word_and_check_complete(word)
+        # Mid-expansion words carry no attribution of their own.
+        self.assertIsNone(tracker.get_llm_consumed())
+
+        tracker.add_word_and_check_complete("cents")
+        self.assertEqual(tracker.get_llm_consumed(), "$42.50,")
+
+        tracker.add_word_and_check_complete("and")
+        self.assertEqual(tracker.get_llm_consumed(), "and")
 
 
 class TestWordCompletionTrackerLLMText(unittest.TestCase):

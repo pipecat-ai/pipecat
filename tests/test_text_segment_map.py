@@ -382,6 +382,83 @@ class TestClassifyHopLiteralMatchHandlesStrayAngleBracket(unittest.TestCase):
         self.assertEqual(hop.seg_chars, len("<3"))
 
 
+class TestClassifyHopSkipsLeadingPunctuation(unittest.TestCase):
+    """A word arriving right after punctuation the provider didn't repeat as its
+    own token (e.g. the comma in "Yeah, I can") must still be placed -- the
+    segment's leading punctuation run has to be skipped, not just its leading
+    whitespace.
+    """
+
+    def test_word_after_comma_and_space_is_placed(self):
+        hop = TextSegmentMap._classify_hop(", I can do that. ", "I")
+        self.assertEqual(hop.kind, _HopKind.PLACED)
+        self.assertEqual(hop.seg_chars, len(", I"))
+
+    def test_full_sentence_advances_word_by_word(self):
+        smap = TextSegmentMap("Yeah, I can do that.", "Yeah, I can do that.")
+        for word in ("Yeah", "I", "can", "do"):
+            self.assertTrue(smap.word_belongs_current_segment(word))
+            smap.advance_word(word)
+        self.assertTrue(smap.word_belongs_current_segment("that"))
+        smap.advance_word("that")
+        self.assertTrue(smap.is_complete)
+
+    def test_tag_name_is_not_matched_as_a_spoken_word(self):
+        """The punctuation skip must stop at '<' rather than scanning into a
+        tag's name, or a tag name arriving as its own word-timestamp token would
+        be PLACED as if it were spoken content and consume the tag.
+        """
+        hop = TextSegmentMap._classify_hop("<break/>hello", "break")
+        self.assertNotEqual(
+            hop.kind, _HopKind.PLACED, "'break' is the tag's name, not spoken content"
+        )
+
+    def test_word_after_leading_tag_still_placed_via_markup_strategy(self):
+        """Stopping the punctuation skip at '<' must not cost the markup-stripped
+        strategy (3) its match on a segment that opens with a tag.
+        """
+        hop = TextSegmentMap._classify_hop("<spell>4111 1111 1111 1111</spell>", "4111")
+        self.assertEqual(hop.kind, _HopKind.PLACED)
+
+
+class TestProviderTokenShapes(unittest.TestCase):
+    """Word-timestamp tokens arrive in provider-specific shapes. Each shape below
+    is handled by a different part of _classify_hop's matching, so each needs its
+    own scenario.
+    """
+
+    def test_tokens_carrying_their_own_leading_whitespace(self):
+        """Some providers include the separating space in the token (Inworld's
+        " world"), so the match must succeed against the segment text as-is --
+        before any leading-whitespace skip is applied.
+        """
+        smap = TextSegmentMap("Hello world", "Hello world")
+        for word in ("Hello", " world"):
+            self.assertTrue(smap.word_belongs_current_segment(word), f"{word!r} should belong")
+            smap.advance_word(word)
+        self.assertTrue(smap.is_complete)
+
+    def test_tokens_uppercased_by_the_provider(self):
+        """A provider that upper-cases its tokens needs the *word* side folded, not
+        just the segment side -- the folded-candidate pass alone would still be
+        comparing an upper-case word against lower-case source text.
+        """
+        smap = TextSegmentMap("hello world", "hello world")
+        for word in ("HELLO", "WORLD"):
+            self.assertTrue(smap.word_belongs_current_segment(word), f"{word!r} should belong")
+            smap.advance_word(word)
+        self.assertTrue(smap.is_complete)
+
+    def test_tokens_carrying_an_accent_absent_from_the_source(self):
+        """Accent folding must work in both directions: the provider may report a
+        diacritic the source text doesn't have, not only strip one it does.
+        """
+        smap = TextSegmentMap("Visit the cafe today", "Visit the cafe today")
+        for word in ("Visit", "the"):
+            smap.advance_word(word)
+        self.assertTrue(smap.word_belongs_current_segment("café"))
+
+
 class TestClassifyHopCaseFoldRequiresWordBoundary(unittest.TestCase):
     """The case/accent-folded fallback strategy must not PLACE a word mid-word.
 

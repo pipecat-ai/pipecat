@@ -164,6 +164,16 @@ class WordCompletionTracker:
             i -= 1
         return text[:i]
 
+    @staticmethod
+    def _remove_leading_punctuation(text: str) -> str:
+        """Remove punctuation and whitespace only at the very start of the given text."""
+        i = 0
+        while i < len(text) and (
+            text[i].isspace() or unicodedata.category(text[i]).startswith("P")
+        ):
+            i += 1
+        return text[i:]
+
     def add_word_and_check_complete(self, word: str) -> bool:
         """Record a spoken word from a word-timestamp event.
 
@@ -304,10 +314,21 @@ class WordCompletionTracker:
         frame_word = self._remove_trailing_punctuation(self._frame_word or "")
         if not frame_word:
             return
-        if self._fold_for_comparison(frame_word) in self._fold_for_comparison(
-            self._llm_consumed or ""
-        ):
+        folded_span = self._fold_for_comparison(self._llm_consumed or "")
+        if self._fold_for_comparison(frame_word) in folded_span:
             return
+
+        # The word may lead with punctuation the previous word already consumed:
+        # advance_by_alnums sweeps punctuation trailing a word into that word's
+        # span, so a provider that instead reports it with the *following* word
+        # (", I" rather than "Yeah,") presents it twice. Drop the duplicate from
+        # the frame word rather than the whole attribution -- keeping it would
+        # emit the punctuation a second time into the conversation context.
+        trimmed = self._remove_leading_punctuation(frame_word)
+        if trimmed and self._fold_for_comparison(trimmed) in folded_span:
+            self._frame_word = self._remove_leading_punctuation(self._frame_word or "")
+            return
+
         logger.warning(
             f"WordCompletionTracker: llm_consumed {repr(self._llm_consumed)!s} "
             f"does not contain frame_word {repr(self._frame_word)!s}, discarding"

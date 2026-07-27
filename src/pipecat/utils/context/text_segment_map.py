@@ -395,16 +395,37 @@ class TextSegmentMap:
         return None
 
     @staticmethod
+    def _leading_nonalnum(text: str, stop_at_markup: bool = False) -> int:
+        """Length of *text*'s leading run of non-alphanumeric characters.
+
+        With *stop_at_markup*, the run also stops at a ``'<'``. A tag's letters
+        are markup, not the start of spoken content, so a scan that reached into
+        one would let a tag *name* arriving as its own word-timestamp token (e.g.
+        ``"break"`` against ``"<break/>hello"``) match as if it were spoken,
+        consuming the tag and desyncing the cursor.
+        """
+        i = 0
+        while i < len(text) and not text[i].isalnum():
+            if stop_at_markup and text[i] == "<":
+                break
+            i += 1
+        return i
+
+    @staticmethod
     def _classify_hop(segment_remaining: str, remaining_word: str) -> _Hop:
         """Decide where *remaining_word* goes against this segment's remaining raw text.
 
         Purely positional/textual -- no tag-name parsing or cross-call state. The
         word is checked with three matching strategies, in order:
 
-        1. Literal, as-is: for providers whose word tokens carry their own
-           surrounding whitespace (e.g. Inworld's ``" world"``), optionally with
-           the segment's leading whitespace stripped, and with the word's own
-           trailing punctuation removed (see :meth:`_literal_hop`).
+        1. Literal, tried at three progressively deeper skip offsets into the
+           segment: as-is (for providers whose word tokens carry their own
+           surrounding whitespace, e.g. Inworld's ``" world"``), past leading
+           whitespace, and past the whole leading non-alphanumeric run -- the
+           last covering punctuation a provider leaves behind by not repeating it
+           in its word-timestamp events (e.g. the ``", "`` still pending in
+           ``"Yeah, I can"`` when ``"I"`` arrives). The word's own trailing
+           punctuation is also tried removed (see :meth:`_literal_hop`).
         2. Same as 1, with both sides case- and accent-folded: for a provider
            that lowercases a word or strips its diacritics in word-timestamp
            events (e.g. ``"SQL"`` -> ``"sql"``, ``"café"`` -> ``"cafe"``).
@@ -440,11 +461,18 @@ class TextSegmentMap:
         """
         stripped = segment_remaining.lstrip()
         lead_ws = len(segment_remaining) - len(stripped)
+        lead_nonalnum = TextSegmentMap._leading_nonalnum(segment_remaining, stop_at_markup=True)
 
-        # Strategy 1: literal match, as-is then whitespace-stripped.
-        candidates = [(segment_remaining, 0)]
-        if lead_ws:
-            candidates.append((stripped, lead_ws))
+        # Strategy 1: literal match at progressively deeper skip offsets -- the
+        # text as-is, past leading whitespace, then past the whole leading
+        # non-alphanumeric run (punctuation the provider didn't repeat as its own
+        # token, e.g. the ", " left in "Yeah, I can" once "Yeah" is consumed).
+        # The offsets are non-decreasing, so this tries the least aggressive skip
+        # first; duplicates are dropped.
+        candidates = [
+            (segment_remaining[offset:], offset)
+            for offset in dict.fromkeys((0, lead_ws, lead_nonalnum))
+        ]
         hop = TextSegmentMap._literal_hop(candidates, remaining_word)
         if hop is not None:
             return hop
@@ -470,11 +498,13 @@ class TextSegmentMap:
         if not normalize(segment_remaining):
             return _Hop(_HopKind.EXHAUSTED)
 
-        # Foreign token: nudge past leading punctuation only, then stop.
-        nudge = 0
-        while nudge < len(segment_remaining) and not segment_remaining[nudge].isalnum():
-            nudge += 1
-        return _Hop(_HopKind.NO_MATCH, seg_chars=nudge)
+        # Foreign token: nudge past leading punctuation only, then stop. Unlike
+        # the strategy 1 candidates this does not stop at markup -- it moves the
+        # raw cursor rather than deciding a match, so there is no tag name it
+        # could mistake for spoken content.
+        return _Hop(
+            _HopKind.NO_MATCH, seg_chars=TextSegmentMap._leading_nonalnum(segment_remaining)
+        )
 
     def _commit_raw_span(self, seg: TextSegment, new_pos: int) -> None:
         """Advance the raw cursor to *new_pos* in *seg*, moving the semantic cursors.
