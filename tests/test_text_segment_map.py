@@ -382,6 +382,37 @@ class TestClassifyHopLiteralMatchHandlesStrayAngleBracket(unittest.TestCase):
         self.assertEqual(hop.seg_chars, len("<3"))
 
 
+class TestClassifyHopSkipsLeadingPunctuation(unittest.TestCase):
+    """A word arriving right after punctuation the provider didn't repeat as its
+    own token (e.g. the comma in "Yeah, I can") must still be placed -- the
+    segment's leading punctuation run has to be skipped, not just its leading
+    whitespace.
+    """
+
+    def test_word_after_comma_and_space_is_placed(self):
+        hop = TextSegmentMap._classify_hop(", I can do that. ", "I")
+        self.assertEqual(hop.kind, _HopKind.PLACED)
+        self.assertEqual(hop.seg_chars, len(", I"))
+
+    def test_full_sentence_advances_word_by_word(self):
+        smap = TextSegmentMap("Yeah, I can do that.", "Yeah, I can do that.")
+        for word in ("Yeah", "I", "can", "do"):
+            self.assertTrue(smap.word_belongs_current_segment(word))
+            smap.advance_word(word)
+        self.assertTrue(smap.word_belongs_current_segment("that"))
+        smap.advance_word("that")
+        self.assertTrue(smap.is_complete)
+
+    def test_leading_markup_tag_is_not_treated_as_leading_punctuation(self):
+        """A segment starting with a markup tag (e.g. "<spell>") must still be
+        matched via the markup-stripped strategy (3) -- the punctuation-skip
+        added for strategy 1 stops before '<' so it can't chew into the tag's
+        own letters and corrupt that fallback.
+        """
+        hop = TextSegmentMap._classify_hop("<spell>4111 1111 1111 1111</spell>", "4111")
+        self.assertEqual(hop.kind, _HopKind.PLACED)
+
+
 class TestClassifyHopCaseFoldRequiresWordBoundary(unittest.TestCase):
     """The case/accent-folded fallback strategy must not PLACE a word mid-word.
 

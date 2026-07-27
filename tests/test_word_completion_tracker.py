@@ -43,10 +43,36 @@ class TestWordCompletionTrackerBasic(unittest.TestCase):
 
 class TestWordCompletionTrackerNormalization(unittest.TestCase):
     def test_punctuation_ignored_in_expected(self):
-        """Punctuation in the source text is stripped before comparison."""
+        """Punctuation in the source text is stripped before comparison.
+
+        Also asserts each word actually belonged and was consumed normally
+        (rather than the second word silently force-completing the tracker) --
+        force-complete also leaves ``is_complete`` True, so it alone would not
+        catch a regression here.
+        """
         tracker = WordCompletionTracker("Hello, world!")
+        self.assertTrue(tracker.word_belongs_here("Hello"))
         tracker.add_word_and_check_complete("Hello")
+        self.assertEqual(tracker.get_word_for_frame(), "Hello")
+        self.assertTrue(tracker.word_belongs_here("world"))
         tracker.add_word_and_check_complete("world")
+        self.assertEqual(tracker.get_word_for_frame(), "world")
+        self.assertTrue(tracker.is_complete)
+
+    def test_word_after_unrepeated_comma_belongs_and_is_consumed(self):
+        """A word immediately following punctuation the TTS provider didn't
+        repeat as its own token (e.g. Inworld reporting "Yeah" then "I" for
+        "Yeah, I can do that.") must be recognised and consumed normally, not
+        dropped via force-complete.
+        """
+        tracker = WordCompletionTracker("Yeah, I can do that.")
+        for word in ("Yeah", "I", "can", "do"):
+            self.assertTrue(tracker.word_belongs_here(word), f"'{word}' should belong here")
+            self.assertFalse(tracker.add_word_and_check_complete(word))
+            self.assertEqual(tracker.get_word_for_frame(), word)
+        self.assertTrue(tracker.word_belongs_here("that"))
+        self.assertTrue(tracker.add_word_and_check_complete("that"))
+        self.assertEqual(tracker.get_word_for_frame(), "that")
         self.assertTrue(tracker.is_complete)
 
     def test_punctuation_ignored_in_words(self):

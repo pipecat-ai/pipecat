@@ -403,8 +403,12 @@ class TextSegmentMap:
 
         1. Literal, as-is: for providers whose word tokens carry their own
            surrounding whitespace (e.g. Inworld's ``" world"``), optionally with
-           the segment's leading whitespace stripped, and with the word's own
-           trailing punctuation removed (see :meth:`_literal_hop`).
+           the segment's leading whitespace stripped, optionally with its leading
+           non-alphanumeric run (whitespace and/or punctuation, stopping before
+           any markup tag) stripped -- e.g. the ``", "`` left over when a
+           provider's word-timestamp events omit punctuation attached to the
+           previous word -- and with the word's own trailing punctuation removed
+           (see :meth:`_literal_hop`).
         2. Same as 1, with both sides case- and accent-folded: for a provider
            that lowercases a word or strips its diacritics in word-timestamp
            events (e.g. ``"SQL"`` -> ``"sql"``, ``"café"`` -> ``"cafe"``).
@@ -441,10 +445,23 @@ class TextSegmentMap:
         stripped = segment_remaining.lstrip()
         lead_ws = len(segment_remaining) - len(stripped)
 
-        # Strategy 1: literal match, as-is then whitespace-stripped.
+        # Strategy 1: literal match, as-is; then whitespace-stripped; then with
+        # the segment's leading non-alphanumeric run stripped (punctuation
+        # and/or whitespace, stopping before any markup tag -- a tag's own
+        # letters are not the spoken word's start, so they must not be treated
+        # as the boundary here; strategy 3 handles matching inside a tag).
         candidates = [(segment_remaining, 0)]
         if lead_ws:
             candidates.append((stripped, lead_ws))
+        lead_nonalnum = 0
+        while (
+            lead_nonalnum < len(segment_remaining)
+            and not segment_remaining[lead_nonalnum].isalnum()
+            and segment_remaining[lead_nonalnum] != "<"
+        ):
+            lead_nonalnum += 1
+        if lead_nonalnum and lead_nonalnum != lead_ws:
+            candidates.append((segment_remaining[lead_nonalnum:], lead_nonalnum))
         hop = TextSegmentMap._literal_hop(candidates, remaining_word)
         if hop is not None:
             return hop
