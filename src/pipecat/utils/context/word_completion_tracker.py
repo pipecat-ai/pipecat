@@ -164,6 +164,57 @@ class WordCompletionTracker:
             i -= 1
         return text[:i]
 
+    def _word_without_redundant_leading_punctuation(self, word: str) -> str:
+        """Remove provider-repeated punctuation from a word-timestamp token.
+
+        Some providers can return a multi-word token whose leading punctuation
+        was already attached to, and consumed with, the preceding token. For
+        example, ``"Yeah,"`` may be followed by ``", I can do that."`` even
+        though the remaining source text starts with ``" I can"``. Ignore that
+        prefix only when all of the following hold:
+
+        - the token does not already match the remaining source text;
+        - its leading prefix contains only whitespace and Unicode punctuation;
+        - the punctuation exactly repeats the consumed source boundary; and
+        - removing the prefix makes the token match the remaining source text.
+
+        The boundary check keeps real leading punctuation and mismatched tokens
+        on the normal rejection/force-complete path.
+        """
+        if self._segment_map.word_belongs_current_segment(word):
+            return word
+
+        prefix_end = 0
+        leading_punctuation = ""
+        while prefix_end < len(word):
+            char = word[prefix_end]
+            if char.isspace():
+                prefix_end += 1
+                continue
+            if unicodedata.category(char).startswith("P"):
+                leading_punctuation += char
+                prefix_end += 1
+                continue
+            break
+
+        if not leading_punctuation or prefix_end >= len(word):
+            return word
+
+        consumed = self._tts_text[: self._segment_map.raw_pos].rstrip()
+        consumed_punctuation_start = len(consumed)
+        while consumed_punctuation_start > 0 and unicodedata.category(
+            consumed[consumed_punctuation_start - 1]
+        ).startswith("P"):
+            consumed_punctuation_start -= 1
+        consumed_punctuation = consumed[consumed_punctuation_start:]
+        if not consumed_punctuation.endswith(leading_punctuation):
+            return word
+
+        candidate = word[prefix_end:]
+        if self._segment_map.word_belongs_current_segment(candidate):
+            return candidate
+        return word
+
     def add_word_and_check_complete(self, word: str) -> bool:
         """Record a spoken word from a word-timestamp event.
 
@@ -229,7 +280,10 @@ class WordCompletionTracker:
             return True
 
         # Word belongs to this frame: let the segment map match it against the
-        # remaining TTS text and advance its own cursors.
+        # remaining TTS text and advance its own cursors. A provider may repeat
+        # punctuation already consumed at the previous token boundary; remove
+        # that verified-redundant prefix before advancing or emitting the word.
+        word = self._word_without_redundant_leading_punctuation(word)
         prev_llm_pos = self._llm_pos
         self._segment_map.advance_word(word)
 
@@ -324,6 +378,7 @@ class WordCompletionTracker:
         event: if the incoming word does not match this slot's remaining content,
         the caller should force-complete this slot and route the word to the next.
         """
+        word = self._word_without_redundant_leading_punctuation(word)
         return self._segment_map.word_belongs_current_segment(word)
 
     def suppress_in_context(self) -> bool:

@@ -648,6 +648,31 @@ class TestWordCompletionTrackerWordBelongsHere(unittest.TestCase):
         self.assertTrue(tracker.word_belongs_here("world"))
         self.assertFalse(tracker.word_belongs_here("hello"))
 
+    def test_repeated_consumed_boundary_punctuation_belongs(self):
+        """A multi-word token may repeat punctuation consumed by the prior token."""
+        text = "Yeah, I can do that. "
+        tracker = WordCompletionTracker(text, llm_text=text)
+
+        self.assertFalse(tracker.add_word_and_check_complete("Yeah,"))
+        self.assertTrue(tracker.word_belongs_here(", I can do that. "))
+        self.assertTrue(tracker.add_word_and_check_complete(", I can do that. "))
+        self.assertEqual(tracker.get_word_for_frame(), "I can do that.")
+        self.assertEqual(tracker.get_llm_consumed(), "I can do that.")
+        self.assertIsNone(tracker.get_overflow_word())
+
+    def test_unrelated_leading_punctuation_does_not_belong(self):
+        """Only punctuation matching the consumed boundary may be ignored."""
+        tracker = WordCompletionTracker("Yeah, I can do that.")
+        tracker.add_word_and_check_complete("Yeah,")
+
+        self.assertFalse(tracker.word_belongs_here("; I can do that."))
+
+    def test_leading_punctuation_at_frame_start_does_not_belong(self):
+        """Leading punctuation is not redundant before any source text was consumed."""
+        tracker = WordCompletionTracker("Hello there")
+
+        self.assertFalse(tracker.word_belongs_here(", Hello there"))
+
 
 class TestWordCompletionTrackerOverflow(unittest.TestCase):
     """Words that span the boundary of two AggregatedTextFrames."""

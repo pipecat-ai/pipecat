@@ -300,6 +300,20 @@ class TestProcessWordBasic(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].text, "zzz")
 
+    async def test_repeated_boundary_punctuation_does_not_duplicate_clause(self):
+        """A provider token repeating the prior comma completes without passthrough."""
+        text = "Yeah, I can do that. "
+        seq = _seq()
+        await seq.register_spoken(_spoken_frame(text), "ctx1", text, True)
+
+        first = seq.process_word("Yeah,", pts=1, context_id="ctx1")
+        second = seq.process_word(", I can do that. ", pts=2, context_id="ctx1")
+        word_frames = [frame for frame in first + second if isinstance(frame, TTSTextFrame)]
+
+        self.assertEqual([frame.text for frame in word_frames], ["Yeah,", "I can do that."])
+        self.assertEqual([frame.raw_text for frame in word_frames], ["Yeah,", "I can do that."])
+        self.assertEqual(seq.force_complete("ctx1", last_word_pts=3), [])
+
     async def test_none_context_word_completes_registered_slot(self):
         # Legacy providers register slots under real context IDs but emit word
         # events with context_id=None; an untagged word must still land on (and
