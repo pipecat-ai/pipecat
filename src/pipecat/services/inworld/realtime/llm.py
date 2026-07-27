@@ -755,7 +755,9 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         metadata = dict(provider_data.get("metadata") or {})
         metadata["sdk"] = "pipecat-realtime"
         provider_data["metadata"] = metadata
-        provider_data["auto_tool_response"] = False # Set to false because Pipecat creates a tool response from client
+        provider_data["auto_tool_response"] = (
+            False  # Set to false because Pipecat creates a tool response from client
+        )
         settings.provider_data = provider_data
 
         await self.send_client_event(events.SessionUpdateEvent(session=settings))
