@@ -110,6 +110,21 @@ def _is_normal_close(exc: BaseException) -> bool:
     return "webtransport error: closed" in msg or "session error" in msg and "closed" in msg
 
 
+def _is_peer_gone(exc: BaseException) -> bool:
+    """Return True when a peer subscription ended because the remote side left.
+
+    When the peer closes its session (or the relay tears down its
+    broadcast), moq-rs surfaces the close code the remote sent as
+    ``"remote error: code=N"`` on whatever subscription we were
+    consuming. For the per-peer catalog/audio/transcript subscriptions
+    that's the normal end of every call — treat it like a disconnect,
+    not a transport failure.
+    """
+    if not isinstance(exc, moq.MoqError):
+        return False
+    return "remote error" in str(exc) or _is_normal_close(exc)
+
+
 _moq_task_filter_installed = False
 
 
@@ -609,10 +624,16 @@ class MOQTransportClient:
         ``moq.Server`` (serve mode). Returns once the session closes or
         :meth:`disconnect` is called.
 
-        Both modes share a single :class:`moq.OriginProducer`. The bot
-        publishes its broadcast through the origin and consumes the
-        peer's broadcast through the same origin — only the transport
-        bring-up differs.
+        The bot publishes its broadcast through ``publish_origin`` and
+        consumes the peer's broadcast through ``subscribe_origin``. In
+        serve mode these are the same :class:`moq.OriginProducer` — the
+        shared origin is what routes broadcasts between accepted
+        sessions. In client mode they must be distinct: with a single
+        shared origin, the relay's announcement of the peer broadcast
+        lands in the consume origin — which is also the publish origin —
+        so the client re-announces the peer's path as its own and the
+        relay routes our subscription back to us, where no producer
+        exists, killing it with ``Mux('... cancelled')``.
         """
         # Install the loop-level filter that swallows the normal-close
         # unretrieved-task warning from moq.Server's internal tasks.
@@ -620,7 +641,8 @@ class MOQTransportClient:
         # helper's docstring for why we can't scope it to _run.
         _install_moq_task_exception_filter()
 
-        origin = moq.OriginProducer()
+        publish_origin = moq.OriginProducer()
+        subscribe_origin = publish_origin if self._params.serve else moq.OriginProducer()
 
         if self._params.serve:
             ctx_label = f"serving {self._bind} as {self._broadcast_path}"
@@ -629,7 +651,7 @@ class MOQTransportClient:
         logger.debug(f"MOQ: {ctx_label}")
 
         try:
-            async with self._make_transport(origin) as transport:
+            async with self._make_transport(publish_origin, subscribe_origin) as transport:
                 if self._params.serve:
                     server = cast(moq.Server, transport)
                     self._cert_fingerprints = server.cert_fingerprints()
@@ -638,7 +660,7 @@ class MOQTransportClient:
                         f"(cert sha256: {self._cert_fingerprints})"
                     )
 
-                origin.publish(self._broadcast_path, self._publish_broadcast)
+                publish_origin.publish(self._broadcast_path, self._publish_broadcast)
                 logger.debug(
                     f"MOQ: published broadcast {self._broadcast_path!r} "
                     f"(transcript: {self._params.transcript_track!r}, "
@@ -665,7 +687,7 @@ class MOQTransportClient:
                     # writing frames into self._audio_out /
                     # self._transcript_out from whichever task is running
                     # the pipeline.
-                    await self._consume_peer(origin)
+                    await self._consume_peer(subscribe_origin)
                 finally:
                     if serve_task is not None and self._task_manager is not None:
                         await self._task_manager.cancel_task(serve_task)
@@ -688,12 +710,16 @@ class MOQTransportClient:
             self._cert_fingerprints = []
             await self._callbacks.on_disconnected()
 
-    def _make_transport(self, origin: "moq.OriginProducer"):
+    def _make_transport(
+        self,
+        publish_origin: "moq.OriginProducer",
+        subscribe_origin: "moq.OriginProducer",
+    ):
         """Return the async-context-manager that owns the MOQ session.
 
         Client mode dials the relay; serve mode binds a local socket and
-        accepts incoming sessions. Both wire ``origin`` for publish and
-        subscribe so the rest of ``_run`` is shape-identical.
+        accepts incoming sessions. See :meth:`_run` for why the origins
+        are shared in serve mode but distinct in client mode.
         """
         if self._params.serve:
             # Serve mode always resolves a concrete listen address (the
@@ -707,8 +733,8 @@ class MOQTransportClient:
                 tls_kwargs["tls_generate"] = [self._params.serve_tls_host]
             return moq.Server(
                 self._bind,
-                publish=origin,
-                subscribe=origin,
+                publish=publish_origin,
+                subscribe=subscribe_origin,
                 **tls_kwargs,
             )
 
@@ -718,8 +744,8 @@ class MOQTransportClient:
             self._url,
             tls_verify=self._params.verify_ssl,
             bind=self._bind,
-            publish=origin,
-            subscribe=origin,
+            publish=publish_origin,
+            subscribe=subscribe_origin,
         )
 
     async def _consume_peer(self, origin: "moq.OriginProducer"):
@@ -797,6 +823,11 @@ class MOQTransportClient:
                     )
         except (asyncio.CancelledError, StopAsyncIteration):
             return
+        except moq.MoqError as e:
+            if not _is_peer_gone(e):
+                raise
+            logger.debug(f"MOQ: peer catalog subscription ended: {e}")
+            return
         except TimeoutError:
             logger.warning(
                 f"MOQ: peer broadcast never advertised audio within "
@@ -859,6 +890,10 @@ class MOQTransportClient:
                     await self._callbacks.on_audio_received(pcm, target_rate)
         except asyncio.CancelledError:
             pass
+        except moq.MoqError as e:
+            if not _is_peer_gone(e):
+                raise
+            logger.debug(f"MOQ: peer audio subscription ended: {e}")
 
     async def _forward_peer_transcript(self, peer_broadcast: "moq.BroadcastConsumer"):
         """Subscribe to the peer's transcript stream and forward RTVI messages inbound.
@@ -888,6 +923,10 @@ class MOQTransportClient:
                 await self._callbacks.on_message_received(message)
         except asyncio.CancelledError:
             pass
+        except moq.MoqError as e:
+            if not _is_peer_gone(e):
+                raise
+            logger.debug(f"MOQ: peer transcript subscription ended: {e}")
 
     def _track(self, consumer):
         """Remember a consumer so ``disconnect()`` can cancel it.
