@@ -29,6 +29,10 @@ For Gemini adapter:
 8. Developer messages are converted to user
 9. Malformed messages raise LLMContextConversionError (preserving the underlying cause)
 
+For Gemini Live adapter (everything the Gemini adapter does, plus):
+1. LLMSpecificMessage objects with llm='gemini-live' are included and others are filtered out
+2. Tool calls and their results are summarized as text messages
+
 For Anthropic adapter:
 1. LLMStandardMessage objects are converted to Anthropic MessageParam format
 2. LLMSpecificMessage objects with llm='anthropic' are included and others are filtered out
@@ -78,6 +82,7 @@ from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
 from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter
 from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMAdapter
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
+from pipecat.adapters.services.gemini_live_adapter import GeminiLiveLLMAdapter
 from pipecat.adapters.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
@@ -746,6 +751,108 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(len(params["messages"]), 2)
         # Second message (developer) should be converted to user in Google format
         self.assertEqual(params["messages"][1].role, "user")
+
+
+class TestGeminiLiveGetLLMInvocationParams(unittest.TestCase):
+    def setUp(self) -> None:
+        """Sets up a common adapter instance for all tests."""
+        self.adapter = GeminiLiveLLMAdapter()
+
+    def test_standard_messages_converted_to_gemini_format(self):
+        """Test that messages with no tool calls are converted just like Gemini's."""
+        standard_messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Hello, how are you?"},
+            {"role": "assistant", "content": "I'm doing well, thank you for asking!"},
+        ]
+        context = LLMContext(messages=standard_messages)
+
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params, GeminiLLMAdapter().get_llm_invocation_params(context))
+
+    def test_llm_specific_message_filtering(self):
+        """Test that Gemini Live-specific messages are included and others are filtered out."""
+        messages = [
+            GeminiLLMAdapter().create_llm_specific_message(
+                Content(role="model", parts=[Part(text="Gemini specific response")]),
+            ),
+            self.adapter.create_llm_specific_message(
+                Content(role="model", parts=[Part(text="Gemini Live specific response")]),
+            ),
+        ]
+        context = LLMContext(messages=messages)
+
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 1)
+        self.assertEqual(params["messages"][0].parts[0].text, "Gemini Live specific response")
+
+    def test_tool_call_and_result_summarized_as_text(self):
+        """Test that a tool call and its result are summarized as text messages."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "user", "content": "What's the weather?"},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {
+                            "name": "get_weather",
+                            "arguments": '{"location": "Paris"}',
+                        },
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call-1", "content": '{"conditions": "nice"}'},
+        ]
+        context = LLMContext(messages=messages)
+
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 3)
+        # The call is a model turn, its result a user turn.
+        call_message = params["messages"][1]
+        self.assertEqual(call_message.role, "model")
+        self.assertIsNone(call_message.parts[0].function_call)
+        self.assertIn("get_weather", call_message.parts[0].text)
+        self.assertIn("Paris", call_message.parts[0].text)
+
+        result_message = params["messages"][2]
+        self.assertEqual(result_message.role, "user")
+        self.assertIsNone(result_message.parts[0].function_response)
+        self.assertIn("get_weather", result_message.parts[0].text)
+        self.assertIn("nice", result_message.parts[0].text)
+
+    def test_parallel_tool_calls_summarized_together(self):
+        """Test that a message calling several functions is summarized as one message."""
+        messages: list[LLMStandardMessage] = [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": "{}"},
+                    },
+                    {
+                        "id": "call-2",
+                        "type": "function",
+                        "function": {"name": "get_restaurant", "arguments": "{}"},
+                    },
+                ],
+            },
+        ]
+        context = LLMContext(messages=messages)
+
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 1)
+        parts = params["messages"][0].parts
+        self.assertEqual(len(parts), 1)
+        self.assertIn("get_weather", parts[0].text)
+        self.assertIn("get_restaurant", parts[0].text)
 
 
 class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
