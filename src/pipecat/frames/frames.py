@@ -31,6 +31,7 @@ from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.text.base_text_aggregator import AggregationType
 from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
@@ -959,15 +960,24 @@ class ErrorFrame(SystemFrame):
         fatal: Whether the error is fatal and requires bot shutdown.
         processor: The frame processor that generated the error.
         exception: The exception that occurred.
+        category: Why the error occurred, when the processor could determine it.
+            Lets handlers tell a transient failure from one that will keep
+            recurring until the configuration changes.
     """
 
     error: str
     fatal: bool = False
     processor: FrameProcessor | None = None
     exception: Exception | None = None
+    category: ErrorCategory = ErrorCategory.UNKNOWN
 
     def __str__(self):
-        return f"{self.name}(error: {self.error}, fatal: {self.fatal})"
+        category = (
+            f", category: {self.category.value}"
+            if self.category is not ErrorCategory.UNKNOWN
+            else ""
+        )
+        return f"{self.name}(error: {self.error}, fatal: {self.fatal}{category})"
 
 
 @dataclass

@@ -12,7 +12,7 @@ model management, settings handling, and frame processing lifecycle methods.
 
 import warnings
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import Any, ClassVar
 
 from loguru import logger
 
@@ -28,6 +28,8 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import ServiceSettings
+from pipecat.services.status import ServiceStatus, status_for_category
+from pipecat.utils.errors import ErrorCategory, classify_exception
 
 
 class AIService(FrameProcessor):
@@ -37,7 +39,24 @@ class AIService(FrameProcessor):
     settings handling, session properties, and frame processing lifecycle.
     Subclasses should implement specific AI functionality while leveraging
     this base infrastructure.
+
+    Event handlers available:
+
+    - on_status_changed: Called with the previous and current
+      :class:`~pipecat.services.status.ServiceStatus` when the service's health
+      changes.
+
+    Example::
+
+        @service.event_handler("on_status_changed")
+        async def on_status_changed(service, previous, current):
+            ...
     """
+
+    #: Whether to classify reported errors and derive `status` from them. Set to
+    #: True on services whose provider errors :func:`classify_exception`
+    #: understands, or that override :meth:`_classify_error`.
+    _classify_errors: ClassVar[bool] = False
 
     def __init__(self, settings: ServiceSettings | None = None, **kwargs):
         """Initialize the AI service.
@@ -47,6 +66,8 @@ class AIService(FrameProcessor):
             **kwargs: Additional arguments passed to the parent FrameProcessor.
         """
         super().__init__(**kwargs)
+        self._status = ServiceStatus.UNKNOWN
+        self._register_event_handler("on_status_changed")
         self._settings: ServiceSettings = (
             settings
             # Here in case subclass doesn't implement more specific settings
@@ -57,6 +78,59 @@ class AIService(FrameProcessor):
         self._session_properties: dict[str, Any] = {}
         self._tracing_enabled: bool = False
         self._tracing_context = None
+
+    @property
+    def status(self) -> ServiceStatus:
+        """The current health of this service."""
+        return self._status
+
+    async def _set_status(self, status: ServiceStatus):
+        """Move the service to a new status, notifying listeners if it changed.
+
+        Args:
+            status: The status to move to.
+        """
+        if status is self._status:
+            return
+
+        previous = self._status
+        self._status = status
+        logger.debug(f"{self}: status changed from {previous.value} to {status.value}")
+        await self._call_event_handler("on_status_changed", previous, status)
+
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Classify a provider exception this service knows the shape of.
+
+        Override for providers that signal failures through SDK-specific
+        exceptions rather than a status code.
+
+        Args:
+            exception: The exception to classify.
+
+        Returns:
+            The category, or None to fall back to :func:`classify_exception`.
+        """
+        return None
+
+    async def push_error_frame(self, error: ErrorFrame):
+        """Push an error frame upstream, classifying it and updating `status`.
+
+        Classification is skipped for services that don't opt into
+        `_classify_errors`, and for errors that already carry a category.
+
+        Args:
+            error: The error frame to push.
+        """
+        if self._classify_errors and error.category is ErrorCategory.UNKNOWN and error.exception:
+            error.category = self._classify_error(error.exception) or classify_exception(
+                error.exception
+            )
+
+        status = status_for_category(error.category)
+        if status:
+            await self._set_status(status)
+
+        await super().push_error_frame(error)
 
     def _sync_model_name_to_metrics(self):
         """Sync the current AI model name (in `self._settings.model`) for usage in metrics.
@@ -153,6 +227,10 @@ class AIService(FrameProcessor):
 
         if changed:
             logger.info(f"{self.name}: updated settings fields: {set(changed)}")
+            # New settings may be the ones that make the service work, so give
+            # it another chance rather than leaving it permanently written off.
+            if self._status is ServiceStatus.MISCONFIGURED:
+                await self._set_status(ServiceStatus.UNKNOWN)
 
         return changed
 

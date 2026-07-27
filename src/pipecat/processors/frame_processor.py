@@ -48,6 +48,7 @@ from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMet
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.frame_queue import FrameQueue
 
 if TYPE_CHECKING:
@@ -679,6 +680,7 @@ class FrameProcessor(BaseObject):
         error_msg: str,
         exception: Exception | None = None,
         fatal: bool = False,
+        category: ErrorCategory = ErrorCategory.UNKNOWN,
     ):
         """Creates and pushes an ErrorFrame upstream.
 
@@ -693,6 +695,9 @@ class FrameProcessor(BaseObject):
             fatal: Whether this error should be considered fatal to the pipeline.
                 Fatal errors typically cause the entire pipeline to stop processing.
                 Defaults to False for non-fatal errors.
+            category: Why the error occurred, when the caller knows. Lets
+                handlers tell a transient failure from one that will keep
+                recurring until the configuration changes.
 
         Example::
 
@@ -707,7 +712,13 @@ class FrameProcessor(BaseObject):
                 await self.push_error("Critical operation failed", exception=e, fatal=True)
             ```
         """
-        error_frame = ErrorFrame(error=error_msg, fatal=fatal, exception=exception, processor=self)
+        error_frame = ErrorFrame(
+            error=error_msg,
+            fatal=fatal,
+            exception=exception,
+            processor=self,
+            category=category,
+        )
         await self.push_error_frame(error=error_frame)
 
     async def push_error_frame(self, error: ErrorFrame):
@@ -720,8 +731,10 @@ class FrameProcessor(BaseObject):
             error.processor = self
         await self._call_event_handler("on_error", error)
 
-        if error.exception:
-            tb = traceback.extract_tb(error.exception.__traceback__)
+        # An exception carries a traceback only once it has been raised, so fall
+        # back to the plain message rather than losing the error entirely.
+        tb = traceback.extract_tb(error.exception.__traceback__) if error.exception else []
+        if tb:
             last = tb[-1]
             error_message = (
                 f"{error.processor} exception ({last.filename}:{last.lineno}): {error.error}"
