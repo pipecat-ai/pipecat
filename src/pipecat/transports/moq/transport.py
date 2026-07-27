@@ -679,7 +679,9 @@ class MOQTransportClient:
                 # close, expected at end-of-call.
                 logger.debug(f"MOQ transport closed: {e}")
             else:
-                logger.error(f"MOQ transport error: {e}", exc_info=True)
+                # Loguru ignores stdlib-style ``exc_info=``; ``opt(exception=...)``
+                # is what captures the traceback.
+                logger.opt(exception=e).error(f"MOQ transport error: {e}")
                 await self._callbacks.on_error(str(e), e)
         finally:
             self._audio_out = None
