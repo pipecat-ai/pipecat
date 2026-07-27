@@ -884,14 +884,28 @@ class TestTransformFollowedByUnrepeatedPunctuation(unittest.TestCase):
     advance.
     """
 
-    TTS_TEXT = "Your balance is forty two dollars, and it is ready"
+    TTS_TEXT = "Your balance is forty two dollars and fifty cents, and it is ready"
     ORIGINAL = "Your balance is $42.50, and it is ready"
 
     def test_words_after_the_transform_are_attributed(self):
         tracker = WordCompletionTracker(
             self.TTS_TEXT, llm_text=self.ORIGINAL, user_facing_text=self.ORIGINAL
         )
-        words = ["Your", "balance", "is", "forty", "two", "dollars", "and", "it", "is", "ready"]
+        words = [
+            "Your",
+            "balance",
+            "is",
+            "forty",
+            "two",
+            "dollars",
+            "and",
+            "fifty",
+            "cents",
+            "and",
+            "it",
+            "is",
+            "ready",
+        ]
         for word in words:
             self.assertTrue(tracker.word_belongs_here(word), f"{word!r} should belong")
             tracker.add_word_and_check_complete(word)
@@ -904,12 +918,12 @@ class TestTransformFollowedByUnrepeatedPunctuation(unittest.TestCase):
         tracker = WordCompletionTracker(
             self.TTS_TEXT, llm_text=self.ORIGINAL, user_facing_text=self.ORIGINAL
         )
-        for word in ("Your", "balance", "is", "forty", "two"):
+        for word in ("Your", "balance", "is", "forty", "two", "dollars", "and", "fifty"):
             tracker.add_word_and_check_complete(word)
         # Mid-expansion words carry no attribution of their own.
         self.assertIsNone(tracker.get_llm_consumed())
 
-        tracker.add_word_and_check_complete("dollars")
+        tracker.add_word_and_check_complete("cents")
         self.assertEqual(tracker.get_llm_consumed(), "$42.50,")
 
         tracker.add_word_and_check_complete("and")
