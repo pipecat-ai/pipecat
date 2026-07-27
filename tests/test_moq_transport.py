@@ -44,10 +44,13 @@ import pytest
 # doesn't pull optional extras.
 pytest.importorskip("moq")
 
+import moq  # noqa: E402
+
 from pipecat.transports.moq.transport import (  # noqa: E402
     MOQParams,
     MOQTransport,
     _downmix_s16_to_mono,
+    _is_peer_gone,
 )
 
 # ----------------------------------------------------------------------
@@ -192,6 +195,27 @@ def _self_signed_pem(tmp_path):
 # The runner module pulls in FastAPI/uvicorn (the `runner` extra). Skip
 # the cert-hash helper tests when that's not installed; the helpers are
 # defined in run.py, so import = require runner extra.
+class TestIsPeerGone(unittest.TestCase):
+    """``_is_peer_gone`` decides whether a per-peer subscription error is
+    the normal end of a call (peer closed its session, relay tore down
+    its broadcast) or a real failure that must propagate."""
+
+    def test_remote_error_code_is_peer_gone(self):
+        """The peer hanging up surfaces as ``remote error: code=N`` on the
+        audio/transcript subscription being consumed."""
+        self.assertTrue(_is_peer_gone(moq.MoqError.Audio("moq: remote error: code=4")))
+
+    def test_normal_close_is_peer_gone(self):
+        """Session-level normal close counts as the peer leaving too."""
+        self.assertTrue(_is_peer_gone(moq.MoqError.Protocol("webtransport error: closed")))
+
+    def test_other_moq_errors_propagate(self):
+        self.assertFalse(_is_peer_gone(moq.MoqError.Mux("json: cancelled")))
+
+    def test_non_moq_errors_propagate(self):
+        self.assertFalse(_is_peer_gone(RuntimeError("remote error: code=4")))
+
+
 fastapi = pytest.importorskip("fastapi")
 from pipecat.runner.moq import (  # noqa: E402
     _build_moq_client_config,
