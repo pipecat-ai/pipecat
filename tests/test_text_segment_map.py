@@ -403,11 +403,19 @@ class TestClassifyHopSkipsLeadingPunctuation(unittest.TestCase):
         smap.advance_word("that")
         self.assertTrue(smap.is_complete)
 
-    def test_leading_markup_tag_is_not_treated_as_leading_punctuation(self):
-        """A segment starting with a markup tag (e.g. "<spell>") must still be
-        matched via the markup-stripped strategy (3) -- the punctuation-skip
-        added for strategy 1 stops before '<' so it can't chew into the tag's
-        own letters and corrupt that fallback.
+    def test_tag_name_is_not_matched_as_a_spoken_word(self):
+        """The punctuation skip must stop at '<' rather than scanning into a
+        tag's name, or a tag name arriving as its own word-timestamp token would
+        be PLACED as if it were spoken content and consume the tag.
+        """
+        hop = TextSegmentMap._classify_hop("<break/>hello", "break")
+        self.assertNotEqual(
+            hop.kind, _HopKind.PLACED, "'break' is the tag's name, not spoken content"
+        )
+
+    def test_word_after_leading_tag_still_placed_via_markup_strategy(self):
+        """Stopping the punctuation skip at '<' must not cost the markup-stripped
+        strategy (3) its match on a segment that opens with a tag.
         """
         hop = TextSegmentMap._classify_hop("<spell>4111 1111 1111 1111</spell>", "4111")
         self.assertEqual(hop.kind, _HopKind.PLACED)
