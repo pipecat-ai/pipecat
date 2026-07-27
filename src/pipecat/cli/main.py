@@ -17,6 +17,7 @@ and the console script) is resolved on first access via ``__getattr__``.
 """
 
 import sys
+from collections.abc import Sequence
 
 _INSTALL_HINT = (
     "The Pipecat CLI needs its optional dependencies (the `cli` extra), which aren't "
@@ -37,14 +38,22 @@ _KNOWN_EXTENSIONS: dict[str, tuple[str, str]] = {
 }
 
 
-def _enable_hint(name: str, package: str) -> str:
-    """Message shown when an official-but-uninstalled sub-CLI is invoked."""
+def _enable_hint(name: str, package: str, installed_plugins: Sequence[str] = ()) -> str:
+    """Message shown when an official-but-uninstalled sub-CLI is invoked.
+
+    ``installed_plugins`` are the plugin packages already present in the tool
+    environment. They must be repeated in the ``uv tool install`` line because
+    ``--with`` *replaces* that environment rather than adding to it — a hint
+    naming only the missing plugin would silently uninstall every other one.
+    """
+    packages = [*dict.fromkeys([*installed_plugins, package])]
+    with_flags = " ".join(f"--with {pkg}" for pkg in packages)
     return (
         f"The `pipecat {name}` command requires the optional `{package}` plugin, "
         "which isn't installed.\n\n"
         "Enable it where the `pipecat` command lives:\n\n"
         "  • As a global tool (on your PATH), reinstall with the plugin:\n"
-        f'        uv tool install "pipecat-ai[cli]" --with {package}\n\n'
+        f'        uv tool install "pipecat-ai[cli]" {with_flags}\n\n'
         "  • In your current project or virtualenv:\n"
         f"        uv pip install {package}     # or: pip install {package}\n"
     )
@@ -103,16 +112,45 @@ def _build_app():
     # `eval` is a first-party sub-Typer group, built in (not a plugin extension).
     app.add_typer(eval_app, name="eval")
 
-    # Discover CLI extensions (e.g. `cloud` from pipecatcloud). The entry-point
-    # group is intentionally still named
-    # "pipecat_cli.extensions" for backward compatibility — renaming it would force
-    # every plugin to re-release. (A future rename to "pipecat.cli.extensions" is a
-    # separate, coordinated change.)
-    extensions = [
-        (ep.name, ep.load())
-        for ep in importlib_metadata.entry_points(group="pipecat_cli.extensions")
-    ]
+    # Discover CLI extensions (e.g. `cloud` from pipecatcloud). The entry-point group
+    # is intentionally still named "pipecat_cli.extensions" for backward compatibility
+    # — renaming it would force every plugin to re-release. (A future rename to
+    # "pipecat.cli.extensions" is a separate, coordinated change.)
+    #
+    # Each plugin loads in isolation. A plugin is third-party code imported on every
+    # invocation, so an unguarded load lets one bad install (missing transitive
+    # dependency, version conflict, stale wheel) take down the entire CLI — including
+    # commands that have nothing to do with it, like `pipecat init`. Skip the broken
+    # one, say so, and carry on.
+    extensions: list[tuple[str, typer.Typer]] = []
+    installed_plugins: list[str] = []
+    for ep in importlib_metadata.entry_points(group="pipecat_cli.extensions"):
+        # Recorded even when the load fails: the package is installed either way,
+        # and `_enable_hint` must not tell the user to drop it (see `--with` note).
+        dist_name = getattr(getattr(ep, "dist", None), "name", None)
+        if dist_name:
+            installed_plugins.append(dist_name)
+        try:
+            extension = ep.load()
+        except Exception as exc:
+            print(
+                f"Warning: skipping the `{ep.name}` plugin, which failed to load: {exc}",
+                file=sys.stderr,
+            )
+            continue
+        if not isinstance(extension, typer.Typer):
+            # add_typer accepts this silently and fails much later, while building
+            # the command tree, with an opaque AttributeError.
+            print(
+                f"Warning: skipping the `{ep.name}` plugin: expected a typer.Typer, "
+                f"got {type(extension).__name__}.",
+                file=sys.stderr,
+            )
+            continue
+        extensions.append((ep.name, extension))
+
     extensions.sort(key=lambda item: item[0].lower())
+    installed_plugins.sort()
     for name, extension in extensions:
         app.add_typer(extension, name=name)
 
@@ -121,7 +159,7 @@ def _build_app():
     # it instead of a bare "No such command". Installed plugins (above) take precedence.
     def _make_extension_stub(cmd_name: str, package: str):
         def _stub(ctx: typer.Context):
-            print(_enable_hint(cmd_name, package), file=sys.stderr)
+            print(_enable_hint(cmd_name, package, installed_plugins), file=sys.stderr)
             raise typer.Exit(1)
 
         return _stub
