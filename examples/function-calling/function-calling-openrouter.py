@@ -23,9 +23,10 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.azure.tts import AzureTTSService
-from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openrouter.llm import OpenRouterLLMService
+from pipecat.services.openrouter.stt import OpenRouterSTTService
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -69,7 +70,13 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
+    stt = OpenRouterSTTService(
+        api_key=os.environ["OPENROUTER_API_KEY"],
+        settings=OpenRouterSTTService.Settings(
+            model="openai/whisper-1",
+            language=Language.EN,
+        ),
+    )
 
     tts = AzureTTSService(
         api_key=os.environ["AZURE_SPEECH_API_KEY"],
