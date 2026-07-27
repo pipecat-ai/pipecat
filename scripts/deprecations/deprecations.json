@@ -3600,6 +3600,17 @@
       "location": "pipecat/services/xai/realtime/llm.py"
     },
     {
+      "subject": "XTTSService",
+      "module": "pipecat.services.xtts.tts",
+      "kind": "class",
+      "deprecated_in": "1.7.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`XTTSService` is deprecated since 1.7.0 and will be removed in 2.0.0. No replacement. `KokoroTTSService` and `PiperTTSService` are the maintained local TTS services.",
+      "location": "pipecat/services/xtts/tts.py"
+    },
+    {
       "subject": "XTTSService.language",
       "module": "pipecat.services.xtts.tts",
       "kind": "parameter",
@@ -3619,6 +3630,17 @@
       "relation": "use_existing",
       "replacement": "settings=XTTSService.Settings(voice=...)",
       "message": "Use ``settings=XTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/xtts/tts.py"
+    },
+    {
+      "subject": "pipecat.services.xtts.tts",
+      "module": "pipecat.services.xtts.tts",
+      "kind": "module",
+      "deprecated_in": "1.7.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. :class:`~pipecat.services.kokoro.tts.KokoroTTSService` and :class:`~pipecat.services.piper.tts.PiperTTSService` are the maintained local TTS services. Will be removed in 2.0.0.",
       "location": "pipecat/services/xtts/tts.py"
     },
     {
