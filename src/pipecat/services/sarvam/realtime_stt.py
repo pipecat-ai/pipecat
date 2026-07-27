@@ -228,9 +228,12 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         if settings is not None:
             default_settings.apply_update(settings)
 
-        if default_settings.language is not None and default_settings.language_code == "hi-IN":
+        if (
+            isinstance(default_settings.language, Language)
+            and default_settings.language_code == "hi-IN"
+        ):
             default_settings.language_code = language_to_sarvam_realtime_language(
-                assert_given(default_settings.language)
+                default_settings.language
             )
 
         self._validate_settings(default_settings)
@@ -576,15 +579,15 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
     async def _emit_usage(self, audio_duration_s: float):
         if not self.usage_metrics_enabled:
             return
-        frame = MetricsFrame(
-            data=[
-                SarvamRealtimeSTTUsageMetricsData(
-                    processor=self.name,
-                    model=self._settings.model,
-                    value=audio_duration_s,
-                )
-            ]
-        )
+        model = assert_given(self._settings.model)
+        data: list[MetricsData] = [
+            SarvamRealtimeSTTUsageMetricsData(
+                processor=self.name,
+                model=model,
+                value=audio_duration_s,
+            )
+        ]
+        frame = MetricsFrame(data=data)
         logger.debug(f"{self} usage audio seconds: {audio_duration_s}")
         await self.push_frame(frame)
 
@@ -633,7 +636,8 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         return payload
 
     def _language_for_frame(self, raw_language: str | None = None) -> Language | None:
-        language_code = self._normalize_language_code(raw_language or self._settings.language_code)
+        configured_language_code = assert_given(self._settings.language_code)
+        language_code = self._normalize_language_code(raw_language or configured_language_code)
         if language_code == "auto":
             return None
         try:
