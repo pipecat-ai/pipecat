@@ -421,6 +421,44 @@ class TestClassifyHopSkipsLeadingPunctuation(unittest.TestCase):
         self.assertEqual(hop.kind, _HopKind.PLACED)
 
 
+class TestProviderTokenShapes(unittest.TestCase):
+    """Word-timestamp tokens arrive in provider-specific shapes. Each shape below
+    is handled by a different part of _classify_hop's matching, so each needs its
+    own scenario.
+    """
+
+    def test_tokens_carrying_their_own_leading_whitespace(self):
+        """Some providers include the separating space in the token (Inworld's
+        " world"), so the match must succeed against the segment text as-is --
+        before any leading-whitespace skip is applied.
+        """
+        smap = TextSegmentMap("Hello world", "Hello world")
+        for word in ("Hello", " world"):
+            self.assertTrue(smap.word_belongs_current_segment(word), f"{word!r} should belong")
+            smap.advance_word(word)
+        self.assertTrue(smap.is_complete)
+
+    def test_tokens_uppercased_by_the_provider(self):
+        """A provider that upper-cases its tokens needs the *word* side folded, not
+        just the segment side -- the folded-candidate pass alone would still be
+        comparing an upper-case word against lower-case source text.
+        """
+        smap = TextSegmentMap("hello world", "hello world")
+        for word in ("HELLO", "WORLD"):
+            self.assertTrue(smap.word_belongs_current_segment(word), f"{word!r} should belong")
+            smap.advance_word(word)
+        self.assertTrue(smap.is_complete)
+
+    def test_tokens_carrying_an_accent_absent_from_the_source(self):
+        """Accent folding must work in both directions: the provider may report a
+        diacritic the source text doesn't have, not only strip one it does.
+        """
+        smap = TextSegmentMap("Visit the cafe today", "Visit the cafe today")
+        for word in ("Visit", "the"):
+            smap.advance_word(word)
+        self.assertTrue(smap.word_belongs_current_segment("café"))
+
+
 class TestClassifyHopCaseFoldRequiresWordBoundary(unittest.TestCase):
     """The case/accent-folded fallback strategy must not PLACE a word mid-word.
 
