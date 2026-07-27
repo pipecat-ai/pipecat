@@ -8,6 +8,11 @@
 
 This module provides integration with Coqui XTTS streaming server for
 text-to-speech synthesis using local Docker deployment.
+
+.. deprecated:: 1.7.0
+    No replacement. :class:`~pipecat.services.kokoro.tts.KokoroTTSService` and
+    :class:`~pipecat.services.piper.tts.PiperTTSService` are the maintained
+    local TTS services. Will be removed in 2.0.0.
 """
 
 from collections.abc import AsyncGenerator
@@ -27,6 +32,7 @@ from pipecat.frames.frames import (
 from pipecat.services.settings import TTSSettings, assert_given
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 # The server below can connect to XTTS through a local running docker
@@ -79,12 +85,21 @@ class XTTSTTSSettings(TTSSettings):
     pass
 
 
+@deprecated(
+    "`XTTSService` is deprecated since 1.7.0 and will be removed in 2.0.0. No replacement. "
+    "`KokoroTTSService` and `PiperTTSService` are the maintained local TTS services."
+)
 class XTTSService(TTSService):
     """Coqui XTTS text-to-speech service.
 
     Provides text-to-speech synthesis using a locally running Coqui XTTS
     streaming server. Supports multiple languages and voice cloning through
     studio speakers configuration.
+
+    .. deprecated:: 1.7.0
+        No replacement. :class:`~pipecat.services.kokoro.tts.KokoroTTSService` and
+        :class:`~pipecat.services.piper.tts.PiperTTSService` are the maintained
+        local TTS services. Will be removed in 2.0.0.
     """
 
     Settings = XTTSTTSSettings
