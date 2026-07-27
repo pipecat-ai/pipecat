@@ -28,7 +28,7 @@ from typing_extensions import override
 from pipecat.adapters.schemas.direct_function import DirectFunction
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
+from pipecat.adapters.services.gemini_live_adapter import GeminiLiveLLMAdapter
 from pipecat.frames.frames import (
     AggregationType,
     BotStartedSpeakingFrame,
@@ -398,7 +398,7 @@ class GeminiLiveLLMSettings(LLMSettings):
     proactivity: ProactivityConfig | dict | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
+class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
     """Provides access to Google's Gemini Live API.
 
     This service enables real-time conversations with Gemini, supporting both
@@ -421,8 +421,8 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
     Settings = GeminiLiveLLMSettings
     _settings: Settings
 
-    # Overriding the default adapter to use the Gemini one.
-    adapter_class = GeminiLLMAdapter
+    # Overriding the default adapter to use the Gemini Live one.
+    adapter_class = GeminiLiveLLMAdapter
 
     def service_metadata_frame(self) -> LLMServiceMetadataFrame:
         """Realtime service; emits no server-side turn frames, so recommends no external strategies."""
@@ -1029,7 +1029,9 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
                     tool_name = self._tool_call_id_to_name.get(
                         async_payload.tool_call_id, "tool_call_result"
                     )
-                    response_dict = GeminiLLMAdapter.to_function_response_dict(async_payload.result)
+                    response_dict = GeminiLiveLLMAdapter.to_function_response_dict(
+                        async_payload.result
+                    )
                     if send_new_results:
                         await self._tool_result(
                             async_payload.tool_call_id, tool_name, response_dict
@@ -1047,7 +1049,7 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
                 if tool_call_id and tool_call_id not in self._completed_tool_calls:
                     # Found a newly-completed function call - send the result to the service
                     tool_name = self._tool_call_id_to_name.get(tool_call_id, "tool_call_result")
-                    response_dict = GeminiLLMAdapter.to_function_response_dict(
+                    response_dict = GeminiLiveLLMAdapter.to_function_response_dict(
                         message.get("content")
                     )
                     if send_new_results:
