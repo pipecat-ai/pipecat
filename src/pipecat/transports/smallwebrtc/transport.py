@@ -238,8 +238,9 @@ class SmallWebRTCClient:
         self._out_sample_rate = None
         self._leave_counter = 0
 
-        # Audio resampler - will be configured during setup with target sample rate
+        # Audio resampler - will be configured during setup with target sample rate/layout
         self._audio_in_resampler = None
+        self._audio_in_layout = None
 
         @self._webrtc_connection.event_handler("connected")
         async def on_connected(connection: SmallWebRTCConnection):
@@ -408,10 +409,16 @@ class SmallWebRTCClient:
                 await asyncio.sleep(0.01)
                 continue
 
-            # Resample if needed, otherwise use the frame as-is
+            # Resample if needed, otherwise use the frame as-is. The resampler
+            # also converts to the configured channel layout, so frames whose
+            # layout doesn't already match must go through it even when the
+            # rate already matches (e.g. aiortc decodes to stereo regardless
+            # of the source track) — otherwise interleaved bytes get labeled
+            # with the wrong channel count.
             frames_to_process = (
                 self._audio_in_resampler.resample(frame)
                 if frame.sample_rate != self._in_sample_rate
+                or frame.layout.name != self._audio_in_layout
                 else [frame]
             )
 
@@ -473,7 +480,10 @@ class SmallWebRTCClient:
         self._out_sample_rate = _params.audio_out_sample_rate or frame.audio_out_sample_rate
         self._params = _params
         self._leave_counter += 1
-        self._audio_in_resampler = AudioResampler("s16", "mono", self._in_sample_rate)
+        self._audio_in_layout = "stereo" if self._audio_in_channels == 2 else "mono"
+        self._audio_in_resampler = AudioResampler(
+            "s16", self._audio_in_layout, self._in_sample_rate
+        )
 
     async def connect(self):
         """Establish the WebRTC connection."""
