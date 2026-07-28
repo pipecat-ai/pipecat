@@ -323,6 +323,8 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
         if system:
             request_params["system"] = system
 
+        # The aiobotocore client is untyped; its methods are created dynamically.
+        client: Any
         async with self._aws_session.create_client(
             service_name="bedrock-runtime", **self._aws_params
         ) as client:
@@ -414,7 +416,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
         ``anthropic.claude-opus-4-6-v1:0``, so patterns are matched as
         substrings.
         """
-        model = self._settings.model or ""
+        model = assert_given(self._settings.model) or ""
         if "claude" not in model:
             return False
         return not any(p in model for p in self._PREFILL_SUPPORTED_PATTERNS)
@@ -487,7 +489,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                 using_noop_tool = True
 
             if tools:
-                tool_config = {"tools": tools}
+                tool_config: dict[str, Any] = {"tools": tools}
 
                 # Only add tool_choice if we have real tools (not just no-op)
                 if not using_noop_tool and tool_choice:

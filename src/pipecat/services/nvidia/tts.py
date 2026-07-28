@@ -149,6 +149,9 @@ class NvidiaTTSService(TTSService):
         voice_id: str | None = None,
         sample_rate: int | None = None,
         model_function_map: Mapping[str, str] = {
+            # The function id identifies NVIDIA's hosted deployment of the model
+            # and changes when NVIDIA redeploys it. The current id is on
+            # https://build.nvidia.com/nvidia/magpie-tts-multilingual/api
             "function_id": "877104f7-e885-42b9-8de8-f6e4c6303969",
             "model_name": "magpie-tts-multilingual",
         },

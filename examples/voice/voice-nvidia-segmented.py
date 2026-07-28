@@ -23,7 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.nvidia.llm import NvidiaLLMService
-from pipecat.services.nvidia.stt import NvidiaSTTService
+from pipecat.services.nvidia.stt import NvidiaSegmentedSTTService
 from pipecat.services.nvidia.tts import NvidiaTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -57,7 +57,7 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = NvidiaSTTService(api_key=os.environ["NVIDIA_API_KEY"])
+    stt = NvidiaSegmentedSTTService(api_key=os.environ["NVIDIA_API_KEY"])
 
     llm = NvidiaLLMService(
         api_key=os.environ["NVIDIA_API_KEY"],

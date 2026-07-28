@@ -412,7 +412,9 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
                 subscription=self._api_key,
                 region=self._region,
             )
-        self._speech_config.speech_synthesis_language = self._settings.language
+        language = assert_given(self._settings.language)
+        if language:
+            self._speech_config.speech_synthesis_language = language
         self._speech_config.set_speech_synthesis_output_format(
             sample_rate_to_output_format(self.sample_rate)
         )
@@ -484,7 +486,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         Returns:
             True if text is only punctuation/whitespace, False otherwise.
         """
-        return text and all(not c.isalnum() for c in text)
+        return bool(text) and all(not c.isalnum() for c in text)
 
     def _handle_word_boundary(self, evt):
         """Handle word boundary events from Azure SDK.
@@ -940,7 +942,9 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
                 subscription=self._api_key,
                 region=self._region,
             )
-        self._speech_config.speech_synthesis_language = self._settings.language
+        language = assert_given(self._settings.language)
+        if language:
+            self._speech_config.speech_synthesis_language = language
         self._speech_config.set_speech_synthesis_output_format(
             sample_rate_to_output_format(self.sample_rate)
         )
@@ -959,6 +963,9 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
         Yields:
             Frame: Audio frames containing the complete synthesized speech.
         """
+        if self._speech_synthesizer is None:
+            return
+
         ssml = self._construct_ssml(text)
 
         result = await asyncio.to_thread(self._speech_synthesizer.speak_ssml, ssml)

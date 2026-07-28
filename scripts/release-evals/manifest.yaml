@@ -103,6 +103,8 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-nvidia.py
     scenarios: [capital_question]
+  - bot: voice/voice-nvidia-segmented.py
+    scenarios: [capital_question]
   - bot: voice/voice-openai.py
     scenarios: [capital_question]
   - bot: voice/voice-openai-http.py
