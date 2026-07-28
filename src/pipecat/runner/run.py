@@ -1343,14 +1343,12 @@ def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace, ws_used_toke
   <Connect>
     <Stream url="wss://{args.proxy}/ws"></Stream>
   </Connect>
-  <Pause length="40"/>
 </Response>""",
             "telnyx": f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
     <Stream url="wss://{args.proxy}/ws" bidirectionalMode="rtp"></Stream>
   </Connect>
-  <Pause length="40"/>
 </Response>""",
             "plivo": f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
