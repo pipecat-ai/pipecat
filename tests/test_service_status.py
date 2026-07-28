@@ -125,11 +125,15 @@ class TestErrorClassification(unittest.TestCase):
 
 
 class TestErrorFrame(unittest.TestCase):
-    def test_defaults_to_unknown_category(self):
-        self.assertEqual(ErrorFrame("boom").category, ErrorCategory.UNKNOWN)
+    def test_category_starts_unset(self):
+        # Unset invites whoever reports the error to work the cause out.
+        self.assertIsNone(ErrorFrame("boom").category)
 
-    def test_str_omits_unknown_category(self):
+    def test_str_omits_an_unset_category(self):
         self.assertNotIn("category", str(ErrorFrame("boom")))
+
+    def test_str_omits_an_unknown_category(self):
+        self.assertNotIn("category", str(ErrorFrame("boom", category=ErrorCategory.UNKNOWN)))
 
     def test_str_includes_known_category(self):
         frame = ErrorFrame("boom", category=ErrorCategory.AUTHENTICATION)
@@ -303,3 +307,52 @@ class TestServiceStatus(unittest.IsolatedAsyncioTestCase):
         await service._update_settings(ServiceSettings())
 
         self.assertEqual(service.status, ServiceStatus.MISCONFIGURED)
+
+
+class ExplodingService(AIService):
+    """Service whose frame processing raises before it can report anything."""
+
+    def __init__(self, exception: Exception, **kwargs):
+        super().__init__(**kwargs)
+        self._exception = exception
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, TextFrame):
+            raise self._exception
+
+        await self.push_frame(frame, direction)
+
+
+class TestUnattributableErrors(unittest.IsolatedAsyncioTestCase):
+    """Errors caught by a broad `except` may not have come from the provider."""
+
+    async def test_an_uncaught_exception_is_not_classified(self):
+        # The exception carries a 401, but the frame-processing catch-all has
+        # no idea where it came from — a downstream processor, an observer, or
+        # the service itself.
+        service = ExplodingService(exception=websocket_rejection(401))
+
+        _, up = await run_test(
+            service,
+            frames_to_send=[TextFrame("hello")],
+            expected_down_frames=[],
+            expected_up_frames=[ErrorFrame],
+        )
+
+        self.assertEqual(up[0].category, ErrorCategory.UNKNOWN)
+        self.assertEqual(service.status, ServiceStatus.UNKNOWN)
+
+    async def test_errors_always_reach_handlers_with_a_category(self):
+        # Nothing reports a category here, so the push settles it.
+        service = ExplodingService(exception=ValueError("boom"))
+
+        _, up = await run_test(
+            service,
+            frames_to_send=[TextFrame("hello")],
+            expected_down_frames=[],
+            expected_up_frames=[ErrorFrame],
+        )
+
+        self.assertIsNotNone(up[0].category)

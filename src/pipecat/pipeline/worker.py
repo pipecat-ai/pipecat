@@ -1191,7 +1191,7 @@ class PipelineWorker(BaseWorker):
                 logger.error(f"A fatal error occurred: {frame}")
                 # Cancel all tasks downstream.
                 await self.queue_frame(CancelFrame())
-            elif frame.category.is_configuration_error and not frame.handled:
+            elif frame.category and frame.category.is_configuration_error and not frame.handled:
                 await self._handle_configuration_error(frame)
             else:
                 logger.warning(f"{self}: Something went wrong: {frame}")

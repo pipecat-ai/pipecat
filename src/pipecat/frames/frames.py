@@ -960,9 +960,12 @@ class ErrorFrame(SystemFrame):
         fatal: Whether the error is fatal and requires bot shutdown.
         processor: The frame processor that generated the error.
         exception: The exception that occurred.
-        category: Why the error occurred, when the processor could determine it.
-            Lets handlers tell a transient failure from one that will keep
-            recurring until the configuration changes.
+        category: Why the error occurred. Lets handlers tell a transient
+            failure from one that will keep recurring until the configuration
+            changes. ``None`` means nobody has said yet, which invites a
+            service to work it out from the exception; set it to
+            `ErrorCategory.UNKNOWN` to report an error whose cause can't be
+            attributed. Always set by the time the frame travels.
         handled: Whether something upstream already recovered from this error,
             for example by failing over to another service. The error still
             travels upstream so applications can observe it, but the pipeline
@@ -973,13 +976,13 @@ class ErrorFrame(SystemFrame):
     fatal: bool = False
     processor: FrameProcessor | None = None
     exception: Exception | None = None
-    category: ErrorCategory = ErrorCategory.UNKNOWN
+    category: ErrorCategory | None = None
     handled: bool = False
 
     def __str__(self):
         category = (
             f", category: {self.category.value}"
-            if self.category is not ErrorCategory.UNKNOWN
+            if self.category and self.category is not ErrorCategory.UNKNOWN
             else ""
         )
         return f"{self.name}(error: {self.error}, fatal: {self.fatal}{category})"

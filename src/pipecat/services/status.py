@@ -54,17 +54,18 @@ class ServiceStatus(Enum):
         return self is ServiceStatus.MISCONFIGURED
 
 
-def status_for_category(category: ErrorCategory) -> ServiceStatus | None:
+def status_for_category(category: ErrorCategory | None) -> ServiceStatus | None:
     """Map an error category to the status it implies.
 
     Args:
-        category: The category of the error the service reported.
+        category: The category of the error the service reported, or None when
+            the error carries no category.
 
     Returns:
         The implied status, or None when the category says nothing about the
         service's health — a rate limit or a one-off transient failure doesn't
         mean the service is unhealthy.
     """
-    if category.is_configuration_error:
+    if category and category.is_configuration_error:
         return ServiceStatus.MISCONFIGURED
     return None

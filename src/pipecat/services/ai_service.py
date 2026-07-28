@@ -111,17 +111,17 @@ class AIService(FrameProcessor):
     async def push_error_frame(self, error: ErrorFrame):
         """Push an error frame upstream, classifying it and updating `status`.
 
-        Classification assumes the exception came from talking to the provider,
-        since that is what the resulting status describes. Report anything else
-        — a failure in application code the service invoked, say — with an
-        explicit category, so a foreign 401 isn't read as this service's own
-        credentials being rejected. Errors that already carry a category are
-        left as the reporter classified them.
+        An error arrives uncategorized when its reporter had nothing to say
+        about the cause, and working it out from the exception assumes the
+        exception came from talking to the provider — which is what the
+        resulting status describes. Report anything else with an explicit
+        category, so a foreign 401 isn't read as this service's own credentials
+        being rejected.
 
         Args:
             error: The error frame to push.
         """
-        if error.category is ErrorCategory.UNKNOWN and error.exception:
+        if error.category is None and error.exception:
             error.category = self._classify_error(error.exception) or classify_exception(
                 error.exception
             )

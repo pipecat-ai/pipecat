@@ -680,7 +680,7 @@ class FrameProcessor(BaseObject):
         error_msg: str,
         exception: Exception | None = None,
         fatal: bool = False,
-        category: ErrorCategory = ErrorCategory.UNKNOWN,
+        category: ErrorCategory | None = None,
     ):
         """Creates and pushes an ErrorFrame upstream.
 
@@ -695,9 +695,11 @@ class FrameProcessor(BaseObject):
             fatal: Whether this error should be considered fatal to the pipeline.
                 Fatal errors typically cause the entire pipeline to stop processing.
                 Defaults to False for non-fatal errors.
-            category: Why the error occurred, when the caller knows. Lets
-                handlers tell a transient failure from one that will keep
-                recurring until the configuration changes.
+            category: Why the error occurred, when the caller knows. Leave it
+                unset to let a service work it out from the exception, or pass
+                `ErrorCategory.UNKNOWN` to report an error whose cause can't be
+                attributed — an unexpected one caught by a broad ``except``,
+                say, which may not have come from the service at all.
 
         Example::
 
@@ -729,6 +731,10 @@ class FrameProcessor(BaseObject):
         """
         if not error.processor:
             error.processor = self
+        # Anything still unset by now is going to stay that way, so settle it
+        # here and let handlers read a category off every error they receive.
+        if error.category is None:
+            error.category = ErrorCategory.UNKNOWN
         await self._call_event_handler("on_error", error)
 
         # An exception carries a traceback only once it has been raised, so fall
@@ -904,6 +910,9 @@ class FrameProcessor(BaseObject):
             await self.push_error(
                 error_msg=f"Uncaught exception handling _start_interruption: {e}",
                 exception=e,
+                # A broad catch: this may not have come from this processor at
+                # all, so its cause can't be attributed.
+                category=ErrorCategory.UNKNOWN,
             )
 
     async def __internal_push_frame(self, frame: Frame, direction: FrameDirection):
@@ -941,7 +950,13 @@ class FrameProcessor(BaseObject):
                     await self._observer.on_push_frame(data)
                 await self._prev.queue_frame(frame, direction)
         except Exception as e:
-            await self.push_error(error_msg=f"Uncaught exception: {e}", exception=e)
+            # Observers and the downstream processor run inside this
+            # block, so the cause of an unexpected failure can't be attributed.
+            await self.push_error(
+                error_msg=f"Uncaught exception: {e}",
+                exception=e,
+                category=ErrorCategory.UNKNOWN,
+            )
 
     def _check_started(self, frame: Frame):
         """Check if the processor has been started.
@@ -1031,7 +1046,13 @@ class FrameProcessor(BaseObject):
 
             await self._call_event_handler("on_after_process_frame", frame)
         except Exception as e:
-            await self.push_error(error_msg=f"Error processing frame: {e}", exception=e)
+            # The frame callback runs inside this block, so the cause of an
+            # unexpected failure can't be attributed.
+            await self.push_error(
+                error_msg=f"Error processing frame: {e}",
+                exception=e,
+                category=ErrorCategory.UNKNOWN,
+            )
 
     async def __input_frame_task_handler(self):
         """Handle frames from the input queue.
