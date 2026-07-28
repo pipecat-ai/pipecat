@@ -16,7 +16,7 @@ import asyncio
 from collections.abc import AsyncGenerator, Mapping
 from concurrent.futures import CancelledError as FuturesCancelledError
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 from pydantic import BaseModel
@@ -219,7 +219,9 @@ class AudioChunkIterator:
             self._closed = True
             raise StopIteration
 
-        return audio
+        # Only put() (bytes) and close() (the sentinel, excluded above) write
+        # to the queue.
+        return cast(bytes, audio)
 
 
 class NvidiaSTTService(STTService):
@@ -546,7 +548,9 @@ class NvidiaSTTService(STTService):
     def _response_handler(self, iterator: AudioChunkIterator):
         drop_reason = None
         try:
-            responses = self._asr_service.streaming_response_generator(
+            asr_service = self._asr_service
+            assert asr_service is not None, "ASR service not initialized"
+            responses = asr_service.streaming_response_generator(
                 audio_chunks=iterator,
                 streaming_config=self._config,
             )
@@ -606,7 +610,9 @@ class NvidiaSTTService(STTService):
 
             transcript = result.alternatives[0].transcript
             if transcript and len(transcript) > 0:
-                language = assert_given(self._settings.language)
+                # Technically `_settings.language` could be a raw string, but
+                # Language is a StrEnum so downstream handles either.
+                language = cast("Language | None", assert_given(self._settings.language))
                 if result.is_final:
                     await self.stop_processing_metrics()
                     logger.debug(f"Transcription: [{transcript}]")
@@ -924,7 +930,9 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
                     text = alternatives[0].transcript.strip()
                     if text:
                         logger.debug(f"Transcription: [{text}]")
-                        language = assert_given(self._settings.language)
+                        # Technically `_settings.language` could be a raw string, but
+                        # Language is a StrEnum so downstream handles either.
+                        language = cast("Language | None", assert_given(self._settings.language))
                         yield TranscriptionFrame(
                             text,
                             self._user_id,
