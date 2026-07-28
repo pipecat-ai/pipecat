@@ -706,7 +706,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         api_key: str | None = None,
         server: str = "grpc.nvcf.nvidia.com:443",
         model_function_map: Mapping[str, str] = {
-            "function_id": "ee8dc628-76de-4acc-8595-1836e7e857bd",
+            "function_id": "b0e8b4a5-217c-40b7-9b96-17d84e666317",
             "model_name": "canary-1b-asr",
         },
         sample_rate: int | None = None,
