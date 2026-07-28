@@ -129,7 +129,10 @@ class SmallestSTTService(WebsocketSTTService):
     for real-time voice applications where immediate feedback is needed.
 
     Uses Pipecat's VAD to detect when the user stops speaking and sends
-    a finalize message to flush the final transcript.
+    a ``finalize`` message to flush the final transcript while keeping the
+    session alive for the next utterance.
+
+    Connects to ``wss://api.smallest.ai/waves/v1/stt/live?model=pulse``.
 
     Example::
 
@@ -305,6 +308,7 @@ class SmallestSTTService(WebsocketSTTService):
             logger.debug("Connecting to Smallest STT")
 
             query_params = {
+                "model": self._settings.model,
                 "language": self._settings.language,
                 "encoding": self._encoding,
                 "sample_rate": str(self.sample_rate),
@@ -317,7 +321,7 @@ class SmallestSTTService(WebsocketSTTService):
                 "diarize": str(self._settings.diarize).lower(),
             }
 
-            ws_url = f"{self._base_url}/waves/v1/pulse/get_text?{urlencode(query_params)}"
+            ws_url = f"{self._base_url}/waves/v1/stt/live?{urlencode(query_params)}"
 
             self._websocket = await websocket_connect(
                 ws_url,
@@ -367,9 +371,21 @@ class SmallestSTTService(WebsocketSTTService):
 
         Args:
             data: Parsed JSON response containing transcript data.
+
+        The response contains:
+            - ``transcript``: The recognized text.
+            - ``is_final``: Whether this is a final (vs. interim) result.
+            - ``is_last``: Whether this is the last message of the session.
+              Only ``True`` after ``close_stream`` is sent at call end.
+            - ``language``: The detected or specified language.
+            - ``session_id``: Unique identifier for the WebSocket session.
         """
         is_final = data.get("is_final", False)
+        is_last = data.get("is_last", False)
         text = data.get("transcript", "").strip()
+
+        if is_last:
+            logger.debug(f"{self} received is_last; server will close session")
 
         if not text:
             return
