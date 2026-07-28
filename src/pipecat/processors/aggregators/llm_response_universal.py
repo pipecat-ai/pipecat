@@ -1884,7 +1884,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
             text=frame.text,
             file=frame.file,
             name=frame.filename,
-            #            options=frame.custom_options,
         )
 
         await self.push_aggregation()
