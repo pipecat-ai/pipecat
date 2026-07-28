@@ -12,6 +12,7 @@ supporting multiple languages, voices, and SSML features.
 
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+from xml.sax.saxutils import escape
 
 from loguru import logger
 from pydantic import BaseModel
@@ -312,7 +313,9 @@ class AWSPollyTTSService(TTSService):
         if prosody_attrs:
             ssml += f"<prosody {' '.join(prosody_attrs)}>"
 
-        ssml += text
+        # Escape XML-reserved characters so arbitrary text can't break the
+        # SSML document (Polly rejects it with InvalidSsmlException).
+        ssml += escape(text)
 
         if prosody_attrs:
             ssml += "</prosody>"
