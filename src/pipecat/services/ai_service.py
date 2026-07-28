@@ -12,7 +12,7 @@ model management, settings handling, and frame processing lifecycle methods.
 
 import warnings
 from collections.abc import AsyncGenerator
-from typing import Any, ClassVar
+from typing import Any
 
 from loguru import logger
 
@@ -52,11 +52,6 @@ class AIService(FrameProcessor):
         async def on_status_changed(service, previous, current):
             ...
     """
-
-    #: Whether to classify reported errors and derive `status` from them. Set to
-    #: True on services whose provider errors :func:`classify_exception`
-    #: understands, or that override :meth:`_classify_error`.
-    _classify_errors: ClassVar[bool] = False
 
     def __init__(self, settings: ServiceSettings | None = None, **kwargs):
         """Initialize the AI service.
@@ -102,7 +97,8 @@ class AIService(FrameProcessor):
         """Classify a provider exception this service knows the shape of.
 
         Override for providers that signal failures through SDK-specific
-        exceptions rather than a status code.
+        exceptions rather than a status code, or whose credentials can be
+        rejected for reasons a reconnection would clear.
 
         Args:
             exception: The exception to classify.
@@ -115,13 +111,13 @@ class AIService(FrameProcessor):
     async def push_error_frame(self, error: ErrorFrame):
         """Push an error frame upstream, classifying it and updating `status`.
 
-        Classification is skipped for services that don't opt into
-        `_classify_errors`, and for errors that already carry a category.
+        Errors that already carry a category are left as the reporter
+        classified them.
 
         Args:
             error: The error frame to push.
         """
-        if self._classify_errors and error.category is ErrorCategory.UNKNOWN and error.exception:
+        if error.category is ErrorCategory.UNKNOWN and error.exception:
             error.category = self._classify_error(error.exception) or classify_exception(
                 error.exception
             )

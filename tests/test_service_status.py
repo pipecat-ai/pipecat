@@ -46,12 +46,6 @@ class StatusService(AIService):
             await self.push_frame(frame, direction)
 
 
-class ClassifyingService(StatusService):
-    """A `StatusService` that opts into error classification."""
-
-    _classify_errors = True
-
-
 class TestErrorClassification(unittest.TestCase):
     def test_status_codes_map_to_categories(self):
         self.assertEqual(classify_status_code(400), ErrorCategory.INVALID_REQUEST)
@@ -119,15 +113,15 @@ class TestErrorClassification(unittest.TestCase):
         self.assertIsNone(status_for_category(ErrorCategory.SERVER))
         self.assertIsNone(status_for_category(ErrorCategory.UNKNOWN))
 
-    def test_misconfigured_is_the_only_unrecoverable_status(self):
-        self.assertFalse(ServiceStatus.MISCONFIGURED.is_recoverable)
+    def test_misconfigured_is_the_only_unusable_status(self):
+        self.assertFalse(ServiceStatus.MISCONFIGURED.is_usable)
         for status in (
             ServiceStatus.UNKNOWN,
             ServiceStatus.READY,
             ServiceStatus.DEGRADED,
             ServiceStatus.UNAVAILABLE,
         ):
-            self.assertTrue(status.is_recoverable)
+            self.assertTrue(status.is_usable)
 
 
 class TestErrorFrame(unittest.TestCase):
@@ -146,8 +140,12 @@ class TestServiceStatus(unittest.IsolatedAsyncioTestCase):
     async def test_services_start_unknown(self):
         self.assertEqual(StatusService().status, ServiceStatus.UNKNOWN)
 
-    async def test_service_without_opt_in_keeps_unknown_status(self):
-        service = StatusService(exception=websocket_rejection(401))
+    async def test_service_specific_classification_can_keep_a_service_usable(self):
+        class RefreshingCredentialsService(StatusService):
+            def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+                return ErrorCategory.CONNECTIVITY
+
+        service = RefreshingCredentialsService(exception=websocket_rejection(401))
 
         _, up = await run_test(
             service,
@@ -156,11 +154,11 @@ class TestServiceStatus(unittest.IsolatedAsyncioTestCase):
             expected_up_frames=[ErrorFrame],
         )
 
-        self.assertEqual(up[0].category, ErrorCategory.UNKNOWN)
+        self.assertEqual(up[0].category, ErrorCategory.CONNECTIVITY)
         self.assertEqual(service.status, ServiceStatus.UNKNOWN)
 
     async def test_rejected_credentials_misconfigure_the_service(self):
-        service = ClassifyingService(exception=websocket_rejection(401))
+        service = StatusService(exception=websocket_rejection(401))
 
         _, up = await run_test(
             service,
@@ -171,10 +169,10 @@ class TestServiceStatus(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(up[0].category, ErrorCategory.AUTHENTICATION)
         self.assertEqual(service.status, ServiceStatus.MISCONFIGURED)
-        self.assertFalse(service.status.is_recoverable)
+        self.assertFalse(service.status.is_usable)
 
     async def test_server_errors_leave_the_status_alone(self):
-        service = ClassifyingService(exception=websocket_rejection(503))
+        service = StatusService(exception=websocket_rejection(503))
 
         _, up = await run_test(
             service,
@@ -187,7 +185,7 @@ class TestServiceStatus(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service.status, ServiceStatus.UNKNOWN)
 
     async def test_unclassifiable_exceptions_leave_the_status_alone(self):
-        service = ClassifyingService(exception=ValueError("nope"))
+        service = StatusService(exception=ValueError("nope"))
 
         _, up = await run_test(
             service,
@@ -200,7 +198,7 @@ class TestServiceStatus(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service.status, ServiceStatus.UNKNOWN)
 
     async def test_errors_without_an_exception_are_not_classified(self):
-        service = ClassifyingService()
+        service = StatusService()
 
         _, up = await run_test(
             service,
@@ -213,7 +211,7 @@ class TestServiceStatus(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service.status, ServiceStatus.UNKNOWN)
 
     async def test_service_specific_classification_takes_precedence(self):
-        class ProviderService(ClassifyingService):
+        class ProviderService(StatusService):
             def _classify_error(self, exception: Exception) -> ErrorCategory | None:
                 return ErrorCategory.AUTHORIZATION
 
@@ -252,7 +250,7 @@ class TestServiceStatus(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service.status, ServiceStatus.MISCONFIGURED)
 
     async def test_status_change_notifies_listeners(self):
-        service = ClassifyingService(exception=websocket_rejection(401))
+        service = StatusService(exception=websocket_rejection(401))
         changed = asyncio.Event()
         transitions = []
 
@@ -274,7 +272,7 @@ class TestServiceStatus(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(transitions, [(ServiceStatus.UNKNOWN, ServiceStatus.MISCONFIGURED)])
 
     async def test_repeated_errors_notify_once(self):
-        service = ClassifyingService(exception=websocket_rejection(401))
+        service = StatusService(exception=websocket_rejection(401))
         transitions = []
 
         @service.event_handler("on_status_changed")
@@ -291,7 +289,7 @@ class TestServiceStatus(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(transitions), 1)
 
     async def test_updated_settings_give_the_service_another_chance(self):
-        service = ClassifyingService(exception=websocket_rejection(401))
+        service = StatusService(exception=websocket_rejection(401))
         await service._set_status(ServiceStatus.MISCONFIGURED)
 
         await service._update_settings(ServiceSettings(model="another-model"))
@@ -299,7 +297,7 @@ class TestServiceStatus(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service.status, ServiceStatus.UNKNOWN)
 
     async def test_unchanged_settings_leave_the_status_alone(self):
-        service = ClassifyingService(exception=websocket_rejection(401))
+        service = StatusService(exception=websocket_rejection(401))
         await service._set_status(ServiceStatus.MISCONFIGURED)
 
         await service._update_settings(ServiceSettings())

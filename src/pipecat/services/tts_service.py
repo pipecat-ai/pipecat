@@ -1267,7 +1267,12 @@ class TTSService(AIService):
         else:
             logger.debug(f"{self}: Generating TTS [{prepared_text}]")
 
-        await self.tts_process_generator(context_id, self.run_tts(prepared_text, context_id))
+        # A service the provider has rejected can't synthesize anything, and
+        # services that connect on demand would attempt a handshake per request.
+        # The surrounding bookkeeping still runs, so the turn completes with no
+        # audio rather than stalling.
+        if self.status.is_usable:
+            await self.tts_process_generator(context_id, self.run_tts(prepared_text, context_id))
 
         if not self._is_streaming_tokens:
             await self.stop_processing_metrics()

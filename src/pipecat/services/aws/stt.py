@@ -41,6 +41,7 @@ from pipecat.services.settings import STTSettings, assert_given
 from pipecat.services.stt_latency import AWS_TRANSCRIBE_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.errors import ErrorCategory, extract_status_code
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -62,6 +63,17 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
     Settings = AWSTranscribeSTTSettings
     _settings: Settings
+
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Treat rejected credentials as recoverable.
+
+        Every connection is signed afresh, so a rejected signature can be an
+        expired one rather than a misconfigured service, and reconnecting is
+        what clears it.
+        """
+        if extract_status_code(exception) in (401, 403):
+            return ErrorCategory.CONNECTIVITY
+        return None
 
     def __init__(
         self,

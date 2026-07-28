@@ -39,8 +39,13 @@ class ServiceStatus(Enum):
     MISCONFIGURED = "misconfigured"
 
     @property
-    def is_recoverable(self) -> bool:
-        """Whether retrying could still succeed."""
+    def is_usable(self) -> bool:
+        """Whether the service is worth sending work to.
+
+        True unless the service needs reconfiguring. A service that is merely
+        degraded, or unavailable because the provider is having trouble, may
+        start working again on its own, so work keeps flowing to it.
+        """
         return self is not ServiceStatus.MISCONFIGURED
 
 

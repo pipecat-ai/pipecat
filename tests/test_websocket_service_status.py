@@ -36,8 +36,6 @@ class FakeWebsocket:
 class FakeWebsocketService(AIService, WebsocketService):
     """Websocket service whose connection attempts succeed or fail on demand."""
 
-    _classify_errors = True
-
     def __init__(self, connect_error: Exception | None = None, **kwargs):
         AIService.__init__(self, **kwargs)
         WebsocketService.__init__(self, **kwargs)
@@ -152,7 +150,7 @@ class TestReconnectionGate(unittest.IsolatedAsyncioTestCase):
 
 
 class TestConnectionStatusTransitions(unittest.IsolatedAsyncioTestCase):
-    async def test_misconfigured_outranks_recoverable_statuses(self):
+    async def test_misconfigured_outranks_usable_statuses(self):
         service = FakeWebsocketService()
         await service._set_status(ServiceStatus.MISCONFIGURED)
 
@@ -160,7 +158,7 @@ class TestConnectionStatusTransitions(unittest.IsolatedAsyncioTestCase):
             await service._set_connection_status(status)
             self.assertEqual(service.status, ServiceStatus.MISCONFIGURED)
 
-    async def test_recoverable_statuses_replace_each_other(self):
+    async def test_usable_statuses_replace_each_other(self):
         service = FakeWebsocketService()
 
         await service._set_connection_status(ServiceStatus.DEGRADED)

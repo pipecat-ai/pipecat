@@ -429,6 +429,11 @@ class STTService(AIService):
         if self._muted:
             return
 
+        # A service the provider has rejected can't transcribe anything, and
+        # services that connect on demand would attempt a handshake per chunk.
+        if not self.status.is_usable:
+            return
+
         self._last_audio_time = time.monotonic()
 
         # UserAudioRawFrame contains a user_id (e.g. Daily, Livekit)
@@ -849,6 +854,11 @@ class SegmentedSTTService(STTService):
 
     async def _handle_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         self._user_speaking = False
+
+        # A service the provider has rejected can't transcribe this segment.
+        if not self.status.is_usable:
+            self._audio_buffer.clear()
+            return
 
         # Report usage for the raw segment before transcription so tracing can
         # attach it to the STT span the resulting TranscriptionFrame closes.

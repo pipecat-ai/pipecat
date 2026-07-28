@@ -9,6 +9,7 @@
 from unittest.mock import AsyncMock, patch
 
 import httpx
+import openai
 import pytest
 
 from pipecat.frames.frames import (
@@ -19,6 +20,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.status import ServiceStatus
 
 
 @pytest.mark.asyncio
@@ -295,3 +297,46 @@ async def test_openai_llm_async_iterator_closed_on_stream_end():
         assert iterator_aclosed, "Async iterator should be explicitly closed"
         # Verify the stream was also closed (releases HTTP resources)
         assert stream_closed, "Stream should be closed to release HTTP resources"
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_rejected_api_key_misconfigures_the_service():
+    """Test that a rejected API key marks the service as misconfigured."""
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+        service._process_context = AsyncMock(
+            side_effect=openai.AuthenticationError(
+                "Incorrect API key provided",
+                response=httpx.Response(401, request=request),
+                body=None,
+            )
+        )
+
+        await service.process_frame(LLMContextFrame(LLMContext()), FrameDirection.DOWNSTREAM)
+
+        assert service.status == ServiceStatus.MISCONFIGURED
+        assert not service.status.is_usable
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_server_error_stays_usable():
+    """Test that a provider-side failure leaves the service retryable."""
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+        service._process_context = AsyncMock(
+            side_effect=openai.InternalServerError(
+                "server had an error",
+                response=httpx.Response(500, request=request),
+                body=None,
+            )
+        )
+
+        await service.process_frame(LLMContextFrame(LLMContext()), FrameDirection.DOWNSTREAM)
+
+        assert service.status.is_usable
