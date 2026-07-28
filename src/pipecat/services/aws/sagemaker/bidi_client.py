@@ -17,7 +17,7 @@ from loguru import logger
 
 try:
     from aws_sdk_sagemaker_runtime_http2.client import SageMakerRuntimeHTTP2Client
-    from aws_sdk_sagemaker_runtime_http2.config import Config, HTTPAuthSchemeResolver
+    from aws_sdk_sagemaker_runtime_http2.config import Config
     from aws_sdk_sagemaker_runtime_http2.models import (
         InvokeEndpointWithBidirectionalStreamInput,
         InvokeEndpointWithBidirectionalStreamOutput,
@@ -26,10 +26,8 @@ try:
         RequestStreamEventPayloadPart,
         ResponseStreamEvent,
     )
-    from smithy_aws_core.auth.sigv4 import SigV4AuthScheme
     from smithy_aws_core.identity import EnvironmentCredentialsResolver
     from smithy_core.aio.eventstream import DuplexEventStream
-    from smithy_core.shapes import ShapeID
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -117,12 +115,12 @@ class SageMakerBidiClient:
                 "AWS CLI configuration and instance metadata."
             )
 
+        # SigV4 auth for the sagemaker service is the Config default, so
+        # auth_schemes and auth_scheme_resolver are left unset.
         config = Config(
             endpoint_uri=self.bidi_endpoint,
             region=self.region,
             aws_credentials_identity_resolver=EnvironmentCredentialsResolver(),
-            auth_scheme_resolver=HTTPAuthSchemeResolver(),
-            auth_schemes={ShapeID("aws.auth#sigv4"): SigV4AuthScheme(service="sagemaker")},
         )
         self._client = SageMakerRuntimeHTTP2Client(config=config)
         return self._client
