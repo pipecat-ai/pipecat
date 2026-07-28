@@ -8,6 +8,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+import httpx
+
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -24,7 +26,9 @@ from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
+from pipecat.services.status import ServiceStatus
 from pipecat.turns.user_mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
+from pipecat.utils.errors import ErrorCategory
 
 
 def _expected_missing_tool_message(name: str) -> str:
@@ -414,3 +418,77 @@ class TestProcessFrameToolWiring(unittest.IsolatedAsyncioTestCase):
         service._sync_registered_tool_handlers = Mock()
         await service.process_frame(LLMSetToolsFrame(tools=NOT_GIVEN), FrameDirection.DOWNSTREAM)
         service._sync_registered_tool_handlers.assert_not_called()
+
+
+class TestToolHandlerErrorClassification(unittest.IsolatedAsyncioTestCase):
+    """A tool handler's own failures say nothing about the LLM service."""
+
+    async def _run_failing_tool(self, exception: Exception) -> list:
+        service = MockLLMService()
+        service._call_event_handler = AsyncMock()
+        service.broadcast_frame = AsyncMock()
+
+        async def failing_handler(params):
+            raise exception
+
+        service.register_function("call_some_api", failing_handler)
+
+        errors = []
+
+        async def capture_error(error):
+            errors.append(error)
+
+        service.push_error_frame = capture_error
+
+        async def run_inline(runner_items):
+            for runner_item in runner_items:
+                await service._run_function_call(runner_item)
+
+        service._run_parallel_function_calls = run_inline
+        service._run_sequential_function_calls = run_inline
+
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name="call_some_api",
+                    tool_call_id="call_1",
+                    arguments={},
+                    context=LLMContext(),
+                )
+            ]
+        )
+
+        return service, errors
+
+    async def test_http_error_from_a_tool_does_not_misconfigure_the_service(self):
+        # A tool calls an unrelated API that answers 404. The LLM's own
+        # credentials are fine, so its status must not change.
+        request = httpx.Request("GET", "https://weather.example.com/forecast")
+        tool_error = httpx.HTTPStatusError(
+            "Not Found", request=request, response=httpx.Response(404, request=request)
+        )
+
+        service, errors = await self._run_failing_tool(tool_error)
+
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0].category, ErrorCategory.APPLICATION)
+        self.assertEqual(service.status, ServiceStatus.UNKNOWN)
+
+    async def test_rejected_credentials_from_a_tool_do_not_misconfigure_the_service(self):
+        # The same holds for a 401 from whatever the tool called.
+        request = httpx.Request("GET", "https://weather.example.com/forecast")
+        tool_error = httpx.HTTPStatusError(
+            "Unauthorized", request=request, response=httpx.Response(401, request=request)
+        )
+
+        service, errors = await self._run_failing_tool(tool_error)
+
+        self.assertEqual(errors[0].category, ErrorCategory.APPLICATION)
+        self.assertFalse(service.status.is_misconfigured)
+
+    async def test_plain_tool_failures_are_still_reported(self):
+        service, errors = await self._run_failing_tool(ValueError("bad arguments"))
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("call_some_api", errors[0].error)
+        self.assertEqual(errors[0].category, ErrorCategory.APPLICATION)

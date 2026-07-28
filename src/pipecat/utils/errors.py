@@ -35,6 +35,9 @@ class ErrorCategory(Enum):
         QUOTA: The account's credit or usage allowance is exhausted.
         CONNECTIVITY: The service could not be reached.
         SERVER: The provider reported an internal failure.
+        APPLICATION: Application code failed, not the provider. Reported by a
+            service on behalf of code it invoked — a tool handler, say — whose
+            failures say nothing about the service's own health.
     """
 
     UNKNOWN = "unknown"
@@ -45,6 +48,7 @@ class ErrorCategory(Enum):
     QUOTA = "quota"
     CONNECTIVITY = "connectivity"
     SERVER = "server"
+    APPLICATION = "application"
 
     @property
     def is_configuration_error(self) -> bool:
