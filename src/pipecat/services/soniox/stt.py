@@ -6,6 +6,7 @@
 
 """Soniox speech-to-text service implementation."""
 
+import asyncio
 import json
 import time
 from collections import Counter
@@ -44,6 +45,10 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 KEEPALIVE_MESSAGE = '{"type": "keepalive"}'
 
 FINALIZE_MESSAGE = '{"type": "finalize"}'
+
+# Ceiling on the websocket closing handshake so an unresponsive server can't
+# hang shutdown (disconnect runs on the EndFrame, before it goes downstream).
+WEBSOCKET_CLOSE_TIMEOUT_S = 2.0
 
 END_TOKEN = "<end>"
 
@@ -634,7 +639,14 @@ class SonioxSTTService(WebsocketSTTService):
         try:
             if self._websocket:
                 logger.debug("Disconnecting from Soniox STT")
-                await self._websocket.close()
+                # Bound the close: an unacknowledged handshake would otherwise
+                # hang shutdown (see WEBSOCKET_CLOSE_TIMEOUT_S).
+                try:
+                    await asyncio.wait_for(
+                        self._websocket.close(), timeout=WEBSOCKET_CLOSE_TIMEOUT_S
+                    )
+                except TimeoutError:
+                    logger.debug("Soniox close handshake timed out; dropping connection")
         except Exception as e:
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:

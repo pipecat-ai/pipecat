@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import json
 from unittest.mock import AsyncMock
 
@@ -49,6 +50,28 @@ async def test_connect_failure_clears_stale_websocket_without_raising(monkeypatc
     service._websocket = _FakeWebsocket([], state=State.CLOSED)
 
     await service._connect_websocket()
+
+    assert service._websocket is None
+
+
+@pytest.mark.asyncio
+async def test_disconnect_websocket_times_out_when_close_hangs(monkeypatch):
+    """A hanging close handshake must not hang the disconnect (bounded close)."""
+    from pipecat.services.soniox import stt as soniox_stt
+
+    async def _hang():
+        await asyncio.Event().wait()
+
+    hanging = _FakeWebsocket([], state=State.OPEN)
+    hanging.close = _hang
+
+    monkeypatch.setattr(soniox_stt, "WEBSOCKET_CLOSE_TIMEOUT_S", 0.1)
+
+    service = SonioxSTTService(api_key="test-key")
+    service._websocket = hanging
+
+    # Returns despite the hang; without the fix this wait_for would trip instead.
+    await asyncio.wait_for(service._disconnect_websocket(), timeout=2.0)
 
     assert service._websocket is None
 
