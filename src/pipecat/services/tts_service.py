@@ -1273,6 +1273,12 @@ class TTSService(AIService):
         # audio rather than stalling.
         if self.status.is_usable:
             await self.tts_process_generator(context_id, self.run_tts(prepared_text, context_id))
+        else:
+            # Name the text that goes unspoken: silence from the bot is
+            # otherwise hard to trace back to the service that caused it.
+            logger.warning(
+                f"{self}: service is {self.status.value}, not speaking [{prepared_text}]"
+            )
 
         if not self._is_streaming_tokens:
             await self.stop_processing_metrics()

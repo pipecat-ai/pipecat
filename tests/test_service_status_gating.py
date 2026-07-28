@@ -9,6 +9,8 @@
 import unittest
 from collections.abc import AsyncGenerator
 
+from loguru import logger
+
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
@@ -142,3 +144,22 @@ class TestTTSStatusGating(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(service.synthesize_calls, 0)
+
+    async def test_dropped_text_is_reported(self):
+        service = CountingTTSService()
+        await service._set_status(ServiceStatus.MISCONFIGURED)
+
+        messages = []
+        handler_id = logger.add(messages.append, level="WARNING", format="{message}")
+        try:
+            await run_test(
+                service,
+                frames_to_send=[TextFrame("this should be spoken")],
+                expected_down_frames=None,
+            )
+        finally:
+            logger.remove(handler_id)
+
+        warning = next((m for m in messages if "this should be spoken" in m), None)
+        self.assertIsNotNone(warning, f"dropped text was not reported: {messages}")
+        self.assertIn("misconfigured", warning)
