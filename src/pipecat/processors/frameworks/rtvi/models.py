@@ -30,7 +30,7 @@ from pipecat.frames.frames import (
 from pipecat.utils.deprecation import deprecated
 
 # -- Constants --
-PROTOCOL_VERSION = "2.1.0"
+PROTOCOL_VERSION = "2.2.0"
 
 # -- Version compatibility --
 # Any 1.x client is deprecated but still supported with the old bot-output format.
