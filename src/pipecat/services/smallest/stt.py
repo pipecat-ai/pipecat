@@ -110,15 +110,10 @@ class SmallestSTTSettings(STTSettings):
         redact_pci: Redact payment card information.
         numerals: Convert spoken numerals to digits.
         diarize: Enable speaker diarization.
-        endpointing: Finalize promptly on trailing silence instead of waiting
-            for the model's slower internal finalization cadence.
+        endpointing: Finalize promptly on trailing silence.
         keywords: Comma-separated ``KEYWORD:INTENSIFIER`` pairs to boost
-            recognition of domain-specific words or phrases (e.g.
-            ``"Blackwell:2,NVIDIA:1"``). Intensifier is optional (default 1.0)
-            and should stay in the 0-5 range to avoid hallucination.
-        format: Apply punctuation and capitalization to transcripts. Disable
-            for raw lowercase output better suited to downstream NLP/LLM
-            pipelines.
+            recognition of domain-specific words/phrases (e.g. ``"NVIDIA:2"``).
+        format: Apply punctuation and capitalization to transcripts.
     """
 
     word_timestamps: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
