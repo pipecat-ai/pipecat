@@ -21,6 +21,8 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     StartFrame,
+    UserMuteStartedFrame,
+    UserMuteStoppedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -42,6 +44,11 @@ class TurnTrackingObserver(BaseObserver):
 
       - The user starts speaking again
       - A timeout period elapses with no more bot speech
+
+    User speaking frames observed while the user is muted are ignored: mute
+    strategies suppress them at the user aggregator, so speech detected during
+    a mute window (e.g. echo of the bot's own audio) must not advance turns or
+    report user speech timing.
     """
 
     def __init__(self, max_frames=100, turn_end_timeout_secs=2.5, **kwargs):
@@ -64,6 +71,7 @@ class TurnTrackingObserver(BaseObserver):
         # audio, so this must be tracked independently from ``_turn_count``.
         self._bot_speaking_turn: int | None = None
         self._user_speaking_turn: int | None = None
+        self._is_user_muted = False
         self._has_bot_spoken = False
         self._turn_start_time = 0
         self._turn_end_timeout_secs = turn_end_timeout_secs
@@ -113,6 +121,10 @@ class TurnTrackingObserver(BaseObserver):
             # Start the first turn immediately when the pipeline starts
             if self._turn_count == 0:
                 await self._start_turn(data)
+        elif isinstance(data.frame, UserMuteStartedFrame):
+            self._is_user_muted = True
+        elif isinstance(data.frame, UserMuteStoppedFrame):
+            self._is_user_muted = False
         elif isinstance(data.frame, UserStartedSpeakingFrame):
             await self._handle_user_started_speaking(data)
         elif isinstance(data.frame, UserStoppedSpeakingFrame):
@@ -157,6 +169,10 @@ class TurnTrackingObserver(BaseObserver):
 
     async def _handle_user_started_speaking(self, data: FramePushed):
         """Handle user speaking events, including interruptions."""
+        if self._is_user_muted:
+            logger.trace(f"Ignoring muted user speech start in Turn {self._turn_count}")
+            return
+
         if self._is_bot_speaking:
             # Handle interruption - end current turn and start a new one
             self._cancel_turn_end_timer()  # Cancel any pending end turn timer
@@ -182,6 +198,13 @@ class TurnTrackingObserver(BaseObserver):
 
     async def _handle_user_stopped_speaking(self, data: FramePushed):
         """Associate the user speech stop with its owning logical turn."""
+        # A stop whose start was suppressed by mute carries no useful timing.
+        # A stop for speech that started before the mute engaged is still
+        # processed so the owning turn's speech state closes correctly.
+        if self._is_user_muted and self._user_speaking_turn is None:
+            logger.trace(f"Ignoring muted user speech stop in Turn {self._turn_count}")
+            return
+
         turn_number = self._user_speaking_turn or self._turn_count
         await self._call_event_handler("on_user_speech_stopped_for_turn", turn_number, data)
         self._user_speaking_turn = None
