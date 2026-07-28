@@ -13,7 +13,7 @@ information to bot functions.
 import argparse
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import WebSocket
 from pydantic import BaseModel, ConfigDict, Field

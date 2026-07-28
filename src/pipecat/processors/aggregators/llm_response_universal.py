@@ -91,13 +91,11 @@ from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
-    ExternalUserTurnStartStrategy,
     TranscriptionUserTurnStartStrategy,
     UserTurnStartedParams,
 )
 from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
-    ExternalUserTurnStopStrategy,
     UserTurnStoppedParams,
 )
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig

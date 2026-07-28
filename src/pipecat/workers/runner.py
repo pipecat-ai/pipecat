@@ -66,7 +66,6 @@ from pipecat.registry.types import WorkerReadyData, WorkerRegistryEntry
 from pipecat.utils.asyncio.task_manager import (
     BaseTaskManager,
     TaskManager,
-    TaskManagerParams,
 )
 from pipecat.utils.base_object import BaseObject
 from pipecat.utils.startup import run_setup_hook
