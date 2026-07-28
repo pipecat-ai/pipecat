@@ -269,6 +269,14 @@ suite:
     scenarios: [describe_image]
 
   #
+  # MCP: the bot's tools come from an MCP server instead of local functions.
+  # The stdio bot spawns the reference memory server with npx (requires
+  # Node.js — see the README prerequisites).
+  #
+  - bot: mcp/mcp-stdio.py
+    scenarios: [mcp_memory]
+
+  #
   # Vision: the bot is handed an image (a cat) on connect via --runner-body and
   # describes it. `runner_body:` is resolved relative to this manifest; relative
   # paths inside it (the image) resolve next to the body file.
