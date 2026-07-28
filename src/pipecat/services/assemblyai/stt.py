@@ -144,7 +144,6 @@ def language_to_assemblyai_language(language: Language) -> str:
         Language.PT: "pt",
         Language.SV: "sv",
         Language.TR: "tr",
-        Language.UR: "ur",
         Language.VI: "vi",
         Language.ZH: "zh",
     }
@@ -190,7 +189,7 @@ class AssemblyAISTTSettings(STTSettings):
             "en", "es", "fr"). On U3 Pro models, a tier-1 code
             ("en"/"es"/"fr"/"de"/"it"/"pt") steers transcription toward that
             language; other supported codes are "tr", "nl", "sv", "no", "da",
-            "fi", "hi", "vi", "ar", "he", "ja", "ur", "zh". AssemblyAI supersedes
+            "fi", "hi", "vi", "ar", "he", "ja", "zh". AssemblyAI supersedes
             this parameter with ``language_codes``, which covers the same languages
             as ``Language`` enums and is bound in preference to this one when both
             are set; prefer that one. Defaults to None (not sent; no steering).
