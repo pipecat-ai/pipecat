@@ -68,7 +68,7 @@ def audio_frame() -> InputAudioRawFrame:
 
 
 class TestSTTStatusGating(unittest.IsolatedAsyncioTestCase):
-    async def test_audio_is_transcribed_while_the_service_is_usable(self):
+    async def test_audio_is_transcribed_while_the_service_is_healthy(self):
         service = CountingSTTService()
 
         await run_test(
@@ -122,7 +122,7 @@ class TestSegmentedSTTStatusGating(unittest.IsolatedAsyncioTestCase):
 
 
 class TestTTSStatusGating(unittest.IsolatedAsyncioTestCase):
-    async def test_text_is_synthesized_while_the_service_is_usable(self):
+    async def test_text_is_synthesized_while_the_service_is_healthy(self):
         service = CountingTTSService()
 
         await run_test(

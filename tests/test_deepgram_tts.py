@@ -45,4 +45,4 @@ async def test_deepgram_unavailable_service_stays_usable(monkeypatch):
 
     await service._connect_websocket()
 
-    assert service.status.is_usable
+    assert not service.status.is_misconfigured

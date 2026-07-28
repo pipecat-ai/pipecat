@@ -113,15 +113,15 @@ class TestErrorClassification(unittest.TestCase):
         self.assertIsNone(status_for_category(ErrorCategory.SERVER))
         self.assertIsNone(status_for_category(ErrorCategory.UNKNOWN))
 
-    def test_misconfigured_is_the_only_unusable_status(self):
-        self.assertFalse(ServiceStatus.MISCONFIGURED.is_usable)
+    def test_is_misconfigured_flags_only_that_status(self):
+        self.assertTrue(ServiceStatus.MISCONFIGURED.is_misconfigured)
         for status in (
             ServiceStatus.UNKNOWN,
             ServiceStatus.READY,
             ServiceStatus.DEGRADED,
             ServiceStatus.UNAVAILABLE,
         ):
-            self.assertTrue(status.is_usable)
+            self.assertFalse(status.is_misconfigured)
 
 
 class TestErrorFrame(unittest.TestCase):
@@ -169,7 +169,7 @@ class TestServiceStatus(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(up[0].category, ErrorCategory.AUTHENTICATION)
         self.assertEqual(service.status, ServiceStatus.MISCONFIGURED)
-        self.assertFalse(service.status.is_usable)
+        self.assertTrue(service.status.is_misconfigured)
 
     async def test_server_errors_leave_the_status_alone(self):
         service = StatusService(exception=websocket_rejection(503))

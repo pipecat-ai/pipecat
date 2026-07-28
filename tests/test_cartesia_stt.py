@@ -67,7 +67,7 @@ async def test_cartesia_rejected_api_key_misconfigures_the_service(monkeypatch):
     await service._connect_websocket()
 
     assert service.status == ServiceStatus.MISCONFIGURED
-    assert not service.status.is_usable
+    assert service.status.is_misconfigured
 
 
 @pytest.mark.asyncio
@@ -81,7 +81,7 @@ async def test_cartesia_unavailable_service_stays_usable(monkeypatch):
 
     await service._connect_websocket()
 
-    assert service.status.is_usable
+    assert not service.status.is_misconfigured
 
 
 @pytest.mark.asyncio

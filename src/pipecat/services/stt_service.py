@@ -431,7 +431,7 @@ class STTService(AIService):
 
         # A service the provider has rejected can't transcribe anything, and
         # services that connect on demand would attempt a handshake per chunk.
-        if not self.status.is_usable:
+        if self.status.is_misconfigured:
             return
 
         self._last_audio_time = time.monotonic()
@@ -856,7 +856,7 @@ class SegmentedSTTService(STTService):
         self._user_speaking = False
 
         # A service the provider has rejected can't transcribe this segment.
-        if not self.status.is_usable:
+        if self.status.is_misconfigured:
             self._audio_buffer.clear()
             return
 

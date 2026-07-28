@@ -72,7 +72,7 @@ class WebsocketService(ABC):
         Args:
             status: The status the connection implies.
         """
-        if status.is_usable and not self._connection_status.is_usable:
+        if not status.is_misconfigured and self._connection_status.is_misconfigured:
             return
 
         set_status = getattr(self, "_set_status", None)
@@ -121,7 +121,7 @@ class WebsocketService(ABC):
             return False
 
         # Reconnecting can't fix credentials or settings the provider rejects.
-        if not self._connection_status.is_usable:
+        if self._connection_status.is_misconfigured:
             logger.error(f"{self} not reconnecting: the service is misconfigured")
             return False
 
@@ -148,7 +148,7 @@ class WebsocketService(ABC):
                         )
                 # A rejected attempt may have identified the service as
                 # misconfigured, in which case further attempts are pointless.
-                if not self._connection_status.is_usable:
+                if self._connection_status.is_misconfigured:
                     logger.error(f"{self} abandoning reconnection: the service is misconfigured")
                     return False
                 wait_time = exponential_backoff_time(attempt)

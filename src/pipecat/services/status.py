@@ -39,14 +39,14 @@ class ServiceStatus(Enum):
     MISCONFIGURED = "misconfigured"
 
     @property
-    def is_usable(self) -> bool:
-        """Whether the service is worth sending work to.
+    def is_misconfigured(self) -> bool:
+        """Whether the service needs reconfiguring before it can work again.
 
-        True unless the service needs reconfiguring. A service that is merely
-        degraded, or unavailable because the provider is having trouble, may
-        start working again on its own, so work keeps flowing to it.
+        The one status worth giving up on. A service that is merely degraded,
+        or unavailable because the provider is having trouble, may start
+        working again on its own, so work keeps flowing to it.
         """
-        return self is not ServiceStatus.MISCONFIGURED
+        return self is ServiceStatus.MISCONFIGURED
 
 
 def status_for_category(category: ErrorCategory) -> ServiceStatus | None:

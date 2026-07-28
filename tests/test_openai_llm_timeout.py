@@ -318,7 +318,7 @@ async def test_openai_llm_rejected_api_key_misconfigures_the_service():
         await service.process_frame(LLMContextFrame(LLMContext()), FrameDirection.DOWNSTREAM)
 
         assert service.status == ServiceStatus.MISCONFIGURED
-        assert not service.status.is_usable
+        assert service.status.is_misconfigured
 
 
 @pytest.mark.asyncio
@@ -339,4 +339,4 @@ async def test_openai_llm_server_error_stays_usable():
 
         await service.process_frame(LLMContextFrame(LLMContext()), FrameDirection.DOWNSTREAM)
 
-        assert service.status.is_usable
+        assert not service.status.is_misconfigured

@@ -147,7 +147,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ):
             logger.info(f"{service}: {previous.value} -> {current.value}")
 
-            if not current.is_usable:
+            if current.is_misconfigured:
                 logger.error(
                     f"{service} needs attention: check its API key, model and voice settings"
                 )

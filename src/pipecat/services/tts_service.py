@@ -1271,14 +1271,14 @@ class TTSService(AIService):
         # services that connect on demand would attempt a handshake per request.
         # The surrounding bookkeeping still runs, so the turn completes with no
         # audio rather than stalling.
-        if self.status.is_usable:
-            await self.tts_process_generator(context_id, self.run_tts(prepared_text, context_id))
-        else:
+        if self.status.is_misconfigured:
             # Name the text that goes unspoken: silence from the bot is
             # otherwise hard to trace back to the service that caused it.
             logger.warning(
                 f"{self}: service is {self.status.value}, not speaking [{prepared_text}]"
             )
+        else:
+            await self.tts_process_generator(context_id, self.run_tts(prepared_text, context_id))
 
         if not self._is_streaming_tokens:
             await self.stop_processing_metrics()
