@@ -655,6 +655,41 @@ class TestServiceSwitcherStrategyFailover(unittest.IsolatedAsyncioTestCase):
         # Active service SHOULD have changed — the error came from a managed service
         self.assertEqual(switcher.strategy.active_service, backup_service)
 
+    async def test_failover_marks_the_error_handled(self):
+        """Test that an error the switcher recovered from is marked as handled."""
+        error_service = ErrorOnTextService("error_service")
+        backup_service = MockFrameProcessor("backup_service")
+        switcher = ServiceSwitcher(
+            [error_service, backup_service],
+            strategy_type=ServiceSwitcherStrategyFailover,
+        )
+
+        _, up = await run_test(
+            switcher,
+            frames_to_send=[TextFrame(text="test")],
+            expected_down_frames=[TextFrame],
+            expected_up_frames=[ErrorFrame],
+        )
+
+        self.assertTrue(up[0].handled)
+
+    async def test_error_without_failover_is_not_marked_handled(self):
+        """Test that an error the switcher couldn't recover from stays unhandled."""
+        error_service = ErrorOnTextService("error_service")
+        switcher = ServiceSwitcher(
+            [error_service],
+            strategy_type=ServiceSwitcherStrategyFailover,
+        )
+
+        _, up = await run_test(
+            switcher,
+            frames_to_send=[TextFrame(text="test")],
+            expected_down_frames=[TextFrame],
+            expected_up_frames=[ErrorFrame],
+        )
+
+        self.assertFalse(up[0].handled)
+
     async def test_on_service_switched_event_fires_on_error(self):
         """Test that on_service_switched event fires when an error triggers a switch."""
         strategy = ServiceSwitcherStrategyFailover(self.services)

@@ -15,6 +15,7 @@ import asyncio
 import warnings
 from collections.abc import AsyncIterable, Iterable
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, TypeVar
 
 from loguru import logger
@@ -134,6 +135,24 @@ class IdleFrameObserver(BaseObserver):
             self._idle_event.set()
 
 
+class ConfigurationErrorPolicy(Enum):
+    """What a pipeline worker does when a service reports it is misconfigured.
+
+    A misconfigured service keeps failing until its credentials or settings
+    change, so the pipeline has to decide whether it is still worth running.
+
+    Parameters:
+        CONTINUE: Report the error and keep running. The application decides
+            what to do, for example by failing over to another provider.
+        END: End the pipeline gracefully, letting queued frames drain first.
+        CANCEL: Cancel the pipeline immediately, abandoning queued frames.
+    """
+
+    CONTINUE = "continue"
+    END = "end"
+    CANCEL = "cancel"
+
+
 class PipelineParams(BaseModel):
     """Configuration parameters for pipeline execution.
 
@@ -196,6 +215,9 @@ class PipelineWorker(BaseWorker):
           the frame if they need to handle specific cases.
 
     - on_pipeline_error: Called when an error occurs with ErrorFrame
+    - on_pipeline_configuration_error: Called when a service reports that it cannot work
+          with its current configuration, such as a rejected API key. Fires once per
+          service, before ``on_configuration_error`` is applied.
 
     Example::
 
@@ -222,6 +244,10 @@ class PipelineWorker(BaseWorker):
         @worker.event_handler("on_pipeline_error")
         async def on_pipeline_error(worker, frame):
             ...
+
+        @worker.event_handler("on_pipeline_configuration_error")
+        async def on_pipeline_configuration_error(worker, frame):
+            ...
     """
 
     def __init__(
@@ -246,6 +272,7 @@ class PipelineWorker(BaseWorker):
         idle_timeout_secs: float | None = IDLE_TIMEOUT_SECS,
         name: str | None = None,
         observers: list[BaseObserver] | None = None,
+        on_configuration_error: ConfigurationErrorPolicy = ConfigurationErrorPolicy.CONTINUE,
         params: PipelineParams | None = None,
         rtvi_processor: RTVIProcessor | None = None,
         rtvi_observer_params: RTVIObserverParams | None = None,
@@ -310,6 +337,11 @@ class PipelineWorker(BaseWorker):
                 automatically.
             name: Optional worker name (used for worker-style addressing on the bus).
             observers: List of observers for monitoring pipeline execution.
+            on_configuration_error: What to do when a service reports that it
+                cannot work with its current configuration, such as a rejected
+                API key. Defaults to
+                :attr:`ConfigurationErrorPolicy.CONTINUE`, leaving the decision
+                to ``on_pipeline_configuration_error`` handlers.
             params: Configuration parameters for the pipeline.
             rtvi_observer_params: The RTVI observer parameter to use if RTVI is enabled.
             rtvi_processor: The RTVI processor to add if RTVI is enabled.
@@ -349,6 +381,10 @@ class PipelineWorker(BaseWorker):
         self._enable_turn_tracking = enable_turn_tracking
         self._idle_timeout_secs = idle_timeout_secs
         self._app_resources = app_resources
+        self._on_configuration_error = on_configuration_error
+        # Processors already reported as misconfigured, so a service that keeps
+        # failing is reported once instead of on every frame it can't handle.
+        self._misconfigured_processors: set[FrameProcessor | None] = set()
         observers = observers or []
         self._turn_tracking_observer: TurnTrackingObserver | None = None
         self._user_bot_latency_observer: UserBotLatencyObserver | None = None
@@ -499,6 +535,7 @@ class PipelineWorker(BaseWorker):
         self._register_event_handler("on_pipeline_started")
         self._register_event_handler("on_pipeline_finished")
         self._register_event_handler("on_pipeline_error")
+        self._register_event_handler("on_pipeline_configuration_error")
 
         # Bridge pipeline lifecycle to the BaseWorker lifecycle so the bus
         # registry sees this worker as ready/finished.
@@ -1154,8 +1191,31 @@ class PipelineWorker(BaseWorker):
                 logger.error(f"A fatal error occurred: {frame}")
                 # Cancel all tasks downstream.
                 await self.queue_frame(CancelFrame())
+            elif frame.category.is_configuration_error and not frame.handled:
+                await self._handle_configuration_error(frame)
             else:
                 logger.warning(f"{self}: Something went wrong: {frame}")
+
+    async def _handle_configuration_error(self, frame: ErrorFrame):
+        """Report a service that can't work with its current configuration.
+
+        Reported once per processor, since a misconfigured service keeps
+        failing for as long as the pipeline keeps using it.
+
+        Args:
+            frame: The error frame the service pushed upstream.
+        """
+        if frame.processor in self._misconfigured_processors:
+            return
+        self._misconfigured_processors.add(frame.processor)
+
+        logger.error(f"{self}: a service is misconfigured: {frame}")
+        await self._call_event_handler("on_pipeline_configuration_error", frame)
+
+        if self._on_configuration_error is ConfigurationErrorPolicy.END:
+            await self.stop_when_done()
+        elif self._on_configuration_error is ConfigurationErrorPolicy.CANCEL:
+            await self.queue_frame(CancelFrame())
 
     async def _sink_push_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames coming downstream from the pipeline.

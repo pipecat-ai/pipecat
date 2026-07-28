@@ -963,6 +963,10 @@ class ErrorFrame(SystemFrame):
         category: Why the error occurred, when the processor could determine it.
             Lets handlers tell a transient failure from one that will keep
             recurring until the configuration changes.
+        handled: Whether something upstream already recovered from this error,
+            for example by failing over to another service. The error still
+            travels upstream so applications can observe it, but the pipeline
+            worker leaves it alone.
     """
 
     error: str
@@ -970,6 +974,7 @@ class ErrorFrame(SystemFrame):
     processor: FrameProcessor | None = None
     exception: Exception | None = None
     category: ErrorCategory = ErrorCategory.UNKNOWN
+    handled: bool = False
 
     def __str__(self):
         category = (

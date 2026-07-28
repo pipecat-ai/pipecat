@@ -300,7 +300,8 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         Non-fatal ``ErrorFrame`` instances are forwarded to the strategy via
         ``handle_error`` so strategies like ``ServiceSwitcherStrategyFailover``
         can perform failover. The error frame is still propagated upstream so
-        that application-level error handlers can observe it.
+        that application-level error handlers can observe it, marked as handled
+        when a switch occurred.
         """
         # Consume ServiceSwitcherRequestMetadataFrame once the targeted service
         # has handled it (i.e. the active service).
@@ -317,7 +318,11 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         # ignoring errors just propagating upstream from other processors.
         if isinstance(frame, ErrorFrame) and not frame.fatal:
             if frame.processor and frame.processor == self.strategy.active_service:
-                await self.strategy.handle_error(frame)
+                switched = await self.strategy.handle_error(frame)
+                # A completed switch means the pipeline recovered, so the error
+                # shouldn't also be acted on further upstream.
+                if switched:
+                    frame.handled = True
 
         await super().push_frame(frame, direction)
 
