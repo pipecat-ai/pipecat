@@ -26,12 +26,13 @@ Three things to watch, all wired up below:
   default) leaves the decision to your handlers — use it when the application
   can recover on its own, for example by failing over to another provider.
 
-To see it work, run with a deliberately wrong key::
+To see it work, run with a deliberately wrong key for any of the services::
 
-    CARTESIA_API_KEY=not-a-real-key python features-service-status.py
+    OPENAI_API_KEY=not-a-real-key python features-service-status.py
 
-Compare that to what a healthy run logs: the bot ends promptly with a clear
-reason instead of retrying a key the provider has already rejected.
+The provider rejects the key, the service reports ``authentication`` and moves
+to ``misconfigured``, both handlers below fire once, and the bot ends — instead
+of retrying a key that will keep being rejected for as long as it runs.
 """
 
 import os
