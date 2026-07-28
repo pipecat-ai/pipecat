@@ -358,6 +358,41 @@ class TestHttpStreamErrorEvents:
         assert "Internal server error" in service.push_error.call_args.kwargs["error_msg"]
 
     @pytest.mark.asyncio
+    async def test_real_sdk_events_are_read_from_the_right_fields(self):
+        """Drive genuine SDK event objects rather than mocks.
+
+        ``failed`` and ``incomplete`` carry their detail on different fields,
+        and a mock would satisfy any attribute path, so build the events the
+        way the streaming decoder does and assert the text arrives.
+        """
+        failed = ResponseFailedEvent.construct(
+            type="response.failed",
+            sequence_number=1,
+            response={"error": {"code": "server_error", "message": "Content filter triggered"}},
+        )
+        incomplete = ResponseIncompleteEvent.construct(
+            type="response.incomplete",
+            sequence_number=1,
+            response={"incomplete_details": {"reason": "max_output_tokens"}},
+        )
+        error = ResponseErrorEvent.construct(
+            type="error", sequence_number=1, message="Internal server error", code=None, param=None
+        )
+
+        for event, expected in (
+            (failed, "Content filter triggered"),
+            (incomplete, "max_output_tokens"),
+            (error, "Internal server error"),
+        ):
+            service = _make_service()
+            service.push_error = AsyncMock()
+
+            await _run(service, event)
+
+            service.push_error.assert_called_once()
+            assert expected in service.push_error.call_args.kwargs["error_msg"]
+
+    @pytest.mark.asyncio
     async def test_terminal_error_stops_consuming_the_stream(self):
         """A terminal event ends the turn: later events must not be processed."""
         service = _make_service()
