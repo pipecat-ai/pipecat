@@ -28,8 +28,13 @@ class ServiceStatus(Enum):
         DEGRADED: The service hit a failure and is retrying.
         UNAVAILABLE: The service gave up retrying, but the failure is one that
             could clear on its own, such as a provider outage.
-        MISCONFIGURED: The service cannot work with its current configuration.
-            Reconnecting will keep failing until credentials or settings change.
+        MISCONFIGURED: The service cannot work as configured, so retrying is
+            pointless. Changing its settings clears the status, and often
+            fixes it: most configuration errors are about *what* was asked
+            for — an unknown model, a voice the account has no access to —
+            and those fields are runtime-updatable. A rejected API key is the
+            exception, since credentials aren't runtime settings; that one
+            needs a new service.
     """
 
     UNKNOWN = "unknown"
