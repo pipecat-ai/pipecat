@@ -1324,12 +1324,14 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                     self._full_model_name = response.model
 
                 elif isinstance(event, ResponseFailedEvent):
-                    # The SDK's lenient decoder leaves the detail objects as
-                    # None when a server omits them, so fall back to a generic
-                    # message rather than assuming they're populated.
+                    # As with usage above, the detail objects and their fields
+                    # are only as reliable as the server; coalesce to a generic
+                    # message so a sparse payload still reports something.
                     error = event.response.error
-                    error_msg = error.message if error else "Response failed"
-                    await self.push_error(error_msg=f"LLM response error: {error_msg}")
+                    message = error.message if error else None
+                    await self.push_error(
+                        error_msg=f"LLM response error: {message or 'Response failed'}"
+                    )
                     break
 
                 elif isinstance(event, ResponseIncompleteEvent):

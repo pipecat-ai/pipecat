@@ -309,6 +309,23 @@ class TestHttpStreamErrorEvents:
         assert "Response failed" in service.push_error.call_args.kwargs["error_msg"]
 
     @pytest.mark.asyncio
+    async def test_response_failed_with_empty_error_message(self):
+        """A server may send an error object whose message is empty.
+
+        The generic fallback must still apply, so the pushed error is never
+        just the bare prefix.
+        """
+        service = _make_service()
+        service.push_error = AsyncMock()
+
+        error = MagicMock()
+        error.message = None
+        await _run(service, _failed_event(error))
+
+        service.push_error.assert_called_once()
+        assert "Response failed" in service.push_error.call_args.kwargs["error_msg"]
+
+    @pytest.mark.asyncio
     async def test_response_incomplete_pushes_error(self):
         service = _make_service()
         service.push_error = AsyncMock()
