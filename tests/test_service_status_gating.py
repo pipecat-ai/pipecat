@@ -9,9 +9,11 @@
 import unittest
 from collections.abc import AsyncGenerator
 
+import httpx
 from loguru import logger
 
 from pipecat.frames.frames import (
+    ErrorFrame,
     Frame,
     InputAudioRawFrame,
     TextFrame,
@@ -23,6 +25,7 @@ from pipecat.services.status import ServiceStatus
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import run_test
+from pipecat.utils.errors import ErrorCategory
 
 
 class CountingSTTService(STTService):
@@ -163,3 +166,32 @@ class TestTTSStatusGating(unittest.IsolatedAsyncioTestCase):
         warning = next((m for m in messages if "this should be spoken" in m), None)
         self.assertIsNotNone(warning, f"dropped text was not reported: {messages}")
         self.assertIn("misconfigured", warning)
+
+
+class TestApplicationErrorClassification(unittest.IsolatedAsyncioTestCase):
+    """Application code a service invokes must not affect the service's health."""
+
+    async def test_failing_text_transformer_does_not_misconfigure_the_service(self):
+        service = CountingTTSService()
+
+        async def failing_transform(text: str, aggregation_type) -> str:
+            # A transformer calling some API that rejects its own credentials.
+            request = httpx.Request("POST", "https://translate.example.com/v1")
+            raise httpx.HTTPStatusError(
+                "Unauthorized", request=request, response=httpx.Response(401, request=request)
+            )
+
+        service.add_text_transformer(failing_transform)
+
+        _, up = await run_test(
+            service,
+            frames_to_send=[TextFrame("hello")],
+            expected_down_frames=None,
+            expected_up_frames=[ErrorFrame],
+        )
+
+        self.assertEqual(up[0].category, ErrorCategory.APPLICATION)
+        self.assertFalse(service.status.is_misconfigured)
+        # The turn produces no audio: a transformer may exist to remove
+        # something, so speaking the untransformed text isn't safe.
+        self.assertEqual(service.synthesize_calls, 0)
