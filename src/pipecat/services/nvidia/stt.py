@@ -258,6 +258,9 @@ class NvidiaSTTService(STTService):
         api_key: str | None = None,
         server: str = "grpc.nvcf.nvidia.com:443",
         model_function_map: Mapping[str, str] = {
+            # The function id identifies NVIDIA's hosted deployment of the model
+            # and changes when NVIDIA redeploys it. The current id is on
+            # https://build.nvidia.com/nvidia/nemotron-asr-streaming/api
             "function_id": "bb0837de-8c7b-481f-9ec8-ef5663e9c1fa",
             "model_name": "nemotron-asr-streaming",
         },
@@ -706,6 +709,9 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         api_key: str | None = None,
         server: str = "grpc.nvcf.nvidia.com:443",
         model_function_map: Mapping[str, str] = {
+            # The function id identifies NVIDIA's hosted deployment of the model
+            # and changes when NVIDIA redeploys it. The current id is on
+            # https://build.nvidia.com/nvidia/canary-1b-asr/api
             "function_id": "b0e8b4a5-217c-40b7-9b96-17d84e666317",
             "model_name": "canary-1b-asr",
         },
