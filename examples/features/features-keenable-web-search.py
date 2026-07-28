@@ -104,9 +104,6 @@ Your output will be spoken aloud, so avoid emojis, URLs, bullet points, or other
     # Keyless by default (uses the "pro" search mode). Pass an API key for higher
     # rate limits and the lower-latency "realtime" mode (best fit for voice;
     # requires an account with realtime mode enabled), selected with mode="realtime".
-    # tools() connects to the server and returns its tool schemas with handlers
-    # attached, so the LLM auto-registers them from the context's tools — no
-    # register() call needed.
     search = KeenableWebSearch(api_key=os.getenv("KEENABLE_API_KEY"))
 
     context = LLMContext(tools=await search.tools())
