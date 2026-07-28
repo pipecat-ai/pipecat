@@ -17,6 +17,7 @@ from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 from websockets.protocol import State
 
 from pipecat.frames.frames import ErrorFrame
+from pipecat.services.status import ServiceStatus
 from pipecat.utils.network import QuickFailureTracker, exponential_backoff_time
 
 
@@ -26,6 +27,11 @@ class WebsocketService(ABC):
     Provides websocket connection management, automatic reconnection with
     exponential backoff, connection verification, and error handling.
     Subclasses implement service-specific connection and message handling logic.
+
+    Reconnection tracks the owning service's
+    :class:`~pipecat.services.status.ServiceStatus`: attempts stop once the
+    service is known to be misconfigured, since no amount of retrying will fix
+    credentials or settings the provider rejects.
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
@@ -46,6 +52,32 @@ class WebsocketService(ABC):
         # survives after being established.
         self._quick_failure_tracker = QuickFailureTracker()
         self._last_connect_time: float = 0.0
+
+    @property
+    def _connection_status(self) -> ServiceStatus:
+        """The owning service's status.
+
+        Reports `ServiceStatus.UNKNOWN` when mixed into something that doesn't
+        track status, leaving reconnection behavior unchanged.
+        """
+        return getattr(self, "status", ServiceStatus.UNKNOWN)
+
+    async def _set_connection_status(self, status: ServiceStatus):
+        """Move the owning service to a status implied by the connection.
+
+        A status the connection can't recover from, such as rejected
+        credentials, outranks anything the reconnection logic infers: retrying
+        can't clear it, so it stands until the service is reconfigured.
+
+        Args:
+            status: The status the connection implies.
+        """
+        if status.is_recoverable and not self._connection_status.is_recoverable:
+            return
+
+        set_status = getattr(self, "_set_status", None)
+        if set_status:
+            await set_status(status)
 
     async def _verify_connection(self) -> bool:
         """Verify the websocket connection is active and responsive.
@@ -88,23 +120,37 @@ class WebsocketService(ABC):
             logger.warning(f"{self} reconnect attempt aborted: already in progress")
             return False
 
+        # Reconnecting can't fix credentials or settings the provider rejects.
+        if not self._connection_status.is_recoverable:
+            logger.error(f"{self} not reconnecting: the service is misconfigured")
+            return False
+
         self._reconnect_in_progress = True
         last_exception: Exception | None = None
         try:
+            await self._set_connection_status(ServiceStatus.DEGRADED)
             for attempt in range(1, max_retries + 1):
                 try:
                     logger.warning(f"{self} reconnecting, attempt {attempt}")
                     if await self._reconnect_websocket(attempt):
                         logger.info(f"{self} reconnected successfully on attempt {attempt}")
                         self._last_connect_time = time.monotonic()
+                        await self._set_connection_status(ServiceStatus.READY)
                         return True
                 except Exception as e:
                     last_exception = e
                     logger.error(f"{self} reconnection attempt {attempt} failed: {e}")
                     if report_error:
                         await report_error(
-                            ErrorFrame(f"{self} reconnection attempt {attempt} failed: {e}")
+                            ErrorFrame(
+                                f"{self} reconnection attempt {attempt} failed: {e}", exception=e
+                            )
                         )
+                # A rejected attempt may have identified the service as
+                # misconfigured, in which case further attempts are pointless.
+                if not self._connection_status.is_recoverable:
+                    logger.error(f"{self} abandoning reconnection: the service is misconfigured")
+                    return False
                 wait_time = exponential_backoff_time(attempt)
                 await asyncio.sleep(wait_time)
             msg = f"{self} failed to reconnect after {max_retries} attempts"
@@ -112,7 +158,8 @@ class WebsocketService(ABC):
                 msg += f": {last_exception}"
             logger.error(msg)
             if report_error:
-                await report_error(ErrorFrame(msg))
+                await report_error(ErrorFrame(msg, exception=last_exception))
+            await self._set_connection_status(ServiceStatus.UNAVAILABLE)
             return False
         finally:
             self._reconnect_in_progress = False
@@ -183,6 +230,7 @@ class WebsocketService(ABC):
                 )
                 logger.error(msg)
                 await report_error(ErrorFrame(msg))
+                await self._set_connection_status(ServiceStatus.UNAVAILABLE)
                 return False
 
         # Log the message
@@ -194,7 +242,8 @@ class WebsocketService(ABC):
             return success
         else:
             # Reconnection disabled
-            await report_error(ErrorFrame(error_message))
+            await report_error(ErrorFrame(error_message, exception=error))
+            await self._set_connection_status(ServiceStatus.UNAVAILABLE)
             return False
 
     async def _receive_task_handler(self, report_error: Callable[[ErrorFrame], Awaitable[None]]):
@@ -209,6 +258,9 @@ class WebsocketService(ABC):
         """
         while True:
             self._last_connect_time = time.monotonic()
+            # Reaching here means a websocket is established and about to be
+            # read from, whether this is the first connection or a reconnection.
+            await self._set_connection_status(ServiceStatus.READY)
             try:
                 await self._receive_messages()
                 # _receive_messages() returned normally. This happens when the websocket
