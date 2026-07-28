@@ -40,6 +40,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
 from pipecat.services.settings import LLMSettings, _NotGiven, assert_given
+from pipecat.services.status import ServiceStatus
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_llm
 
@@ -563,6 +564,10 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 await self.push_frame(LLMFullResponseStartFrame())
                 await self.start_processing_metrics()
                 await self._process_context(frame.context)
+                # A completed response is the only proof this service works:
+                # the client is built without contacting the provider, so
+                # nothing before this point says the credentials are good.
+                await self._set_status(ServiceStatus.READY)
             except httpx.TimeoutException as e:
                 await self._call_event_handler("on_completion_timeout")
                 await self.push_error(error_msg="LLM completion timeout", exception=e)

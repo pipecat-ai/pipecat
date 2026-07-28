@@ -340,3 +340,42 @@ async def test_openai_llm_server_error_stays_usable():
         await service.process_frame(LLMContextFrame(LLMContext()), FrameDirection.DOWNSTREAM)
 
         assert not service.status.is_misconfigured
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_creating_the_client_does_not_report_ready():
+    """Test that building the client says nothing about the service's health.
+
+    The client is constructed without contacting the provider, so an invalid
+    API key builds just as happily as a valid one.
+    """
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+
+        assert service.status == ServiceStatus.UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_completed_response_reports_ready():
+    """Test that a completed response is what marks the service ready."""
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+        service._process_context = AsyncMock()
+
+        await service.process_frame(LLMContextFrame(LLMContext()), FrameDirection.DOWNSTREAM)
+
+        assert service.status == ServiceStatus.READY
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_failed_response_does_not_report_ready():
+    """Test that a failed completion leaves the service unhealthy."""
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+        service._process_context = AsyncMock(side_effect=RuntimeError("boom"))
+
+        await service.process_frame(LLMContextFrame(LLMContext()), FrameDirection.DOWNSTREAM)
+
+        assert service.status != ServiceStatus.READY
