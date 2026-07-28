@@ -22,7 +22,8 @@ Example::
 Search runs against a hosted MCP server powered by `Keenable AI
 <https://keenable.ai>`_. No API key is required — keyless requests use ``pro``
 mode. Pass ``api_key=`` for higher rate limits and access to the lower-latency
-``realtime`` mode (which requires an enabled account); select it with ``mode=``.
+``realtime`` mode (which requires an account with realtime mode enabled);
+select it with ``mode=``.
 """
 
 from typing import Literal
@@ -79,13 +80,14 @@ class KeenableWebSearch:
             api_key: API key for higher rate limits and ``realtime`` access.
                 When unset, the keyless free tier is used.
             mode: Search mode — ``"pro"`` (higher quality) or ``"realtime"``
-                (lower latency, good for voice; requires an enabled account).
+                (lower latency, good for voice; requires an account with
+                realtime mode enabled).
                 When unset, defaults to ``"realtime"`` if an API key is present,
                 else ``"pro"``.
         """
         self._api_key = api_key
-        # realtime requires an enabled key, so default to it only when keyed;
-        # keyless falls back to pro.
+        # realtime requires an account with it enabled, so default to it only
+        # when keyed; keyless falls back to pro.
         self._mode: SearchMode = mode or ("realtime" if api_key else "pro")
         self._mcp = MCPClient(
             server_params=StreamableHttpParameters(
