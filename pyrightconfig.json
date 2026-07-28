@@ -15,7 +15,6 @@
     "src/pipecat/services/aws/llm.py",
     "src/pipecat/services/aws/nova_sonic/llm.py",
     "src/pipecat/services/aws/sagemaker/bidi_client.py",
-    "src/pipecat/services/azure/tts.py",
     "src/pipecat/services/deepgram/flux/sagemaker/stt.py",
     "src/pipecat/services/deepgram/sagemaker/stt.py",
     "src/pipecat/services/deepgram/sagemaker/tts.py",
