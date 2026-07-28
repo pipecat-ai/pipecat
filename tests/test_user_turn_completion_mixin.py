@@ -13,6 +13,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMarkerFrame,
+    LLMMessagesAppendFrame,
     LLMTextFrame,
     UserStartedSpeakingFrame,
     UserTurnInferenceCompletedFrame,
@@ -400,6 +401,125 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
 
         texts = [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)]
         self.assertEqual(texts, ["One moment.", "Here are the openings."])
+        self.assertTrue(processor._user_turn_completion_voiced)
+
+    async def test_requested_run_resets_completion_latch(self):
+        """An appended message requesting a run lets its response voice a completion.
+
+        Re-prompts driven by the application (a user-idle check-in, a "didn't
+        catch that" nudge) fire while the user is silent, so no speech frame
+        clears the latch for them.
+        """
+        processor = MockProcessor()
+        processor._user_turn_completion_voiced = True
+
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            await processor.process_frame(
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "developer", "content": "The user has been quiet."}],
+                    run_llm=True,
+                ),
+                FrameDirection.DOWNSTREAM,
+            )
+
+        self.assertFalse(processor._user_turn_completion_voiced)
+
+    async def test_append_without_run_keeps_completion_latch(self):
+        """Appending messages without requesting a run leaves the latch armed.
+
+        Nothing asked for fresh speech, so the turn keeps its one spoken
+        completion and a later duplicate inference is still dropped.
+        """
+        processor = MockProcessor()
+        processor._user_turn_completion_voiced = True
+
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            await processor.process_frame(
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "developer", "content": "Background note."}],
+                ),
+                FrameDirection.DOWNSTREAM,
+            )
+
+        self.assertTrue(processor._user_turn_completion_voiced)
+
+    async def test_reprompt_speaks_after_voiced_completion(self):
+        """Regression test for #5145: silence after a re-prompt following a spoken ✓.
+
+        Sequence: the user's turn completes and the bot voices a ✓ reply, setting
+        the latch; the user stays silent, so an idle handler appends a developer
+        message with ``run_llm=True``; the resulting ✓ must be spoken. Without
+        resetting the latch on the requested run, that response is dropped and
+        the bot stays mute.
+        """
+        processor = MockProcessor()
+        processor.broadcast_frame = AsyncMock()
+
+        pushed_frames = []
+        with unittest.mock.patch.object(
+            FrameProcessor,
+            "push_frame",
+            AsyncMock(side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)),
+        ):
+            # The user's turn completes and the bot answers, setting the latch.
+            await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Japan is a great pick.")
+            await processor.push_frame(LLMFullResponseEndFrame())
+            self.assertTrue(processor._user_turn_completion_voiced)
+
+            # The user says nothing, so the idle handler asks for a check-in.
+            with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+                await processor.process_frame(
+                    LLMMessagesAppendFrame(
+                        messages=[{"role": "developer", "content": "The user has been quiet."}],
+                        run_llm=True,
+                    ),
+                    FrameDirection.DOWNSTREAM,
+                )
+
+            await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Are you still there?")
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        texts = [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)]
+        self.assertEqual(texts, ["Japan is a great pick.", "Are you still there?"])
+
+    async def test_requested_run_allows_only_one_extra_completion(self):
+        """A requested run grants exactly ONE extra spoken completion, then re-latches.
+
+        Clearing the latch on the requested run lets the re-prompt speak, but
+        that response's own ✓ re-arms the latch, so a later stray inference in
+        the same turn is still dropped. This guards against the reset
+        accidentally widening into an open-ended window.
+        """
+        processor = MockProcessor()
+        processor.broadcast_frame = AsyncMock()
+
+        pushed_frames = []
+        with unittest.mock.patch.object(
+            FrameProcessor,
+            "push_frame",
+            AsyncMock(side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)),
+        ):
+            await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Japan is a great pick.")
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+            with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+                await processor.process_frame(
+                    LLMMessagesAppendFrame(
+                        messages=[{"role": "developer", "content": "The user has been quiet."}],
+                        run_llm=True,
+                    ),
+                    FrameDirection.DOWNSTREAM,
+                )
+
+            await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Are you still there?")
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+            # Stray acoustic-detector inference, same turn, no new run requested.
+            await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Duplicate!")
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        texts = [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)]
+        self.assertEqual(texts, ["Japan is a great pick.", "Are you still there?"])
         self.assertTrue(processor._user_turn_completion_voiced)
 
 
