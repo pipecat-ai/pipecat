@@ -16,6 +16,7 @@ from loguru import logger
 
 from pipecat.frames.frames import UserStartedSpeakingFrame
 from pipecat.services.assemblyai.stt import AssemblyAISTTService, is_u3_pro_model
+from pipecat.transcriptions.language import Language
 
 
 def _query(service: AssemblyAISTTService) -> dict[str, list[str]]:
@@ -465,13 +466,20 @@ def test_language_codes_omitted_by_default():
     assert "language_codes" not in _query(service)
 
 
-@pytest.mark.parametrize("codes", [["es"], ["en", "es"], ["en", "es", "fr"]])
-def test_language_codes_sent_json_encoded(codes):
+@pytest.mark.parametrize(
+    "languages, expected",
+    [
+        ([Language.ES], ["es"]),
+        ([Language.EN, Language.ES], ["en", "es"]),
+        ([Language.EN, Language.ES, Language.FR], ["en", "es", "fr"]),
+    ],
+)
+def test_language_codes_sent_json_encoded(languages, expected):
     service = AssemblyAISTTService(
         api_key="test-key",
-        settings=AssemblyAISTTService.Settings(language_codes=codes),
+        settings=AssemblyAISTTService.Settings(language_codes=languages),
     )
-    assert _query(service)["language_codes"] == [json.dumps(codes)]
+    assert _query(service)["language_codes"] == [json.dumps(expected)]
 
 
 def test_language_codes_sent_for_universal_streaming():
@@ -481,7 +489,7 @@ def test_language_codes_sent_for_universal_streaming():
         api_key="test-key",
         settings=AssemblyAISTTService.Settings(
             model="universal-streaming-multilingual",
-            language_codes=["en", "es"],
+            language_codes=[Language.EN, Language.ES],
         ),
     )
     assert _query(service)["language_codes"] == [json.dumps(["en", "es"])]
@@ -496,7 +504,7 @@ def test_language_codes_with_language_detection_warns():
         service = AssemblyAISTTService(
             api_key="test-key",
             settings=AssemblyAISTTService.Settings(
-                language_codes=["es"],
+                language_codes=[Language.ES],
                 language_detection=True,
             ),
         )
@@ -517,7 +525,7 @@ def test_language_code_and_language_codes_together_warns():
             api_key="test-key",
             settings=AssemblyAISTTService.Settings(
                 language_code="es",
-                language_codes=["en", "es"],
+                language_codes=[Language.EN, Language.ES],
             ),
         )
     finally:
@@ -528,57 +536,69 @@ def test_language_code_and_language_codes_together_warns():
     assert "ignoring language_code" in sink.getvalue()
 
 
-@pytest.mark.parametrize(
-    "codes, message",
-    [
-        ([f"c{i}" for i in range(11)], "at most 10 codes"),
-        (["en", "multi"], "cannot combine 'multi'"),
-    ],
-)
-def test_language_codes_invalid_raises(codes, message):
-    # AssemblyAI rejects these at connect time; fail where the value was set.
-    with pytest.raises(ValueError, match=message):
+def test_language_codes_over_limit_raises():
+    # AssemblyAI rejects an over-long list at connect time; fail where it was set.
+    languages = [
+        Language.EN,
+        Language.ES,
+        Language.DE,
+        Language.FR,
+        Language.IT,
+        Language.PT,
+        Language.TR,
+        Language.NL,
+        Language.SV,
+        Language.NO,
+        Language.DA,
+    ]
+    with pytest.raises(ValueError, match="at most 10 languages"):
         AssemblyAISTTService(
             api_key="test-key",
-            settings=AssemblyAISTTService.Settings(language_codes=codes),
+            settings=AssemblyAISTTService.Settings(language_codes=languages),
         )
 
 
-def test_language_codes_unknown_code_forwarded():
-    # Which codes are valid is the server's call, so an unrecognized code is
-    # passed through rather than rejected here.
+def test_language_codes_regional_variants_resolve_to_base_codes():
+    # AssemblyAI declares base ISO codes, so variants of one language collapse
+    # to a single code while declaration order is preserved.
     service = AssemblyAISTTService(
         api_key="test-key",
-        settings=AssemblyAISTTService.Settings(language_codes=["zz"]),
+        settings=AssemblyAISTTService.Settings(
+            language_codes=[Language.ES_MX, Language.EN_US, Language.EN_GB],
+        ),
     )
-    assert _query(service)["language_codes"] == [json.dumps(["zz"])]
+    assert _query(service)["language_codes"] == [json.dumps(["es", "en"])]
 
 
-def test_language_codes_multi_alone_allowed():
-    # "multi" is valid on its own — it routes to the multilingual model.
+def test_language_codes_unlisted_language_forwarded():
+    # Which languages are supported is the server's call, so one outside the
+    # verified map is forwarded as its base code rather than rejected here.
     service = AssemblyAISTTService(
         api_key="test-key",
-        settings=AssemblyAISTTService.Settings(language_codes=["multi"]),
+        settings=AssemblyAISTTService.Settings(language_codes=[Language.KO]),
     )
-    assert _query(service)["language_codes"] == [json.dumps(["multi"])]
-
-
-def test_language_codes_duplicate_multi_allowed():
-    # The server dedupes before rejecting "multi" alongside others.
-    service = AssemblyAISTTService(
-        api_key="test-key",
-        settings=AssemblyAISTTService.Settings(language_codes=["multi", "multi"]),
-    )
-    assert _query(service)["language_codes"] == [json.dumps(["multi", "multi"])]
+    assert _query(service)["language_codes"] == [json.dumps(["ko"])]
 
 
 def test_language_codes_at_limit_allowed():
-    codes = ["en", "es", "de", "fr", "it", "pt", "tr", "nl", "sv", "no"]
+    languages = [
+        Language.EN,
+        Language.ES,
+        Language.DE,
+        Language.FR,
+        Language.IT,
+        Language.PT,
+        Language.TR,
+        Language.NL,
+        Language.SV,
+        Language.NO,
+    ]
     service = AssemblyAISTTService(
         api_key="test-key",
-        settings=AssemblyAISTTService.Settings(language_codes=codes),
+        settings=AssemblyAISTTService.Settings(language_codes=languages),
     )
-    assert _query(service)["language_codes"] == [json.dumps(codes)]
+    expected = ["en", "es", "de", "fr", "it", "pt", "tr", "nl", "sv", "no"]
+    assert _query(service)["language_codes"] == [json.dumps(expected)]
 
 
 # --- prompt + keyterms_prompt ---
@@ -728,10 +748,10 @@ def test_update_settings_language_codes_only_sends_without_reconnect():
     service = AssemblyAISTTService(api_key="test-key")
     sent, reconnects = _stub_connection(service)
 
-    delta = AssemblyAISTTService.Settings(language_codes=["en", "es"])
+    delta = AssemblyAISTTService.Settings(language_codes=[Language.EN, Language.ES])
     asyncio.run(service._update_settings(delta))
 
-    # Hot update: UpdateConfiguration carries the raw list, no reconnect.
+    # Hot update: UpdateConfiguration carries the resolved codes, no reconnect.
     assert sent == [{"language_codes": ["en", "es"]}]
     assert reconnects == []
 
@@ -758,7 +778,7 @@ def test_update_settings_language_codes_not_sent_for_non_u3():
     sink = io.StringIO()
     handler_id = logger.add(sink, level="WARNING", format="{message}")
     try:
-        delta = AssemblyAISTTService.Settings(language_codes=["es"])
+        delta = AssemblyAISTTService.Settings(language_codes=[Language.ES])
         asyncio.run(service._update_settings(delta))
     finally:
         logger.remove(handler_id)
@@ -780,8 +800,12 @@ def test_update_settings_language_codes_non_u3_warns_once():
     sink = io.StringIO()
     handler_id = logger.add(sink, level="WARNING", format="{message}")
     try:
-        asyncio.run(service._update_settings(AssemblyAISTTService.Settings(language_codes=["es"])))
-        asyncio.run(service._update_settings(AssemblyAISTTService.Settings(language_codes=["fr"])))
+        asyncio.run(
+            service._update_settings(AssemblyAISTTService.Settings(language_codes=[Language.ES]))
+        )
+        asyncio.run(
+            service._update_settings(AssemblyAISTTService.Settings(language_codes=[Language.FR]))
+        )
     finally:
         logger.remove(handler_id)
 
@@ -793,7 +817,7 @@ def test_update_settings_language_codes_with_agent_context_sends_both():
     service = AssemblyAISTTService(api_key="test-key")
     sent, reconnects = _stub_connection(service)
 
-    delta = AssemblyAISTTService.Settings(agent_context="Hello.", language_codes=["es"])
+    delta = AssemblyAISTTService.Settings(agent_context="Hello.", language_codes=[Language.ES])
     asyncio.run(service._update_settings(delta))
 
     # Both fields are hot-updatable, so neither triggers a reconnect.

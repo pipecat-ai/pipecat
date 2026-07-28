@@ -38,7 +38,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import ASSEMBLYAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -115,6 +115,58 @@ def map_language_from_assemblyai(language_code: str) -> Language:
         return Language.EN
 
 
+def language_to_assemblyai_language(language: Language) -> str:
+    """Convert a Pipecat Language to an AssemblyAI language code.
+
+    AssemblyAI declares languages as base ISO codes, so regional variants
+    (``Language.ES_MX``) resolve to their base code (``"es"``).
+
+    Args:
+        language: The Language enum value to convert.
+
+    Returns:
+        The AssemblyAI language code.
+    """
+    LANGUAGE_MAP = {
+        Language.AR: "ar",
+        Language.DA: "da",
+        Language.DE: "de",
+        Language.EN: "en",
+        Language.ES: "es",
+        Language.FI: "fi",
+        Language.FR: "fr",
+        Language.HE: "he",
+        Language.HI: "hi",
+        Language.IT: "it",
+        Language.JA: "ja",
+        Language.NL: "nl",
+        Language.NO: "no",
+        Language.PT: "pt",
+        Language.SV: "sv",
+        Language.TR: "tr",
+        Language.UR: "ur",
+        Language.VI: "vi",
+        Language.ZH: "zh",
+    }
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
+
+
+def _prepare_language_codes(language_codes: list[Language]) -> list[str]:
+    """Resolve declared languages to the AssemblyAI codes sent on the wire.
+
+    Duplicates are collapsed — regional variants of one language share a base
+    code — while preserving order, which the steering prompt follows.
+
+    Args:
+        language_codes: Declared languages.
+
+    Returns:
+        AssemblyAI language codes, deduplicated in declaration order.
+    """
+    prepared = [language_to_assemblyai_language(lang) for lang in language_codes]
+    return list(dict.fromkeys(prepared))
+
+
 @dataclass
 class AssemblyAISTTSettings(STTSettings):
     """Settings for AssemblyAISTTService.
@@ -139,20 +191,20 @@ class AssemblyAISTTSettings(STTSettings):
             ("en"/"es"/"fr"/"de"/"it"/"pt") steers transcription toward that
             language; other supported codes are "tr", "nl", "sv", "no", "da",
             "fi", "hi", "vi", "ar", "he", "ja", "ur", "zh". AssemblyAI supersedes
-            this parameter with ``language_codes``, which accepts the same codes
-            and is bound in preference to this one when both are set; prefer that
-            one. Defaults to None (not sent; no steering).
-        language_codes: Customer-declared audio languages as a list of ISO codes,
-            accepting the same codes as ``language_code``. A single code (e.g.
-            ``["es"]``) pins transcription to that language; several codes (e.g.
-            ``["en", "es"]``) steer toward that subset while keeping code-switching
-            among them. Order is significant — the steering prompt follows the
-            declared order. At most 10 codes. ``"multi"`` must be declared alone and
-            is superseded by ``model="universal-streaming-multilingual"``. Steering
-            is prompt-based, so it applies to U3 Pro models only. Unlike most
-            settings, a change applies to a live session without reconnecting; pass
-            an empty list to clear steering back to the model default. Defaults to
-            None (not sent; no steering).
+            this parameter with ``language_codes``, which covers the same languages
+            as ``Language`` enums and is bound in preference to this one when both
+            are set; prefer that one. Defaults to None (not sent; no steering).
+        language_codes: Customer-declared audio languages. A single language (e.g.
+            ``[Language.ES]``) pins transcription to that language; several (e.g.
+            ``[Language.EN, Language.ES]``) steer toward that subset while keeping
+            code-switching among them. Order is significant — the steering prompt
+            follows the declared order. Regional variants resolve to their base code,
+            so at most 10 distinct languages. Steering is prompt-based, so it applies
+            to U3 Pro models only. Unlike most settings, a change applies to a live
+            session without reconnecting; pass an empty list to clear steering back to
+            the model default. For fully multilingual transcription, set
+            ``model="universal-streaming-multilingual"`` instead. Defaults to None
+            (not sent; no steering).
         format_turns: Whether to format transcript turns.
         speaker_labels: Enable speaker diarization.
         vad_threshold: VAD confidence threshold (0.0–1.0) for classifying
@@ -208,7 +260,7 @@ class AssemblyAISTTSettings(STTSettings):
     prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language_detection: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language_code: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language_codes: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_codes: list[Language] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     format_turns: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_labels: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -456,23 +508,15 @@ class AssemblyAISTTService(WebsocketSTTService):
                 f"for model '{default_settings.model}'."
             )
 
-        # Structural limits on the declared-language list, which AssemblyAI
-        # rejects at connect time. Which codes are accepted is left to the server,
-        # so that a newly supported language needs no change here.
+        # AssemblyAI rejects an over-long declared-language list at connect time.
+        # Counted after resolution, since that is the list the server sees.
         language_codes = default_settings.language_codes
         if isinstance(language_codes, list):
-            if len(language_codes) > MAX_LANGUAGE_CODES:
+            prepared = _prepare_language_codes(language_codes)
+            if len(prepared) > MAX_LANGUAGE_CODES:
                 raise ValueError(
-                    f"language_codes accepts at most {MAX_LANGUAGE_CODES} codes, got "
-                    f"{len(language_codes)}."
-                )
-
-            # Duplicates are collapsed before the "multi" check, matching the server.
-            deduped = list(dict.fromkeys(language_codes))
-            if "multi" in deduped and len(deduped) > 1:
-                raise ValueError(
-                    "language_codes cannot combine 'multi' with other codes. Declare "
-                    "'multi' alone, or set model='universal-streaming-multilingual'."
+                    f"language_codes accepts at most {MAX_LANGUAGE_CODES} languages, got "
+                    f"{len(prepared)}."
                 )
 
         declared_language_fields = [
@@ -495,7 +539,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 "language_code and language_codes are both set. AssemblyAI treats them as "
                 "aliases for a single parameter and binds language_codes, ignoring "
                 "language_code entirely. Set only language_codes (a single-element list "
-                "such as ['es'] declares one language)."
+                "such as [Language.ES] declares one language)."
             )
 
         # 6. Configure pipecat turn mode (mutates default_settings)
@@ -645,7 +689,7 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         return changed
 
-    async def _update_language_codes(self, language_codes: list[str]):
+    async def _update_language_codes(self, language_codes: list[Language]):
         """Re-steer the live session toward a new set of declared languages.
 
         Steering is prompt-based and therefore u3-rt-pro-only; AssemblyAI discards
@@ -653,8 +697,8 @@ class AssemblyAISTTService(WebsocketSTTService):
         Reconnecting wouldn't help either — those models aren't steered at all.
 
         Args:
-            language_codes: Declared language codes, or an empty list to clear
-                steering back to the model default.
+            language_codes: Declared languages, or an empty list to clear steering
+                back to the model default.
         """
         if not is_u3_pro_model(self._settings.model):
             if not self._language_codes_warned:
@@ -665,7 +709,9 @@ class AssemblyAISTTService(WebsocketSTTService):
                 )
             return
 
-        await self._send_update_configuration(language_codes=language_codes)
+        await self._send_update_configuration(
+            language_codes=_prepare_language_codes(language_codes)
+        )
 
     async def start(self, frame: StartFrame):
         """Start the speech-to-text service.
@@ -796,8 +842,8 @@ class AssemblyAISTTService(WebsocketSTTService):
         # List-valued parameters travel as JSON-encoded query values.
         if s.keyterms_prompt is not None:
             params["keyterms_prompt"] = json.dumps(s.keyterms_prompt)
-        if s.language_codes is not None:
-            params["language_codes"] = json.dumps(s.language_codes)
+        if isinstance(s.language_codes, list):
+            params["language_codes"] = json.dumps(_prepare_language_codes(s.language_codes))
 
         if params:
             query_string = urlencode(params)
