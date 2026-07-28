@@ -27,6 +27,8 @@ from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
+_MIN_INTERIM_AUDIO_SECONDS = 0.5
+
 try:
     from faster_whisper import WhisperModel
 except ModuleNotFoundError as e:
@@ -213,6 +215,22 @@ class WhisperSTTService(SegmentedSTTService):
 
     This service uses Faster Whisper to perform speech-to-text transcription on audio
     segments. It supports multiple languages and various model sizes.
+
+    Supports opt-in interim transcriptions: pass ``interim_interval`` to
+    periodically re-transcribe the buffered segment with a separate interim
+    model (``interim_model``, default ``tiny``) while the user speaks.
+    Whisper has no incremental decoding mode, so each pass re-transcribes the
+    whole segment buffered so far; keep the interim model small.
+
+    Example::
+
+        stt = WhisperSTTService(
+            interim_interval=0.25,
+            interim_model=Model.TINY,
+            settings=WhisperSTTService.Settings(
+                model=Model.DISTIL_MEDIUM_EN,
+            ),
+        )
     """
 
     Settings = WhisperSTTSettings
@@ -227,6 +245,7 @@ class WhisperSTTService(SegmentedSTTService):
         self,
         *,
         model: str | Model | None = None,
+        interim_model: str | Model = Model.TINY,
         device: str = "auto",
         compute_type: str = "default",
         no_speech_prob: float | None = None,
@@ -243,6 +262,9 @@ class WhisperSTTService(SegmentedSTTService):
                     Use ``settings=WhisperSTTService.Settings(model=...)`` instead.
                     Will be removed in 2.0.0.
 
+            interim_model: The init-only Whisper model used for interim
+                transcriptions. Should be small enough to transcribe the buffered
+                segment within ``interim_interval``.
             device: The device to run inference on ('cpu', 'cuda', or 'auto').
                 Defaults to ``"auto"``.
             compute_type: The compute type for inference ('default', 'int8',
@@ -297,8 +319,15 @@ class WhisperSTTService(SegmentedSTTService):
         self._compute_type = compute_type
 
         self._model: WhisperModel | None = None
+        self._interim_model: WhisperModel | None = None
 
         self._load()
+        if self._interim_interval is not None:
+            self._interim_model = WhisperModel(
+                interim_model.value if isinstance(interim_model, Model) else interim_model,
+                device=self._device,
+                compute_type=self._compute_type,
+            )
 
     def can_generate_metrics(self) -> bool:
         """Indicates whether this service can generate metrics.
@@ -340,6 +369,44 @@ class WhisperSTTService(SegmentedSTTService):
         """Handle a transcription result with tracing."""
         pass
 
+    async def run_interim_stt(self, audio: bytes) -> str | None:
+        """Transcribe the audio buffered so far with the interim model.
+
+        Args:
+            audio: Raw audio bytes in 16-bit PCM format.
+
+        Returns:
+            The partial transcription, or None if nothing was transcribed.
+        """
+        if not self._interim_model:
+            return None
+
+        min_audio_bytes = int(self.sample_rate * _MIN_INTERIM_AUDIO_SECONDS * 2)
+        if len(audio) < min_audio_bytes:
+            return None
+
+        return await self._transcribe(self._interim_model, audio)
+
+    async def _transcribe(self, model: WhisperModel, audio: bytes) -> str | None:
+        """Transcribe raw PCM audio with the provided Whisper model."""
+
+        def transcribe() -> str | None:
+            # Divide by 32768 because we have signed 16-bit data.
+            audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
+            language = assert_given(self._settings.language)
+            no_speech_prob_threshold = assert_given(self._settings.no_speech_prob)
+            segments, _ = model.transcribe(audio_float, language=language)
+            text = ""
+            for segment in segments:
+                if (
+                    no_speech_prob_threshold is not None
+                    and segment.no_speech_prob < no_speech_prob_threshold
+                ):
+                    text += f"{segment.text} "
+            return text or None
+
+        return await asyncio.to_thread(transcribe)
+
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Transcribe audio data using Whisper.
 
@@ -359,23 +426,8 @@ class WhisperSTTService(SegmentedSTTService):
             return
 
         await self.start_processing_metrics()
-
-        # Divide by 32768 because we have signed 16-bit data.
-        audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
-
         language = assert_given(self._settings.language)
-        segments, _ = await asyncio.to_thread(
-            self._model.transcribe, audio_float, language=language
-        )
-        text: str = ""
-        no_speech_prob_threshold = assert_given(self._settings.no_speech_prob)
-        for segment in segments:
-            if (
-                no_speech_prob_threshold is not None
-                and segment.no_speech_prob < no_speech_prob_threshold
-            ):
-                text += f"{segment.text} "
-
+        text = await self._transcribe(self._model, audio)
         await self.stop_processing_metrics()
 
         if text:
@@ -440,6 +492,9 @@ class WhisperSTTServiceMLX(WhisperSTTService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
+        if kwargs.get("interim_interval") is not None:
+            raise ValueError("WhisperSTTServiceMLX does not support interim transcriptions")
+
         # --- 1. Hardcoded defaults ---
         default_settings = self.Settings(
             model=MLXModel.TINY.value,

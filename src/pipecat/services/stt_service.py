@@ -8,6 +8,7 @@
 
 import asyncio
 import io
+import math
 import time
 import warnings
 import wave
@@ -24,6 +25,7 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextAssistantTurnFrame,
     ServiceSwitcherRequestMetadataFrame,
@@ -44,6 +46,7 @@ from pipecat.services.stt_latency import DEFAULT_TTFS_P99
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.time import time_now_iso8601
 
 # Duration in seconds of silent audio sent for WebSocket keepalive (100ms).
 _KEEPALIVE_SILENCE_DURATION = 0.1
@@ -784,22 +787,44 @@ class SegmentedSTTService(STTService):
     :attr:`wants_wav_segments` to return ``False`` so they receive the
     unwrapped buffer instead. This is a subclass-level contract, not a
     user-configurable option: the format is dictated by what the model expects.
+
+    Subclasses can provide interim transcriptions by implementing :meth:`run_interim_stt`.
+    When ``interim_interval`` is set, the buffered segment is periodically re-transcribed
+    while the user is speaking. Each pass processes the complete segment buffered so far,
+    so the aggregate work grows quadratically with the utterance length.
     """
 
-    def __init__(self, *, sample_rate: int | None = None, **kwargs):
+    def __init__(
+        self,
+        *,
+        sample_rate: int | None = None,
+        interim_interval: float | None = None,
+        **kwargs,
+    ):
         """Initialize the segmented STT service.
 
         Args:
             sample_rate: The sample rate for audio input. If None, will be determined
                 from the start frame.
+            interim_interval: Seconds between interim transcriptions while the user is
+                speaking. None disables interim transcriptions. Requires the subclass to
+                implement :meth:`run_interim_stt`.
             **kwargs: Additional arguments passed to the parent STTService.
         """
+        if interim_interval is not None and (
+            not math.isfinite(interim_interval) or interim_interval <= 0
+        ):
+            raise ValueError("interim_interval must be a finite value greater than zero")
+
         super().__init__(sample_rate=sample_rate, **kwargs)
         self._content = None
         self._wave = None
         self._audio_buffer = bytearray()
         self._audio_buffer_size_1s = 0
         self._user_speaking = False
+
+        self._interim_interval = interim_interval
+        self._interim_task: asyncio.Task | None = None
 
     async def start(self, frame: StartFrame):
         """Start the segmented STT service and initialize audio buffer.
@@ -809,6 +834,29 @@ class SegmentedSTTService(STTService):
         """
         await super().start(frame)
         self._audio_buffer_size_1s = self.sample_rate * 2
+
+    async def stop(self, frame: EndFrame):
+        """Stop the service and any in-flight interim transcription.
+
+        Args:
+            frame: The end frame.
+        """
+        await self._cancel_interim_task()
+        await super().stop(frame)
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the service and any in-flight interim transcription.
+
+        Args:
+            frame: The cancel frame.
+        """
+        await self._cancel_interim_task()
+        await super().cancel(frame)
+
+    async def cleanup(self):
+        """Release resources owned by the segmented STT service."""
+        await self._cancel_interim_task()
+        await super().cleanup()
 
     @property
     def wants_wav_segments(self) -> bool:
@@ -847,33 +895,91 @@ class SegmentedSTTService(STTService):
     async def _handle_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         self._user_speaking = True
 
+        if self._interim_interval is not None and self._interim_task is None:
+            self._interim_task = self.create_task(self._interim_task_handler(), "interim_stt")
+
     async def _handle_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         self._user_speaking = False
+
+        await self._cancel_interim_task()
 
         # Report usage for the raw segment before transcription so tracing can
         # attach it to the STT span the resulting TranscriptionFrame closes.
         self._record_stt_audio_usage(self._audio_buffer)
         await self.emit_stt_usage_metrics()
 
-        if self.wants_wav_segments:
-            content = io.BytesIO()
-            wav = wave.open(content, "wb")
-            wav.setsampwidth(2)
-            wav.setnchannels(1)
-            wav.setframerate(self.sample_rate)
-            wav.writeframes(self._audio_buffer)
-            wav.close()
-            content.seek(0)
-            audio = content.read()
-        else:
-            # Local models read the buffer as raw 16-bit PCM; wrapping it in a
-            # WAV container would make them misread the 44-byte header as audio.
-            audio = bytes(self._audio_buffer)
+        audio = self._segment_audio(bytes(self._audio_buffer))
 
         # Start clean.
         self._audio_buffer.clear()
 
         await self.process_generator(self.run_stt(audio))
+
+    def _segment_audio(self, audio: bytes) -> bytes:
+        """Format a buffered segment per the :attr:`wants_wav_segments` contract."""
+        if not self.wants_wav_segments:
+            # Local models read the buffer as raw 16-bit PCM; wrapping it in a
+            # WAV container would make them misread the 44-byte header as audio.
+            return audio
+
+        content = io.BytesIO()
+        wav = wave.open(content, "wb")
+        wav.setsampwidth(2)
+        wav.setnchannels(1)
+        wav.setframerate(self.sample_rate)
+        wav.writeframes(audio)
+        wav.close()
+        content.seek(0)
+        return content.read()
+
+    async def _cancel_interim_task(self):
+        """Stop the interim transcription task if running."""
+        if self._interim_task:
+            await self.cancel_task(self._interim_task)
+            self._interim_task = None
+
+    async def _interim_task_handler(self):
+        """Periodically re-transcribe the buffered audio while the user speaks."""
+        interval = self._interim_interval
+        if interval is None:
+            return
+
+        last_text = ""
+        while True:
+            await asyncio.sleep(interval)
+
+            audio = bytes(self._audio_buffer)
+            if not audio:
+                continue
+
+            try:
+                text = await self.run_interim_stt(self._segment_audio(audio))
+            except NotImplementedError:
+                logger.warning(
+                    f"{self}: interim_interval is set but run_interim_stt is not implemented"
+                )
+                return
+            except Exception as e:
+                logger.warning(f"{self}: interim transcription failed: {e}")
+                continue
+
+            if text and text != last_text:
+                last_text = text
+                language = self._settings.language if is_given(self._settings.language) else None
+                await self.push_frame(
+                    InterimTranscriptionFrame(text, self._user_id, time_now_iso8601(), language)
+                )
+
+    async def run_interim_stt(self, audio: bytes) -> str | None:
+        """Transcribe buffered audio for an interim result.
+
+        Args:
+            audio: Audio formatted according to :attr:`wants_wav_segments`.
+
+        Returns:
+            The interim transcription, or None if nothing was transcribed.
+        """
+        raise NotImplementedError("Subclasses must implement run_interim_stt")
 
     async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
         """Process audio frames by buffering them for segmented transcription.
