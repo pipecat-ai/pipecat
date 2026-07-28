@@ -110,6 +110,15 @@ class SmallestSTTSettings(STTSettings):
         redact_pci: Redact payment card information.
         numerals: Convert spoken numerals to digits.
         diarize: Enable speaker diarization.
+        endpointing: Finalize promptly on trailing silence instead of waiting
+            for the model's slower internal finalization cadence.
+        keywords: Comma-separated ``KEYWORD:INTENSIFIER`` pairs to boost
+            recognition of domain-specific words or phrases (e.g.
+            ``"Blackwell:2,NVIDIA:1"``). Intensifier is optional (default 1.0)
+            and should stay in the 0-5 range to avoid hallucination.
+        format: Apply punctuation and capitalization to transcripts. Disable
+            for raw lowercase output better suited to downstream NLP/LLM
+            pipelines.
     """
 
     word_timestamps: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -119,6 +128,9 @@ class SmallestSTTSettings(STTSettings):
     redact_pci: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     numerals: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     diarize: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpointing: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keywords: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    format: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SmallestSTTService(WebsocketSTTService):
@@ -180,6 +192,9 @@ class SmallestSTTService(WebsocketSTTService):
             redact_pci=False,
             numerals="auto",
             diarize=False,
+            endpointing=True,
+            keywords="",
+            format=True,
         )
 
         if settings is not None:
@@ -319,6 +334,9 @@ class SmallestSTTService(WebsocketSTTService):
                 "redact_pci": str(self._settings.redact_pci).lower(),
                 "numerals": self._settings.numerals,
                 "diarize": str(self._settings.diarize).lower(),
+                "endpointing": str(self._settings.endpointing).lower(),
+                "keywords": self._settings.keywords,
+                "format": str(self._settings.format).lower(),
             }
 
             ws_url = f"{self._base_url}/waves/v1/stt/live?{urlencode(query_params)}"
