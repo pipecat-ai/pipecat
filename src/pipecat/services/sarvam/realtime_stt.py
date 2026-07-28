@@ -10,7 +10,7 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any, Literal
 from urllib.parse import urlencode
 
@@ -188,7 +188,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         *,
         api_key: str,
         base_url: str = REALTIME_STT_URL,
-        sample_rate: int = 16000,
         settings: Settings | None = None,
         should_interrupt: bool = True,
         session_end_timeout: float = 0.5,
@@ -200,13 +199,25 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         Args:
             api_key: Sarvam API key.
             base_url: Realtime STT websocket endpoint.
-            sample_rate: Input audio sample rate. Supported values are 8000 and 16000.
             settings: Runtime-updatable realtime settings.
             should_interrupt: Whether provider speech-start events should broadcast interruption.
             session_end_timeout: Seconds to wait for ``session.end`` during clean shutdown.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
             **kwargs: Additional arguments passed to :class:`WebsocketSTTService`.
         """
+        settings_fields = {setting.name for setting in fields(self.Settings)}
+        direct_settings = sorted(settings_fields.intersection(kwargs))
+        if direct_settings:
+            names = ", ".join(direct_settings)
+            raise TypeError(
+                f"{names} must be passed via "
+                "settings=SarvamRealtimeSTTService.Settings(...), not as constructor kwargs"
+            )
+        if "reconnect_on_error" in kwargs:
+            raise TypeError(
+                "SarvamRealtimeSTTService does not support reconnect_on_error; "
+                "reconnection is always disabled"
+            )
         default_settings = self.Settings(
             model=REALTIME_MODEL,
             language=None,
@@ -214,7 +225,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             stream_type="fast",
             endpointing="vad",
             encoding="linear16",
-            sample_rate=sample_rate,
+            sample_rate=16000,
             mode="transcribe",
             prompt=None,
             return_timestamps=False,
@@ -243,6 +254,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             sample_rate=resolved_sample_rate,
             settings=default_settings,
             ttfs_p99_latency=ttfs_p99_latency,
+            reconnect_on_error=False,
             **kwargs,
         )
 
