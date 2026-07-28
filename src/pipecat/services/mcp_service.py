@@ -225,13 +225,13 @@ class MCPClient(BaseObject):
         return await self._list_tools_helper(session, attach_handlers=True)
 
     @deprecated(
-        "`MCPClient.register_tools` is deprecated since 1.5.0 and will be removed in 2.0.0. "
+        "`MCPClient.register_tools` is deprecated since 1.7.0 and will be removed in 2.0.0. "
         "Use `MCPClient.tools` instead."
     )
     async def register_tools(self, llm: LLMService | LLMSwitcher) -> ToolsSchema:
         """Register all available MCP tools with an LLM service.
 
-        .. deprecated:: 1.5.0
+        .. deprecated:: 1.7.0
             Use :meth:`tools` instead — pass its result to ``LLMContext(tools=...)``
             and the handlers register automatically. Will be removed in 2.0.0.
 
@@ -260,13 +260,13 @@ class MCPClient(BaseObject):
         return self._active_session
 
     @deprecated(
-        "`MCPClient.get_tools_schema` is deprecated since 1.5.0 and will be removed in 2.0.0. "
+        "`MCPClient.get_tools_schema` is deprecated since 1.7.0 and will be removed in 2.0.0. "
         "Use `MCPClient.tools` instead."
     )
     async def get_tools_schema(self) -> ToolsSchema:
         """Get the schema of all available MCP tools without registering them.
 
-        .. deprecated:: 1.5.0
+        .. deprecated:: 1.7.0
             Use :meth:`tools` instead. Will be removed in 2.0.0.
 
         Requires the client to be started via start() or async with.
@@ -278,7 +278,7 @@ class MCPClient(BaseObject):
         return await self._list_tools_helper(session)
 
     @deprecated(
-        "`MCPClient.register_tools_schema` is deprecated since 1.5.0 and will be removed in "
+        "`MCPClient.register_tools_schema` is deprecated since 1.7.0 and will be removed in "
         "2.0.0. Use `MCPClient.tools` instead."
     )
     async def register_tools_schema(
@@ -286,7 +286,7 @@ class MCPClient(BaseObject):
     ) -> None:
         """Register previously obtained MCP tools with the LLM service.
 
-        .. deprecated:: 1.5.0
+        .. deprecated:: 1.7.0
             Use :meth:`tools` instead — its schemas carry handlers that
             register automatically. Will be removed in 2.0.0.
 
