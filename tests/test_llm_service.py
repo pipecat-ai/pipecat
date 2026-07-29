@@ -5,6 +5,7 @@
 #
 
 import unittest
+import warnings
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -19,12 +20,14 @@ from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
     LLMContextFrame,
     LLMSetToolsFrame,
+    LLMUpdateSettingsFrame,
 )
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
+from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 
 
 def _expected_missing_tool_message(name: str) -> str:
@@ -45,8 +48,8 @@ class MockLLMService(LLMService):
             frequency_penalty=None,
             presence_penalty=None,
             seed=None,
-            filter_incomplete_user_turns=None,
-            user_turn_completion_config=None,
+            filter_incomplete_user_turns=kwargs.pop("filter_incomplete_user_turns", None),
+            user_turn_completion_config=kwargs.pop("user_turn_completion_config", None),
         )
         super().__init__(settings=settings, **kwargs)
         # Stub the pipeline task so FunctionCallParams can be constructed.
@@ -414,3 +417,42 @@ class TestProcessFrameToolWiring(unittest.IsolatedAsyncioTestCase):
         service._sync_registered_tool_handlers = Mock()
         await service.process_frame(LLMSetToolsFrame(tools=NOT_GIVEN), FrameDirection.DOWNSTREAM)
         service._sync_registered_tool_handlers.assert_not_called()
+
+
+class TestTurnCompletionSettingsDeprecation(unittest.IsolatedAsyncioTestCase):
+    """The turn-completion settings belong to the user turn strategy.
+
+    ``LLMTurnCompletionUserTurnStopStrategy`` enables them over an
+    ``LLMUpdateSettingsFrame`` and is also what finalizes the user turn from the
+    resulting verdict, so an application that sets them on the service directly
+    gets the marker protocol with nothing waiting on it.
+    """
+
+    def test_filter_incomplete_user_turns_at_construction_warns(self):
+        with self.assertWarns(DeprecationWarning) as ctx:
+            MockLLMService(filter_incomplete_user_turns=True)
+        self.assertIn("FilterIncompleteUserTurnStrategies", str(ctx.warning))
+
+    def test_user_turn_completion_config_at_construction_warns(self):
+        with self.assertWarns(DeprecationWarning) as ctx:
+            MockLLMService(user_turn_completion_config=UserTurnCompletionConfig())
+        self.assertIn("FilterIncompleteUserTurnStrategies(config=...)", str(ctx.warning))
+
+    def test_construction_without_the_settings_is_silent(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            MockLLMService()
+            # Spelling the fields out with their off values, the way concrete
+            # services build their defaults, must not warn either.
+            MockLLMService(filter_incomplete_user_turns=False, user_turn_completion_config=None)
+
+    async def test_strategy_settings_update_is_silent(self):
+        """The strategy's own update is how the setting is meant to arrive."""
+        service = MockLLMService()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            await service.process_frame(
+                LLMUpdateSettingsFrame(delta=LLMSettings(filter_incomplete_user_turns=True)),
+                FrameDirection.DOWNSTREAM,
+            )
+        self.assertTrue(service._filter_incomplete_user_turns)
