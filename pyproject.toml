@@ -182,6 +182,13 @@ docs = [
     "toml",
 ]
 
+# Chart rendering + browser tier for benchmarks/ (see benchmarks/transport_latency/).
+bench = [
+    "matplotlib>=3.9,<4",
+    "playwright>=1.49,<2",
+    "sounddevice>=0.5,<1",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
@@ -241,6 +248,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # Skip docstring checks for non-source code
+"benchmarks/**/*.py" = ["D"]
 "examples/**/*.py" = ["D"]
 "tests/**/*.py" = ["D"]
 "scripts/**/*.py" = ["D"]

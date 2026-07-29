@@ -1,0 +1,17 @@
+{
+  "name": "transport-latency-bench-web",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Browser measuring client for the transport latency benchmark",
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --format=iife --outfile=dist/bench.js"
+  },
+  "dependencies": {
+    "@pipecat-ai/client-js": "^1.13.0",
+    "@pipecat-ai/moq-transport": "^0.1.0",
+    "@pipecat-ai/small-webrtc-transport": "^1.10.6"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
