@@ -1884,7 +1884,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             text=frame.text,
             file=frame.file,
             name=frame.filename,
-            #            options=frame.custom_options,
+            # TODO: pass custom_options through to adapters via the universal message
         )
 
         await self.push_aggregation()

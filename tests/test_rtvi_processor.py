@@ -490,6 +490,45 @@ class TestRTVISendFile(unittest.IsolatedAsyncioTestCase):
         self.processor._send_error_response.assert_called_once()
         self.assertEqual(len(self._pushed_frames()), 0)
 
+    async def test_file_id_missing_file_sends_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.processor._folder = tmpdir
+            data = self._make_send_file_data(
+                RTVI.FileId(id=f"pipecat:{uuid.uuid4().hex}"), fmt="application/pdf"
+            )
+            await self.processor._handle_send_file(data, "msg-1")
+
+        self.processor._send_error_response.assert_called_once()
+        error_msg = self.processor._send_error_response.call_args[0][1]
+        self.assertIn("not found", error_msg)
+        self.assertEqual(len(self._pushed_frames()), 0)
+
+    # -- FileBytes carrying a full data URL -----------------------------------
+
+    async def test_file_bytes_data_url_not_double_wrapped(self):
+        raw = b"%PDF-1.4 fake content"
+        b64 = base64.b64encode(raw).decode()
+        data_url = f"data:application/pdf;base64,{b64}"
+        data = self._make_send_file_data(RTVI.FileBytes(bytes=data_url), fmt="application/pdf")
+        await self.processor._handle_send_file(data, "msg-1")
+
+        frames = self._pushed_frames()
+        self.assertEqual(len(frames), 1)
+        self.assertIsInstance(frames[0], UserFileRawFrame)
+        self.assertEqual(frames[0].file, data_url)
+
+    async def test_file_bytes_image_data_url_decodes_to_raw_bytes(self):
+        raw = b"\x89PNG\r\n\x1a\n fake png"
+        b64 = base64.b64encode(raw).decode()
+        data_url = f"data:image/png;base64,{b64}"
+        data = self._make_send_file_data(RTVI.FileBytes(bytes=data_url), fmt="image/png")
+        await self.processor._handle_send_file(data, "msg-1")
+
+        frames = self._pushed_frames()
+        self.assertEqual(len(frames), 1)
+        self.assertIsInstance(frames[0], UserImageRawFrame)
+        self.assertEqual(frames[0].image, raw)
+
 
 if __name__ == "__main__":
     unittest.main()
