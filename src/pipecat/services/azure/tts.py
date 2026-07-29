@@ -79,6 +79,13 @@ class AzureTTSSettings(TTSSettings):
         style: Speaking style (e.g., "cheerful", "sad", "excited").
         style_degree: Intensity of the speaking style (0.01 to 2.0).
         volume: Volume level (e.g., "+20%", "loud", "x-soft").
+        force_locale: Force the voice to speak in the configured ``language``
+            via SSML's ``<lang xml:lang>``, instead of auto-detecting it per
+            segment. Useful for multilingual voices (e.g.
+            ``en-US-EmmaMultilingualNeural``) to get a specific accent, but
+            disables per-segment language switching for mixed-language text.
+            No effect on standard, single-locale voices. Defaults to
+            ``False`` (unchanged SSML).
     """
 
     emphasis: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -88,6 +95,7 @@ class AzureTTSSettings(TTSSettings):
     style: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     style_degree: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     volume: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    force_locale: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AzureBaseTTSService:
@@ -191,6 +199,9 @@ class AzureBaseTTSService:
             "<mstts:silence type='Sentenceboundary' value='20ms' />"
         )
 
+        if self._settings.force_locale:
+            ssml += f"<lang xml:lang='{language}'>"
+
         if self._settings.style:
             ssml += f"<mstts:express-as style='{self._settings.style}'"
             if self._settings.style_degree:
@@ -224,6 +235,9 @@ class AzureBaseTTSService:
 
         if self._settings.style:
             ssml += "</mstts:express-as>"
+
+        if self._settings.force_locale:
+            ssml += "</lang>"
 
         ssml += "</voice></speak>"
 
@@ -321,6 +335,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             style=None,
             style_degree=None,
             volume=None,
+            force_locale=False,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -868,6 +883,7 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
             style=None,
             style_degree=None,
             volume=None,
+            force_locale=False,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
