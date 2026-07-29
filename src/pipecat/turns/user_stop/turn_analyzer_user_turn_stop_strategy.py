@@ -115,11 +115,29 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._turn_analyzer.clear()
 
     async def _reset(self):
-        """Clear per-turn bookkeeping. Runs at both turn boundaries."""
+        """Clear turn-scoped state. Runs at both turn boundaries.
+
+        ``_vad_stopped_time`` is turn-scoped — it records whether *this* turn
+        got a VAD stop, which is what the no-VAD transcript fallback keys on —
+        so it is cleared here.
+
+        ``_vad_user_speaking`` is not, and is left alone: whether the user is
+        speaking belongs to the user rather than to the turn, and VAD reports it
+        only on transitions. Clearing it at a turn start VAD didn't drive — a
+        turn begun from a transcript, mid-utterance — would leave it wrong until
+        the user next stops.
+        """
         self._text = ""
-        self._turn_complete = False
-        self._vad_user_speaking = False
         self._vad_stopped_time = None
+        await self._discard_pending_end_of_turn()
+
+    async def _discard_pending_end_of_turn(self):
+        """Drop any end-of-turn conclusion reached so far.
+
+        Runs at a turn boundary, and whenever VAD reports the user speaking
+        again — which makes an earlier conclusion stale mid-turn.
+        """
+        self._turn_complete = False
         self._transcript_finalized = False
         self._timeout_expired = False
         if self._timeout_task:
@@ -205,15 +223,9 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         """Handle when the VAD indicates the user is speaking."""
         # Sync Smart Turn pre-speech buffering with VAD start delay
         self._turn_analyzer.update_vad_start_secs(frame.start_secs)
-        self._turn_complete = False
         self._vad_user_speaking = True
         self._vad_stopped_time = None
-        self._transcript_finalized = False
-        self._timeout_expired = False
-        # Cancel any pending timeout
-        if self._timeout_task:
-            await self.task_manager.cancel_task(self._timeout_task)
-            self._timeout_task = None
+        await self._discard_pending_end_of_turn()
 
     async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         """Handle when the VAD indicates the user has stopped speaking."""
