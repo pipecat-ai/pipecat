@@ -93,6 +93,12 @@ except ModuleNotFoundError as e:
     logger.error("In order to use MOQ transport, you need to `pip install pipecat-ai[moq]`.")
     raise Exception(f"Missing module: {e}")
 
+# UniFFI's generated bindings declare ``MoqError`` twice — the Exception
+# subclass, then a plain namespace class for the variants — so static type
+# checkers resolve it as a non-Exception type even though the Exception
+# subclass is restored at runtime. Re-type it for use in ``except`` clauses.
+_MoqError = cast("type[BaseException]", moq.MoqError)
+
 
 def _is_normal_close(exc: BaseException) -> bool:
     """Return True for the MoQ session-closed error we see when the peer hangs up.
@@ -823,7 +829,7 @@ class MOQTransportClient:
                     )
         except (asyncio.CancelledError, StopAsyncIteration):
             return
-        except moq.MoqError as e:
+        except _MoqError as e:
             if not _is_peer_gone(e):
                 raise
             logger.debug(f"MOQ: peer catalog subscription ended: {e}")
@@ -890,7 +896,7 @@ class MOQTransportClient:
                     await self._callbacks.on_audio_received(pcm, target_rate)
         except asyncio.CancelledError:
             pass
-        except moq.MoqError as e:
+        except _MoqError as e:
             if not _is_peer_gone(e):
                 raise
             logger.debug(f"MOQ: peer audio subscription ended: {e}")
@@ -923,7 +929,7 @@ class MOQTransportClient:
                 await self._callbacks.on_message_received(message)
         except asyncio.CancelledError:
             pass
-        except moq.MoqError as e:
+        except _MoqError as e:
             if not _is_peer_gone(e):
                 raise
             logger.debug(f"MOQ: peer transcript subscription ended: {e}")
