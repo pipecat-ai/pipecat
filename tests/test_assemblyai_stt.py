@@ -459,6 +459,21 @@ def test_language_code_with_language_detection_warns():
 
 # --- language_codes ---
 
+# One past AssemblyAI's 10-language cap, all resolving to distinct base codes.
+OVER_LIMIT_LANGUAGES = [
+    Language.EN,
+    Language.ES,
+    Language.DE,
+    Language.FR,
+    Language.IT,
+    Language.PT,
+    Language.TR,
+    Language.NL,
+    Language.SV,
+    Language.NO,
+    Language.DA,
+]
+
 
 def test_language_codes_omitted_by_default():
     # Unset means "not sent" — no steering, current behavior preserved.
@@ -538,23 +553,10 @@ def test_language_code_and_language_codes_together_warns():
 
 def test_language_codes_over_limit_raises():
     # AssemblyAI rejects an over-long list at connect time; fail where it was set.
-    languages = [
-        Language.EN,
-        Language.ES,
-        Language.DE,
-        Language.FR,
-        Language.IT,
-        Language.PT,
-        Language.TR,
-        Language.NL,
-        Language.SV,
-        Language.NO,
-        Language.DA,
-    ]
     with pytest.raises(ValueError, match="at most 10 languages"):
         AssemblyAISTTService(
             api_key="test-key",
-            settings=AssemblyAISTTService.Settings(language_codes=languages),
+            settings=AssemblyAISTTService.Settings(language_codes=OVER_LIMIT_LANGUAGES),
         )
 
 
@@ -823,6 +825,59 @@ def test_update_settings_language_codes_with_agent_context_sends_both():
     # Both fields are hot-updatable, so neither triggers a reconnect.
     assert sent == [{"agent_context": "Hello."}, {"language_codes": ["es"]}]
     assert reconnects == []
+
+
+def test_update_settings_language_codes_over_limit_ignored():
+    service = AssemblyAISTTService(api_key="test-key")
+    sent, reconnects = _stub_connection(service)
+
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="WARNING", format="{message}")
+    try:
+        delta = AssemblyAISTTService.Settings(language_codes=OVER_LIMIT_LANGUAGES)
+        asyncio.run(service._update_settings(delta))
+    finally:
+        logger.remove(handler_id)
+
+    # AssemblyAI closes the session on an over-long list, so it is never sent.
+    assert sent == []
+    assert reconnects == []
+    assert "at most 10 languages" in sink.getvalue()
+
+
+def test_update_settings_language_codes_over_limit_leaves_settings_intact():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(language_codes=[Language.ES]),
+    )
+    _stub_connection(service)
+
+    asyncio.run(
+        service._update_settings(AssemblyAISTTService.Settings(language_codes=OVER_LIMIT_LANGUAGES))
+    )
+
+    # A rejected list must not reach _settings, which a reconnect rebuilds from.
+    assert _query(service)["language_codes"] == [json.dumps(["es"])]
+
+
+def test_update_settings_over_limit_language_codes_still_reconnects_for_other_fields():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(language_codes=[Language.ES]),
+    )
+    sent, reconnects = _stub_connection(service)
+
+    delta = AssemblyAISTTService.Settings(
+        model="universal-streaming-english",
+        language_codes=OVER_LIMIT_LANGUAGES,
+    )
+    asyncio.run(service._update_settings(delta))
+
+    # Dropping language_codes leaves the connect-time model change to reconnect,
+    # and the rebuilt URL carries the previous steering.
+    assert reconnects == ["disconnect", "connect"]
+    assert sent == []
+    assert _query(service)["language_codes"] == [json.dumps(["es"])]
 
 
 def test_update_settings_mixed_delta_reconnects_without_update_configuration():

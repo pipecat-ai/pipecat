@@ -13,7 +13,7 @@ WebSocket API for streaming audio transcription.
 import asyncio
 import json
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 from urllib.parse import urlencode
 
@@ -161,9 +161,18 @@ def _prepare_language_codes(language_codes: list[Language]) -> list[str]:
 
     Returns:
         AssemblyAI language codes, deduplicated in declaration order.
+
+    Raises:
+        ValueError: If more than ``MAX_LANGUAGE_CODES`` distinct languages remain
+            after resolution.
     """
     prepared = [language_to_assemblyai_language(lang) for lang in language_codes]
-    return list(dict.fromkeys(prepared))
+    deduped = list(dict.fromkeys(prepared))
+    if len(deduped) > MAX_LANGUAGE_CODES:
+        raise ValueError(
+            f"language_codes accepts at most {MAX_LANGUAGE_CODES} languages, got {len(deduped)}."
+        )
+    return deduped
 
 
 @dataclass
@@ -507,16 +516,11 @@ class AssemblyAISTTService(WebsocketSTTService):
                 f"for model '{default_settings.model}'."
             )
 
-        # AssemblyAI rejects an over-long declared-language list at connect time.
-        # Counted after resolution, since that is the list the server sees.
-        language_codes = default_settings.language_codes
-        if isinstance(language_codes, list):
-            prepared = _prepare_language_codes(language_codes)
-            if len(prepared) > MAX_LANGUAGE_CODES:
-                raise ValueError(
-                    f"language_codes accepts at most {MAX_LANGUAGE_CODES} languages, got "
-                    f"{len(prepared)}."
-                )
+        # AssemblyAI rejects an over-long declared-language list at connect time,
+        # so fail where it was set. Counted after resolution, since that is the
+        # list the server sees.
+        if isinstance(default_settings.language_codes, list):
+            _prepare_language_codes(default_settings.language_codes)
 
         declared_language_fields = [
             name
@@ -666,6 +670,16 @@ class AssemblyAISTTService(WebsocketSTTService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
+        if isinstance(delta.language_codes, list):
+            try:
+                _prepare_language_codes(delta.language_codes)
+            except ValueError as e:
+                # An over-long list closes the session server-side rather than
+                # being ignored, and one that reached _settings would fail every
+                # later reconnect too. Drop the field and leave steering as-is.
+                logger.warning(f"{self} ignoring language_codes update: {e}")
+                delta = replace(delta, language_codes=NOT_GIVEN)
+
         changed = await super()._update_settings(delta)
 
         if not changed:
