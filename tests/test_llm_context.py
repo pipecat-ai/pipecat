@@ -431,5 +431,51 @@ class TestCreateFileMessage(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(messages[0]["content"][0]["file"]["filename"], "test.pdf")
 
 
+class TestMaybeRemoveInvalidMessage(unittest.IsolatedAsyncioTestCase):
+    """Tests for LLMContext.maybe_remove_invalid_message."""
+
+    def _file_error(self) -> Exception:
+        e = Exception("invalid file")
+        e.type = "invalid_request_error"
+        e.param = "file_id"
+        return e
+
+    async def _context_with_file_message(self) -> LLMContext:
+        context = LLMContext()
+        context.add_message({"role": "user", "content": "hello"})
+        await context.add_file_frame_message(
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+        )
+        return context
+
+    async def test_removes_most_recent_file_message(self):
+        context = await self._context_with_file_message()
+        context.maybe_remove_invalid_message(self._file_error())
+
+        messages = context.get_messages()
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["content"], "hello")
+
+    async def test_ignores_unrelated_exception(self):
+        context = await self._context_with_file_message()
+        context.maybe_remove_invalid_message(Exception("boom"))
+
+        self.assertEqual(len(context.get_messages()), 2)
+
+    async def test_skips_llm_specific_and_string_content_messages(self):
+        context = LLMContext(
+            messages=[
+                LLMSpecificMessage(
+                    llm="openai",
+                    message={"role": "user", "content": [{"type": "file", "file": {}}]},
+                ),
+                {"role": "user", "content": "plain text"},
+            ]
+        )
+        context.maybe_remove_invalid_message(self._file_error())
+
+        self.assertEqual(len(context.get_messages()), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

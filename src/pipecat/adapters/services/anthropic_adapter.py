@@ -144,7 +144,9 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                     if item.get("type") == "thinking" and item.get("signature"):
                         item["signature"] = "..."
                     if item.get("type") == "document":
-                        item["source"]["data"] = "..."
+                        source = item.get("source")
+                        if isinstance(source, dict) and "data" in source:
+                            source["data"] = "..."
             messages_for_logging.append(msg)
         return messages_for_logging
 

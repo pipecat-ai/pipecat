@@ -13,6 +13,7 @@ import re
 from collections.abc import Mapping
 from typing import Any, Optional
 
+import aiofiles
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel, ValidationError
@@ -81,8 +82,9 @@ class RTVIProcessor(FrameProcessor):
                     downstream. For client-ready audio gating, set
                     ``audio_in_stream_on_start=False`` on the transport params.
             uploads_folder: Path to folder where client uploads (e.g. POST /files) are
-                stored; required for send-file with /files/ URLs. Use
-                runner_uploads_folder() when using the development runner.
+                stored; required for send-file messages that reference an uploaded
+                file ID (``pipecat:<id>``). Use runner_uploads_folder() when using
+                the development runner.
 
             **kwargs: Additional arguments passed to parent class.
         """
@@ -518,24 +520,28 @@ class RTVIProcessor(FrameProcessor):
 
         match file.source:
             case RTVI.FileBytes() as fs:
-                source = f"data:{file.format};base64,{fs.bytes}"
+                # `bytes` is raw base64, but tolerate clients that send a full data URL.
+                if fs.bytes.startswith("data:"):
+                    source = fs.bytes
+                else:
+                    source = f"data:{file.format};base64,{fs.bytes}"
             case RTVI.FileUrl() as fs:
                 if not fs.public:
                     if not fs.url.startswith(("http://", "https://")):
                         logger.warning(f"Unsupported URL scheme for file fetch: {fs.url!r}")
                         await self._send_error_response(message_id, "Unsupported URL scheme")
                         return
-                    _MAX_FILE_BYTES = 50 * 1024 * 1024
+                    _MAX_UPLOAD_BYTES = 50 * 1024 * 1024
                     type = "bytes"
                     try:
                         timeout = aiohttp.ClientTimeout(total=30)
                         async with aiohttp.ClientSession(timeout=timeout) as session:
                             async with session.get(fs.url) as response:
                                 response.raise_for_status()
-                                raw_bytes = await response.content.read(_MAX_FILE_BYTES + 1)
-                                if len(raw_bytes) > _MAX_FILE_BYTES:
+                                raw_bytes = await response.content.read(_MAX_UPLOAD_BYTES + 1)
+                                if len(raw_bytes) > _MAX_UPLOAD_BYTES:
                                     logger.warning(
-                                        f"File at URL exceeds {_MAX_FILE_BYTES} byte limit"
+                                        f"File at URL exceeds {_MAX_UPLOAD_BYTES} byte limit"
                                     )
                                     await self._send_error_response(message_id, "File too large")
                                     return
@@ -571,12 +577,17 @@ class RTVIProcessor(FrameProcessor):
                 # read bytes from file system, encode to base64, then delete the file
                 type = "bytes"
                 file_path = os.path.join(self._folder, suffix)
-                with open(file_path, "rb") as f:
-                    raw_bytes = f.read()
-                    encoded_file = base64.b64encode(raw_bytes).decode("utf-8")
-                    source = f"data:{file.format};base64,{encoded_file}"
                 try:
-                    os.remove(file_path)
+                    async with aiofiles.open(file_path, "rb") as f:
+                        raw_bytes = await f.read()
+                except OSError as e:
+                    logger.warning(f"Failed to read uploaded file {file_path}: {e}")
+                    await self._send_error_response(message_id, "File not found")
+                    return
+                encoded_file = base64.b64encode(raw_bytes).decode("utf-8")
+                source = f"data:{file.format};base64,{encoded_file}"
+                try:
+                    await asyncio.to_thread(os.remove, file_path)
                 except OSError as e:
                     logger.warning(f"Failed to remove uploaded file {file_path}: {e}")
             case _:
