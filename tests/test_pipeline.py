@@ -440,13 +440,11 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
                 cancel_on_idle_timeout=False,
             )
 
-            try:
-                await asyncio.wait_for(
-                    worker.run(WorkerParams(task_manager=TaskManager())),
-                    timeout=0.6,
-                )
-            except TimeoutError:
-                pass
+            @worker.event_handler("on_heartbeat_timeout")
+            async def on_heartbeat_timeout(worker: PipelineWorker):
+                await worker.cancel()
+
+            await worker.run(WorkerParams(task_manager=TaskManager()))
 
             log_text = log_output.getvalue()
             assert f"more than {custom_monitor_secs} seconds" in log_text
