@@ -2093,15 +2093,20 @@ class ServiceUpdateSettingsFrame(ControlFrame, UninterruptibleFrame):
 
         delta: :class:`~pipecat.services.settings.ServiceSettings` delta-mode
             object describing the fields to change.
-
         service: Optional target service instance. When provided, only that
             service will apply the settings; other services will forward the
             frame unchanged.
+        affects_inactive_services: Whether every service a
+            :class:`~pipecat.pipeline.service_switcher.ServiceSwitcher` manages
+            should apply these settings, rather than only the active one. Set
+            this for provider-neutral settings that must survive a service
+            switch.
     """
 
     settings: Mapping[str, Any] = field(default_factory=dict)
     delta: ServiceSettings | None = None
     service: FrameProcessor | None = None
+    affects_inactive_services: bool = False
 
 
 @dataclass

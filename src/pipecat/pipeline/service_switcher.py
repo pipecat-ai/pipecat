@@ -6,6 +6,8 @@
 
 """Service switcher for switching between different services at runtime, with different switching strategies."""
 
+from collections import deque
+from dataclasses import replace
 from typing import Any, Generic, TypeVar
 
 from loguru import logger
@@ -17,6 +19,7 @@ from pipecat.frames.frames import (
     ServiceMetadataFrame,
     ServiceSwitcherFrame,
     ServiceSwitcherRequestMetadataFrame,
+    ServiceUpdateSettingsFrame,
 )
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.processors.filters.function_filter import FunctionFilter
@@ -216,6 +219,12 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
     `ServiceSwitcherFrame` frames and delegated to a pluggable
     `ServiceSwitcherStrategy`.
 
+    `ServiceUpdateSettingsFrame` is the exception to the gating. A settings
+    update addressed to a member service (``service=``) reaches it whether or
+    not it is active, and one marked ``affects_inactive_services`` reaches every
+    member, so whichever service becomes active later is already configured. Any
+    other settings update applies to the active service alone.
+
     Example::
 
         switcher = ServiceSwitcher(services=[stt_1, stt_2])
@@ -237,6 +246,10 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         super().__init__(*self._make_pipeline_definitions(services, _strategy))
         self._services = services
         self._strategy = _strategy
+        # Ids of the settings updates handed to services that weren't active, so
+        # they can be consumed again on their way out. A small ring is enough: an
+        # update crosses its service long before the ring wraps.
+        self._inactive_service_updates: deque[int] = deque(maxlen=64)
 
     @property
     def strategy(self) -> StrategyType:
@@ -297,6 +310,10 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         all the filters let it pass, and `StartFrame` causes the service to
         generate `ServiceMetadataFrame`.
 
+        Also suppresses the copies of a `ServiceUpdateSettingsFrame` handed to
+        the inactive services, so that the update the rest of the pipeline sees
+        is the one travelling the active service's branch.
+
         Non-fatal ``ErrorFrame`` instances are forwarded to the strategy via
         ``handle_error`` so strategies like ``ServiceSwitcherStrategyFailover``
         can perform failover. The error frame is still propagated upstream so
@@ -311,6 +328,12 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         # Only let metadata from the active service escape.
         if isinstance(frame, ServiceMetadataFrame):
             if frame.service_name != self.strategy.active_service.name:
+                return
+
+        # Consume the settings updates handed to the inactive services: they have
+        # been delivered, and only the active service's copy travels on.
+        if isinstance(frame, ServiceUpdateSettingsFrame):
+            if frame.id in self._inactive_service_updates:
                 return
 
         # Let the strategy react to non-fatal errors from the active service,
@@ -337,3 +360,47 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
                 await super().process_frame(frame, direction)
         else:
             await super().process_frame(frame, direction)
+
+            if isinstance(frame, ServiceUpdateSettingsFrame):
+                await self._update_inactive_services(frame, direction)
+
+    async def _update_inactive_services(
+        self, frame: ServiceUpdateSettingsFrame, direction: FrameDirection
+    ):
+        """Hand a settings update to the member services that aren't active.
+
+        The active service receives the update through its branch like any other
+        frame. The inactive ones sit behind closed filters, so each is handed its
+        own copy directly.
+
+        Args:
+            frame: The settings update to hand over.
+            direction: The direction the settings update is travelling.
+        """
+        for service in self._inactive_update_targets(frame):
+            # A copy carries the same update with an id of its own, which is how
+            # push_frame tells it from the active service's.
+            update = replace(frame)
+            self._inactive_service_updates.append(update.id)
+            await service.queue_frame(update, direction)
+
+    def _inactive_update_targets(self, frame: ServiceUpdateSettingsFrame) -> list[FrameProcessor]:
+        """Return the inactive member services that should apply a settings update.
+
+        Args:
+            frame: The settings update to route.
+
+        Returns:
+            The services to hand the update to, which may be empty.
+        """
+        inactive = [s for s in self.services if s is not self.strategy.active_service]
+
+        # An addressed update goes to its service alone, active or not. One
+        # addressed elsewhere in the pipeline is left for the switcher that
+        # manages it.
+        if frame.service is not None:
+            return [frame.service] if frame.service in inactive else []
+
+        # Any other update crosses to the inactive services only if it opts in,
+        # since settings values are often specific to one provider.
+        return inactive if frame.affects_inactive_services else []

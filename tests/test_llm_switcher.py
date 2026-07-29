@@ -9,10 +9,14 @@
 import unittest
 
 from pipecat.adapters.schemas.direct_function import tool_options
+from pipecat.frames.frames import Frame, LLMUpdateSettingsFrame
 from pipecat.pipeline.llm_switcher import LLMSwitcher
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
+from pipecat.tests.utils import run_test
+from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 
 
 class _MockLLMService(LLMService):
@@ -33,6 +37,11 @@ class _MockLLMService(LLMService):
             user_turn_completion_config=None,
         )
         super().__init__(settings=settings, **kwargs)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process a frame, pushing everything onward like a concrete service does."""
+        await super().process_frame(frame, direction)
+        await self.push_frame(frame, direction)
 
 
 async def get_current_weather(params: FunctionCallParams, location: str):
@@ -97,6 +106,39 @@ class TestLLMSwitcherDirectFunctions(unittest.TestCase):
 
         for llm in (llm1, llm2):
             self.assertIn("get_current_weather", llm._functions)
+
+
+class TestLLMSwitcherSettings(unittest.IsolatedAsyncioTestCase):
+    """An LLMSwitcher must apply settings updates on every member LLM."""
+
+    async def test_turn_completion_setting_applied_to_all_member_llms(self):
+        """Enabling filter_incomplete_user_turns reaches inactive members too.
+
+        LLMTurnCompletionUserTurnStopStrategy enables the setting with a single
+        frame on StartFrame. A member LLM that missed it would emit none of the
+        completion markers the strategy waits on, so user turns would stop being
+        finalized as soon as it became the active LLM.
+        """
+        llm1 = _MockLLMService()
+        llm2 = _MockLLMService()
+        switcher = LLMSwitcher(llms=[llm1, llm2])
+
+        await run_test(
+            switcher,
+            frames_to_send=[
+                LLMUpdateSettingsFrame(
+                    delta=LLMSettings(filter_incomplete_user_turns=True),
+                    affects_inactive_services=True,
+                )
+            ],
+        )
+
+        for llm in (llm1, llm2):
+            self.assertTrue(llm._filter_incomplete_user_turns)
+            self.assertEqual(
+                llm._settings.system_instruction,
+                UserTurnCompletionConfig().completion_instructions,
+            )
 
 
 class TestLLMSwitcherRegisterFunctionOptionPrecedence(unittest.TestCase):
