@@ -28,11 +28,9 @@ from typing import (
     TypeGuard,
     TypeVar,
     cast,
-    get_args,
     overload,
 )
 
-import aiohttp
 from loguru import logger
 from PIL import Image
 
@@ -198,7 +196,7 @@ class LLMContext:
         Args:
             role: The role of this message (defaults to "user").
             type: The type of the file (e.g., "bytes" or "url").
-            format: File format (MIME type) or "url" if the file is a URL.
+            format: MIME type of the file (e.g., "application/pdf").
             file: Base64 data URL (``data:<mime>;base64,...``) or plain URL string.
             name: Optional name of the file.
             text: Optional text to include with the file.
@@ -530,7 +528,7 @@ class LLMContext:
 
         Args:
             type: File source type ('bytes' or 'url').
-            format: MIME type of the file (e.g., 'application/pdf') or "url".
+            format: MIME type of the file (e.g., 'application/pdf').
             file: Base64 data URL (``data:<mime>;base64,...``) or plain URL string.
                 URL fetching for providers that require bytes is handled by the
                 provider adapter during message conversion.
@@ -575,9 +573,11 @@ class LLMContext:
         ):
             for i in range(len(self._messages) - 1, -1, -1):
                 message = self._messages[i]
-                content = getattr(message, "content", [])
+                if isinstance(message, LLMSpecificMessage):
+                    continue
+                content = message.get("content")
                 if isinstance(content, list) and any(
-                    item.get("type") == "file" for item in content
+                    isinstance(item, dict) and item.get("type") == "file" for item in content
                 ):
                     logger.warning(
                         "Removing message with file content from context due to invalid response."

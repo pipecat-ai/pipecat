@@ -1514,6 +1514,9 @@ def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace, ws_used_toke
         await _handle_telephony_ws(websocket, path_token=token)
 
 
+_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
+
 def _setup_file_uploads_route(app: FastAPI, args: argparse.Namespace):
     @app.post("/files")
     async def upload_file(file: UploadFile = File(...)):
@@ -1529,7 +1532,9 @@ def _setup_file_uploads_route(app: FastAPI, args: argparse.Namespace):
         safe_name = uuid.uuid4().hex
         file_path = folder / safe_name
         try:
-            contents = await file.read()
+            contents = await file.read(_MAX_UPLOAD_BYTES + 1)
+            if len(contents) > _MAX_UPLOAD_BYTES:
+                raise HTTPException(413, f"File exceeds {_MAX_UPLOAD_BYTES} byte limit")
             file_path.write_bytes(contents)
             logger.debug(f"Uploaded file to {file_path}")
         except OSError as e:
@@ -1539,6 +1544,7 @@ def _setup_file_uploads_route(app: FastAPI, args: argparse.Namespace):
         # Use original filename only for format/mime in response
         original_name = Path(file.filename or "").name
         media_type, _ = mimetypes.guess_type(original_name, strict=False)
+        media_type = media_type or file.content_type or "application/octet-stream"
         # Return the file as a URL that can be used in the client, matching the format of RTVIFile
         return {
             "name": original_name,
