@@ -916,8 +916,20 @@ def _setup_webrtc_routes(
         return FileResponse(path=file_path, media_type=media_type, filename=file_path.name)
 
     # Initialize the SmallWebRTC request handler
+    ice_servers = None
+    if args.webrtc_ice_url:
+        from pipecat.transports.smallwebrtc.connection import IceServer
+
+        ice_servers = [
+            IceServer(
+                urls=url,
+                username=args.webrtc_ice_username,
+                credential=args.webrtc_ice_credential,
+            )
+            for url in args.webrtc_ice_url
+        ]
     small_webrtc_handler: SmallWebRTCRequestHandler = SmallWebRTCRequestHandler(
-        esp32_mode=args.esp32, host=args.host
+        esp32_mode=args.esp32, host=args.host, ice_servers=ice_servers
     )
 
     @app.post("/api/offer")
@@ -1600,6 +1612,28 @@ def main(parser: argparse.ArgumentParser | None = None):
         action="store_true",
         default=False,
         help="Enable SDP munging for ESP32 compatibility (requires --host with IP address)",
+    )
+    parser.add_argument(
+        "--webrtc-ice-url",
+        action="append",
+        default=None,
+        metavar="URL",
+        help=(
+            "STUN/TURN server URL for the bot's SmallWebRTC connections, e.g. "
+            "turn:turn.example.com:3478?transport=udp. Repeatable; all URLs share "
+            "--webrtc-ice-username/--webrtc-ice-credential. Without it the bot "
+            "gathers host candidates only."
+        ),
+    )
+    parser.add_argument(
+        "--webrtc-ice-username",
+        default=None,
+        help="Username for the --webrtc-ice-url TURN server(s)",
+    )
+    parser.add_argument(
+        "--webrtc-ice-credential",
+        default=None,
+        help="Credential for the --webrtc-ice-url TURN server(s)",
     )
     parser.add_argument(
         "--whatsapp",
