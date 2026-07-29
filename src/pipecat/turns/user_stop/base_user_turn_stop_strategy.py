@@ -162,7 +162,7 @@ class BaseUserTurnStopStrategy(BaseObject):
         """
         await self._call_event_handler("on_broadcast_frame", frame_cls, **kwargs)
 
-    async def trigger_user_turn_stopped(self):
+    async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames: bool | None = None):
         """Fire both ``on_user_turn_inference_triggered`` and ``on_user_turn_stopped``.
 
         Most strategies call this when they decide a turn has ended. To
@@ -170,17 +170,36 @@ class BaseUserTurnStopStrategy(BaseObject):
         only the inference-triggered event), wrap this strategy with
         :func:`~pipecat.turns.user_stop.deferred` instead of changing
         the trigger call.
+
+        Args:
+            enable_user_speaking_frames: Overrides the configured setting for
+                this trigger only. Pass False when something else in the pipeline
+                has already emitted the turn frame.
         """
         await self.trigger_user_turn_inference_triggered()
-        await self.trigger_user_turn_finalized()
+        await self.trigger_user_turn_finalized(
+            enable_user_speaking_frames=enable_user_speaking_frames
+        )
 
     async def trigger_user_turn_inference_triggered(self):
         """Trigger only the `on_user_turn_inference_triggered` event."""
         await self._call_event_handler("on_user_turn_inference_triggered")
 
-    async def trigger_user_turn_finalized(self):
-        """Trigger only the `on_user_turn_stopped` event."""
+    async def trigger_user_turn_finalized(self, *, enable_user_speaking_frames: bool | None = None):
+        """Trigger only the `on_user_turn_stopped` event.
+
+        Args:
+            enable_user_speaking_frames: Overrides the configured setting for
+                this trigger only. Pass False when something else in the pipeline
+                has already emitted the turn frame.
+        """
         await self._call_event_handler(
             "on_user_turn_stopped",
-            UserTurnStoppedParams(enable_user_speaking_frames=self._enable_user_speaking_frames),
+            UserTurnStoppedParams(
+                enable_user_speaking_frames=(
+                    self._enable_user_speaking_frames
+                    if enable_user_speaking_frames is None
+                    else enable_user_speaking_frames
+                )
+            ),
         )

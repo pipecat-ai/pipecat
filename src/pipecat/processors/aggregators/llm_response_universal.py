@@ -103,6 +103,7 @@ from pipecat.turns.user_stop import (
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import (
+    ExternalUserTurnStrategies,
     FilterIncompleteUserTurnStrategies,
     UserTurnStrategies,
 )
@@ -823,7 +824,7 @@ class LLMUserAggregator(LLMContextAggregator):
         elif isinstance(frame, ServiceMetadataFrame):
             await self._handle_service_metadata(frame)
             await self.push_frame(frame, direction)
-        else:
+        elif not self._user_turn_controller.owns_frame(frame):
             await self.push_frame(frame, direction)
 
         await self._user_turn_controller.process_frame(frame)
@@ -964,10 +965,40 @@ class LLMUserAggregator(LLMContextAggregator):
                 f"{self}: ignoring user turn strategies recommended by "
                 f"`{service_name}`; using the user-provided strategies."
             )
+            self._warn_on_discarded_interruption_setting(service_name, user_turn_strategies)
             return
 
         logger.debug(f"{self}: applying user turn strategies recommended by `{service_name}`.")
         await self._user_turn_controller.update_strategies(user_turn_strategies)
+
+    def _warn_on_discarded_interruption_setting(
+        self, service_name: str, recommended: UserTurnStrategies
+    ):
+        """Warn when discarding a recommendation silently turns interruptions back on.
+
+        A service configured with ``should_interrupt=False`` carries that on its
+        recommendation, but user-provided strategies discard the recommendation
+        whole — so the pipeline would start interrupting with no indication why.
+        """
+        if not isinstance(recommended, ExternalUserTurnStrategies):
+            return
+        if recommended.enable_interruptions:
+            return
+
+        provided = self._params.user_turn_strategies
+        if (
+            not isinstance(provided, ExternalUserTurnStrategies)
+            or not provided.enable_interruptions
+        ):
+            return
+
+        logger.warning(
+            f"{self}: `{service_name}` asked for interruptions to stay off, but the "
+            "user-provided `ExternalUserTurnStrategies` leaves them on, so the bot will "
+            "be interrupted when the user starts speaking. Drop `user_turn_strategies` to "
+            "use the service's recommendation, or pass "
+            "`ExternalUserTurnStrategies(enable_interruptions=False)`."
+        )
 
     async def _handle_llm_service_metadata(self, frame: LLMServiceMetadataFrame):
         """Handle an ``LLMServiceMetadataFrame`` broadcast by an LLM service.

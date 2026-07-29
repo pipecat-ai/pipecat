@@ -1130,6 +1130,35 @@ class VADUserStoppedSpeakingFrame(SystemFrame):
 
 
 @dataclass
+class ProposedUserStartedSpeakingFrame(SystemFrame):
+    """Frame proposing that the user turn has started.
+
+    Emitted by a component with its own turn detection — typically an STT or
+    realtime LLM service whose provider reports speech boundaries. It is a
+    proposal, not a decision: an
+    :class:`~pipecat.turns.user_start.ExternalUserTurnStartStrategy` resolves it
+    into a :class:`UserStartedSpeakingFrame` and broadcasts the interruption, so
+    the pipeline keeps one place that decides when turns begin.
+    """
+
+    pass
+
+
+@dataclass
+class ProposedUserStoppedSpeakingFrame(SystemFrame):
+    """Frame proposing that the user turn has ended.
+
+    The end-of-turn counterpart to :class:`ProposedUserStartedSpeakingFrame`,
+    resolved into a :class:`UserStoppedSpeakingFrame` by an
+    :class:`~pipecat.turns.user_stop.ExternalUserTurnStopStrategy` — which may
+    hold the turn open past this proposal, for instance while waiting on a
+    trailing transcript.
+    """
+
+    pass
+
+
+@dataclass
 class BotStartedSpeakingFrame(SystemFrame):
     """Frame indicating the bot started speaking.
 

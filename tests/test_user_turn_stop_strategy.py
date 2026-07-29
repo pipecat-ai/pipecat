@@ -10,6 +10,8 @@ from unittest.mock import patch
 
 from pipecat.frames.frames import (
     InterimTranscriptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
@@ -859,6 +861,135 @@ class TestExternalUserTurnCompletionStopStrategy(unittest.IsolatedAsyncioTestCas
 
         await strategy.process_frame(UserTurnInferenceCompletedFrame())
         self.assertTrue(finalized)
+
+
+class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.task_manager = TaskManager()
+        self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
+
+    async def _run_turn(self, strategy, *, started, stopped):
+        """Drive one turn through the strategy and return the stop params."""
+        params = None
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, stop_params):
+            nonlocal params
+            params = stop_params
+
+        await strategy.process_frame(started)
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="", timestamp="now"))
+        await strategy.process_frame(stopped)
+        return params
+
+    async def test_proposal_finalizes_with_emission_enabled(self):
+        strategy = ExternalUserTurnStopStrategy()
+        await strategy.setup(self.task_manager)
+        params = await self._run_turn(
+            strategy,
+            started=ProposedUserStartedSpeakingFrame(),
+            stopped=ProposedUserStoppedSpeakingFrame(),
+        )
+        self.assertIsNotNone(params)
+        self.assertTrue(params.enable_user_speaking_frames)
+        await strategy.cleanup()
+
+    async def test_real_turn_frame_finalizes_with_emission_suppressed(self):
+        strategy = ExternalUserTurnStopStrategy()
+        await strategy.setup(self.task_manager)
+        params = await self._run_turn(
+            strategy,
+            started=UserStartedSpeakingFrame(),
+            stopped=UserStoppedSpeakingFrame(),
+        )
+        self.assertIsNotNone(params)
+        self.assertFalse(params.enable_user_speaking_frames)
+        await strategy.cleanup()
+
+    async def test_deferred_finalization_keeps_the_signals_emission_flags(self):
+        """Finalization from the transcript timeout carries the right flags.
+
+        With wait_for_transcript the stop can land from the internal timeout
+        rather than the stop signal, long after the signal that determined
+        whether emission is suppressed.
+        """
+        strategy = ExternalUserTurnStopStrategy(timeout=0.05)
+        await strategy.setup(self.task_manager)
+
+        params = None
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, stop_params):
+            nonlocal params
+            params = stop_params
+
+        # Stop signal first, transcript after: the stop resolves from the
+        # timeout in the strategy's task handler.
+        await strategy.process_frame(UserStartedSpeakingFrame())
+        await strategy.process_frame(UserStoppedSpeakingFrame())
+        self.assertIsNone(params)
+
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="", timestamp="now"))
+        await asyncio.sleep(0.15)
+        self.assertIsNotNone(params)
+        self.assertFalse(params.enable_user_speaking_frames)
+        await strategy.cleanup()
+
+    async def test_subclass_can_delay_finalization(self):
+        """A subclass can shift turn-stop timing — the motivator for proposals.
+
+        Mirrors ``GracePeriodUserTurnStopStrategy`` from
+        ``examples/turn-management/turn-management-custom-external-turn-strategy.py``.
+        """
+
+        class DelayedStopStrategy(ExternalUserTurnStopStrategy):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self.pending = None
+
+            async def process_frame(self, frame):
+                if isinstance(frame, ProposedUserStartedSpeakingFrame) and self.pending:
+                    task, self.pending = self.pending, None
+                    await self.cancel_task(task)
+                return await super().process_frame(frame)
+
+            async def _trigger_user_turn_stopped(self):
+                if self.pending:
+                    return
+                self.pending = self.create_task(self._finalize_later())
+
+            async def _finalize_later(self):
+                await asyncio.sleep(0.2)
+                self.pending = None
+                await super()._trigger_user_turn_stopped()
+
+        strategy = DelayedStopStrategy()
+        await strategy.setup(self.task_manager)
+
+        stopped = False
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal stopped
+            stopped = True
+
+        await strategy.process_frame(ProposedUserStartedSpeakingFrame())
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="", timestamp="now"))
+        await strategy.process_frame(ProposedUserStoppedSpeakingFrame())
+        # The base strategy would have finalized by now; this one holds the turn.
+        self.assertFalse(stopped)
+
+        # Resuming within the grace period keeps the turn open.
+        await strategy.process_frame(ProposedUserStartedSpeakingFrame())
+        await asyncio.sleep(0.3)
+        self.assertFalse(stopped)
+
+        # Falling silent again lets the delayed finalization through.
+        await strategy.process_frame(ProposedUserStoppedSpeakingFrame())
+        await asyncio.sleep(0.3)
+        self.assertTrue(stopped)
+
+        await strategy.cleanup()
 
 
 if __name__ == "__main__":

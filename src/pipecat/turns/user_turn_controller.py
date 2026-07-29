@@ -11,6 +11,8 @@ import asyncio
 from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -21,9 +23,14 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
+    ExternalUserTurnStartStrategy,
     UserTurnStartedParams,
 )
-from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
+from pipecat.turns.user_stop import (
+    BaseUserTurnStopStrategy,
+    ExternalUserTurnStopStrategy,
+    UserTurnStoppedParams,
+)
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
@@ -146,6 +153,37 @@ class UserTurnController(BaseObject):
         self._user_turn_strategies = strategies
         await self._setup_strategies()
 
+    def owns_frame(self, frame: Frame) -> bool:
+        """Whether this controller's strategies claim the given frame.
+
+        A proposed turn frame is a request for a decision, so the first
+        controller with strategies that resolve proposals takes ownership and
+        callers stop forwarding it — otherwise a second resolver further along
+        would decide the same turn again. Ownership is independent of whether the
+        strategies act immediately: a stop strategy may hold the proposal while
+        it waits on a trailing transcript.
+
+        A controller whose strategies don't resolve proposals passes them along,
+        so another resolver in the pipeline can still pick them up.
+
+        Args:
+            frame: The frame to check.
+
+        Returns:
+            True if the caller should stop forwarding the frame.
+        """
+        if isinstance(frame, ProposedUserStartedSpeakingFrame):
+            return any(
+                isinstance(s, ExternalUserTurnStartStrategy)
+                for s in self._user_turn_strategies.start or []
+            )
+        if isinstance(frame, ProposedUserStoppedSpeakingFrame):
+            return any(
+                isinstance(s, ExternalUserTurnStopStrategy)
+                for s in self._user_turn_strategies.stop or []
+            )
+        return False
+
     async def process_frame(self, frame: Frame):
         """Process an incoming frame to detect user turn start or stop.
 
@@ -157,9 +195,9 @@ class UserTurnController(BaseObject):
             frame: The frame to be processed.
 
         """
-        if isinstance(frame, UserStartedSpeakingFrame):
+        if isinstance(frame, (UserStartedSpeakingFrame, ProposedUserStartedSpeakingFrame)):
             await self._handle_user_started_speaking(frame)
-        elif isinstance(frame, UserStoppedSpeakingFrame):
+        elif isinstance(frame, (UserStoppedSpeakingFrame, ProposedUserStoppedSpeakingFrame)):
             await self._handle_user_stopped_speaking(frame)
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             await self._handle_vad_user_started_speaking(frame)
@@ -215,13 +253,17 @@ class UserTurnController(BaseObject):
             )
             s.remove_event_handler("on_user_turn_stopped", self._on_user_turn_stopped)
 
-    async def _handle_user_started_speaking(self, frame: UserStartedSpeakingFrame):
+    async def _handle_user_started_speaking(
+        self, frame: UserStartedSpeakingFrame | ProposedUserStartedSpeakingFrame
+    ):
         self._user_speaking = True
 
         # The user started talking, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
 
-    async def _handle_user_stopped_speaking(self, frame: UserStoppedSpeakingFrame):
+    async def _handle_user_stopped_speaking(
+        self, frame: UserStoppedSpeakingFrame | ProposedUserStoppedSpeakingFrame
+    ):
         self._user_speaking = False
 
         # The user stopped talking, let's reset the user turn timeout.

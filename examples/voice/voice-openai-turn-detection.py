@@ -10,22 +10,17 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
-)
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.soniox.stt import SonioxSTTService
-from pipecat.services.soniox.tts import SonioxTTSService
-from pipecat.transcriptions.language import Language
+from pipecat.services.openai.stt import OpenAIRealtimeSTTService
+from pipecat.services.openai.tts import OpenAITTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -33,6 +28,8 @@ from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "eval": lambda: EvalTransportParams(
         audio_in_enabled=True,
@@ -54,50 +51,45 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    """Soniox Speech-to-Text with Built-in Endpoint Detection
+    """OpenAI Realtime Speech-to-Text with the server's VAD driving turns.
 
-    This example demonstrates using Soniox's built-in endpoint detection for
-    turn taking, instead of Pipecat's local VAD/smart-turn analysis.
+    This example uses OpenAI's server-side VAD for turn taking, instead of
+    Pipecat's local VAD/smart-turn analysis.
 
     Key features:
 
-    1. Soniox Turn Detection
-       - Set `vad_force_turn_endpoint=False` to enable Soniox endpoint detection
-       - Soniox decides when the user is done speaking; the service proposes
-         those turn boundaries and the user aggregator resolves them into turn
-         frames and interruptions
+    1. OpenAI Turn Detection
+       - Set `turn_detection=None` to enable the server's default VAD, or pass a
+         dict to configure it (threshold, silence duration, prefix padding)
+       - The server decides when the user starts and stops speaking; the service
+         proposes those turn boundaries and the user aggregator resolves them
+         into turn frames and interruptions
 
-    2. Responsive Barge-In via Local VAD
-       - Soniox has no speech-started event, so with a VAD analyzer configured
-         (as below) the turn opens on the local VAD signal — the most responsive
-       - Without a VAD, the turn opens on the first transcript token instead,
-         which adds the network round-trip plus model latency to barge-in
+    2. No Local VAD
+       - Do not run a separate VAD processor in this mode — two detectors would
+         compete over the same turn. See `voice-openai.py` for the Pipecat-side
+         turn detection setup, which is the default (`turn_detection=False`)
 
-    3. Endpoint Detection Tuning (Optional)
-       - `max_endpoint_delay_ms`: Max silence (ms) before the turn is finalized
-       - `endpoint_sensitivity`: Higher values finalize sooner (-1.0 to 1.0)
-       - `endpoint_latency_adjustment_level`: Reduces endpoint latency (0-3);
-         higher finalizes sooner but may reduce accuracy
-
-    For more information: https://soniox.com/docs/stt/rt/endpoint-detection
+    3. Barge-In
+       - `should_interrupt=False` on the service leaves the bot talking through
+         the user's speech; it rides on the turn strategies the service
+         recommends
     """
     logger.info(f"Starting bot")
 
-    stt = SonioxSTTService(
-        api_key=os.environ["SONIOX_API_KEY"],
-        vad_force_turn_endpoint=False,  # Use Soniox's built-in endpoint detection
-        settings=SonioxSTTService.Settings(
-            language_hints=[Language.EN],
-            # Optional: Tune endpoint detection timing
-            # endpoint_sensitivity=0.3,
-            # endpoint_latency_adjustment_level=2,
+    stt = OpenAIRealtimeSTTService(
+        api_key=os.environ["OPENAI_API_KEY"],
+        turn_detection={"type": "server_vad"},  # Use OpenAI's server-side VAD
+        settings=OpenAIRealtimeSTTService.Settings(
+            # gpt-realtime-whisper (the default) rejects turn detection.
+            model="gpt-4o-transcribe",
         ),
     )
 
-    tts = SonioxTTSService(
-        api_key=os.environ["SONIOX_API_KEY"],
-        settings=SonioxTTSService.Settings(
-            voice="Maya",
+    tts = OpenAITTSService(
+        api_key=os.environ["OPENAI_API_KEY"],
+        settings=OpenAITTSService.Settings(
+            voice="ballad",
         ),
     )
 
@@ -109,10 +101,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     context = LLMContext()
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-        context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
-    )
+    # No vad_analyzer: OpenAI's server-side VAD drives turns, and the service
+    # recommends the external turn strategies that resolve them.
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [

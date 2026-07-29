@@ -157,13 +157,35 @@ class BaseUserTurnStartStrategy(BaseObject):
         """
         await self._call_event_handler("on_broadcast_frame", frame_cls, **kwargs)
 
-    async def trigger_user_turn_started(self):
-        """Trigger the `on_user_turn_started` event."""
+    async def trigger_user_turn_started(
+        self,
+        *,
+        enable_interruptions: bool | None = None,
+        enable_user_speaking_frames: bool | None = None,
+    ):
+        """Trigger the `on_user_turn_started` event.
+
+        Args:
+            enable_interruptions: Overrides the configured setting for this
+                trigger only. Pass False when something else in the pipeline has
+                already broadcast the interruption for this turn.
+            enable_user_speaking_frames: Overrides the configured setting for
+                this trigger only. Pass False when something else in the pipeline
+                has already emitted the turn frame.
+        """
         await self._call_event_handler(
             "on_user_turn_started",
             UserTurnStartedParams(
-                enable_interruptions=self._enable_interruptions,
-                enable_user_speaking_frames=self._enable_user_speaking_frames,
+                enable_interruptions=(
+                    self._enable_interruptions
+                    if enable_interruptions is None
+                    else enable_interruptions
+                ),
+                enable_user_speaking_frames=(
+                    self._enable_user_speaking_frames
+                    if enable_user_speaking_frames is None
+                    else enable_user_speaking_frames
+                ),
             ),
         )
 

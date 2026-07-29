@@ -12,9 +12,9 @@ from websockets.protocol import State
 
 from pipecat.frames.frames import (
     InterimTranscriptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -218,22 +218,20 @@ async def test_soniox_turn_detection_emits_turn_frames(monkeypatch):
 
     assert events == [
         # Turn opens on the first token, before any transcription frames.
-        ("broadcast", UserStartedSpeakingFrame),
-        ("interruption", None),
+        ("broadcast", ProposedUserStartedSpeakingFrame),
         ("push", InterimTranscriptionFrame),
         # Endpoint: finalized transcript first, then the turn closes.
         ("push", TranscriptionFrame),
-        ("broadcast", UserStoppedSpeakingFrame),
+        ("broadcast", ProposedUserStoppedSpeakingFrame),
     ]
     assert service._user_turn_open is False
 
 
 @pytest.mark.asyncio
-async def test_soniox_turn_detection_should_interrupt_false(monkeypatch):
+async def test_soniox_turn_detection_never_interrupts_directly(monkeypatch):
+    """The service proposes turns; the strategies own the interruption."""
     events = []
-    service = _instrumented_service(
-        monkeypatch, events, vad_force_turn_endpoint=False, should_interrupt=False
-    )
+    service = _instrumented_service(monkeypatch, events, vad_force_turn_endpoint=False)
 
     messages = [
         json.dumps({"tokens": [{"text": "Hel", "is_final": False}]}),
@@ -243,8 +241,28 @@ async def test_soniox_turn_detection_should_interrupt_false(monkeypatch):
 
     await service._receive_messages()
 
-    assert ("broadcast", UserStartedSpeakingFrame) in events
+    assert ("broadcast", ProposedUserStartedSpeakingFrame) in events
     assert ("interruption", None) not in events
+
+
+def test_soniox_should_interrupt_rides_on_recommended_strategies():
+    # should_interrupt no longer gates a local broadcast; it configures the
+    # strategies the service recommends via its metadata frame.
+    for should_interrupt in (True, False):
+        service = SonioxSTTService(
+            api_key="test-key",
+            vad_force_turn_endpoint=False,
+            should_interrupt=should_interrupt,
+        )
+        strategies = service.service_metadata_frame().user_turn_strategies
+        assert isinstance(strategies, ExternalUserTurnStrategies)
+        assert strategies.enable_interruptions is should_interrupt
+
+
+def test_soniox_pipecat_mode_recommends_no_strategies():
+    """In the default Pipecat mode Soniox proposes no turns, so the defaults stand."""
+    service = SonioxSTTService(api_key="test-key", vad_force_turn_endpoint=True)
+    assert service.service_metadata_frame().user_turn_strategies is None
 
 
 @pytest.mark.asyncio
@@ -270,16 +288,14 @@ async def test_soniox_turn_detection_reopens_turn_after_end_token(monkeypatch):
     await service._receive_messages()
 
     assert events == [
-        ("broadcast", UserStartedSpeakingFrame),
-        ("interruption", None),
+        ("broadcast", ProposedUserStartedSpeakingFrame),
         ("push", TranscriptionFrame),
-        ("broadcast", UserStoppedSpeakingFrame),
+        ("broadcast", ProposedUserStoppedSpeakingFrame),
         # Tokens after the endpoint open a new turn.
-        ("broadcast", UserStartedSpeakingFrame),
-        ("interruption", None),
+        ("broadcast", ProposedUserStartedSpeakingFrame),
         ("push", InterimTranscriptionFrame),
         # The finished message closes the still-open turn.
-        ("broadcast", UserStoppedSpeakingFrame),
+        ("broadcast", ProposedUserStoppedSpeakingFrame),
     ]
 
 
@@ -297,7 +313,9 @@ async def test_soniox_turn_detection_no_duplicate_started_across_messages(monkey
 
     await service._receive_messages()
 
-    started = [event for event in events if event == ("broadcast", UserStartedSpeakingFrame)]
+    started = [
+        event for event in events if event == ("broadcast", ProposedUserStartedSpeakingFrame)
+    ]
     assert len(started) == 1
 
 
@@ -338,8 +356,7 @@ async def test_vad_start_opens_turn_before_tokens(monkeypatch):
 
     assert events == [
         ("push", VADUserStartedSpeakingFrame),  # re-pushed by the base STTService
-        ("broadcast", UserStartedSpeakingFrame),
-        ("interruption", None),
+        ("broadcast", ProposedUserStartedSpeakingFrame),
     ]
 
     # Tokens arriving later must not open a second turn.
@@ -358,11 +375,13 @@ async def test_vad_start_opens_turn_before_tokens(monkeypatch):
 
     await service._receive_messages()
 
-    started = [event for event in events if event == ("broadcast", UserStartedSpeakingFrame)]
+    started = [
+        event for event in events if event == ("broadcast", ProposedUserStartedSpeakingFrame)
+    ]
     assert len(started) == 1
     assert events[-2:] == [
         ("push", TranscriptionFrame),
-        ("broadcast", UserStoppedSpeakingFrame),
+        ("broadcast", ProposedUserStoppedSpeakingFrame),
     ]
 
 
@@ -376,7 +395,7 @@ async def test_vad_stop_does_not_close_turn(monkeypatch):
     await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
     await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
 
-    assert ("broadcast", UserStoppedSpeakingFrame) not in events
+    assert ("broadcast", ProposedUserStoppedSpeakingFrame) not in events
     assert service._user_turn_open is True
 
 
@@ -414,10 +433,9 @@ async def test_soniox_turn_detection_error_closes_open_turn(monkeypatch):
     await service._receive_messages()
 
     assert events == [
-        ("broadcast", UserStartedSpeakingFrame),
-        ("interruption", None),
+        ("broadcast", ProposedUserStartedSpeakingFrame),
         ("push", InterimTranscriptionFrame),
-        ("broadcast", UserStoppedSpeakingFrame),
+        ("broadcast", ProposedUserStoppedSpeakingFrame),
         ("error", None),
     ]
 

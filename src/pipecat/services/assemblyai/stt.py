@@ -27,11 +27,11 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -276,7 +276,10 @@ class AssemblyAISTTService(WebsocketSTTService):
                 - No ForceEndpoint on VAD stop
             should_interrupt: Whether to interrupt the bot when the user starts speaking
                 in AssemblyAI turn detection mode (vad_force_turn_endpoint=False). Only applies
-                when using AssemblyAI's built-in turn detection. Defaults to True.
+                when using AssemblyAI's built-in turn detection. Passed along to the
+                user turn strategies this service recommends, which own the
+                interruption; a user-supplied ``user_turn_strategies`` overrides the
+                recommendation and this setting with it. Defaults to True.
             speaker_format: Optional format string for speaker labels when diarization is enabled.
                 Use {speaker} for speaker label and {text} for transcript text.
                 Example: "<{speaker}>{text}</{speaker}>" or "{speaker}: {text}"
@@ -541,15 +544,17 @@ class AssemblyAISTTService(WebsocketSTTService):
         """Request external turn strategies in AssemblyAI's turn-detection mode.
 
         With ``vad_force_turn_endpoint=False`` AssemblyAI's model decides turn
-        endings and emits ``UserStarted/StoppedSpeakingFrame``, so the user
-        aggregator defers to those rather than running local VAD/smart-turn. In the
-        default Pipecat mode (``vad_force_turn_endpoint=True``) the STT emits no turn
-        frames, so the defaults are left in place. Applied unless the user passed
+        endings and emits ``ProposedUserStarted/StoppedSpeakingFrame``, so the user
+        aggregator resolves those rather than running local VAD/smart-turn. In the
+        default Pipecat mode (``vad_force_turn_endpoint=True``) the STT proposes no
+        turns, so the defaults are left in place. Applied unless the user passed
         their own ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
         if not self._vad_force_turn_endpoint:
-            frame.user_turn_strategies = ExternalUserTurnStrategies()
+            frame.user_turn_strategies = ExternalUserTurnStrategies(
+                enable_interruptions=self._should_interrupt,
+            )
         return frame
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
@@ -975,9 +980,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         if self._vad_force_turn_endpoint:
             return  # Pipecat mode: handled by aggregator
 
-        await self.broadcast_frame(UserStartedSpeakingFrame)
-        if self._should_interrupt:
-            await self.broadcast_interruption()
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
         await self.start_processing_metrics()
         self._user_speaking = True
 
@@ -1091,10 +1094,10 @@ class AssemblyAISTTService(WebsocketSTTService):
                 )
                 await self._trace_transcription(transcript_text, True, language)
                 await self.stop_processing_metrics()
-                # AAI is authoritative — emit UserStoppedSpeakingFrame immediately.
-                # broadcast_frame pushes downstream (same queue as TranscriptionFrame
-                # above, so ordering is preserved) and upstream.
-                await self.broadcast_frame(UserStoppedSpeakingFrame)
+                # Propose the turn stop immediately. broadcast_frame pushes
+                # downstream (same queue as TranscriptionFrame above, so ordering
+                # is preserved) and upstream.
+                await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
                 self._user_speaking = False
                 await self._call_event_handler("on_end_of_turn", transcript_text)
             else:

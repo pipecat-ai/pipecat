@@ -41,6 +41,8 @@ from pipecat.frames.frames import (
     LLMServiceMetadataFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     SpeechControlParamsFrame,
     StartFrame,
     TranscriptionFrame,
@@ -212,11 +214,13 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     bidirectional audio and text interactions. Supports function calling, conversation
     management, and real-time transcription.
 
-    Emits ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame`` from
-    OpenAI's server-side VAD events, so pipeline processors that depend on
-    those frames (RTVI client speech events, ``TurnTrackingObserver``,
-    ``AudioBufferProcessor`` turn recording, ``UserIdleController``, user
-    mute strategies, voicemail detector) work out of the box.
+    Proposes turn boundaries from OpenAI's server-side VAD events, which the
+    recommended external user turn strategies resolve into
+    ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame``, so pipeline
+    processors that depend on those frames (RTVI client speech events,
+    ``TurnTrackingObserver``, ``AudioBufferProcessor`` turn recording,
+    ``UserIdleController``, user mute strategies, voicemail detector) work out
+    of the box.
     ``LLMContextAggregatorPair`` auto-detects this realtime service and
     decouples context writes from those frames; see the
     ``examples/realtime/realtime-openai.py`` example.
@@ -1116,8 +1120,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         # which is good: in that case, local turn detection is responsible for
         # this work.
         await self._truncate_current_audio_response()
-        await self.broadcast_frame(UserStartedSpeakingFrame)
-        await self.broadcast_interruption()
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
 
     async def _handle_evt_speech_stopped(self, evt):
         # Note: this event is not received when turn detection is disabled,
@@ -1125,7 +1128,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         # this work.
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
-        await self.broadcast_frame(UserStoppedSpeakingFrame)
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
     async def _maybe_handle_evt_retrieve_conversation_item_error(self, evt: events.ErrorEvent):
         """Maybe handle an error event related to retrieving a conversation item.

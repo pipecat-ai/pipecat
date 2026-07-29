@@ -12,6 +12,8 @@ from unittest.mock import AsyncMock, MagicMock
 from pipecat.audio.turn.base_turn_analyzer import EndOfTurnState
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
@@ -328,6 +330,111 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
         self.assertTrue(should_stop)
         self.assertTrue(timeout)
+
+    async def test_proposed_frames_drive_the_turn_and_emit(self):
+        """A proposal leaves the decision to the strategy, which emits."""
+        controller = UserTurnController(
+            user_turn_strategies=ExternalUserTurnStrategies(),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(self.task_manager)
+
+        started_params = None
+        stopped_params = None
+
+        @controller.event_handler("on_user_turn_started")
+        async def on_user_turn_started(controller, strategy, params):
+            nonlocal started_params
+            started_params = params
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            nonlocal stopped_params
+            stopped_params = params
+
+        await controller.process_frame(ProposedUserStartedSpeakingFrame())
+        self.assertTrue(started_params.enable_user_speaking_frames)
+        self.assertTrue(started_params.enable_interruptions)
+
+        await controller.process_frame(
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now")
+        )
+        await controller.process_frame(ProposedUserStoppedSpeakingFrame())
+        self.assertTrue(stopped_params.enable_user_speaking_frames)
+
+        await controller.cleanup()
+
+    async def test_real_turn_frames_drive_the_turn_but_suppress_emission(self):
+        """The emitter already announced the turn, so the strategy emits nothing."""
+        controller = UserTurnController(
+            user_turn_strategies=ExternalUserTurnStrategies(),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(self.task_manager)
+
+        started_params = None
+        stopped_params = None
+
+        @controller.event_handler("on_user_turn_started")
+        async def on_user_turn_started(controller, strategy, params):
+            nonlocal started_params
+            started_params = params
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            nonlocal stopped_params
+            stopped_params = params
+
+        await controller.process_frame(UserStartedSpeakingFrame())
+        self.assertFalse(started_params.enable_user_speaking_frames)
+        self.assertFalse(started_params.enable_interruptions)
+
+        await controller.process_frame(
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now")
+        )
+        await controller.process_frame(UserStoppedSpeakingFrame())
+        self.assertFalse(stopped_params.enable_user_speaking_frames)
+
+        await controller.cleanup()
+
+    async def test_proposal_arriving_mid_speech_does_not_stop_the_turn(self):
+        """The finalization guard still applies when proposals drive the turn."""
+        controller = UserTurnController(
+            user_turn_strategies=ExternalUserTurnStrategies(),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(self.task_manager)
+
+        stopped = False
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            nonlocal stopped
+            stopped = True
+
+        # The controller tracks _user_speaking from the proposals, so a
+        # completion resolving mid-speech is still dropped as stale.
+        await controller.process_frame(ProposedUserStartedSpeakingFrame())
+        await controller.process_frame(UserTurnInferenceCompletedFrame())
+        self.assertFalse(stopped)
+
+        await controller.cleanup()
+
+    async def test_owns_frame_claims_proposals_only_for_external_strategies(self):
+        """A controller that can't resolve a proposal passes it along."""
+        external = UserTurnController(user_turn_strategies=ExternalUserTurnStrategies())
+        self.assertTrue(external.owns_frame(ProposedUserStartedSpeakingFrame()))
+        self.assertTrue(external.owns_frame(ProposedUserStoppedSpeakingFrame()))
+        self.assertFalse(external.owns_frame(UserStartedSpeakingFrame()))
+
+        default = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[VADUserTurnStartStrategy()],
+                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)],
+            )
+        )
+        self.assertFalse(default.owns_frame(ProposedUserStartedSpeakingFrame()))
+        self.assertFalse(default.owns_frame(ProposedUserStoppedSpeakingFrame()))
 
     async def test_late_transcription_between_turns_no_premature_stop(self):
         """Test that a late transcription arriving between turns does not cause a premature stop.

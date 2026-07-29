@@ -4,28 +4,22 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-
 import os
 
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
-)
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.soniox.stt import SonioxSTTService
-from pipecat.services.soniox.tts import SonioxTTSService
-from pipecat.transcriptions.language import Language
+from pipecat.services.sarvam.llm import SarvamLLMService
+from pipecat.services.sarvam.stt import SarvamSTTService
+from pipecat.services.sarvam.tts import SarvamTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -33,6 +27,9 @@ from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
+
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "eval": lambda: EvalTransportParams(
         audio_in_enabled=True,
@@ -54,70 +51,62 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    """Soniox Speech-to-Text with Built-in Endpoint Detection
+    """Sarvam Speech-to-Text with Sarvam's server-side VAD driving turns.
 
-    This example demonstrates using Soniox's built-in endpoint detection for
-    turn taking, instead of Pipecat's local VAD/smart-turn analysis.
+    This example uses Sarvam's VAD signals for turn taking, instead of
+    Pipecat's local VAD/smart-turn analysis.
 
     Key features:
 
-    1. Soniox Turn Detection
-       - Set `vad_force_turn_endpoint=False` to enable Soniox endpoint detection
-       - Soniox decides when the user is done speaking; the service proposes
-         those turn boundaries and the user aggregator resolves them into turn
-         frames and interruptions
+    1. Sarvam Turn Detection
+       - Set `vad_signals=True` to have Sarvam report speech boundaries
+       - Sarvam decides when the user starts and stops speaking; the service
+         proposes those turn boundaries and the user aggregator resolves them
+         into turn frames and interruptions
 
-    2. Responsive Barge-In via Local VAD
-       - Soniox has no speech-started event, so with a VAD analyzer configured
-         (as below) the turn opens on the local VAD signal — the most responsive
-       - Without a VAD, the turn opens on the first transcript token instead,
-         which adds the network round-trip plus model latency to barge-in
+    2. No Local VAD
+       - Sarvam ignores local VAD frames in this mode, so there's no
+         `vad_analyzer` on the user aggregator — see `voice-sarvam.py` for the
+         Pipecat-side turn detection setup
 
-    3. Endpoint Detection Tuning (Optional)
-       - `max_endpoint_delay_ms`: Max silence (ms) before the turn is finalized
-       - `endpoint_sensitivity`: Higher values finalize sooner (-1.0 to 1.0)
-       - `endpoint_latency_adjustment_level`: Reduces endpoint latency (0-3);
-         higher finalizes sooner but may reduce accuracy
-
-    For more information: https://soniox.com/docs/stt/rt/endpoint-detection
+    3. VAD Sensitivity (Optional)
+       - `high_vad_sensitivity=True` makes Sarvam quicker to call speech, at the
+         cost of more false starts on background noise
     """
     logger.info(f"Starting bot")
 
-    stt = SonioxSTTService(
-        api_key=os.environ["SONIOX_API_KEY"],
-        vad_force_turn_endpoint=False,  # Use Soniox's built-in endpoint detection
-        settings=SonioxSTTService.Settings(
-            language_hints=[Language.EN],
-            # Optional: Tune endpoint detection timing
-            # endpoint_sensitivity=0.3,
-            # endpoint_latency_adjustment_level=2,
+    stt = SarvamSTTService(
+        api_key=os.environ["SARVAM_API_KEY"],
+        settings=SarvamSTTService.Settings(
+            model="saaras:v3",
+            vad_signals=True,  # Use Sarvam's VAD signals for turn detection
         ),
     )
 
-    tts = SonioxTTSService(
-        api_key=os.environ["SONIOX_API_KEY"],
-        settings=SonioxTTSService.Settings(
-            voice="Maya",
+    tts = SarvamTTSService(
+        api_key=os.environ["SARVAM_API_KEY"],
+        settings=SarvamTTSService.Settings(
+            model="bulbul:v3",
+            voice="shubh",
         ),
     )
 
-    llm = OpenAILLMService(
-        api_key=os.environ["OPENAI_API_KEY"],
-        settings=OpenAILLMService.Settings(
+    llm = SarvamLLMService(
+        api_key=os.environ["SARVAM_API_KEY"],
+        settings=SarvamLLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
 
     context = LLMContext()
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-        context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
-    )
+    # No vad_analyzer: Sarvam's VAD signals drive turns, and the service
+    # recommends the external turn strategies that resolve them.
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            stt,  # STT
+            stt,
             user_aggregator,  # User responses
             llm,  # LLM
             tts,  # TTS
