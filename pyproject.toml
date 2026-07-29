@@ -182,6 +182,11 @@ docs = [
     "toml",
 ]
 
+# Chart rendering for benchmarks/ (see benchmarks/transport_latency/charts.py).
+bench = [
+    "matplotlib>=3.9,<4",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
@@ -241,6 +246,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # Skip docstring checks for non-source code
+"benchmarks/**/*.py" = ["D"]
 "examples/**/*.py" = ["D"]
 "tests/**/*.py" = ["D"]
 "scripts/**/*.py" = ["D"]
