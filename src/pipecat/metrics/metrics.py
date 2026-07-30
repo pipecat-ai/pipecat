@@ -75,11 +75,9 @@ class LLMTokenUsage(BaseModel):
     """Token usage statistics for LLM operations.
 
     Services differ in whether their input count is reported net or gross of the
-    prompt cache. OpenAI and Google count cache reads inside ``prompt_tokens``;
-    Anthropic and Bedrock report them alongside it. ``total_tokens`` is normalized
-    to the gross figure either way, so summing it across services is meaningful,
-    but it means ``total_tokens`` is not always ``prompt_tokens +
-    completion_tokens``. For a breakdown, read the cache fields rather than
+    prompt cache. ``total_tokens`` is the gross figure either way, so it stays
+    comparable across services, and it is therefore not always ``prompt_tokens +
+    completion_tokens``. Read the cache fields for the breakdown rather than
     subtracting.
 
     Parameters:

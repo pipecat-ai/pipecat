@@ -663,9 +663,10 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             tokens = LLMTokenUsage(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
-                # Bedrock reports inputTokens net of the cache, the same as the
-                # Anthropic API it fronts, so the cached tokens have to be added
-                # back for the total to mean what it means elsewhere.
+                # Bedrock reports inputTokens net of the cache, so the cached
+                # tokens are added back. The provider's own totalTokens is unused
+                # because an interrupted turn reports an estimated completion
+                # count, which the total has to agree with.
                 total_tokens=(
                     prompt_tokens
                     + cache_creation_input_tokens

@@ -4,18 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests that ``LLMTokenUsage.total_tokens`` means the same thing across services.
+"""Tests that ``LLMTokenUsage.total_tokens`` counts cached input tokens.
 
-Services report their input count differently: OpenAI and Google count cache reads
-inside ``prompt_tokens`` and hand back a total that already includes them, while
-Anthropic and Bedrock report cache reads alongside an input count that excludes
-them. Computing ``prompt_tokens + completion_tokens`` on the second group therefore
-drops every cached token, and a consumer summing ``total_tokens`` over a session
-gets a number that is quietly too low without anything raising.
-
-The gap is not marginal for a voice agent, where the system prompt and the
-conversation history are re-read from cache on every turn, so cache reads come to
-dominate the input count within a few turns.
+Anthropic and Bedrock report cache reads and cache writes alongside an input count
+that excludes them, so their totals are summed from all four component counts. On
+services whose provider supplies the total, cached tokens are already inside it, so
+``total_tokens`` carries the same meaning everywhere.
 """
 
 from unittest.mock import AsyncMock
@@ -50,9 +44,11 @@ def _reported(service) -> object:
 
 
 class TestAnthropicTotals:
+    """Anthropic totals cover the cache reads and writes reported beside the input count."""
+
     @pytest.mark.asyncio
     async def test_cached_reads_are_counted_in_the_total(self):
-        """The turn billed 2100 input tokens; only 100 of them were uncached."""
+        """A turn billed for 2100 input tokens, only 100 of them uncached."""
         service = _anthropic_service()
         await service._report_usage_metrics(
             prompt_tokens=100,
@@ -76,8 +72,8 @@ class TestAnthropicTotals:
         assert _reported(service).total_tokens == 1650
 
     @pytest.mark.asyncio
-    async def test_the_components_are_still_reported_separately(self):
-        """The total is normalized, so the breakdown has to stay available."""
+    async def test_the_components_are_reported_separately(self):
+        """The total is the gross figure, so the breakdown stays available beside it."""
         service = _anthropic_service()
         await service._report_usage_metrics(
             prompt_tokens=100,
@@ -92,8 +88,8 @@ class TestAnthropicTotals:
         assert usage.total_tokens == 2450
 
     @pytest.mark.asyncio
-    async def test_an_uncached_turn_is_unaffected(self):
-        """No cache in play means the old arithmetic was already right."""
+    async def test_an_uncached_turn_counts_input_plus_output(self):
+        """With no cache activity the total is just the input and output counts."""
         service = _anthropic_service()
         await service._report_usage_metrics(
             prompt_tokens=100,
@@ -105,9 +101,11 @@ class TestAnthropicTotals:
 
 
 class TestBedrockTotals:
+    """Bedrock reports inputTokens net of the cache, so its totals are summed the same way."""
+
     @pytest.mark.asyncio
     async def test_cached_reads_are_counted_in_the_total(self):
-        """Bedrock fronts the same Anthropic models and reports inputTokens the same way."""
+        """A turn carrying both cache reads and cache writes."""
         service = _bedrock_service()
         await service._report_usage_metrics(
             prompt_tokens=100,
@@ -119,8 +117,7 @@ class TestBedrockTotals:
 
     @pytest.mark.asyncio
     async def test_a_cache_only_report_is_not_dropped(self):
-        """The guard skipped reporting unless input or output was non-zero, so a
-        report carrying only cache activity vanished instead of being counted."""
+        """Cache activity alone is enough to report usage."""
         service = _bedrock_service()
         await service._report_usage_metrics(
             prompt_tokens=0,
@@ -131,8 +128,8 @@ class TestBedrockTotals:
         assert _reported(service).total_tokens == 2000
 
     @pytest.mark.asyncio
-    async def test_an_empty_report_is_still_skipped(self):
-        """Widening the guard must not start emitting all-zero usage."""
+    async def test_an_empty_report_is_skipped(self):
+        """An all-zero report produces no usage metrics."""
         service = _bedrock_service()
         await service._report_usage_metrics(
             prompt_tokens=0,
