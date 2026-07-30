@@ -906,6 +906,38 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(params.enable_user_speaking_frames)
         await strategy.cleanup()
 
+    async def test_no_timer_driven_finalization_while_no_turn_is_open(self):
+        """The idle timer must stay quiet between turns.
+
+        With wait_for_transcript off (how realtime mode configures this
+        strategy) the timer path would otherwise fire on every tick forever.
+        """
+        strategy = ExternalUserTurnStopStrategy(timeout=0.05, wait_for_transcript=False)
+        await strategy.setup(self.task_manager)
+
+        fired = 0
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal fired
+            fired += 1
+
+        # Never started a turn: several timer ticks should pass in silence.
+        await asyncio.sleep(0.3)
+        self.assertEqual(fired, 0)
+
+        # Once a turn opens, the timer finalizes it as before.
+        await strategy.handle_user_turn_started()
+        await strategy.process_frame(ProposedUserStoppedSpeakingFrame())
+        self.assertEqual(fired, 1)
+
+        # And falls silent again after the turn ends.
+        await strategy.handle_user_turn_stopped()
+        await asyncio.sleep(0.3)
+        self.assertEqual(fired, 1)
+
+        await strategy.cleanup()
+
     async def test_deferred_finalization_keeps_the_signals_emission_flags(self):
         """Finalization from the transcript timeout carries the right flags.
 
@@ -922,6 +954,10 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         async def on_user_turn_stopped(strategy, stop_params):
             nonlocal params
             params = stop_params
+
+        # The controller opens the turn on every stop strategy before any
+        # signals arrive; the timer path only runs while a turn is open.
+        await strategy.handle_user_turn_started()
 
         # Stop signal first, transcript after: the stop resolves from the
         # timeout in the strategy's task handler.

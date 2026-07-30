@@ -78,6 +78,7 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._user_speaking = False
         self._seen_interim_results = False
         self._adopting = False
+        self._turn_open = False
         self._event = asyncio.Event()
         self._task: asyncio.Task | None = None
 
@@ -93,10 +94,12 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
     async def handle_user_turn_started(self):
         """Ready the strategy to detect the end of the turn now starting."""
         await self._reset()
+        self._turn_open = True
 
     async def handle_user_turn_stopped(self):
         """Clear per-turn state once the turn has ended."""
         await self._reset()
+        self._turn_open = False
 
     async def _reset(self):
         """Clear per-turn state. Runs at both turn boundaries."""
@@ -184,7 +187,12 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
                 await asyncio.wait_for(self._event.wait(), timeout=self._timeout)
                 self._event.clear()
             except TimeoutError:
-                await self._maybe_trigger_user_turn_stopped()
+                # Note: with wait_for_transcript off (realtime mode) this fires
+                # on every tick, and with no turn to end the controller would
+                # just discard every one. Harmless, but very noisy. Hence the
+                # _turn_open check.
+                if self._turn_open:
+                    await self._maybe_trigger_user_turn_stopped()
 
     async def _trigger_user_turn_stopped(self):
         """End the turn, emitting the turn frame unless it was already announced.
