@@ -181,6 +181,11 @@ class PipelineWorker(BaseWorker):
 
     - on_frame_reached_upstream: Called when upstream frames reach the source
     - on_frame_reached_downstream: Called when downstream frames reach the sink
+    - on_heartbeat: Called every time a heartbeat frame completes its traversal of the
+          pipeline, with the traversal latency in seconds. This is the positive health
+          signal and the only reliable "recovered" edge for consumers that act on
+          ``on_heartbeat_timeout``. Keep the handler cheap (it fires once per
+          ``heartbeats_period_secs`` per pipeline).
     - on_heartbeat_timeout: Called when a heartbeat frame is not received within the monitor timeout.
           Fires repeatedly every ``heartbeats_monitor_secs`` for as long as the stall persists.
     - on_idle_timeout: Called when pipeline is idle beyond timeout threshold
@@ -201,6 +206,10 @@ class PipelineWorker(BaseWorker):
 
         @worker.event_handler("on_frame_reached_upstream")
         async def on_frame_reached_upstream(worker, frame):
+            ...
+
+        @worker.event_handler("on_heartbeat")
+        async def on_heartbeat(worker, latency_secs):
             ...
 
         @worker.event_handler("on_heartbeat_timeout")
@@ -506,6 +515,7 @@ class PipelineWorker(BaseWorker):
         self._reached_downstream_types: set[type[Frame]] = set()
         self._register_event_handler("on_frame_reached_upstream")
         self._register_event_handler("on_frame_reached_downstream")
+        self._register_event_handler("on_heartbeat")
         self._register_event_handler("on_heartbeat_timeout")
         self._register_event_handler("on_idle_timeout")
         self._register_event_handler("on_pipeline_started")
@@ -1241,10 +1251,17 @@ class PipelineWorker(BaseWorker):
     async def _heartbeat_monitor_handler(self):
         """Monitor heartbeat frames for processing time and timeout detection.
 
-        Logs the time each heartbeat takes to traverse the pipeline. If no
-        heartbeat arrives within ``heartbeats_monitor_secs``, logs a warning
-        and fires ``on_heartbeat_timeout``. The event fires repeatedly every
+        Logs the time each heartbeat takes to traverse the pipeline and fires
+        ``on_heartbeat`` with that traversal latency in seconds. If no heartbeat
+        arrives within ``heartbeats_monitor_secs``, logs a warning and fires
+        ``on_heartbeat_timeout``. The timeout event fires repeatedly every
         ``heartbeats_monitor_secs`` for as long as the stall persists.
+
+        ``on_heartbeat`` is the positive counterpart of ``on_heartbeat_timeout``:
+        consumers that gate remediation (aborting a call, opening an admission
+        breaker) on missed heartbeats need an explicit recovery signal, otherwise
+        they can only infer recovery from a wall clock. Keep handlers cheap — this
+        fires once per ``heartbeats_period_secs`` per pipeline.
         """
         wait_time = self._params.heartbeats_monitor_secs
         while True:
@@ -1253,6 +1270,7 @@ class PipelineWorker(BaseWorker):
                 process_time = (self._clock.get_time() - frame.timestamp) / 1_000_000_000
                 logger.trace(f"{self}: heartbeat frame processed in {process_time} seconds")
                 self._heartbeat_queue.task_done()
+                await self._call_event_handler("on_heartbeat", process_time)
             except TimeoutError:
                 logger.warning(
                     f"{self}: heartbeat frame not received for more than {wait_time} seconds"

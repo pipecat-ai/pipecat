@@ -32,6 +32,7 @@ from pipecat.frames.frames import (
     CancelTaskFrame,
     EndFrame,
     Frame,
+    HeartbeatFrame,
     InterruptionFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
@@ -118,6 +119,36 @@ class BaseOutputTransport(FrameProcessor):
             The size of audio chunks in bytes.
         """
         return self._audio_chunk_size
+
+    @property
+    def seconds_since_last_output_write(self) -> float:
+        """Staleness of the output audio task, in seconds.
+
+        Complements the pipeline heartbeat. Heartbeats deliberately bypass the
+        media senders (they are a pipeline-traversal probe, and the audio path is
+        paced at 1x realtime, so routing them through it measures playout backlog
+        instead of health). This property is the cheap, low-false-positive check
+        for the one thing heartbeats therefore no longer cover: an output audio
+        task that has stopped making progress.
+
+        Only senders that write continuously are considered — i.e. senders with a
+        mixer, which emit a mixed silence frame whenever their queue is empty and
+        so write every audio chunk regardless of conversation activity. A sender
+        without a mixer legitimately writes nothing while idle and is skipped
+        rather than reported as stale.
+
+        Returns:
+            The largest staleness across continuously-writing senders, or 0.0
+            when there is no such sender. 0.0 means "no evidence of a wedge";
+            callers must treat it as healthy, never as a fresh measurement.
+        """
+        staleness = [
+            secs
+            for sender in self._media_senders.values()
+            if sender.writes_audio_continuously
+            and (secs := sender.seconds_since_last_audio_write) is not None
+        ]
+        return max(staleness) if staleness else 0.0
 
     async def start(self, frame: StartFrame):
         """Start the output transport and initialize components.
@@ -352,6 +383,17 @@ class BaseOutputTransport(FrameProcessor):
             await self.write_dtmf(frame)
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
+        elif isinstance(frame, HeartbeatFrame):
+            # Health probe, not media. The audio task writes OutputAudioRawFrames
+            # at 1x realtime, so routing a heartbeat through MediaSender measures
+            # playout backlog rather than liveness: a single ~9s utterance already
+            # queued ahead of it delays the heartbeat past a 10s monitor timeout.
+            # Deliver it straight to the worker sink; the frame has already been
+            # processed by every processor upstream of this transport, which is
+            # what the probe is actually asking about. Liveness of the MediaSender
+            # audio task itself is reported separately by
+            # `seconds_since_last_output_write`.
+            await self.push_frame(frame, direction)
         elif direction == FrameDirection.UPSTREAM:
             await self.push_frame(frame, direction)
         else:
@@ -453,6 +495,11 @@ class BaseOutputTransport(FrameProcessor):
             self._video_task: asyncio.Task | None = None
             self._clock_task: asyncio.Task | None = None
 
+            # Monotonic timestamp of the last successful `write_audio_frame`.
+            # Stamped when the audio task is created so a freshly started sender
+            # never reads as stale. See `seconds_since_last_audio_write`.
+            self._last_audio_write_time: float | None = None
+
             # If timestamps are equal, use this count to preserve the insertion order
             self._clock_queue_counter = itertools.count()
 
@@ -473,6 +520,33 @@ class BaseOutputTransport(FrameProcessor):
                 The size of audio chunks in bytes.
             """
             return self._audio_chunk_size
+
+        @property
+        def writes_audio_continuously(self) -> bool:
+            """Whether this sender is expected to write audio even while idle.
+
+            True only when a mixer is configured: the mixer path synthesizes and
+            writes a silence frame whenever the audio queue is empty, so writes
+            happen every audio chunk regardless of conversation activity. Without
+            a mixer the audio task deliberately blocks on an empty queue, so a
+            growing time-since-last-write means "idle", not "wedged".
+
+            Returns:
+                True if the audio task writes on a fixed cadence while idle.
+            """
+            return self._mixer is not None and self._audio_task is not None
+
+        @property
+        def seconds_since_last_audio_write(self) -> float | None:
+            """Seconds since the last successful ``write_audio_frame``.
+
+            Returns:
+                Seconds since the last successful audio write, or None if the
+                audio task has never run (nothing to report yet).
+            """
+            if self._last_audio_write_time is None:
+                return None
+            return time.monotonic() - self._last_audio_write_time
 
         async def start(self, frame: StartFrame):
             """Start the media sender and initialize components.
@@ -653,6 +727,9 @@ class BaseOutputTransport(FrameProcessor):
             """Create the audio processing task."""
             if not self._audio_task:
                 self._audio_queue = FrameQueue()
+                # Arm the write watchdog from task creation so a sender that has
+                # not written yet is never mistaken for a wedged one.
+                self._last_audio_write_time = time.monotonic()
                 self._audio_task = self._transport.create_task(self._audio_task_handler())
 
         async def _cancel_audio_task(self):
@@ -660,6 +737,7 @@ class BaseOutputTransport(FrameProcessor):
             if self._audio_task:
                 await self._transport.cancel_task(self._audio_task)
                 self._audio_task = None
+                self._last_audio_write_time = None
 
         async def _bot_started_speaking(self):
             """Handle bot started speaking event."""
@@ -864,6 +942,11 @@ class BaseOutputTransport(FrameProcessor):
                 try:
                     if isinstance(frame, OutputAudioRawFrame):
                         push_downstream = await self._transport.write_audio_frame(frame)
+                        if push_downstream:
+                            # Liveness stamp for `seconds_since_last_audio_write`.
+                            # Only successful writes count: a transport that keeps
+                            # returning False is not making progress.
+                            self._last_audio_write_time = time.monotonic()
                 except Exception as e:
                     logger.error(f"{self} Error writing {frame} to transport: {e}")
                     push_downstream = False

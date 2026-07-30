@@ -1879,11 +1879,21 @@ class InputTransportStartAudioStreamingFrame(ControlFrame):
 
 
 @dataclass
-class HeartbeatFrame(ControlFrame):
+class HeartbeatFrame(ControlFrame, UninterruptibleFrame):
     """Frame used by pipeline task to monitor pipeline health.
 
     This frame is used by the pipeline task as a mechanism to know if the
     pipeline is running properly.
+
+    Heartbeats are ``UninterruptibleFrame`` on purpose: every ``FrameProcessor``
+    keeps its pending non-system frames in a ``FrameQueue`` that is drained of
+    interruptible items on every ``InterruptionFrame``. Without this mixin a
+    single barge-in destroys every heartbeat that happens to be in flight
+    anywhere in the pipeline, so a perfectly healthy pipeline under continuous
+    interruption looks stalled to the heartbeat monitor. Being uninterruptible
+    only preserves the probe; it does not delay interruption handling, because
+    ``FrameProcessor._start_interruption`` explicitly excludes heartbeats from
+    the "current frame is uninterruptible, don't cancel" guard.
 
     Parameters:
         timestamp: Timestamp when the heartbeat was generated.

@@ -37,6 +37,7 @@ from pipecat.frames.frames import (
     FrameProcessorPauseUrgentFrame,
     FrameProcessorResumeFrame,
     FrameProcessorResumeUrgentFrame,
+    HeartbeatFrame,
     InterruptionFrame,
     StartFrame,
     SystemFrame,
@@ -874,9 +875,19 @@ class FrameProcessor(BaseObject):
     async def _start_interruption(self):
         """Start handling an interruption by cancelling current tasks."""
         try:
+            # HeartbeatFrame is uninterruptible so an interruption cannot drain
+            # in-flight heartbeats out of the process queue (that is what made
+            # the heartbeat monitor a barge-in detector rather than a health
+            # probe). It must NOT, however, protect the process task from being
+            # cancelled: a heartbeat can be the current frame while the task is
+            # parked in `pause_processing_frames()`, and taking the
+            # reset-only branch there leaves the task parked forever. Heartbeats
+            # are cheap and re-issued every period, so losing the one in flight
+            # at the instant of an interruption costs nothing.
+            current = self.__process_current_frame
             current_is_uninterruptible = isinstance(
-                self.__process_current_frame, UninterruptibleFrame
-            )
+                current, UninterruptibleFrame
+            ) and not isinstance(current, HeartbeatFrame)
             if current_is_uninterruptible:
                 # The frame currently being processed is uninterruptible, so we
                 # must not cancel it. Just flush non-uninterruptible frames from

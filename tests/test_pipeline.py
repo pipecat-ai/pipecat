@@ -409,6 +409,51 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         # still catching heartbeats that fire too fast.
         assert elapsed >= (expected_heartbeats - 1) * period_secs
 
+    async def test_on_heartbeat_event_reports_traversal_latency(self):
+        """The monitor must emit a positive event, not only a timeout event.
+
+        Consumers that act on ``on_heartbeat_timeout`` (aborting a call, opening
+        an admission breaker) need an explicit "recovered" edge; without one they
+        can only decay their state on a wall clock, which is what kept a
+        prod admission breaker latched on pods that had already drained.
+        """
+        period_secs = 0.2
+        expected_heartbeats = 3
+        latencies: list[float] = []
+        received_expected = asyncio.Event()
+
+        pipeline = Pipeline([IdentityFilter()])
+        worker = PipelineWorker(
+            pipeline,
+            params=PipelineParams(
+                enable_heartbeats=True,
+                heartbeats_period_secs=period_secs,
+            ),
+            cancel_on_idle_timeout=False,
+        )
+
+        @worker.event_handler("on_heartbeat")
+        async def on_heartbeat(worker, latency_secs):
+            latencies.append(latency_secs)
+            if len(latencies) >= expected_heartbeats:
+                received_expected.set()
+
+        async def wait_for_heartbeats():
+            try:
+                await asyncio.wait_for(received_expected.wait(), timeout=5.0)
+            except TimeoutError:
+                pass
+            await worker.queue_frame(EndFrame())
+
+        await asyncio.gather(
+            worker.run(WorkerParams(task_manager=TaskManager())),
+            wait_for_heartbeats(),
+        )
+
+        assert len(latencies) >= expected_heartbeats
+        # An idle identity pipeline traverses in well under a heartbeat period.
+        assert all(0 <= latency < period_secs for latency in latencies), latencies
+
     async def test_heartbeat_monitor_respects_custom_timeout(self):
         """Verify the heartbeat monitor uses heartbeats_monitor_secs from params."""
 

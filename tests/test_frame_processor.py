@@ -12,6 +12,7 @@ from pipecat.frames.frames import (
     DataFrame,
     EndFrame,
     Frame,
+    HeartbeatFrame,
     InterruptionFrame,
     OutputTransportMessageUrgentFrame,
     StopFrame,
@@ -26,6 +27,7 @@ from pipecat.processors.frame_processor import (
     FrameProcessor,
 )
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.utils.frame_queue import FrameQueue
 
 
 @dataclass
@@ -472,6 +474,99 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_down_frames,
         )
         self.assertTrue(code_after_ran, "Code after broadcast_interruption() should execute")
+
+
+class TestHeartbeatSurvivesInterruptions(unittest.IsolatedAsyncioTestCase):
+    """A barge-in must not destroy the pipeline's health probe.
+
+    Regression coverage for the run-60 false-stall signal. Every FrameProcessor
+    keeps its pending non-system frames in a ``FrameQueue`` that is drained of
+    interruptible items on every ``InterruptionFrame``, and heartbeats used to be
+    interruptible. In a workload with continuous barge-in that suppressed
+    heartbeats indefinitely on a healthy pipeline, which is what the stall
+    watchdog and the admission breaker were then armed on.
+    """
+
+    def test_heartbeat_survives_frame_queue_reset(self):
+        queue = FrameQueue()
+        heartbeat = HeartbeatFrame(timestamp=0)
+        queue.put_nowait(TextFrame(text="dropped"))
+        queue.put_nowait(heartbeat)
+        queue.put_nowait(TextFrame(text="also dropped"))
+
+        self.assertTrue(queue.has_uninterruptible)
+        queue.reset()
+
+        self.assertEqual(queue.qsize(), 1)
+        self.assertIs(queue.get_nowait(), heartbeat)
+
+    async def test_queued_heartbeat_survives_an_interruption(self):
+        """A heartbeat waiting behind a slow frame is still delivered."""
+
+        class DelayTestFrameProcessor(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, TextFrame):
+                    # Sleep more than SleepFrame default so the interruption
+                    # lands while this frame is the one being processed and the
+                    # heartbeat is still waiting in the queue behind it.
+                    await asyncio.sleep(0.4)
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([DelayTestFrameProcessor()])
+
+        frames_to_send = [
+            TextFrame(text="slow frame the interruption will discard"),
+            HeartbeatFrame(timestamp=0),
+            SleepFrame(),
+            InterruptionFrame(),
+        ]
+        expected_down_frames = [
+            InterruptionFrame,
+            HeartbeatFrame,
+        ]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+
+    async def test_in_flight_heartbeat_does_not_block_the_process_task_cancel(self):
+        """Being uninterruptible must not make a heartbeat un-cancellable.
+
+        If the frame being processed when an interruption arrives is
+        uninterruptible, ``_start_interruption`` only drains the queue and
+        leaves the process task alone. A heartbeat must be excluded from that
+        guard: heartbeats are re-issued every period, so losing one costs
+        nothing, whereas leaving a wedged process task alive deadlocks the
+        processor for the rest of the call.
+        """
+
+        class WedgeOnHeartbeatProcessor(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, HeartbeatFrame):
+                    # Never returns: only a task cancel can recover this.
+                    await asyncio.sleep(30)
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([WedgeOnHeartbeatProcessor()])
+
+        frames_to_send = [
+            HeartbeatFrame(timestamp=0),
+            SleepFrame(),
+            InterruptionFrame(),
+            TextFrame(text="after the interruption"),
+        ]
+        expected_down_frames = [
+            InterruptionFrame,
+            TextFrame,
+        ]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
 
 
 if __name__ == "__main__":
