@@ -591,6 +591,14 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                 completion_tokens=completion_tokens,
                 cache_creation_input_tokens=cache_creation_input_tokens,
                 cache_read_input_tokens=cache_read_input_tokens,
-                total_tokens=prompt_tokens + completion_tokens,
+                # Anthropic reports input_tokens net of the cache, so the cached
+                # tokens are added back to keep the total comparable with services
+                # whose provider supplies it already gross.
+                total_tokens=(
+                    prompt_tokens
+                    + cache_creation_input_tokens
+                    + cache_read_input_tokens
+                    + completion_tokens
+                ),
             )
             await self.start_llm_usage_metrics(tokens)

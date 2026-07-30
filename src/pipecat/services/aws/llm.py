@@ -654,11 +654,25 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
         cache_read_input_tokens: int,
         cache_creation_input_tokens: int,
     ):
-        if prompt_tokens or completion_tokens:
+        if (
+            prompt_tokens
+            or completion_tokens
+            or cache_read_input_tokens
+            or cache_creation_input_tokens
+        ):
             tokens = LLMTokenUsage(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
-                total_tokens=prompt_tokens + completion_tokens,
+                # Bedrock reports inputTokens net of the cache, so the cached
+                # tokens are added back. The provider's own totalTokens is unused
+                # because an interrupted turn reports an estimated completion
+                # count, which the total has to agree with.
+                total_tokens=(
+                    prompt_tokens
+                    + cache_creation_input_tokens
+                    + cache_read_input_tokens
+                    + completion_tokens
+                ),
                 cache_read_input_tokens=cache_read_input_tokens,
                 cache_creation_input_tokens=cache_creation_input_tokens,
             )
