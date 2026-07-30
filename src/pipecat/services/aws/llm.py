@@ -654,11 +654,24 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
         cache_read_input_tokens: int,
         cache_creation_input_tokens: int,
     ):
-        if prompt_tokens or completion_tokens:
+        if (
+            prompt_tokens
+            or completion_tokens
+            or cache_read_input_tokens
+            or cache_creation_input_tokens
+        ):
             tokens = LLMTokenUsage(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
-                total_tokens=prompt_tokens + completion_tokens,
+                # Bedrock reports inputTokens net of the cache, the same as the
+                # Anthropic API it fronts, so the cached tokens have to be added
+                # back for the total to mean what it means elsewhere.
+                total_tokens=(
+                    prompt_tokens
+                    + cache_creation_input_tokens
+                    + cache_read_input_tokens
+                    + completion_tokens
+                ),
                 cache_read_input_tokens=cache_read_input_tokens,
                 cache_creation_input_tokens=cache_creation_input_tokens,
             )

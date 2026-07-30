@@ -74,10 +74,20 @@ class ProcessingMetricsData(MetricsData):
 class LLMTokenUsage(BaseModel):
     """Token usage statistics for LLM operations.
 
+    Services differ in whether their input count is reported net or gross of the
+    prompt cache. OpenAI and Google count cache reads inside ``prompt_tokens``;
+    Anthropic and Bedrock report them alongside it. ``total_tokens`` is normalized
+    to the gross figure either way, so summing it across services is meaningful,
+    but it means ``total_tokens`` is not always ``prompt_tokens +
+    completion_tokens``. For a breakdown, read the cache fields rather than
+    subtracting.
+
     Parameters:
-        prompt_tokens: Number of tokens in the input prompt.
+        prompt_tokens: Number of tokens in the input prompt. Net of the cache on
+            services that report cache reads separately.
         completion_tokens: Number of tokens in the generated completion.
-        total_tokens: Total number of tokens used (prompt + completion).
+        total_tokens: Total number of tokens used, including any cached input
+            tokens.
         cache_read_input_tokens: Number of tokens read from cache, if applicable.
         cache_creation_input_tokens: Number of tokens used to create cache entries, if applicable.
         reasoning_tokens: Number of completion tokens used for reasoning, if applicable.
