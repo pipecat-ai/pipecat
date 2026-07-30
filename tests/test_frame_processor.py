@@ -545,6 +545,7 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
                 await super().process_frame(frame, direction)
                 if isinstance(frame, TextFrame):
                     await self.pause_processing_frames()
+
                     # Resume shortly after pausing so the test can complete.
                     async def resume_later():
                         await asyncio.sleep(0.1)
