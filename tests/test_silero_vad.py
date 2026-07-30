@@ -89,7 +89,7 @@ class TestSileroVADErrorReporting(unittest.TestCase):
         analyzer = SileroVADAnalyzer(sample_rate=16000)
 
         def always_fails(audio_float32, sample_rate):
-            raise ValueError(f"Supported sampling rates: [8000, 16000] (or multiply of 16000)")
+            raise ValueError("Supported sampling rates: [8000, 16000] (or multiply of 16000)")
 
         analyzer._model = always_fails
         return analyzer

@@ -145,6 +145,10 @@ class KrispVivaTurn(BaseTurnAnalyzer):
 
     async def cleanup(self):
         """Release SDK reference when analyzer is destroyed."""
+        # KrispVivaTurn derives from BaseTurnAnalyzer, not BaseSmartTurn, so it
+        # owns no worker-thread executor. Chain to super() anyway so it picks up
+        # any future base-class teardown for free.
+        await super().cleanup()
         if self._sdk_acquired:
             try:
                 # Clean up session first

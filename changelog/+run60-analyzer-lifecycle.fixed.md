@@ -4,7 +4,9 @@
   alive) was only reclaimed when the executor happened to be garbage collected —
   arbitrarily late for objects held in a pipeline's reference cycles. Shutdown is
   idempotent and non-blocking; analysis after teardown degrades to the last known
-  state instead of raising.
+  state instead of raising. `KrispVivaVadAnalyzer.cleanup()` overrode the base
+  without chaining to it and so kept leaking a thread per leg; it now calls
+  `super().cleanup()`.
 
 - `SileroVADAnalyzer` no longer floods the log on a persistent analysis failure.
   Any exception returns 0 confidence, which is the correct fail-safe but is
@@ -27,4 +29,6 @@
   (`vad_analyzer.py`, `soxr_stream_resampler.py`): per-frame CPU in the VAD,
   smart-turn and resampling paths is two orders of magnitude below the event-loop
   budget and does not explain per-pod concurrency limits. Do not tune it; measure
-  scheduling delay via `PipelineWorker`'s new `on_heartbeat` latency instead.
+  per-pipeline load via `PipelineWorker`'s new `on_heartbeat` latency instead,
+  reading it as scheduling delay plus the longest in-flight per-processor frame
+  operation.

@@ -208,6 +208,9 @@ class KrispVivaVadAnalyzer(VADAnalyzer):
 
     async def cleanup(self):
         """Cleanup analyzer resources."""
+        # VADAnalyzer.cleanup() releases this analyzer's dedicated worker thread;
+        # skipping super() here would leak one thread per call leg.
+        await super().cleanup()
         try:
             self._session = None
             KrispVivaSDKManager.release()
