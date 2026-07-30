@@ -11,7 +11,7 @@ import json
 import time
 import urllib.parse
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from loguru import logger
@@ -29,7 +29,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.services.settings import STTSettings
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -41,11 +41,20 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 class CartesiaTurnsSTTSettings(STTSettings):
     """Settings for CartesiaTurnsSTTService.
 
-    The ink-2 model family is English-only and does not support runtime model or language switching,
-    so no fields are added beyond the inherited :class:`STTSettings`.
+    ``model`` and ``language`` are inherited from ``STTSettings`` /
+    ``ServiceSettings``. The ink-2 model family is English-only and does not
+    support runtime model or language switching.
+
+    Parameters:
+        keyterm: List of key terms or phrases to bias transcription towards.
+            Sent as repeated ``keyterm`` query parameters on the WebSocket
+            connection URL. Cartesia applies keyterms only at connection
+            time; like ``model`` and ``language``, changing this at runtime
+            has no effect and is reported as unhandled. See
+            https://docs.cartesia.ai/use-the-api/stt/keyterms.
     """
 
-    pass
+    keyterm: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class CartesiaTurnsSTTService(WebsocketSTTService):
@@ -112,8 +121,8 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
             extra_headers: Optional additional HTTP headers to send with the
                 WebSocket handshake.
             settings: Runtime-updatable settings. The ink-2 family does not
-                support runtime model or language switching; attempts to update
-                either field will be reported as unhandled.
+                support runtime model, language, or keyterm switching; attempts
+                to update any of these fields will be reported as unhandled.
             **kwargs: Additional arguments passed to the parent
                 :class:`WebsocketSTTService`.
         """
@@ -121,6 +130,7 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         default_settings = self.Settings(
             model="ink-2",
             language=None,
+            keyterm=None,
         )
 
         if settings is not None:
@@ -253,11 +263,14 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
     def _websocket_url(self) -> str:
         # Pipecat pipes 16-bit signed little-endian PCM through the pipeline,
         # so the wire encoding is fixed.
-        params = {
-            "model": self._settings.model,
-            "encoding": "pcm_s16le",
-            "sample_rate": str(self.sample_rate),
-        }
+        params = [
+            ("model", self._settings.model),
+            ("encoding", "pcm_s16le"),
+            ("sample_rate", str(self.sample_rate)),
+        ]
+        keyterm = self._settings.keyterm
+        if is_given(keyterm) and keyterm is not None:
+            params.extend(("keyterm", term) for term in keyterm)
         return f"{self._url}?{urllib.parse.urlencode(params)}"
 
     async def _connect_websocket(self):

@@ -13,7 +13,7 @@ the Cartesia Live transcription API for real-time speech recognition.
 import json
 import urllib.parse
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from loguru import logger
@@ -30,7 +30,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import STTSettings
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
 from pipecat.services.stt_latency import CARTESIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
@@ -41,9 +41,21 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 
 @dataclass
 class CartesiaSTTSettings(STTSettings):
-    """Settings for CartesiaSTTService."""
+    """Settings for CartesiaSTTService.
 
-    pass
+    ``model`` and ``language`` are inherited from ``STTSettings`` /
+    ``ServiceSettings``.
+
+    Parameters:
+        keyterm: List of key terms or phrases to bias transcription towards.
+            Sent as repeated ``keyterm`` query parameters on the WebSocket
+            connection URL. Cartesia applies keyterms only at connection
+            time and does not support changing them mid-stream; updating
+            this setting at runtime triggers a reconnect. See
+            https://docs.cartesia.ai/use-the-api/stt/keyterms.
+    """
+
+    keyterm: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @deprecated(
@@ -186,6 +198,7 @@ class CartesiaSTTService(WebsocketSTTService):
         default_settings = self.Settings(
             model="ink-whisper",
             language=Language.EN.value,
+            keyterm=None,
         )
 
         # 2. Apply live_options overrides — only if settings not provided
@@ -342,12 +355,15 @@ class CartesiaSTTService(WebsocketSTTService):
                 return
             logger.debug("Connecting to Cartesia STT")
 
-            params = {
-                "model": self._settings.model,
-                "language": self._settings.language,
-                "encoding": self._encoding,
-                "sample_rate": str(self.sample_rate),
-            }
+            params = [
+                ("model", self._settings.model),
+                ("language", self._settings.language),
+                ("encoding", self._encoding),
+                ("sample_rate", str(self.sample_rate)),
+            ]
+            keyterm = self._settings.keyterm
+            if is_given(keyterm) and keyterm is not None:
+                params.extend(("keyterm", term) for term in keyterm)
             ws_url = f"wss://{self._base_url}/stt/websocket?{urllib.parse.urlencode(params)}"
             headers = {"Cartesia-Version": "2025-04-16", "X-API-Key": self._api_key}
 

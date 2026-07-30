@@ -5,6 +5,7 @@
 #
 
 from unittest.mock import AsyncMock
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from websockets.protocol import State
@@ -33,6 +34,58 @@ async def test_cartesia_connect_failure_clears_stale_websocket(monkeypatch):
     await service._connect_websocket()
 
     assert service._websocket is None
+
+
+@pytest.mark.asyncio
+async def test_cartesia_connect_websocket_url_includes_keyterm(monkeypatch):
+    captured = {}
+
+    async def fake_websocket_connect(url, *, additional_headers):
+        captured["url"] = url
+        captured["headers"] = additional_headers
+        return _FakeWebsocket()
+
+    monkeypatch.setattr("pipecat.services.cartesia.stt.websocket_connect", fake_websocket_connect)
+
+    service = CartesiaSTTService(
+        api_key="test-key",
+        sample_rate=16000,
+        settings=CartesiaSTTService.Settings(keyterm=["Cartesia", "Ink Whisper"]),
+    )
+    # sample_rate is normally set from StartFrame; poke it directly since this
+    # test calls _connect_websocket() without running a full pipeline.
+    service._sample_rate = 16000
+
+    await service._connect_websocket()
+
+    parsed = urlparse(captured["url"])
+    query = parse_qs(parsed.query)
+    assert parsed.scheme == "wss"
+    assert parsed.netloc == "api.cartesia.ai"
+    assert parsed.path == "/stt/websocket"
+    assert query["model"] == ["ink-whisper"]
+    assert query["sample_rate"] == ["16000"]
+    assert query["keyterm"] == ["Cartesia", "Ink Whisper"]
+    assert captured["headers"]["X-API-Key"] == "test-key"
+
+
+@pytest.mark.asyncio
+async def test_cartesia_connect_websocket_url_omits_keyterm_when_not_set(monkeypatch):
+    captured = {}
+
+    async def fake_websocket_connect(url, *, additional_headers):
+        captured["url"] = url
+        return _FakeWebsocket()
+
+    monkeypatch.setattr("pipecat.services.cartesia.stt.websocket_connect", fake_websocket_connect)
+
+    service = CartesiaSTTService(api_key="test-key", sample_rate=16000)
+    service._sample_rate = 16000
+
+    await service._connect_websocket()
+
+    query = parse_qs(urlparse(captured["url"]).query)
+    assert "keyterm" not in query
 
 
 @pytest.mark.asyncio
