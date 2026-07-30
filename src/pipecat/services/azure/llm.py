@@ -13,6 +13,7 @@ from openai import AsyncAzureOpenAI
 
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import is_given
 
 
 @dataclass
@@ -46,7 +47,10 @@ class AzureLLMService(OpenAILLMService):
         Args:
             api_key: The API key for accessing Azure OpenAI.
             endpoint: The Azure endpoint URL.
-            model: The model identifier to use. Defaults to "gpt-4.1".
+            model: The Azure OpenAI **deployment name** to use — i.e. the name
+                you gave the deployment on your Azure resource, which becomes
+                the ``/deployments/<name>/`` segment in request URLs. Required;
+                no default because deployment names are user-specific.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AzureLLMService.Settings(model=...)`` instead.
@@ -56,9 +60,14 @@ class AzureLLMService(OpenAILLMService):
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
+
+        Raises:
+            ValueError: If no deployment name is provided via either the
+                deprecated ``model=`` init arg or ``settings.model``.
         """
-        # 1. Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model="gpt-4.1")
+        # 1. Initialize default_settings — no hardcoded model default because
+        # on Azure `model` is the deployment name, which is user-specific.
+        default_settings = self.Settings()
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
@@ -70,6 +79,16 @@ class AzureLLMService(OpenAILLMService):
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
+
+        # Fail loudly if no deployment name was supplied; otherwise Azure would
+        # 404 with `DeploymentNotFound` at first inference.
+        if not is_given(default_settings.model) or default_settings.model is None:
+            raise ValueError(
+                "AzureLLMService requires an explicit deployment name via "
+                "`settings=AzureLLMService.Settings(model='<your-deployment-name>')`. "
+                "On Azure OpenAI, `model` is the deployment name you chose on "
+                "your resource, not the model family."
+            )
 
         # Initialize variables before calling parent __init__() because that
         # will call create_client() and we need those values there.
