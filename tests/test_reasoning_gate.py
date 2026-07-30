@@ -67,15 +67,11 @@ class TestClosedBlocks:
         assert suppressed > 0
 
     def test_piped_block_split_across_chunks(self):
-        out, _ = run_stream(
-            ["<|thou", "ght|>secret reasoning<|/thou", "ght|>הבנתי, תודה"]
-        )
+        out, _ = run_stream(["<|thou", "ght|>secret reasoning<|/thou", "ght|>הבנתי, תודה"])
         assert out == "הבנתי, תודה"
 
     def test_think_variant(self):
-        out, _ = run_stream(
-            ["<think>should ask about the party</think>", "למי אתה מתכוון להצביע?"]
-        )
+        out, _ = run_stream(["<think>should ask about the party</think>", "למי אתה מתכוון להצביע?"])
         assert out == "למי אתה מתכוון להצביע?"
 
     def test_mixed_case_thinking_variant(self):
@@ -83,9 +79,7 @@ class TestClosedBlocks:
         assert out == "בסדר גמור."
 
     def test_midstream_block_after_real_text(self):
-        out, _ = run_stream(
-            ["בסדר גמור. ", "<thought>\nwhat next?</thought>", " יום טוב!"]
-        )
+        out, _ = run_stream(["בסדר גמור. ", "<thought>\nwhat next?</thought>", " יום טוב!"])
         assert out == "בסדר גמור.  יום טוב!"
 
     def test_whitespace_before_opener(self):
@@ -126,8 +120,22 @@ class TestChunkBoundaryResidue:
     def test_per_token_closed_block_leaks_nothing(self):
         # The exact per-token shape vLLM streams for a textual pseudo-tag.
         out, _ = run_stream(
-            ["<", "thought", "\n", "Thinking", " Process", ":", " analyze",
-             "\n", "</", "thought", ">", "\n", "Great", ", will you vote?"]
+            [
+                "<",
+                "thought",
+                "\n",
+                "Thinking",
+                " Process",
+                ":",
+                " analyze",
+                "\n",
+                "</",
+                "thought",
+                ">",
+                "\n",
+                "Great",
+                ", will you vote?",
+            ]
         )
         assert out == "\nGreat, will you vote?"
 
@@ -154,9 +162,7 @@ class TestChunkBoundaryResidue:
         assert out.strip() == "הבנתי, תודה. מה הסיבות?"
 
     def test_per_token_unclosed_cot_fully_suppressed(self):
-        out, _ = run_stream(
-            ["<", "thought", ">", "\nThinking Process: analyze the input. Step 1"]
-        )
+        out, _ = run_stream(["<", "thought", ">", "\nThinking Process: analyze the input. Step 1"])
         assert out == ""
 
     def test_legit_tag_prefix_word_survives_any_split(self):
@@ -185,8 +191,10 @@ class TestChunkBoundaryResidue:
         # CoT prose that MENTIONS a ">"-less closer must not end the hold and
         # stream the rest of the reasoning.
         out, _ = run_stream(
-            ["<thought\nThinking Process: if we emit </think here the rest",
-             " leaks\nmore secret reasoning"]
+            [
+                "<thought\nThinking Process: if we emit </think here the rest",
+                " leaks\nmore secret reasoning",
+            ]
         )
         assert out == ""
 
@@ -242,3 +250,66 @@ class TestAccounting:
         gate = ReasoningTagGate()
         assert gate.feed("") == ""
         assert gate.visible_text == ""
+
+
+class TestBoundedHold:
+    """`hold` must not batch an entire reply behind a lone opener.
+
+    Gemma-4's no-thinking-mode artifact is an opener with no closer followed by
+    the real answer. Waiting for `flush()` to release that means downstream TTS
+    receives nothing until the generation finishes, so time-to-first-audio
+    becomes full generation time rather than first-token time — on the model
+    that carried 100% of production traffic.
+    """
+
+    def test_long_reply_behind_a_lone_opener_starts_streaming_early(self):
+        reply = "".join(f"sentence {i} of the answer. " for i in range(40))
+        assert len(reply) > ReasoningTagGate.REASONING_HOLD_MAX_CHARS
+
+        gate = ReasoningTagGate()
+        gate.feed("<thought>")
+        deltas = [reply[i : i + 20] for i in range(0, len(reply), 20)]
+        emitted = [gate.feed(d) for d in deltas]
+
+        # Emission began before the last delta arrived...
+        assert any(chunk for chunk in emitted[:-1]), "hold released nothing mid-stream"
+        # ...and nothing was lost or duplicated.
+        assert "".join(emitted) + gate.flush() == reply
+        assert gate.bounded_releases == 1
+
+    def test_long_chain_of_thought_still_held_and_suppressed(self):
+        cot = "Thinking Process:\n\n" + "".join(
+            f"{i}. analyze the user input carefully. " for i in range(40)
+        )
+        assert len(cot) > ReasoningTagGate.REASONING_HOLD_MAX_CHARS
+
+        gate = ReasoningTagGate()
+        gate.feed("<thought>")
+        emitted = [gate.feed(cot[i : i + 20]) for i in range(0, len(cot), 20)]
+
+        assert "".join(emitted) == ""
+        assert gate.flush() == ""
+        assert gate.bounded_releases == 0
+        assert gate.suppressed_chars > 0
+
+    def test_short_reply_behind_a_lone_opener_is_unchanged(self):
+        # Under the bound: still released at flush, exactly as before.
+        gate = ReasoningTagGate()
+        assert gate.feed("<thought>שלום, איך אפשר לעזור?") == ""
+        assert gate.flush().strip() == "שלום, איך אפשר לעזור?"
+        assert gate.bounded_releases == 0
+
+    def test_closer_arriving_after_a_bounded_release_is_not_spoken(self):
+        reply = "".join(f"word{i} " for i in range(80))
+        assert len(reply) > ReasoningTagGate.REASONING_HOLD_MAX_CHARS
+
+        gate = ReasoningTagGate()
+        gate.feed("<thought>")
+        out = "".join(gate.feed(reply[i : i + 20]) for i in range(0, len(reply), 20))
+        # The closer finally turns up — it belongs to the released block.
+        out += "".join(gate.feed(c) for c in ["</thou", "ght>", " tail."])
+        out += gate.flush()
+
+        assert "</thought>" not in out
+        assert "</thou" not in out
+        assert out == reply + " tail."

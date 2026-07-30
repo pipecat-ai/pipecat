@@ -10,6 +10,7 @@ import ast
 import asyncio
 import json
 import re
+import time
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -65,6 +66,27 @@ STREAM_CLEANUP_TIMEOUT_SECS = 2
 # that empties transiently (Gemma-4 stalled a live turn after a single failed
 # retry); each retry is a fresh attempt and only fires on an otherwise-dead turn.
 MAX_EMPTY_COMPLETION_RETRIES = 3
+
+# Wall-clock budget for ALL generation attempts of a single turn (the initial
+# generation plus every empty-completion retry plus every connection retry).
+# The three retry layers otherwise multiply with no aggregate bound, so a
+# degraded server can hold a live turn open for minutes while the caller hears
+# silence. Sized against a healthy sub-second time-to-first-token: several
+# attempts still fit, but a slow server stops the ladder early instead of
+# stacking timeouts.
+EMPTY_RETRY_TOTAL_BUDGET_SECS = 6.0
+
+# Bounds for the AsyncOpenAI client built by `create_client`. The SDK defaults
+# are max_retries=2 and timeout=600s, and `retry_on_timeout` defaults to False,
+# so without these a single completion on a black-holed endpoint is awaited with
+# no bound at all — on a voice pipeline that is a ten-minute dead-air turn.
+# Every value is overridable per-service via the `client_max_retries` and
+# `client_timeout` constructor arguments.
+CLIENT_MAX_RETRIES = 1
+CLIENT_CONNECT_TIMEOUT_SECS = 5.0
+CLIENT_READ_TIMEOUT_SECS = 30.0
+CLIENT_WRITE_TIMEOUT_SECS = 10.0
+CLIENT_POOL_TIMEOUT_SECS = 5.0
 
 
 def _repair_truncated_json(text) -> Optional[dict]:
@@ -175,9 +197,7 @@ def _recover_leaked_tool_call(content: str, known_names):
                 continue
             try:
                 args = {
-                    kw.arg: ast.literal_eval(kw.value)
-                    for kw in node.keywords
-                    if kw.arg is not None
+                    kw.arg: ast.literal_eval(kw.value) for kw in node.keywords if kw.arg is not None
                 }
             except (ValueError, SyntaxError):
                 continue
@@ -251,10 +271,26 @@ _REASONING_TAG_FORMS = (
 )
 
 
+_REASONING_CLOSE_FORMS = (
+    "<|/thought|>",
+    "<|/thinking|>",
+    "<|/think|>",
+    "</thought>",
+    "</thinking>",
+    "</think>",
+)
+
+
 def _could_grow_into_reasoning_tag(fragment: str) -> bool:
     """True if ``fragment`` (starting at ``<``) is a proper prefix of a tag form."""
     low = fragment.lower()
     return any(form.startswith(low) and form != low for form in _REASONING_TAG_FORMS)
+
+
+def _could_grow_into_reasoning_closer(fragment: str) -> bool:
+    """True if ``fragment`` (starting at ``<``) is a proper prefix of a closer form."""
+    low = fragment.lower()
+    return any(form.startswith(low) and form != low for form in _REASONING_CLOSE_FORMS)
 
 
 # What genuine leaked reasoning looks like right after the opening tag —
@@ -264,9 +300,7 @@ def _could_grow_into_reasoning_tag(fragment: str) -> bool:
 # an opener followed by anything else is the model going straight to its answer
 # behind a lone opener (keep the answer). Mirrors the aggregate-level heuristic
 # in the API layer's delivery sanitizer.
-_REASONING_COT_SIGNATURE_RE = re.compile(
-    r"^\s*[*_#`\s]*thinking\s+process\b", re.IGNORECASE
-)
+_REASONING_COT_SIGNATURE_RE = re.compile(r"^\s*[*_#`\s]*thinking\s+process\b", re.IGNORECASE)
 
 
 class ReasoningTagGate:
@@ -294,11 +328,28 @@ class ReasoningTagGate:
     no-thinking-mode artifact) — the withheld text IS the reply and is
     released. Holding costs latency only on turns that emit an opener at all;
     normal turns stream through immediately.
+
+    That lone-opener case is also bounded mid-stream by
+    :attr:`REASONING_HOLD_MAX_CHARS`: waiting for ``flush()`` to release it means
+    downstream TTS gets nothing until the generation finishes, so
+    time-to-first-audio becomes full generation time. Past the bound, a held
+    block with no closer and no CoT signature is released and the gate starts
+    streaming (still swallowing a closer if one turns up later).
     """
 
     # Longest closer form ("<|/thinking|>") — the overlap a windowed re-scan of
     # newly held text needs so a closer spanning the window edge still matches.
     _CLOSER_OVERLAP = 13
+
+    # Upper bound on how much text `hold` may withhold before giving up on ever
+    # seeing a closer and releasing what it has. Without this, Gemma-4's
+    # no-thinking-mode artifact — a lone opener with no closer, followed by the
+    # real reply — withholds the ENTIRE reply until flush(), so downstream TTS
+    # receives nothing until generation completes and time-to-first-audio
+    # becomes full generation time instead of first-token time. Genuine CoT is
+    # both far longer than this and identified by its signature, which is
+    # re-checked before every release, so a real thought block still holds.
+    REASONING_HOLD_MAX_CHARS = 240
 
     def __init__(self):
         self._mode = "detect"
@@ -307,9 +358,14 @@ class ReasoningTagGate:
         # for a closer, so each feed re-scans only the new tail (+ overlap)
         # instead of the whole held block — O(n) over a long run-to-limit CoT.
         self._held_scanned = 0
+        # Set when `hold` released text on the size bound rather than on a
+        # closer: a closer may still arrive, and it must be swallowed rather
+        # than spoken. Cleared once one is seen.
+        self._stray_closer_pending = False
         self.visible_text = ""
         self.suppressed_chars = 0
         self.suppressed_preview = ""
+        self.bounded_releases = 0
 
     def _suppress(self, text: str):
         self.suppressed_chars += len(text)
@@ -336,9 +392,30 @@ class ReasoningTagGate:
                     self._suppress(self._buf[: m.end()])
                     self._buf = self._buf[m.end() :]
                     self._held_scanned = 0
+                    self._stray_closer_pending = False
                     self._mode = "detect"
                     continue
                 self._held_scanned = len(self._buf)
+                if len(
+                    self._buf
+                ) > self.REASONING_HOLD_MAX_CHARS and not _REASONING_COT_SIGNATURE_RE.match(
+                    self._buf
+                ):
+                    # Held past the bound with no closer and no CoT signature:
+                    # this is a lone opener in front of the actual reply, so
+                    # stop batching it and start streaming. Logged so the
+                    # release rate is measurable before the bound is retuned.
+                    logger.debug(
+                        f"ReasoningTagGate: releasing {len(self._buf)} held chars — "
+                        f"no closer within {self.REASONING_HOLD_MAX_CHARS} chars and no "
+                        f"chain-of-thought signature"
+                    )
+                    self.bounded_releases += 1
+                    out.append(self._buf)
+                    self._buf = ""
+                    self._held_scanned = 0
+                    self._stray_closer_pending = True
+                    self._mode = "pass"
                 break  # withhold until a closer or end of stream
             elif self._mode == "detect":
                 probe = self._buf.lstrip()
@@ -348,11 +425,7 @@ class ReasoningTagGate:
                     self._mode = "pass"
                     continue
                 m = _REASONING_OPEN_RE.match(probe)
-                if (
-                    m
-                    and m.end() == len(probe)
-                    and _could_grow_into_reasoning_tag(m.group(0))
-                ):
+                if m and m.end() == len(probe) and _could_grow_into_reasoning_tag(m.group(0)):
                     # A chunk-final match that may still be growing ("<thought"
                     # → "<thought>", "<think" → "<thinking>"): committing now
                     # would leave the tag's residue (">"/"ing>") to leak as
@@ -369,12 +442,19 @@ class ReasoningTagGate:
                 self._mode = "pass"
                 continue
             else:  # pass
+                if self._stray_closer_pending:
+                    # A bounded release above started streaming a block whose
+                    # closer had not arrived yet. If it turns up now it belongs
+                    # to that block: swallow it instead of speaking it.
+                    mc = _REASONING_CLOSE_RE.search(self._buf)
+                    if mc:
+                        out.append(self._buf[: mc.start()])
+                        self._suppress(self._buf[mc.start() : mc.end()])
+                        self._buf = self._buf[mc.end() :]
+                        self._stray_closer_pending = False
+                        continue
                 m = _REASONING_OPEN_RE.search(self._buf)
-                if (
-                    m
-                    and m.end() == len(self._buf)
-                    and _could_grow_into_reasoning_tag(m.group(0))
-                ):
+                if m and m.end() == len(self._buf) and _could_grow_into_reasoning_tag(m.group(0)):
                     # Same still-growing guard as detect: emit what precedes
                     # the candidate tag, hold the fragment itself.
                     out.append(self._buf[: m.start()])
@@ -387,7 +467,13 @@ class ReasoningTagGate:
                     self._mode = "hold"
                     continue
                 i = self._buf.rfind("<")
-                if i != -1 and _could_grow_into_reasoning_tag(self._buf[i:]):
+                if i != -1 and (
+                    _could_grow_into_reasoning_tag(self._buf[i:])
+                    or (
+                        self._stray_closer_pending
+                        and _could_grow_into_reasoning_closer(self._buf[i:])
+                    )
+                ):
                     out.append(self._buf[:i])
                     self._buf = self._buf[i:]
                 else:
@@ -516,6 +602,8 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         settings: Settings | None = None,
         retry_timeout_secs: float | None = 5.0,
         retry_on_timeout: bool | None = False,
+        client_max_retries: int | None = None,
+        client_timeout: httpx.Timeout | None = None,
         **kwargs,
     ):
         """Initialize the BaseOpenAILLMService.
@@ -543,6 +631,12 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 parameters, ``settings`` values take precedence.
             retry_timeout_secs: Request timeout in seconds. Defaults to 5.0 seconds.
             retry_on_timeout: Whether to retry the request once if it times out.
+            client_max_retries: HTTP retries the AsyncOpenAI client performs per
+                request. Defaults to ``CLIENT_MAX_RETRIES``; the SDK default of 2
+                is too many to sit inside a live conversational turn.
+            client_timeout: ``httpx.Timeout`` for the AsyncOpenAI client. Defaults
+                to the ``CLIENT_*_TIMEOUT_SECS`` constants. Raise the read timeout
+                for long non-conversational generations.
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
@@ -589,6 +683,9 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         self._service_tier = service_tier
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
+        # Read by create_client, so these must be set before it runs.
+        self._client_max_retries = client_max_retries
+        self._client_timeout = client_timeout
         self._full_model_name: str = ""
         self._client = self.create_client(
             api_key=api_key,
@@ -617,6 +714,12 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         self._max_tool_call_rounds_per_turn = 2
         self._tool_call_rounds_this_turn = 0
 
+        # Cumulative ReasoningTagGate activity for this service instance. The
+        # gate previously only logged, so a gate bug was indistinguishable from
+        # a genuinely empty completion and its rate was not queryable at all.
+        self._reasoning_suppressed_chars_total = 0
+        self._reasoning_bounded_releases_total = 0
+
     def create_client(
         self,
         api_key=None,
@@ -627,6 +730,16 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         **kwargs,
     ):
         """Create an AsyncOpenAI client instance.
+
+        The client is bounded: without an explicit ``max_retries`` and ``timeout``
+        the SDK defaults to 2 retries and a 600s timeout, which on a voice
+        pipeline means one black-holed endpoint can hold a live turn open for
+        half an hour. Both bounds are overridable via the ``client_max_retries``
+        and ``client_timeout`` constructor arguments.
+
+        Note that subclasses which build their own client (Azure, Google, AWS)
+        must apply their own bounds; this only covers the shared AsyncOpenAI path,
+        which is what every OpenAI-compatible provider inherits.
 
         Args:
             api_key: OpenAI API key.
@@ -639,6 +752,16 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         Returns:
             Configured AsyncOpenAI client instance.
         """
+        # getattr: a subclass may build its client before BaseOpenAILLMService
+        # __init__ has run (Azure does this for its endpoint/api_version).
+        configured_retries = getattr(self, "_client_max_retries", None)
+        max_retries = configured_retries if configured_retries is not None else CLIENT_MAX_RETRIES
+        timeout = getattr(self, "_client_timeout", None) or httpx.Timeout(
+            connect=CLIENT_CONNECT_TIMEOUT_SECS,
+            read=CLIENT_READ_TIMEOUT_SECS,
+            write=CLIENT_WRITE_TIMEOUT_SECS,
+            pool=CLIENT_POOL_TIMEOUT_SECS,
+        )
         return AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
@@ -650,6 +773,8 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 )
             ),
             default_headers=default_headers,
+            max_retries=max_retries,
+            timeout=timeout,
         )
 
     def can_generate_metrics(self) -> bool:
@@ -659,6 +784,28 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             True, as OpenAI service supports metrics generation.
         """
         return True
+
+    @property
+    def reasoning_suppressed_chars_total(self) -> int:
+        """Total characters of model reasoning this service has suppressed.
+
+        Returns:
+            Cumulative suppressed character count since the service was created.
+        """
+        return self._reasoning_suppressed_chars_total
+
+    @property
+    def reasoning_bounded_releases_total(self) -> int:
+        """How many times a held reasoning block was released on the size bound.
+
+        A non-zero and growing value means ``REASONING_HOLD_MAX_CHARS`` is being
+        hit — either the model is emitting lone openers (expected on Gemma-4) or
+        the bound is too tight for genuine chain-of-thought on this model.
+
+        Returns:
+            Cumulative bounded-release count since the service was created.
+        """
+        return self._reasoning_bounded_releases_total
 
     def set_full_model_name(self, full_model_name: str):
         """Set the full AI model name.
@@ -757,8 +904,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 # Routing nodes keep tool_choice="required" through retries —
                 # there the empty was a swallowed malformed call, so demand a
                 # correct call, not prose.
-                "(Your previous replies were empty. Emit the required tool "
-                "call correctly now.)"
+                "(Your previous replies were empty. Emit the required tool call correctly now.)"
                 if params.get("tools")
                 # Everything generated here is SPOKEN to the caller — the
                 # nudge must forbid meta-commentary or the model narrates its
@@ -781,6 +927,15 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             try:
                 return await self._client.chat.completions.create(**params)
             except APIConnectionError:
+                # ...but not past this turn's total generation budget: the
+                # reconnect stacks on top of the empty-completion ladder and the
+                # SDK's own retries, and the caller is already waiting.
+                if self._generation_budget_remaining() <= 0:
+                    logger.warning(
+                        f"{self}: connection error on completion request — "
+                        f"generation budget exhausted, not reconnecting"
+                    )
+                    raise
                 logger.warning(
                     f"{self}: connection error on completion request — "
                     f"retrying once on a fresh connection"
@@ -790,9 +945,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
         if self._retry_on_timeout:
             try:
-                chunks = await asyncio.wait_for(
-                    _create(), timeout=self._retry_timeout_secs
-                )
+                chunks = await asyncio.wait_for(_create(), timeout=self._retry_timeout_secs)
                 return chunks
             except (TimeoutError, APITimeoutError):
                 # Retry, this time without a timeout so we get a response
@@ -899,8 +1052,29 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             content = cleaned
         return content
 
+    def _generation_budget_remaining(self) -> float:
+        """Seconds left in this turn's total generation budget.
+
+        Returns ``inf`` when no deadline has been stamped (a generation started
+        outside ``_process_context``), so the budget can only ever shorten a
+        retry ladder, never block a first attempt.
+        """
+        deadline = getattr(self, "_turn_generation_deadline", None)
+        if deadline is None:
+            return float("inf")
+        return deadline - time.monotonic()
+
     @traced_llm
     async def _process_context(self, context: LLMContext):
+        # Stamp the wall-clock budget for this turn's whole retry ladder on the
+        # outermost generation only; the recursive empty-completion retries below
+        # re-enter this method and must share one deadline. Three retry layers
+        # (empty-completion recursion, the connection retry, and the SDK's own
+        # max_retries) otherwise multiply into minutes of dead air on a degraded
+        # server.
+        if getattr(self, "_empty_retry_depth", 0) == 0:
+            self._turn_generation_deadline = time.monotonic() + EMPTY_RETRY_TOTAL_BUDGET_SECS
+
         functions_list = []
         arguments_list = []
         tool_id_list = []
@@ -1090,16 +1264,18 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             text_generated_signal = True
             await self._push_llm_text(gate_tail)
         visible_text = reasoning_gate.visible_text
+        self._reasoning_bounded_releases_total += reasoning_gate.bounded_releases
         if reasoning_gate.suppressed_chars:
+            self._reasoning_suppressed_chars_total += reasoning_gate.suppressed_chars
             logger.warning(
                 f"{self}: suppressed {reasoning_gate.suppressed_chars} chars of "
                 f"leaked model reasoning from the stream "
-                f"(starts: {reasoning_gate.suppressed_preview[:80]!r})"
+                f"(starts: {reasoning_gate.suppressed_preview[:80]!r}; "
+                f"{self._reasoning_suppressed_chars_total} chars / "
+                f"{self._reasoning_bounded_releases_total} bounded releases this session)"
             )
 
-        loop_guard_tripped = (
-            self._tool_call_rounds_this_turn >= self._max_tool_call_rounds_per_turn
-        )
+        loop_guard_tripped = self._tool_call_rounds_this_turn >= self._max_tool_call_rounds_per_turn
         # Recover a call the model wrote as prose (structured tool_calls empty).
         # Runs on the RAW buffer: a call written inside a reasoning block is
         # still a real call. Hoisted above the empty-retry so a thought-only
@@ -1121,22 +1297,38 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         # context, before giving up to idle handling. Healthy turns never reach
         # here, so this adds latency only to a turn that would otherwise have
         # gone silent.
-        if (
-            not function_name
-            and not recovered
-            and not visible_text.strip()
-            and getattr(self, "_empty_retry_depth", 0) < MAX_EMPTY_COMPLETION_RETRIES
-        ):
-            self._empty_retry_depth = getattr(self, "_empty_retry_depth", 0) + 1
-            try:
+        #
+        # The depth cap alone is not a latency bound: each attempt can take as
+        # long as the client's read timeout, so the ladder is also cut off by
+        # EMPTY_RETRY_TOTAL_BUDGET_SECS of wall clock measured from the turn's
+        # first generation. On a healthy server (sub-second TTFT) the budget
+        # never binds and all retries run; on a degraded one the caller gets the
+        # fall-through to idle handling seconds earlier instead of waiting out
+        # every attempt.
+        if not function_name and not recovered and not visible_text.strip():
+            depth = getattr(self, "_empty_retry_depth", 0)
+            budget_left = self._generation_budget_remaining()
+            if depth < MAX_EMPTY_COMPLETION_RETRIES and budget_left > 0:
+                self._empty_retry_depth = depth + 1
+                try:
+                    logger.warning(
+                        f"{self}: empty completion (no visible text, no tool calls) — "
+                        f"retry {self._empty_retry_depth}/{MAX_EMPTY_COMPLETION_RETRIES} "
+                        f"({budget_left:.1f}s of budget left)"
+                    )
+                    await self._process_context(context)
+                finally:
+                    self._empty_retry_depth -= 1
+                return
+            if depth < MAX_EMPTY_COMPLETION_RETRIES:
+                # Stopped by the clock rather than the attempt count. Logged
+                # distinctly so the exhaustion rate is measurable before anyone
+                # tunes EMPTY_RETRY_TOTAL_BUDGET_SECS.
                 logger.warning(
-                    f"{self}: empty completion (no visible text, no tool calls) — "
-                    f"retry {self._empty_retry_depth}/{MAX_EMPTY_COMPLETION_RETRIES}"
+                    f"{self}: empty completion — retry budget exhausted after "
+                    f"{depth + 1} attempt(s) in {EMPTY_RETRY_TOTAL_BUDGET_SECS:.1f}s; "
+                    f"giving up on this turn"
                 )
-                await self._process_context(context)
-            finally:
-                self._empty_retry_depth -= 1
-            return
 
         # What the caller actually HEARS this turn. For a recovered leaked call
         # this is the visible text minus the call syntax — the raw form ends
@@ -1223,9 +1415,10 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 # before it can run (Tavily would 400 and the error result would
                 # re-prompt the model into the same bad call). Skipping it here
                 # lets the model answer in plain text instead of looping.
-                if function_name == "web_search" and not str(
-                    (arguments or {}).get("query", "")
-                ).strip():
+                if (
+                    function_name == "web_search"
+                    and not str((arguments or {}).get("query", "")).strip()
+                ):
                     logger.warning(
                         f"{self}: dropping web_search call with empty/missing 'query' "
                         f"argument (malformed); model must answer without it"
@@ -1265,9 +1458,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             # Visible text only: suppressed reasoning never reached TTS, so a
             # thought-only completion must count as silent here or the deferred
             # call below waits forever for a BotStoppedSpeakingFrame.
-            self._last_generation_had_text = bool(
-                text_generated_signal and visible_text.strip()
-            )
+            self._last_generation_had_text = bool(text_generated_signal and visible_text.strip())
             # The words themselves, for guards that need more than the bool —
             # e.g. the workflow engine's open-question end guard reads the
             # trailing "?" of the co-spoken reply. Reading the aggregated
