@@ -522,19 +522,34 @@ class BaseOutputTransport(FrameProcessor):
             return self._audio_chunk_size
 
         @property
+        def _generates_mixer_audio(self) -> bool:
+            """Whether a mixer is set that actually contributes audio.
+
+            A passthrough mixer returns its input unchanged, so there is nothing
+            to keep flowing while the queue is empty and nothing to lose by
+            cancelling the audio task on an interruption.
+
+            Note:
+                Read where the audio-send strategy is chosen, which happens when
+                the audio task is created — a mixer that flips this at runtime
+                only takes effect on the next task creation.
+            """
+            return self._mixer is not None and not self._mixer.is_passthrough
+
+        @property
         def writes_audio_continuously(self) -> bool:
             """Whether this sender is expected to write audio even while idle.
 
-            True only when a mixer is configured: the mixer path synthesizes and
-            writes a silence frame whenever the audio queue is empty, so writes
-            happen every audio chunk regardless of conversation activity. Without
-            a mixer the audio task deliberately blocks on an empty queue, so a
-            growing time-since-last-write means "idle", not "wedged".
+            True only when an audio-generating mixer is configured: that path
+            synthesizes and writes a silence frame whenever the audio queue is
+            empty, so writes happen every audio chunk regardless of conversation
+            activity. Otherwise the audio task deliberately blocks on an empty
+            queue, so a growing time-since-last-write means "idle", not "wedged".
 
             Returns:
                 True if the audio task writes on a fixed cadence while idle.
             """
-            return self._mixer is not None and self._audio_task is not None
+            return self._generates_mixer_audio and self._audio_task is not None
 
         @property
         def seconds_since_last_audio_write(self) -> float | None:
@@ -628,7 +643,7 @@ class BaseOutputTransport(FrameProcessor):
             await self._cancel_clock_task()
             await self._cancel_video_task()
 
-            if self._audio_queue.has_uninterruptible or self._mixer:
+            if self._audio_queue.has_uninterruptible or self._generates_mixer_audio:
                 # Keep the audio task running but drain all interruptible frames
                 # so the pending UninterruptibleFrames are still delivered. With
                 # a mixer, cancelling the task would also stop mixer-only output
@@ -896,9 +911,12 @@ class BaseOutputTransport(FrameProcessor):
                         # and preventing cancel/stop signals from being processed properly
                         await asyncio.sleep(0)
 
-            if self._mixer:
+            if self._generates_mixer_audio:
                 return with_mixer(self._params.bot_vad_stop_secs)
             else:
+                # Includes the passthrough-mixer case: nothing to mix in, so
+                # block on the queue instead of running a full-rate synthesize-
+                # and-write loop on every idle leg.
                 return without_mixer(self._params.bot_vad_stop_secs)
 
         async def _send_silence(self, secs: int):

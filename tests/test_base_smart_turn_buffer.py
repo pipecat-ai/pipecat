@@ -150,3 +150,55 @@ def test_pre_speech_buffer_trim_still_bounds_growth():
     # well below 50 entries. We're conservative — anything < 50 proves the
     # trim ran.
     assert len(analyzer._audio_buffer) < 50
+
+
+@pytest.mark.asyncio
+async def test_cleanup_releases_the_worker_thread():
+    """Each analyzer owns a thread that is only reclaimed on GC otherwise.
+
+    One VAD analyzer and one smart-turn analyzer exist per leg, each holding a
+    worker thread plus a retained ONNX session, and neither ever shut its
+    executor down. Thread exit then depends on the executor being garbage
+    collected, which is delayed indefinitely for objects held in the pipeline's
+    reference cycles.
+    """
+    import asyncio
+
+    analyzer = _RecordingSmartTurn(sample_rate=16000, params=SmartTurnParams())
+    executor = analyzer._executor
+    assert executor is not None
+
+    await analyzer.cleanup()
+    assert analyzer._executor is None
+
+    # Idempotent, and analysis after teardown degrades instead of raising.
+    await analyzer.cleanup()
+    state, result = await analyzer.analyze_end_of_turn()
+    assert state == EndOfTurnState.INCOMPLETE
+    assert result is None
+    assert isinstance(asyncio.get_running_loop(), asyncio.AbstractEventLoop)
+
+
+@pytest.mark.asyncio
+async def test_vad_analyzer_cleanup_releases_the_worker_thread():
+    """Same for the VAD analyzer, which is the higher-frequency of the two."""
+    import threading
+
+    from pipecat.audio.vad.silero import SileroVADAnalyzer
+    from pipecat.audio.vad.vad_analyzer import VADState
+
+    baseline = threading.active_count()
+    analyzers = [SileroVADAnalyzer(sample_rate=16000) for _ in range(10)]
+    for analyzer in analyzers:
+        analyzer.set_sample_rate(16000)
+        # Touch the executor so its worker thread actually exists.
+        await analyzer.analyze_audio(np.zeros(512, dtype=np.int16).tobytes())
+    assert threading.active_count() > baseline
+
+    for analyzer in analyzers:
+        await analyzer.cleanup()
+        assert analyzer._executor is None
+        # Degrades to the last known state rather than raising.
+        assert isinstance(
+            await analyzer.analyze_audio(np.zeros(512, dtype=np.int16).tobytes()), VADState
+        )

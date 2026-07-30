@@ -304,3 +304,78 @@ class TestBaseOutputTransportWriteWatchdog(unittest.IsolatedAsyncioTestCase):
             self.assertGreater(transport.seconds_since_last_output_write, 0.15)
         finally:
             await transport.cancel(CancelFrame())
+
+
+class _SilenceOnlyMixer(_PassthroughMixer):
+    """A mixer that declares it contributes nothing to the outgoing audio."""
+
+    @property
+    def is_passthrough(self) -> bool:
+        return True
+
+
+class TestBaseOutputTransportPassthroughMixer(unittest.IsolatedAsyncioTestCase):
+    """A mixer that adds nothing should not force the continuous send path.
+
+    Configuring any mixer puts the sender on a full-rate synthesize/mix/write
+    loop and makes every interruption drain the audio queue in place. That is
+    right for a mixer that generates audio, but a silence mixer installed
+    unconditionally when ambient audio is off pays it on every idle leg.
+    """
+
+    async def test_passthrough_mixer_does_not_write_while_idle(self):
+        transport = await _make_transport(mixer=_SilenceOnlyMixer())
+        try:
+            await asyncio.sleep(0.15)
+            self.assertEqual(transport.write_audio_frame.call_count, 0)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_audio_generating_mixer_still_writes_while_idle(self):
+        transport = await _make_transport(mixer=_PassthroughMixer())
+        try:
+            await asyncio.sleep(0.15)
+            self.assertGreater(transport.write_audio_frame.call_count, 0)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_passthrough_mixer_interruption_recreates_the_audio_task(self):
+        transport = await _make_transport(mixer=_SilenceOnlyMixer())
+        try:
+            sender = transport._media_senders[None]
+            task_before = sender._audio_task
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
+            # Same branch as the no-mixer case: cancel and recreate, rather than
+            # resetting the queue to keep mixer-only output flowing.
+            self.assertIsNot(sender._audio_task, task_before)
+            self.assertIsNotNone(sender._audio_task)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_passthrough_mixer_still_delivers_queued_audio(self):
+        transport = await _make_transport(mixer=_SilenceOnlyMixer())
+        try:
+            sender = transport._media_senders[None]
+            await transport.process_frame(
+                OutputAudioRawFrame(
+                    audio=b"\x01\x02" * (sender.audio_chunk_size // 2),
+                    sample_rate=sender.sample_rate,
+                    num_channels=1,
+                ),
+                FrameDirection.DOWNSTREAM,
+            )
+            await asyncio.sleep(0.1)
+            self.assertGreater(transport.write_audio_frame.call_count, 0)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_watchdog_is_inert_for_a_passthrough_mixer(self):
+        transport = await _make_transport(mixer=_SilenceOnlyMixer())
+        try:
+            await asyncio.sleep(0.15)
+            # No continuous writer, so no wedge evidence either way.
+            self.assertEqual(transport.seconds_since_last_output_write, 0.0)
+        finally:
+            await transport.cancel(CancelFrame())

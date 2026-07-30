@@ -4,11 +4,16 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import io
 import unittest
 
 import numpy as np
+from loguru import logger
 
-from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.silero import (
+    _VAD_MAX_CONSECUTIVE_ERRORS,
+    SileroVADAnalyzer,
+)
 
 
 class TestSileroVAD(unittest.TestCase):
@@ -69,6 +74,63 @@ class TestSileroVAD(unittest.TestCase):
 
         expected = samples.astype(np.float32) / 32768.0
         np.testing.assert_array_equal(captured["audio"], expected)
+
+
+class TestSileroVADErrorReporting(unittest.TestCase):
+    """A persistently failing analyzer must be legible, not a log flood.
+
+    `voice_confidence` returns 0 on any exception. That is the right fail-safe,
+    but 0 is indistinguishable downstream from real silence, so a persistent
+    fault presents as a caller who never speaks — while emitting one ERROR per
+    audio frame (~50/second/leg). Reproduced with a mismatched sample rate.
+    """
+
+    def _make_failing_analyzer(self) -> SileroVADAnalyzer:
+        analyzer = SileroVADAnalyzer(sample_rate=16000)
+
+        def always_fails(audio_float32, sample_rate):
+            raise ValueError(f"Supported sampling rates: [8000, 16000] (or multiply of 16000)")
+
+        analyzer._model = always_fails
+        return analyzer
+
+    def test_repeated_identical_errors_are_rate_limited(self):
+        analyzer = self._make_failing_analyzer()
+        buffer = np.zeros(512, dtype=np.int16).tobytes()
+
+        log_output = io.StringIO()
+        handler_id = logger.add(log_output, level="ERROR", format="{message}")
+        try:
+            for _ in range(200):
+                self.assertEqual(analyzer.voice_confidence(buffer), 0)
+        finally:
+            logger.remove(handler_id)
+
+        lines = [line for line in log_output.getvalue().splitlines() if line]
+        # The first occurrence at full detail, plus one degraded-analyzer line.
+        self.assertLessEqual(len(lines), 3, lines)
+        self.assertTrue(any("Supported sampling rates" in line for line in lines))
+        degraded = [line for line in lines if "permanently degraded" in line]
+        self.assertEqual(len(degraded), 1, lines)
+        self.assertGreaterEqual(analyzer._consecutive_errors, _VAD_MAX_CONSECUTIVE_ERRORS)
+
+    def test_counter_resets_on_recovery(self):
+        analyzer = self._make_failing_analyzer()
+        buffer = np.zeros(512, dtype=np.int16).tobytes()
+        for _ in range(5):
+            analyzer.voice_confidence(buffer)
+        self.assertEqual(analyzer._consecutive_errors, 5)
+
+        class _HealthyModel:
+            def __call__(self, audio_float32, sample_rate):
+                return [0.42]
+
+            def reset_states(self):
+                pass
+
+        analyzer._model = _HealthyModel()
+        self.assertAlmostEqual(analyzer.voice_confidence(buffer), 0.42)
+        self.assertEqual(analyzer._consecutive_errors, 0)
 
 
 if __name__ == "__main__":

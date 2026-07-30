@@ -21,6 +21,18 @@ from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 # How often should we reset internal model state
 _MODEL_RESET_STATES_TIME = 5.0
 
+# Consecutive analysis failures after which the analyzer is declared
+# permanently degraded. VAD runs at ~50 frames/second per leg, so this is
+# roughly 0.5s of audio — long enough that a single bad buffer does not trip it,
+# short enough to name the problem before a whole turn is lost.
+_VAD_MAX_CONSECUTIVE_ERRORS = 25
+
+# Minimum gap between repeats of the same analysis error. Without it a
+# persistent fault (e.g. a mismatched sample rate) emits one ERROR per audio
+# frame — 50 lines/second/leg — while the caller silently reads as never
+# speaking.
+_VAD_ERROR_LOG_INTERVAL_SECS = 30.0
+
 try:
     import onnxruntime
 
@@ -165,6 +177,14 @@ class SileroVADAnalyzer(VADAnalyzer):
 
         self._last_reset_time = 0
 
+        # Analysis-failure accounting. A failure returns 0 confidence, which is
+        # indistinguishable from real silence, so a persistent fault presents as
+        # a permanently mute caller plus a log flood. See voice_confidence().
+        self._consecutive_errors = 0
+        self._last_error_message = ""
+        self._last_error_log_time = 0.0
+        self._degraded_reported = False
+
         logger.debug("Loaded Silero VAD")
 
     #
@@ -198,11 +218,19 @@ class SileroVADAnalyzer(VADAnalyzer):
     def voice_confidence(self, buffer) -> float:
         """Calculate voice activity confidence for the given audio buffer.
 
+        A failed analysis returns 0, which is the correct fail-safe but is
+        indistinguishable downstream from genuine silence: a persistent fault
+        (a mismatched sample rate, say) presents as a caller who never speaks,
+        while emitting one ERROR per audio frame — about 50 lines per second per
+        leg. Repeats of the same message are therefore rate-limited, and a run of
+        consecutive failures is reported once as a degraded analyzer so the mute
+        has a name in the log.
+
         Args:
             buffer: Audio buffer to analyze.
 
         Returns:
-            Voice confidence score between 0.0 and 1.0.
+            Voice confidence score between 0.0 and 1.0. 0 on failure.
         """
         try:
             audio_int16 = np.frombuffer(buffer, np.int16)
@@ -218,8 +246,42 @@ class SileroVADAnalyzer(VADAnalyzer):
                 self._model.reset_states()
                 self._last_reset_time = curr_time
 
+            if self._consecutive_errors:
+                if self._degraded_reported:
+                    logger.info(
+                        f"Silero VAD recovered after {self._consecutive_errors} "
+                        f"consecutive failed analyses"
+                    )
+                self._consecutive_errors = 0
+                self._last_error_message = ""
+                self._degraded_reported = False
+
             return new_confidence
         except Exception as e:
             # This comes from an empty audio array
-            logger.error(f"Error analyzing audio with Silero VAD: {e}")
+            self._report_analysis_error(e)
             return 0
+
+    def _report_analysis_error(self, error: Exception) -> None:
+        """Log an analysis failure without flooding, and name a persistent one."""
+        message = str(error)
+        self._consecutive_errors += 1
+        now = time.time()
+
+        first_of_its_kind = message != self._last_error_message
+        interval_elapsed = (now - self._last_error_log_time) >= _VAD_ERROR_LOG_INTERVAL_SECS
+        if first_of_its_kind or interval_elapsed:
+            logger.error(
+                f"Error analyzing audio with Silero VAD: {error} "
+                f"(consecutive failures: {self._consecutive_errors})"
+            )
+            self._last_error_message = message
+            self._last_error_log_time = now
+
+        if not self._degraded_reported and self._consecutive_errors >= _VAD_MAX_CONSECUTIVE_ERRORS:
+            self._degraded_reported = True
+            logger.error(
+                f"Silero VAD is permanently degraded: {self._consecutive_errors} consecutive "
+                f"failed analyses at {self.sample_rate} Hz — voice confidence is pinned at 0, "
+                f"so this leg will read as silent. Last error: {message}"
+            )

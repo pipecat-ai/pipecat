@@ -87,7 +87,33 @@ class VADAnalyzer(ABC):
 
         # Thread executor that will run the model. We only need one thread per
         # analyzer because one analyzer just handles one audio stream.
-        self._executor = ThreadPoolExecutor(max_workers=1)
+        #
+        # MEASURED NEGATIVE RESULT — per-frame CPU in this path is NOT what
+        # limits per-pod concurrency. Numbers from a developer Mac (2026-07-30,
+        # Python 3.13); a GKE e2-standard-4 node will be perhaps 2-4x slower,
+        # but the ratios are what matter and they are two orders of magnitude
+        # below the budget:
+        #
+        #   - Silero voice_confidence: 109us per 32ms frame @16kHz, 76us @8kHz.
+        #     Runs on this worker thread and ONNX releases the GIL, so it is off
+        #     the event loop entirely.
+        #   - The executor round trip below — the only loop-side cost — is 35us,
+        #     paid once per input audio frame per leg. At 50fps x 6 legs that is
+        #     ~1% of loop time.
+        #   - soxr stream resampling, for comparison: 3.6us per 20ms frame at
+        #     16k->8k VHQ, 5.1us at 24k->8k. Dropping quality below VHQ saves
+        #     ~1us and is not worth the audio cost.
+        #
+        # Do not tune these paths looking for concurrency headroom. Measure
+        # instead: with heartbeats no longer routed through the paced media
+        # queue, heartbeat traversal latency (PipelineWorker's `on_heartbeat`)
+        # is an honest per-pipeline scheduling-delay signal.
+        #
+        # The thread itself, however, is per-analyzer and is only reclaimed when
+        # the executor is garbage collected — arbitrarily late for an object
+        # held in the pipeline's reference cycles. `shutdown()` releases it
+        # deterministically at teardown.
+        self._executor: ThreadPoolExecutor | None = ThreadPoolExecutor(max_workers=1)
 
     @property
     def sample_rate(self) -> int:
@@ -182,9 +208,25 @@ class VADAnalyzer(ABC):
         Returns:
             Current VAD state after processing the buffer.
         """
+        executor = self._executor
+        if executor is None:
+            # Shut down: the analyzer is torn down but audio is still arriving.
+            # Report the last known state rather than raising into the pipeline.
+            return self._vad_state
         loop = asyncio.get_running_loop()
-        state = await loop.run_in_executor(self._executor, self._run_analyzer, buffer)
+        state = await loop.run_in_executor(executor, self._run_analyzer, buffer)
         return state
+
+    def shutdown(self) -> None:
+        """Release the analyzer's worker thread. Idempotent.
+
+        Safe to call while an analysis is in flight: pending work is cancelled,
+        the running one is not waited for, and later ``analyze_audio`` calls
+        return the last known state instead of raising.
+        """
+        executor, self._executor = self._executor, None
+        if executor is not None:
+            executor.shutdown(wait=False, cancel_futures=True)
 
     def _run_analyzer(self, buffer: bytes) -> VADState:
         """Analyze audio buffer and return current VAD state."""
@@ -249,4 +291,4 @@ class VADAnalyzer(ABC):
         It waits for all currently executing event handler tasks to finish
         before returning.
         """
-        pass
+        self.shutdown()

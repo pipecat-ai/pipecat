@@ -25,6 +25,29 @@ class BaseAudioMixer(ABC):
     mixer at runtime.
     """
 
+    @property
+    def is_passthrough(self) -> bool:
+        """Whether this mixer contributes nothing to the outgoing audio.
+
+        Configuring a mixer puts the output transport on its continuous send
+        path: the media sender synthesizes and mixes a silence frame whenever
+        its queue is empty, so every leg runs a full-rate mix/serialize/write
+        loop even while nobody is speaking, and an interruption drains the audio
+        queue in place rather than cancelling and recreating the audio task.
+        That is correct for a mixer that actually generates audio (background
+        noise, hold music) — cancelling the task there would leave an audible
+        gap in the background bed.
+
+        A mixer that only ever returns its input unchanged — e.g. a silence
+        mixer installed unconditionally when ambient audio is disabled — pays
+        that cost for nothing. Returning True lets the transport treat it as if
+        no mixer were configured.
+
+        Returns:
+            False by default, so existing mixers are unaffected.
+        """
+        return False
+
     @abstractmethod
     async def start(self, sample_rate: int):
         """Initialize the mixer when the output transport starts.

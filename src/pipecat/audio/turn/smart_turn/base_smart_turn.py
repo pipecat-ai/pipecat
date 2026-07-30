@@ -74,8 +74,11 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         self._silence_ms = 0
         self._speech_start_time = 0
         # Thread executor that will run the model. We only need one thread per
-        # analyzer because one analyzer just handles one audio stream.
-        self._executor = ThreadPoolExecutor(max_workers=1)
+        # analyzer because one analyzer just handles one audio stream. The
+        # thread is only reclaimed when the executor is garbage collected, and
+        # analyzers are held in the pipeline's reference cycles, so `cleanup()`
+        # releases it (and the ONNX session it keeps alive) deterministically.
+        self._executor: ThreadPoolExecutor | None = ThreadPoolExecutor(max_workers=1)
         self._vad_start_secs: float = 0.0
 
     @property
@@ -157,14 +160,26 @@ class BaseSmartTurn(BaseTurnAnalyzer):
             Tuple containing the end-of-turn state and optional metrics data
             from the ML model analysis.
         """
+        executor = self._executor
+        if executor is None:
+            # Shut down: the analyzer is torn down but audio is still arriving.
+            # Report an incomplete turn rather than raising into the pipeline.
+            return EndOfTurnState.INCOMPLETE, None
         loop = asyncio.get_running_loop()
         state, result = await loop.run_in_executor(
-            self._executor, self._process_speech_segment, self._audio_buffer
+            executor, self._process_speech_segment, self._audio_buffer
         )
         if state == EndOfTurnState.COMPLETE:
             self._clear(state)
         logger.debug(f"End of Turn result: {state}")
         return state, result
+
+    async def cleanup(self):
+        """Release the analyzer's worker thread. Idempotent."""
+        await super().cleanup()
+        executor, self._executor = self._executor, None
+        if executor is not None:
+            executor.shutdown(wait=False, cancel_futures=True)
 
     def update_vad_start_secs(self, vad_start_secs: float):
         """Store the new vad_start_secs value."""

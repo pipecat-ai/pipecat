@@ -51,6 +51,13 @@ class SOXRStreamAudioResampler(BaseAudioResampler):
             quality: SOXR quality preset. Higher quality means higher CPU cost.
                 One of "VHQ" (default, very high quality), "HQ", "MQ", "LQ",
                 or "QQ" (quick, lowest latency).
+
+                Measured (developer Mac, 2026-07-30): 3.6us per 20ms frame at
+                16k->8k VHQ and 5.1us at 24k->8k VHQ, versus 2.4-2.8us for every
+                lower preset. That is 0.02% of one core per stream, so lowering
+                the preset to save CPU is not worth the audio quality; and
+                resampling is not a candidate explanation for per-pod
+                concurrency limits in either direction.
             clear_after_secs: Seconds of inactivity after which the internal
                 resampler state is cleared to avoid audio artefacts from stale
                 history. Set to ``None`` to never clear (recommended for
