@@ -18,7 +18,19 @@ from pipecat.frames.frames import MixerControlFrame
 
 
 class SilenceAudioMixer(BaseAudioMixer):
-    """Audio mixer that produces silence — pass-through with no extra mixing."""
+    """Audio mixer that produces silence — pass-through with no extra mixing.
+
+    Note:
+        This mixer is a candidate for ``is_passthrough = True``: it returns its
+        input unchanged, so the output transport's continuous send path (a
+        full-rate synthesize/mix/write loop on every leg, even an idle one) buys
+        nothing here. Deliberately NOT enabled yet — flipping it switches every
+        leg that installs this mixer from the mixer path to the no-mixer path,
+        which changes whether silence is continuously transmitted, and some
+        RTP/telephony configurations rely on that to keep a stream alive. Gate it
+        behind a low-concurrency validation run of its own; do not bundle it with
+        other changes.
+    """
 
     def __init__(self):
         """Initialize the silence audio mixer."""
