@@ -316,20 +316,30 @@ class _EmptyStream:
 
 
 class _FakeClock:
-    """Monotonic clock that advances a fixed amount on every read."""
+    """Manually advanced monotonic clock; reading it never moves it.
 
-    def __init__(self, step: float):
-        self._now = 0.0
-        self._step = step
+    Advanced explicitly by the fake generation rather than per read, so the
+    assertions below depend on how much wall clock each *generation* costs and
+    not on how many times the implementation happens to read the clock.
+    """
+
+    def __init__(self):
+        self.now = 0.0
 
     def monotonic(self) -> float:
-        now = self._now
-        self._now += self._step
-        return now
+        return self.now
+
+    def advance(self, secs: float) -> None:
+        self.now += secs
 
 
-def _make_empty_completion_service():
-    """A service whose every generation comes back empty, with attempts counted."""
+def _make_empty_completion_service(clock: _FakeClock | None = None, secs_per_generation: float = 0):
+    """A service whose every generation comes back empty, with attempts counted.
+
+    The clock is injected on the service instead of monkeypatching the stdlib
+    ``time`` module, which is process-global and would also replace asyncio's
+    event-loop clock for the duration of the test.
+    """
     from pipecat.services.openai.llm import OpenAILLMService
 
     with patch.object(OpenAILLMService, "create_client"):
@@ -340,7 +350,15 @@ def _make_empty_completion_service():
     service.start_ttfb_metrics = AsyncMock()
     service.stop_ttfb_metrics = AsyncMock()
     service.start_llm_usage_metrics = AsyncMock()
-    service.get_chat_completions = AsyncMock(side_effect=lambda _ctx: _EmptyStream())
+
+    clock = clock or _FakeClock()
+    service._generation_clock = clock.monotonic
+
+    def generate(_ctx):
+        clock.advance(secs_per_generation)
+        return _EmptyStream()
+
+    service.get_chat_completions = AsyncMock(side_effect=generate)
     return service
 
 
@@ -349,12 +367,11 @@ async def test_empty_completion_retries_all_run_when_the_budget_is_ample():
     """A healthy-but-empty server still gets the full retry ladder."""
     from pipecat.services.openai import base_llm
 
-    service = _make_empty_completion_service()
+    # Generations are instant: the budget can never be the limiting factor.
+    service = _make_empty_completion_service(secs_per_generation=0)
     context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
 
-    # Clock never advances: the budget can never be the limiting factor.
-    with patch.object(base_llm.time, "monotonic", return_value=0.0):
-        await service._process_context(context)
+    await service._process_context(context)
 
     # Initial generation + MAX_EMPTY_COMPLETION_RETRIES.
     assert service.get_chat_completions.await_count == base_llm.MAX_EMPTY_COMPLETION_RETRIES + 1
@@ -370,17 +387,16 @@ async def test_empty_completion_retry_ladder_is_cut_off_by_the_wall_clock():
     """
     from pipecat.services.openai import base_llm
 
-    service = _make_empty_completion_service()
+    # Each generation burns 4s of a 6s budget: the first retry still fits, the
+    # second cannot, so the ladder must stop short of the depth cap.
+    secs_per_generation = base_llm.EMPTY_RETRY_TOTAL_BUDGET_SECS * 2 / 3
+    service = _make_empty_completion_service(secs_per_generation=secs_per_generation)
     context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
 
     log_output = io.StringIO()
     handler_id = logger.add(log_output, level="WARNING", format="{message}")
     try:
-        # Time advances well inside the budget for the first retry and past it
-        # for the rest, so the ladder must stop short of the depth cap.
-        clock = _FakeClock(step=1.0)
-        with patch.object(base_llm.time, "monotonic", side_effect=clock.monotonic):
-            await service._process_context(context)
+        await service._process_context(context)
     finally:
         logger.remove(handler_id)
 
@@ -439,3 +455,66 @@ async def test_client_bounds_are_overridable():
     )
     assert service._client.max_retries == 4
     assert service._client.timeout.read == 120.0
+
+
+@pytest.mark.asyncio
+async def test_run_inference_is_not_capped_by_the_conversational_read_timeout():
+    """Out-of-band inference must not inherit the live-turn read bound.
+
+    ``run_inference`` is non-streaming, so the client's ``read`` timeout would
+    bound *total generation* rather than time-to-first-byte. A transcript
+    summary or a slot extraction on a self-hosted model can easily exceed the
+    30s that is correct for a first token on a live turn.
+    """
+    from pipecat.services.openai import base_llm
+    from pipecat.services.openai.llm import OpenAILLMService
+
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+
+    captured = {}
+
+    async def fake_create(**params):
+        captured.update(params)
+        message = type("Message", (), {"content": "ok"})()
+        choice = type("Choice", (), {"message": message})()
+        return type("Response", (), {"choices": [choice]})()
+
+    service._client = AsyncMock()
+    service._client.chat.completions.create = AsyncMock(side_effect=fake_create)
+
+    context = LLMContext(messages=[{"role": "user", "content": "Summarize"}])
+    result = await service.run_inference(context)
+
+    assert result == "ok"
+    assert captured["stream"] is False
+    assert captured["timeout"] == base_llm.INFERENCE_TIMEOUT_SECS
+    # ...and it is much looser than the conversational bound, which is the point.
+    assert captured["timeout"] > base_llm.CLIENT_READ_TIMEOUT_SECS
+
+
+@pytest.mark.asyncio
+async def test_run_inference_timeout_is_overridable():
+    """Deployments with slower out-of-band models must be able to widen it."""
+    from pipecat.services.openai.llm import OpenAILLMService
+
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(
+            settings=OpenAILLMService.Settings(model="gpt-4"),
+            inference_timeout_secs=42.0,
+        )
+
+    captured = {}
+
+    async def fake_create(**params):
+        captured.update(params)
+        message = type("Message", (), {"content": "ok"})()
+        choice = type("Choice", (), {"message": message})()
+        return type("Response", (), {"choices": [choice]})()
+
+    service._client = AsyncMock()
+    service._client.chat.completions.create = AsyncMock(side_effect=fake_create)
+
+    await service.run_inference(LLMContext(messages=[{"role": "user", "content": "Hi"}]))
+
+    assert captured["timeout"] == 42.0

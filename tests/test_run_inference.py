@@ -18,6 +18,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.aws.llm import AWSBedrockLLMService
 from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.openai.base_llm import INFERENCE_TIMEOUT_SECS
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.responses.llm import (
     OpenAIResponsesHttpLLMService,
@@ -84,6 +85,10 @@ async def test_openai_run_inference_with_llm_context():
             messages=test_messages,
             tools=OPENAI_NOT_GIVEN,
             tool_choice=OPENAI_NOT_GIVEN,
+            # Out-of-band inference is non-streaming, so the client's
+            # conversational read timeout would bound total generation rather
+            # than time-to-first-byte. It carries its own, looser bound instead.
+            timeout=INFERENCE_TIMEOUT_SECS,
         )
 
 

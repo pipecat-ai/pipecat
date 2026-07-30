@@ -9,6 +9,15 @@
   (Speaches/vLLM, Groq, Together, Fireworks, OpenRouter, xAI, …); providers that
   build their own client (Azure, Google, AWS) are unaffected.
 
+- `BaseOpenAILLMService.run_inference` now carries its own per-request timeout
+  (`INFERENCE_TIMEOUT_SECS`, 180s, overridable via the new
+  `inference_timeout_secs` constructor argument) instead of inheriting the
+  client's conversational read bound. Out-of-band inference is non-streaming, so
+  the server sends nothing until the whole completion is generated and the read
+  timeout applies to total generation rather than time-to-first-byte; the 30s
+  that is right for a first token on a live turn would silently cap post-call
+  analysis (transcript summaries, slot extraction, tagging, classification).
+
 - Added `EMPTY_RETRY_TOTAL_BUDGET_SECS` (6s), a wall-clock budget covering all
   generation attempts of a single turn. The empty-completion recursion, the
   `APIConnectionError` reconnect and the SDK's own retries previously multiplied

@@ -11,7 +11,7 @@ import asyncio
 import json
 import re
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -87,6 +87,17 @@ CLIENT_CONNECT_TIMEOUT_SECS = 5.0
 CLIENT_READ_TIMEOUT_SECS = 30.0
 CLIENT_WRITE_TIMEOUT_SECS = 10.0
 CLIENT_POOL_TIMEOUT_SECS = 5.0
+
+# `run_inference` is out-of-band (not on the conversational path) and, unlike a
+# live turn, NON-streaming: the server sends nothing at all until the whole
+# completion is generated. httpx's `read` timeout therefore bounds total
+# generation there, not time-to-first-byte, so the conversational
+# CLIENT_READ_TIMEOUT_SECS would silently cap post-call analysis — transcript
+# summaries, variable/slot extraction, call tagging, DNC classification — at a
+# value chosen for first-token latency. Those calls get their own, much looser
+# per-request bound, overridable via the `inference_timeout_secs` constructor
+# argument. It is still a bound: the SDK default is 600s.
+INFERENCE_TIMEOUT_SECS = 180.0
 
 
 def _repair_truncated_json(text) -> Optional[dict]:
@@ -604,6 +615,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         retry_on_timeout: bool | None = False,
         client_max_retries: int | None = None,
         client_timeout: httpx.Timeout | None = None,
+        inference_timeout_secs: float | None = None,
         **kwargs,
     ):
         """Initialize the BaseOpenAILLMService.
@@ -637,6 +649,11 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             client_timeout: ``httpx.Timeout`` for the AsyncOpenAI client. Defaults
                 to the ``CLIENT_*_TIMEOUT_SECS`` constants. Raise the read timeout
                 for long non-conversational generations.
+            inference_timeout_secs: Per-request timeout applied to
+                :meth:`run_inference` only. Defaults to ``INFERENCE_TIMEOUT_SECS``.
+                Out-of-band inference is non-streaming, so this bounds total
+                generation, not time-to-first-byte, and must be much looser than
+                the conversational ``client_timeout``.
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
@@ -686,6 +703,9 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         # Read by create_client, so these must be set before it runs.
         self._client_max_retries = client_max_retries
         self._client_timeout = client_timeout
+        self._inference_timeout_secs = (
+            inference_timeout_secs if inference_timeout_secs is not None else INFERENCE_TIMEOUT_SECS
+        )
         self._full_model_name: str = ""
         self._client = self.create_client(
             api_key=api_key,
@@ -998,6 +1018,12 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
     ) -> str | None:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
+        This path carries its own per-request timeout (``inference_timeout_secs``,
+        default ``INFERENCE_TIMEOUT_SECS``) instead of the client's conversational
+        read timeout. The completion is non-streaming, so the client's read bound
+        would apply to total generation rather than to time-to-first-byte and would
+        cap post-call analysis at a value picked for a live turn.
+
         Args:
             context: The LLM context containing conversation history.
             max_tokens: Optional maximum number of tokens to generate. If provided,
@@ -1031,6 +1057,15 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             else:
                 params["max_tokens"] = max_tokens
 
+        # Out-of-band inference gets its own, looser per-request timeout: see the
+        # INFERENCE_TIMEOUT_SECS note. `extra` may already carry an explicit
+        # timeout; if it does, respect it.
+        if "timeout" not in params:
+            inference_timeout = getattr(self, "_inference_timeout_secs", None)
+            if inference_timeout is None:
+                inference_timeout = INFERENCE_TIMEOUT_SECS
+            params["timeout"] = inference_timeout
+
         # LLM completion
         response = await self._client.chat.completions.create(**params)
 
@@ -1052,6 +1087,12 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             content = cleaned
         return content
 
+    # Clock read by the per-turn generation budget. Indirected through an
+    # overridable attribute so a test can inject a fake clock without
+    # monkeypatching the stdlib `time` module, which is process-global and would
+    # also replace asyncio's event-loop clock.
+    _generation_clock: Callable[[], float] = staticmethod(time.monotonic)
+
     def _generation_budget_remaining(self) -> float:
         """Seconds left in this turn's total generation budget.
 
@@ -1062,7 +1103,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         deadline = getattr(self, "_turn_generation_deadline", None)
         if deadline is None:
             return float("inf")
-        return deadline - time.monotonic()
+        return deadline - self._generation_clock()
 
     @traced_llm
     async def _process_context(self, context: LLMContext):
@@ -1073,7 +1114,9 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         # max_retries) otherwise multiply into minutes of dead air on a degraded
         # server.
         if getattr(self, "_empty_retry_depth", 0) == 0:
-            self._turn_generation_deadline = time.monotonic() + EMPTY_RETRY_TOTAL_BUDGET_SECS
+            self._turn_generation_deadline = (
+                self._generation_clock() + EMPTY_RETRY_TOTAL_BUDGET_SECS
+            )
 
         functions_list = []
         arguments_list = []
