@@ -176,16 +176,21 @@ class FrameProcessorQueue(asyncio.PriorityQueue):
         return item
 
 
-# Timeout in seconds for cancelling the input frame processing task.
-# This prevents hanging if a library swallows asyncio.CancelledError.
+# CAREFUL — these are REPORTING thresholds, not bounds, and the code below is
+# written on that assumption. `TaskManager.cancel_task` cannot abandon a cancel
+# it has started: cancelling an asyncio task and awaiting it always waits for
+# the cancellation to complete (asyncio.wait_for is no exception — it cancels
+# the inner task and then waits for it before raising TimeoutError). Crossing
+# the threshold therefore logs a warning naming the blocking frame and how long
+# the cancel really took; it does NOT orphan the task or return early. A real
+# bound would let a still-running process task push stale frames into a fresh
+# turn, so it needs a generation guard that does not exist yet.
+#
+# The practical consequence, seen in production: a process task that takes 3s to
+# cancel serializes 3s of barge-in propagation, because an interruption cancels
+# it inline from the input task. Raising or lowering these numbers changes only
+# when you hear about it.
 INPUT_TASK_CANCEL_TIMEOUT_SECS = 3
-
-# Timeout in seconds for cancelling the non-system frame processing task.
-# An interruption cancels this task inline from the input task; without a
-# bound, a process task wedged in un-cancellable cleanup (e.g. an HTTP
-# stream aclose() over a dead connection) blocks the input task forever,
-# which freezes the whole pipeline — heartbeats, new turns, even CancelFrame.
-# On timeout the wedged task is orphaned and a fresh process task takes over.
 PROCESS_TASK_CANCEL_TIMEOUT_SECS = 3
 
 
