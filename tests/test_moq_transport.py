@@ -190,6 +190,7 @@ from pipecat.runner.moq import (  # noqa: E402
     _build_moq_client_config,
     _cert_hash_from_pem,
     _hex_to_b64,
+    _validate_moq_args,
 )
 
 
@@ -295,6 +296,7 @@ class TestCertHashHelpers(unittest.TestCase):
             args.moq_path = "/moq"
             args.moq_serve = False
             args.moq_tls_cert = pem_path
+            args.moq_tls_fingerprint = None
             args.moq_client_id = "client0"
             args.moq_bot_id = "bot0"
 
@@ -312,10 +314,49 @@ class TestCertHashHelpers(unittest.TestCase):
         args.moq_path = "/moq"
         args.moq_serve = False
         args.moq_tls_cert = None
+        args.moq_tls_fingerprint = None
         args.moq_client_id = "client0"
         args.moq_bot_id = "bot0"
 
         cfg = _build_moq_client_config(args, namespace="pipecat", cert_fingerprints=None)
+        self.assertIsNone(cfg["certHash"])
+
+    def test_build_moq_client_config_client_mode_explicit_fingerprint(self):
+        """Client mode against a self-signed relay: ``--moq-tls-fingerprint``
+        (hex, as advertised by moq-relay at ``/certificate.sha256``) is
+        converted to base64 and handed to the browser as ``certHash`` for
+        WebTransport pinning — no PEM required."""
+        import base64
+
+        digest = bytes(range(32))
+        args = MagicMock()
+        args.moq_host = "localhost"
+        args.moq_port = 4443
+        args.moq_path = "/anon"
+        args.moq_serve = False
+        args.moq_tls_cert = None
+        args.moq_tls_fingerprint = digest.hex()
+        args.moq_client_id = "client0"
+        args.moq_bot_id = "bot0"
+
+        cfg = _build_moq_client_config(args, namespace="pipecat", cert_fingerprints=None)
+        self.assertEqual(cfg["certHash"], base64.b64encode(digest).decode())
+        self.assertFalse(cfg["serve"])
+
+    def test_build_moq_client_config_unix_dial_has_no_browser_relay_url(self):
+        """When the bot dials over a unix socket, the browser config's
+        ``relayUrl`` is None — a socket path is not a network endpoint the
+        browser can reach, so the client supplies one out-of-band."""
+        args = MagicMock()
+        args.moq_serve = False
+        args.moq_tls_cert = None
+        args.moq_tls_fingerprint = None
+        args.moq_relay_url = "unix:///var/lib/moq/relay.unix"
+        args.moq_client_id = "client0"
+        args.moq_bot_id = "bot0"
+
+        cfg = _build_moq_client_config(args, namespace="pipecat", cert_fingerprints=None)
+        self.assertIsNone(cfg["relayUrl"])
         self.assertIsNone(cfg["certHash"])
 
 
@@ -412,6 +453,73 @@ class TestMOQTransportInit(unittest.TestCase):
         ``--moq-cert`` path. Verifies the published initial state."""
         transport, _broadcast, _track, _moq = self._make_transport()
         self.assertEqual(transport.cert_fingerprints, [])
+
+
+class TestValidateMoqArgs(unittest.TestCase):
+    """``_validate_moq_args`` resolves server-vs-client mode and derives the
+    host/port/path the transport and browser config are built from. Mode is
+    explicit via ``--moq-serve``/``--no-moq-serve`` and otherwise inferred
+    from whether ``--moq-connect`` was given."""
+
+    @staticmethod
+    def _args(**overrides):
+        """Namespace mirroring the parser defaults for the MoQ args."""
+        import argparse
+
+        defaults = dict(
+            moq_serve=None,
+            moq_connect=None,
+            moq_bind=None,
+            moq_tls_cert=None,
+            moq_tls_key=None,
+            moq_tls_insecure=False,
+            moq_tls_generate=None,
+        )
+        defaults.update(overrides)
+        return argparse.Namespace(**defaults)
+
+    def test_server_mode_is_the_default_when_nothing_given(self):
+        """Bare ``-t moq`` (no relay URL) stays in server mode with a
+        self-signed localhost cert — the zero-config local-dev path."""
+        args = self._args()
+        self.assertTrue(_validate_moq_args(args))
+        self.assertTrue(args.moq_serve)
+        self.assertEqual(args.moq_host, "localhost")
+        self.assertEqual(args.moq_port, 4080)
+
+    def test_client_mode_inferred_from_connect(self):
+        """Passing ``--moq-connect`` without an explicit ``--moq-serve``
+        selects client mode and derives host/port/path from the URL."""
+        args = self._args(moq_connect="https://relay.example.com/moq")
+        self.assertTrue(_validate_moq_args(args))
+        self.assertFalse(args.moq_serve)
+        self.assertEqual(args.moq_host, "relay.example.com")
+        self.assertEqual(args.moq_port, 443)  # https default
+        self.assertEqual(args.moq_path, "/moq")
+
+    def test_no_moq_serve_forces_client_mode_with_default_relay(self):
+        """``--no-moq-serve`` with no URL falls back to the default relay."""
+        args = self._args(moq_serve=False)
+        self.assertTrue(_validate_moq_args(args))
+        self.assertFalse(args.moq_serve)
+
+    def test_explicit_serve_overrides_connect(self):
+        """An explicit ``--moq-serve`` wins even if ``--moq-connect`` is
+        also present (the URL is ignored, not an error)."""
+        args = self._args(moq_serve=True, moq_connect="https://relay.example.com/moq")
+        self.assertTrue(_validate_moq_args(args))
+        self.assertTrue(args.moq_serve)
+        self.assertEqual(args.moq_port, 4080)
+
+    def test_unix_socket_connect_sets_relay_url(self):
+        """A ``unix://`` --moq-connect selects client mode and passes the
+        socket URL straight through as the dial target — no host/port, since
+        a co-located relay over a unix socket has neither."""
+        args = self._args(moq_connect="unix:///var/lib/moq/relay.unix")
+        self.assertTrue(_validate_moq_args(args))
+        self.assertFalse(args.moq_serve)
+        self.assertEqual(args.moq_relay_url, "unix:///var/lib/moq/relay.unix")
+        self.assertIsNone(args.moq_host)
 
 
 if __name__ == "__main__":

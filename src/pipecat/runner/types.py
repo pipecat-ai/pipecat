@@ -274,6 +274,11 @@ class MOQRunnerArguments(RunnerArguments):
         host: MOQ relay/server hostname the browser uses to connect.
         port: MOQ relay/server port.
         path: MOQ endpoint path on the relay (client mode).
+        relay_url: Full relay dial URL for the bot. When set it overrides
+            ``host``/``port``/``path`` — used for a ``unix://`` socket dial
+            to a co-located relay (e.g. a sidecar), where there is no
+            host/port. Browsers still need the relay's network endpoint
+            supplied separately.
         namespace: MOQ namespace (like a room identifier).
         participant_id: This bot's participant id; it broadcasts under
             ``<namespace>/<participant_id>``.
@@ -299,6 +304,7 @@ class MOQRunnerArguments(RunnerArguments):
     host: str
     port: int
     path: str = "/moq"
+    relay_url: str | None = None
     namespace: str = "pipecat"
     participant_id: str = "bot0"
     peer_id: str = "client0"
