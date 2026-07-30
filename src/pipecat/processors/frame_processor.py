@@ -30,6 +30,7 @@ from loguru import logger
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.frames.frames import (
     CancelFrame,
+    EndFrame,
     ErrorFrame,
     Frame,
     FrameProcessorPauseFrame,
@@ -1030,7 +1031,16 @@ class FrameProcessor(BaseObject):
         while True:
             (frame, direction, callback) = await self.__input_queue.get()
 
-            if self.__should_block_system_frames and self.__input_event:
+            # Lifecycle frames (e.g. CancelFrame) must not be gated behind the
+            # system-frame processing pause. Teardown coordination depends on
+            # these frames flowing through promptly; blocking them can
+            # deadlock pipeline shutdown when upstream frame flow requires the
+            # lifecycle frame to be processed.
+            if (
+                self.__should_block_system_frames
+                and self.__input_event
+                and not isinstance(frame, CancelFrame)
+            ):
                 logger.trace(f"{self}: system frame processing paused")
                 await self.__input_event.wait()
                 self.__input_event.clear()
@@ -1057,7 +1067,16 @@ class FrameProcessor(BaseObject):
 
             self.__process_current_frame = frame
 
-            if self.__should_block_frames and self.__process_event:
+            # Lifecycle frames (e.g. EndFrame) must bypass the processing pause.
+            # The pause exists to avoid audio overlap, but gating lifecycle frames
+            # behind it can deadlock teardown: e.g. a ParallelPipeline's EndFrame
+            # synchronization buffers the very frames needed to lift the pause, so
+            # an EndFrame stuck behind the pause never reaches the sync sink.
+            if (
+                self.__should_block_frames
+                and self.__process_event
+                and not isinstance(frame, (EndFrame, CancelFrame))
+            ):
                 logger.trace(f"{self}: frame processing paused")
                 await self.__process_event.wait()
                 self.__process_event.clear()
