@@ -13,6 +13,7 @@ from collections.abc import Awaitable, Callable
 
 import websockets
 from loguru import logger
+from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 from websockets.protocol import State
@@ -26,6 +27,37 @@ from pipecat.utils.network import QuickFailureTracker, exponential_backoff_time
 # The websockets default of 10s is long enough to be noticeable once several
 # websocket services tear down in sequence.
 WS_CLOSE_TIMEOUT = 2.0
+
+
+class _BoundedCloseConnection(ClientConnection):
+    """Websocket connection that reports an unacknowledged closing handshake.
+
+    ``websockets`` enforces ``close_timeout`` internally and absorbs the outcome:
+    :meth:`close` returns normally whether the peer acknowledged the handshake or
+    the deadline expired and the connection was dropped. Timing the call is the
+    only way to tell those apart, which keeps a teardown that silently cost
+    ``close_timeout`` from going unnoticed.
+    """
+
+    async def close(self, code: int = 1000, reason: str = "") -> None:
+        """Close the connection, logging if the peer never acknowledged it.
+
+        Args:
+            code: WebSocket close code.
+            reason: WebSocket close reason.
+        """
+        start = time.monotonic()
+        try:
+            await super().close(code, reason)
+        finally:
+            elapsed = time.monotonic() - start
+            if self.close_timeout is not None and elapsed >= self.close_timeout:
+                # Immediately follows the owning service's "Disconnecting from
+                # ..." log, so the connection needs no further identification.
+                logger.debug(
+                    f"Peer did not acknowledge the websocket close within "
+                    f"{self.close_timeout}s; connection dropped"
+                )
 
 
 class WebsocketService(ABC):
@@ -83,6 +115,7 @@ class WebsocketService(ABC):
             The connected websocket.
         """
         kwargs.setdefault("close_timeout", self._ws_close_timeout)
+        kwargs.setdefault("create_connection", _BoundedCloseConnection)
         return await websocket_connect(uri, **kwargs)
 
     async def _verify_connection(self) -> bool:
