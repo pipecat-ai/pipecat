@@ -20,7 +20,6 @@ from typing import Any
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -290,7 +289,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
 
             headers = {"x-api-key": self._api_key}
 
-            self._websocket = await websocket_connect(url, additional_headers=headers)
+            self._websocket = await self._websocket_connect(url, additional_headers=headers)
 
             await self._call_event_handler("on_connected")
         except Exception as e:

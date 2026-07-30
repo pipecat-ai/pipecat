@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -278,7 +277,7 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
                 **self._extra_headers,
             }
             logger.debug(f"Connecting to Cartesia Ink-2 ASR: {self._websocket_url()}")
-            self._websocket = await websocket_connect(
+            self._websocket = await self._websocket_connect(
                 self._websocket_url(), additional_headers=headers
             )
 

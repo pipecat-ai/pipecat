@@ -19,7 +19,6 @@ from typing import Any, cast
 
 from loguru import logger
 from pydantic import BaseModel
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -388,7 +387,7 @@ class GradiumSTTService(WebsocketSTTService):
                 "x-api-key": self._api_key,
                 "x-api-source": "pipecat",
             }
-            websocket = await websocket_connect(
+            websocket = await self._websocket_connect(
                 ws_url,
                 additional_headers=headers,
             )

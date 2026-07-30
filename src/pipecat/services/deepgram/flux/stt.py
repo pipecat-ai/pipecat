@@ -12,7 +12,6 @@ from collections.abc import AsyncGenerator
 
 from loguru import logger
 from pydantic import BaseModel
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -314,14 +313,14 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             # `_connect` sets `_websocket_url` before calling us; the assert
             # narrows for pyright.
             assert self._websocket_url is not None
-            websocket = await websocket_connect(
+            websocket = await self._websocket_connect(
                 self._websocket_url,
                 additional_headers={"Authorization": f"Token {self._api_key}"},
             )
             self._websocket = websocket
 
             # `response` is populated after the handshake completes (which it
-            # has, since `websocket_connect` already returned).
+            # has, since the connect call already returned).
             response_headers = websocket.response.headers if websocket.response else {}
             headers = {k: v for k, v in response_headers.items() if k.startswith("dg-")}
             logger.debug(f'{self}: Websocket connection initialized: {{"headers": {headers}}}')

@@ -684,7 +684,7 @@ class TestConnectionLifecycle:
         service._websocket = mock_ws
 
         with patch(
-            "pipecat.services.openai.responses.llm.websocket_connect",
+            "pipecat.services.websocket_service.websocket_connect",
             new_callable=AsyncMock,
             return_value=AsyncMock(),
         ):

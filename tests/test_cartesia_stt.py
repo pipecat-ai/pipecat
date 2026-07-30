@@ -23,7 +23,9 @@ async def test_cartesia_connect_failure_clears_stale_websocket(monkeypatch):
     async def fake_websocket_connect(*args, **kwargs):
         raise RuntimeError("connection failed")
 
-    monkeypatch.setattr("pipecat.services.cartesia.stt.websocket_connect", fake_websocket_connect)
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
 
     service = CartesiaSTTService(api_key="test-key", sample_rate=16000)
     service._websocket = _FakeWebsocket(state=State.CLOSED)

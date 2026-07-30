@@ -13,7 +13,7 @@ from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 from websockets.frames import Close
 
 from pipecat.frames.frames import ErrorFrame
-from pipecat.services.websocket_service import WebsocketService
+from pipecat.services.websocket_service import WS_CLOSE_TIMEOUT, WebsocketService
 
 
 class ConcreteWebsocketService(WebsocketService):
@@ -284,3 +284,57 @@ async def test_connect_resets_state(service):
 
     assert service._disconnecting is False
     assert service._quick_failure_tracker.count == 0
+
+
+# ---------------------------------------------------------------------------
+# Close timeout — bounding the closing handshake
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def connect_mock():
+    """Patch the underlying websockets connect() and capture its kwargs."""
+    with patch(
+        "pipecat.services.websocket_service.websocket_connect", new_callable=AsyncMock
+    ) as mock:
+        yield mock
+
+
+@pytest.mark.asyncio
+async def test_websocket_connect_applies_default_close_timeout(service, connect_mock):
+    """Connections get the default close timeout without the caller asking."""
+    await service._websocket_connect("wss://example.test")
+
+    assert connect_mock.await_args.kwargs["close_timeout"] == WS_CLOSE_TIMEOUT
+
+
+@pytest.mark.asyncio
+async def test_websocket_connect_honors_constructor_override(connect_mock):
+    """ws_close_timeout passed at construction reaches the connection."""
+    service = ConcreteWebsocketService(ws_close_timeout=7.5)
+
+    await service._websocket_connect("wss://example.test")
+
+    assert connect_mock.await_args.kwargs["close_timeout"] == 7.5
+
+
+@pytest.mark.asyncio
+async def test_websocket_connect_honors_per_call_override(service, connect_mock):
+    """An explicit close_timeout wins over the service default.
+
+    Used by services whose peer never acknowledges the closing handshake.
+    """
+    await service._websocket_connect("wss://example.test", close_timeout=0)
+
+    assert connect_mock.await_args.kwargs["close_timeout"] == 0
+
+
+@pytest.mark.asyncio
+async def test_websocket_connect_forwards_arguments(service, connect_mock):
+    """The URI and caller kwargs are passed through untouched."""
+    headers = {"Authorization": "Bearer token"}
+
+    await service._websocket_connect("wss://example.test", additional_headers=headers)
+
+    assert connect_mock.await_args.args == ("wss://example.test",)
+    assert connect_mock.await_args.kwargs["additional_headers"] is headers

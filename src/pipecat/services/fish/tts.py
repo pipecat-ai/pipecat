@@ -34,7 +34,6 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
     import ormsgpack
-    from websockets.asyncio.client import connect as websocket_connect
     from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -290,7 +289,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             model = assert_given(self._settings.model)
             if model is not None:
                 headers["model"] = model
-            websocket = await websocket_connect(self._base_url, additional_headers=headers)
+            websocket = await self._websocket_connect(self._base_url, additional_headers=headers)
             self._websocket = websocket
 
             # Send initial start message with ormsgpack

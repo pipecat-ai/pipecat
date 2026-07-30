@@ -13,11 +13,19 @@ from collections.abc import Awaitable, Callable
 
 import websockets
 from loguru import logger
+from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 from websockets.protocol import State
 
 from pipecat.frames.frames import ErrorFrame
 from pipecat.utils.network import QuickFailureTracker, exponential_backoff_time
+
+# Default ceiling, in seconds, on the websocket closing handshake. Disconnect
+# runs while a service handles the EndFrame, before the frame continues
+# downstream, so an unacknowledged close delays pipeline shutdown by this much.
+# The websockets default of 10s is long enough to be noticeable once several
+# websocket services tear down in sequence.
+WS_CLOSE_TIMEOUT = 2.0
 
 
 class WebsocketService(ABC):
@@ -28,15 +36,27 @@ class WebsocketService(ABC):
     Subclasses implement service-specific connection and message handling logic.
     """
 
-    def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
+    def __init__(
+        self,
+        *,
+        reconnect_on_error: bool = True,
+        ws_close_timeout: float = WS_CLOSE_TIMEOUT,
+        **kwargs,
+    ):
         """Initialize the websocket service.
 
         Args:
             reconnect_on_error: Whether to automatically reconnect on connection errors.
+            ws_close_timeout: Maximum time, in seconds, to wait for the peer to
+                acknowledge the websocket closing handshake before dropping the
+                connection. Applied to connections opened through
+                :meth:`_websocket_connect`. Increase it for peers that need
+                longer to complete a graceful close.
             **kwargs: Additional arguments (unused, for compatibility).
         """
         self._websocket: websockets.WebSocketClientProtocol | None = None  # pyright: ignore[reportAttributeAccessIssue]
         self._reconnect_on_error = reconnect_on_error
+        self._ws_close_timeout = ws_close_timeout
         self._reconnect_in_progress: bool = False
         self._disconnecting: bool = False
         # Rapid failure detection: when a server accepts the WebSocket handshake
@@ -46,6 +66,24 @@ class WebsocketService(ABC):
         # survives after being established.
         self._quick_failure_tracker = QuickFailureTracker()
         self._last_connect_time: float = 0.0
+
+    async def _websocket_connect(self, uri: str, **kwargs):
+        """Open a websocket connection with the service's close timeout applied.
+
+        Wraps :func:`websockets.asyncio.client.connect`, defaulting
+        ``close_timeout`` to ``ws_close_timeout``. Pass ``close_timeout``
+        explicitly to override it for a service whose peer needs different
+        closing behavior.
+
+        Args:
+            uri: The websocket URI to connect to.
+            **kwargs: Additional arguments passed to ``connect()``.
+
+        Returns:
+            The connected websocket.
+        """
+        kwargs.setdefault("close_timeout", self._ws_close_timeout)
+        return await websocket_connect(uri, **kwargs)
 
     async def _verify_connection(self) -> bool:
         """Verify the websocket connection is active and responsive.

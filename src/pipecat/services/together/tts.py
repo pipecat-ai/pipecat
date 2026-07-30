@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from loguru import logger
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -210,7 +209,7 @@ class TogetherTTSService(WebsocketTTSService):
             logger.debug(f"Connecting to Together AI TTS: {ws_url}")
 
             headers = {"Authorization": f"Bearer {self._api_key}"}
-            self._websocket = await websocket_connect(ws_url, additional_headers=headers)
+            self._websocket = await self._websocket_connect(ws_url, additional_headers=headers)
             await self._call_event_handler("on_connected")
 
             # Ensure voice is set on the server side

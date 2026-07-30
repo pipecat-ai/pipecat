@@ -13,7 +13,6 @@ from typing import Any
 from loguru import logger
 from pydantic import BaseModel
 from websockets import ConnectionClosedOK
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -256,7 +255,7 @@ class GradiumTTSService(WebsocketTTSService):
                 return
 
             headers = {"x-api-key": self._api_key, "x-api-source": "pipecat"}
-            self._websocket = await websocket_connect(self._url, additional_headers=headers)
+            self._websocket = await self._websocket_connect(self._url, additional_headers=headers)
 
             await self._call_event_handler("on_connected")
         except Exception as e:

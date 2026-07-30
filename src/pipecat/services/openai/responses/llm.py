@@ -33,7 +33,6 @@ from openai.types.responses import (
     ResponseTextDeltaEvent,
 )
 from pydantic import BaseModel
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import ConnectionClosed
 
 from pipecat.adapters.services.open_ai_responses_adapter import (
@@ -592,7 +591,7 @@ class OpenAIResponsesLLMService(
         try:
             if self._websocket:
                 return
-            self._websocket = await websocket_connect(
+            self._websocket = await self._websocket_connect(
                 uri=self._ws_url,
                 additional_headers={
                     "Authorization": f"Bearer {self._api_key}",
