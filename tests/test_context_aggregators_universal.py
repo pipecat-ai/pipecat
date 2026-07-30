@@ -392,6 +392,36 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_down_frames,
         )
 
+    async def test_proposed_frames_go_unresolved_while_the_user_is_muted(self):
+        """Muting gates the proposal, so no turn is decided from it."""
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=ExternalUserTurnStrategies(),
+                user_mute_strategies=[FirstSpeechUserMuteStrategy()],
+            ),
+        )
+
+        frames_to_send = [
+            # Bot is speaking, so the user is muted.
+            BotStartedSpeakingFrame(),
+            SleepFrame(),
+            ProposedUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+            ProposedUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=1.0),
+        ]
+        received_down, _ = await run_test(
+            Pipeline([user_aggregator]),
+            frames_to_send=frames_to_send,
+            expected_down_frames=None,
+        )
+        names = [type(f).__name__ for f in received_down]
+        self.assertNotIn("UserStartedSpeakingFrame", names)
+        self.assertNotIn("UserStoppedSpeakingFrame", names)
+        self.assertNotIn("InterruptionFrame", names)
+
     async def test_proposed_frames_are_consumed_by_the_resolver(self):
         """The resolver owns the proposal, so it doesn't reach a second resolver."""
         context = LLMContext()
