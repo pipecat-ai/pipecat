@@ -124,7 +124,10 @@ class TestBaseOutputTransportInterruptions(unittest.IsolatedAsyncioTestCase):
                 return True
 
             transport.write_audio_frame = AsyncMock(side_effect=slow_write)
-            await write_started.wait()
+            # A timeout here IS the assertion: if the sender ever stops writing
+            # continuously this must fail, not hang the suite (there is no
+            # global pytest timeout in this repo).
+            await asyncio.wait_for(write_started.wait(), timeout=5)
 
             # Queue bot audio (one full chunk) behind the in-flight write.
             bot_audio = OutputAudioRawFrame(
@@ -184,7 +187,10 @@ class TestBaseOutputTransportHeartbeatRouting(unittest.IsolatedAsyncioTestCase):
                 return True
 
             transport.write_audio_frame = AsyncMock(side_effect=blocked_write)
-            await write_started.wait()
+            # A timeout here IS the assertion: if the sender ever stops writing
+            # continuously this must fail, not hang the suite (there is no
+            # global pytest timeout in this repo).
+            await asyncio.wait_for(write_started.wait(), timeout=5)
 
             await self._fill_audio_queue(transport, chunks=50)
             queued_before = sender._audio_queue.qsize()

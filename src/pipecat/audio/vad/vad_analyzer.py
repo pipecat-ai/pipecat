@@ -106,8 +106,13 @@ class VADAnalyzer(ABC):
         #
         # Do not tune these paths looking for concurrency headroom. Measure
         # instead: with heartbeats no longer routed through the paced media
-        # queue, heartbeat traversal latency (PipelineWorker's `on_heartbeat`)
-        # is an honest per-pipeline scheduling-delay signal.
+        # queue, no longer drained by an interruption and exempt from
+        # `pause_processing_frames()`, heartbeat traversal latency
+        # (PipelineWorker's `on_heartbeat`) is usable as a per-pipeline load
+        # signal. Read it for what it is: scheduling delay PLUS the longest
+        # in-flight per-processor frame operation — a streamed LLM generation
+        # still sits in front of it — so compare like-for-like across pods
+        # rather than treating an absolute value as pure event-loop delay.
         #
         # The thread itself, however, is per-analyzer and is only reclaimed when
         # the executor is garbage collected — arbitrarily late for an object

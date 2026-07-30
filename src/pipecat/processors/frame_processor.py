@@ -1080,7 +1080,28 @@ class FrameProcessor(BaseObject):
 
             self.__process_current_frame = frame
 
-            if self.__should_block_frames and self.__process_event:
+            # A heartbeat is a liveness probe, not work: it carries no ordering
+            # semantics, which is the same argument that keeps it out of the
+            # output transport's paced audio queue. `pause_processing_frames()`
+            # is held for an entire utterance playout by every TTS service
+            # constructed with `pause_frame_processing=True` (they pause on
+            # LLMFullResponseEndFrame and resume on BotStoppedSpeakingFrame), so
+            # parking the probe here would make its traversal latency measure
+            # playout backlog again -- the exact defect the heartbeat routing fix
+            # removed, merely relocated from the transport to the TTS processor.
+            # The pause flag is deliberately left armed, so the next non-heartbeat
+            # frame still blocks and the ordering of real work is unchanged.
+            #
+            # Residual, deliberately not addressed here: a heartbeat that lands
+            # behind a non-heartbeat frame which is itself parked still waits for
+            # the pause to lift, and a heartbeat still queues behind a long
+            # in-flight frame operation (e.g. a streamed LLM generation). See the
+            # traversal-latency caveat on `PipelineWorker`'s `on_heartbeat`.
+            if (
+                self.__should_block_frames
+                and self.__process_event
+                and not isinstance(frame, HeartbeatFrame)
+            ):
                 logger.trace(f"{self}: frame processing paused")
                 await self.__process_event.wait()
                 self.__process_event.clear()

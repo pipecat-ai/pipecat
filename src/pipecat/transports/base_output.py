@@ -131,11 +131,23 @@ class BaseOutputTransport(FrameProcessor):
         for the one thing heartbeats therefore no longer cover: an output audio
         task that has stopped making progress.
 
-        Only senders that write continuously are considered — i.e. senders with a
-        mixer, which emit a mixed silence frame whenever their queue is empty and
-        so write every audio chunk regardless of conversation activity. A sender
-        without a mixer legitimately writes nothing while idle and is skipped
-        rather than reported as stale.
+        Only senders that write continuously are considered — i.e. senders with an
+        audio-generating mixer, which emit a mixed silence frame whenever their
+        queue is empty and so write every audio chunk regardless of conversation
+        activity. A sender without such a mixer legitimately writes nothing while
+        idle and is skipped rather than reported as stale.
+
+        Known coverage hole, stated explicitly because it is a real regression in
+        observability and not merely a numeric one: a sender with no
+        audio-generating mixer now has *no* output-task liveness signal at all.
+        Heartbeats used to prove that task was alive as a side effect of being
+        routed through its queue; they no longer are, and this property skips the
+        sender. That is deliberate — reporting a growing staleness for a sender
+        that is idle by design would hand consumers a fresh false-positive kill
+        signal, which is the failure class this whole change set exists to remove
+        — but it means transports that never set a mixer, and any transport at all
+        if :attr:`BaseAudioMixer.is_passthrough` is ever enabled for the mixer in
+        use, are unmonitored here and need a different check.
 
         Returns:
             The largest staleness across continuously-writing senders, or 0.0

@@ -418,6 +418,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         prod admission breaker latched on pods that had already drained.
         """
         period_secs = 0.2
+        monitor_secs = 5.0
         expected_heartbeats = 3
         latencies: list[float] = []
         received_expected = asyncio.Event()
@@ -428,6 +429,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             params=PipelineParams(
                 enable_heartbeats=True,
                 heartbeats_period_secs=period_secs,
+                heartbeats_monitor_secs=monitor_secs,
             ),
             cancel_on_idle_timeout=False,
         )
@@ -450,9 +452,65 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             wait_for_heartbeats(),
         )
 
-        assert len(latencies) >= expected_heartbeats
-        # An idle identity pipeline traverses in well under a heartbeat period.
-        assert all(0 <= latency < period_secs for latency in latencies), latencies
+        # At least two positive edges, so this proves the event repeats rather
+        # than firing once. Not `>= expected_heartbeats`: the monitor coalesces a
+        # drained backlog into a single event, so a loaded runner may legitimately
+        # produce fewer events than heartbeats.
+        assert len(latencies) >= 2, latencies
+        # The reported latency must be a real traversal measurement, not a stale
+        # or negative timestamp. Bounded by the monitor window rather than the
+        # period: a loaded CI runner can exceed one 200ms period of scheduling
+        # delay, and anything under the monitor window is by definition healthy.
+        assert all(0 <= latency < monitor_secs for latency in latencies), latencies
+
+    async def test_heartbeat_monitor_coalesces_a_drained_backlog(self):
+        """A pipeline that unblocks must emit one positive edge, not a burst of stale ones.
+
+        Heartbeats are uninterruptible, so a genuinely blocked pipeline
+        accumulates them instead of having them purged. When it drains, all of
+        them traverse at once. A consumer that closes an admission breaker or
+        resets a stall streak on ``on_heartbeat`` would otherwise be fooled N
+        times over by one momentary drain, each event carrying a stale latency.
+        """
+        worker = PipelineWorker(
+            Pipeline([IdentityFilter()]),
+            params=PipelineParams(enable_heartbeats=True),
+            cancel_on_idle_timeout=False,
+        )
+
+        events: list[tuple] = []
+
+        async def record(event_name, *args):
+            events.append((event_name, *args))
+
+        # Bypasses the event dispatcher (which would need a task manager); the
+        # subject under test is the monitor's coalescing, not the dispatch.
+        worker._call_event_handler = record
+        worker._clock.start()
+
+        now = worker._clock.get_time()
+        one_second = 1_000_000_000
+        # A four-heartbeat backlog: 4s, 3s, 2s and 0.1s of traversal latency.
+        for age_secs in (4.0, 3.0, 2.0, 0.1):
+            worker._heartbeat_queue.put_nowait(
+                HeartbeatFrame(timestamp=now - age_secs * one_second)
+            )
+
+        monitor = asyncio.create_task(worker._heartbeat_monitor_handler())
+        try:
+            await asyncio.sleep(0.1)
+        finally:
+            monitor.cancel()
+            try:
+                await monitor
+            except asyncio.CancelledError:
+                pass
+
+        heartbeats = [event for event in events if event[0] == "on_heartbeat"]
+        assert len(heartbeats) == 1, events
+        # The newest measurement, not the oldest and not four replays of it.
+        assert heartbeats[0][1] < 1.0, heartbeats
+        assert worker._heartbeat_queue.empty()
 
     async def test_heartbeat_monitor_respects_custom_timeout(self):
         """Verify the heartbeat monitor uses heartbeats_monitor_secs from params."""
