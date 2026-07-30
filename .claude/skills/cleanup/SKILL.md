@@ -233,6 +233,8 @@ async def bot(runner_args: RunnerArguments):
    - Pattern consistency
 4. Generate actionable recommendations
 5. Apply Pipecat standards
+6. Run `/prose-review branch` over the comments and docstrings written above, and fix
+   anything it flags
 
 ---
 

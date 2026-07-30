@@ -243,7 +243,8 @@ When documenting deprecated code:
 
 ## Checklist
 
-Before finishing, verify:
+Before finishing, run `/prose-review <path>` over the documented file and fix
+anything it flags, then verify:
 
 - [ ] Module has a docstring at the top (after copyright header and imports)
 - [ ] All public classes have docstrings
