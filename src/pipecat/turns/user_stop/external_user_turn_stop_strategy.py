@@ -195,9 +195,9 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
                 self._event.clear()
             except TimeoutError:
                 # Note: with wait_for_transcript off (realtime mode) this fires
-                # on every tick, and with no turn to end the controller would
-                # just discard every one. Harmless, but very noisy. Hence the
-                # _turn_open check.
+                # on every tick. The _turn_open check protects against
+                # unnecessarily triggering over and over (harmless, since the
+                # controller drops repeated triggers, but noisy).
                 if self._turn_open:
                     await self._maybe_trigger_user_turn_stopped()
 
