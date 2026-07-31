@@ -35,12 +35,19 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
       service proposing that the turn has ended. This strategy decides, and
       emits the :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` itself.
       It may also hold the turn open past the proposal, which is what
-      ``wait_for_transcript`` does. Subclass it to shift that timing further.
+      ``wait_for_transcript`` does.
 
     - :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` — the turn end was
       already decided and announced elsewhere, typically by a shared
       :class:`~pipecat.turns.user_turn_processor.UserTurnProcessor`. This
       strategy adopts that decision and emits nothing.
+
+    To shift the timing further, subclass this strategy and override
+    :meth:`~pipecat.turns.user_stop.BaseUserTurnStopStrategy.trigger_user_turn_stopped`,
+    which both paths reach once they decide the turn is over. Its
+    ``enable_user_speaking_frames`` argument already carries whichever path got
+    there, so pass it through when the override eventually finalizes. See
+    ``examples/turn-management/turn-management-custom-external-turn-strategy.py``.
     """
 
     def __init__(

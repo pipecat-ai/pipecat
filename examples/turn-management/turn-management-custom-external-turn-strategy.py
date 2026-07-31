@@ -91,17 +91,21 @@ class GracePeriodUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         await self._cancel_pending()
         await super().cleanup()
 
-    async def _trigger_user_turn_stopped(self):
+    async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames: bool | None = None):
         """Schedule the finalization instead of running it now."""
         if self._pending:
             return
-        self._pending = self.create_task(self._finalize_after_grace_period())
+        self._pending = self.create_task(
+            self._finalize_after_grace_period(enable_user_speaking_frames)
+        )
 
-    async def _finalize_after_grace_period(self):
+    async def _finalize_after_grace_period(self, enable_user_speaking_frames: bool | None):
         await asyncio.sleep(self._grace_period)
         self._pending = None
-        logger.debug(f"Grace period elapsed with no new speech; ending the user turn")
-        await super()._trigger_user_turn_stopped()
+        logger.debug("Grace period elapsed with no new speech; ending the user turn")
+        await super().trigger_user_turn_stopped(
+            enable_user_speaking_frames=enable_user_speaking_frames
+        )
 
     async def _cancel_pending(self):
         if not self._pending:

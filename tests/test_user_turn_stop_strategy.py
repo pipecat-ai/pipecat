@@ -989,41 +989,45 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
                     await self.cancel_task(task)
                 return await super().process_frame(frame)
 
-            async def _trigger_user_turn_stopped(self):
+            async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames=None):
                 if self.pending:
                     return
-                self.pending = self.create_task(self._finalize_later())
+                self.pending = self.create_task(self._finalize_later(enable_user_speaking_frames))
 
-            async def _finalize_later(self):
+            async def _finalize_later(self, enable_user_speaking_frames):
                 await asyncio.sleep(0.2)
                 self.pending = None
-                await super()._trigger_user_turn_stopped()
+                await super().trigger_user_turn_stopped(
+                    enable_user_speaking_frames=enable_user_speaking_frames
+                )
 
         strategy = DelayedStopStrategy()
         await strategy.setup(self.task_manager)
 
-        stopped = False
+        stop_params = None
 
         @strategy.event_handler("on_user_turn_stopped")
         async def on_user_turn_stopped(strategy, params):
-            nonlocal stopped
-            stopped = True
+            nonlocal stop_params
+            stop_params = params
 
         await strategy.process_frame(ProposedUserStartedSpeakingFrame())
         await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="", timestamp="now"))
         await strategy.process_frame(ProposedUserStoppedSpeakingFrame())
         # The base strategy would have finalized by now; this one holds the turn.
-        self.assertFalse(stopped)
+        self.assertIsNone(stop_params)
 
         # Resuming within the grace period keeps the turn open.
         await strategy.process_frame(ProposedUserStartedSpeakingFrame())
         await asyncio.sleep(0.3)
-        self.assertFalse(stopped)
+        self.assertIsNone(stop_params)
 
-        # Falling silent again lets the delayed finalization through.
+        # Falling silent again lets the delayed finalization through, still
+        # carrying the emission setting the decide path handed the override.
         await strategy.process_frame(ProposedUserStoppedSpeakingFrame())
         await asyncio.sleep(0.3)
-        self.assertTrue(stopped)
+        self.assertIsNotNone(stop_params)
+        self.assertTrue(stop_params.enable_user_speaking_frames)
 
         await strategy.cleanup()
 
