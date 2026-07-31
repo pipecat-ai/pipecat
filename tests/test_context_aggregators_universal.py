@@ -510,9 +510,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(stop_messages), 2)
         self.assertEqual(stop_messages[0].content, "Turn one.")
         self.assertEqual(stop_messages[1].content, "Turn two.")
-        self.assertEqual(
-            [m["content"] for m in context.messages], ["Turn one.", "Turn two."]
-        )
+        self.assertEqual([m["content"] for m in context.messages], ["Turn one.", "Turn two."])
 
     async def test_transcription_that_starts_turn_is_kept(self):
         context = LLMContext()
