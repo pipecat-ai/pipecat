@@ -1158,11 +1158,6 @@ class TTSService(AIService):
             if not text.strip():
                 return
 
-        # This is just a flag that indicates if we sent something to the TTS
-        # service. It will be cleared if we sent text because of a TTSSpeakFrame
-        # or when we received an LLMFullResponseEndFrame
-        self._processing_text = True
-
         # Accumulate text for a single debug log at flush time when streaming tokens.
         if self._is_streaming_tokens:
             self._streamed_text += text
@@ -1188,6 +1183,14 @@ class TTSService(AIService):
         elif not text.strip():
             await self.stop_processing_metrics()
             return
+
+        # This is just a flag that indicates if we sent something to the TTS
+        # service. It will be cleared if we sent text because of a TTSSpeakFrame
+        # or when we received an LLMFullResponseEndFrame. Set only after the
+        # whitespace/filter gates above, otherwise a filter that strips the text
+        # to empty would leave the flag latched and, with pause_frame_processing
+        # enabled, pause frame processing waiting for audio that never comes.
+        self._processing_text = True
 
         # To support use cases that may want to know the text before it's spoken, we
         # push the AggregatedTextFrame version before transforming and sending to TTS.
