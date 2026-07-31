@@ -917,7 +917,7 @@ class ServiceRegistry:
         ServiceDefinition(
             value="pockettts_tts",
             label="Pocket TTS",
-            package="pipecat-ai[pockettts]",
+            package="pipecat-ai[pocket-tts]",
             class_name=["PocketTTSService"],
             env_prefix="POCKETTTS",
             settings_params=["voice"],

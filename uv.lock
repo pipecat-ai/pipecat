@@ -4961,7 +4961,7 @@ piper = [
     { name = "piper-tts" },
     { name = "requests" },
 ]
-pockettts = [
+pocket-tts = [
     { name = "pocket-tts" },
 ]
 redis = [
@@ -5120,7 +5120,7 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["webrtc"], marker = "extra == 'webrtc-video'" },
     { name = "pipecat-ai-prebuilt", marker = "extra == 'runner'", specifier = ">=1.0.5" },
     { name = "piper-tts", marker = "extra == 'piper'", specifier = ">=1.3.0,<2" },
-    { name = "pocket-tts", marker = "extra == 'pockettts'", specifier = ">=2.1.0,<3" },
+    { name = "pocket-tts", marker = "extra == 'pocket-tts'", specifier = ">=2.1.0,<3" },
     { name = "protobuf", specifier = ">=5.29.6,<7" },
     { name = "protobuf", marker = "extra == 'nvidia'", specifier = ">=6.31.1,<7" },
     { name = "pvkoala", marker = "extra == 'koala'", specifier = "~=2.0.3" },
@@ -5160,7 +5160,7 @@ requires-dist = [
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1,<1" },
     { name = "websockets", specifier = ">=13.1" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "baseten", "cartesia", "camb", "cerebras", "crusoe", "daily", "deepgram", "deepseek", "elevenlabs", "evals", "fal", "fireworks", "fish", "funasr", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "koala", "kokoro", "langchain", "lemonslice", "livekit", "lmnt", "local", "local-smart-turn", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "moonshine", "moq", "nebius", "neuphonic", "novita", "nvidia", "openai", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "pockettts", "qwen", "redis", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "vonage-video-connector", "webrtc", "webrtc-video", "websocket", "whisper", "xai", "cli"]
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "baseten", "cartesia", "camb", "cerebras", "crusoe", "daily", "deepgram", "deepseek", "elevenlabs", "evals", "fal", "fireworks", "fish", "funasr", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "koala", "kokoro", "langchain", "lemonslice", "livekit", "lmnt", "local", "local-smart-turn", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "moonshine", "moq", "nebius", "neuphonic", "novita", "nvidia", "openai", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "pocket-tts", "qwen", "redis", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "vonage-video-connector", "webrtc", "webrtc-video", "websocket", "whisper", "xai", "cli"]
 
 [package.metadata.requires-dev]
 dev = [

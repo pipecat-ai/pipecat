@@ -24,7 +24,7 @@ try:
     from pocket_tts import TTSModel
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error('In order to use Pocket TTS, you need to `uv add "pipecat-ai[pockettts]"`.')
+    logger.error('In order to use Pocket TTS, you need to `uv add "pipecat-ai[pocket-tts]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 DEFAULT_VOICE = "alba"

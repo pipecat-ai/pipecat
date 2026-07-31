@@ -61,7 +61,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = PocketTTSService(
         settings=PocketTTSService.Settings(
-            voice="alba",
+            voice="anna",
         ),
     )
 
