@@ -981,6 +981,17 @@ class LLMUserAggregator(LLMContextAggregator):
         A service configured with ``should_interrupt=False`` carries that on its
         recommendation, but user-provided strategies discard the recommendation
         whole — so the pipeline would start interrupting with no indication why.
+
+        Passing ``ExternalUserTurnStrategies`` explicitly was a safe way to opt
+        out of the recommendation until 1.8.0, because the external start
+        strategy never interrupted no matter how it was constructed. It
+        broadcasts the interruption now, so explicit strategies can contradict
+        the service, and this warning names the two ways to reconcile them.
+
+        Only that container is checked. A ``UserTurnStrategies`` assembled by
+        hand around a bare ``ExternalUserTurnStartStrategy`` contradicts the
+        service the same way and goes unwarned — not expected to come up often
+        enough to justify inspecting the individual strategies.
         """
         if not isinstance(recommended, ExternalUserTurnStrategies):
             return
