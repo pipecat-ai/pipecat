@@ -633,7 +633,7 @@ class TestServiceSwitcherSettingsUpdates(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.service3.received_settings, [])
 
     async def test_settings_update_reaches_every_service(self):
-        """An update marked affects_inactive_services is applied by inactive services too.
+        """An update marked reach_inactive_services is applied by inactive services too.
 
         Their branch filters otherwise gate the update, leaving them to take over
         a session without a setting the rest of the pipeline assumes is in place.
@@ -644,7 +644,7 @@ class TestServiceSwitcherSettingsUpdates(unittest.IsolatedAsyncioTestCase):
             switcher,
             frames_to_send=[
                 LLMUpdateSettingsFrame(
-                    delta=LLMSettings(model="new-model"), affects_inactive_services=True
+                    delta=LLMSettings(model="new-model"), reach_inactive_services=True
                 )
             ],
             # A single copy leaves the switcher, not one per service.
@@ -666,7 +666,7 @@ class TestServiceSwitcherSettingsUpdates(unittest.IsolatedAsyncioTestCase):
             switcher,
             frames_to_send=[
                 LLMUpdateSettingsFrame(
-                    delta=LLMSettings(model="new-model"), affects_inactive_services=True
+                    delta=LLMSettings(model="new-model"), reach_inactive_services=True
                 )
             ],
             frames_to_send_direction=FrameDirection.UPSTREAM,
@@ -762,7 +762,7 @@ class TestServiceSwitcherSettingsUpdates(unittest.IsolatedAsyncioTestCase):
             frames_to_send=[
                 TextFrame("turn text"),
                 LLMUpdateSettingsFrame(
-                    delta=LLMSettings(model="new-model"), affects_inactive_services=True
+                    delta=LLMSettings(model="new-model"), reach_inactive_services=True
                 ),
             ],
             expected_down_frames=[TextFrame, LLMUpdateSettingsFrame],
@@ -777,7 +777,7 @@ class TestServiceSwitcherSettingsUpdates(unittest.IsolatedAsyncioTestCase):
             switcher,
             frames_to_send=[
                 LLMUpdateSettingsFrame(
-                    delta=LLMSettings(model="new-model"), affects_inactive_services=True
+                    delta=LLMSettings(model="new-model"), reach_inactive_services=True
                 ),
                 ManuallySwitchServiceFrame(service=self.service2),
             ],

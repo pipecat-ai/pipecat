@@ -25,7 +25,7 @@ class LLMTurnCompletionUserTurnStopStrategy(ExternalUserTurnCompletionStopStrate
     downstream that enables ``filter_incomplete_user_turns`` on the LLM
     and seeds the
     :class:`~pipecat.turns.user_turn_completion_mixin.UserTurnCompletionConfig`.
-    The update is marked ``affects_inactive_services`` so that every LLM behind
+    The update is marked ``reach_inactive_services`` so that every LLM behind
     an :class:`~pipecat.pipeline.llm_switcher.LLMSwitcher` is configured, not
     only the one active at startup.
 
@@ -81,6 +81,6 @@ class LLMTurnCompletionUserTurnStopStrategy(ExternalUserTurnCompletionStopStrate
                     filter_incomplete_user_turns=True,
                     user_turn_completion_config=self._config,
                 ),
-                affects_inactive_services=True,
+                reach_inactive_services=True,
             )
         )

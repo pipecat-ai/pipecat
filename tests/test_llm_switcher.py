@@ -128,7 +128,7 @@ class TestLLMSwitcherSettings(unittest.IsolatedAsyncioTestCase):
             frames_to_send=[
                 LLMUpdateSettingsFrame(
                     delta=LLMSettings(filter_incomplete_user_turns=True),
-                    affects_inactive_services=True,
+                    reach_inactive_services=True,
                 )
             ],
         )

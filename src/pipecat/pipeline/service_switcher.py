@@ -221,7 +221,7 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
 
     `ServiceUpdateSettingsFrame` is the exception to the gating. A settings
     update addressed to a member service (``service=``) reaches it whether or
-    not it is active, and one marked ``affects_inactive_services`` reaches every
+    not it is active, and one marked ``reach_inactive_services`` reaches every
     member, so whichever service becomes active later is already configured. Any
     other settings update applies to the active service alone.
 
@@ -403,4 +403,4 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
 
         # Any other update crosses to the inactive services only if it opts in,
         # since settings values are often specific to one provider.
-        return inactive if frame.affects_inactive_services else []
+        return inactive if frame.reach_inactive_services else []

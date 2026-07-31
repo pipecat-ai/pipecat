@@ -731,7 +731,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
 
         updates = [f for f in received_down if isinstance(f, LLMUpdateSettingsFrame)]
         self.assertEqual(len(updates), 1)
-        self.assertTrue(updates[0].affects_inactive_services)
+        self.assertTrue(updates[0].reach_inactive_services)
 
     async def test_llm_completion_strategy_finalizes_on_complete_marker(self):
         """LLMTurnCompletionUserTurnStopStrategy finalizes only on UserTurnInferenceCompletedFrame(complete)."""
