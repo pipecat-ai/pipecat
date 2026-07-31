@@ -398,11 +398,24 @@ class LLMSettings(ServiceSettings):
         seed: Random seed for reproducibility.
         filter_incomplete_user_turns: Enable LLM-based turn completion detection
             to suppress bot responses when the user was cut off mid-thought.
-            See ``examples/22-filter-incomplete-turns.py`` and
-            ``UserTurnCompletionLLMServiceMixin``.
+            Set by
+            :class:`~pipecat.turns.user_stop.LLMTurnCompletionUserTurnStopStrategy`,
+            which is also what waits on the resulting verdict.
+
+            .. deprecated:: 1.7.0
+                Use
+                ``user_turn_strategies=FilterIncompleteUserTurnStrategies()`` on
+                :class:`~pipecat.processors.aggregators.llm_response_universal.LLMUserAggregatorParams`
+                instead. Will be removed in 2.0.0.
+
         user_turn_completion_config: Configuration for turn completion behavior
             when ``filter_incomplete_user_turns`` is enabled. Controls timeouts
             and prompts for incomplete turns.
+
+            .. deprecated:: 1.7.0
+                Pass the config to
+                ``FilterIncompleteUserTurnStrategies(config=...)`` instead. Will
+                be removed in 2.0.0.
     """
 
     system_instruction: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)

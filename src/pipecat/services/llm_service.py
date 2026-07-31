@@ -307,7 +307,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self._group_parallel_tools = group_parallel_tools
         self._function_call_timeout_secs = function_call_timeout_secs
         self._enable_async_tool_cancellation: bool = enable_async_tool_cancellation
+        # Turn completion is owned by LLMTurnCompletionUserTurnStopStrategy, which
+        # enables it over an LLMUpdateSettingsFrame once the pipeline starts.
         self._filter_incomplete_user_turns: bool = False
+        self._warn_turn_completion_settings_are_strategy_owned()
         self._async_tool_cancellation_enabled: bool = False
         # The user's base system instruction, without composed addons. Captured
         # here and refreshed when the user changes ``system_instruction`` at
@@ -469,6 +472,32 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             await self._cancel_sequential_runner_task()
         await self._cancel_summary_task()
         await self._cancel_all_function_call_tasks()
+
+    def _warn_turn_completion_settings_are_strategy_owned(self):
+        """Warn that the turn-completion settings belong to the user turn strategy.
+
+        Construction is the one place these settings can only have come from
+        application code: the strategy configures the service over an
+        ``LLMUpdateSettingsFrame`` once the pipeline is running.
+        """
+        replacements = {
+            "filter_incomplete_user_turns": (
+                "`user_turn_strategies=FilterIncompleteUserTurnStrategies()`"
+            ),
+            "user_turn_completion_config": "`FilterIncompleteUserTurnStrategies(config=...)`",
+        }
+        for name, replacement in replacements.items():
+            if not getattr(self._settings, name, None):
+                continue
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    f"`{type(self._settings).__name__}.{name}` is deprecated since 1.7.0 and "
+                    f"will be removed in 2.0.0. It has no effect here. "
+                    f"Use {replacement} instead.",
+                    DeprecationWarning,
+                    stacklevel=4,
+                )
 
     def append_system_instruction(self, instruction: str) -> None:
         """Append durable text to the system instruction, preserving the user's prompt.
