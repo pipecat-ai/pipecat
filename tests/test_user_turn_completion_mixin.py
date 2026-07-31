@@ -487,8 +487,7 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
 
         Clearing the latch on the requested run lets the re-prompt speak, but
         that response's own ✓ re-arms the latch, so a later stray inference in
-        the same turn is still dropped. This guards against the reset
-        accidentally widening into an open-ended window.
+        the same turn is still dropped.
         """
         processor = MockProcessor()
         processor.broadcast_frame = AsyncMock()
