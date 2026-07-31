@@ -123,6 +123,14 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._text = ""
         if clear_vad_user_speaking:
             self._vad_user_speaking = False
+        await self._discard_pending_end_of_turn()
+
+    async def _discard_pending_end_of_turn(self):
+        """Drop whatever progress toward an end-of-turn has been made so far.
+
+        Runs at a turn boundary, and whenever VAD reports the user speaking
+        again — which makes earlier progress stale mid-turn.
+        """
         self._transcript_finalized = False
         self._vad_stopped = False
         self._user_speech_wait_done = False
@@ -183,11 +191,7 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
     async def _handle_vad_user_started_speaking(self, _: VADUserStartedSpeakingFrame):
         """Handle when the VAD indicates the user is speaking."""
         self._vad_user_speaking = True
-        self._transcript_finalized = False
-        self._vad_stopped = False
-        self._user_speech_wait_done = False
-        self._stt_wait_done = False
-        await self._cancel_all_tasks()
+        await self._discard_pending_end_of_turn()
 
     async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         """Handle when the VAD indicates the user has stopped speaking."""
