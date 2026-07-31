@@ -6,7 +6,7 @@
 
 import asyncio
 import unittest
-from typing import Optional, TypedDict, Union
+from typing import TypedDict
 
 from pipecat.flows.exceptions import InvalidFunctionError
 from pipecat.flows.manager import FlowManager

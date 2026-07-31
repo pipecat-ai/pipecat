@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
 import unittest
 from dataclasses import dataclass, field
 from types import SimpleNamespace
