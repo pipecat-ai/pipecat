@@ -701,6 +701,38 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertIs(stop_strategies[0].inner, existing)
         self.assertIsInstance(stop_strategies[1], LLMTurnCompletionUserTurnStopStrategy)
 
+    async def test_llm_completion_strategy_configures_inactive_llms(self):
+        """The startup settings update reaches every LLM behind a switcher.
+
+        The strategy configures the LLM once, at startup, and then waits on the
+        completion frame from whichever LLM is active. An LLM that missed the
+        update would emit no markers, leaving user turns to the stop timeout.
+        """
+        from pipecat.frames.frames import LLMUpdateSettingsFrame
+        from pipecat.turns.user_stop import LLMTurnCompletionUserTurnStopStrategy, deferred
+
+        user_aggregator = LLMUserAggregator(
+            LLMContext(),
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[
+                        deferred(
+                            SpeechTimeoutUserTurnStopStrategy(
+                                user_speech_timeout=TRANSCRIPTION_TIMEOUT
+                            )
+                        ),
+                        LLMTurnCompletionUserTurnStopStrategy(),
+                    ],
+                ),
+            ),
+        )
+
+        received_down, _ = await run_test(user_aggregator, frames_to_send=[])
+
+        updates = [f for f in received_down if isinstance(f, LLMUpdateSettingsFrame)]
+        self.assertEqual(len(updates), 1)
+        self.assertTrue(updates[0].reach_inactive_services)
+
     async def test_llm_completion_strategy_finalizes_on_complete_marker(self):
         """LLMTurnCompletionUserTurnStopStrategy finalizes only on UserTurnInferenceCompletedFrame(complete)."""
         from pipecat.frames.frames import UserTurnInferenceCompletedFrame
