@@ -461,6 +461,97 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stop_message.content, "Hello!")
         self.assertFalse(timeout)
 
+    async def test_stale_aggregation_not_carried_into_next_turn(self):
+        context = LLMContext()
+
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    start=[VADUserTurnStartStrategy()],
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+                    ],
+                ),
+                user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+            ),
+        )
+
+        stop_messages = []
+
+        @user_aggregator.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(aggregator, strategy, message):
+            stop_messages.append(message)
+
+        pipeline = Pipeline([user_aggregator])
+
+        frames_to_send = [
+            # Turn 1: transcript lands in time and is committed on stop.
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Turn one.", user_id="", timestamp="now"),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
+            # Late final from turn 1 arrives after the turn was committed.
+            TranscriptionFrame(text="Late straggler.", user_id="", timestamp="now"),
+            # Let the straggler (a data frame) drain before the VAD system
+            # frame, which would otherwise skip the queue and overtake it.
+            SleepFrame(),
+            # Turn 2: new speech must not inherit the stale straggler.
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Turn two.", user_id="", timestamp="now"),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
+        ]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+        )
+
+        self.assertEqual(len(stop_messages), 2)
+        self.assertEqual(stop_messages[0].content, "Turn one.")
+        self.assertEqual(stop_messages[1].content, "Turn two.")
+        self.assertEqual(
+            [m["content"] for m in context.messages], ["Turn one.", "Turn two."]
+        )
+
+    async def test_transcription_that_starts_turn_is_kept(self):
+        context = LLMContext()
+
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    start=[TranscriptionUserTurnStartStrategy()],
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+                    ],
+                ),
+                user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+            ),
+        )
+
+        stop_messages = []
+
+        @user_aggregator.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(aggregator, strategy, message):
+            stop_messages.append(message)
+
+        pipeline = Pipeline([user_aggregator])
+
+        # No VAD frames: the final transcription itself starts the turn and
+        # must survive the turn-start stale-aggregation cleanup.
+        frames_to_send = [
+            TranscriptionFrame(text="Hello there!", user_id="", timestamp="now"),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
+        ]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+        )
+
+        self.assertEqual(len(stop_messages), 1)
+        self.assertEqual(stop_messages[0].content, "Hello there!")
+
     async def test_user_mute_strategies(self):
         context = LLMContext()
 
