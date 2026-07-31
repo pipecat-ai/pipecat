@@ -10,6 +10,8 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 
@@ -61,6 +63,35 @@ class NovitaLLMService(OpenAILLMService):
             settings=default_settings,
             **kwargs,
         )
+
+        # Novita repeats a cumulative usage snapshot on every streamed chunk, so
+        # the latest one holds the totals for the whole completion.
+        self._token_usage: LLMTokenUsage | None = None
+
+    async def _process_context(self, context: LLMContext):
+        """Process a context through the LLM, reporting usage once per completion.
+
+        Args:
+            context: The context to process, containing messages and other
+                information needed for the LLM interaction.
+        """
+        self._token_usage = None
+
+        try:
+            await super()._process_context(context)
+        finally:
+            # Report even if the response is interrupted or cancelled mid-stream.
+            if self._token_usage:
+                await super().start_llm_usage_metrics(self._token_usage)
+                self._token_usage = None
+
+    async def start_llm_usage_metrics(self, tokens: LLMTokenUsage):
+        """Hold the latest usage snapshot rather than reporting it per chunk.
+
+        Args:
+            tokens: Cumulative token usage for the completion so far.
+        """
+        self._token_usage = tokens
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         """Create OpenAI-compatible client for Novita AI API endpoint.
