@@ -198,21 +198,22 @@ class AssemblyAISTTSettings(STTSettings):
             "en", "es", "fr"). On U3 Pro models, a tier-1 code
             ("en"/"es"/"fr"/"de"/"it"/"pt") steers transcription toward that
             language; other supported codes are "tr", "nl", "sv", "no", "da",
-            "fi", "hi", "vi", "ar", "he", "ja", "zh". AssemblyAI supersedes
-            this parameter with ``language_codes``, which covers the same languages
-            as ``Language`` enums and is bound in preference to this one when both
-            are set; prefer that one. Defaults to None (not sent; no steering).
+            "fi", "hi", "vi", "ar", "he", "ja", "zh". This is one of the names
+            AssemblyAI accepts for its declared-language parameter, alongside
+            ``language_codes``, which covers the same languages as ``Language``
+            enums and is bound in preference to this one when both are set. Prefer
+            ``language_codes``. Defaults to None (not sent; no steering).
         language_codes: Customer-declared audio languages. A single language (e.g.
             ``[Language.ES]``) pins transcription to that language; several (e.g.
             ``[Language.EN, Language.ES]``) steer toward that subset while keeping
             code-switching among them. Order is significant — the steering prompt
             follows the declared order. Regional variants resolve to their base code,
             so at most 10 distinct languages. Steering is prompt-based, so it applies
-            to U3 Pro models only. Unlike most settings, a change applies to a live
-            session without reconnecting; pass an empty list to clear steering back to
-            the model default. For fully multilingual transcription, set
-            ``model="universal-streaming-multilingual"`` instead. Defaults to None
-            (not sent; no steering).
+            to U3 Pro models only and is not sent for other models — including
+            ``universal-streaming-multilingual``, which transcribes multilingual audio
+            without steering. Unlike most settings, a change applies to a live session
+            without reconnecting; pass an empty list to clear steering back to the
+            model default. Defaults to None (not sent; no steering).
         format_turns: Whether to format transcript turns.
         speaker_labels: Enable speaker diarization.
         vad_threshold: VAD confidence threshold (0.0–1.0) for classifying
@@ -522,6 +523,15 @@ class AssemblyAISTTService(WebsocketSTTService):
         if isinstance(default_settings.language_codes, list):
             _prepare_language_codes(default_settings.language_codes)
 
+        # Language steering is prompt-based and therefore U3 Pro-only. Other
+        # models — including universal-streaming-multilingual, which transcribes
+        # multilingual audio without steering — don't accept it, so it isn't sent.
+        if not is_u3_pro and isinstance(default_settings.language_codes, list):
+            logger.warning(
+                "language_codes is only supported by U3 Pro models and will be ignored "
+                f"for model '{default_settings.model}'."
+            )
+
         declared_language_fields = [
             name
             for name in ("language_code", "language_codes")
@@ -705,8 +715,8 @@ class AssemblyAISTTService(WebsocketSTTService):
     async def _update_language_codes(self, language_codes: list[Language]):
         """Re-steer the live session toward a new set of declared languages.
 
-        Steering is prompt-based and therefore u3-rt-pro-only; AssemblyAI discards
-        a mid-session change for any other model, so don't bother sending one.
+        Steering is prompt-based and therefore U3 Pro-only; AssemblyAI discards a
+        mid-session change for any other model, so don't bother sending one.
         Reconnecting wouldn't help either — those models aren't steered at all.
 
         Args:
@@ -717,7 +727,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             if not self._language_codes_warned:
                 self._language_codes_warned = True
                 logger.warning(
-                    f"{self} language_codes steering is only supported by u3-rt-pro; "
+                    f"{self} language_codes steering is only supported by U3 Pro models; "
                     f"ignoring mid-session change for model '{self._settings.model}'."
                 )
             return
@@ -832,8 +842,8 @@ class AssemblyAISTTService(WebsocketSTTService):
         }
 
         # continuous_partials, interruption_delay, agent_context,
-        # previous_context_n_turns, voice_focus(_threshold), and mode only apply
-        # to the U3 Pro family.
+        # previous_context_n_turns, voice_focus(_threshold), mode, and
+        # language_codes only apply to the U3 Pro family.
         if is_u3_pro_model(s.model):
             optional_fields["continuous_partials"] = s.continuous_partials
             optional_fields["interruption_delay"] = s.interruption_delay
@@ -855,7 +865,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         # List-valued parameters travel as JSON-encoded query values.
         if s.keyterms_prompt is not None:
             params["keyterms_prompt"] = json.dumps(s.keyterms_prompt)
-        if isinstance(s.language_codes, list):
+        if is_u3_pro_model(s.model) and isinstance(s.language_codes, list):
             params["language_codes"] = json.dumps(_prepare_language_codes(s.language_codes))
 
         if params:

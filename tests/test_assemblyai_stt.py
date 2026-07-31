@@ -497,17 +497,28 @@ def test_language_codes_sent_json_encoded(languages, expected):
     assert _query(service)["language_codes"] == [json.dumps(expected)]
 
 
-def test_language_codes_sent_for_universal_streaming():
-    # Forwarded for any model. Only U3 Pro is prompt-steered, so this has no
-    # transcription effect there, but the parameter is accepted, not rejected.
-    service = AssemblyAISTTService(
-        api_key="test-key",
-        settings=AssemblyAISTTService.Settings(
-            model="universal-streaming-multilingual",
-            language_codes=[Language.EN, Language.ES],
-        ),
-    )
-    assert _query(service)["language_codes"] == [json.dumps(["en", "es"])]
+@pytest.mark.parametrize("model", ["universal-streaming-multilingual", "u3-rt-pro-beta-1"])
+def test_language_codes_sent_for_u3_pro_models_only(model):
+    # Steering is prompt-based, so only the U3 Pro family accepts it.
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="WARNING", format="{message}")
+    try:
+        service = AssemblyAISTTService(
+            api_key="test-key",
+            settings=AssemblyAISTTService.Settings(
+                model=model,
+                language_codes=[Language.EN, Language.ES],
+            ),
+        )
+    finally:
+        logger.remove(handler_id)
+
+    if is_u3_pro_model(model):
+        assert _query(service)["language_codes"] == [json.dumps(["en", "es"])]
+        assert "language_codes is only supported" not in sink.getvalue()
+    else:
+        assert "language_codes" not in _query(service)
+        assert "language_codes is only supported by U3 Pro models" in sink.getvalue()
 
 
 def test_language_codes_with_language_detection_warns():
@@ -770,10 +781,13 @@ def test_update_settings_language_codes_empty_list_clears_steering():
     assert reconnects == []
 
 
-def test_update_settings_language_codes_not_sent_for_non_u3():
+@pytest.mark.parametrize(
+    "model", ["universal-streaming-english", "universal-streaming-multilingual"]
+)
+def test_update_settings_language_codes_not_sent_for_non_u3(model):
     service = AssemblyAISTTService(
         api_key="test-key",
-        settings=AssemblyAISTTService.Settings(model="universal-streaming-english"),
+        settings=AssemblyAISTTService.Settings(model=model),
     )
     sent, reconnects = _stub_connection(service)
 
@@ -785,11 +799,11 @@ def test_update_settings_language_codes_not_sent_for_non_u3():
     finally:
         logger.remove(handler_id)
 
-    # Steering is u3-rt-pro-only; the server would discard this, so don't send
-    # it — and don't reconnect either, since those models aren't steered at all.
+    # Steering is U3 Pro-only; the server would discard this, so don't send it —
+    # and don't reconnect either, since those models aren't steered at all.
     assert sent == []
     assert reconnects == []
-    assert "only supported by u3-rt-pro" in sink.getvalue()
+    assert "only supported by U3 Pro models" in sink.getvalue()
 
 
 def test_update_settings_language_codes_non_u3_warns_once():
@@ -812,7 +826,7 @@ def test_update_settings_language_codes_non_u3_warns_once():
         logger.remove(handler_id)
 
     # A language-switching bot would otherwise warn on every attempt.
-    assert sink.getvalue().count("only supported by u3-rt-pro") == 1
+    assert sink.getvalue().count("only supported by U3 Pro models") == 1
 
 
 def test_update_settings_language_codes_with_agent_context_sends_both():
@@ -868,7 +882,7 @@ def test_update_settings_over_limit_language_codes_still_reconnects_for_other_fi
     sent, reconnects = _stub_connection(service)
 
     delta = AssemblyAISTTService.Settings(
-        model="universal-streaming-english",
+        model="u3-rt-pro",
         language_codes=OVER_LIMIT_LANGUAGES,
     )
     asyncio.run(service._update_settings(delta))
