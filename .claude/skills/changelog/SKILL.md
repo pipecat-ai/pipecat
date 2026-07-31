@@ -46,10 +46,7 @@ Create changelog files for the important commits in this PR. The PR number is pr
 
    Ask yourself: "If I'm a developer building on Pipecat, what would I notice changed?" Start there.
 
-8. Once the entries are written, run `/prose-review changelog/` and fix anything it
-   flags. Contrasting old and new *user-visible* behavior is expected here; what it
-   catches is development-process detail — internal refactoring described from the
-   inside, rejected approaches, verification narrative.
+8. Once the entries are written, run `/prose-review changelog/` and fix anything it flags.
 
 ## Example
 

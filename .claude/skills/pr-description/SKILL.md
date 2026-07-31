@@ -119,13 +119,9 @@ Note: Use "Fixes #X" format (not "Closes" or "Resolves") for consistency. Each i
 
 ## Checklist
 
-Before updating the PR, read the description against the "Writing for Future
-Readers" standard in `AGENTS.md` — the same one `/prose-review` applies to code
-prose. A description is release notes: what changed and why it matters to users.
-Cut development-process detail — approaches tried and abandoned, review
-back-and-forth, verification narrative, refactoring described from the inside.
-Then verify:
+Before updating the PR:
 
+- [ ] Description documents the change for users, not the development process — the standard `/prose-review` applies, in `AGENTS.md` under "Writing for Future Readers"
 - [ ] Verified existing description needs updating (not already complete)
 - [ ] Summary accurately reflects the changes
 - [ ] Breaking changes are clearly documented (if any)
