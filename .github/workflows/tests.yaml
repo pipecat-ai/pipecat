@@ -53,6 +53,7 @@ jobs:
             --extra redis \
             --extra runner \
             --extra sagemaker \
+            --extra sarvam \
             --extra tracing \
             --extra websocket
 

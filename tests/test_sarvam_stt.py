@@ -4,6 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import pytest
+
+pytest.importorskip("sarvamai")
+
 from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 
