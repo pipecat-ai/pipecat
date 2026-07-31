@@ -237,10 +237,9 @@ class TestTurnStartVADState(unittest.IsolatedAsyncioTestCase):
         # finalizes a fragment part way through. The utterance ends with a real
         # pause.
         #
-        # Audio arrives in short runs, each followed by a sleep: every frame
-        # costs the VAD analyzer an executor round-trip, so a long run leaves
-        # transcripts queued behind it, and the interruption a turn start
-        # broadcasts would then discard them.
+        # Audio arrives in short runs, each followed by a sleep, so a transcript
+        # is never queued behind a long run of audio frames — the interruption a
+        # turn start broadcasts would discard it.
         frames_to_send: list = [
             STTMetadataFrame(service_name="DailyTransport", ttfs_p99_latency=DEEPGRAM_TTFS_P99),
             *_speech_audio(AUDIO_RUN_SECS),

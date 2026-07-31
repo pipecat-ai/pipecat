@@ -117,11 +117,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
     async def _reset(self):
         """Clear turn-scoped state. Runs at both turn boundaries.
 
-        ``_vad_stopped`` is turn-scoped — it records whether *this* turn got a
-        VAD stop, which is what the no-VAD transcript fallback keys on — so it
-        is cleared at each boundary.
-
-        ``_vad_user_speaking`` is not, and is left alone: whether the user is
+        ``_vad_user_speaking`` is deliberately left alone: whether the user is
         speaking belongs to the user rather than to the turn, and VAD reports it
         only on transitions. Clearing it at a turn start VAD didn't drive — a
         turn begun from a transcript, mid-utterance — would leave it wrong until
