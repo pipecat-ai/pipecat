@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import unittest
 import warnings
 from types import SimpleNamespace
@@ -14,6 +15,7 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.frames.frames import (
+    FunctionCallCancelFrame,
     FunctionCallFromLLM,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
@@ -30,6 +32,7 @@ from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.utils.async_tool_cancellation import CANCEL_ASYNC_TOOL_NAME
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 
 def _expected_missing_tool_message(name: str) -> str:
@@ -130,6 +133,374 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
         warnings = [c.args[0] for c in mock_logger.warning.call_args_list]
         self.assertTrue(any("not in the currently advertised tool set" in w for w in warnings))
         self.assertFalse(any("just unregistered" in w for w in warnings))
+
+    async def test_function_call_timeout_cancels_handler(self):
+        """A timed-out function call must not keep running or emit a late result."""
+        service = MockLLMService()
+        service._task_manager = TaskManager()
+        service._call_event_handler = AsyncMock()
+        await self._run_function_calls_inline(service)
+
+        results = []
+
+        async def mock_broadcast_frame(frame_cls, **kwargs):
+            if frame_cls is FunctionCallResultFrame:
+                results.append(kwargs["result"])
+
+        service.broadcast_frame = mock_broadcast_frame
+
+        handler_cancelled = asyncio.Event()
+        side_effects = []
+
+        async def slow_handler(params):
+            try:
+                await asyncio.sleep(0.05)
+            except asyncio.CancelledError:
+                handler_cancelled.set()
+                raise
+
+            side_effects.append("completed")
+            await params.result_callback("late-success")
+
+        service.register_function("slow_tool", slow_handler, timeout_secs=0.01)
+
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name="slow_tool",
+                    tool_call_id="call_1",
+                    arguments={},
+                    context=LLMContext(),
+                )
+            ]
+        )
+
+        await asyncio.wait_for(handler_cancelled.wait(), timeout=1.0)
+        self.assertEqual(side_effects, [])
+        self.assertEqual(results, [None])
+
+    async def test_function_call_timeout_does_not_wait_for_cancellation_cleanup(self):
+        """The timeout result is terminal even while cancellation cleanup is still running."""
+        service = MockLLMService()
+        service._task_manager = TaskManager()
+        service._call_event_handler = AsyncMock()
+        await self._run_function_calls_inline(service)
+
+        results = []
+        timeout_result = asyncio.Event()
+
+        async def mock_broadcast_frame(frame_cls, **kwargs):
+            if frame_cls is FunctionCallResultFrame:
+                results.append(kwargs["result"])
+                timeout_result.set()
+
+        service.broadcast_frame = mock_broadcast_frame
+
+        handler_cancelled = asyncio.Event()
+        finish_cleanup = asyncio.Event()
+        cleanup_completed = asyncio.Event()
+
+        async def handler_with_slow_cancellation_cleanup(params):
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                handler_cancelled.set()
+                await finish_cleanup.wait()
+                await params.result_callback("late-success")
+                cleanup_completed.set()
+
+        service.register_function(
+            "slow_cleanup_tool", handler_with_slow_cancellation_cleanup, timeout_secs=0.01
+        )
+
+        call_task = asyncio.create_task(
+            service.run_function_calls(
+                [
+                    FunctionCallFromLLM(
+                        function_name="slow_cleanup_tool",
+                        tool_call_id="call_1",
+                        arguments={},
+                        context=LLMContext(),
+                    )
+                ]
+            )
+        )
+
+        await asyncio.wait_for(timeout_result.wait(), timeout=1.0)
+        await asyncio.wait_for(call_task, timeout=1.0)
+
+        self.assertTrue(handler_cancelled.is_set())
+        self.assertTrue(call_task.done())
+        self.assertFalse(cleanup_completed.is_set())
+        self.assertEqual(results, [None])
+
+        finish_cleanup.set()
+        await asyncio.wait_for(cleanup_completed.wait(), timeout=1.0)
+        self.assertEqual(results, [None])
+
+    async def test_cleanup_drains_timed_out_handler_cleanup(self):
+        """A detached timeout handler remains owned by the service until cleanup."""
+        service = MockLLMService()
+        service._task_manager = TaskManager()
+        service._call_event_handler = AsyncMock()
+        await self._run_function_calls_inline(service)
+
+        timeout_result = asyncio.Event()
+
+        async def mock_broadcast_frame(frame_cls, **kwargs):
+            if frame_cls is FunctionCallResultFrame:
+                timeout_result.set()
+
+        service.broadcast_frame = mock_broadcast_frame
+
+        first_cancellation = asyncio.Event()
+        cleanup_exited = asyncio.Event()
+
+        async def cancellation_suppressing_handler(params):
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                first_cancellation.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cleanup_exited.set()
+
+        service.register_function(
+            "cleanup_owned_tool", cancellation_suppressing_handler, timeout_secs=0.01
+        )
+
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name="cleanup_owned_tool",
+                    tool_call_id="call_1",
+                    arguments={},
+                    context=LLMContext(),
+                )
+            ]
+        )
+
+        await asyncio.wait_for(timeout_result.wait(), timeout=1.0)
+        await asyncio.wait_for(first_cancellation.wait(), timeout=1.0)
+        self.assertEqual(len(service._timed_out_function_call_tasks), 1)
+
+        await asyncio.wait_for(service.cleanup(), timeout=1.0)
+
+        self.assertTrue(cleanup_exited.is_set())
+        self.assertEqual(service._timed_out_function_call_tasks, set())
+
+    async def test_function_call_timeout_stops_after_result_callback(self):
+        """A valid result callback satisfies the timeout while handler cleanup continues."""
+        service = MockLLMService()
+        service._task_manager = TaskManager()
+        service._call_event_handler = AsyncMock()
+        await self._run_function_calls_inline(service)
+
+        results = []
+
+        async def mock_broadcast_frame(frame_cls, **kwargs):
+            if frame_cls is FunctionCallResultFrame:
+                results.append(kwargs["result"])
+
+        service.broadcast_frame = mock_broadcast_frame
+
+        cleanup_completed = asyncio.Event()
+
+        async def handler_with_cleanup(params):
+            await params.result_callback("success")
+            await asyncio.sleep(0.05)
+            cleanup_completed.set()
+
+        service.register_function("cleanup_tool", handler_with_cleanup, timeout_secs=0.01)
+
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name="cleanup_tool",
+                    tool_call_id="call_1",
+                    arguments={},
+                    context=LLMContext(),
+                )
+            ]
+        )
+
+        self.assertTrue(cleanup_completed.is_set())
+        self.assertEqual(results, ["success"])
+
+    async def test_function_call_interruption_cancels_owned_timeout_handler(self):
+        """External cancellation still propagates to a handler with a global timeout."""
+        service = MockLLMService(function_call_timeout_secs=1.0)
+        service._task_manager = TaskManager()
+        service._call_event_handler = AsyncMock()
+        await self._run_function_calls_inline(service)
+
+        results = []
+
+        async def mock_broadcast_frame(frame_cls, **kwargs):
+            if frame_cls is FunctionCallResultFrame:
+                results.append(kwargs["result"])
+
+        service.broadcast_frame = mock_broadcast_frame
+
+        handler_started = asyncio.Event()
+        handler_cancelled = asyncio.Event()
+
+        async def interrupted_handler(params):
+            handler_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                handler_cancelled.set()
+                raise
+
+        service.register_function("interrupted_tool", interrupted_handler)
+
+        call_task = asyncio.create_task(
+            service.run_function_calls(
+                [
+                    FunctionCallFromLLM(
+                        function_name="interrupted_tool",
+                        tool_call_id="call_1",
+                        arguments={},
+                        context=LLMContext(),
+                    )
+                ]
+            )
+        )
+
+        await asyncio.wait_for(handler_started.wait(), timeout=1.0)
+        call_task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await call_task
+
+        self.assertTrue(handler_cancelled.is_set())
+        self.assertEqual(results, [])
+
+    async def test_timeout_terminal_claim_wins_over_interruption(self):
+        """Interruption cannot replace a timeout result whose broadcast has started."""
+        service = MockLLMService()
+        service._task_manager = TaskManager()
+        service._call_event_handler = AsyncMock()
+
+        result_broadcast_started = asyncio.Event()
+        finish_result_broadcast = asyncio.Event()
+        recorded_frames = []
+
+        async def mock_broadcast_frame(frame_cls, **kwargs):
+            recorded_frames.append(frame_cls)
+            if frame_cls is FunctionCallResultFrame:
+                result_broadcast_started.set()
+                await finish_result_broadcast.wait()
+
+        service.broadcast_frame = mock_broadcast_frame
+
+        async def slow_handler(params):
+            await asyncio.Event().wait()
+
+        service.register_function("racing_tool", slow_handler, timeout_secs=0.01)
+
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name="racing_tool",
+                    tool_call_id="call_1",
+                    arguments={},
+                    context=LLMContext(),
+                )
+            ]
+        )
+
+        await asyncio.wait_for(result_broadcast_started.wait(), timeout=1.0)
+        function_call_task = next(iter(service._function_call_tasks))
+
+        await service._cancel_function_call("racing_tool")
+        self.assertNotIn(FunctionCallCancelFrame, recorded_frames)
+
+        finish_result_broadcast.set()
+        await asyncio.wait_for(function_call_task, timeout=1.0)
+        self.assertEqual(recorded_frames.count(FunctionCallResultFrame), 1)
+
+    async def test_interruption_terminal_claim_drops_cleanup_result(self):
+        """A handler cannot replace a claimed cancellation during cleanup."""
+        service = MockLLMService()
+        service._task_manager = TaskManager()
+        service._call_event_handler = AsyncMock()
+
+        recorded_frames = []
+
+        async def mock_broadcast_frame(frame_cls, **kwargs):
+            recorded_frames.append(frame_cls)
+
+        service.broadcast_frame = mock_broadcast_frame
+
+        handler_started = asyncio.Event()
+
+        async def cleanup_result_handler(params):
+            handler_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await params.result_callback("cleanup-result")
+
+        service.register_function("cleanup_result_tool", cleanup_result_handler)
+
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name="cleanup_result_tool",
+                    tool_call_id="call_1",
+                    arguments={},
+                    context=LLMContext(),
+                )
+            ]
+        )
+
+        await asyncio.wait_for(handler_started.wait(), timeout=1.0)
+        await service._cancel_function_call("cleanup_result_tool")
+
+        terminal_frames = [
+            frame_cls
+            for frame_cls in recorded_frames
+            if frame_cls in (FunctionCallResultFrame, FunctionCallCancelFrame)
+        ]
+        self.assertEqual(terminal_frames, [FunctionCallCancelFrame])
+
+    async def test_function_call_preserves_handler_timeout_error(self):
+        """TimeoutError from application code follows the normal error path."""
+        service = MockLLMService()
+        service._task_manager = TaskManager()
+        service._call_event_handler = AsyncMock()
+        service.broadcast_frame = AsyncMock()
+        service.push_error = AsyncMock()
+        await self._run_function_calls_inline(service)
+
+        async def failing_handler(params):
+            raise TimeoutError("downstream request timed out")
+
+        service.register_function("failing_tool", failing_handler, timeout_secs=1.0)
+
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name="failing_tool",
+                    tool_call_id="call_1",
+                    arguments={},
+                    context=LLMContext(),
+                )
+            ]
+        )
+
+        service.push_error.assert_awaited_once()
+        self.assertIn(
+            "downstream request timed out", service.push_error.await_args.kwargs["error_msg"]
+        )
+        self.assertFalse(
+            any(
+                call.args and call.args[0] is FunctionCallResultFrame
+                for call in service.broadcast_frame.await_args_list
+            )
+        )
 
     async def test_function_unregistered_between_queue_and_execute(self):
         """Function unregistered between queuing and execution still terminates."""
