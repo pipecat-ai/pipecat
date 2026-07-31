@@ -67,13 +67,13 @@ async def test_elevenlabs_stt_sends_keyterms_multipart_fields(aiohttp_client):
 async def test_elevenlabs_realtime_websocket_url_includes_keyterms(monkeypatch):
     captured = {}
 
-    async def fake_websocket_connect(url, *, additional_headers):
+    async def fake_websocket_connect(url, *, additional_headers, **kwargs):
         captured["url"] = url
         captured["headers"] = additional_headers
         return object()
 
     monkeypatch.setattr(
-        "pipecat.services.elevenlabs.stt.websocket_connect",
+        "pipecat.services.websocket_service.websocket_connect",
         fake_websocket_connect,
     )
 

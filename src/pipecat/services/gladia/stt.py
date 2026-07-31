@@ -20,7 +20,6 @@ from typing import Any, Literal
 import aiohttp
 import websockets
 from loguru import logger
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat import version as pipecat_version
@@ -555,7 +554,7 @@ class GladiaSTTService(WebsocketSTTService):
 
             if self._session_url is None:
                 raise RuntimeError(f"{self} session URL is not initialized")
-            self._websocket = await websocket_connect(self._session_url)
+            self._websocket = await self._websocket_connect(self._session_url)
             self._connection_active = True
 
             # Reset byte tracking for new connection

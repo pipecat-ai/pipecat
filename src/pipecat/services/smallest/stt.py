@@ -21,7 +21,6 @@ from typing import Any
 from urllib.parse import urlencode
 
 from loguru import logger
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat import version as pipecat_version
@@ -323,7 +322,7 @@ class SmallestSTTService(WebsocketSTTService):
 
             ws_url = f"{self._base_url}/waves/v1/stt/live?{urlencode(query_params)}"
 
-            self._websocket = await websocket_connect(
+            self._websocket = await self._websocket_connect(
                 ws_url,
                 additional_headers={
                     "Authorization": f"Bearer {self._api_key}",

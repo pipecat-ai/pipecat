@@ -6,14 +6,32 @@
 
 """Tests for WebsocketService reconnection and lifecycle behavior."""
 
+import asyncio
+import base64
+import hashlib
+import io
+import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from loguru import logger
+from websockets.asyncio.client import ClientConnection
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 from websockets.frames import Close
 
 from pipecat.frames.frames import ErrorFrame
-from pipecat.services.websocket_service import WebsocketService
+from pipecat.services.websocket_service import (
+    WS_CLOSE_TIMEOUT,
+    WebsocketService,
+    _BoundedCloseConnection,
+)
+
+# Magic value RFC 6455 requires when deriving the handshake accept header.
+_WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+# The _no_sleep fixture below stubs out asyncio.sleep for the whole module, so
+# tests that need real elapsed time use this reference instead.
+_real_sleep = asyncio.sleep
 
 
 class ConcreteWebsocketService(WebsocketService):
@@ -284,3 +302,154 @@ async def test_connect_resets_state(service):
 
     assert service._disconnecting is False
     assert service._quick_failure_tracker.count == 0
+
+
+# ---------------------------------------------------------------------------
+# Close timeout — bounding the closing handshake
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def connect_mock():
+    """Patch the underlying websockets connect() and capture its kwargs."""
+    with patch(
+        "pipecat.services.websocket_service.websocket_connect", new_callable=AsyncMock
+    ) as mock:
+        yield mock
+
+
+@pytest.mark.asyncio
+async def test_websocket_connect_applies_default_close_timeout(service, connect_mock):
+    """Connections get the default close timeout without the caller asking."""
+    await service._websocket_connect("wss://example.test")
+
+    assert connect_mock.await_args.kwargs["close_timeout"] == WS_CLOSE_TIMEOUT
+
+
+@pytest.mark.asyncio
+async def test_websocket_connect_honors_constructor_override(connect_mock):
+    """ws_close_timeout passed at construction reaches the connection."""
+    service = ConcreteWebsocketService(ws_close_timeout=7.5)
+
+    await service._websocket_connect("wss://example.test")
+
+    assert connect_mock.await_args.kwargs["close_timeout"] == 7.5
+
+
+@pytest.mark.asyncio
+async def test_websocket_connect_honors_per_call_override(service, connect_mock):
+    """An explicit close_timeout wins over the service default.
+
+    Used by services whose peer never acknowledges the closing handshake.
+    """
+    await service._websocket_connect("wss://example.test", close_timeout=0)
+
+    assert connect_mock.await_args.kwargs["close_timeout"] == 0
+
+
+@pytest.mark.asyncio
+async def test_websocket_connect_forwards_arguments(service, connect_mock):
+    """The URI and caller kwargs are passed through untouched."""
+    headers = {"Authorization": "Bearer token"}
+
+    await service._websocket_connect("wss://example.test", additional_headers=headers)
+
+    assert connect_mock.await_args.args == ("wss://example.test",)
+    assert connect_mock.await_args.kwargs["additional_headers"] is headers
+
+
+@pytest.mark.asyncio
+async def test_websocket_connect_installs_bounded_close_connection(service, connect_mock):
+    """Connections are created as the class that reports an overrunning close."""
+    await service._websocket_connect("wss://example.test")
+
+    assert connect_mock.await_args.kwargs["create_connection"] is _BoundedCloseConnection
+
+
+@pytest.fixture
+def log_sink():
+    """Capture loguru output for the duration of a test."""
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="DEBUG", format="{message}")
+    try:
+        yield sink
+    finally:
+        logger.remove(handler_id)
+
+
+@pytest.mark.asyncio
+async def test_bounded_close_logs_when_handshake_overruns(log_sink):
+    """An unacknowledged close is logged so a silent teardown cost leaves a trace."""
+    conn = _BoundedCloseConnection.__new__(_BoundedCloseConnection)
+    conn.close_timeout = 0.05
+
+    async def slow_close(self, code=1000, reason=""):
+        await _real_sleep(0.1)
+
+    with patch.object(ClientConnection, "close", slow_close):
+        await conn.close()
+
+    assert "did not acknowledge the websocket close" in log_sink.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_bounded_close_silent_when_handshake_completes(log_sink):
+    """A clean close logs nothing."""
+    conn = _BoundedCloseConnection.__new__(_BoundedCloseConnection)
+    conn.close_timeout = 5.0
+
+    async def fast_close(self, code=1000, reason=""):
+        return None
+
+    with patch.object(ClientConnection, "close", fast_close):
+        await conn.close()
+
+    assert "did not acknowledge the websocket close" not in log_sink.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_bounded_close_against_unresponsive_peer(log_sink):
+    """End to end: a peer that never acknowledges the close is bounded and logged.
+
+    Serves a raw WebSocket handshake and then goes silent, which is the condition
+    that makes the closing handshake overrun.
+    """
+    handshake_done = asyncio.Event()
+
+    async def deaf_peer(reader, writer):
+        request = await reader.readuntil(b"\r\n\r\n")
+        key = next(
+            line.split(":", 1)[1].strip()
+            for line in request.decode().split("\r\n")
+            if line.lower().startswith("sec-websocket-key:")
+        )
+        accept = base64.b64encode(
+            hashlib.sha1((key + _WS_GUID).encode()).digest()  # noqa: S324 - required by RFC 6455
+        ).decode()
+        writer.write(
+            b"HTTP/1.1 101 Switching Protocols\r\n"
+            b"Upgrade: websocket\r\nConnection: Upgrade\r\n"
+            b"Sec-WebSocket-Accept: " + accept.encode() + b"\r\n\r\n"
+        )
+        await writer.drain()
+        await handshake_done.wait()
+
+    server = await asyncio.start_server(deaf_peer, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    service = ConcreteWebsocketService(ws_close_timeout=0.3)
+    try:
+        websocket = await service._websocket_connect(f"ws://127.0.0.1:{port}", ping_interval=None)
+        assert isinstance(websocket, _BoundedCloseConnection)
+
+        started = time.monotonic()
+        await websocket.close()
+        elapsed = time.monotonic() - started
+
+        # Bounded by ws_close_timeout rather than the websockets default of 10s,
+        # and 1006 confirms the peer never sent its close frame.
+        assert 0.3 <= elapsed < 3.0
+        assert websocket.close_code == 1006
+        assert "did not acknowledge the websocket close" in log_sink.getvalue()
+    finally:
+        handshake_done.set()
+        server.close()

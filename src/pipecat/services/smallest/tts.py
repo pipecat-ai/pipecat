@@ -19,7 +19,6 @@ from enum import StrEnum
 from typing import Any
 
 from loguru import logger
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat import version as pipecat_version
@@ -322,7 +321,7 @@ class SmallestTTSService(InterruptibleTTSService):
 
             logger.debug("Connecting to Smallest TTS")
 
-            self._websocket = await websocket_connect(
+            self._websocket = await self._websocket_connect(
                 self._build_websocket_url(),
                 additional_headers={
                     "Authorization": f"Bearer {self._api_key}",

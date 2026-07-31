@@ -27,7 +27,6 @@ import aiohttp
 import websockets
 from loguru import logger
 from pydantic import BaseModel
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -808,7 +807,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
                 )
 
             # Set max websocket message size to 16MB for large audio responses
-            self._websocket = await websocket_connect(
+            self._websocket = await self._websocket_connect(
                 url, max_size=16 * 1024 * 1024, additional_headers={"xi-api-key": self._api_key}
             )
 

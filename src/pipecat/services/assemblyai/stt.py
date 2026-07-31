@@ -18,7 +18,6 @@ from typing import Any, Literal
 from urllib.parse import urlencode
 
 from loguru import logger
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat import version as pipecat_version
@@ -875,7 +874,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 "Authorization": self._api_key,
                 "User-Agent": f"AssemblyAI/1.0 (integration=Pipecat/{pipecat_version()})",
             }
-            self._websocket = await websocket_connect(
+            self._websocket = await self._websocket_connect(
                 ws_url,
                 additional_headers=headers,
             )

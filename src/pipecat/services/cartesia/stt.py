@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -352,7 +351,7 @@ class CartesiaSTTService(WebsocketSTTService):
             ws_url = f"wss://{self._base_url}/stt/websocket?{urllib.parse.urlencode(params)}"
             headers = {"Cartesia-Version": "2025-04-16", "X-API-Key": self._api_key}
 
-            self._websocket = await websocket_connect(ws_url, additional_headers=headers)
+            self._websocket = await self._websocket_connect(ws_url, additional_headers=headers)
             await self._call_event_handler("on_connected")
         except Exception as e:
             self._websocket = None
