@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   test:
-    name: "Unit and Integration Tests"
+    name: "Unit Tests"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo

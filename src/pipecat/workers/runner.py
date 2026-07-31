@@ -269,7 +269,7 @@ class WorkerRunner(BaseObject, BusSubscriber):
         await self._call_event_handler("on_ready")
 
         # Wait for shutdown. With ``auto_end=True``, ``_run_worker`` sets
-        # ``_shutdown_event`` as soon as any root worker finishes.
+        # ``_shutdown_event`` once the last root worker finishes.
         try:
             await self._shutdown_event.wait()
         except asyncio.CancelledError:
