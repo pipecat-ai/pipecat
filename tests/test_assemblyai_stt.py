@@ -476,7 +476,7 @@ OVER_LIMIT_LANGUAGES = [
 
 
 def test_language_codes_omitted_by_default():
-    # Unset means "not sent" — no steering, current behavior preserved.
+    # Unset means "not sent" — no steering.
     service = AssemblyAISTTService(api_key="test-key")
     assert "language_codes" not in _query(service)
 
