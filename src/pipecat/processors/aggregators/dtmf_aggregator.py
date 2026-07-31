@@ -141,8 +141,9 @@ class DTMFAggregator(FrameProcessor):
         sequence = self._aggregation
         transcription_text = f"{self._prefix}{sequence}"
 
+        # A DTMF flush is always a complete entry, so mark it finalized.
         transcription_frame = TranscriptionFrame(
-            text=transcription_text, user_id="", timestamp=time_now_iso8601()
+            text=transcription_text, user_id="", timestamp=time_now_iso8601(), finalized=True
         )
         await self.push_frame(transcription_frame)
 
