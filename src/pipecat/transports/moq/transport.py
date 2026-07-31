@@ -58,6 +58,7 @@ Two modes:
 """
 
 import asyncio
+import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -94,20 +95,35 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def _is_normal_close(exc: BaseException) -> bool:
-    """Return True for the MoQ session-closed error we see when the peer hangs up.
+# Reset codes (moq-net ``Error::to_code``) that mean "the peer is gone",
+# not "something broke": the peer cancelled, its producer went away
+# mid-track without finishing, or the handle was already closed.
+_NORMAL_CLOSE_CODES = frozenset({0, 24, 25})  # Cancel, Dropped, Closed
 
-    moq-rs surfaces a normal WebTransport close (code=0) as a
-    ``MoqError.Protocol`` whose message contains
-    ``"webtransport error: closed"``. That's not a failure — it's the
-    expected end of every session, both when the browser disconnects and
-    when the bot itself tears down its own transport. We log it at info
-    (and skip the ``on_error`` handler) instead of ERROR + traceback.
+_REMOTE_CODE_RE = re.compile(r"remote error: code=(\d+)")
+
+
+def _is_normal_close(exc: BaseException) -> bool:
+    """Return True for the MoQ errors we see when the peer hangs up.
+
+    A hangup surfaces at two levels, and both are the expected end of a
+    session rather than a failure. The session itself reports a normal
+    WebTransport close (code=0) as a ``MoqError.Protocol`` whose message
+    contains ``"webtransport error: closed"``. Separately, any track
+    subscription still in flight is reset by the peer, surfacing as a
+    per-track ``MoqError`` carrying a numeric remote code — a browser
+    that disconnects mid-call drops its microphone producer without
+    finishing, so the bot's audio subscriber sees ``Dropped``. Callers
+    log these at debug and skip the ``on_error`` handler instead of
+    reporting ERROR + traceback.
     """
     if not isinstance(exc, moq.MoqError):
         return False
     msg = str(exc)
-    return "webtransport error: closed" in msg or "session error" in msg and "closed" in msg
+    if "webtransport error: closed" in msg or "session error" in msg and "closed" in msg:
+        return True
+    match = _REMOTE_CODE_RE.search(msg)
+    return match is not None and int(match.group(1)) in _NORMAL_CLOSE_CODES
 
 
 _moq_task_filter_installed = False

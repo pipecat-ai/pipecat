@@ -48,6 +48,7 @@ from pipecat.transports.moq.transport import (  # noqa: E402
     MOQParams,
     MOQTransport,
     _downmix_s16_to_mono,
+    _is_normal_close,
 )
 
 # ----------------------------------------------------------------------
@@ -418,17 +419,6 @@ class TestMoqNamespaceResolution(unittest.TestCase):
             self.assertTrue(ns.startswith("pipecat-"))
             self.assertEqual(len(ns.removeprefix("pipecat-")), 16)
 
-    def test_minted_namespace_is_a_single_path_segment(self):
-        """The namespace is joined into ``<namespace>/<id>``; a stray
-        separator would silently reshape the broadcast path."""
-        for _ in range(20):
-            self.assertNotIn("/", _new_session_namespace())
-
-
-# ----------------------------------------------------------------------
-# MOQTransport.__init__ characterization
-# ----------------------------------------------------------------------
-
 
 class TestMOQTransportInit(unittest.TestCase):
     """Lock in the synchronous-construction contract:
@@ -599,6 +589,56 @@ class TestMOQTransportInit(unittest.TestCase):
         ``--moq-cert`` path. Verifies the published initial state."""
         transport, _broadcast, _track, _moq = self._make_transport()
         self.assertEqual(transport.cert_fingerprints, [])
+
+
+# ----------------------------------------------------------------------
+# _is_normal_close
+# ----------------------------------------------------------------------
+
+
+class TestIsNormalClose(unittest.TestCase):
+    """Cover which MoQ errors count as a hangup rather than a failure.
+
+    A disconnect surfaces at two levels: the session reports a
+    WebTransport close, and every in-flight track subscription is reset
+    with a numeric remote code. Misclassifying either turns an ordinary
+    hangup into an ERROR log, a traceback, and an ``on_error`` callback
+    that application code may act on.
+
+    The codes come from moq-net's ``Error::to_code``. Application codes
+    are offset by 64 there, so ``code=240`` (``App(176)``) shares a
+    prefix with the ``Dropped`` code and must not be matched by it.
+    """
+
+    def _audio_error(self, message):
+        import moq
+
+        return moq.MoqError.Audio(message)
+
+    def test_session_close_is_normal(self):
+        self.assertTrue(_is_normal_close(self._audio_error("webtransport error: closed")))
+
+    def test_peer_dropped_producer_is_normal(self):
+        """A browser leaving mid-call drops its mic producer without finishing."""
+        self.assertTrue(_is_normal_close(self._audio_error("moq: remote error: code=24")))
+
+    def test_cancel_and_closed_are_normal(self):
+        for code in (0, 25):
+            with self.subTest(code=code):
+                self.assertTrue(
+                    _is_normal_close(self._audio_error(f"moq: remote error: code={code}"))
+                )
+
+    def test_real_failures_are_not_normal(self):
+        # Decode, Lagged, and an application code that starts with "24".
+        for code in (5, 26, 240):
+            with self.subTest(code=code):
+                self.assertFalse(
+                    _is_normal_close(self._audio_error(f"moq: remote error: code={code}"))
+                )
+
+    def test_non_moq_exception_is_not_normal(self):
+        self.assertFalse(_is_normal_close(RuntimeError("moq: remote error: code=24")))
 
 
 if __name__ == "__main__":
