@@ -36,6 +36,7 @@ Four areas covered:
 import argparse
 import unittest
 from unittest.mock import MagicMock, patch
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -197,6 +198,7 @@ fastapi = pytest.importorskip("fastapi")
 from pipecat.runner.moq import (  # noqa: E402
     _build_moq_client_config,
     _cert_hash_from_pem,
+    _direct_client_url,
     _hex_to_b64,
     _new_session_namespace,
     _validate_moq_args,
@@ -347,6 +349,7 @@ def _moq_args(**overrides) -> argparse.Namespace:
         moq_tls_insecure=False,
         moq_bot_id="response",
         moq_client_id="request",
+        moq_direct=False,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -418,6 +421,60 @@ class TestMoqNamespaceResolution(unittest.TestCase):
         for ns in minted:
             self.assertTrue(ns.startswith("pipecat-"))
             self.assertEqual(len(ns.removeprefix("pipecat-")), 16)
+
+
+class TestMoqDirectMode(unittest.TestCase):
+    """Direct mode drops the ``/start`` rendezvous, so the namespace has to
+    be known before anyone connects: it travels to the browser in a URL
+    rather than a response body."""
+
+    def test_namespace_is_resolved_up_front(self):
+        """Unlike per-session client mode, direct mode can't leave this
+        unresolved — there's no request later to mint one on."""
+        args = _moq_args(moq_connect="https://cdn.moq.dev/anon", moq_direct=True)
+        self.assertTrue(_validate_moq_args(args))
+        self.assertIsNotNone(args.moq_namespace)
+        self.assertTrue(args.moq_namespace.startswith("pipecat-"))
+
+    def test_explicit_namespace_still_wins(self):
+        args = _moq_args(
+            moq_connect="https://cdn.moq.dev/anon", moq_direct=True, moq_namespace="my-room"
+        )
+        self.assertTrue(_validate_moq_args(args))
+        self.assertEqual(args.moq_namespace, "my-room")
+
+    def test_serve_mode_is_rejected(self):
+        """Serve mode's browser needs the self-signed cert fingerprint, which
+        only the /start response carries."""
+        args = _moq_args(moq_direct=True)
+        self.assertFalse(_validate_moq_args(args))
+
+    def test_client_url_carries_everything_the_browser_cant_guess(self):
+        args = _moq_args(moq_connect="https://cdn.moq.dev/anon", moq_direct=True)
+        self.assertTrue(_validate_moq_args(args))
+        url = _direct_client_url(args, "http://localhost:7860")
+        parsed = urlparse(url)
+        query = parse_qs(parsed.query)
+        # Points at the UI directly: the root redirect drops the query.
+        self.assertEqual(parsed.path, "/client/")
+        self.assertEqual(query["relay"], ["https://cdn.moq.dev:443/anon"])
+        self.assertEqual(query["ns"], [args.moq_namespace])
+        # The ids default to the direction each side carries, and the
+        # browser mirrors the bot's: it publishes the request, reads the
+        # response.
+        self.assertEqual(query["botId"], ["response"])
+        self.assertEqual(query["clientId"], ["request"])
+
+    def test_minted_namespace_is_a_single_path_segment(self):
+        """The namespace is joined into ``<namespace>/<id>``; a stray
+        separator would silently reshape the broadcast path."""
+        for _ in range(20):
+            self.assertNotIn("/", _new_session_namespace())
+
+
+# ----------------------------------------------------------------------
+# MOQTransport.__init__ characterization
+# ----------------------------------------------------------------------
 
 
 class TestMOQTransportInit(unittest.TestCase):

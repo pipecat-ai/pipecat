@@ -7,19 +7,26 @@
 """MoQ runner helpers.
 
 Configuration helpers used by the development runner to construct the
-MoQ relay config sent to the browser at ``/start``.
+MoQ relay config the browser needs, whether it arrives in a ``/start``
+response or, in direct mode, in the client URL.
 """
 
 import argparse
 import secrets
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 from loguru import logger
 
 DEFAULT_MOQ_SERVE_BIND = "[::]:4080"
 DEFAULT_MOQ_PATH = "/moq"
 DEFAULT_MOQ_NAMESPACE = "pipecat"
+
+# How long a direct-mode bot holds the relay open waiting for a browser.
+# The stock timeouts assume ``/start`` spawned the bot with a client already
+# connecting; here the bot arrives first, so the wait is however long it
+# takes someone to open the page.
+DIRECT_MODE_PEER_WAIT_SECS = 3600.0
 
 
 def _new_session_namespace() -> str:
@@ -158,7 +165,41 @@ def _validate_moq_args(args: argparse.Namespace) -> bool:
     if args.moq_namespace is None and args.moq_serve:
         args.moq_namespace = DEFAULT_MOQ_NAMESPACE
 
+    if getattr(args, "moq_direct", False):
+        if args.moq_serve:
+            logger.error(
+                "--moq-direct needs a relay to meet the browser on: pass "
+                "--moq-connect <url>. Serve mode hands the browser its cert "
+                "fingerprint through /start, which direct mode doesn't have."
+            )
+            return False
+        # Nothing mints a namespace per session here, so resolve one now and
+        # keep it for the process's lifetime: it's what gets handed to the
+        # browser out-of-band.
+        if args.moq_namespace is None:
+            args.moq_namespace = _new_session_namespace()
+
     return True
+
+
+def _direct_client_url(args: argparse.Namespace, runner_url: str) -> str:
+    """Build the browser URL carrying the relay config as query params.
+
+    Direct mode has no ``/start`` response to deliver that config, so
+    everything the browser can't derive on its own — where to dial, which
+    namespace to meet on, and which end of the path pair each side owns —
+    rides in the URL instead. Points at the prebuilt UI directly because
+    the root redirect drops the query.
+    """
+    query = urlencode(
+        {
+            "relay": f"https://{args.moq_host}:{args.moq_port}{args.moq_path}",
+            "ns": args.moq_namespace,
+            "botId": args.moq_bot_id,
+            "clientId": args.moq_client_id,
+        }
+    )
+    return f"{runner_url}/client/?{query}"
 
 
 def _cert_hash_from_pem(path: str) -> str | None:

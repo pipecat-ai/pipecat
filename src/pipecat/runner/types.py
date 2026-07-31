@@ -296,6 +296,11 @@ class MOQRunnerArguments(RunnerArguments):
         cert_fingerprints: SHA-256 fingerprints (hex) of the bot's TLS
             cert chain — populated by the transport in serve mode so
             ``/api/config`` can hand them to the browser for pinning.
+        connection_timeout: Seconds to wait for the peer's broadcast before
+            giving up, overriding :attr:`MOQParams.connection_timeout` when
+            set. The default suits a bot spawned as a client connects;
+            direct mode raises it, since there the bot reaches the relay
+            first and waits for someone to open the page.
     """
 
     host: str
@@ -312,3 +317,4 @@ class MOQRunnerArguments(RunnerArguments):
     serve_tls_key: str | None = None
     ready_event: asyncio.Event | None = field(default=None, kw_only=True)
     cert_fingerprints: list[str] = field(default_factory=list, kw_only=True)
+    connection_timeout: float | None = field(default=None, kw_only=True)
