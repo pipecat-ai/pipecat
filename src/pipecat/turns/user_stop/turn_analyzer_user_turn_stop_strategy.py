@@ -83,7 +83,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._text = ""
         self._turn_complete = False
         self._vad_user_speaking = False
-        self._vad_stopped_time: float | None = None  # Track when VAD stopped was received
+        self._vad_stopped: bool = False  # Whether VAD reported a stop this turn
         self._transcript_finalized = False
         self._timeout_task: asyncio.Task | None = None
         self._timeout_expired: bool = False
@@ -117,9 +117,9 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
     async def _reset(self):
         """Clear turn-scoped state. Runs at both turn boundaries.
 
-        ``_vad_stopped_time`` is turn-scoped — it records whether *this* turn
-        got a VAD stop, which is what the no-VAD transcript fallback keys on —
-        so it is cleared at each boundary.
+        ``_vad_stopped`` is turn-scoped — it records whether *this* turn got a
+        VAD stop, which is what the no-VAD transcript fallback keys on — so it
+        is cleared at each boundary.
 
         ``_vad_user_speaking`` is not, and is left alone: whether the user is
         speaking belongs to the user rather than to the turn, and VAD reports it
@@ -139,7 +139,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._turn_complete = False
         self._transcript_finalized = False
         self._timeout_expired = False
-        self._vad_stopped_time = None
+        self._vad_stopped = False
         if self._timeout_task:
             await self.task_manager.cancel_task(self._timeout_task)
             self._timeout_task = None
@@ -230,7 +230,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         """Handle when the VAD indicates the user has stopped speaking."""
         self._vad_user_speaking = False
         self._stop_secs = frame.stop_secs
-        self._vad_stopped_time = frame.timestamp
+        self._vad_stopped = True
 
         # The STT p99 budget is measured from when the user actually stopped
         # speaking, which VAD only reports stop_secs later. Anchoring the
@@ -296,9 +296,8 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
         # Fallback: handle transcripts when no VAD stop was received.
         # This handles edge cases where transcripts arrive without VAD firing.
-        # _vad_stopped_time is None means VAD stopped hasn't been received yet.
         # In fallback mode, reset timeout on each transcript to wait for inactivity.
-        if not self._vad_user_speaking and self._vad_stopped_time is None:
+        if not self._vad_user_speaking and not self._vad_stopped:
             # Cancel existing fallback timeout if any
             if self._timeout_task:
                 await self.task_manager.cancel_task(self._timeout_task)
