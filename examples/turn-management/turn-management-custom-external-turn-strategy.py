@@ -78,7 +78,7 @@ class GracePeriodUserTurnStopStrategy(ExternalUserTurnStopStrategy):
     async def process_frame(self, frame: Frame) -> ProcessFrameResult:
         """Cancel any pending finalization when the user starts speaking again."""
         if isinstance(frame, ProposedUserStartedSpeakingFrame):
-            await self._cancel_pending()
+            await self._cancel_pending(resumed=True)
         return await super().process_frame(frame)
 
     async def handle_user_turn_stopped(self):
@@ -107,12 +107,20 @@ class GracePeriodUserTurnStopStrategy(ExternalUserTurnStopStrategy):
             enable_user_speaking_frames=enable_user_speaking_frames
         )
 
-    async def _cancel_pending(self):
+    async def _cancel_pending(self, *, resumed: bool = False):
+        """Drop the scheduled finalization.
+
+        Args:
+            resumed: Whether the user speaking again is what cancelled it, as
+                opposed to the turn ending some other way or the strategy
+                shutting down.
+        """
         if not self._pending:
             return
         task, self._pending = self._pending, None
         await self.cancel_task(task)
-        logger.debug(f"User resumed speaking within the grace period; turn stays open")
+        if resumed:
+            logger.debug("User resumed speaking within the grace period; turn stays open")
 
 
 # We use lambdas to defer transport parameter creation until the transport
