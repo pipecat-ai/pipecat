@@ -108,7 +108,7 @@ Top-level optional fields:
                   speech:                  # required when modality is audio
                     service: kokoro        # local TTS that synthesizes the user turns
                     voice: af_heart
-                    language: zh           # optional; language code or Language
+                    language: zh           # optional; language code (e.g. "zh", "zh-TW")
                     sample_rate: 16000     # optional
 
             ``audio`` streams synthesized user audio to the bot (exercising its

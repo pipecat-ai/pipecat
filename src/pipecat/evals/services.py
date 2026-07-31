@@ -46,6 +46,10 @@ def _cfg_language(cfg: dict) -> Language | None:
     value = cfg.get("language")
     if value is None:
         return None
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
     try:
         return Language(value)
     except ValueError as e:
