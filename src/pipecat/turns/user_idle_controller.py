@@ -62,6 +62,7 @@ class UserIdleController(BaseObject):
 
         self._user_idle_timeout = user_idle_timeout
 
+        self._bot_speaking: bool = False
         self._user_turn_in_progress: bool = False
         self._function_calls_in_progress: int = 0
         self._idle_timer_task: asyncio.Task | None = None
@@ -80,12 +81,19 @@ class UserIdleController(BaseObject):
             frame: The frame to be processed.
         """
         if isinstance(frame, UserIdleTimeoutUpdateFrame):
+            was_running = self._idle_timer_task is not None
             self._user_idle_timeout = frame.timeout
             if self._user_idle_timeout <= 0:
                 await self._cancel_idle_timer()
+            elif was_running or self._can_start_idle_timer():
+                # Restart a running timer so the new duration applies now, and
+                # arm a fresh one if the update arrives while everything is
+                # already idle (e.g. the timeout was previously disabled).
+                await self._start_idle_timer()
             return
 
         if isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
             # Only start the timer if the user isn't mid-turn and no function
             # calls are pending.
             #
@@ -103,6 +111,7 @@ class UserIdleController(BaseObject):
             if not self._user_turn_in_progress and self._function_calls_in_progress == 0:
                 await self._start_idle_timer()
         elif isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
             await self._cancel_idle_timer()
         elif isinstance(frame, UserStartedSpeakingFrame):
             self._user_turn_in_progress = True
@@ -114,6 +123,14 @@ class UserIdleController(BaseObject):
             await self._cancel_idle_timer()
         elif isinstance(frame, (FunctionCallResultFrame, FunctionCallCancelFrame)):
             self._function_calls_in_progress = max(0, self._function_calls_in_progress - 1)
+
+    def _can_start_idle_timer(self) -> bool:
+        """Whether current state allows arming the idle timer."""
+        return (
+            not self._bot_speaking
+            and not self._user_turn_in_progress
+            and self._function_calls_in_progress == 0
+        )
 
     async def _start_idle_timer(self):
         """Start (or restart) the idle timer."""

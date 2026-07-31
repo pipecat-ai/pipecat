@@ -318,6 +318,75 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
 
         await controller.cleanup()
 
+    async def test_update_applies_to_running_timer(self):
+        """Test that a timeout update restarts a running timer with the new duration."""
+        controller = UserIdleController(user_idle_timeout=10)
+        await controller.setup(self.task_manager)
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        # Timer starts with the long timeout
+        await controller.process_frame(BotStoppedSpeakingFrame())
+        # Retune to a short timeout while the timer is running
+        await controller.process_frame(UserIdleTimeoutUpdateFrame(timeout=USER_IDLE_TIMEOUT))
+
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertTrue(idle_triggered)
+
+        await controller.cleanup()
+
+    async def test_enable_via_frame_arms_while_idle(self):
+        """Test that enabling via frame arms the timer when everything is already idle."""
+        controller = UserIdleController()
+        await controller.setup(self.task_manager)
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        # Bot finished speaking while idle detection was disabled
+        await controller.process_frame(BotStartedSpeakingFrame())
+        await controller.process_frame(BotStoppedSpeakingFrame())
+
+        # Enable idle detection — no further speaking events will re-arm
+        await controller.process_frame(UserIdleTimeoutUpdateFrame(timeout=USER_IDLE_TIMEOUT))
+
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertTrue(idle_triggered)
+
+        await controller.cleanup()
+
+    async def test_update_while_bot_speaking_does_not_arm(self):
+        """Test that a timeout update while the bot is speaking does not arm the timer."""
+        controller = UserIdleController()
+        await controller.setup(self.task_manager)
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        await controller.process_frame(BotStartedSpeakingFrame())
+        await controller.process_frame(UserIdleTimeoutUpdateFrame(timeout=USER_IDLE_TIMEOUT))
+
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertFalse(idle_triggered)
+
+        await controller.cleanup()
+
 
 if __name__ == "__main__":
     unittest.main()
