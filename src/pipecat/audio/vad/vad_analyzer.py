@@ -194,9 +194,18 @@ class VADAnalyzer(ABC):
         state = await loop.run_in_executor(self._executor, self._run_analyzer)
         return state
 
-    def _run_analyzer(self) -> VADState:
-        """Analyze the buffered audio and return current VAD state."""
+    def _run_analyzer(self, buffer: bytes = b"") -> VADState:
+        """Analyze the buffered audio and return current VAD state.
+
+        Args:
+            buffer: Additional audio to buffer before analyzing. Subclasses that
+                override :meth:`analyze_audio` may pass the incoming chunk here.
+        """
+        self._vad_buffer += buffer
+
         num_required_bytes = self._vad_frames_num_bytes
+        if len(self._vad_buffer) < num_required_bytes:
+            return self._vad_state
 
         while len(self._vad_buffer) >= num_required_bytes:
             audio_frames = self._vad_buffer[:num_required_bytes]
