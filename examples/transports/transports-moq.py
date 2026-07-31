@@ -25,6 +25,13 @@ Usage:
         -t moq --moq-connect https://moq.example.com:4080/moq
 
     # Then open http://localhost:7860 and click Connect.
+
+    # Direct mode — the bot dials the relay at startup and waits there,
+    # instead of a browser POSTing /start to bring one up. The relay and
+    # namespace ride in the URL printed at startup, so nothing has to
+    # reach this process over HTTP:
+    uv run python examples/transports/transports-moq.py \\
+        -t moq --moq-connect https://moq.example.com:4080/moq --moq-direct
 """
 
 import os
