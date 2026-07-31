@@ -142,7 +142,11 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
                     Use ``settings=DeepgramFluxSTTService.Settings(...)`` instead.
                     Will be removed in 2.0.0.
 
-            should_interrupt: Determine whether the bot should be interrupted when Flux detects that the user is speaking.
+            should_interrupt: Whether to interrupt the bot when Flux detects that
+                the user is speaking. Passed along to the user turn strategies
+                this service recommends, which own the interruption; a
+                user-supplied ``user_turn_strategies`` overrides the
+                recommendation and this setting with it.
             watchdog_min_timeout: Minimum silence duration in seconds before the watchdog
                 sends silence to prevent dangling turns. Defaults to 0.5.
             settings: Runtime-updatable settings. When provided alongside deprecated
