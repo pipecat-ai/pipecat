@@ -2130,7 +2130,9 @@ class UserIdleTimeoutUpdateFrame(SystemFrame):
     """Frame for updating the user idle timeout at runtime.
 
     Setting timeout to 0 disables idle detection. Setting a positive value
-    enables it.
+    enables it. Updates apply immediately: a running idle timer restarts with
+    the new duration, and if the bot is waiting for the user to speak the
+    timer is armed right away.
 
     Parameters:
         timeout: The new idle timeout in seconds. 0 disables idle detection.

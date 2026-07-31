@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
     UserIdleTimeoutUpdateFrame,
     UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
@@ -379,6 +380,97 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
             idle_triggered = True
 
         await controller.process_frame(BotStartedSpeakingFrame())
+        await controller.process_frame(UserIdleTimeoutUpdateFrame(timeout=USER_IDLE_TIMEOUT))
+
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertFalse(idle_triggered)
+
+        await controller.cleanup()
+
+    async def test_update_before_first_bot_turn_does_not_arm(self):
+        """Test that a timeout update before the bot has spoken does not arm the timer."""
+        controller = UserIdleController()
+        await controller.setup(self.task_manager)
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        await controller.process_frame(UserIdleTimeoutUpdateFrame(timeout=USER_IDLE_TIMEOUT))
+
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertFalse(idle_triggered)
+
+        await controller.cleanup()
+
+    async def test_update_while_user_turn_in_progress_does_not_arm(self):
+        """Test that a timeout update during a user turn does not arm the timer."""
+        controller = UserIdleController()
+        await controller.setup(self.task_manager)
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        await controller.process_frame(BotStartedSpeakingFrame())
+        await controller.process_frame(UserStartedSpeakingFrame())
+        await controller.process_frame(BotStoppedSpeakingFrame())
+        await controller.process_frame(UserIdleTimeoutUpdateFrame(timeout=USER_IDLE_TIMEOUT))
+
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertFalse(idle_triggered)
+
+        await controller.cleanup()
+
+    async def test_update_while_awaiting_bot_response_does_not_arm(self):
+        """Test that a timeout update between a user turn and the bot's response does not arm."""
+        controller = UserIdleController()
+        await controller.setup(self.task_manager)
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        # User finished a turn; the bot's response is still in flight.
+        await controller.process_frame(UserStartedSpeakingFrame())
+        await controller.process_frame(UserStoppedSpeakingFrame())
+        await controller.process_frame(UserIdleTimeoutUpdateFrame(timeout=USER_IDLE_TIMEOUT))
+
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertFalse(idle_triggered)
+
+        await controller.cleanup()
+
+    async def test_update_while_function_call_in_progress_does_not_arm(self):
+        """Test that a timeout update during a function call does not arm the timer."""
+        controller = UserIdleController()
+        await controller.setup(self.task_manager)
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        await controller.process_frame(BotStartedSpeakingFrame())
+        await controller.process_frame(BotStoppedSpeakingFrame())
+        await controller.process_frame(
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+        )
         await controller.process_frame(UserIdleTimeoutUpdateFrame(timeout=USER_IDLE_TIMEOUT))
 
         await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
