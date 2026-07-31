@@ -49,11 +49,11 @@ async def test_run_pocket_tts_success():
     Checks frame ordering, audio conversion to int16, and that the cached
     voice state is passed with copy_state=True.
     """
-    with patch("pipecat.services.pockettts.tts.TTSModel") as mock_model_cls:
+    with patch("pipecat.services.pocket_tts.tts.TTSModel") as mock_model_cls:
         model = _make_mock_model()
         mock_model_cls.load_model.return_value = model
 
-        from pipecat.services.pockettts.tts import PocketTTSService
+        from pipecat.services.pocket_tts.tts import PocketTTSService
 
         tts_service = PocketTTSService(sample_rate=SAMPLE_RATE)
 
@@ -117,11 +117,11 @@ async def test_run_pocket_tts_success():
 @pytest.mark.asyncio
 async def test_pocket_tts_voice_update():
     """Test that a runtime voice change re-derives the voice state."""
-    with patch("pipecat.services.pockettts.tts.TTSModel") as mock_model_cls:
+    with patch("pipecat.services.pocket_tts.tts.TTSModel") as mock_model_cls:
         model = _make_mock_model()
         mock_model_cls.load_model.return_value = model
 
-        from pipecat.services.pockettts.tts import PocketTTSService
+        from pipecat.services.pocket_tts.tts import PocketTTSService
 
         tts_service = PocketTTSService(sample_rate=SAMPLE_RATE)
 
