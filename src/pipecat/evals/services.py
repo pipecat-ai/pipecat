@@ -21,6 +21,38 @@ from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import NOT_GIVEN
 from pipecat.services.stt_service import STTService
 from pipecat.services.tts_service import TTSService
+from pipecat.transcriptions.language import Language
+
+
+def _cfg_language(cfg: dict) -> Language | None:
+    """Coerce a config's optional ``language`` value to a :class:`Language`.
+
+    ``Language`` is a ``StrEnum``, so both a code string (e.g. ``"zh"``) and a
+    ``Language`` are accepted. Each concrete service maps the ``Language`` to its
+    own provider code internally (via ``resolve_language``), so the eval layer
+    only needs to hand off a ``Language``.
+
+    Args:
+        cfg: A ``user.speech`` or ``judge.transcription`` config mapping.
+
+    Returns:
+        The resolved ``Language``, or ``None`` when ``language`` is absent (so
+        callers leave the service's own default untouched).
+
+    Raises:
+        ValueError: If ``language`` is set to a value that is not a recognized
+            language code.
+    """
+    value = cfg.get("language")
+    if value is None:
+        return None
+    try:
+        return Language(value)
+    except ValueError as e:
+        raise ValueError(
+            f"Unknown language {value!r} in eval speech/transcription config; "
+            "expected a language code like 'zh' or a Language value."
+        ) from e
 
 
 def kokoro_service(voice_cfg: dict, sample_rate: int) -> TTSService:
@@ -29,17 +61,35 @@ def kokoro_service(voice_cfg: dict, sample_rate: int) -> TTSService:
     Kokoro runs an ONNX model locally (no API key, no per-run cost), so the eval
     suite synthesizes user audio for free. The model files are downloaded once
     on first use and cached under ``~/.cache/kokoro-onnx``.
+
+    Config keys:
+        voice: Kokoro voice id (e.g. ``af_heart``).
+        language: Optional language code (e.g. ``zh``) or ``Language`` value.
+            When omitted, Kokoro keeps its own default.
     """
     from pipecat.services.kokoro.tts import KokoroTTSService
 
+    settings: dict[str, Any] = {"voice": str(voice_cfg.get("voice", ""))}
+    language = _cfg_language(voice_cfg)
+    if language is not None:
+        settings["language"] = language
+
     return KokoroTTSService(
-        settings=KokoroTTSService.Settings(voice=str(voice_cfg.get("voice", ""))),
+        settings=KokoroTTSService.Settings(**settings),
         sample_rate=sample_rate,
     )
 
 
 def cartesia_service(voice_cfg: dict, sample_rate: int) -> TTSService:
-    """Build a Cartesia TTS service from the ``user_audio`` config."""
+    """Build a Cartesia TTS service from the ``user_audio`` config.
+
+    Config keys:
+        voice: Cartesia voice id.
+        model: Optional model (defaults to ``sonic-2``).
+        api_key: Optional key (falls back to ``$CARTESIA_API_KEY``).
+        language: Optional language code (e.g. ``zh``) or ``Language`` value.
+            When omitted, Cartesia keeps its own default.
+    """
     from pipecat.services.cartesia.tts import CartesiaHttpTTSService
 
     # Prefer an explicit api_key in the config; fall back to the env var so
@@ -50,12 +100,17 @@ def cartesia_service(voice_cfg: dict, sample_rate: int) -> TTSService:
             "Cartesia API key not found — set $CARTESIA_API_KEY or user_audio.api_key"
         )
 
+    settings: dict[str, Any] = {
+        "voice": str(voice_cfg.get("voice", "")),
+        "model": voice_cfg.get("model") or "sonic-2",
+    }
+    language = _cfg_language(voice_cfg)
+    if language is not None:
+        settings["language"] = language
+
     return CartesiaHttpTTSService(
         api_key=api_key,
-        settings=CartesiaHttpTTSService.Settings(
-            voice=str(voice_cfg.get("voice", "")),
-            model=voice_cfg.get("model") or "sonic-2",
-        ),
+        settings=CartesiaHttpTTSService.Settings(**settings),
         sample_rate=sample_rate,
     )
 
@@ -77,6 +132,13 @@ def whisper_service(config: dict) -> STTService:
     whose ``no_speech_prob`` jitters across ~0.4-0.6 run to run (a dropped segment
     yields no ``TranscriptionFrame``, so the harness then waits out the whole
     transcription timeout). Disable the filter with a permissive threshold.
+
+    Config keys:
+        device: ``cpu`` (default) or ``cuda``.
+        compute_type: Whisper compute type (defaults to ``int8`` on CPU).
+        model: Optional Whisper model (left unset to use Whisper's default).
+        language: Optional language code (e.g. ``zh``) or ``Language`` value.
+            When omitted, Whisper stays in auto-detect mode.
     """
     from pipecat.services.whisper.stt import WhisperSTTService
 
@@ -85,13 +147,17 @@ def whisper_service(config: dict) -> STTService:
     # the default ("default") would pick float32 on CPU, which is much slower.
     compute_type = config.get("compute_type", "int8" if device == "cpu" else "default")
     # NOT_GIVEN (not None) leaves the model unset so Whisper uses its own default.
+    settings: dict[str, Any] = {
+        "no_speech_prob": 1.0,
+        "model": config.get("model", NOT_GIVEN),
+    }
+    language = _cfg_language(config)
+    if language is not None:
+        settings["language"] = language
     return WhisperSTTService(
         device=device,
         compute_type=compute_type,
-        settings=WhisperSTTService.Settings(
-            no_speech_prob=1.0,
-            model=config.get("model", NOT_GIVEN),
-        ),
+        settings=WhisperSTTService.Settings(**settings),
     )
 
 
@@ -103,11 +169,22 @@ def moonshine_service(config: dict) -> STTService:
     it tends to keep the answer where Whisper sometimes drops it. ``model`` selects
     the architecture (a :class:`~pipecat.services.moonshine.stt.Model` value or
     string; default ``Model.SMALL_STREAMING``).
+
+    Config keys:
+        model: Optional architecture (a ``Model`` value or string; default
+            ``Model.SMALL_STREAMING``).
+        language: Optional language code (e.g. ``zh``) or ``Language`` value.
+            When omitted, Moonshine keeps its own default (English). Moonshine
+            supports only a handful of languages.
     """
     from pipecat.services.moonshine.stt import Model, MoonshineSTTService
 
+    settings: dict[str, Any] = {"model": config.get("model") or Model.SMALL_STREAMING}
+    language = _cfg_language(config)
+    if language is not None:
+        settings["language"] = language
     return MoonshineSTTService(
-        settings=MoonshineSTTService.Settings(model=config.get("model") or Model.SMALL_STREAMING),
+        settings=MoonshineSTTService.Settings(**settings),
     )
 
 
