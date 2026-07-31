@@ -68,7 +68,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = SarvamLLMService(
         api_key=os.environ["SARVAM_API_KEY"],
         settings=SarvamLLMService.Settings(
-            model="sarvam-30b",
             system_instruction=(
                 "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way."
             ),
