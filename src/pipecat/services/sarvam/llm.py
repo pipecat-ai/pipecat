@@ -48,9 +48,7 @@ class SarvamLLMService(OpenAILLMService):
     # This value is used by BaseOpenAILLMService when calling the adapter.
     supports_developer_role = False
 
-    _SUPPORTED_MODELS = frozenset(
-        {"sarvam-30b", "sarvam-30b-16k", "sarvam-105b", "sarvam-105b-32k"}
-    )
+    _SUPPORTED_MODELS = frozenset({"sarvam-105b"})
     Settings = SarvamLLMSettings
     _settings: Settings
 
@@ -75,7 +73,7 @@ class SarvamLLMService(OpenAILLMService):
         # Initialize only Sarvam-specific defaults; inherited defaults are
         # provided by the OpenAI base service initialization.
         default_settings = self.Settings(
-            model="sarvam-30b",
+            model="sarvam-105b",
             wiki_grounding=None,
             reasoning_effort=None,
         )
