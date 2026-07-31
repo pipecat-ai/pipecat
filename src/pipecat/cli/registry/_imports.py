@@ -142,6 +142,7 @@ IMPORTS = {
     ],
     "openai_tts": ["from pipecat.services.openai.tts import OpenAITTSService"],
     "piper_tts": ["from pipecat.services.piper.tts import PiperTTSService"],
+    "pockettts_tts": ["from pipecat.services.pockettts.tts import PocketTTSService"],
     "resemble_tts": ["from pipecat.services.resembleai.tts import ResembleAITTSService"],
     "rime_tts": ["from pipecat.services.rime.tts import RimeTTSService"],
     "sarvam_tts": ["from pipecat.services.sarvam.tts import SarvamTTSService"],

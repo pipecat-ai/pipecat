@@ -535,6 +535,13 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "pockettts_tts": (
+        "PocketTTSService(\n"
+        "        settings=PocketTTSService.Settings(\n"
+        '            voice=os.getenv("POCKETTTS_VOICE_ID", "alba"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "resemble_tts": (
         "ResembleAITTSService(\n"
         '        api_key=os.getenv("RESEMBLE_API_KEY"),\n'
