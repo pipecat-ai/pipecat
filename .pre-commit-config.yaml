@@ -1,9 +1,11 @@
 repos:
   - repo: local
     hooks:
+      # F401 (unused imports) is selected here rather than in pyproject.toml so
+      # imports are only stripped at commit time, not mid-development.
       - id: ruff
         name: ruff
-        entry: uv run ruff check --fix
+        entry: uv run ruff check --fix --extend-select F401
         language: system
         types: [python]
       - id: ruff-format
