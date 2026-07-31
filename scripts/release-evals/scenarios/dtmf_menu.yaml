@@ -29,3 +29,19 @@ turns:
         text_contains: "DTMF: 2"
       - event: response
         eval: "gives the office location (123 Main Street)"
+
+  # Press 3: request a callback.
+  - dtmf: "3"
+    expect:
+      - event: user_transcription
+        text_contains: "DTMF: 3"
+      - event: response
+        eval: "asks the caller to enter their callback number followed by the pound key"
+
+  # Enter the callback number, finalized with '#'.
+  - dtmf: "5551234567#"
+    expect:
+      - event: user_transcription
+        text_contains: "DTMF: 5551234567#"
+      - event: response
+        eval: "confirms the callback number 5551234567 and says someone will call back"
