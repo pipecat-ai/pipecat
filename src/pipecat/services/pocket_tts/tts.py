@@ -27,8 +27,6 @@ except ModuleNotFoundError as e:
     logger.error('In order to use Pocket TTS, you need to `uv add "pipecat-ai[pocket-tts]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
-DEFAULT_VOICE = "alba"
-
 
 def language_to_pocket_tts_language(language: Language) -> str:
     """Convert a Language enum to a pocket-tts model language name.
@@ -103,7 +101,7 @@ class PocketTTSService(TTSService):
         # Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model=None,
-            voice=DEFAULT_VOICE,
+            voice="alba",
             language=Language.EN,
         )
 
