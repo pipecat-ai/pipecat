@@ -921,7 +921,6 @@ class ServiceRegistry:
             class_name=["PocketTTSService"],
             env_prefix="POCKETTTS",
             settings_params=["voice"],
-            param_defaults={"voice": "alba"},
         ),
         ServiceDefinition(
             value="resemble_tts",

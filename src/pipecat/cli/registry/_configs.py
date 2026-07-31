@@ -538,7 +538,7 @@ SERVICE_CONFIGS = {
     "pockettts_tts": (
         "PocketTTSService(\n"
         "        settings=PocketTTSService.Settings(\n"
-        '            voice=os.getenv("POCKETTTS_VOICE_ID", "alba"),\n'
+        '            voice=os.getenv("POCKETTTS_VOICE_ID"),\n'
         "        ),\n"
         "    )\n"
     ),
