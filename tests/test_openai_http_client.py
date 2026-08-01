@@ -50,15 +50,3 @@ class TestOpenAIHttpClient(unittest.IsolatedAsyncioTestCase):
         service = OpenAISTTService(api_key="test-key")
         self.assertIsInstance(service._client._client, httpx.AsyncClient)
         self.assertNotEqual(service._client.timeout, CUSTOM_TIMEOUT)
-
-    async def test_create_client_is_an_override_point(self):
-        async with make_http_client() as http_client:
-
-            class CustomSTTService(OpenAISTTService):
-                def create_client(self, api_key=None, base_url=None, http_client=None, **kwargs):
-                    return super().create_client(
-                        api_key=api_key, base_url=base_url, http_client=http_client, **kwargs
-                    )
-
-            service = CustomSTTService(api_key="test-key", http_client=http_client)
-            self.assertIs(service._client._client, http_client)

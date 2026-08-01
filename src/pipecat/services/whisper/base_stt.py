@@ -227,31 +227,17 @@ class BaseWhisperSTTService(SegmentedSTTService):
             settings=default_settings,
             **kwargs,
         )
-        self._client = self.create_client(
-            api_key=api_key, base_url=base_url, http_client=http_client
-        )
+        self._client = self._create_client(api_key, base_url, http_client)
         self._include_prob_metrics = include_prob_metrics
         self._push_empty_transcripts = push_empty_transcripts
 
-    def create_client(
+    def _create_client(
         self,
-        api_key: str | None = None,
-        base_url: str | None = None,
+        api_key: str | None,
+        base_url: str | None,
         http_client: httpx.AsyncClient | None = None,
-        **kwargs,
     ) -> AsyncOpenAI:
-        """Create an AsyncOpenAI client instance.
-
-        Args:
-            api_key: Service API key.
-            base_url: Service API base URL.
-            http_client: Custom ``httpx.AsyncClient`` for API requests.
-            **kwargs: Additional client configuration arguments.
-
-        Returns:
-            Configured AsyncOpenAI client instance.
-        """
-        return AsyncOpenAI(api_key=api_key, base_url=base_url, http_client=http_client, **kwargs)
+        return AsyncOpenAI(api_key=api_key, base_url=base_url, http_client=http_client)
 
     def can_generate_metrics(self) -> bool:
         """Whether this service can generate processing metrics.
