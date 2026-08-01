@@ -7,6 +7,8 @@
 import asyncio
 import contextlib
 import io
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -14,6 +16,7 @@ from deepgram.core import ApiError
 from loguru import logger
 
 from pipecat.services.deepgram.stt import DeepgramSTTService, _derive_deepgram_urls
+from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.network import QuickFailureTracker
 
 
@@ -318,27 +321,16 @@ async def test_final_transcript_emits_usage_before_transcription_frame(monkeypat
 async def test_connection_handler_does_not_reconnect_after_cancel():
     """A cancelled ``_connection_handler`` must die, not loop and reconnect.
 
-    Regression test for an orphaned-reconnect zombie observed in production:
-    ``_connection_handler`` is a ``while True`` reconnect loop whose
-    ``finally`` block awaits ``cancel_task(keepalive_task)``. If the pipeline
-    teardown cancels the connection task while it is suspended in that
-    ``finally`` (e.g. right after a mid-call network drop, with the keepalive
-    blocked on the dead socket), ``TaskManager.cancel_task`` used to swallow
-    the handler's own ``CancelledError`` — so the loop iterated and the
-    service RECONNECTED to Deepgram after having been cancelled, invisible to
-    the pipeline, forever.
+    ``_connection_handler`` is a ``while True`` reconnect loop whose ``finally``
+    block awaits ``cancel_task(keepalive_task)``. Pipeline teardown can cancel
+    the connection task while it is suspended in that ``finally`` — right after
+    a mid-call network drop, with the keepalive blocked on the dead socket —
+    and a handler that survived would reconnect to Deepgram unsupervised.
 
-    The test wires a real ``TaskManager`` straight onto the service (instead
-    of the full processor setup) so the genuine ``_connection_handler`` runs
-    its genuine ``finally`` against the genuine ``cancel_task`` under test,
-    with a fake SDK client so no network is involved.
+    The service is wired to a real ``TaskManager`` by hand so that the handler
+    runs its own ``finally`` against the real ``cancel_task``; the fake SDK
+    client keeps the network out of it.
     """
-    import asyncio
-    from contextlib import asynccontextmanager
-    from types import SimpleNamespace
-
-    from pipecat.utils.asyncio.task_manager import TaskManager
-
     task_manager = TaskManager(loop=asyncio.get_running_loop())
 
     service = DeepgramSTTService(api_key="fake-key-offline-test")

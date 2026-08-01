@@ -225,8 +225,14 @@ class TaskManager(BaseTaskManager):
         Args:
             task: The task to be cancelled.
             timeout: The optional timeout in seconds to wait for the task to cancel.
+
+        Raises:
+            asyncio.CancelledError: If the calling task is itself cancelled while
+                waiting for ``task`` to finish cancelling.
         """
         name = task.get_name()
+        current = asyncio.current_task()
+        cancels_requested = current.cancelling() if current else 0
         task.cancel()
         try:
             if timeout:
@@ -236,17 +242,18 @@ class TaskManager(BaseTaskManager):
         except TimeoutError:
             logger.warning(f"{name}: timed out waiting for task to cancel")
         except asyncio.CancelledError:
-            current = asyncio.current_task()
-            if current is not None and current.cancelling() > 0:
-                # This CancelledError is the caller's OWN cancellation,
-                # delivered while suspended waiting for `task` — it must
-                # propagate, not be swallowed. Swallowing it makes the caller
-                # survive its own cancellation: a service awaiting
-                # cancel_task() from a `finally` block resumes as if it was
-                # never cancelled, and a reconnect loop then reconnects after
-                # having been cancelled, leaving an orphaned task behind.
+            # Either `task` finished cancelling, or the calling task was
+            # cancelled while we waited. Only the latter may propagate:
+            # swallowing it would let the caller outlive its own cancellation,
+            # and a caller that is a reconnect loop would go on reconnecting
+            # unsupervised.
+            #
+            # cancelling() is a running count cleared only by uncancel(), so a
+            # caller already winding down carries a non-zero count throughout
+            # its teardown. Only a rise above the count on entry means a fresh
+            # cancellation arrived here.
+            if current is not None and current.cancelling() > cancels_requested:
                 raise
-            # Otherwise `task` itself was cancelled properly.
         except Exception as e:
             tb = traceback.extract_tb(e.__traceback__)
             last = tb[-1]

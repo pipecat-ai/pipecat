@@ -139,25 +139,15 @@ class TestTaskManagerCancelTask(unittest.IsolatedAsyncioTestCase):
     async def test_caller_cancellation_propagates(self):
         """``cancel_task()`` must not swallow the caller's own cancellation.
 
-        Regression test: ``cancel_task`` awaits the cancelled task and treats
-        any ``CancelledError`` raised at that point as proof that ``task``
-        finished cancelling. But if the *caller* of ``cancel_task`` is itself
-        cancelled while suspended there, the ``CancelledError`` is the
-        caller's own cancellation — and ``except CancelledError: pass``
-        swallowed it, so the caller resumed as if it was never cancelled.
+        A caller cancelled while suspended in ``cancel_task`` has to die.
+        Services tear down by awaiting ``cancel_task()`` from a ``finally``
+        block (e.g. ``DeepgramSTTService._connection_handler`` cancelling its
+        keepalive task); a reconnect loop that outlived its own cancellation
+        would reconnect unsupervised and run forever.
 
-        Services awaiting ``cancel_task()`` from a ``finally`` block during
-        teardown (e.g. ``DeepgramSTTService._connection_handler`` cancelling
-        its keepalive task) would then survive the pipeline's cancellation
-        and, being reconnect loops, reconnect after having been cancelled —
-        leaving an orphaned task running forever (observed in production as
-        multi-day zombie reconnect loops).
-
-        No assertion is made about the child's fate: cancelling a task that
-        is suspended at ``await child`` also cancels ``child`` itself (asyncio
-        propagates cancellation into the awaited future), so the child dies
-        promptly in both the buggy and the fixed implementation. The bug is
-        strictly about the caller's fate.
+        No assertion is made about the child: cancelling a task suspended at
+        ``await child`` cancels ``child`` as well, so its state says nothing
+        about the caller's.
         """
         task_manager = self._create_task_manager()
 
@@ -202,8 +192,7 @@ class TestTaskManagerCancelTask(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(child, caller_task, return_exceptions=True)
 
     async def test_child_cancellation_still_absorbed(self):
-        """The normal case must keep working: awaiting the cancelled child's
-        ``CancelledError`` is absorbed and ``cancel_task`` returns cleanly."""
+        """The child's own ``CancelledError`` is absorbed, not propagated."""
         task_manager = self._create_task_manager()
 
         async def long_handler():
@@ -214,6 +203,41 @@ class TestTaskManagerCancelTask(unittest.IsolatedAsyncioTestCase):
         # Must not raise even though awaiting `task` raises CancelledError.
         await task_manager.cancel_task(task)
         self.assertTrue(task.cancelled())
+
+    async def test_already_cancelled_caller_finishes_cleanup(self):
+        """An already-cancelled caller still completes the rest of its cleanup.
+
+        A task that has been cancelled carries a non-zero ``cancelling()``
+        count for the rest of its life, including throughout the ``finally``
+        block where it tears down its children. Cancelling a child there is
+        not a fresh cancellation of the caller, so ``cancel_task`` must return
+        normally and let the remaining cleanup — closing a websocket, say —
+        run to completion.
+        """
+        task_manager = self._create_task_manager()
+        steps = []
+
+        async def child():
+            await asyncio.Event().wait()
+
+        async def caller():
+            task = task_manager.create_task(child(), "child")
+            await asyncio.sleep(0)
+            try:
+                await asyncio.Event().wait()
+            finally:
+                await task_manager.cancel_task(task)
+                steps.append("cancel_task returned")
+                await asyncio.sleep(0)
+                steps.append("cleanup finished")
+
+        caller_task = asyncio.get_running_loop().create_task(caller())
+        await asyncio.sleep(0.05)
+        caller_task.cancel()
+        await asyncio.gather(caller_task, return_exceptions=True)
+
+        self.assertEqual(steps, ["cancel_task returned", "cleanup finished"])
+        self.assertTrue(caller_task.cancelled())
 
 
 if __name__ == "__main__":
