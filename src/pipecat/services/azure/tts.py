@@ -73,6 +73,15 @@ class AzureTTSSettings(TTSSettings):
 
     Parameters:
         emphasis: Emphasis level for speech ("strong", "moderate", "reduced").
+        force_locale: Wrap synthesized text in SSML's ``<lang xml:lang>`` so the
+            voice speaks in the configured ``language`` rather than the one it
+            auto-detects from the text. Multilingual voices (e.g.
+            ``en-US-EmmaMultilingualNeural``) use this to pin an accent; standard,
+            single-locale voices ignore the element. Enabling it also disables
+            per-segment language switching, so mixed-language text is spoken
+            entirely in the configured locale. A multilingual voice synthesizes
+            no audio at all for a locale outside the set it speaks, so pair this
+            with a ``language`` the voice supports. Defaults to ``False``.
         pitch: Voice pitch adjustment (e.g., "+10%", "-5Hz", "high").
         rate: Speech rate adjustment (e.g., "1.0", "1.25", "slow", "fast").
         role: Voice role for expression (e.g., "YoungAdultFemale").
@@ -82,6 +91,7 @@ class AzureTTSSettings(TTSSettings):
     """
 
     emphasis: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    force_locale: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pitch: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     rate: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     role: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -191,6 +201,9 @@ class AzureBaseTTSService:
             "<mstts:silence type='Sentenceboundary' value='20ms' />"
         )
 
+        if self._settings.force_locale:
+            ssml += f"<lang xml:lang='{language}'>"
+
         if self._settings.style:
             ssml += f"<mstts:express-as style='{self._settings.style}'"
             if self._settings.style_degree:
@@ -224,6 +237,9 @@ class AzureBaseTTSService:
 
         if self._settings.style:
             ssml += "</mstts:express-as>"
+
+        if self._settings.force_locale:
+            ssml += "</lang>"
 
         ssml += "</voice></speak>"
 
@@ -315,6 +331,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             voice="en-US-SaraNeural",
             language="en-US",
             emphasis=None,
+            force_locale=False,
             pitch=None,
             rate=None,
             role=None,
@@ -862,6 +879,7 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
             voice="en-US-SaraNeural",
             language="en-US",
             emphasis=None,
+            force_locale=False,
             pitch=None,
             rate=None,
             role=None,
