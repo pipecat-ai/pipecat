@@ -1000,6 +1000,13 @@ class TTSService(AIService):
             await filter.handle_interruption()
 
         self._llm_response_started = False
+        # Report before dropping the accumulator. When streaming tokens the
+        # per-token usage calls short-circuit and the flush is the only thing
+        # that emits the metric, so an interrupted turn would otherwise report
+        # nothing at all for text the service has already been sent and billed
+        # for. Barge-in is the normal case in a voice agent, not an edge case.
+        if self._streamed_text:
+            await super().start_tts_usage_metrics(self._streamed_text)
         self._streamed_text = ""
         self._text_aggregation_metrics_started = False
         self._aggregated_frame_sequencer.clear()  # discard all pending slots on interruption
