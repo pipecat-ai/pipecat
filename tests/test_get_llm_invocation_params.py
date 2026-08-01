@@ -352,6 +352,7 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
 
         self.assertEqual(params["messages"][0]["role"], "user")
         self.assertEqual(params["messages"][0]["content"], "Extra context.")
+        self.assertEqual(context.get_messages()[0]["role"], "developer")
 
     def test_developer_conversion_does_not_affect_other_roles(self):
         """convert_developer_to_user only affects developer messages, not system/user/assistant."""
@@ -1296,6 +1297,16 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(len(params["messages"]), 1)
         self.assertEqual(params["messages"][0]["role"], "user")
         self.assertEqual(params["messages"][0]["content"], "You are a helpful assistant.")
+
+    def test_single_system_message_conversion_does_not_mutate_source_context(self):
+        """Converting a lone system message to user leaves the source context unchanged."""
+        context = LLMContext(messages=[{"role": "system", "content": "You are helpful."}])
+
+        self.adapter.get_llm_invocation_params(
+            context, enable_prompt_caching=False, system_instruction="Be concise."
+        )
+
+        self.assertEqual(context.get_messages()[0]["role"], "system")
 
     def test_system_instruction_only(self):
         """system_instruction alone becomes the system parameter."""
