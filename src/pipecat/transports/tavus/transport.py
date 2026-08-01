@@ -159,15 +159,17 @@ class TavusParams(DailyParams):
         audio_out_enabled: Whether to enable audio output to participants.
         microphone_out_enabled: Whether to enable microphone output track.
         audio_out_faster_than_realtime: Whether to send bot audio app messages as fast as
-            possible instead of paced to real playback time. Speeds up avatar rendering, but
-            breaks any downstream processor (e.g. ``AudioBufferProcessor``) that relies on bot
-            audio arriving at the pipeline at roughly real time.
+            possible instead of paced to real playback time. Enabled by default: it hands
+            Tavus a larger rendering buffer, since TTS audio is typically generated well
+            faster than realtime and pacing it throttles delivery to 1x. Set to False when a
+            downstream processor (e.g. ``AudioBufferProcessor``) needs bot audio to arrive at
+            the pipeline at roughly real time.
     """
 
     audio_in_enabled: bool = True
     audio_out_enabled: bool = True
     microphone_out_enabled: bool = False
-    audio_out_faster_than_realtime: bool = False
+    audio_out_faster_than_realtime: bool = True
 
 
 class TavusTransportClient:
