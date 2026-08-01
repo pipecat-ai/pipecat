@@ -7,28 +7,59 @@
 """Unit tests for custom http_client support in OpenAI TTS and Whisper-based STT services."""
 
 import unittest
-from unittest.mock import patch
 
 import httpx
+from openai import DefaultAsyncHttpxClient
 
+from pipecat.services.groq.stt import GroqSTTService
 from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.services.openai.tts import OpenAITTSService
+
+# The OpenAI SDK adopts a caller-supplied client as-is and derives its own request
+# timeout from it, so both are asserted against the service's live SDK client.
+CUSTOM_TIMEOUT = httpx.Timeout(60.0, connect=10.0)
+
+
+def make_http_client() -> DefaultAsyncHttpxClient:
+    return DefaultAsyncHttpxClient(timeout=CUSTOM_TIMEOUT)
 
 
 class TestOpenAIHttpClient(unittest.IsolatedAsyncioTestCase):
     async def test_openai_tts_uses_custom_http_client(self):
-        async with httpx.AsyncClient() as http_client:
-            with patch("pipecat.services.openai.tts.AsyncOpenAI") as mock_openai:
-                OpenAITTSService(api_key="test-key", http_client=http_client)
-            self.assertIs(mock_openai.call_args.kwargs["http_client"], http_client)
+        async with make_http_client() as http_client:
+            service = OpenAITTSService(api_key="test-key", http_client=http_client)
+            self.assertIs(service._client._client, http_client)
+            self.assertEqual(service._client.timeout, CUSTOM_TIMEOUT)
 
     async def test_openai_stt_uses_custom_http_client(self):
-        async with httpx.AsyncClient() as http_client:
-            with patch("pipecat.services.whisper.base_stt.AsyncOpenAI") as mock_openai:
-                OpenAISTTService(api_key="test-key", http_client=http_client)
-            self.assertIs(mock_openai.call_args.kwargs["http_client"], http_client)
+        async with make_http_client() as http_client:
+            service = OpenAISTTService(api_key="test-key", http_client=http_client)
+            self.assertIs(service._client._client, http_client)
+            self.assertEqual(service._client.timeout, CUSTOM_TIMEOUT)
 
-    async def test_openai_tts_http_client_defaults_to_none(self):
-        with patch("pipecat.services.openai.tts.AsyncOpenAI") as mock_openai:
-            OpenAITTSService(api_key="test-key")
-        self.assertIsNone(mock_openai.call_args.kwargs["http_client"])
+    async def test_groq_stt_uses_custom_http_client(self):
+        async with make_http_client() as http_client:
+            service = GroqSTTService(api_key="test-key", http_client=http_client)
+            self.assertIs(service._client._client, http_client)
+
+    async def test_openai_tts_defaults_to_sdk_client(self):
+        service = OpenAITTSService(api_key="test-key")
+        self.assertIsInstance(service._client._client, httpx.AsyncClient)
+        self.assertNotEqual(service._client.timeout, CUSTOM_TIMEOUT)
+
+    async def test_openai_stt_defaults_to_sdk_client(self):
+        service = OpenAISTTService(api_key="test-key")
+        self.assertIsInstance(service._client._client, httpx.AsyncClient)
+        self.assertNotEqual(service._client.timeout, CUSTOM_TIMEOUT)
+
+    async def test_create_client_is_an_override_point(self):
+        async with make_http_client() as http_client:
+
+            class CustomSTTService(OpenAISTTService):
+                def create_client(self, api_key=None, base_url=None, http_client=None, **kwargs):
+                    return super().create_client(
+                        api_key=api_key, base_url=base_url, http_client=http_client, **kwargs
+                    )
+
+            service = CustomSTTService(api_key="test-key", http_client=http_client)
+            self.assertIs(service._client._client, http_client)

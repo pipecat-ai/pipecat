@@ -156,9 +156,12 @@ class BaseWhisperSTTService(SegmentedSTTService):
 
             api_key: Service API key. Defaults to None.
             base_url: Service API base URL. Defaults to None.
-            http_client: Custom ``httpx.AsyncClient`` for API requests, e.g. to configure
-                explicit timeouts or connection limits. If None, uses the OpenAI SDK's
-                default client.
+            http_client: Custom ``httpx.AsyncClient`` for API requests, e.g. to raise the
+                request timeout for high-latency endpoints. Prefer
+                ``openai.DefaultAsyncHttpxClient``, which retains the OpenAI SDK's
+                connection limits and redirect handling; a bare ``httpx.AsyncClient``
+                uses httpx's own defaults instead. If None, the SDK builds its default
+                client. Defaults to None.
             language: Language of the audio input.
 
                 .. deprecated:: 0.0.105
@@ -225,17 +228,31 @@ class BaseWhisperSTTService(SegmentedSTTService):
             settings=default_settings,
             **kwargs,
         )
-        self._client = self._create_client(api_key, base_url, http_client)
+        self._client = self.create_client(
+            api_key=api_key, base_url=base_url, http_client=http_client
+        )
         self._include_prob_metrics = include_prob_metrics
         self._push_empty_transcripts = push_empty_transcripts
 
-    def _create_client(
+    def create_client(
         self,
-        api_key: str | None,
-        base_url: str | None,
+        api_key: str | None = None,
+        base_url: str | None = None,
         http_client: httpx.AsyncClient | None = None,
-    ):
-        return AsyncOpenAI(api_key=api_key, base_url=base_url, http_client=http_client)
+        **kwargs,
+    ) -> AsyncOpenAI:
+        """Create an AsyncOpenAI client instance.
+
+        Args:
+            api_key: Service API key.
+            base_url: Service API base URL.
+            http_client: Custom ``httpx.AsyncClient`` for API requests.
+            **kwargs: Additional client configuration arguments.
+
+        Returns:
+            Configured AsyncOpenAI client instance.
+        """
+        return AsyncOpenAI(api_key=api_key, base_url=base_url, http_client=http_client, **kwargs)
 
     def can_generate_metrics(self) -> bool:
         """Whether this service can generate processing metrics.
