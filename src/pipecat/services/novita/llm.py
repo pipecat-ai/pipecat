@@ -80,13 +80,18 @@ class NovitaLLMService(OpenAILLMService):
         try:
             await super()._process_context(context)
         finally:
-            # Report even if the response is interrupted or cancelled mid-stream.
+            # Only the base implementation emits the metrics; report through it
+            # even if the response is interrupted or cancelled mid-stream.
             if self._token_usage:
                 await super().start_llm_usage_metrics(self._token_usage)
                 self._token_usage = None
 
     async def start_llm_usage_metrics(self, tokens: LLMTokenUsage):
-        """Hold the latest usage snapshot rather than reporting it per chunk.
+        """Hold the latest usage snapshot rather than reporting it.
+
+        The inherited streaming loop calls this for every chunk carrying usage.
+        Holding the snapshot here suppresses that per-chunk reporting, leaving
+        :meth:`_process_context` to report the final one when the completion ends.
 
         Args:
             tokens: Cumulative token usage for the completion so far.
