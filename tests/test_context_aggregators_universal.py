@@ -7,6 +7,8 @@
 import json
 import unittest
 
+import pytest
+
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.frames.frames import (
@@ -461,6 +463,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stop_message.content, "Hello!")
         self.assertFalse(timeout)
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     async def test_user_mute_strategies(self):
         context = LLMContext()
 

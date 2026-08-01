@@ -11,6 +11,7 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
@@ -30,15 +31,15 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_mute import (
-    FunctionCallUserMuteStrategy,
-    MuteUntilFirstBotCompleteUserMuteStrategy,
-)
+from pipecat.turns.user_mute import MuteUntilFirstBotCompleteUserMuteStrategy
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
 
+# The call survives an interruption, so the five-second lookup still reports its
+# result even if the user speaks while it runs.
+@tool_options(cancel_on_interruption=False)
 async def get_current_weather(params: FunctionCallParams, location: str, format: str):
     """Get the current weather.
 
@@ -98,10 +99,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            user_mute_strategies=[
-                MuteUntilFirstBotCompleteUserMuteStrategy(),
-                FunctionCallUserMuteStrategy(),
-            ],
+            user_mute_strategies=[MuteUntilFirstBotCompleteUserMuteStrategy()],
             vad_analyzer=SileroVADAnalyzer(),
         ),
     )

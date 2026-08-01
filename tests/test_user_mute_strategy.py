@@ -6,6 +6,8 @@
 
 import unittest
 
+import pytest
+
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -55,7 +57,12 @@ class TestMuteUntilFirstBotCompleteUserMuteStrategy(unittest.IsolatedAsyncioTest
         self.assertFalse(await strategy.process_frame(InterruptionFrame()))
 
 
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
 class TestFunctionCallUserMuteStrategy(unittest.IsolatedAsyncioTestCase):
+    def test_deprecation_warning(self):
+        with pytest.warns(DeprecationWarning, match="`FunctionCallUserMuteStrategy` is deprecated"):
+            FunctionCallUserMuteStrategy()
+
     async def test_user_mute_strategy(self):
         strategy = FunctionCallUserMuteStrategy()
 

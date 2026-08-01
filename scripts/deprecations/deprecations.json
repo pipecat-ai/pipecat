@@ -3754,6 +3754,17 @@
       "location": "pipecat/transports/whatsapp/client.py"
     },
     {
+      "subject": "FunctionCallUserMuteStrategy",
+      "module": "pipecat.turns.user_mute.function_call_user_mute_strategy",
+      "kind": "class",
+      "deprecated_in": "1.7.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "@tool_options(cancel_on_interruption=False)",
+      "message": "`FunctionCallUserMuteStrategy` is deprecated since 1.7.0 and will be removed in 2.0.0. Use `@tool_options(cancel_on_interruption=False)` instead.",
+      "location": "pipecat/turns/user_mute/function_call_user_mute_strategy.py"
+    },
+    {
       "subject": "BaseUserTurnStartStrategy.reset",
       "module": "pipecat.turns.user_start.base_user_turn_start_strategy",
       "kind": "method",

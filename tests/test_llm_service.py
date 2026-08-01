@@ -9,6 +9,8 @@ import warnings
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+import pytest
+
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -296,6 +298,7 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any("register_function" in e for e in errors))
         self.assertFalse(any("not in the currently advertised tool set" in w for w in warnings))
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     async def test_missing_function_call_allows_user_mute_cleanup(self):
         service = MockLLMService()
         service._call_event_handler = AsyncMock()
@@ -326,6 +329,7 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(muted)
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     async def test_builtin_cancel_tool_allows_user_mute_cleanup(self):
         """The built-in cancel tool is excluded from FunctionCallsStartedFrame,
         so the mute strategy sees a result frame for a tool call id it is not
@@ -367,6 +371,7 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(muted)
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     async def test_intermediate_results_allow_user_mute_cleanup(self):
         """An async tool reporting intermediate updates emits a result frame per
         update, so the mute strategy sees the same tool call id finish twice.

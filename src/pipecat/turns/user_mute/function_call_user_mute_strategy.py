@@ -13,8 +13,13 @@ from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
 )
 from pipecat.turns.user_mute.base_user_mute_strategy import BaseUserMuteStrategy
+from pipecat.utils.deprecation import deprecated
 
 
+@deprecated(
+    "`FunctionCallUserMuteStrategy` is deprecated since 1.7.0 and will be removed in 2.0.0. "
+    "Use `@tool_options(cancel_on_interruption=False)` instead."
+)
 class FunctionCallUserMuteStrategy(BaseUserMuteStrategy):
     """User mute strategy that mutes the user while a function call is executing.
 
@@ -23,6 +28,12 @@ class FunctionCallUserMuteStrategy(BaseUserMuteStrategy):
     muted. Once the function call completes or is canceled, user input is
     allowed again.
 
+    .. deprecated:: 1.7.0
+        Use :func:`~pipecat.adapters.schemas.direct_function.tool_options` with
+        ``cancel_on_interruption=False`` instead, which keeps a tool call running
+        across an interruption without suppressing user speech. Muting covers
+        every call, so the user is silenced for as long as the slowest one takes.
+        Will be removed in 2.0.0.
     """
 
     def __init__(self):
