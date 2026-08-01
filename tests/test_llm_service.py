@@ -17,6 +17,7 @@ from pipecat.frames.frames import (
     FunctionCallFromLLM,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    FunctionCallResultProperties,
     FunctionCallsStartedFrame,
     LLMContextFrame,
     LLMSetToolsFrame,
@@ -24,10 +25,11 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import LLMService
+from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
+from pipecat.utils.async_tool_cancellation import CANCEL_ASYNC_TOOL_NAME
 
 
 def _expected_missing_tool_message(name: str) -> str:
@@ -315,6 +317,92 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
                     context=LLMContext(),
                 )
             ]
+        )
+
+        strategy = FunctionCallUserMuteStrategy()
+        muted = False
+        for frame in recorded_frames:
+            muted = await strategy.process_frame(frame)
+
+        self.assertFalse(muted)
+
+    async def test_builtin_cancel_tool_allows_user_mute_cleanup(self):
+        """The built-in cancel tool is excluded from FunctionCallsStartedFrame,
+        so the mute strategy sees a result frame for a tool call id it is not
+        tracking.
+        """
+        service = MockLLMService()
+        service._call_event_handler = AsyncMock()
+        await self._run_function_calls_inline(service)
+
+        async def async_tool(params: FunctionCallParams):
+            await params.result_callback("done")
+
+        service.register_function("async_tool", async_tool, cancel_on_interruption=False)
+
+        recorded_frames = []
+
+        async def mock_broadcast_frame(frame_cls, **kwargs):
+            recorded_frames.append(frame_cls(**kwargs))
+
+        service.broadcast_frame = mock_broadcast_frame
+
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name=CANCEL_ASYNC_TOOL_NAME,
+                    tool_call_id="cancel_1",
+                    arguments={"tool_call_id": "call_1"},
+                    context=LLMContext(),
+                )
+            ]
+        )
+
+        self.assertNotIn(FunctionCallsStartedFrame, [type(frame) for frame in recorded_frames])
+
+        strategy = FunctionCallUserMuteStrategy()
+        muted = False
+        for frame in recorded_frames:
+            muted = await strategy.process_frame(frame)
+
+        self.assertFalse(muted)
+
+    async def test_intermediate_results_allow_user_mute_cleanup(self):
+        """An async tool reporting intermediate updates emits a result frame per
+        update, so the mute strategy sees the same tool call id finish twice.
+        """
+        service = MockLLMService()
+        service._call_event_handler = AsyncMock()
+        await self._run_function_calls_inline(service)
+
+        async def async_tool(params: FunctionCallParams):
+            await params.result_callback(
+                "working", properties=FunctionCallResultProperties(is_final=False)
+            )
+            await params.result_callback("done")
+
+        service.register_function("async_tool", async_tool, cancel_on_interruption=False)
+
+        recorded_frames = []
+
+        async def mock_broadcast_frame(frame_cls, **kwargs):
+            recorded_frames.append(frame_cls(**kwargs))
+
+        service.broadcast_frame = mock_broadcast_frame
+
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name="async_tool",
+                    tool_call_id="call_1",
+                    arguments={},
+                    context=LLMContext(),
+                )
+            ]
+        )
+
+        self.assertEqual(
+            len([f for f in recorded_frames if isinstance(f, FunctionCallResultFrame)]), 2
         )
 
         strategy = FunctionCallUserMuteStrategy()
