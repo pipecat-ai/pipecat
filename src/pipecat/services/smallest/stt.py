@@ -109,6 +109,10 @@ class SmallestSTTSettings(STTSettings):
         redact_pci: Redact payment card information.
         numerals: Convert spoken numerals to digits.
         diarize: Enable speaker diarization.
+        endpointing: Finalize promptly on trailing silence.
+        keywords: Comma-separated ``KEYWORD:INTENSIFIER`` pairs to boost
+            recognition of domain-specific words/phrases (e.g. ``"NVIDIA:2"``).
+        format: Apply punctuation and capitalization to transcripts.
     """
 
     word_timestamps: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -118,6 +122,9 @@ class SmallestSTTSettings(STTSettings):
     redact_pci: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     numerals: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     diarize: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpointing: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keywords: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    format: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SmallestSTTService(WebsocketSTTService):
@@ -179,6 +186,9 @@ class SmallestSTTService(WebsocketSTTService):
             redact_pci=False,
             numerals="auto",
             diarize=False,
+            endpointing=True,
+            keywords="",
+            format=True,
         )
 
         if settings is not None:
@@ -318,7 +328,14 @@ class SmallestSTTService(WebsocketSTTService):
                 "redact_pci": str(self._settings.redact_pci).lower(),
                 "numerals": self._settings.numerals,
                 "diarize": str(self._settings.diarize).lower(),
+                "endpointing": str(self._settings.endpointing).lower(),
+                "format": str(self._settings.format).lower(),
             }
+
+            # An empty `keywords` value would register a single empty keyword,
+            # so omit the parameter entirely when no keywords are configured.
+            if self._settings.keywords:
+                query_params["keywords"] = self._settings.keywords
 
             ws_url = f"{self._base_url}/waves/v1/stt/live?{urlencode(query_params)}"
 
