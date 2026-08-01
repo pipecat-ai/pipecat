@@ -44,13 +44,10 @@ class FunctionCallUserMuteStrategy(BaseUserMuteStrategy):
         if isinstance(frame, FunctionCallsStartedFrame):
             await self._handle_function_calls_started(frame)
         elif isinstance(frame, (FunctionCallCancelFrame, FunctionCallResultFrame)):
-            # ``discard`` (silent no-op on absent id) over ``remove`` (KeyError):
-            # in multi-worker bus topologies a child worker can see the same
-            # result frame twice (the bus bridge re-delivers a frame the
-            # downstream worker has already handled). ``remove`` would raise on
-            # the second delivery and tear down the frame loop. ``discard`` is
-            # identical in single-worker (id always present → removed) and
-            # robust everywhere else.
+            # Untracked ids reach here: cancel_async_tool_call is excluded from
+            # FunctionCallsStartedFrame yet still emits a result, async tools
+            # emit a result frame per intermediate update, and a bus bridge can
+            # re-deliver a result another worker already handled.
             self._function_call_in_progress.discard(frame.tool_call_id)
 
         return bool(self._function_call_in_progress)
