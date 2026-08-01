@@ -38,20 +38,60 @@ from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
+# Cartesia caps a connection at 100 keyterms totaling 1200 characters.
+_MAX_KEYTERMS = 100
+_MAX_KEYTERM_CHARS = 1200
+
+# Keyterms are only honored by the ink-2 model family.
+_KEYTERM_MODEL_PREFIX = "ink-2"
+
+
+def _prepare_keyterms(keyterms: list[str] | None | _NotGiven) -> list[str]:
+    """Normalize keyterms to the limits Cartesia accepts on a connection.
+
+    Drops blank entries and truncates to :data:`_MAX_KEYTERMS` terms totaling
+    :data:`_MAX_KEYTERM_CHARS` characters, warning about whatever is dropped.
+    Clamping rather than forwarding an oversized list keeps a bad keyterm
+    list from failing the connection outright mid-call.
+
+    Args:
+        keyterms: Keyterms from settings, which may be unset or ``None``.
+
+    Returns:
+        The keyterms to send, in the order given.
+    """
+    if not is_given(keyterms) or not keyterms:
+        return []
+
+    terms = [stripped for term in keyterms if (stripped := term.strip())]
+
+    prepared: list[str] = []
+    total_chars = 0
+    for term in terms:
+        if len(prepared) >= _MAX_KEYTERMS or total_chars + len(term) > _MAX_KEYTERM_CHARS:
+            break
+        prepared.append(term)
+        total_chars += len(term)
+
+    if len(prepared) < len(terms):
+        logger.warning(
+            f"Cartesia accepts at most {_MAX_KEYTERMS} keyterms totaling "
+            f"{_MAX_KEYTERM_CHARS} characters; dropping {len(terms) - len(prepared)} keyterm(s)"
+        )
+
+    return prepared
+
 
 @dataclass
 class CartesiaSTTSettings(STTSettings):
     """Settings for CartesiaSTTService.
 
-    ``model`` and ``language`` are inherited from ``STTSettings`` /
-    ``ServiceSettings``.
-
     Parameters:
-        keyterm: List of key terms or phrases to bias transcription towards.
-            Sent as repeated ``keyterm`` query parameters on the WebSocket
-            connection URL. Cartesia applies keyterms only at connection
-            time and does not support changing them mid-stream; updating
-            this setting at runtime triggers a reconnect. See
+        keyterm: Key terms or phrases to bias transcription towards, sent as
+            repeated ``keyterm`` query parameters on the connection URL. Only
+            honored by ink-2 models; keyterms set for any other model are
+            ignored with a warning. Cartesia binds keyterms to a connection,
+            so updating this setting at runtime triggers a reconnect. See
             https://docs.cartesia.ai/use-the-api/stt/keyterms.
     """
 
@@ -361,10 +401,19 @@ class CartesiaSTTService(WebsocketSTTService):
                 ("encoding", self._encoding),
                 ("sample_rate", str(self.sample_rate)),
             ]
-            keyterm = self._settings.keyterm
-            if is_given(keyterm) and keyterm is not None:
-                params.extend(("keyterm", term) for term in keyterm)
-            ws_url = f"wss://{self._base_url}/stt/websocket?{urllib.parse.urlencode(params)}"
+            keyterms = _prepare_keyterms(self._settings.keyterm)
+            if keyterms:
+                if str(self._settings.model).startswith(_KEYTERM_MODEL_PREFIX):
+                    params.extend(("keyterm", term) for term in keyterms)
+                else:
+                    logger.warning(
+                        f"keyterms are only supported on {_KEYTERM_MODEL_PREFIX} models; "
+                        f"ignoring keyterms for model {self._settings.model!r}"
+                    )
+            # Cartesia expects spaces inside a keyterm as %20, which urlencode
+            # only emits with quote_via=quote.
+            query = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
+            ws_url = f"wss://{self._base_url}/stt/websocket?{query}"
             headers = {"Cartesia-Version": "2025-04-16", "X-API-Key": self._api_key}
 
             self._websocket = await self._websocket_connect(ws_url, additional_headers=headers)

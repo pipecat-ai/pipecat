@@ -29,7 +29,8 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
+from pipecat.services.cartesia.stt import _prepare_keyterms
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -41,16 +42,14 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 class CartesiaTurnsSTTSettings(STTSettings):
     """Settings for CartesiaTurnsSTTService.
 
-    ``model`` and ``language`` are inherited from ``STTSettings`` /
-    ``ServiceSettings``. The ink-2 model family is English-only and does not
-    support runtime model or language switching.
+    The ink-2 model family is English-only and does not support runtime model
+    or language switching.
 
     Parameters:
-        keyterm: List of key terms or phrases to bias transcription towards.
-            Sent as repeated ``keyterm`` query parameters on the WebSocket
-            connection URL. Cartesia applies keyterms only at connection
-            time; like ``model`` and ``language``, changing this at runtime
-            has no effect and is reported as unhandled. See
+        keyterm: Key terms or phrases to bias transcription towards, sent as
+            repeated ``keyterm`` query parameters on the connection URL.
+            Cartesia binds keyterms to a connection, so updating this setting
+            at runtime triggers a reconnect. See
             https://docs.cartesia.ai/use-the-api/stt/keyterms.
     """
 
@@ -121,8 +120,8 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
             extra_headers: Optional additional HTTP headers to send with the
                 WebSocket handshake.
             settings: Runtime-updatable settings. The ink-2 family does not
-                support runtime model, language, or keyterm switching; attempts
-                to update any of these fields will be reported as unhandled.
+                support runtime model or language switching; attempts to update
+                either field will be reported as unhandled.
             **kwargs: Additional arguments passed to the parent
                 :class:`WebsocketSTTService`.
         """
@@ -229,8 +228,9 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta.
 
-        Ink-2 does not support runtime model or language switching, so any
-        changed fields are reported as unhandled.
+        Keyterms are bound to a connection, so a changed ``keyterm`` list is
+        applied by reconnecting. Ink-2 does not support runtime model or
+        language switching, so those changes are reported as unhandled.
 
         Args:
             delta: A :class:`STTSettings` (or
@@ -240,7 +240,12 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
             Dict mapping changed field names to their previous values.
         """
         changed = await super()._update_settings(delta)
-        self._warn_unhandled_updated_settings(changed.keys())
+
+        self._warn_unhandled_updated_settings(changed.keys() - {"keyterm"})
+
+        if "keyterm" in changed:
+            await self._request_reconnect()
+
         return changed
 
     # ------------------------------------------------------------------
@@ -268,10 +273,10 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
             ("encoding", "pcm_s16le"),
             ("sample_rate", str(self.sample_rate)),
         ]
-        keyterm = self._settings.keyterm
-        if is_given(keyterm) and keyterm is not None:
-            params.extend(("keyterm", term) for term in keyterm)
-        return f"{self._url}?{urllib.parse.urlencode(params)}"
+        params.extend(("keyterm", term) for term in _prepare_keyterms(self._settings.keyterm))
+        # Cartesia expects spaces inside a keyterm as %20, which urlencode only
+        # emits with quote_via=quote.
+        return f"{self._url}?{urllib.parse.urlencode(params, quote_via=urllib.parse.quote)}"
 
     async def _connect_websocket(self):
         """Connect to the v2 WebSocket and wait for the server's ``connected`` frame."""
