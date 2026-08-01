@@ -1100,6 +1100,22 @@ class UserTurnInferenceCompletedFrame(SystemFrame):
 
 
 @dataclass
+class UserTurnStopTimeoutFrame(SystemFrame):
+    """Frame indicating that the user turn was finalized by the safety timeout.
+
+    Broadcast by the user aggregator when a user turn ends because
+    ``user_turn_stop_timeout`` elapsed (the ``on_user_turn_stopped`` strategy is
+    ``None``) rather than because a stop strategy fired. Turn-completion-aware
+    LLM services consume this to recover when the model never produced a
+    completion marker (✓/○/◐) for the turn — without it, such a turn ends with
+    no response and the bot goes silent. Consumers should treat an absent
+    completion as "no answer was generated" and decide whether to re-prompt.
+    """
+
+    pass
+
+
+@dataclass
 class VADUserStartedSpeakingFrame(SystemFrame):
     """Frame emitted when VAD definitively detects user started speaking.
 
