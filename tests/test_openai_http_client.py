@@ -15,8 +15,7 @@ from pipecat.services.groq.stt import GroqSTTService
 from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.services.openai.tts import OpenAITTSService
 
-# The OpenAI SDK adopts a caller-supplied client as-is and derives its own request
-# timeout from it, so both are asserted against the service's live SDK client.
+# The SDK adopts a caller-supplied client as-is and derives its request timeout from it.
 CUSTOM_TIMEOUT = httpx.Timeout(60.0, connect=10.0)
 
 

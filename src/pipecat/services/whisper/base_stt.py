@@ -156,12 +156,11 @@ class BaseWhisperSTTService(SegmentedSTTService):
 
             api_key: Service API key. Defaults to None.
             base_url: Service API base URL. Defaults to None.
-            http_client: Custom ``httpx.AsyncClient`` for API requests, e.g. to raise the
-                request timeout for high-latency endpoints. Prefer
-                ``openai.DefaultAsyncHttpxClient``, which retains the OpenAI SDK's
-                connection limits and redirect handling; a bare ``httpx.AsyncClient``
-                uses httpx's own defaults instead. If None, the SDK builds its default
-                client. Defaults to None.
+            http_client: Custom ``httpx.AsyncClient`` for API requests, e.g. one with a
+                longer request timeout. Prefer ``openai.DefaultAsyncHttpxClient``, which
+                keeps the SDK's connection limits and redirect handling; a bare
+                ``httpx.AsyncClient`` uses httpx's defaults instead. Defaults to None,
+                which lets the SDK build its own client.
             language: Language of the audio input.
 
                 .. deprecated:: 0.0.105

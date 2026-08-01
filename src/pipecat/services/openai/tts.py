@@ -127,12 +127,11 @@ class OpenAITTSService(TTSService):
         Args:
             api_key: OpenAI API key for authentication. If None, uses environment variable.
             base_url: Custom base URL for OpenAI API. If None, uses default.
-            http_client: Custom ``httpx.AsyncClient`` for API requests, e.g. to raise the
-                request timeout for high-latency endpoints. Prefer
-                ``openai.DefaultAsyncHttpxClient``, which retains the OpenAI SDK's
-                connection limits and redirect handling; a bare ``httpx.AsyncClient``
-                uses httpx's own defaults instead. If None, the SDK builds its default
-                client. Defaults to None.
+            http_client: Custom ``httpx.AsyncClient`` for API requests, e.g. one with a
+                longer request timeout. Prefer ``openai.DefaultAsyncHttpxClient``, which
+                keeps the SDK's connection limits and redirect handling; a bare
+                ``httpx.AsyncClient`` uses httpx's defaults instead. Defaults to None,
+                which lets the SDK build its own client.
             voice: Voice ID to use for synthesis. Defaults to "alloy".
 
                 .. deprecated:: 0.0.105
