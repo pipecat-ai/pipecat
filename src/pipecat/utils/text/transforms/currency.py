@@ -21,7 +21,7 @@ _CURRENCY_MAP: dict[str, tuple[str, str, str | None, str | None]] = {
     "₹": ("rupee", "rupees", "paisa", "paise"),
 }
 
-_CURRENCY_RE = re.compile(r"([€£¥₹\$])\s*(\d{1,3}(?:,\d{3})*|\d+)\b(?:\.(\d{1,2}))?")
+_CURRENCY_RE = re.compile(r"([€£¥₹\$])\s*(\d{1,3}(?:,\d{3})*|\d+)\b(?:\.(\d+))?")
 
 
 def _amount_to_words(n: float, singular: str, plural: str) -> str:
@@ -42,7 +42,7 @@ def _currency_match(match: re.Match) -> str:
     result = _amount_to_words(whole, singular, plural)
 
     if frac_str and c_singular and c_plural:
-        frac = int(frac_str.ljust(2, "0"))
+        frac = int(frac_str[:2].ljust(2, "0"))
         if frac > 0:
             result += " and " + _amount_to_words(frac, c_singular, c_plural)
 
