@@ -41,6 +41,7 @@ jobs:
           uv sync --group dev \
             --extra anthropic \
             --extra aws \
+            --extra aws-nova-sonic \
             --extra azure \
             --extra cli \
             --extra daily \
