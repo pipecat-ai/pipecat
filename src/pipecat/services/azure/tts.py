@@ -79,7 +79,9 @@ class AzureTTSSettings(TTSSettings):
             ``en-US-EmmaMultilingualNeural``) use this to pin an accent; standard,
             single-locale voices ignore the element. Enabling it also disables
             per-segment language switching, so mixed-language text is spoken
-            entirely in the configured locale. Defaults to ``False``.
+            entirely in the configured locale. A multilingual voice synthesizes
+            no audio at all for a locale outside the set it speaks, so pair this
+            with a ``language`` the voice supports. Defaults to ``False``.
         pitch: Voice pitch adjustment (e.g., "+10%", "-5Hz", "high").
         rate: Speech rate adjustment (e.g., "1.0", "1.25", "slow", "fast").
         role: Voice role for expression (e.g., "YoungAdultFemale").
