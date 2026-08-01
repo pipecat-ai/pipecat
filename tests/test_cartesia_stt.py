@@ -5,6 +5,7 @@
 #
 
 from unittest.mock import AsyncMock
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from websockets.protocol import State
@@ -33,6 +34,136 @@ async def test_cartesia_connect_failure_clears_stale_websocket(monkeypatch):
     await service._connect_websocket()
 
     assert service._websocket is None
+
+
+def _capture_connect_url(monkeypatch) -> dict:
+    """Stub out the websocket connect and capture the URL it's called with."""
+    captured = {}
+
+    async def fake_websocket_connect(url, **kwargs):
+        captured["url"] = url
+        captured["headers"] = kwargs.get("additional_headers")
+        return _FakeWebsocket()
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+    return captured
+
+
+def _connected_service(**kwargs) -> CartesiaSTTService:
+    service = CartesiaSTTService(api_key="test-key", sample_rate=16000, **kwargs)
+    # sample_rate is normally set from StartFrame, which these tests skip.
+    service._sample_rate = 16000
+    return service
+
+
+@pytest.mark.asyncio
+async def test_cartesia_connect_websocket_url_includes_keyterm(monkeypatch):
+    captured = _capture_connect_url(monkeypatch)
+
+    service = _connected_service(
+        settings=CartesiaSTTService.Settings(model="ink-2", keyterm=["Cartesia", "Ink 2"]),
+    )
+
+    await service._connect_websocket()
+
+    parsed = urlparse(captured["url"])
+    query = parse_qs(parsed.query)
+    assert parsed.scheme == "wss"
+    assert parsed.netloc == "api.cartesia.ai"
+    assert parsed.path == "/stt/websocket"
+    assert query["model"] == ["ink-2"]
+    assert query["sample_rate"] == ["16000"]
+    assert query["keyterm"] == ["Cartesia", "Ink 2"]
+    assert captured["headers"]["X-API-Key"] == "test-key"
+
+
+@pytest.mark.asyncio
+async def test_cartesia_connect_websocket_url_encodes_keyterm_spaces_as_percent_20(monkeypatch):
+    captured = _capture_connect_url(monkeypatch)
+
+    service = _connected_service(
+        settings=CartesiaSTTService.Settings(model="ink-2", keyterm=["Ink 2"]),
+    )
+
+    await service._connect_websocket()
+
+    assert "keyterm=Ink%202" in captured["url"]
+
+
+@pytest.mark.asyncio
+async def test_cartesia_connect_websocket_url_omits_keyterm_when_not_set(monkeypatch):
+    captured = _capture_connect_url(monkeypatch)
+
+    service = _connected_service()
+
+    await service._connect_websocket()
+
+    query = parse_qs(urlparse(captured["url"]).query)
+    assert "keyterm" not in query
+
+
+@pytest.mark.asyncio
+async def test_cartesia_connect_websocket_url_omits_keyterm_for_non_ink_2_model(monkeypatch):
+    captured = _capture_connect_url(monkeypatch)
+
+    service = _connected_service(
+        settings=CartesiaSTTService.Settings(keyterm=["Cartesia"]),
+    )
+
+    await service._connect_websocket()
+
+    query = parse_qs(urlparse(captured["url"]).query)
+    assert query["model"] == ["ink-whisper"]
+    assert "keyterm" not in query
+
+
+@pytest.mark.asyncio
+async def test_cartesia_connect_websocket_url_clamps_keyterms_to_limits(monkeypatch):
+    captured = _capture_connect_url(monkeypatch)
+
+    service = _connected_service(
+        settings=CartesiaSTTService.Settings(
+            model="ink-2",
+            keyterm=[f"term{i}" for i in range(150)],
+        ),
+    )
+
+    await service._connect_websocket()
+
+    query = parse_qs(urlparse(captured["url"]).query)
+    assert query["keyterm"] == [f"term{i}" for i in range(100)]
+
+
+@pytest.mark.asyncio
+async def test_cartesia_connect_websocket_url_clamps_keyterms_to_character_budget(monkeypatch):
+    captured = _capture_connect_url(monkeypatch)
+
+    service = _connected_service(
+        settings=CartesiaSTTService.Settings(model="ink-2", keyterm=["a" * 700, "b" * 700, "c"]),
+    )
+
+    await service._connect_websocket()
+
+    query = parse_qs(urlparse(captured["url"]).query)
+    assert query["keyterm"] == ["a" * 700]
+
+
+@pytest.mark.asyncio
+async def test_cartesia_update_keyterm_reconnects(monkeypatch):
+    _capture_connect_url(monkeypatch)
+
+    service = _connected_service(
+        settings=CartesiaSTTService.Settings(model="ink-2", keyterm=["Cartesia"]),
+    )
+    reconnect = AsyncMock()
+    monkeypatch.setattr(service, "_request_reconnect", reconnect)
+
+    await service._update_settings(CartesiaSTTService.Settings(keyterm=["Ink 2"]))
+
+    assert service._settings.keyterm == ["Ink 2"]
+    reconnect.assert_awaited_once()
 
 
 @pytest.mark.asyncio
