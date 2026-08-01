@@ -330,9 +330,13 @@ class SmallestSTTService(WebsocketSTTService):
                 "numerals": self._settings.numerals,
                 "diarize": str(self._settings.diarize).lower(),
                 "endpointing": str(self._settings.endpointing).lower(),
-                "keywords": self._settings.keywords,
                 "format": str(self._settings.format).lower(),
             }
+
+            # An empty `keywords` value would register a single empty keyword,
+            # so omit the parameter entirely when no keywords are configured.
+            if self._settings.keywords:
+                query_params["keywords"] = self._settings.keywords
 
             ws_url = f"{self._base_url}/waves/v1/stt/live?{urlencode(query_params)}"
 
