@@ -170,11 +170,15 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             if extracted is not None:
                 system = extracted
 
-        # Convert remaining messages to Anthropic format. A conversion failure
-        # (e.g. a malformed message) is wrapped so it surfaces with its
-        # underlying cause.
+        # Convert remaining messages to Anthropic format, skipping messages that
+        # have no Anthropic representation. A conversion failure (e.g. a
+        # malformed message) is wrapped so it surfaces with its underlying cause.
         try:
-            messages = [self._from_universal_context_message(m) for m in remaining]
+            messages = [
+                converted
+                for m in remaining
+                if (converted := self._from_universal_context_message(m)) is not None
+            ]
         except Exception as e:
             raise LLMContextConversionError(e) from e
 
@@ -237,12 +241,12 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             messages.append({"role": "user", "content": [{"type": "text", "text": "."}]})
         return messages
 
-    def _from_universal_context_message(self, message: LLMContextMessage) -> MessageParam:
+    def _from_universal_context_message(self, message: LLMContextMessage) -> MessageParam | None:
         if isinstance(message, LLMSpecificMessage):
             return self._from_anthropic_specific_message(message)
         return self._from_standard_message(message)
 
-    def _from_anthropic_specific_message(self, message: LLMSpecificMessage) -> MessageParam:
+    def _from_anthropic_specific_message(self, message: LLMSpecificMessage) -> MessageParam | None:
         """Convert LLMSpecificMessage to Anthropic format.
 
         Anthropic-specific messages may either be special thought messages that
@@ -251,24 +255,32 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
 
         Args:
             message: Anthropic-specific message.
+
+        Returns:
+            The message in Anthropic format, or None for a thought that can't be
+            represented as a thinking block.
         """
         # Handle special case of thought messages.
         # These can be converted to standalone "assistant" messages; later
         # these thinking messages will be properly merged into the assistant
         # response messages before the context is sent to Anthropic for the
         # next turn.
-        if (
-            isinstance(message.message, dict)
-            and message.message.get("type") == "thought"
-            and (text := message.message.get("text"))
-            and (signature := message.message.get("signature"))
-        ):
+        if isinstance(message.message, dict) and message.message.get("type") == "thought":
+            # A thinking block is valid to Anthropic only with a signature: it
+            # carries the encrypted reasoning the API decrypts when the block is
+            # passed back, and a block without one can't be round-tripped.
+            # Thought text can legitimately be empty, since models that default
+            # to `display: "omitted"` return thinking blocks with no text.
+            # https://platform.claude.com/docs/en/build-with-claude/thinking#controlling-thinking-display
+            signature = message.message.get("signature")
+            if not signature:
+                return None
             return {
                 "role": "assistant",
                 "content": [
                     {
                         "type": "thinking",
-                        "thinking": text,
+                        "thinking": message.message.get("text") or "",
                         "signature": signature,
                     }
                 ],
