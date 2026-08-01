@@ -73,29 +73,29 @@ class AzureTTSSettings(TTSSettings):
 
     Parameters:
         emphasis: Emphasis level for speech ("strong", "moderate", "reduced").
+        force_locale: Wrap synthesized text in SSML's ``<lang xml:lang>`` so the
+            voice speaks in the configured ``language`` rather than the one it
+            auto-detects from the text. Multilingual voices (e.g.
+            ``en-US-EmmaMultilingualNeural``) use this to pin an accent; standard,
+            single-locale voices ignore the element. Enabling it also disables
+            per-segment language switching, so mixed-language text is spoken
+            entirely in the configured locale. Defaults to ``False``.
         pitch: Voice pitch adjustment (e.g., "+10%", "-5Hz", "high").
         rate: Speech rate adjustment (e.g., "1.0", "1.25", "slow", "fast").
         role: Voice role for expression (e.g., "YoungAdultFemale").
         style: Speaking style (e.g., "cheerful", "sad", "excited").
         style_degree: Intensity of the speaking style (0.01 to 2.0).
         volume: Volume level (e.g., "+20%", "loud", "x-soft").
-        force_locale: Force the voice to speak in the configured ``language``
-            via SSML's ``<lang xml:lang>``, instead of auto-detecting it per
-            segment. Useful for multilingual voices (e.g.
-            ``en-US-EmmaMultilingualNeural``) to get a specific accent, but
-            disables per-segment language switching for mixed-language text.
-            No effect on standard, single-locale voices. Defaults to
-            ``False`` (unchanged SSML).
     """
 
     emphasis: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    force_locale: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pitch: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     rate: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     role: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     style: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     style_degree: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     volume: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    force_locale: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AzureBaseTTSService:
@@ -329,13 +329,13 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             voice="en-US-SaraNeural",
             language="en-US",
             emphasis=None,
+            force_locale=False,
             pitch=None,
             rate=None,
             role=None,
             style=None,
             style_degree=None,
             volume=None,
-            force_locale=False,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -877,13 +877,13 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
             voice="en-US-SaraNeural",
             language="en-US",
             emphasis=None,
+            force_locale=False,
             pitch=None,
             rate=None,
             role=None,
             style=None,
             style_degree=None,
             volume=None,
-            force_locale=False,
         )
 
         # 2. Apply direct init arg overrides (deprecated)

@@ -117,9 +117,7 @@ async def test_completion_sentinel_wakes_idle_loop():
 
 @pytest.mark.parametrize("service_class", SSML_SERVICE_CLASSES)
 def test_construct_ssml_default_has_no_lang_element(service_class):
-    """Regression test: default settings must produce the same SSML as before
-    force_locale existed — no <lang> element anywhere in the output.
-    """
+    """Default settings emit no <lang> element anywhere in the output."""
     service = service_class(api_key="test-key", region="eastus")
 
     ssml = service._construct_ssml("Hello there.")
