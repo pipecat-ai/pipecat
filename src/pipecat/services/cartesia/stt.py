@@ -414,7 +414,7 @@ class CartesiaSTTService(WebsocketSTTService):
             # only emits with quote_via=quote.
             query = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
             ws_url = f"wss://{self._base_url}/stt/websocket?{query}"
-            headers = {"Cartesia-Version": "2025-04-16", "X-API-Key": self._api_key}
+            headers = {"Cartesia-Version": "2026-03-01", "X-API-Key": self._api_key}
 
             self._websocket = await self._websocket_connect(ws_url, additional_headers=headers)
             await self._call_event_handler("on_connected")
