@@ -4,12 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for OpenAI-compatible services that report cumulative token usage.
+"""Tests that OpenAI-compatible services report token usage once per completion.
 
-Baseten, Grok, Perplexity and NVIDIA all repeat a cumulative usage snapshot on
-every streamed chunk rather than sending one summary at the end. Each service
-holds the latest snapshot and reports it once when the completion finishes, so
-a single turn produces a single usage metric.
+Providers differ in how often they send usage: some once at the end, others a
+cumulative snapshot on every streamed chunk. The base streaming loop holds the
+latest snapshot and reports it when the completion finishes, so a single turn
+produces a single usage metric either way.
 """
 
 import asyncio
@@ -21,15 +21,23 @@ import pytest
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.services.baseten.llm import BasetenLLMService
+from pipecat.services.novita.llm import NovitaLLMService
 from pipecat.services.nvidia.llm import NvidiaLLMService
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.perplexity.llm import PerplexityLLMService
+from pipecat.services.sambanova.llm import SambaNovaLLMService
 from pipecat.services.xai.llm import GrokLLMService
 
+# SambaNova keeps its own copy of the streaming loop, so it is covered here
+# alongside the services that inherit the base one.
 SERVICES = [
+    pytest.param(OpenAILLMService, {"api_key": "test-key"}, id="openai"),
     pytest.param(BasetenLLMService, {"api_key": "test-key"}, id="baseten"),
     pytest.param(GrokLLMService, {"api_key": "test-key"}, id="grok"),
+    pytest.param(NovitaLLMService, {"api_key": "test-key"}, id="novita"),
     pytest.param(PerplexityLLMService, {"api_key": "test-key"}, id="perplexity"),
     pytest.param(NvidiaLLMService, {"api_key": "test-key"}, id="nvidia"),
+    pytest.param(SambaNovaLLMService, {"api_key": "test-key"}, id="sambanova"),
 ]
 
 
@@ -48,17 +56,43 @@ def _usage_chunk(prompt_tokens: int, completion_tokens: int, reasoning_tokens: i
     )
 
 
-def _service(service_class, init_kwargs, chunks):
+class _FakeStream:
+    """Stands in for the provider's chat completion stream.
+
+    Satisfies the base streaming loop, which iterates and then closes the
+    stream, as well as SambaNova's copy, which enters it as an async context
+    manager.
+    """
+
+    def __init__(self, chunks, raise_at_end=None):
+        self._chunks = list(chunks)
+        self._raise_at_end = raise_at_end
+
+    def __aiter__(self):
+        return self._iterate()
+
+    async def _iterate(self):
+        for chunk in self._chunks:
+            yield chunk
+        if self._raise_at_end:
+            raise self._raise_at_end
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+    async def close(self):
+        pass
+
+
+def _service(service_class, init_kwargs, chunks, raise_at_end=None):
     """A service whose stream yields the given chunks."""
     with patch.object(service_class, "create_client"):
         service = service_class(settings=service_class.Settings(model="test-model"), **init_kwargs)
     service._client = AsyncMock()
-
-    async def stream():
-        for chunk in chunks:
-            yield chunk
-
-    service.get_chat_completions = AsyncMock(return_value=stream())
+    service.get_chat_completions = AsyncMock(return_value=_FakeStream(chunks, raise_at_end))
     service.start_ttfb_metrics = AsyncMock()
     service.stop_ttfb_metrics = AsyncMock()
     return service
@@ -92,14 +126,12 @@ async def test_the_snapshots_are_reported_once_as_a_final_total(service_class, i
 @pytest.mark.asyncio
 async def test_usage_is_reported_when_the_response_is_interrupted(service_class, init_kwargs):
     """A completion cancelled mid-stream still reports the latest snapshot once."""
-    service = _service(service_class, init_kwargs, [])
-
-    async def interrupted_stream():
-        yield _usage_chunk(20, 5)
-        yield _usage_chunk(20, 12)
-        raise asyncio.CancelledError()
-
-    service.get_chat_completions = AsyncMock(return_value=interrupted_stream())
+    service = _service(
+        service_class,
+        init_kwargs,
+        [_usage_chunk(20, 5), _usage_chunk(20, 12)],
+        raise_at_end=asyncio.CancelledError(),
+    )
 
     with patch.object(FrameProcessor, "start_llm_usage_metrics", AsyncMock()) as reported:
         with pytest.raises(asyncio.CancelledError):
@@ -148,10 +180,9 @@ async def test_a_later_completion_does_not_inherit_earlier_usage(service_class, 
     with patch.object(FrameProcessor, "start_llm_usage_metrics", AsyncMock()) as reported:
         await service._process_context(_context())
 
-        async def empty_stream():
-            yield SimpleNamespace(usage=None, model=None, choices=[])
-
-        service.get_chat_completions = AsyncMock(return_value=empty_stream())
+        service.get_chat_completions = AsyncMock(
+            return_value=_FakeStream([SimpleNamespace(usage=None, model=None, choices=[])])
+        )
         await service._process_context(_context())
 
     reported.assert_called_once()
