@@ -51,8 +51,7 @@ def _prepare_keyterms(keyterms: list[str] | None | _NotGiven) -> list[str]:
 
     Drops blank entries and truncates to :data:`_MAX_KEYTERMS` terms totaling
     :data:`_MAX_KEYTERM_CHARS` characters, warning about whatever is dropped.
-    Clamping rather than forwarding an oversized list keeps a bad keyterm
-    list from failing the connection outright mid-call.
+    Truncating keeps an oversized list from failing the connection mid-call.
 
     Args:
         keyterms: Keyterms from settings, which may be unset or ``None``.
