@@ -3,6 +3,7 @@
 import ast
 import shutil
 import subprocess
+import tomllib
 
 import pytest
 
@@ -39,8 +40,6 @@ def validate_python_syntax(file_path):
 
 def validate_pyproject_toml(file_path):
     """Validate that pyproject.toml is valid TOML and has required fields."""
-    import tomllib
-
     with open(file_path, "rb") as f:
         data = tomllib.load(f)
 
@@ -554,20 +553,31 @@ def test_project_generation(config_data, temp_output_dir):
 
     # Verify video service dependencies and imports
     if config.video_service:
+        with open(pyproject_file, "rb") as f:
+            dependencies = tomllib.load(f)["project"]["dependencies"]
+        pipecat_dependency = next(
+            dependency for dependency in dependencies if dependency.startswith("pipecat-ai[")
+        )
+        pipecat_extras = set(pipecat_dependency.split("[", 1)[1].split("]", 1)[0].split(","))
+        video_extras = {
+            "tavus_video": "tavus",
+            "heygen_video": "heygen",
+            "simli_video": "simli",
+        }
+
         # Video services should be in bot.py
         if config.video_service == "tavus_video":
             assert "TavusVideoService" in bot_content, "TavusVideoService should be imported"
-            assert "tavus" in pyproject_content, "tavus extra should be in dependencies"
         elif config.video_service == "heygen_video":
             assert "HeyGenVideoService" in bot_content, "HeyGenVideoService should be imported"
-            assert "heygen" in pyproject_content, "heygen extra should be in dependencies"
             assert "LiveAvatarNewSessionRequest" in bot_content, (
                 "LiveAvatarNewSessionRequest should be imported for HeyGen"
             )
             assert "ServiceType" in bot_content, "ServiceType should be imported for HeyGen"
         elif config.video_service == "simli_video":
             assert "SimliVideoService" in bot_content, "SimliVideoService should be imported"
-            assert "simli" in pyproject_content, "simli extra should be in dependencies"
+
+        assert video_extras[config.video_service] in pipecat_extras
 
         # Video service should be initialized in bot.py
         assert "video" in bot_content.lower(), "video service variable should be present"
