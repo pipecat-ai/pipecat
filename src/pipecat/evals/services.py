@@ -66,10 +66,16 @@ def kokoro_service(voice_cfg: dict, sample_rate: int) -> TTSService:
     suite synthesizes user audio for free. The model files are downloaded once
     on first use and cached under ``~/.cache/kokoro-onnx``.
 
-    Config keys:
-        voice: Kokoro voice id (e.g. ``af_heart``).
-        language: Optional language code (e.g. ``zh``) or ``Language`` value.
-            When omitted, Kokoro keeps its own default.
+    Args:
+        voice_cfg: The ``user.speech`` config mapping:
+
+            - ``voice``: Kokoro voice id (e.g. ``af_heart``).
+            - ``language``: Optional language code (e.g. ``zh``) or ``Language``.
+              When omitted, Kokoro keeps its own default (English). Voices are
+              language-specific, so a non-English language needs a matching voice
+              — ``af_heart`` speaks US English whatever the language is set to.
+
+        sample_rate: Sample rate for the synthesized audio.
     """
     from pipecat.services.kokoro.tts import KokoroTTSService
 
@@ -85,12 +91,19 @@ def kokoro_service(voice_cfg: dict, sample_rate: int) -> TTSService:
 def cartesia_service(voice_cfg: dict, sample_rate: int) -> TTSService:
     """Build a Cartesia TTS service from the ``user_audio`` config.
 
-    Config keys:
-        voice: Cartesia voice id.
-        model: Optional model (defaults to ``sonic-2``).
-        api_key: Optional key (falls back to ``$CARTESIA_API_KEY``).
-        language: Optional language code (e.g. ``zh``) or ``Language`` value.
-            When omitted, Cartesia keeps its own default.
+    Args:
+        voice_cfg: The ``user.speech`` config mapping:
+
+            - ``voice``: Cartesia voice id.
+            - ``model``: Optional model (defaults to ``sonic-2``).
+            - ``api_key``: Optional key (falls back to ``$CARTESIA_API_KEY``).
+            - ``language``: Optional language code (e.g. ``zh``) or ``Language``.
+              When omitted, Cartesia keeps its own default (English).
+
+        sample_rate: Sample rate for the synthesized audio.
+
+    Raises:
+        RuntimeError: If no API key is given in the config or the environment.
     """
     from pipecat.services.cartesia.tts import CartesiaHttpTTSService
 
@@ -131,13 +144,15 @@ def whisper_service(config: dict) -> STTService:
     yields no ``TranscriptionFrame``, so the harness then waits out the whole
     transcription timeout). Disable the filter with a permissive threshold.
 
-    Config keys:
-        device: ``cpu`` (default) or ``cuda``.
-        compute_type: Whisper compute type (defaults to ``int8`` on CPU).
-        model: Optional Whisper model (left unset to use Whisper's default).
-        language: Optional language code (e.g. ``zh``) or ``Language`` value.
-            When omitted, Whisper keeps its own default (English) — it does not
-            auto-detect, so a non-English bot needs this set.
+    Args:
+        config: The ``judge.transcription`` config mapping:
+
+            - ``device``: ``cpu`` (default) or ``cuda``.
+            - ``compute_type``: Whisper compute type (``int8`` on CPU).
+            - ``model``: Optional Whisper model (left unset to use Whisper's own).
+            - ``language``: Optional language code (e.g. ``zh``) or ``Language``.
+              When omitted, Whisper keeps its own default (English) — it does not
+              auto-detect, so a non-English bot needs this set.
     """
     from pipecat.services.whisper.stt import WhisperSTTService
 
@@ -162,16 +177,17 @@ def moonshine_service(config: dict) -> STTService:
 
     Moonshine runs on the CPU via ONNX Runtime (no GPU, no API key) and is small
     and fast. On the short, isolated bot-answer segments the harness transcribes,
-    it tends to keep the answer where Whisper sometimes drops it. ``model`` selects
-    the architecture (a :class:`~pipecat.services.moonshine.stt.Model` value or
-    string; default ``Model.SMALL_STREAMING``).
+    it tends to keep the answer where Whisper sometimes drops it.
 
-    Config keys:
-        model: Optional architecture (a ``Model`` value or string; default
-            ``Model.SMALL_STREAMING``).
-        language: Optional language code (e.g. ``zh``) or ``Language`` value.
-            When omitted, Moonshine keeps its own default (English). Moonshine
-            supports only a handful of languages.
+    Args:
+        config: The ``judge.transcription`` config mapping:
+
+            - ``model``: Optional architecture, as a
+              :class:`~pipecat.services.moonshine.stt.Model` or the equivalent
+              string (default ``Model.SMALL_STREAMING``).
+            - ``language``: Optional language code (e.g. ``zh``) or ``Language``.
+              When omitted, Moonshine keeps its own default (English). It
+              supports only a handful of languages.
     """
     from pipecat.services.moonshine.stt import Model, MoonshineSTTService
 
