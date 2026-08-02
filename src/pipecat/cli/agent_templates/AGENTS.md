@@ -94,27 +94,27 @@ You have live sources for current truth — never substitute your memory. Use th
    - **Learn the concept** (before building something unfamiliar): `search_docs` — how a capability works (the Learn guides) and how to use an optional feature (the Fundamentals guides — recording, transcripts, metrics, idle detection, muting, IVR, voicemail, …); `get_doc` — read a page in full. `search_examples` / `get_example` — a working implementation to start from. When asked for a feature, search it rather than guess.
    - **Verify a specific API** (as you write): `check_deprecation` — **run on any symbol you're unsure about** (the stale-training antidote, e.g. `PipelineTask`→`PipelineWorker`); `search_api` / `get_code_snippet` — exact current signatures and usage. Examples can lag the framework — `check_deprecation` any symbol you copy from one.
 
-   The index is **local** — check `get_hub_status` for `last_refresh_at`, and refresh (`pipecat mcp refresh`, or `uvx pipecat-ai-context-hub@latest refresh`) when it's stale or after a Pipecat version bump.
-2. **No MCP? Query the same index from your shell** — same handlers, same JSON. Check once with `pipecat mcp --help`: it lists the commands when the plugin is installed, and tells you how to install it when not. Don't infer this from `pipecat --help`, where `mcp` is listed either way — that is what makes it discoverable. If it isn't installed, the `uvx` form below needs no install at all.
+   The index is **local** — check `get_hub_status` for `last_refresh_at`, and refresh (`pipecat context-hub refresh`, or `uvx pipecat-ai-context-hub@latest refresh`) when it's stale or after a Pipecat version bump.
+2. **No MCP? Query the same index from your shell** — same handlers, same JSON. Check once with `pipecat context-hub --help`: it lists the commands when the plugin is installed, and tells you how to install it when not. Don't infer this from `pipecat --help`, where `mcp` is listed either way — that is what makes it discoverable. If it isn't installed, the `uvx` form below needs no install at all.
    ```bash
-   pipecat mcp search-docs "turn detection"                      # learn a concept
-   pipecat mcp check-deprecation PipelineTask                    # the reflex check; <1s
-   pipecat mcp search-api "EvalTransportParams"
-   pipecat mcp search-examples "twilio bot" --domain backend
-   pipecat mcp status                                            # index health / freshness
+   pipecat context-hub search-docs "turn detection"                      # learn a concept
+   pipecat context-hub check-deprecation PipelineTask                    # the reflex check; <1s
+   pipecat context-hub search-api "EvalTransportParams"
+   pipecat context-hub search-examples "twilio bot" --domain backend
+   pipecat context-hub status                                            # index health / freshness
 
    uvx pipecat-ai-context-hub search-docs "turn detection"       # same, without the CLI
    ```
-   Stdout is the tool's JSON. **Exit 2 means the local index isn't built yet** — run `pipecat mcp refresh` (or `uvx pipecat-ai-context-hub@latest refresh`) once; it downloads local models and indexes the sources, so allow several minutes. Then re-run the query. Tell the user `pipecat mcp install` wires the MCP server up for future sessions — but keep using these shell commands for the current one, since an MCP server only loads at session start, never mid-session.
+   Stdout is the tool's JSON. **Exit 2 means the local index isn't built yet** — run `pipecat context-hub refresh` (or `uvx pipecat-ai-context-hub@latest refresh`) once; it downloads local models and indexes the sources, so allow several minutes. Then re-run the query. Tell the user `pipecat context-hub install` wires the MCP server up for future sessions — but keep using these shell commands for the current one, since an MCP server only loads at session start, never mid-session.
 3. **Installed package source** — the pinned version is on disk; the code cannot be stale. Read it when the index is ambiguous:
    ```bash
    python -c "import pipecat, os; print(os.path.dirname(pipecat.__file__))"
    ```
 4. **`llms.txt`** — machine-readable docs index at `https://docs.pipecat.ai/llms.txt` (full content: `llms-full.txt`). The last resort when nothing local works.
 
-> `pipecat mcp` is an **optional plugin**, not bundled with `pipecat-ai[cli]`. Install it alongside: `uv tool install "pipecat-ai[cli]" --with pipecat-ai-context-hub`. (Without it, `pipecat mcp` lists in `--help` but prints how to enable it when run.) Note `--with` *replaces* the tool environment, so repeat any plugin you already have — e.g. `--with pipecatcloud --with pipecat-ai-context-hub`.
+> `pipecat context-hub` is an **optional plugin**, not bundled with `pipecat-ai[cli]`. Install it alongside: `uv tool install "pipecat-ai[cli]" --with pipecat-ai-context-hub`. (Without it, `pipecat context-hub` lists in `--help` but prints how to enable it when run.) Note `--with` *replaces* the tool environment, so repeat any plugin you already have — e.g. `--with pipecatcloud --with pipecat-ai-context-hub`.
 
-(Naming: the *package* is `pipecat-ai-context-hub`; the standalone command and MCP server are `pipecat-context-hub`; mounted in the CLI it is `pipecat mcp`. All resolve to the same tool.)
+(Naming: the *package* is `pipecat-ai-context-hub`; the standalone command and MCP server are `pipecat-context-hub`; mounted in the CLI it is `pipecat context-hub`. All resolve to the same tool.)
 
 For browsing examples directly, the **`pipecat-examples` repo** groups demos by category in its README (telephony, vision, etc.); `scripts/demos.json` lists each example's run command.
 

@@ -109,7 +109,7 @@ class TestStaleness:
         warning = freshness_warning()
         assert warning is not None
         assert "30 days old" in warning
-        assert "pipecat mcp refresh" in warning
+        assert "pipecat context-hub refresh" in warning
 
     def test_threshold_is_configurable(self, tmp_path, monkeypatch):
         _write_index(tmp_path, last_refresh_at=_ago(3))
