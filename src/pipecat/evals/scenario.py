@@ -363,9 +363,8 @@ class EvalScenario:
             present, the harness streams RTVI ``raw-audio`` (not ``send-text``)
             to the bot, exercising its STT for real. Mapping with ``service``,
             ``voice``, and optional ``model`` / ``language`` / ``sample_rate`` /
-            ``api_key``. Set ``language`` (a code like ``zh`` or a ``Language``)
-            to synthesize non-English user turns. Omit for text-only evals
-            (default).
+            ``api_key``. Set ``language`` (a code like ``zh``) to synthesize
+            non-English user turns. Omit for text-only evals (default).
         trigger_disconnect: Whether the harness fires the bot's
             ``on_client_disconnected`` handler when this scenario's connection
             ends. Bots often cancel their pipeline there, so this is False by
