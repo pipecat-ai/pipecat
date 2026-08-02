@@ -107,7 +107,8 @@ Top-level optional fields:
                   modality: audio          # audio | text (default text)
                   speech:                  # required when modality is audio
                     service: kokoro        # local TTS that synthesizes the user turns
-                    voice: af_heart
+                    voice: af_heart        # voices are language-specific
+                    language: en           # optional; must match the voice
                     sample_rate: 16000     # optional
 
             ``audio`` streams synthesized user audio to the bot (exercising its
@@ -122,6 +123,7 @@ Top-level optional fields:
                   transcription:           # required when modality is audio
                     service: moonshine     # STT for the bot's audio (or whisper)
                     model: small-streaming # optional
+                    language: en           # optional; the language the bot speaks
                     padding_secs: 0        # optional; silence padded around the
                                            # segment (default: 2)
 
@@ -351,14 +353,17 @@ class EvalScenario:
             greeting is silent. True (audio): the bot speaks, and the judge
             evaluates the transcription of its actual audio.
         transcriber: Parsed from the ``judge.transcription:`` block; the STT
-            config (``service`` defaults to ``moonshine``, plus ``model``) used to
-            transcribe the bot's audio for the ``response`` event (``None`` in
-            text modality).
+            config (``service`` defaults to ``moonshine``, plus ``model`` and an
+            optional ``language`` code) used to transcribe the bot's audio for the
+            ``response`` event (``None`` in text modality). Set ``language`` when
+            the bot speaks a non-English language so the STT doesn't default to
+            English.
         user_audio: TTS config the harness uses to generate user audio. When
             present, the harness streams RTVI ``raw-audio`` (not ``send-text``)
             to the bot, exercising its STT for real. Mapping with ``service``,
-            ``voice``, and optional ``model`` / ``sample_rate`` /
-            ``api_key``. Omit for text-only evals (default).
+            ``voice``, and optional ``model`` / ``language`` / ``sample_rate`` /
+            ``api_key``. Set ``language`` (a code like ``zh``) to synthesize
+            non-English user turns. Omit for text-only evals (default).
         trigger_disconnect: Whether the harness fires the bot's
             ``on_client_disconnected`` handler when this scenario's connection
             ends. Bots often cancel their pipeline there, so this is False by
