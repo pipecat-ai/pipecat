@@ -19,6 +19,7 @@ import numpy as np
 from loguru import logger
 
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
+from pipecat.audio.utils import create_file_resampler
 from pipecat.frames.frames import MixerControlFrame, MixerEnableFrame, MixerUpdateSettingsFrame
 
 try:
@@ -36,8 +37,8 @@ class SoundfileMixer(BaseAudioMixer):
 
     This is an audio mixer that mixes incoming audio with audio from a
     file. It uses the soundfile library to load files so it supports multiple
-    formats. The audio files need to only have one channel (mono) and it needs
-    to match the sample rate of the output transport.
+    formats. Multi-channel files are downmixed to mono and files whose sample
+    rate doesn't match the output transport are resampled on load.
 
     Multiple files can be loaded, each with a different name. The
     `MixerUpdateSettingsFrame` has the following settings available: `sound`
@@ -84,7 +85,7 @@ class SoundfileMixer(BaseAudioMixer):
         """
         self._sample_rate = sample_rate
         for sound_name, file_name in self._sound_files.items():
-            await asyncio.to_thread(self._load_sound_file, sound_name, file_name)
+            await self._load_sound_file(sound_name, file_name)
 
     async def stop(self):
         """Clean up mixer resources.
@@ -151,20 +152,28 @@ class SoundfileMixer(BaseAudioMixer):
         """Update the looping behavior."""
         self._loop = loop
 
-    def _load_sound_file(self, sound_name: str, file_name: str):
+    async def _load_sound_file(self, sound_name: str, file_name: str):
         """Load an audio file into memory for mixing."""
         try:
             logger.debug(f"Loading mixer sound from {file_name}")
-            sound, sample_rate = sf.read(file_name, dtype="int16")
+            sound, sample_rate = await asyncio.to_thread(sf.read, file_name, dtype="int16")
+
+            if sound.ndim > 1:
+                sound = np.mean(sound, axis=1).astype(np.int16)
 
             if sample_rate == self._sample_rate:
                 audio = sound.tobytes()
                 # Convert from np to bytes again.
                 self._sounds[sound_name] = np.frombuffer(audio, dtype=np.int16)
             else:
-                logger.warning(
-                    f"Sound file {file_name} has incorrect sample rate {sample_rate} (should be {self._sample_rate})"
+                logger.debug(
+                    f"Resampling sound file {file_name} from {sample_rate} to {self._sample_rate}"
                 )
+                resampler = create_file_resampler()
+                resampled = await resampler.resample(
+                    sound.tobytes(), int(sample_rate), self._sample_rate
+                )
+                self._sounds[sound_name] = np.frombuffer(resampled, dtype=np.int16)
         except Exception as e:
             logger.error(f"Unable to open file {file_name}: {e}")
 
