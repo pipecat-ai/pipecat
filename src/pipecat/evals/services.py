@@ -18,13 +18,13 @@ import os
 from typing import Any
 
 from pipecat.services.llm_service import LLMService
-from pipecat.services.settings import NOT_GIVEN
+from pipecat.services.settings import NOT_GIVEN, _NotGiven
 from pipecat.services.stt_service import STTService
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 
 
-def _cfg_language(cfg: dict) -> Language | None:
+def _cfg_language(cfg: dict) -> Language | _NotGiven:
     """Coerce a config's optional ``language`` value to a :class:`Language`.
 
     ``Language`` is a ``StrEnum``, so both a code string (e.g. ``"zh"``) and a
@@ -36,8 +36,8 @@ def _cfg_language(cfg: dict) -> Language | None:
         cfg: A ``user.speech`` or ``judge.transcription`` config mapping.
 
     Returns:
-        The resolved ``Language``, or ``None`` when ``language`` is absent (so
-        callers leave the service's own default untouched).
+        The resolved ``Language``, or ``NOT_GIVEN`` when ``language`` is absent,
+        which leaves the service's own default in place.
 
     Raises:
         ValueError: If ``language`` is set to a value that is not a recognized
@@ -45,11 +45,11 @@ def _cfg_language(cfg: dict) -> Language | None:
     """
     value = cfg.get("language")
     if value is None:
-        return None
+        return NOT_GIVEN
     if isinstance(value, str):
         value = value.strip()
         if not value:
-            return None
+            return NOT_GIVEN
     try:
         return Language(value)
     except ValueError as e:
@@ -73,13 +73,11 @@ def kokoro_service(voice_cfg: dict, sample_rate: int) -> TTSService:
     """
     from pipecat.services.kokoro.tts import KokoroTTSService
 
-    settings: dict[str, Any] = {"voice": str(voice_cfg.get("voice", ""))}
-    language = _cfg_language(voice_cfg)
-    if language is not None:
-        settings["language"] = language
-
     return KokoroTTSService(
-        settings=KokoroTTSService.Settings(**settings),
+        settings=KokoroTTSService.Settings(
+            voice=str(voice_cfg.get("voice", "")),
+            language=_cfg_language(voice_cfg),
+        ),
         sample_rate=sample_rate,
     )
 
@@ -104,17 +102,13 @@ def cartesia_service(voice_cfg: dict, sample_rate: int) -> TTSService:
             "Cartesia API key not found — set $CARTESIA_API_KEY or user_audio.api_key"
         )
 
-    settings: dict[str, Any] = {
-        "voice": str(voice_cfg.get("voice", "")),
-        "model": voice_cfg.get("model") or "sonic-2",
-    }
-    language = _cfg_language(voice_cfg)
-    if language is not None:
-        settings["language"] = language
-
     return CartesiaHttpTTSService(
         api_key=api_key,
-        settings=CartesiaHttpTTSService.Settings(**settings),
+        settings=CartesiaHttpTTSService.Settings(
+            voice=str(voice_cfg.get("voice", "")),
+            model=voice_cfg.get("model") or "sonic-2",
+            language=_cfg_language(voice_cfg),
+        ),
         sample_rate=sample_rate,
     )
 
@@ -152,17 +146,14 @@ def whisper_service(config: dict) -> STTService:
     # the default ("default") would pick float32 on CPU, which is much slower.
     compute_type = config.get("compute_type", "int8" if device == "cpu" else "default")
     # NOT_GIVEN (not None) leaves the model unset so Whisper uses its own default.
-    settings: dict[str, Any] = {
-        "no_speech_prob": 1.0,
-        "model": config.get("model", NOT_GIVEN),
-    }
-    language = _cfg_language(config)
-    if language is not None:
-        settings["language"] = language
     return WhisperSTTService(
         device=device,
         compute_type=compute_type,
-        settings=WhisperSTTService.Settings(**settings),
+        settings=WhisperSTTService.Settings(
+            no_speech_prob=1.0,
+            model=config.get("model", NOT_GIVEN),
+            language=_cfg_language(config),
+        ),
     )
 
 
@@ -184,12 +175,11 @@ def moonshine_service(config: dict) -> STTService:
     """
     from pipecat.services.moonshine.stt import Model, MoonshineSTTService
 
-    settings: dict[str, Any] = {"model": config.get("model") or Model.SMALL_STREAMING}
-    language = _cfg_language(config)
-    if language is not None:
-        settings["language"] = language
     return MoonshineSTTService(
-        settings=MoonshineSTTService.Settings(**settings),
+        settings=MoonshineSTTService.Settings(
+            model=config.get("model") or Model.SMALL_STREAMING,
+            language=_cfg_language(config),
+        ),
     )
 
 
