@@ -192,11 +192,16 @@ def moonshine_service(config: dict) -> STTService:
             - ``model``: Optional architecture, as a
               :class:`~pipecat.services.moonshine.stt.Model` or the equivalent
               string (default ``Model.SMALL_STREAMING``). Only ``base`` has
-              non-English models, so a non-English ``language`` needs it.
+              non-English models, so a non-English ``language`` needs it, and
+              raises at construction naming the models it does have if the
+              pairing has none.
             - ``language``: Optional language code (e.g. ``es``) or ``Language``.
-              When omitted, Moonshine keeps its own default (English). It
-              supports only a handful of languages, and raises at construction
-              naming the models it does have if asked for another.
+              When omitted, Moonshine keeps its own default (English).
+
+    Prefer :func:`whisper_service` for a non-English bot. Moonshine's non-English
+    models handle synthesized speech unevenly — returning an empty transcript on
+    audio Whisper reads correctly, and dropping the tail of a Mandarin utterance —
+    and an empty transcript reads as a bot that said nothing.
     """
     from pipecat.services.moonshine.stt import Model, MoonshineSTTService
 

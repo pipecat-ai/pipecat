@@ -43,6 +43,7 @@ suite:
       - interruption_audio
       - interruption_text
       - language_switch
+      - language_switch_audio
   - bot: voice/voice-cartesia-http.py
     scenarios: [capital_question]
   - bot: voice/voice-cartesia-turns.py
