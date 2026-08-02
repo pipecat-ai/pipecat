@@ -191,14 +191,14 @@ def freshness_warning(cwd: Path | None = None) -> str | None:
         # An index whose refresh never completed. Reporting an age would be a
         # lie, and calling it stale would be the wrong instruction.
         return (
-            "Pipecat Context Hub index looks unbuilt — run `pipecat mcp refresh` "
+            "Pipecat Context Hub index looks unbuilt — run `pipecat context-hub refresh` "
             "so coding agents get current Pipecat context."
         )
     if threshold > 0 and age >= threshold:
         days = round(age)
         return (
             f"Pipecat Context Hub index is {days} day{'' if days == 1 else 's'} old — run "
-            "`pipecat mcp refresh` so coding agents don't cite stale APIs."
+            "`pipecat context-hub refresh` so coding agents don't cite stale APIs."
         )
 
     return _version_mismatch_warning(metadata, cwd)
@@ -243,6 +243,6 @@ def _version_mismatch_warning(metadata: dict[str, str], cwd: Path | None) -> str
 
     return (
         f"Pipecat Context Hub index was built for pipecat-ai {indexed}, but this "
-        f"project uses {project} — run `pipecat mcp refresh` so coding agents "
+        f"project uses {project} — run `pipecat context-hub refresh` so coding agents "
         "match your version."
     )

@@ -13,7 +13,7 @@ Hub**, a local index of Pipecat source, examples, and docs:
 ```bash
 # Co-install the hub with the CLI, then let it do the setup
 uv tool install "pipecat-ai[cli]" --with pipecat-ai-context-hub
-pipecat mcp install
+pipecat context-hub install
 ```
 
 `install` registers the MCP server with each coding agent it finds and builds the
@@ -22,7 +22,7 @@ index, which takes a few minutes the first time since it downloads local models.
 MCP servers load at session start, so do this *before* opening the coding
 session.
 
-Re-run `pipecat mcp refresh` to index newer content — after bumping your Pipecat
+Re-run `pipecat context-hub refresh` to index newer content — after bumping your Pipecat
 version, or periodically, since Pipecat moves fast. The CLI reminds you when the
 index is stale or was built for a different Pipecat version.
 

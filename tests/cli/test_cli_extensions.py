@@ -201,7 +201,7 @@ class TestEnableHintPreservesInstalledPlugins:
     """
 
     def test_installed_plugins_are_repeated(self):
-        hint = _enable_hint("mcp", "pipecat-ai-context-hub", ["pipecatcloud"])
+        hint = _enable_hint("context-hub", "pipecat-ai-context-hub", ["pipecatcloud"])
         assert (
             'uv tool install "pipecat-ai[cli]" --with pipecatcloud '
             "--with pipecat-ai-context-hub" in hint
@@ -219,6 +219,6 @@ class TestEnableHintPreservesInstalledPlugins:
 
     def test_pip_form_names_only_the_missing_package(self):
         """`uv pip install` adds to a venv, so it has no replacement problem."""
-        hint = _enable_hint("mcp", "pipecat-ai-context-hub", ["pipecatcloud"])
+        hint = _enable_hint("context-hub", "pipecat-ai-context-hub", ["pipecatcloud"])
         assert "uv pip install pipecat-ai-context-hub" in hint
         assert "uv pip install pipecatcloud" not in hint
