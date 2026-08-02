@@ -150,9 +150,16 @@ def whisper_service(config: dict) -> STTService:
             - ``device``: ``cpu`` (default) or ``cuda``.
             - ``compute_type``: Whisper compute type (``int8`` on CPU).
             - ``model``: Optional Whisper model (left unset to use Whisper's own).
-            - ``language``: Optional language code (e.g. ``zh``) or ``Language``.
+              Whisper's default is English-only, as is every ``.en`` model, so a
+              non-English ``language`` needs a multilingual model here (e.g.
+              ``large-v3-turbo``).
+            - ``language``: Optional language code (e.g. ``es``) or ``Language``.
               When omitted, Whisper keeps its own default (English) — it does not
               auto-detect, so a non-English bot needs this set.
+
+    Raises:
+        ValueError: If ``language`` names a language the chosen model can't
+            transcribe (raised by :class:`~pipecat.services.whisper.stt.WhisperSTTService`).
     """
     from pipecat.services.whisper.stt import WhisperSTTService
 
@@ -184,10 +191,12 @@ def moonshine_service(config: dict) -> STTService:
 
             - ``model``: Optional architecture, as a
               :class:`~pipecat.services.moonshine.stt.Model` or the equivalent
-              string (default ``Model.SMALL_STREAMING``).
-            - ``language``: Optional language code (e.g. ``zh``) or ``Language``.
+              string (default ``Model.SMALL_STREAMING``). Only ``base`` has
+              non-English models, so a non-English ``language`` needs it.
+            - ``language``: Optional language code (e.g. ``es``) or ``Language``.
               When omitted, Moonshine keeps its own default (English). It
-              supports only a handful of languages.
+              supports only a handful of languages, and raises at construction
+              naming the models it does have if asked for another.
     """
     from pipecat.services.moonshine.stt import Model, MoonshineSTTService
 
