@@ -4,14 +4,22 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for Whisper STT model/language compatibility checking."""
+"""Tests for Whisper STT model/language compatibility checking.
+
+The service module is imported with ``pytest.importorskip`` so the suite is
+skipped rather than failing collection when the optional Whisper dependencies
+aren't installed.
+"""
 
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pipecat.services.whisper.stt import WhisperSTTService
-from pipecat.transcriptions.language import Language
+# The service raises ImportError (not ModuleNotFoundError) when its extra is absent.
+pytest.importorskip("pipecat.services.whisper.stt", exc_type=ImportError)
+
+from pipecat.services.whisper.stt import WhisperSTTService  # noqa: E402
+from pipecat.transcriptions.language import Language  # noqa: E402
 
 
 def _build(supported, **settings):

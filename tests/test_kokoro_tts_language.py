@@ -4,10 +4,20 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for Kokoro TTS language code mapping."""
+"""Tests for Kokoro TTS language code mapping.
 
-from pipecat.services.kokoro.tts import language_to_kokoro_language
-from pipecat.transcriptions.language import Language
+The service module is imported with ``pytest.importorskip`` so the suite is
+skipped rather than failing collection when the optional Kokoro dependencies
+aren't installed.
+"""
+
+import pytest
+
+# The service raises ImportError (not ModuleNotFoundError) when its extra is absent.
+pytest.importorskip("pipecat.services.kokoro.tts", exc_type=ImportError)
+
+from pipecat.services.kokoro.tts import language_to_kokoro_language  # noqa: E402
+from pipecat.transcriptions.language import Language  # noqa: E402
 
 
 def test_kokoro_uses_espeak_names_not_iso_codes():
