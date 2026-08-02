@@ -365,8 +365,8 @@ class WhisperSTTService(SegmentedSTTService):
         """Apply a settings delta, reporting a language the model can't handle.
 
         A mid-call switch to an unsupported language is reported rather than
-        raised: the model stays loaded and keeps transcribing as English, which
-        beats tearing down a live pipeline.
+        raised, so a settings change can't tear down a live pipeline; the model
+        stays loaded and keeps transcribing as English.
 
         Args:
             delta: An STT settings delta.

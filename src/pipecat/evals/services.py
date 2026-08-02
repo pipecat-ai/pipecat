@@ -198,10 +198,10 @@ def moonshine_service(config: dict) -> STTService:
             - ``language``: Optional language code (e.g. ``es``) or ``Language``.
               When omitted, Moonshine keeps its own default (English).
 
-    Prefer :func:`whisper_service` for a non-English bot. Moonshine's non-English
-    models handle synthesized speech unevenly — returning an empty transcript on
-    audio Whisper reads correctly, and dropping the tail of a Mandarin utterance —
-    and an empty transcript reads as a bot that said nothing.
+    Prefer :func:`whisper_service` for a non-English bot: Moonshine's non-English
+    models transcribe synthesized speech unreliably, returning an empty transcript
+    or dropping the tail of an utterance, and an empty transcript is
+    indistinguishable from a bot that said nothing.
     """
     from pipecat.services.moonshine.stt import Model, MoonshineSTTService
 
