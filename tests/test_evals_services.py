@@ -65,7 +65,7 @@ class TestVoiceFromConfig(unittest.TestCase):
             tts_cache_key({"service": "cartesia", "voice": "v", "language": "en"}),
             tts_cache_key({"service": "cartesia", "voice": "v", "language": "zh"}),
         )
-        # A config with no language is stable and equals an explicit-empty one.
+        # An absent language and an explicit empty one key to the same slot.
         self.assertEqual(
             tts_cache_key({"service": "cartesia", "voice": "v"}),
             tts_cache_key({"service": "cartesia", "voice": "v", "language": ""}),
@@ -91,9 +91,8 @@ class TestVoiceFromConfig(unittest.TestCase):
         self.assertEqual(v._service[2], 24000)
 
     def test_language_reaches_cartesia_settings(self):
-        # cartesia_service constructs without any network call or model download,
-        # so it's the safe builder to assert language forwarding through. Whisper/
-        # Moonshine/Kokoro load models, so they're not tested this way.
+        # Cartesia is the one builder a unit test can construct: Whisper, Moonshine
+        # and Kokoro load their models at construction time.
         from pipecat.evals.services import cartesia_service
         from pipecat.transcriptions.language import Language
 
@@ -104,15 +103,14 @@ class TestVoiceFromConfig(unittest.TestCase):
         self.assertEqual(service._settings.language, Language.ZH)
 
     def test_no_language_leaves_cartesia_default(self):
-        # Omitting language must not force a value; the service keeps its own default.
+        # Omitting language must not force a value; the service keeps its own
+        # default, which for Cartesia is Language.EN.
         from pipecat.evals.services import cartesia_service
+        from pipecat.transcriptions.language import Language
 
         service = cartesia_service(
             {"service": "cartesia", "voice": "v", "api_key": "test-key"}, 16000
         )
-        # Cartesia defaults language to Language.EN; the point is we didn't override it.
-        from pipecat.transcriptions.language import Language
-
         self.assertEqual(service._settings.language, Language.EN)
 
     def test_unknown_language_rejected(self):

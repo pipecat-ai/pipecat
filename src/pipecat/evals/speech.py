@@ -68,9 +68,7 @@ def tts_cache_key(voice_cfg: dict) -> str:
 
     Covers the audio's semantic identity (service, voice, model, language) but not
     the sample rate, so different rates reuse the same slot (a mismatch just
-    triggers regeneration in :meth:`EvalSpeech.generate`). ``language`` is included
-    so an English and a non-English render of the same text don't collide on the
-    same cached ``.wav``; it is normalized to its string value (``""`` when absent).
+    triggers regeneration in :meth:`EvalSpeech.generate`).
     """
     service = str(voice_cfg.get("service", "")).lower()
     voice = str(voice_cfg.get("voice", ""))

@@ -142,7 +142,8 @@ def whisper_service(config: dict) -> STTService:
         compute_type: Whisper compute type (defaults to ``int8`` on CPU).
         model: Optional Whisper model (left unset to use Whisper's default).
         language: Optional language code (e.g. ``zh``) or ``Language`` value.
-            When omitted, Whisper stays in auto-detect mode.
+            When omitted, Whisper keeps its own default (English) — it does not
+            auto-detect, so a non-English bot needs this set.
     """
     from pipecat.services.whisper.stt import WhisperSTTService
 
