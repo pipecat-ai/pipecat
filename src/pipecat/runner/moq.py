@@ -21,6 +21,10 @@ from loguru import logger
 DEFAULT_MOQ_SERVE_BIND = "[::]:4080"
 DEFAULT_MOQ_PATH = "/moq"
 DEFAULT_MOQ_NAMESPACE = "pipecat"
+# Participant ids name the direction each side carries: the bot publishes
+# its responses, the browser publishes its requests.
+DEFAULT_MOQ_BOT_ID = "response"
+DEFAULT_MOQ_CLIENT_ID = "request"
 
 # How long a direct-mode bot holds the relay open waiting for a browser.
 # The stock timeouts assume ``/start`` spawned the bot with a client already
@@ -173,13 +177,24 @@ def _validate_moq_args(args: argparse.Namespace) -> bool:
                 "fingerprint through /start, which direct mode doesn't have."
             )
             return False
-        # Nothing mints a namespace per session here, so resolve one now and
-        # keep it for the process's lifetime: it's what gets handed to the
-        # browser out-of-band.
+        # Every call already carries the browser's unguessable session id,
+        # so a namespace isn't needed to keep callers apart. Default to
+        # none and let the paths sit at the relay root, which keeps the
+        # client URL down to the relay. Naming one scopes the bot to that
+        # room instead, so it ignores traffic anywhere else on the relay.
         if args.moq_namespace is None:
-            args.moq_namespace = _new_session_namespace()
+            args.moq_namespace = ""
 
     return True
+
+
+def _join_path(*parts: str) -> str:
+    """Join broadcast path components, dropping empty ones.
+
+    An unset namespace has to vanish rather than leave a leading slash,
+    since moq paths are relative and trim their boundaries.
+    """
+    return "/".join(p for p in parts if p)
 
 
 def _client_prefix(args: argparse.Namespace) -> str:
@@ -188,7 +203,7 @@ def _client_prefix(args: argparse.Namespace) -> str:
     Direct mode watches this rather than one fixed path, because the id
     that separates one caller from the next is minted by the browser.
     """
-    return f"{args.moq_namespace}/{args.moq_client_id}/"
+    return f"{_join_path(args.moq_namespace, args.moq_client_id)}/"
 
 
 def _session_paths(args: argparse.Namespace, session: str) -> tuple[str, str]:
@@ -198,7 +213,7 @@ def _session_paths(args: argparse.Namespace, session: str) -> tuple[str, str]:
     serves exactly the caller that announced it and nobody else.
     """
     return (
-        f"{args.moq_namespace}/{args.moq_bot_id}/{session}",
+        _join_path(args.moq_namespace, args.moq_bot_id, session),
         f"{_client_prefix(args)}{session}",
     )
 
@@ -211,16 +226,18 @@ def _direct_client_url(args: argparse.Namespace, runner_url: str) -> str:
     namespace to meet on, and which end of the path pair each side owns —
     rides in the URL instead. Points at the prebuilt UI directly because
     the root redirect drops the query.
+
+    Values the client already defaults to are left out, so an unscoped
+    run reduces to just the relay.
     """
-    query = urlencode(
-        {
-            "relay": f"https://{args.moq_host}:{args.moq_port}{args.moq_path}",
-            "ns": args.moq_namespace,
-            "botId": args.moq_bot_id,
-            "clientId": args.moq_client_id,
-        }
-    )
-    return f"{runner_url}/client/?{query}"
+    params = {"relay": f"https://{args.moq_host}:{args.moq_port}{args.moq_path}"}
+    if args.moq_namespace:
+        params["ns"] = args.moq_namespace
+    if args.moq_bot_id != DEFAULT_MOQ_BOT_ID:
+        params["botId"] = args.moq_bot_id
+    if args.moq_client_id != DEFAULT_MOQ_CLIENT_ID:
+        params["clientId"] = args.moq_client_id
+    return f"{runner_url}/client/?{urlencode(params)}"
 
 
 def _cert_hash_from_pem(path: str) -> str | None:
