@@ -88,6 +88,18 @@ class BaseUserTurnStartStrategy(BaseObject):
                 stacklevel=2,
             )
 
+    @property
+    def resolves_proposed_turn_start_frames(self) -> bool:
+        """Whether this strategy resolves proposals into turn starts.
+
+        A :class:`~pipecat.frames.frames.ProposedUserStartedSpeakingFrame` is a
+        request for a decision, so a strategy that acts on one consumes it: the
+        frame stops travelling, and no resolver further along decides the same
+        turn a second time. Override to True in a strategy that handles that
+        frame.
+        """
+        return False
+
     async def cleanup(self):
         """Cleanup the strategy."""
         pass

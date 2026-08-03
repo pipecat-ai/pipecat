@@ -22,12 +22,14 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.turns.user_start import VADUserTurnStartStrategy
+from pipecat.turns.user_start import BaseUserTurnStartStrategy, VADUserTurnStartStrategy
 from pipecat.turns.user_start.min_words_user_turn_start_strategy import (
     MinWordsUserTurnStartStrategy,
 )
 from pipecat.turns.user_stop import (
+    BaseUserTurnStopStrategy,
     ExternalUserTurnCompletionStopStrategy,
+    ExternalUserTurnStopStrategy,
     SpeechTimeoutUserTurnStopStrategy,
     TurnAnalyzerUserTurnStopStrategy,
     deferred,
@@ -420,12 +422,12 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
 
         await controller.cleanup()
 
-    async def test_owns_frame_claims_proposals_only_for_external_strategies(self):
+    async def test_proposals_are_consumed_only_by_resolving_strategies(self):
         """A controller that can't resolve a proposal passes it along."""
         external = UserTurnController(user_turn_strategies=ExternalUserTurnStrategies())
-        self.assertTrue(external.owns_frame(ProposedUserStartedSpeakingFrame()))
-        self.assertTrue(external.owns_frame(ProposedUserStoppedSpeakingFrame()))
-        self.assertFalse(external.owns_frame(UserStartedSpeakingFrame()))
+        self.assertTrue(external.should_consume_frame(ProposedUserStartedSpeakingFrame()))
+        self.assertTrue(external.should_consume_frame(ProposedUserStoppedSpeakingFrame()))
+        self.assertFalse(external.should_consume_frame(UserStartedSpeakingFrame()))
 
         default = UserTurnController(
             user_turn_strategies=UserTurnStrategies(
@@ -433,8 +435,39 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
                 stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)],
             )
         )
-        self.assertFalse(default.owns_frame(ProposedUserStartedSpeakingFrame()))
-        self.assertFalse(default.owns_frame(ProposedUserStoppedSpeakingFrame()))
+        self.assertFalse(default.should_consume_frame(ProposedUserStartedSpeakingFrame()))
+        self.assertFalse(default.should_consume_frame(ProposedUserStoppedSpeakingFrame()))
+
+    async def test_custom_strategies_can_consume_proposals(self):
+        """Consumption follows what a strategy declares, not what class it is."""
+
+        class CustomStartStrategy(BaseUserTurnStartStrategy):
+            @property
+            def resolves_proposed_turn_start_frames(self) -> bool:
+                return True
+
+        class CustomStopStrategy(BaseUserTurnStopStrategy):
+            @property
+            def resolves_proposed_turn_stop_frames(self) -> bool:
+                return True
+
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[CustomStartStrategy()],
+                stop=[CustomStopStrategy()],
+            )
+        )
+        self.assertTrue(controller.should_consume_frame(ProposedUserStartedSpeakingFrame()))
+        self.assertTrue(controller.should_consume_frame(ProposedUserStoppedSpeakingFrame()))
+
+    async def test_deferring_a_strategy_keeps_its_proposal_resolution(self):
+        """Deferred finalization changes when the turn ends, not who decides it."""
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                stop=[deferred(ExternalUserTurnStopStrategy())],
+            )
+        )
+        self.assertTrue(controller.should_consume_frame(ProposedUserStoppedSpeakingFrame()))
 
     async def test_late_transcription_between_turns_no_premature_stop(self):
         """Test that a late transcription arriving between turns does not cause a premature stop.

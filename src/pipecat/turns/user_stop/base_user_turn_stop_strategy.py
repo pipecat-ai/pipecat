@@ -87,6 +87,19 @@ class BaseUserTurnStopStrategy(BaseObject):
                 stacklevel=2,
             )
 
+    @property
+    def resolves_proposed_turn_stop_frames(self) -> bool:
+        """Whether this strategy resolves proposals into turn stops.
+
+        A :class:`~pipecat.frames.frames.ProposedUserStoppedSpeakingFrame` is a
+        request for a decision, so a strategy that acts on one consumes it: the
+        frame stops travelling, and no resolver further along decides the same
+        turn a second time. Override to True in a strategy that handles that
+        frame — including one that holds the proposal for a while before
+        deciding.
+        """
+        return False
+
     async def cleanup(self):
         """Cleanup the strategy."""
         pass

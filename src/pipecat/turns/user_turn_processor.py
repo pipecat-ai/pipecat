@@ -149,7 +149,7 @@ class UserTurnProcessor(FrameProcessor):
         elif isinstance(frame, CancelFrame):
             await self._cancel(frame)
             await self.push_frame(frame, direction)
-        elif not self._user_turn_controller.owns_frame(frame):
+        elif not self._user_turn_controller.should_consume_frame(frame):
             await self.push_frame(frame, direction)
 
         await self._user_turn_controller.process_frame(frame)

@@ -90,6 +90,11 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._task: asyncio.Task | None = None
 
     @property
+    def resolves_proposed_turn_stop_frames(self) -> bool:
+        """Whether this strategy resolves proposals into turn stops."""
+        return True
+
+    @property
     def wait_for_transcript(self) -> bool:
         """Whether turn-stop signaling waits for transcript text."""
         return self._wait_for_transcript

@@ -91,6 +91,8 @@ class GracePeriodUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         await self._cancel_pending()
         await super().cleanup()
 
+    # The override point: the base strategy calls this to end the turn, so this
+    # is where this subclass adjusts the timing.
     async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames: bool | None = None):
         """Schedule the finalization instead of running it now."""
         if self._pending:

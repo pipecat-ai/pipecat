@@ -23,12 +23,10 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
-    ExternalUserTurnStartStrategy,
     UserTurnStartedParams,
 )
 from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
-    ExternalUserTurnStopStrategy,
     UserTurnStoppedParams,
 )
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
@@ -153,18 +151,12 @@ class UserTurnController(BaseObject):
         self._user_turn_strategies = strategies
         await self._setup_strategies()
 
-    def owns_frame(self, frame: Frame) -> bool:
-        """Whether this controller's strategies claim the given frame.
+    def should_consume_frame(self, frame: Frame) -> bool:
+        """Whether the caller should stop forwarding the given frame.
 
-        A proposed turn frame is a request for a decision, so the first
-        controller with strategies that resolve proposals takes ownership and
-        callers stop forwarding it — otherwise a second resolver further along
-        would decide the same turn again. Ownership is independent of whether the
-        strategies act immediately: a stop strategy may hold the proposal while
-        it waits on a trailing transcript.
-
-        A controller whose strategies don't resolve proposals passes them along,
-        so another resolver in the pipeline can still pick them up.
+        Most frames travel on regardless of what this controller does with them.
+        A frame is consumed only when passing it along would let something
+        further down the pipeline act on it a second time.
 
         Args:
             frame: The frame to check.
@@ -172,15 +164,17 @@ class UserTurnController(BaseObject):
         Returns:
             True if the caller should stop forwarding the frame.
         """
+        # A proposal must be resolved once: forwarding it after our own
+        # strategies resolve it would let a resolver further along decide the
+        # same turn a second time.
         if isinstance(frame, ProposedUserStartedSpeakingFrame):
             return any(
-                isinstance(s, ExternalUserTurnStartStrategy)
+                s.resolves_proposed_turn_start_frames
                 for s in self._user_turn_strategies.start or []
             )
         if isinstance(frame, ProposedUserStoppedSpeakingFrame):
             return any(
-                isinstance(s, ExternalUserTurnStopStrategy)
-                for s in self._user_turn_strategies.stop or []
+                s.resolves_proposed_turn_stop_frames for s in self._user_turn_strategies.stop or []
             )
         return False
 

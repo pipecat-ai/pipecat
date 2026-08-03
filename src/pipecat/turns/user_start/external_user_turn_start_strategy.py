@@ -67,6 +67,11 @@ class ExternalUserTurnStartStrategy(BaseUserTurnStartStrategy):
             **kwargs,
         )
 
+    @property
+    def resolves_proposed_turn_start_frames(self) -> bool:
+        """Whether this strategy resolves proposals into turn starts."""
+        return True
+
     async def process_frame(self, frame: Frame) -> ProcessFrameResult:
         """Process an incoming frame to detect user turn start.
 
