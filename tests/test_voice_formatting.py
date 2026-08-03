@@ -519,6 +519,39 @@ class TestExpandNumbers(unittest.IsolatedAsyncioTestCase):
         self.assertIn("point", result)
         self.assertIn("7 5", result)
 
+    async def test_leading_zero_read_digit_by_digit(self):
+        # A leading zero marks an identifier, and reading it as a quantity also drops the
+        # zero: "007" would otherwise become "seven".
+        result = await expand_numbers(digit_cutoff=2025)("Flight 007 departs", "*")
+        self.assertIn("0 0 7", result)
+        self.assertNotIn("seven", result)
+
+    async def test_leading_zero_below_cutoff_not_expanded(self):
+        # Without the leading-zero check these depend on whether the digits happen to
+        # exceed the cutoff: "01234" expanded to words while "02134" did not.
+        result = await expand_numbers(digit_cutoff=2025)("zip code 01234", "*")
+        self.assertIn("0 1 2 3 4", result)
+        self.assertNotIn("thousand", result)
+
+    async def test_leading_zero_ignores_cutoff(self):
+        # `digit_cutoff=None` disables the magnitude rule, but a leading zero is
+        # significant regardless of magnitude.
+        result = await expand_numbers(digit_cutoff=None)("PIN 0451", "*")
+        self.assertIn("0 4 5 1", result)
+
+    async def test_leading_zero_preserves_fraction(self):
+        # Same as the above-cutoff case: the digits are read out, and the fractional
+        # part must not be dropped on the way.
+        result = await expand_numbers(digit_cutoff=2025)("version 01.5", "*")
+        self.assertIn("0 1", result)
+        self.assertIn("point", result)
+        self.assertIn("5", result)
+
+    async def test_bare_zero_still_expands(self):
+        # The check needs more than one digit, so a real zero quantity is unaffected.
+        self.assertIn("zero", await expand_numbers(digit_cutoff=2025)("0 results", "*"))
+        self.assertIn("zero point five", await expand_numbers(digit_cutoff=None)("0.5", "*"))
+
 
 if __name__ == "__main__":
     unittest.main()
