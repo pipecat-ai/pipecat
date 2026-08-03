@@ -182,6 +182,27 @@ def _validate_moq_args(args: argparse.Namespace) -> bool:
     return True
 
 
+def _client_prefix(args: argparse.Namespace) -> str:
+    """Return the broadcast prefix browsers announce themselves under.
+
+    Direct mode watches this rather than one fixed path, because the id
+    that separates one caller from the next is minted by the browser.
+    """
+    return f"{args.moq_namespace}/{args.moq_client_id}/"
+
+
+def _session_paths(args: argparse.Namespace, session: str) -> tuple[str, str]:
+    """Return the ``(response, request)`` broadcast paths for one session.
+
+    Both sides of a call hang off the id the browser chose, so a bot
+    serves exactly the caller that announced it and nobody else.
+    """
+    return (
+        f"{args.moq_namespace}/{args.moq_bot_id}/{session}",
+        f"{_client_prefix(args)}{session}",
+    )
+
+
 def _direct_client_url(args: argparse.Namespace, runner_url: str) -> str:
     """Build the browser URL carrying the relay config as query params.
 

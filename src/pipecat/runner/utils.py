@@ -782,6 +782,10 @@ async def create_transport(
         params.serve_tls_key = runner_args.serve_tls_key
         if runner_args.connection_timeout is not None:
             params.connection_timeout = runner_args.connection_timeout
+        if runner_args.response_path is not None:
+            params.response_path = runner_args.response_path
+        if runner_args.request_path is not None:
+            params.request_path = runner_args.request_path
 
         transport = MOQTransport(
             params=params,

@@ -198,9 +198,11 @@ fastapi = pytest.importorskip("fastapi")
 from pipecat.runner.moq import (  # noqa: E402
     _build_moq_client_config,
     _cert_hash_from_pem,
+    _client_prefix,
     _direct_client_url,
     _hex_to_b64,
     _new_session_namespace,
+    _session_paths,
     _validate_moq_args,
 )
 
@@ -448,6 +450,27 @@ class TestMoqDirectMode(unittest.TestCase):
         only the /start response carries."""
         args = _moq_args(moq_direct=True)
         self.assertFalse(_validate_moq_args(args))
+
+    def test_per_session_paths_hang_off_the_browsers_id(self):
+        args = _moq_args(moq_connect="https://cdn.moq.dev/anon", moq_direct=True)
+        self.assertTrue(_validate_moq_args(args))
+        ns = args.moq_namespace
+
+        response, request = _session_paths(args, "abc123")
+        self.assertEqual(response, f"{ns}/response/abc123")
+        self.assertEqual(request, f"{ns}/request/abc123")
+
+        # The request path must sit under the prefix the runner watches,
+        # or the bot would never see the client that announced it.
+        self.assertTrue(request.startswith(_client_prefix(args)))
+
+    def test_sessions_do_not_collide(self):
+        """Two browsers on one namespace get disjoint path pairs."""
+        args = _moq_args(moq_connect="https://cdn.moq.dev/anon", moq_direct=True)
+        self.assertTrue(_validate_moq_args(args))
+        first = _session_paths(args, "alice")
+        second = _session_paths(args, "bob")
+        self.assertEqual(len(set(first) | set(second)), 4)
 
     def test_client_url_carries_everything_the_browser_cant_guess(self):
         args = _moq_args(moq_connect="https://cdn.moq.dev/anon", moq_direct=True)

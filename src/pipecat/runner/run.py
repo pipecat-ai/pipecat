@@ -122,8 +122,10 @@ from pipecat.runner.moq import (
     DEFAULT_MOQ_SERVE_BIND,
     DIRECT_MODE_PEER_WAIT_SECS,
     _build_moq_client_config,
+    _client_prefix,
     _direct_client_url,
     _new_session_namespace,
+    _session_paths,
     _validate_moq_args,
 )
 from pipecat.runner.types import (
@@ -1021,25 +1023,26 @@ def _setup_webrtc_routes(
 
 
 def _setup_moq_direct(app: FastAPI, args: argparse.Namespace):
-    """Start the MoQ bot with the runner rather than on a client's ``/start``.
+    """Start MoQ bots from relay announcements rather than a client's ``/start``.
 
-    The bot dials the relay at boot and waits there for the browser to
-    publish its side, so a session begins whenever someone opens the page —
-    nothing has to reach the runner over HTTP to bring a bot up. A fresh
-    bot replaces it after each session, since there's no ``/start`` to
-    spawn one per call.
+    The runner watches the relay for browsers appearing under the request
+    prefix and gives each one its own bot, so a session begins whenever
+    someone opens the page and several callers can be served at once —
+    nothing has to reach the runner over HTTP to bring a bot up.
 
     The namespace is fixed for the process (:func:`_validate_moq_args`
-    resolves it) rather than minted per session, because it has to be
-    known in advance: it reaches the browser through the URL instead of a
-    ``/start`` response.
+    resolves it) because it has to be known in advance: it reaches the
+    browser through the URL instead of a ``/start`` response. Within it,
+    the browser mints the per-session id that separates one caller from
+    the next.
     """
     if args.transport != "moq" or not args.moq_direct:
         return
     if not _transport_routes_enabled("moq"):
         return
 
-    def build_runner_args() -> MOQRunnerArguments:
+    def build_runner_args(session: str) -> MOQRunnerArguments:
+        response_path, request_path = _session_paths(args, session)
         runner_args = MOQRunnerArguments(
             host=args.moq_host,
             port=args.moq_port,
@@ -1054,45 +1057,74 @@ def _setup_moq_direct(app: FastAPI, args: argparse.Namespace):
             serve_tls_cert=args.moq_tls_cert,
             serve_tls_key=args.moq_tls_key,
             body={},
-            session_id=str(uuid.uuid4()),
+            session_id=session,
             connection_timeout=DIRECT_MODE_PEER_WAIT_SECS,
+            # The browser picked this id, so the paths are assigned rather
+            # than derived from the namespace convention.
+            response_path=response_path,
+            request_path=request_path,
         )
         runner_args.cli_args = args
-        # The pipeline is idle by definition until the browser shows up,
-        # which the idle monitor would read as an abandoned call. A session
-        # here ends when the peer leaves, not when the clock runs out.
+        # The pipeline is idle from the moment it starts until its browser
+        # subscribes, which the idle monitor would read as an abandoned
+        # call. A session here ends when the peer leaves.
         runner_args.pipeline_idle_timeout_secs = 0
         return runner_args
 
-    async def run_bot_sessions():
-        """Keep one bot on the relay, replacing it after each session.
+    async def run_session(session: str):
+        try:
+            await bot_module.bot(build_runner_args(session))
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.opt(exception=e).error(f"MoQ session {session!r} failed: {e}")
 
-        ``/start`` spawns a bot per call; direct mode has no such request,
-        so the runner takes that role. Without this the first hangup would
-        leave the namespace empty and the next visitor would find nothing.
+    async def watch_for_clients():
+        """Give every browser that appears its own bot.
+
+        Each browser mints an id and publishes under
+        ``<namespace>/<client_id>/<id>``; we watch that prefix and start a
+        bot per id, publishing the matching ``<namespace>/<bot_id>/<id>``
+        back. That's the role ``/start`` plays for the other transports —
+        one session per caller, several at once.
+
+        Departures aren't announced, so a session is considered over when
+        its bot returns.
         """
-        bot_module = _get_bot_module()
-        while True:
-            started = time.monotonic()
+        import moq
+
+        prefix = _client_prefix(args)
+        relay_url = f"https://{args.moq_host}:{args.moq_port}{args.moq_path}"
+        sessions: dict[str, asyncio.Task] = {}
+
+        logger.debug(f"MoQ direct: watching {prefix!r} on {relay_url}")
+        origin = moq.OriginProducer()
+        async with moq.Client(
+            relay_url, tls_verify=not args.moq_tls_insecure, publish=origin, subscribe=origin
+        ):
             try:
-                await bot_module.bot(build_runner_args())
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                logger.opt(exception=e).error(f"MoQ direct bot session failed: {e}")
-            # A session that ends the moment it starts is a broken bot, not
-            # a hangup — pause so a failing one can't spin this loop.
-            if time.monotonic() - started < 1.0:
-                await asyncio.sleep(5.0)
+                # `path` is relative to the prefix, so it is the id itself.
+                async for announcement in origin.consume().announced(prefix):
+                    session = announcement.path
+                    for done in [s for s, t in sessions.items() if t.done()]:
+                        del sessions[done]
+                    if session in sessions:
+                        continue
+                    logger.info(f"MoQ direct: client {session!r} arrived, starting a bot")
+                    sessions[session] = asyncio.create_task(run_session(session))
+            finally:
+                for task in sessions.values():
+                    task.cancel()
 
     @asynccontextmanager
     async def moq_direct_lifespan(app: FastAPI):
-        sessions_task = asyncio.create_task(run_bot_sessions())
+        watch_task = asyncio.create_task(watch_for_clients())
         try:
             yield
         finally:
-            sessions_task.cancel()
+            watch_task.cancel()
 
+    bot_module = _get_bot_module()
     _add_lifespan_to_app(app, moq_direct_lifespan)
 
 
