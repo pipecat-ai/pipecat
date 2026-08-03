@@ -27,9 +27,13 @@ def expand_numbers(
     expanded as quantities (e.g. ``"42"`` → ``"forty two"``). Pass ``None``
     to expand all numbers as words regardless of magnitude.
 
+    A number written with a leading zero is always read digit-by-digit, whatever the
+    cutoff: the zero is significant, so ``"Flight 007"`` reads as ``"Flight 0 0 7"``.
+
     Args:
         digit_cutoff: Numbers larger than this value are read digit-by-digit.
             ``None`` disables the cutoff so every number is expanded as a word.
+            Numbers with a leading zero are read digit-by-digit regardless.
 
     Returns:
         An async transform callable compatible with ``text_transforms``.
@@ -45,6 +49,15 @@ def expand_numbers(
         whole_str = match.group(1).replace(",", "")
         frac_str = match.group(2)
         whole = int(whole_str)
+
+        # A leading zero marks an identifier rather than a quantity, and it is significant:
+        # reading it as a number both drops the zero and says the wrong thing, so "Flight 007"
+        # becomes "Flight seven". Read those digit-by-digit like an over-cutoff number.
+        if len(whole_str) > 1 and whole_str[0] == "0":
+            result = " ".join(whole_str)
+            if frac_str:
+                result += " point " + " ".join(frac_str)
+            return result
 
         if digit_cutoff is not None and whole > digit_cutoff:
             result = " ".join(whole_str)

@@ -60,7 +60,9 @@ class VoiceFormatter:
                 ``num2words``.
             number_digit_cutoff: Numbers above this value are read digit-by-digit
                 instead of as a quantity. Defaults to ``None`` (expand all numbers
-                as words). Only used when ``expand_numbers=True``.
+                as words). A number written with a leading zero is read
+                digit-by-digit whatever the cutoff. Only used when
+                ``expand_numbers=True``.
             expand_percentages: Expand percentage expressions (e.g. ``"50%"`` →
                 ``"fifty percent"``). Requires ``num2words``.
             expand_units: Expand unit abbreviations (e.g. ``"5km"`` →
