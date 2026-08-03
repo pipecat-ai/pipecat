@@ -31,7 +31,6 @@ from pipecat.frames.frames import (
     StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -793,16 +792,14 @@ class AssemblyAISTTService(WebsocketSTTService):
         yield None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames for VAD and metrics handling.
+        """Forward a Pipecat-detected turn end to AssemblyAI as a ForceEndpoint.
 
         Args:
             frame: Frame to process.
             direction: Direction of frame processing.
         """
         await super().process_frame(frame, direction)
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            pass
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             if (
                 self._vad_force_turn_endpoint
                 and self._websocket
@@ -810,7 +807,6 @@ class AssemblyAISTTService(WebsocketSTTService):
             ):
                 self.request_finalize()
                 await self._websocket.send(json.dumps({"type": "ForceEndpoint"}))
-            await self.start_processing_metrics()
 
     @traced_stt
     async def _trace_transcription(self, transcript: str, is_final: bool, language: Language):
@@ -1135,7 +1131,6 @@ class AssemblyAISTTService(WebsocketSTTService):
             return  # Pipecat mode: handled by aggregator
 
         await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
-        await self.start_processing_metrics()
         self._user_speaking = True
 
     async def _handle_termination(self, message: TerminationMessage):
@@ -1215,7 +1210,6 @@ class AssemblyAISTTService(WebsocketSTTService):
                     )
                 )
                 await self._trace_transcription(transcript_text, True, language)
-                await self.stop_processing_metrics()
                 await self._call_event_handler("on_end_of_turn", transcript_text)
             else:
                 await self.push_frame(
@@ -1247,7 +1241,6 @@ class AssemblyAISTTService(WebsocketSTTService):
                     )
                 )
                 await self._trace_transcription(transcript_text, True, language)
-                await self.stop_processing_metrics()
                 # Propose the turn stop immediately. broadcast_frame pushes
                 # downstream (same queue as TranscriptionFrame above, so ordering
                 # is preserved) and upstream.

@@ -123,9 +123,6 @@ async def test_receive_messages_sets_final_transcription_language(monkeypatch):
     async def fake_handle_transcription(transcript, is_final, language=None):
         traced_transcriptions.append((transcript, is_final, language))
 
-    async def fake_stop_processing_metrics():
-        pass
-
     messages = [
         json.dumps(
             {
@@ -143,7 +140,6 @@ async def test_receive_messages_sets_final_transcription_language(monkeypatch):
     service._websocket = _FakeWebsocket(messages)
     monkeypatch.setattr(service, "push_frame", fake_push_frame)
     monkeypatch.setattr(service, "_handle_transcription", fake_handle_transcription)
-    monkeypatch.setattr(service, "stop_processing_metrics", fake_stop_processing_metrics)
 
     await service._receive_messages()
 
@@ -180,8 +176,6 @@ def _instrumented_service(monkeypatch, events, **kwargs):
     monkeypatch.setattr(service, "broadcast_frame", fake_broadcast_frame)
     monkeypatch.setattr(service, "broadcast_interruption", fake_broadcast_interruption)
     monkeypatch.setattr(service, "_handle_transcription", fake_noop)
-    monkeypatch.setattr(service, "start_processing_metrics", fake_noop)
-    monkeypatch.setattr(service, "stop_processing_metrics", fake_noop)
     return service
 
 
@@ -459,8 +453,6 @@ async def test_endpoint_transcript_emits_usage_before_transcription_frame(monkey
 
     monkeypatch.setattr(service, "push_frame", fake_push_frame)
     monkeypatch.setattr(service, "_handle_transcription", fake_noop)
-    monkeypatch.setattr(service, "start_processing_metrics", fake_noop)
-    monkeypatch.setattr(service, "stop_processing_metrics", fake_noop)
 
     # Simulate audio previously submitted to the service.
     service._stt_usage_pending_seconds = 2.5
@@ -506,9 +498,6 @@ async def test_receive_messages_allows_final_transcription_without_language(monk
     async def fake_handle_transcription(transcript, is_final, language=None):
         traced_transcriptions.append((transcript, is_final, language))
 
-    async def fake_stop_processing_metrics():
-        pass
-
     messages = [
         json.dumps(
             {
@@ -527,7 +516,6 @@ async def test_receive_messages_allows_final_transcription_without_language(monk
     service._websocket = _FakeWebsocket(messages)
     monkeypatch.setattr(service, "push_frame", fake_push_frame)
     monkeypatch.setattr(service, "_handle_transcription", fake_handle_transcription)
-    monkeypatch.setattr(service, "stop_processing_metrics", fake_stop_processing_metrics)
 
     await service._receive_messages()
 

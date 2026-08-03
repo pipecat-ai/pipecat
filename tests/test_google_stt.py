@@ -54,14 +54,10 @@ async def test_google_final_result_emits_finalized_transcription_frame():
     async def push_frame(frame):
         frames.append(frame)
 
-    async def stop_processing_metrics():
-        pass
-
     async def handle_transcription(transcript, is_final, language=None):
         transcriptions.append((transcript, is_final, language))
 
     service.push_frame = push_frame
-    service.stop_processing_metrics = stop_processing_metrics
     service._handle_transcription = handle_transcription
 
     responses = AsyncResponses(

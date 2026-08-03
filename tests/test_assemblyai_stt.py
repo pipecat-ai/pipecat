@@ -970,19 +970,12 @@ def test_speech_started_proposes_turn_without_interrupting():
     async def fake_broadcast_interruption():
         events.append(("interruption", None))
 
-    async def fake_start_processing_metrics():
-        events.append(("start_metrics", None))
-
     service.broadcast_frame = fake_broadcast_frame
     service.broadcast_interruption = fake_broadcast_interruption
-    service.start_processing_metrics = fake_start_processing_metrics
 
     asyncio.run(service._handle_speech_started(None))
 
-    assert events == [
-        ("broadcast", ProposedUserStartedSpeakingFrame),
-        ("start_metrics", None),
-    ]
+    assert events == [("broadcast", ProposedUserStartedSpeakingFrame)]
 
 
 def test_should_interrupt_rides_on_recommended_strategies():

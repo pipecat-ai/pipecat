@@ -682,7 +682,6 @@ class SonioxSTTService(WebsocketSTTService):
                     )
                 )
                 await self._handle_transcription(text, is_final=True, language=language)
-                await self.stop_processing_metrics()
                 self._final_transcription_buffer = []
 
         async def finalize_turn():
@@ -718,8 +717,6 @@ class SonioxSTTService(WebsocketSTTService):
                             # the rest will be sent as interim tokens (even final tokens).
                             await finalize_turn()
                         else:
-                            if not self._final_transcription_buffer:
-                                await self.start_processing_metrics()
                             self._final_transcription_buffer.append(token)
                     else:
                         non_final_transcription.append(token)

@@ -1,0 +1,5 @@
+- ⚠️ Streaming STT services no longer report processing metrics. `MetricsFrame` and the RTVI `metrics` message keep the `processing` key, but it no longer carries entries for these services. Nothing else changes: TTFB, STT usage, and the metrics reported by every other kind of service are untouched, and `SegmentedSTTService` subclasses (Whisper, Moonshine, FunASR, fal, ElevenLabs, NVIDIA Segmented) still report processing time for each transcription call.
+
+  Processing metrics time a discrete unit of work, and a streaming STT never performs one — audio arrives continuously. Across the 22 affected services, 5 anchored the measurement to each inbound audio chunk and published the alignment between that cadence and the transcript's arrival, 16 anchored it to a speech or turn boundary and published the length of the user's utterance (Deepgram Flux measured `StartOfTurn` to `EndOfTurn` exactly), and 1 never published at all. The one service measuring real latency, AssemblyAI in Pipecat turn-detection mode, duplicated TTFB less precisely.
+
+  TTFB — speech end to final transcript — is the STT latency measure, and it is unaffected.
