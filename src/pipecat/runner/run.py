@@ -1092,6 +1092,12 @@ def _setup_moq_direct(app: FastAPI, args: argparse.Namespace):
 
         Departures aren't announced, so a session is considered over when
         its bot returns.
+
+        Surviving a dropped relay connection is the session's job, not
+        this loop's: a path that goes quiet never ends the iterator or
+        raises, so a retry wrapped around it has nothing to react to.
+        See moq-dev/moq#2609 — moq-native reconnects, but moq-ffi doesn't
+        expose it yet.
         """
         import moq
 
