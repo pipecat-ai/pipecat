@@ -35,11 +35,16 @@ churns belongs in the live sources the guide's §3 points agents at.
 """
 
 import re
+import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path
+from typing import TextIO
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 
 import pipecat.cli
 from pipecat.cli.scaffold import (
@@ -70,6 +75,25 @@ _PANEL_FEATURES = "Scaffold features"
 
 # Matches the version recorded in a guide footer, e.g. "(pipecat-ai 0.1.2)".
 _FOOTER_VERSION_RE = re.compile(r"pipecat-ai ([^)]+)\)")
+
+# The hub's `install` exit code for "nothing was configured automatically; the MCP config
+# was printed to paste instead". Registration output is captured, so this is the only way
+# to tell that outcome from a successful one.
+_HUB_MANUAL_SETUP = 3
+
+# How often the Context Hub index build refreshes its status line, the width below which
+# the hub's current step is dropped rather than trimmed to nothing, and how much of a
+# failed build's output to show — enough for the error, short of a wall of text.
+_INDEX_BUILD_POLL_SECONDS = 0.5
+_INDEX_DETAIL_MIN_CHARS = 20
+_INDEX_ERROR_LINES = 10
+
+# Leading `<timestamp> <logger> <LEVEL> ` of a hub log line. Stripping it leaves the
+# message, which is the only part worth echoing; a line that doesn't match is shown
+# whole, so a change to the hub's log format costs legibility rather than correctness.
+_LOG_PREFIX_RE = re.compile(
+    r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d[,.]\d+ \S+ (?:DEBUG|INFO|WARNING|ERROR|CRITICAL) "
+)
 
 
 def _guide_footer() -> str:
@@ -236,6 +260,195 @@ def _is_interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
+def _register_context_hub() -> subprocess.CompletedProcess[str]:
+    """Register the Context Hub MCP server with whatever coding agents are installed.
+
+    Idempotent and quick, so it runs without asking: the guide this command just wrote
+    tells the agent to query the hub, and registering is what makes that possible. A
+    client that already has it is not an error.
+
+    Returns the completed process so the caller can tell the outcomes apart. Its output
+    is captured rather than shown — a wall of client-by-client detail is the wrong
+    register here — which is why the exit code has to carry the meaning.
+    """
+    return subprocess.run(
+        [sys.executable, "-m", "pipecat_context_hub", "install", "--no-refresh"],
+        capture_output=True,
+        text=True,
+    )
+
+
+def _format_duration(seconds: float) -> str:
+    """Elapsed time as ``2m 47s`` or ``47s``."""
+    minutes, secs = divmod(int(seconds), 60)
+    return f"{minutes}m {secs:02d}s" if minutes else f"{secs}s"
+
+
+def _latest_log_line(reader: TextIO, carried: str) -> tuple[str, str]:
+    """Newest complete line the hub has written since the last read.
+
+    Returns the still-unterminated remainder to carry into the next read, and the
+    message of the newest complete line (empty when the hub hasn't finished one).
+    """
+    carried += reader.read()
+    if "\n" not in carried:
+        return carried, ""
+    body, _, carried = carried.rpartition("\n")
+    lines = [line for line in body.splitlines() if line.strip()]
+    return carried, _LOG_PREFIX_RE.sub("", lines[-1].strip()) if lines else ""
+
+
+def _index_status(detail: str) -> str:
+    """The build's status line: the step the hub is on."""
+    label = "Building the Context Hub index..."
+    # Keep it to one row. The spinner redraws in place, so a wrapped line leaves the
+    # overflow behind on screen; the margin covers the spinner and its padding.
+    room = console.width - len(label) - len(" · ") - 4
+    if not detail or room < _INDEX_DETAIL_MIN_CHARS:
+        return label
+    if len(detail) > room:
+        detail = detail[: room - 1].rstrip() + "…"
+    # The hub quotes bracketed values that Rich would otherwise read as markup.
+    return f"{label} · {escape(detail)}"
+
+
+def _build_context_hub_index() -> bool:
+    """Build the index, showing progress in place of the hub's own log stream.
+
+    The hub's own log stream is the right output for ``pipecat context-hub refresh`` run
+    directly and the wrong output here: a wall of module paths and chunk counts for a
+    step the user answered one question about. Only its newest line is echoed, which is
+    enough to show which source is being indexed during the stretches of tens of seconds
+    when nothing else surfaces.
+
+    No progress estimate: most of the build is embedding ~17k records on the CPU, so the
+    total tracks single-core speed and any fixed target would read as an overrun on a
+    slower machine. The duration is reported once the build ends.
+
+    The whole stream is kept regardless, and shown if the build fails.
+
+    Returns True if the index was built.
+    """
+    started = time.monotonic()
+    with tempfile.TemporaryDirectory() as workspace:
+        log_path = Path(workspace) / "refresh.log"
+        # Both streams into one file, so a failure reads in the order it happened
+        # whichever stream carried it. A file rather than a pipe because nothing drains a
+        # pipe while we poll, and a chatty failure would then deadlock the build. The
+        # reader is a second handle because the child's descriptor is a dup of the
+        # writer's and shares its offset — seeking to read would move where it writes.
+        with open(log_path, "w") as sink, open(log_path, errors="replace") as reader:
+            process = subprocess.Popen(
+                [sys.executable, "-m", "pipecat_context_hub", "--log-level", "INFO", "refresh"],
+                stdout=sink,
+                stderr=sink,
+            )
+            carried, detail = "", ""
+            with console.status(_index_status(""), spinner="dots") as status:
+                while process.poll() is None:
+                    time.sleep(_INDEX_BUILD_POLL_SECONDS)
+                    carried, line = _latest_log_line(reader, carried)
+                    if line:
+                        detail = line
+                        status.update(_index_status(detail))
+
+        elapsed = _format_duration(time.monotonic() - started)
+        if process.returncode == 0:
+            console.print(f"[green]✓[/green] Built the Context Hub index ({elapsed})")
+            return True
+
+        details = log_path.read_text(errors="replace").strip().splitlines()
+
+    console.print(f"\n[yellow]⚠[/yellow]  The Context Hub index could not be built ({elapsed}).")
+    # The tail carries the failure; earlier lines are progress the user didn't ask for.
+    for line in details[-_INDEX_ERROR_LINES:]:
+        console.print(f"    {line}", markup=False, highlight=False)
+    console.print(
+        "\n  Retry before your first coding session:\n"
+        "      [bold]pipecat context-hub refresh[/bold]"
+    )
+    return False
+
+
+def _offer_context_hub_index() -> None:
+    """Offer to build the local index, or say how, when there isn't one yet.
+
+    The index is the only expensive part of setup — a few minutes and roughly 900 MB —
+    so it is the only part worth a question. Its absence is also the whole signal: an
+    index cannot exist unless someone ran ``refresh``, so having one means this has
+    already been dealt with, here or in another project.
+
+    Defaults to yes because ``serve`` refuses to start against an empty index. Skipping
+    leaves the MCP server dead and the agent relying on it having read AGENTS.md, which
+    is a weaker path than tools it can always see.
+    """
+    from pipecat.cli.hub_status import read_hub_metadata
+
+    metadata = read_hub_metadata()
+    if metadata and metadata.get("last_refresh_at"):
+        return
+
+    build_now = False
+    if _is_interactive():
+        import questionary
+
+        from pipecat.cli.prompts.questions import custom_style
+
+        console.print(
+            "\n  Your agent uses up-to-date knowledge of Pipecat APIs from Context Hub's"
+            "\n  local index, rather than relying on stale training data."
+        )
+        build_now = bool(
+            questionary.confirm(
+                "Build it now? (3+ minutes, ~900 MB of disk)",
+                default=True,
+                style=custom_style,
+            ).ask()
+        )
+
+    if not build_now:
+        console.print(
+            "\n  Build the index before your first coding session:\n"
+            "      [bold]pipecat context-hub refresh[/bold]"
+        )
+        return
+
+    _build_context_hub_index()
+
+
+def _setup_context_hub() -> None:
+    """Wire the Context Hub up for the coding-agent path.
+
+    Never fatal: this is setup for a tool the developer can also configure by hand, so a
+    failure here must not fail the command that scaffolded their project.
+    """
+    try:
+        result = _register_context_hub()
+        if result.returncode == 0:
+            console.print("[green]✓[/green] Registered the Context Hub MCP server")
+        elif result.returncode == _HUB_MANUAL_SETUP:
+            # Editors configured by hand — Cursor, VS Code, Zed — and machines with no
+            # agent CLI at all. `install` prints the config block to paste; run directly
+            # so the developer sees it rather than having it captured here.
+            console.print(
+                "\n  No coding agent CLI found. To add the Context Hub to Cursor,\n"
+                "  VS Code, or Zed, print the config to paste with:\n"
+                "      [bold]pipecat context-hub install[/bold]"
+            )
+        else:
+            detail = (result.stderr or result.stdout or "").strip().splitlines()
+            console.print("\n[yellow]⚠[/yellow]  Could not register the Context Hub MCP server.")
+            if detail:
+                console.print(f"    {detail[-1]}", markup=False, highlight=False)
+            console.print("      Retry with: [bold]pipecat context-hub install[/bold]")
+        _offer_context_hub_index()
+    except Exception:
+        console.print(
+            "\n  Set up the Context Hub for your coding agent with:\n"
+            "      [bold]pipecat context-hub install[/bold]"
+        )
+
+
 def _print_ready(target_dir: Path) -> None:
     """Print the guidance shown when the developer keeps the coding-agent path.
 
@@ -252,7 +465,7 @@ def _print_ready(target_dir: Path) -> None:
     )
 
 
-def _route_build_method(target_dir: Path, overwrite_guide: bool) -> None:
+def _route_build_method(target_dir: Path, overwrite_guide: bool, context_hub: bool) -> None:
     """Ask whether to build with a coding agent or scaffold a runnable bot now.
 
     The coding-agent path adds the developer guide (GETTING_STARTED.md) and points the
@@ -264,6 +477,8 @@ def _route_build_method(target_dir: Path, overwrite_guide: bool) -> None:
     already_scaffolded = (target_dir / "server").exists()
     if already_scaffolded or not _is_interactive():
         _write_developer_guide(target_dir, overwrite_guide)
+        if context_hub:
+            _setup_context_hub()
         _print_ready(target_dir)
         return
 
@@ -283,6 +498,8 @@ def _route_build_method(target_dir: Path, overwrite_guide: bool) -> None:
     # `ask()` returns None on Ctrl-C / EOF — fall through to the safe agent path.
     if choice != "scaffold":
         _write_developer_guide(target_dir, overwrite_guide)
+        if context_hub:
+            _setup_context_hub()
         _print_ready(target_dir)
         return
 
@@ -381,6 +598,12 @@ def init_command(
         "--overwrite-guide",
         help=f"Overwrite existing guide files ({_AGENTS_FILE}, {_CLAUDE_FILE}, "
         f"{_GETTING_STARTED_FILE}). By default existing files are kept.",
+    ),
+    context_hub: bool = typer.Option(
+        True,
+        "--context-hub/--no-context-hub",
+        help="Register the Context Hub MCP server with your coding agents, and offer to "
+        "build its index. On by default.",
     ),
     name: str | None = typer.Option(
         None,
@@ -609,7 +832,7 @@ def init_command(
         overwrite_guide = _offer_refresh(target_dir)
     else:
         _print_refresh_summary(statuses)
-    _route_build_method(target_dir, overwrite_guide)
+    _route_build_method(target_dir, overwrite_guide, context_hub)
 
 
 def _scaffold_non_interactive(

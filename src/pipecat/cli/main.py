@@ -29,16 +29,16 @@ _INSTALL_HINT = (
     '        uv pip install "pipecat-ai[cli]"      # or: pip install "pipecat-ai[cli]"\n'
 )
 
-# Official optional sub-CLIs. Each ships as a separate plugin package that registers
-# a Typer app under the ``pipecat_cli.extensions`` group. We list them in ``--help``
-# even when they're not installed (as stubs) so they're discoverable, and the stub
-# prints how to enable the plugin. Only first-party plugins belong here.
+# Official sub-CLIs the user must install themselves. Each ships as a separate plugin
+# package that registers a Typer app under the ``pipecat_cli.extensions`` group. We list
+# them in ``--help`` even when they're not installed (as stubs) so they're discoverable,
+# and the stub prints how to enable the plugin.
+#
+# `context-hub` is deliberately absent: it ships with the `cli` extra, so it mounts from
+# its entry point like any installed plugin and a stub advertising an install step would
+# be describing one that doesn't exist.
 _KNOWN_EXTENSIONS: dict[str, tuple[str, str]] = {
     "cloud": ("pipecatcloud", "Deploy and manage bots on Pipecat Cloud"),
-    "context-hub": (
-        "pipecat-ai-context-hub",
-        "Query current Pipecat docs, examples, and API source from a coding agent",
-    ),
 }
 
 
