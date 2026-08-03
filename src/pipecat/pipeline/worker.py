@@ -988,8 +988,17 @@ class PipelineWorker(BaseWorker):
         if isinstance(frame, CancelFrame):
             await wait_for_cancel()
         else:
-            await self._pipeline_end_event.wait()
-            logger.debug(f"{self}: {frame} reached the end of the pipeline, pipeline is closing.")
+            try:
+                await asyncio.wait_for(
+                    self._pipeline_end_event.wait(), timeout=self._cancel_timeout_secs
+                )
+                logger.debug(
+                    f"{self}: {frame} reached the end of the pipeline, pipeline is closing."
+                )
+            except TimeoutError:
+                logger.warning(
+                    f"{self}: timeout waiting for {frame} to reach the end of the pipeline (being blocked somewhere?)."
+                )
 
         self._pipeline_end_event.clear()
 
