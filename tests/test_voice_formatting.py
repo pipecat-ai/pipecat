@@ -539,6 +539,14 @@ class TestExpandNumbers(unittest.IsolatedAsyncioTestCase):
         result = await expand_numbers(digit_cutoff=None)("PIN 0451", "*")
         self.assertIn("0 4 5 1", result)
 
+    async def test_leading_zero_preserves_fraction(self):
+        # Same as the above-cutoff case: the digits are read out, and the fractional
+        # part must not be dropped on the way.
+        result = await expand_numbers(digit_cutoff=2025)("version 01.5", "*")
+        self.assertIn("0 1", result)
+        self.assertIn("point", result)
+        self.assertIn("5", result)
+
     async def test_bare_zero_still_expands(self):
         # The check needs more than one digit, so a real zero quantity is unaffected.
         self.assertIn("zero", await expand_numbers(digit_cutoff=2025)("0 results", "*"))
