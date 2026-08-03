@@ -66,14 +66,15 @@ def tts_sample_rate(voice_cfg: dict) -> int:
 def tts_cache_key(voice_cfg: dict) -> str:
     """A stable identity for a ``user_audio`` config, for caching synthesized audio.
 
-    Covers the audio's semantic identity (service, voice, model) but not the
-    sample rate, so different rates reuse the same slot (a mismatch just triggers
-    regeneration in :meth:`EvalSpeech.generate`).
+    Covers the audio's semantic identity (service, voice, model, language) but not
+    the sample rate, so different rates reuse the same slot (a mismatch just
+    triggers regeneration in :meth:`EvalSpeech.generate`).
     """
     service = str(voice_cfg.get("service", "")).lower()
     voice = str(voice_cfg.get("voice", ""))
     model = str(voice_cfg.get("model", ""))
-    return "\x00".join((service, voice, model))
+    language = str(voice_cfg.get("language") or "")
+    return "\x00".join((service, voice, model, language))
 
 
 class EvalSpeech:

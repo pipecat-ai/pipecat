@@ -43,7 +43,9 @@ async def test_connect_failure_clears_stale_websocket_without_raising(monkeypatc
     async def fake_websocket_connect(*args, **kwargs):
         raise RuntimeError("connection failed")
 
-    monkeypatch.setattr("pipecat.services.soniox.stt.websocket_connect", fake_websocket_connect)
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
 
     service = SonioxSTTService(api_key="test-key")
     service._websocket = _FakeWebsocket([], state=State.CLOSED)

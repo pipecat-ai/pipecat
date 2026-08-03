@@ -24,7 +24,6 @@ from urllib.parse import urlencode
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -198,6 +197,7 @@ class ElevenLabsRealtimeSTTSettings(STTSettings):
         vad_threshold: VAD sensitivity (0.1-0.9, lower is more sensitive).
         min_speech_duration_ms: Minimum speech duration for VAD (50-2000ms).
         min_silence_duration_ms: Minimum silence duration for VAD (50-2000ms).
+        filter_background_audio: Whether ElevenLabs filters out background audio before transcription.
     """
 
     keyterms: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -205,6 +205,7 @@ class ElevenLabsRealtimeSTTSettings(STTSettings):
     vad_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_speech_duration_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_silence_duration_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    filter_background_audio: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class ElevenLabsSTTService(SegmentedSTTService):
@@ -556,6 +557,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             min_speech_duration_ms=None,
             min_silence_duration_ms=None,
             keyterms=None,
+            filter_background_audio=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -802,11 +804,15 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                         f"min_silence_duration_ms={self._settings.min_silence_duration_ms}"
                     )
 
+            filter_background_audio = self._settings.filter_background_audio
+            if is_given(filter_background_audio) and filter_background_audio is not None:
+                params.append(f"filter_background_audio={str(filter_background_audio).lower()}")
+
             ws_url = f"wss://{self._base_url}/v1/speech-to-text/realtime?{'&'.join(params)}"
 
             headers = {"xi-api-key": self._api_key}
 
-            self._websocket = await websocket_connect(ws_url, additional_headers=headers)
+            self._websocket = await self._websocket_connect(ws_url, additional_headers=headers)
             await self._call_event_handler("on_connected")
             logger.debug("Connected to ElevenLabs Realtime STT")
         except Exception as e:

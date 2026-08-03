@@ -23,7 +23,6 @@ from typing import Any
 
 import websockets
 from loguru import logger
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -401,7 +400,7 @@ class SonioxTTSService(WebsocketTTSService):
             logger.debug("Connecting to Soniox TTS")
             # Soniox expects the api_key in the per-stream config message, not
             # as a header or query param, so the connect call is bare.
-            self._websocket = await websocket_connect(self._url)
+            self._websocket = await self._websocket_connect(self._url)
             await self._call_event_handler("on_connected")
         except Exception as e:
             self._websocket = None

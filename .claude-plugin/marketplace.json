@@ -20,6 +20,7 @@
         "./.claude/skills/docstring",
         "./.claude/skills/pr-description",
         "./.claude/skills/pr-submit",
+        "./.claude/skills/prose-review",
         "./.claude/skills/update-docs"
       ]
     }

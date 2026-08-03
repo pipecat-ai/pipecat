@@ -90,6 +90,7 @@ from pipecat.adapters.services.open_ai_responses_adapter import OpenAIResponsesL
 from pipecat.adapters.services.perplexity_adapter import PerplexityLLMAdapter
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
+    LLMSpecificMessage,
     LLMStandardMessage,
 )
 
@@ -352,6 +353,7 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
 
         self.assertEqual(params["messages"][0]["role"], "user")
         self.assertEqual(params["messages"][0]["content"], "Extra context.")
+        self.assertEqual(context.get_messages()[0]["role"], "developer")
 
     def test_developer_conversion_does_not_affect_other_roles(self):
         """convert_developer_to_user only affects developer messages, not system/user/assistant."""
@@ -1297,6 +1299,16 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][0]["role"], "user")
         self.assertEqual(params["messages"][0]["content"], "You are a helpful assistant.")
 
+    def test_single_system_message_conversion_does_not_mutate_source_context(self):
+        """Converting a lone system message to user leaves the source context unchanged."""
+        context = LLMContext(messages=[{"role": "system", "content": "You are helpful."}])
+
+        self.adapter.get_llm_invocation_params(
+            context, enable_prompt_caching=False, system_instruction="Be concise."
+        )
+
+        self.assertEqual(context.get_messages()[0]["role"], "system")
+
     def test_system_instruction_only(self):
         """system_instruction alone becomes the system parameter."""
         messages: list[LLMStandardMessage] = [
@@ -1473,6 +1485,71 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         )
         self.assertEqual(params["messages"][-1]["role"], "user")
         self.assertEqual(params["messages"][-1]["content"][0]["type"], "tool_result")
+
+    def test_thought_converted_to_thinking_block(self):
+        """A signed thought becomes a thinking block merged into the assistant message."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                LLMSpecificMessage(
+                    llm="anthropic",
+                    message={"type": "thought", "text": "Let me check.", "signature": "sig"},
+                ),
+                {"role": "assistant", "content": "It's sunny."},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        # The thought and the response merge into a single assistant message,
+        # with the thinking block first.
+        self.assertEqual(len(params["messages"]), 2)
+        content = params["messages"][1]["content"]
+        self.assertEqual(
+            content[0], {"type": "thinking", "thinking": "Let me check.", "signature": "sig"}
+        )
+        self.assertEqual(content[1], {"type": "text", "text": "It's sunny."})
+
+    def test_thought_with_empty_text_preserved(self):
+        """A signed thought with no text still round-trips as a thinking block.
+
+        Models that default to ``display: "omitted"`` return thinking blocks whose
+        text is empty and whose signature carries the reasoning; Anthropic requires
+        those blocks to be passed back.
+        """
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                LLMSpecificMessage(
+                    llm="anthropic",
+                    message={"type": "thought", "text": "", "signature": "sig"},
+                ),
+                {"role": "assistant", "content": "It's sunny."},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        self.assertEqual(len(params["messages"]), 2)
+        content = params["messages"][1]["content"]
+        self.assertEqual(content[0], {"type": "thinking", "thinking": "", "signature": "sig"})
+        self.assertEqual(content[1], {"type": "text", "text": "It's sunny."})
+
+    def test_thought_without_signature_dropped(self):
+        """A thought with no signature can't be round-tripped, so it's skipped."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                LLMSpecificMessage(
+                    llm="anthropic",
+                    message={"type": "thought", "text": "Let me check.", "signature": ""},
+                ),
+                {"role": "assistant", "content": "It's sunny."},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        self.assertEqual(len(params["messages"]), 2)
+        self.assertEqual(params["messages"][0]["content"], "What's the weather?")
+        self.assertEqual(params["messages"][1]["content"], "It's sunny.")
 
 
 class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
@@ -1885,6 +1962,65 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
         self.assertEqual(params["messages"][-1]["role"], "user")
         self.assertIn("toolResult", params["messages"][-1]["content"][0])
+
+    def test_image_before_text_does_not_raise_unbound_local_error(self):
+        """Regression test for issue #4724: image placed before text must not raise UnboundLocalError.
+
+        When a user message's content list places the image *before* the text (e.g. a
+        UserImageRawFrame followed by a prompt), _from_standard_message previously
+        raised ``UnboundLocalError: cannot access local variable 'image_item'``
+        because the ``new_content.insert(...)`` call was outside the
+        ``if img_idx > first_txt_idx:`` guard that assigns ``image_item``.
+        """
+        # Image appears FIRST (before text) — this is the failing shape from the issue.
+        message: LLMStandardMessage = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/jpeg;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+                    },
+                },
+                {"type": "text", "text": "What do you see?"},
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        # Must not raise — previously threw UnboundLocalError.
+        params = self.adapter.get_llm_invocation_params(context)
+
+        user_msg = params["messages"][0]
+        self.assertEqual(user_msg["role"], "user")
+        content = user_msg["content"]
+        self.assertEqual(len(content), 2)
+        # Image was already first, so the adapter should leave it in place.
+        self.assertIn("image", content[0])
+        self.assertEqual(content[1]["text"], "What do you see?")
+
+    def test_image_after_text_reordered_to_first(self):
+        """Image placed after text is reordered to come before text (existing behaviour)."""
+        message: LLMStandardMessage = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What do you see?"},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/jpeg;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        user_msg = params["messages"][0]
+        content = user_msg["content"]
+        self.assertEqual(len(content), 2)
+        # Adapter should have moved the image before the text.
+        self.assertIn("image", content[0])
+        self.assertEqual(content[1]["text"], "What do you see?")
 
 
 class TestPerplexityGetLLMInvocationParams(unittest.TestCase):

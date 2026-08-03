@@ -23,7 +23,7 @@ from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
 from pipecat.audio.utils import create_file_resampler
 
 __DTMF_LOCK__ = asyncio.Lock()
-__DTMF_AUDIO__: dict[KeypadEntry, bytes] = {}
+__DTMF_AUDIO__: dict[tuple[KeypadEntry, int], bytes] = {}
 __DTMF_RESAMPLER__: BaseAudioResampler | None = None
 
 __DTMF_FILE_NAME = {
@@ -45,8 +45,9 @@ async def load_dtmf_audio(button: KeypadEntry, *, sample_rate: int = 8000) -> by
     global __DTMF_AUDIO__, __DTMF_RESAMPLER__
 
     async with __DTMF_LOCK__:
-        if button in __DTMF_AUDIO__:
-            return __DTMF_AUDIO__[button]
+        cache_key = (button, sample_rate)
+        if cache_key in __DTMF_AUDIO__:
+            return __DTMF_AUDIO__[cache_key]
 
         if not __DTMF_RESAMPLER__:
             __DTMF_RESAMPLER__ = create_file_resampler()
@@ -66,6 +67,6 @@ async def load_dtmf_audio(button: KeypadEntry, *, sample_rate: int = 8000) -> by
                 resampled_audio = await __DTMF_RESAMPLER__.resample(
                     audio, in_sample_rate, sample_rate
                 )
-                __DTMF_AUDIO__[button] = resampled_audio
+                __DTMF_AUDIO__[cache_key] = resampled_audio
 
-    return __DTMF_AUDIO__[button]
+    return __DTMF_AUDIO__[cache_key]

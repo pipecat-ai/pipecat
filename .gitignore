@@ -72,3 +72,5 @@ whisker_setup.py
 
 # MoQ transport
 *.pem
+# Release-eval run artifacts (logs and conversation recordings)
+scripts/release-evals/test-runs/

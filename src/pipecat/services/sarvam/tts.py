@@ -48,7 +48,6 @@ from typing import Any, ClassVar
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel, Field
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -1071,7 +1070,7 @@ class SarvamTTSService(InterruptibleTTSService):
                 "api-subscription-key": self._api_key,
             }
 
-            self._websocket = await websocket_connect(
+            self._websocket = await self._websocket_connect(
                 self._websocket_url,
                 additional_headers=ws_additional_headers,
                 user_agent_header=sdk_headers()["User-Agent"],

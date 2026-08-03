@@ -11,8 +11,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
-from openai import AsyncStream
-from openai.types.chat import ChatCompletionChunk
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.frames.frames import (
@@ -138,7 +136,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         return params
 
     @traced_llm  # type: ignore
-    async def _process_context(self, context: LLMContext) -> AsyncStream[ChatCompletionChunk]:
+    async def _process_context(self, context: LLMContext):
         """Process OpenAI LLM context and stream chat completion chunks.
 
         This method handles the streaming response from SambaNova API, including
@@ -147,9 +145,6 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
 
         Args:
             context: OpenAI LLM context containing conversation state and tools.
-
-        Returns:
-            Async stream of chat completion chunks.
         """
         functions_list = []
         arguments_list = []

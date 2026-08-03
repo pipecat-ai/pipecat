@@ -398,6 +398,12 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         elif isinstance(frame, UserStartedSpeakingFrame):
             # A new user turn begins, so allow one fresh spoken completion.
             self._user_turn_completion_voiced = False
+        elif isinstance(frame, LLMMessagesAppendFrame) and frame.run_llm:
+            # An externally appended message that asks for a run (e.g. a user-idle
+            # check-in) is an explicit request for fresh speech, and it arrives
+            # precisely while the user is silent. Clear the voiced latch so the ✓
+            # guard in ``_push_turn_text`` does not drop its text.
+            self._user_turn_completion_voiced = False
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             # The user resumed speaking within the same open turn. A new turn's
             # InterruptionFrame does not fire for a resume inside an already-open

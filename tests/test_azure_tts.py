@@ -30,7 +30,9 @@ pytest.importorskip("azure.cognitiveservices.speech")
 
 from azure.cognitiveservices.speech import CancellationReason  # noqa: E402
 
-from pipecat.services.azure.tts import AzureTTSService  # noqa: E402
+from pipecat.services.azure.tts import AzureHttpTTSService, AzureTTSService  # noqa: E402
+
+SSML_SERVICE_CLASSES = (AzureTTSService, AzureHttpTTSService)
 
 # The thread fires after this delay, by which point the awaiting getter has parked
 # the loop in select() — so only the callback itself can wake it.
@@ -111,3 +113,99 @@ async def test_completion_sentinel_wakes_idle_loop():
         svc._word_boundary_queue.get(), lambda: svc._handle_completed(evt)
     )
     assert item is None
+
+
+@pytest.mark.parametrize("service_class", SSML_SERVICE_CLASSES)
+def test_construct_ssml_default_has_no_lang_element(service_class):
+    """Default settings emit no <lang> element anywhere in the output."""
+    service = service_class(api_key="test-key", region="eastus")
+
+    ssml = service._construct_ssml("Hello there.")
+
+    assert "<lang" not in ssml
+    assert ssml == (
+        "<speak version='1.0' xml:lang='en-US' "
+        "xmlns='http://www.w3.org/2001/10/synthesis' "
+        "xmlns:mstts='http://www.w3.org/2001/mstts'>"
+        "<voice name='en-US-SaraNeural'>"
+        "<mstts:silence type='Sentenceboundary' value='20ms' />"
+        "Hello there."
+        "</voice></speak>"
+    )
+
+
+@pytest.mark.parametrize("service_class", SSML_SERVICE_CLASSES)
+def test_construct_ssml_force_locale_false_matches_default(service_class):
+    """force_locale=False explicitly must match the unset default byte-for-byte."""
+    default_service = service_class(api_key="test-key", region="eastus")
+    explicit_false_service = service_class(
+        api_key="test-key",
+        region="eastus",
+        settings=service_class.Settings(force_locale=False),
+    )
+
+    assert default_service._construct_ssml(
+        "Hello there."
+    ) == explicit_false_service._construct_ssml("Hello there.")
+
+
+@pytest.mark.parametrize("service_class", SSML_SERVICE_CLASSES)
+def test_construct_ssml_force_locale_wraps_text_in_lang_element(service_class):
+    """force_locale=True wraps the text in <lang xml:lang> inside <voice>."""
+    service = service_class(
+        api_key="test-key",
+        region="eastus",
+        settings=service_class.Settings(language="en-GB", force_locale=True),
+    )
+
+    ssml = service._construct_ssml("Hello there.")
+
+    assert ssml == (
+        "<speak version='1.0' xml:lang='en-GB' "
+        "xmlns='http://www.w3.org/2001/10/synthesis' "
+        "xmlns:mstts='http://www.w3.org/2001/mstts'>"
+        "<voice name='en-US-SaraNeural'>"
+        "<mstts:silence type='Sentenceboundary' value='20ms' />"
+        "<lang xml:lang='en-GB'>"
+        "Hello there."
+        "</lang>"
+        "</voice></speak>"
+    )
+
+
+@pytest.mark.parametrize("service_class", SSML_SERVICE_CLASSES)
+def test_construct_ssml_force_locale_wraps_nested_style_and_prosody(service_class):
+    """force_locale=True wraps the entire nested style/prosody/emphasis block,
+    not just the raw text.
+    """
+    service = service_class(
+        api_key="test-key",
+        region="eastus",
+        settings=service_class.Settings(
+            language="en-GB",
+            force_locale=True,
+            style="cheerful",
+            rate="slow",
+            emphasis="strong",
+        ),
+    )
+
+    ssml = service._construct_ssml("Hello there.")
+
+    assert ssml == (
+        "<speak version='1.0' xml:lang='en-GB' "
+        "xmlns='http://www.w3.org/2001/10/synthesis' "
+        "xmlns:mstts='http://www.w3.org/2001/mstts'>"
+        "<voice name='en-US-SaraNeural'>"
+        "<mstts:silence type='Sentenceboundary' value='20ms' />"
+        "<lang xml:lang='en-GB'>"
+        "<mstts:express-as style='cheerful'>"
+        "<prosody rate='slow'>"
+        "<emphasis level='strong'>"
+        "Hello there."
+        "</emphasis>"
+        "</prosody>"
+        "</mstts:express-as>"
+        "</lang>"
+        "</voice></speak>"
+    )

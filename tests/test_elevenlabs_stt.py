@@ -67,13 +67,13 @@ async def test_elevenlabs_stt_sends_keyterms_multipart_fields(aiohttp_client):
 async def test_elevenlabs_realtime_websocket_url_includes_keyterms(monkeypatch):
     captured = {}
 
-    async def fake_websocket_connect(url, *, additional_headers):
+    async def fake_websocket_connect(url, *, additional_headers, **kwargs):
         captured["url"] = url
         captured["headers"] = additional_headers
         return object()
 
     monkeypatch.setattr(
-        "pipecat.services.elevenlabs.stt.websocket_connect",
+        "pipecat.services.websocket_service.websocket_connect",
         fake_websocket_connect,
     )
 
@@ -106,3 +106,59 @@ async def test_elevenlabs_realtime_websocket_url_includes_keyterms(monkeypatch):
     assert query["vad_threshold"] == ["0.7"]
     assert query["keyterms"] == ["Pipecat", "Scribe V2"]
     assert captured["headers"] == {"xi-api-key": "test-key"}
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_realtime_websocket_url_includes_filter_background_audio(monkeypatch):
+    captured = {}
+
+    async def fake_websocket_connect(url, *, additional_headers, **kwargs):
+        captured["url"] = url
+        return object()
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect",
+        fake_websocket_connect,
+    )
+
+    # Background filtering applies under either commit strategy, unlike the VAD tuning params.
+    service = ElevenLabsRealtimeSTTService(
+        api_key="test-key",
+        base_url="example.test",
+        commit_strategy=CommitStrategy.MANUAL,
+        sample_rate=16000,
+        settings=ElevenLabsRealtimeSTTService.Settings(filter_background_audio=True),
+    )
+    service._audio_format = audio_format_from_sample_rate(16000)
+
+    await service._connect_websocket()
+
+    query = parse_qs(urlparse(captured["url"]).query)
+    assert query["commit_strategy"] == ["manual"]
+    assert query["filter_background_audio"] == ["true"]
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_realtime_websocket_url_omits_unset_filter_background_audio(monkeypatch):
+    captured = {}
+
+    async def fake_websocket_connect(url, *, additional_headers, **kwargs):
+        captured["url"] = url
+        return object()
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect",
+        fake_websocket_connect,
+    )
+
+    service = ElevenLabsRealtimeSTTService(
+        api_key="test-key",
+        base_url="example.test",
+        sample_rate=16000,
+    )
+    service._audio_format = audio_format_from_sample_rate(16000)
+
+    await service._connect_websocket()
+
+    query = parse_qs(urlparse(captured["url"]).query)
+    assert "filter_background_audio" not in query

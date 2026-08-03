@@ -81,7 +81,7 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._text = ""
         self._vad_user_speaking = False
         self._transcript_finalized = False
-        self._vad_stopped_time: float | None = None
+        self._vad_stopped: bool = False  # Whether VAD reported a stop this turn
 
         self._user_speech_timeout_task: asyncio.Task | None = None
         self._stt_timeout_task: asyncio.Task | None = None
@@ -123,8 +123,16 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._text = ""
         if clear_vad_user_speaking:
             self._vad_user_speaking = False
+        await self._discard_pending_end_of_turn()
+
+    async def _discard_pending_end_of_turn(self):
+        """Drop whatever progress toward an end-of-turn has been made so far.
+
+        Runs at a turn boundary, and whenever VAD reports the user speaking
+        again — which makes earlier progress stale mid-turn.
+        """
         self._transcript_finalized = False
-        self._vad_stopped_time = None
+        self._vad_stopped = False
         self._user_speech_wait_done = False
         self._stt_wait_done = False
         await self._cancel_all_tasks()
@@ -183,17 +191,13 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
     async def _handle_vad_user_started_speaking(self, _: VADUserStartedSpeakingFrame):
         """Handle when the VAD indicates the user is speaking."""
         self._vad_user_speaking = True
-        self._transcript_finalized = False
-        self._vad_stopped_time = None
-        self._user_speech_wait_done = False
-        self._stt_wait_done = False
-        await self._cancel_all_tasks()
+        await self._discard_pending_end_of_turn()
 
     async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         """Handle when the VAD indicates the user has stopped speaking."""
         self._vad_user_speaking = False
         self._stop_secs = frame.stop_secs
-        self._vad_stopped_time = frame.timestamp
+        self._vad_stopped = True
 
         if not self._stop_secs_warned:
             if self._stop_secs != VAD_STOP_SECS:
@@ -255,7 +259,7 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         # since the last transcript with the user_speech_timer. stt_timeout
         # has no meaning here (it's defined relative to VAD stop), so mark
         # the stt wait done immediately.
-        if not self._vad_user_speaking and self._vad_stopped_time is None:
+        if not self._vad_user_speaking and not self._vad_stopped:
             self._stt_wait_done = True
             await self._restart_user_speech_timer()
 

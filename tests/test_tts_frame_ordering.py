@@ -63,6 +63,7 @@ from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.text.base_text_aggregator import AggregationType
+from pipecat.utils.text.base_text_filter import BaseTextFilter
 
 # ---------------------------------------------------------------------------
 # Test-only frame
@@ -1625,6 +1626,51 @@ async def test_no_deadlock_on_zero_audio_context_completion():
     assert any(f.label == "after_completion" for f in foo_frames), (
         "FooFrame after zero-audio context completion was not received — "
         "pipeline deadlocked (missing resume-on-zero-audio guard)"
+    )
+
+
+class _StripEverythingFilter(BaseTextFilter):
+    """Text filter that strips all text, like a filter removing leaked reasoning tokens."""
+
+    async def filter(self, text: str) -> str:
+        return ""
+
+
+@pytest.mark.asyncio
+async def test_filter_stripped_text_does_not_pause_frame_processing():
+    """A text filter that strips the whole utterance must not pause frame processing.
+
+    _push_tts_frames used to set _processing_text=True before running the text
+    filters. If a filter stripped the text to empty, the early return left the
+    flag latched, and LLMFullResponseEndFrame paused frame processing waiting
+    for TTS audio that would never come — permanently muting the bot.
+
+    The mock never delivers audio, so if the pause is (wrongly) engaged there
+    is no BotStoppedSpeakingFrame to release it and FooFrame never arrives.
+    """
+    tts = MockWebSocketPauseTTSServiceNoAudio(text_filters=[_StripEverythingFilter()])
+
+    frames_to_send = [
+        LLMFullResponseStartFrame(),
+        TextFrame(text="Leaked reasoning tokens."),
+        LLMFullResponseEndFrame(),
+        SleepFrame(sleep=0.1),
+        FooFrame(label="after_stripped_response"),
+    ]
+
+    frames_received = await asyncio.wait_for(
+        run_test(tts, frames_to_send=frames_to_send),
+        timeout=3.0,
+    )
+
+    assert not tts._processing_text, (
+        "_processing_text leaked True after a filter stripped the text to empty"
+    )
+
+    down = frames_received[0]
+    foo_frames = [f for f in down if isinstance(f, FooFrame)]
+    assert any(f.label == "after_stripped_response" for f in foo_frames), (
+        "FooFrame was not received — frame processing paused on filter-stripped text"
     )
 
 

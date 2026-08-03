@@ -43,6 +43,7 @@ suite:
       - interruption_audio
       - interruption_text
       - language_switch
+      - language_switch_audio
   - bot: voice/voice-cartesia-http.py
     scenarios: [capital_question]
   - bot: voice/voice-cartesia-turns.py
@@ -267,6 +268,14 @@ suite:
     scenarios: [filter_incomplete_turns_function_calling]
   - bot: turn-management/turn-management-filter-incomplete-turns-function-calling.py
     scenarios: [filter_incomplete_turns]
+
+  #
+  # Turn management: the user goes silent instead of trailing off. The bot's
+  # idle handler asks the LLM for a check-in, and that response has to be spoken
+  # even though no user speech preceded it.
+  #
+  - bot: turn-management/turn-management-filter-incomplete-turns-user-idle.py
+    scenarios: [filter_incomplete_turns_user_idle]
 
   #
   # DTMF: the caller drives a keypad phone menu (IVR) with DTMF tones instead of

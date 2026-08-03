@@ -227,7 +227,9 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         non-system message.
 
         Args:
-            messages: Message list in standard format (mutated in-place).
+            messages: Message list in standard format. The list is mutated
+                in-place; the message dicts it holds are never mutated, since
+                they are shared with the source LLMContext.
             system_instruction: The system instruction from service settings
                 or ``run_inference``. Only used to decide whether to warn
                 about a conflict in the single-message case.
@@ -253,7 +255,9 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
                         " system message is being converted to a user message to"
                         " avoid sending an empty conversation history."
                     )
-            messages[0]["role"] = "user"
+            # Replace rather than mutate: the message dicts are shared with the
+            # source LLMContext, so an in-place write would rewrite its history.
+            messages[0] = {**messages[0], "role": "user"}
             return None
 
         # Extract

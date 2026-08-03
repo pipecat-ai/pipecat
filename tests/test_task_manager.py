@@ -92,5 +92,43 @@ class TestTaskManagerCreateTask(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await task, 42)
 
 
+class TestTaskManagerRegistry(unittest.IsolatedAsyncioTestCase):
+    """Tests for how TaskManager tracks concurrently-running tasks."""
+
+    async def test_same_name_tasks_tracked_independently(self):
+        """Concurrent tasks that share a name are each tracked separately.
+
+        Task names are not unique: :meth:`BaseObject.create_task` derives the
+        name from the coroutine's ``co_name`` when none is given, so tasks
+        started from the same method on the same object — the parallel
+        function-call tasks, for example — all share a single name.
+        """
+        task_manager = TaskManager()
+
+        both_running = asyncio.Event()
+        release = asyncio.Event()
+        running = 0
+
+        async def handler():
+            nonlocal running
+            running += 1
+            if running == 2:
+                both_running.set()
+            await release.wait()
+
+        task1 = task_manager.create_task(handler(), "svc::_run_function_call")
+        task2 = task_manager.create_task(handler(), "svc::_run_function_call")
+
+        await both_running.wait()
+        current = task_manager.current_tasks()
+        self.assertEqual(len(current), 2)
+        self.assertIn(task1, current)
+        self.assertIn(task2, current)
+
+        release.set()
+        await asyncio.gather(task1, task2)
+        self.assertEqual(len(task_manager.current_tasks()), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
