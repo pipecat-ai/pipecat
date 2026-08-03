@@ -93,33 +93,20 @@ class ExternalUserTurnStrategies(UserTurnStrategies):
     ``ProposedUserStarted/StoppedSpeakingFrame`` leaves the decision here, so the
     aggregator pushes the turn frames and broadcasts interruptions.
     ``UserStarted/StoppedSpeakingFrame`` means the emitter already announced the
-    turn, so the aggregator emits nothing and the parameters below don't apply.
+    turn, so the aggregator emits nothing and the parameter below doesn't apply.
 
     Parameters:
         enable_interruptions: Whether to broadcast an interruption when a
             proposal starts a turn. Services route their ``should_interrupt``
             setting here.
-        enable_user_speaking_frames: Whether to emit ``UserStartedSpeakingFrame``
-            and ``UserStoppedSpeakingFrame`` when a proposal starts or ends a
-            turn.
 
     """
 
     enable_interruptions: bool = True
-    enable_user_speaking_frames: bool = True
 
     def __post_init__(self):
-        self.start = [
-            ExternalUserTurnStartStrategy(
-                enable_interruptions=self.enable_interruptions,
-                enable_user_speaking_frames=self.enable_user_speaking_frames,
-            )
-        ]
-        self.stop = [
-            ExternalUserTurnStopStrategy(
-                enable_user_speaking_frames=self.enable_user_speaking_frames,
-            )
-        ]
+        self.start = [ExternalUserTurnStartStrategy(enable_interruptions=self.enable_interruptions)]
+        self.stop = [ExternalUserTurnStopStrategy()]
 
 
 @dataclass

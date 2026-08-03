@@ -55,7 +55,6 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
         *,
         timeout: float = 0.5,
         wait_for_transcript: bool = True,
-        enable_user_speaking_frames: bool = True,
         **kwargs,
     ):
         """Initialize the external user turn stop strategy.
@@ -72,13 +71,9 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
                 consuming audio directly), so transcripts are off the latency
                 critical path. ``LLMContextAggregatorPair`` flips this for you
                 when ``realtime_service_mode=True``.
-            enable_user_speaking_frames: If True, emit a
-                ``UserStoppedSpeakingFrame`` when a proposal ends a turn.
-                Ignored on the adopt path, where the emitter has already emitted
-                one.
             **kwargs: Additional keyword arguments.
         """
-        super().__init__(enable_user_speaking_frames=enable_user_speaking_frames, **kwargs)
+        super().__init__(**kwargs)
         self._timeout = timeout
         self._wait_for_transcript = wait_for_transcript
         self._text = ""

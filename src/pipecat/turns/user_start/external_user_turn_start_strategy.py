@@ -42,30 +42,16 @@ class ExternalUserTurnStartStrategy(BaseUserTurnStartStrategy):
     instead hands that job back to the pipeline.
     """
 
-    def __init__(
-        self,
-        *,
-        enable_interruptions: bool = True,
-        enable_user_speaking_frames: bool = True,
-        **kwargs,
-    ):
+    def __init__(self, *, enable_interruptions: bool = True, **kwargs):
         """Initialize the external user turn start strategy.
 
         Args:
             enable_interruptions: If True, broadcast an interruption when a
                 proposal opens a turn. Ignored on the adopt path, where the
                 emitter has already broadcast one.
-            enable_user_speaking_frames: If True, emit a
-                ``UserStartedSpeakingFrame`` when a proposal opens a turn.
-                Ignored on the adopt path, where the emitter has already emitted
-                one.
             **kwargs: Additional keyword arguments.
         """
-        super().__init__(
-            enable_interruptions=enable_interruptions,
-            enable_user_speaking_frames=enable_user_speaking_frames,
-            **kwargs,
-        )
+        super().__init__(enable_interruptions=enable_interruptions, **kwargs)
 
     @property
     def resolves_proposed_turn_start_frames(self) -> bool:
