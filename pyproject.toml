@@ -154,6 +154,11 @@ cli = [
     "jinja2>=3.1.0,<4",
     "questionary>=2.0.0,<3",
     "ruff>=0.12.1,<1",
+    # Mounts as `pipecat context-hub`, the live Pipecat context the guides written
+    # by `pipecat init` tell coding agents to query. The 0.5.1 floor is load-bearing:
+    # `init` reads `install`'s exit code to tell "configured a coding agent" from
+    # "printed the config to paste", and earlier releases collapse both into 0.
+    "pipecat-ai-context-hub>=0.5.1,<1",
 ]
 
 [dependency-groups]
