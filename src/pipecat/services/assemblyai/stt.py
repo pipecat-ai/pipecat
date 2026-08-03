@@ -1123,10 +1123,10 @@ class AssemblyAISTTService(WebsocketSTTService):
     async def _handle_speech_started(self, message: SpeechStartedMessage):
         """Handle SpeechStarted event — fast barge-in for AssemblyAI turn detection.
 
-        Broadcasts UserStartedSpeakingFrame to signal the start of user
-        speech, then pushes an interruption to cancel any bot audio.
-        SpeechStarted fires before any transcript arrives, so the turn
-        is cleanly started before any transcription frames are pushed.
+        Proposes a turn start, which the user turn strategies resolve into a
+        ``UserStartedSpeakingFrame`` and an interruption. SpeechStarted fires
+        before any transcript arrives, so the turn is cleanly started before any
+        transcription frames are pushed.
 
         Only applies when using AssemblyAI's built-in turn detection. When using
         Pipecat turn detection, VAD + smart turn analyzer handle interruptions.
