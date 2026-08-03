@@ -193,8 +193,12 @@ GrokTool = WebSearchTool | XSearchTool | FileSearchTool | FunctionTool | dict[st
 # Voice options
 #
 
-# Grok voice options: Ara (default), Rex, Sal, Eve, Leo
-GrokVoice = Literal["Ara", "Rex", "Sal", "Eve", "Leo"]
+# Voice IDs are plain strings. The built-in catalogue is documented by xAI
+# (https://docs.x.ai/docs/guides/voice/agent; ``GET /v1/tts/voices`` returns the
+# full list), and a custom voice ID from the Custom Voices API works the same
+# way — so this stays an alias rather than a pinned Literal that would need a
+# release every time xAI ships a voice.
+GrokVoice = str
 
 
 #
@@ -207,8 +211,10 @@ class SessionProperties(BaseModel):
 
     Parameters:
         instructions: System instructions for the assistant.
-        voice: The voice the model uses to respond. Options: Ara, Rex, Sal, Eve, Leo.
-            Defaults to "Ara".
+        voice: The voice the model uses to respond — a built-in voice ID (see
+            `xAI's docs <https://docs.x.ai/docs/guides/voice/agent>`_) or a
+            custom one from the Custom Voices API. Defaults to "eve", which is
+            xAI's own default.
         turn_detection: Configuration for turn detection. Defaults to server-side VAD.
             Set to None for manual turn detection.
         audio: Configuration for input and output audio.
@@ -219,7 +225,7 @@ class SessionProperties(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     instructions: str | None = None
-    voice: GrokVoice | str | None = "Ara"
+    voice: str | None = "eve"
     turn_detection: TurnDetection | None = Field(
         default_factory=lambda: TurnDetection(type="server_vad")
     )
