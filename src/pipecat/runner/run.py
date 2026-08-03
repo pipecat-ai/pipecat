@@ -119,6 +119,8 @@ from fastapi.responses import FileResponse, Response
 from loguru import logger
 
 from pipecat.runner.moq import (
+    DEFAULT_MOQ_BOT_ID,
+    DEFAULT_MOQ_CLIENT_ID,
     DEFAULT_MOQ_SERVE_BIND,
     DIRECT_MODE_PEER_WAIT_SECS,
     _build_moq_client_config,
@@ -1805,7 +1807,9 @@ def main(parser: argparse.ArgumentParser | None = None):
         help=(
             "MOQ namespace/room. Defaults to 'pipecat' in server mode. In client "
             "mode each session gets its own random namespace instead, since the "
-            "relay is shared — set this only to pin a well-known room."
+            "relay is shared — set this only to pin a well-known room. Direct "
+            "mode defaults to no namespace, putting calls at the relay root; "
+            "name one to scope the bot to a room and ignore other traffic."
         ),
     )
     parser.add_argument(
@@ -1822,13 +1826,13 @@ def main(parser: argparse.ArgumentParser | None = None):
     parser.add_argument(
         "--moq-bot-id",
         type=str,
-        default="response",
+        default=DEFAULT_MOQ_BOT_ID,
         help="This bot's participant id; it publishes under <namespace>/<bot-id> (default: response, the direction the bot carries)",
     )
     parser.add_argument(
         "--moq-client-id",
         type=str,
-        default="request",
+        default=DEFAULT_MOQ_CLIENT_ID,
         help="The peer's participant id; the bot subscribes to <namespace>/<client-id> (default: request)",
     )
     parser.add_argument(
