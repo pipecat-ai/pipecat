@@ -193,11 +193,9 @@ GrokTool = WebSearchTool | XSearchTool | FileSearchTool | FunctionTool | dict[st
 # Voice options
 #
 
-# Voice IDs are plain strings. The built-in catalogue is documented by xAI
-# (https://docs.x.ai/docs/guides/voice/agent; ``GET /v1/tts/voices`` returns the
-# full list), and a custom voice ID from the Custom Voices API works the same
-# way — so this stays an alias rather than a pinned Literal that would need a
-# release every time xAI ships a voice.
+# Voice IDs are plain strings: any built-in voice (xAI documents the catalogue at
+# https://docs.x.ai/docs/guides/voice/agent, and ``GET /v1/tts/voices`` returns it)
+# or a custom ID from the Custom Voices API. IDs are case-insensitive.
 GrokVoice = str
 
 

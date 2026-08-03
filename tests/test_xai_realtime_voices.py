@@ -15,6 +15,7 @@ def test_default_voice_matches_xai_default():
 
 
 def test_default_voice_reaches_the_wire():
+    """The default voice is serialized into the session update sent to xAI."""
     session = events.SessionUpdateEvent(session=events.SessionProperties()).model_dump(
         exclude_none=True
     )["session"]
