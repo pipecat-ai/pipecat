@@ -64,6 +64,7 @@ machine to get a second, independent call.
 - No `POST /start` in the network tab — the client connects the transport
   straight from the query params.
 - The runner logs `client '<uuid>' arrived, starting a bot` per visitor, and
-  each bot publishes `<namespace>/response/<uuid>` against the matching
-  `<namespace>/request/<uuid>`. Two browsers never share a path.
+  each bot publishes `response/<uuid>` against the matching `request/<uuid>`
+  (under the namespace, if `--moq-namespace` named one). Two browsers never
+  share a path.
 - Disconnecting is a clean shutdown: no `ERROR`, no traceback.

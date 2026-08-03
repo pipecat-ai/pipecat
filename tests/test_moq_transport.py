@@ -426,17 +426,19 @@ class TestMoqNamespaceResolution(unittest.TestCase):
 
 
 class TestMoqDirectMode(unittest.TestCase):
-    """Direct mode drops the ``/start`` rendezvous, so the namespace has to
-    be known before anyone connects: it travels to the browser in a URL
-    rather than a response body."""
+    """Direct mode drops the ``/start`` rendezvous, so whatever the browser
+    can't derive travels to it in a URL rather than a response body. The
+    per-call isolation comes from the session id the browser mints, which
+    leaves the namespace free to be a plain room name — or absent."""
 
-    def test_namespace_is_resolved_up_front(self):
-        """Unlike per-session client mode, direct mode can't leave this
-        unresolved — there's no request later to mint one on."""
+    def test_namespace_defaults_to_none(self):
+        """Unscoped calls sit at the relay root, so the client URL is just
+        the relay. The session id is what separates callers."""
         args = _moq_args(moq_connect="https://cdn.moq.dev/anon", moq_direct=True)
         self.assertTrue(_validate_moq_args(args))
-        self.assertIsNotNone(args.moq_namespace)
-        self.assertTrue(args.moq_namespace.startswith("pipecat-"))
+        self.assertEqual(args.moq_namespace, "")
+        self.assertEqual(_client_prefix(args), "request/")
+        self.assertEqual(_session_paths(args, "abc123"), ("response/abc123", "request/abc123"))
 
     def test_explicit_namespace_still_wins(self):
         args = _moq_args(
@@ -452,41 +454,51 @@ class TestMoqDirectMode(unittest.TestCase):
         self.assertFalse(_validate_moq_args(args))
 
     def test_per_session_paths_hang_off_the_browsers_id(self):
-        args = _moq_args(moq_connect="https://cdn.moq.dev/anon", moq_direct=True)
+        args = _moq_args(
+            moq_connect="https://cdn.moq.dev/anon", moq_direct=True, moq_namespace="room"
+        )
         self.assertTrue(_validate_moq_args(args))
-        ns = args.moq_namespace
 
         response, request = _session_paths(args, "abc123")
-        self.assertEqual(response, f"{ns}/response/abc123")
-        self.assertEqual(request, f"{ns}/request/abc123")
+        self.assertEqual(response, "room/response/abc123")
+        self.assertEqual(request, "room/request/abc123")
 
         # The request path must sit under the prefix the runner watches,
         # or the bot would never see the client that announced it.
         self.assertTrue(request.startswith(_client_prefix(args)))
 
     def test_sessions_do_not_collide(self):
-        """Two browsers on one namespace get disjoint path pairs."""
+        """Two browsers sharing a URL get disjoint path pairs."""
         args = _moq_args(moq_connect="https://cdn.moq.dev/anon", moq_direct=True)
         self.assertTrue(_validate_moq_args(args))
         first = _session_paths(args, "alice")
         second = _session_paths(args, "bob")
         self.assertEqual(len(set(first) | set(second)), 4)
 
-    def test_client_url_carries_everything_the_browser_cant_guess(self):
+    def test_client_url_omits_what_the_client_already_defaults_to(self):
+        """An unscoped run reduces to the relay alone."""
         args = _moq_args(moq_connect="https://cdn.moq.dev/anon", moq_direct=True)
         self.assertTrue(_validate_moq_args(args))
-        url = _direct_client_url(args, "http://localhost:7860")
-        parsed = urlparse(url)
+        query = parse_qs(urlparse(_direct_client_url(args, "http://localhost:7860")).query)
+        self.assertEqual(query, {"relay": ["https://cdn.moq.dev:443/anon"]})
+
+    def test_client_url_carries_what_the_browser_cant_guess(self):
+        args = _moq_args(
+            moq_connect="https://cdn.moq.dev/anon",
+            moq_direct=True,
+            moq_namespace="room",
+            moq_bot_id="agent",
+        )
+        self.assertTrue(_validate_moq_args(args))
+        parsed = urlparse(_direct_client_url(args, "http://localhost:7860"))
         query = parse_qs(parsed.query)
         # Points at the UI directly: the root redirect drops the query.
         self.assertEqual(parsed.path, "/client/")
         self.assertEqual(query["relay"], ["https://cdn.moq.dev:443/anon"])
-        self.assertEqual(query["ns"], [args.moq_namespace])
-        # The ids default to the direction each side carries, and the
-        # browser mirrors the bot's: it publishes the request, reads the
-        # response.
-        self.assertEqual(query["botId"], ["response"])
-        self.assertEqual(query["clientId"], ["request"])
+        self.assertEqual(query["ns"], ["room"])
+        self.assertEqual(query["botId"], ["agent"])
+        # Left at its default, so the client supplies it.
+        self.assertNotIn("clientId", query)
 
     def test_minted_namespace_is_a_single_path_segment(self):
         """The namespace is joined into ``<namespace>/<id>``; a stray
