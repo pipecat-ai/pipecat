@@ -937,9 +937,11 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         Args:
             data: Committed transcript data.
         """
-        # If timestamps are enabled, skip this message and wait for the
-        # committed_transcript_with_timestamps message which contains all the data
-        if self._include_timestamps:
+        # The server also sends committed_transcript_with_timestamps whenever
+        # timestamps or language detection is enabled, and only that message carries
+        # language_code. Skip this one so each segment is emitted exactly once, with
+        # the timestamped message as the single source of truth.
+        if self._include_timestamps or self._include_language_detection:
             return
 
         text = data.get("text", "").strip()
