@@ -937,10 +937,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         Args:
             data: Committed transcript data.
         """
-        # The server also sends committed_transcript_with_timestamps whenever
-        # timestamps or language detection is enabled, and only that message carries
-        # language_code. Skip this one so each segment is emitted exactly once, with
-        # the timestamped message as the single source of truth.
+        # The server pairs every commit with a committed_transcript_with_timestamps
+        # message whenever timestamps or language detection is enabled, and only that
+        # message carries language_code. Skip this one so each commit is emitted once.
         if self._include_timestamps or self._include_language_detection:
             return
 
@@ -976,10 +975,12 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
     async def _on_committed_transcript_with_timestamps(self, data: dict):
         """Handle committed transcript with word-level timestamps.
 
-        This message is sent when include_timestamps=true. The result data includes:
+        This message is sent when include_timestamps=true or
+        include_language_detection=true. The result data includes:
         - text: The transcribed text
         - language_code: Detected language (if available)
-        - words: Array of word objects with timing information:
+        - words: Array of word objects with timing information, null when only
+          language detection was requested:
             - text: The word text
             - start: Start time in seconds
             - end: End time in seconds
@@ -1006,8 +1007,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
         finalized = self._commit_strategy == CommitStrategy.MANUAL
 
-        # This message is sent after committed_transcript when include_timestamps=true.
-        # It contains the full transcript data including text and word-level timestamps.
         await self.emit_stt_usage_metrics()
         await self.push_frame(
             TranscriptionFrame(
