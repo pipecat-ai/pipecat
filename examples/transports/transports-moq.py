@@ -22,7 +22,7 @@ Usage:
     # Client mode — dial an external relay instead (works behind NAT,
     # since neither the bot nor the browser needs a reachable address):
     uv run python examples/transports/transports-moq.py \\
-        -t moq --moq-connect https://moq.example.com:4080/moq
+        -t moq --moq-connect https://cdn.moq.dev/anon
 
     # Then open http://localhost:7860 and click Connect.
 
@@ -31,7 +31,7 @@ Usage:
     # namespace ride in the URL printed at startup, so nothing has to
     # reach this process over HTTP:
     uv run python examples/transports/transports-moq.py \\
-        -t moq --moq-connect https://moq.example.com:4080/moq --moq-direct
+        -t moq --moq-connect https://cdn.moq.dev/anon --moq-direct
 """
 
 import os
