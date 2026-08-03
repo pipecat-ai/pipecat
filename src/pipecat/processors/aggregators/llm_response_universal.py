@@ -974,11 +974,13 @@ class LLMUserAggregator(LLMContextAggregator):
     def _warn_on_discarded_interruption_setting(
         self, service_name: str, recommended: UserTurnStrategies
     ):
-        """Warn when discarding a recommendation silently turns interruptions back on.
+        """Warn when (maybe unintentionally) overruling a service silently turns interruptions back on.
 
-        A service configured with ``should_interrupt=False`` carries that on its
-        recommendation, but user-provided strategies discard the recommendation
-        whole — so the pipeline would start interrupting with no indication why.
+        A service recommends turn strategies by putting them on its
+        ``ServiceMetadataFrame.user_turn_strategies``, and one configured with
+        ``should_interrupt=False`` carries that setting there. User-provided
+        strategies discard the recommendation whole — so the pipeline would
+        start interrupting with no indication why.
 
         Passing ``ExternalUserTurnStrategies`` explicitly was a safe way to opt
         out of the recommendation until 1.8.0, because the external start
