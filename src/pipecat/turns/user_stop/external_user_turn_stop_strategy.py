@@ -84,7 +84,7 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._text = ""
         self._user_speaking = False
         self._seen_interim_results = False
-        self._adopting = False
+        self._turn_announced_elsewhere = False
         self._turn_open = False
         self._event = asyncio.Event()
         self._task: asyncio.Task | None = None
@@ -118,7 +118,7 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._text = ""
         self._user_speaking = False
         self._seen_interim_results = False
-        self._adopting = False
+        self._turn_announced_elsewhere = False
         self._event.clear()
 
     async def setup(self, task_manager: BaseTaskManager):
@@ -150,13 +150,13 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
             Always returns CONTINUE so subsequent stop strategies are evaluated.
         """
         if isinstance(frame, ProposedUserStartedSpeakingFrame):
-            await self._handle_user_started_speaking(adopting=False)
+            await self._handle_user_started_speaking(announced_elsewhere=False)
         elif isinstance(frame, ProposedUserStoppedSpeakingFrame):
-            await self._handle_user_stopped_speaking(adopting=False)
+            await self._handle_user_stopped_speaking(announced_elsewhere=False)
         elif isinstance(frame, UserStartedSpeakingFrame):
-            await self._handle_user_started_speaking(adopting=True)
+            await self._handle_user_started_speaking(announced_elsewhere=True)
         elif isinstance(frame, UserStoppedSpeakingFrame):
-            await self._handle_user_stopped_speaking(adopting=True)
+            await self._handle_user_stopped_speaking(announced_elsewhere=True)
         elif isinstance(frame, InterimTranscriptionFrame):
             await self._handle_interim_transcription(frame)
         elif isinstance(frame, TranscriptionFrame):
@@ -164,15 +164,15 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
         return ProcessFrameResult.CONTINUE
 
-    async def _handle_user_started_speaking(self, *, adopting: bool):
+    async def _handle_user_started_speaking(self, *, announced_elsewhere: bool):
         """Handle the external signal that the user is speaking."""
         self._user_speaking = True
-        self._adopting = adopting
+        self._turn_announced_elsewhere = announced_elsewhere
 
-    async def _handle_user_stopped_speaking(self, *, adopting: bool):
+    async def _handle_user_stopped_speaking(self, *, announced_elsewhere: bool):
         """Handle the external signal that the user has stopped speaking."""
         self._user_speaking = False
-        self._adopting = adopting
+        self._turn_announced_elsewhere = announced_elsewhere
         await self._maybe_trigger_user_turn_stopped()
 
     async def _handle_interim_transcription(self, frame: InterimTranscriptionFrame):
@@ -209,16 +209,16 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
     async def _trigger_user_turn_stopped(self):
         """End the turn, emitting the turn frame unless it was already announced.
 
-        Reads ``_adopting`` rather than taking it as an argument: finalization
-        can land here from the transcript timeout above, long after the signal
-        that set it.
+        Reads the flag rather than taking it as an argument: finalization can
+        land here from the transcript timeout above, long after the signal that
+        set it.
         """
-        if self._adopting:
+        if self._turn_announced_elsewhere:
             logger.debug(f"{self}: adopting a user turn stop decided elsewhere")
         else:
             logger.debug(f"{self}: resolving a proposed user turn stop")
         await self.trigger_user_turn_stopped(
-            enable_user_speaking_frames=False if self._adopting else None
+            enable_user_speaking_frames=False if self._turn_announced_elsewhere else None
         )
 
     async def _maybe_trigger_user_turn_stopped(self):
