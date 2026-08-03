@@ -12,7 +12,7 @@ voice conversations. The Grok Voice Agent provides:
 
 - Real-time audio streaming with low latency
 - Built-in voice activity detection (VAD)
-- Multiple voice options (Ara, Rex, Sal, Eve, Leo)
+- Built-in and custom voice IDs
 - Built-in tools: web_search, x_search, file_search
 - Custom function calling
 
@@ -139,8 +139,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Configure Grok session properties
     session_properties = SessionProperties(
-        # Voice options: Ara, Rex, Sal, Eve, Leo
-        voice="Ara",
+        voice="rex",
         # Grok-specific built-in tools can be added here:
         # tools=[
         #     WebSearchTool(),  # Enable web search

@@ -140,7 +140,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting Grok Realtime persistent context bot")
 
     session_properties = SessionProperties(
-        voice="Ara",
+        voice="rex",
         turn_detection=TurnDetection(type="server_vad"),
         instructions="""You are a helpful and friendly AI assistant powered by Grok.
 

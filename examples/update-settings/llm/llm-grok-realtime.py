@@ -128,11 +128,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await worker.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
-        logger.info("Updating Grok Realtime LLM settings: voice='Rex'")
+        logger.info("Updating Grok Realtime LLM settings: voice='rex'")
         await worker.queue_frame(
             LLMUpdateSettingsFrame(
                 delta=GrokRealtimeLLMService.Settings(
-                    session_properties=events.SessionProperties(voice="Rex")
+                    session_properties=events.SessionProperties(voice="rex")
                 )
             )
         )
