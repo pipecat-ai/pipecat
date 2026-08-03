@@ -236,6 +236,48 @@ class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("grams", result)
 
 
+class TestExpandUnitsSingular(unittest.IsolatedAsyncioTestCase):
+    """A quantity of exactly one takes the singular form of the unit."""
+
+    async def test_singular_forms(self):
+        cases = {
+            "Only 1km left": "Only 1 kilometer left",
+            "Only 1mi left": "Only 1 mile left",
+            "Only 1ft left": "Only 1 foot left",
+            "Only 1in left": "Only 1 inch left",
+            "Only 1lb left": "Only 1 pound left",
+            "Only 1gb left": "Only 1 gigabyte left",
+            "Only 1mph left": "Only 1 mile per hour left",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await expand_units(text, "*"), expected)
+
+    async def test_singular_with_space(self):
+        result = await expand_units("1 km away", "*")
+        self.assertEqual(result, "1 kilometer away")
+
+    async def test_plural_forms_kept(self):
+        cases = {
+            "5km away": "5 kilometers away",
+            "0.5 mi away": "0.5 miles away",
+            "21 lb of flour": "21 pounds of flour",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await expand_units(text, "*"), expected)
+
+    async def test_decimal_one_is_plural(self):
+        """A decimal such as "1.0" reads as plural in speech, unlike a bare "1"."""
+        result = await expand_units("1.0km away", "*")
+        self.assertEqual(result, "1.0 kilometers away")
+
+    async def test_invariant_units_unchanged(self):
+        """Units whose singular and plural forms match expand identically."""
+        self.assertEqual(await expand_units("1hz tone", "*"), "1 hertz tone")
+        self.assertEqual(await expand_units("3 GHz processor", "*"), "3 gigahertz processor")
+
+
 class TestExpandUnitsUnambiguous(unittest.IsolatedAsyncioTestCase):
     """Units that are unambiguous even with a space before them should still expand."""
 
