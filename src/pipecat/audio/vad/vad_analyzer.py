@@ -182,12 +182,25 @@ class VADAnalyzer(ABC):
         Returns:
             Current VAD state after processing the buffer.
         """
+        self._vad_buffer += buffer
+
+        # Transports deliver audio in chunks smaller than one analysis frame
+        # (10 ms is 320 bytes at 16 kHz, while Silero needs 1024), so most calls
+        # only buffer. Hand off to the model thread once a full frame is ready.
+        if len(self._vad_buffer) < self._vad_frames_num_bytes:
+            return self._vad_state
+
         loop = asyncio.get_running_loop()
-        state = await loop.run_in_executor(self._executor, self._run_analyzer, buffer)
+        state = await loop.run_in_executor(self._executor, self._run_analyzer)
         return state
 
-    def _run_analyzer(self, buffer: bytes) -> VADState:
-        """Analyze audio buffer and return current VAD state."""
+    def _run_analyzer(self, buffer: bytes = b"") -> VADState:
+        """Analyze the buffered audio and return current VAD state.
+
+        Args:
+            buffer: Additional audio to buffer before analyzing. Subclasses that
+                override :meth:`analyze_audio` may pass the incoming chunk here.
+        """
         self._vad_buffer += buffer
 
         num_required_bytes = self._vad_frames_num_bytes
