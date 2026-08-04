@@ -428,8 +428,6 @@ def normalize_google_speech_adaptation(
     if converted_phrase_sets:
         normalized["phrase_sets"] = converted_phrase_sets
 
-    logger.debug("google_speech_adaptation phrase_sets: {}", normalized)
-
     return cloud_speech.SpeechAdaptation(normalized)
 
 
