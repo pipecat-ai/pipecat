@@ -15,7 +15,6 @@ from google.cloud.speech_v2.types import cloud_speech
 from pipecat.frames.frames import InterimTranscriptionFrame, TranscriptionFrame
 from pipecat.services.google.stt import (
     GoogleSTTService,
-    google_stt_model_supports_adaptation,
     normalize_google_speech_adaptation,
 )
 
@@ -82,13 +81,6 @@ async def test_google_final_result_emits_finalized_transcription_frame():
     assert isinstance(frames[1], TranscriptionFrame)
     assert frames[1].finalized is True
     assert transcriptions == [("hello", True, "en-US")]
-
-
-def test_google_stt_model_supports_adaptation():
-    assert google_stt_model_supports_adaptation("latest_long") is True
-    assert google_stt_model_supports_adaptation("telephony") is False
-    assert google_stt_model_supports_adaptation("TELEPHONY") is False
-    assert google_stt_model_supports_adaptation(None) is True
 
 
 def test_normalize_google_speech_adaptation_accepts_native_message():

@@ -363,11 +363,6 @@ def language_to_google_stt_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
-def google_stt_model_supports_adaptation(model: str | None) -> bool:
-    """Return whether a Google STT v2 model supports SpeechAdaptation."""
-    return (model or "").lower() != "telephony"
-
-
 def normalize_google_speech_adaptation(
     adaptation: dict[str, Any] | cloud_speech.SpeechAdaptation,
 ) -> cloud_speech.SpeechAdaptation:
@@ -445,7 +440,9 @@ class GoogleSTTSettings(STTSettings):
         enable_word_confidence: Include confidence scores for each word.
         enable_interim_results: Stream partial recognition results.
         enable_voice_activity_events: Detect voice activity in audio.
-        adaptation: Optional Google SpeechAdaptation payload.
+        adaptation: Optional Google SpeechAdaptation payload. Support varies by
+            model and language — see
+            https://cloud.google.com/speech-to-text/v2/docs/speech-to-text-supported-languages
     """
 
     languages: list[Language] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -932,15 +929,15 @@ class GoogleSTTService(STTService):
         self._stream_start_time = int(time.time() * 1000)
         self._new_stream = True
 
-        recognition_config_args = {
-            "explicit_decoding_config": cloud_speech.ExplicitDecodingConfig(
+        recognition_config = cloud_speech.RecognitionConfig(
+            explicit_decoding_config=cloud_speech.ExplicitDecodingConfig(
                 encoding=cloud_speech.ExplicitDecodingConfig.AudioEncoding.LINEAR16,
                 sample_rate_hertz=self.sample_rate,
                 audio_channel_count=1,
             ),
-            "language_codes": self._get_language_codes(),
-            "model": self._settings.model,
-            "features": cloud_speech.RecognitionFeatures(
+            language_codes=self._get_language_codes(),
+            model=self._settings.model,
+            features=cloud_speech.RecognitionFeatures(
                 enable_automatic_punctuation=self._settings.enable_automatic_punctuation,
                 enable_spoken_punctuation=self._settings.enable_spoken_punctuation,
                 enable_spoken_emojis=self._settings.enable_spoken_emojis,
@@ -948,22 +945,14 @@ class GoogleSTTService(STTService):
                 enable_word_time_offsets=self._settings.enable_word_time_offsets,
                 enable_word_confidence=self._settings.enable_word_confidence,
             ),
-        }
+        )
 
         speech_adaptation = self._get_speech_adaptation()
-        if speech_adaptation is not None and google_stt_model_supports_adaptation(
-            self._settings.model
-        ):
-            recognition_config_args["adaptation"] = speech_adaptation
-        elif speech_adaptation is not None:
-            logger.warning(
-                "Google STT model '{}' does not support SpeechAdaptation; "
-                "ignoring google_speech_adaptation.",
-                self._settings.model,
-            )
+        if speech_adaptation is not None:
+            recognition_config.adaptation = speech_adaptation
 
         self._config = cloud_speech.StreamingRecognitionConfig(
-            config=cloud_speech.RecognitionConfig(**recognition_config_args),
+            config=recognition_config,
             streaming_features=cloud_speech.StreamingRecognitionFeatures(
                 enable_voice_activity_events=self._settings.enable_voice_activity_events,
                 interim_results=self._settings.enable_interim_results,
