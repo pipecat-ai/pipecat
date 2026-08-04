@@ -363,14 +363,10 @@ def language_to_google_stt_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
-def normalize_google_speech_adaptation(
+def _normalize_speech_adaptation(
     adaptation: dict[str, Any] | cloud_speech.SpeechAdaptation,
 ) -> cloud_speech.SpeechAdaptation:
     """Normalize adaptation input to a SpeechAdaptation message.
-
-    Supports both:
-    - native v2 payloads (``phrase_sets`` with ``phrase_set``/``inline_phrase_set``)
-    - v1-style shortcut ``phrase_set_references`` (converted to v2)
 
     A ``phrase_sets`` entry may be a resource name string, an
     ``AdaptationPhraseSet`` object, or a bare inline phrase set; a single
@@ -390,22 +386,10 @@ def normalize_google_speech_adaptation(
 
     normalized = dict(adaptation)
 
-    references = normalized.pop("phrase_set_references", None)
-    if isinstance(references, str):
-        references = [references]
-    if isinstance(references, dict):
-        raise ValueError(
-            "Invalid Google SpeechAdaptation phrase_set_references: expected a resource "
-            "name string or a list of them."
-        )
-
     raw_phrase_sets = normalized.get("phrase_sets", [])
     if isinstance(raw_phrase_sets, (str, dict)):
         raw_phrase_sets = [raw_phrase_sets]
     phrase_sets = list(raw_phrase_sets)
-
-    if references:
-        phrase_sets.extend({"phrase_set": ref} for ref in references)
 
     converted_phrase_sets: list[dict[str, Any]] = []
     for phrase_set in phrase_sets:
@@ -645,9 +629,7 @@ class GoogleSTTService(STTService):
             default_settings.apply_update(settings)
 
         if is_given(default_settings.adaptation) and default_settings.adaptation is not None:
-            default_settings.adaptation = normalize_google_speech_adaptation(
-                default_settings.adaptation
-            )
+            default_settings.adaptation = _normalize_speech_adaptation(default_settings.adaptation)
 
         super().__init__(
             sample_rate=sample_rate,
@@ -752,17 +734,8 @@ class GoogleSTTService(STTService):
         adaptation = self._settings.adaptation
         if not is_given(adaptation) or adaptation is None:
             return None
-
-        if isinstance(adaptation, cloud_speech.SpeechAdaptation):
-            return adaptation
-
-        if isinstance(adaptation, dict):
-            return normalize_google_speech_adaptation(adaptation)
-
-        raise ValueError(
-            "Google STT adaptation must be a dict, SpeechAdaptation instance, or None. "
-            f"Got {type(adaptation).__name__}."
-        )
+        # Already a message: normalizing on the way in leaves nothing to convert.
+        return _normalize_speech_adaptation(adaptation)
 
     async def _reconnect_if_needed(self):
         """Reconnect the stream if it's currently active."""
@@ -820,7 +793,7 @@ class GoogleSTTService(STTService):
                 )
 
         if is_given(delta.adaptation) and delta.adaptation is not None:
-            delta.adaptation = normalize_google_speech_adaptation(delta.adaptation)
+            delta.adaptation = _normalize_speech_adaptation(delta.adaptation)
 
         changed = await super()._update_settings(delta)
 
