@@ -19,6 +19,15 @@ SERVICE_CONFIGS = {
         '        region=os.getenv("AWS_REGION")\n'
         "    )\n"
     ),
+    "azure_openai_stt": (
+        "AzureOpenAISTTService(\n"
+        '        api_key=os.getenv("AZURE_OPENAI_STT_API_KEY"),\n'
+        '        endpoint=os.getenv("AZURE_OPENAI_STT_ENDPOINT"),\n'
+        "        settings=AzureOpenAISTTService.Settings(\n"
+        '            model=os.getenv("AZURE_OPENAI_STT_MODEL", "gpt-4o-transcribe"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "azure_stt": (
         "AzureSTTService(\n"
         '        api_key=os.getenv("AZURE_SPEECH_API_KEY"),\n'
