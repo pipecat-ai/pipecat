@@ -11,7 +11,7 @@ plus one custom command and one client-emitted event.
 - **Read-side deixis**: select a paragraph, ask "review this", and the
   worker grounds in the selected text.
 - **Async fan-out**: a paragraph review spawns two peer workers (clarity
-  + tone) in parallel via `start_ui_job_group`. The in-flight card
+  + tone) in parallel via `request_job_group(..., ui=UIJobGroupOptions(...))`. The in-flight card
   streams each worker's progress.
 - **Custom UI command**: as each worker completes, `on_job_response`
   emits an `add_note` command with the worker's feedback; the client
