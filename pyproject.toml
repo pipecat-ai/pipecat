@@ -101,6 +101,7 @@ livekit = [ "livekit>=1.0.13,<2", "livekit-api>=1.0.5,<2", "tenacity>=8.2.3,<10.
 lmnt = []
 local = [ "pyaudio~=0.2.14" ]
 local-smart-turn = [ "coremltools>=8.0", "transformers>=4.48.0,<6", "torch>=2.5.0,<3", "torchaudio>=2.5.0,<3" ]
+maya = []
 mcp = [ "mcp[cli]>=1.11.0,<2" ]
 mem0 = [ "mem0ai>=2,<3" ]
 mistral = ["mistralai>=2.0.0,<3"]
