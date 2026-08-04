@@ -383,7 +383,13 @@ def normalize_google_speech_adaptation(
     normalized = dict(adaptation)
 
     references = normalized.pop("phrase_set_references", None)
-    phrase_sets = list(normalized.get("phrase_sets", []))
+    if isinstance(references, str):
+        references = [references]
+
+    raw_phrase_sets = normalized.get("phrase_sets", [])
+    if isinstance(raw_phrase_sets, str):
+        raw_phrase_sets = [raw_phrase_sets]
+    phrase_sets = list(raw_phrase_sets)
 
     if references:
         phrase_sets.extend({"phrase_set": ref} for ref in references)
@@ -625,6 +631,11 @@ class GoogleSTTService(STTService):
         if settings is not None:
             default_settings.apply_update(settings)
 
+        if is_given(default_settings.adaptation) and default_settings.adaptation is not None:
+            default_settings.adaptation = normalize_google_speech_adaptation(
+                default_settings.adaptation
+            )
+
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
@@ -681,9 +692,6 @@ class GoogleSTTService(STTService):
             raise ValueError("Project ID not found in credentials")
 
         self._client = speech_v2.SpeechAsyncClient(credentials=creds, client_options=client_options)
-
-        if not is_given(self._settings.adaptation):
-            self._settings.adaptation = None
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -781,8 +789,6 @@ class GoogleSTTService(STTService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
-        from pipecat.services.settings import is_given
-
         # If base set_language sent a Language value, convert to languages list
         if is_given(delta.language):
             delta.languages = [delta.language]
@@ -799,6 +805,9 @@ class GoogleSTTService(STTService):
                     DeprecationWarning,
                     stacklevel=2,
                 )
+
+        if is_given(delta.adaptation) and delta.adaptation is not None:
+            delta.adaptation = normalize_google_speech_adaptation(delta.adaptation)
 
         changed = await super()._update_settings(delta)
 

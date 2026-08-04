@@ -114,6 +114,16 @@ def test_normalize_google_speech_adaptation_converts_phrase_set_references():
     )
 
 
+@pytest.mark.parametrize("field", ["phrase_set_references", "phrase_sets"])
+def test_normalize_google_speech_adaptation_accepts_single_phrase_set_string(field):
+    phrase_set = "projects/test/locations/global/phraseSets/support-terms"
+
+    normalized = normalize_google_speech_adaptation({field: phrase_set})
+
+    assert len(normalized.phrase_sets) == 1
+    assert normalized.phrase_sets[0].phrase_set == phrase_set
+
+
 def test_normalize_google_speech_adaptation_converts_string_and_inline_phrase_sets():
     normalized = normalize_google_speech_adaptation(
         {
@@ -140,3 +150,22 @@ def test_normalize_google_speech_adaptation_converts_string_and_inline_phrase_se
 def test_normalize_google_speech_adaptation_rejects_invalid_phrase_set_entries():
     with pytest.raises(ValueError, match="Invalid Google SpeechAdaptation phrase_set entry"):
         normalize_google_speech_adaptation({"phrase_sets": [123]})
+
+
+def test_google_stt_rejects_invalid_adaptation_during_initialization():
+    settings = GoogleSTTService.Settings(adaptation={"phrase_sets": [{"phrases": ["hello"]}]})
+
+    with pytest.raises(TypeError, match="expected.*Phrase.*got.*str"):
+        GoogleSTTService(settings=settings)
+
+
+@pytest.mark.asyncio
+async def test_google_stt_rejects_invalid_runtime_adaptation_before_commit():
+    service = object.__new__(GoogleSTTService)
+    service._settings = GoogleSTTService.Settings(adaptation=None)
+    delta = GoogleSTTService.Settings(adaptation={"phrase_sets": [{"phrases": ["hello"]}]})
+
+    with pytest.raises(TypeError, match="expected.*Phrase.*got.*str"):
+        await service._update_settings(delta)
+
+    assert service._settings.adaptation is None
