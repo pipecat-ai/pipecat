@@ -905,19 +905,13 @@ class SpeechmaticsSTTService(STTService):
         """Handle StartOfTurn events.
 
         When Speechmatics STT detects the start of a new speaking turn, a StartOfTurn
-        event is triggered. This triggers bot interruption to stop any ongoing speech
-        synthesis and signals the start of user speech detection.
-
-        The service will:
-        - Send a BotInterruptionFrame upstream to stop bot speech
-        - Send a UserStartedSpeakingFrame downstream to notify other components
-        - Start metrics collection for measuring response times
+        event is triggered. The service proposes a turn start, which the user turn
+        strategies resolve into a UserStartedSpeakingFrame and an interruption.
 
         Args:
             message: the message payload.
         """
         logger.debug(f"{self} StartOfTurn received")
-        # await self.start_processing_metrics()
         await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
 
     async def _handle_end_of_turn(self, message: dict[str, Any]) -> None:
@@ -926,17 +920,13 @@ class SpeechmaticsSTTService(STTService):
         EndOfTurn events are triggered by Speechmatics STT when it concludes a
         speaking turn. This occurs either due to silence or reaching the
         end-of-turn confidence thresholds. These events provide the final
-        transcript for the completed turn.
-
-        The service will:
-        - Stop processing metrics collection
-        - Send a UserStoppedSpeakingFrame to signal turn completion
+        transcript for the completed turn. The service proposes a turn stop, which
+        the user turn strategies resolve into a UserStoppedSpeakingFrame.
 
         Args:
             message: the message payload.
         """
         logger.debug(f"{self} EndOfTurn received")
-        # await self.stop_processing_metrics()
         await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
     async def _handle_speakers_result(self, message: dict[str, Any]) -> None:

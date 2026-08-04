@@ -35,7 +35,6 @@ from pipecat.frames.frames import (
     StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -497,9 +496,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
         # Handle local VAD events when server-side VAD is disabled.
         if not self._server_vad_enabled:
-            if isinstance(frame, VADUserStartedSpeakingFrame):
-                await self.start_processing_metrics()
-            elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            if isinstance(frame, VADUserStoppedSpeakingFrame):
                 await self._commit_audio_buffer()
 
     # ------------------------------------------------------------------
@@ -766,7 +763,6 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
                 )
             )
             await self._handle_transcription_trace(transcript, True)
-            await self.stop_processing_metrics()
 
     @traced_stt
     async def _handle_transcription_trace(
@@ -795,7 +791,6 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         """
         logger.debug("Server VAD: speech started")
         await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
-        await self.start_processing_metrics()
 
     async def _handle_speech_stopped(self, evt: dict):
         """Handle server-side VAD speech stop.

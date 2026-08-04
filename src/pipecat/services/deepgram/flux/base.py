@@ -416,16 +416,6 @@ class DeepgramFluxSTTBase(STTService):
         await super().cleanup()
         await self._disconnect()
 
-    async def start_metrics(self):
-        """Start TTFB and processing metrics collection."""
-        # TTFB (Time To First Byte) metrics are currently disabled for Deepgram Flux.
-        # Ideally, TTFB should measure the time from when a user starts speaking
-        # until we receive the first transcript. However, Deepgram Flux delivers
-        # both the "user started speaking" event and the first transcript simultaneously,
-        # making this timing measurement meaningless in this context.
-        # await self.start_ttfb_metrics()
-        await self.start_processing_metrics()
-
     @traced_stt
     async def _handle_transcription(
         self, transcript: str, is_final: bool, language: Language | None = None
@@ -684,7 +674,6 @@ class DeepgramFluxSTTBase(STTService):
         The service will:
         - Propose a turn start, which the user turn strategies resolve into a
           UserStartedSpeakingFrame and an interruption
-        - Start metrics collection for measuring response times
 
         Args:
             transcript: maybe the first few words of the turn.
@@ -692,7 +681,6 @@ class DeepgramFluxSTTBase(STTService):
         logger.debug("User started speaking")
         self._user_is_speaking = True
         await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
-        await self.start_metrics()
         await self._call_event_handler("on_start_of_turn", transcript)
         if transcript:
             logger.trace(f"Start of turn transcript: {transcript}")
@@ -751,7 +739,6 @@ class DeepgramFluxSTTBase(STTService):
         The service will:
         - Create and send a final TranscriptionFrame with the complete transcript
         - Trigger transcription handling with tracing for metrics
-        - Stop processing metrics collection
         - Propose a turn stop, which the user turn strategies resolve into a
           UserStoppedSpeakingFrame
 
@@ -793,7 +780,6 @@ class DeepgramFluxSTTBase(STTService):
             )
 
         await self._handle_transcription(transcript, True, detected_language)
-        await self.stop_processing_metrics()
         await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
         await self._call_event_handler("on_end_of_turn", transcript)
 

@@ -504,7 +504,6 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         logger.debug("Cartesia Ink-2 ASR turn.start")
         self._user_is_speaking = True
         await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
-        await self.start_processing_metrics()
         await self._call_event_handler("on_turn_start", transcript)
 
     async def _handle_turn_update(self, data: dict):
@@ -555,7 +554,6 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
                 )
             )
             await self._handle_transcription(transcript, True, self._language)
-        await self.stop_processing_metrics()
         await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
         await self._call_event_handler("on_turn_end", transcript)
 

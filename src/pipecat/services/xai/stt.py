@@ -386,8 +386,6 @@ class XAISTTService(WebsocketSTTService):
             )
         )
         await self._trace_transcription(text, True, language)
-        if speech_final:
-            await self.stop_processing_metrics()
 
     def _language_for_frame(self) -> Language:
         """Return a Language enum suitable for transcription frames.

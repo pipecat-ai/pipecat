@@ -29,7 +29,6 @@ from pipecat.frames.frames import (
     StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -448,16 +447,14 @@ class SarvamSTTService(STTService):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames.
 
-        Handles VAD frames for TTFB tracking when using Pipecat's VAD
-        instead of Sarvam's built-in VAD.
+        Flushes on Pipecat's VAD turn end when Sarvam's built-in VAD signals
+        aren't driving the turn.
         """
         await super().process_frame(frame, direction)
 
         # Only handle VAD frames when not using Sarvam's VAD signals
         if not self._settings.vad_signals:
-            if isinstance(frame, VADUserStartedSpeakingFrame):
-                await self._start_metrics()
-            elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            if isinstance(frame, VADUserStoppedSpeakingFrame):
                 if self._socket_client:
                     await self._socket_client.flush()
 
@@ -821,7 +818,6 @@ class SarvamSTTService(STTService):
                 logger.debug(f"VAD Signal: {signal}, Occurred at: {timestamp}")
 
                 if signal == "START_SPEECH":
-                    await self._start_metrics()
                     logger.debug("User started speaking")
                     await self._call_event_handler("on_speech_started")
                     await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
@@ -862,9 +858,6 @@ class SarvamSTTService(STTService):
                             result=(message.dict() if hasattr(message, "dict") else str(message)),
                         )
                     )
-
-                await self.stop_processing_metrics()
-
         except Exception as e:
             await self.push_error(error_msg=f"Failed to handle message: {e}", exception=e)
             await self.stop_all_metrics()
@@ -923,7 +916,3 @@ class SarvamSTTService(STTService):
             await self._socket_client.translate(**method_kwargs)
         else:
             await self._socket_client.transcribe(**method_kwargs)
-
-    async def _start_metrics(self):
-        """Start processing metrics collection."""
-        await self.start_processing_metrics()

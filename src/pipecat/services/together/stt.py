@@ -28,7 +28,6 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -180,9 +179,7 @@ class TogetherSTTService(WebsocketSTTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self.start_processing_metrics()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             await self._commit_audio_buffer()
 
     # ------------------------------------------------------------------
@@ -358,7 +355,6 @@ class TogetherSTTService(WebsocketSTTService):
                 )
             )
             await self._handle_transcription_trace(transcript, True, self._settings.language)
-            await self.stop_processing_metrics()
 
     @traced_stt
     async def _handle_transcription_trace(
