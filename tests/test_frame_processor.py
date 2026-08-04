@@ -9,6 +9,7 @@ import unittest
 from dataclasses import dataclass, field
 
 from pipecat.frames.frames import (
+    CancelFrame,
     DataFrame,
     EndFrame,
     Frame,
@@ -472,6 +473,175 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_down_frames,
         )
         self.assertTrue(code_after_ran, "Code after broadcast_interruption() should execute")
+
+    async def test_lifecycle_endframe_bypasses_processing_pause(self):
+        """EndFrame must bypass a processing pause so teardown is not delayed.
+
+        A processor that has called pause_processing_frames() (e.g. a TTS
+        service pausing to avoid audio overlap) must still process EndFrame
+        immediately. Otherwise, when an upstream ParallelPipeline's EndFrame
+        synchronization buffers frames until all branches deliver EndFrame, an
+        EndFrame stuck behind the pause never reaches the sync sink and the
+        pipeline deadlocks (or stalls until a watchdog force-resumes).
+        """
+        received_frames: list[Frame] = []
+
+        class PauseOnTextProcessor(FrameProcessor):
+            """Pauses frame processing when it sees a TextFrame trigger."""
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, TextFrame):
+                    await self.pause_processing_frames()
+                await self.push_frame(frame, direction)
+
+        class CaptureFrameProcessor(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                received_frames.append(frame)
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([PauseOnTextProcessor(), CaptureFrameProcessor()])
+
+        frames_to_send = [
+            TextFrame(text="trigger_pause"),
+            # Give the pause time to latch before EndFrame arrives.
+            SleepFrame(sleep=0.05),
+            # EndFrame arrives while processing is paused; it must bypass the
+            # pause and reach the capture processor immediately.
+            EndFrame(),
+        ]
+
+        # If EndFrame does NOT bypass the pause, run_test will hang waiting for
+        # the pipeline to finish (EndFrame never reaches the sink). The
+        # asyncio.wait_for timeout catches that. We skip expected_down_frames
+        # validation because EndFrame is not filtered when send_end_frame=False.
+        await asyncio.wait_for(
+            run_test(
+                pipeline,
+                frames_to_send=frames_to_send,
+                send_end_frame=False,
+            ),
+            timeout=3.0,
+        )
+
+        end_frames = [f for f in received_frames if isinstance(f, EndFrame)]
+        self.assertEqual(len(end_frames), 1, "EndFrame should bypass the processing pause")
+
+    async def test_regular_dataframe_respects_processing_pause(self):
+        """A regular DataFrame must remain gated behind a processing pause.
+
+        This is the counterpart to the lifecycle-frame bypass: non-lifecycle
+        frames must still honor pause_processing_frames() and only flow once
+        resume_processing_frames() is called.
+        """
+        received_frames: list[Frame] = []
+        resumed = asyncio.Event()
+
+        class PauseAndResumeProcessor(FrameProcessor):
+            """Pauses on a trigger, then resumes after a short delay."""
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, TextFrame):
+                    await self.pause_processing_frames()
+
+                    # Resume shortly after pausing so the test can complete.
+                    async def resume_later():
+                        await asyncio.sleep(0.1)
+                        await self.resume_processing_frames()
+                        resumed.set()
+
+                    self.create_task(resume_later())
+                await self.push_frame(frame, direction)
+
+        class CaptureFrameProcessor(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                received_frames.append(frame)
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([PauseAndResumeProcessor(), CaptureFrameProcessor()])
+
+        # MarkerDataFrame is a regular (non-lifecycle) DataFrame; it must NOT
+        # arrive at the capture processor until after resume.
+        @dataclass
+        class MarkerDataFrame(DataFrame):
+            label: str = ""
+
+        frames_to_send = [
+            TextFrame(text="trigger_pause"),
+            # Give the pause time to latch before the marker frame is queued.
+            SleepFrame(sleep=0.05),
+            MarkerDataFrame(label="gated"),
+        ]
+
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[TextFrame, MarkerDataFrame],
+        )
+
+        # The marker frame must have arrived — but only after resume.
+        self.assertTrue(resumed.is_set(), "resume_processing_frames should have been called")
+        marker_frames = [f for f in received_frames if isinstance(f, MarkerDataFrame)]
+        self.assertEqual(len(marker_frames), 1, "MarkerDataFrame should arrive after resume")
+
+    async def test_cancelframe_bypasses_processing_pause(self):
+        """CancelFrame must bypass the frame processing pause.
+
+        CancelFrame is a SystemFrame, so it is handled by the input frame task
+        handler and gated by the system-frame pause. Like EndFrame, it must
+        bypass that pause so cancellation can flow through promptly during
+        teardown — a ParallelPipeline's CancelFrame synchronization has the
+        same buffering dependency as its EndFrame synchronization.
+        """
+        received_frames: list[Frame] = []
+
+        class PauseSystemOnTextProcessor(FrameProcessor):
+            """Pauses system-frame processing when it sees a TextFrame trigger."""
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, TextFrame):
+                    await self.pause_processing_system_frames()
+                await self.push_frame(frame, direction)
+
+        class CaptureFrameProcessor(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                received_frames.append(frame)
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([PauseSystemOnTextProcessor(), CaptureFrameProcessor()])
+
+        frames_to_send = [
+            TextFrame(text="trigger_pause"),
+            # Give the pause time to latch before CancelFrame arrives.
+            SleepFrame(sleep=0.05),
+            # CancelFrame is a SystemFrame; it must bypass the system-frame
+            # pause and reach the capture processor immediately.
+            CancelFrame(),
+        ]
+
+        # If CancelFrame does NOT bypass the pause, the pipeline will hang
+        # (CancelFrame never reaches the sink, so the worker's cancel wait
+        # never completes). We pass expected_down_frames=None because CancelFrame
+        # is a high-priority SystemFrame that may reach the sink before the
+        # regular TextFrame is processed, so ordering is not guaranteed.
+        await asyncio.wait_for(
+            run_test(
+                pipeline,
+                frames_to_send=frames_to_send,
+                send_end_frame=False,
+            ),
+            timeout=3.0,
+        )
+
+        cancel_frames = [f for f in received_frames if isinstance(f, CancelFrame)]
+        self.assertEqual(
+            len(cancel_frames), 1, "CancelFrame should bypass the system-frame processing pause"
+        )
 
 
 if __name__ == "__main__":
