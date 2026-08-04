@@ -1,0 +1,5 @@
+- ⚠️ TTS services that hand text off for synthesis elsewhere no longer report processing metrics — `ProcessingMetricsData` in `MetricsFrame`, surfaced as the `processing` field of RTVI's `metrics` message. This covers every `WebsocketTTSService` subclass plus `DeepgramSageMakerTTSService`, which makes the same handoff over a bidirectional HTTP/2 stream. Services that synthesize inside `run_tts` are unaffected and still report a real duration.
+
+  Processing time is measured around `run_tts`, so it only means something when synthesis finishes before `run_tts` returns. These services send the text and return, leaving audio to arrive on their receive task, so the window closed on the send and published ~0ms. TTFB and TTFA carry the latency for them, and are unaffected.
+
+  A new `TTSService.supports_processing_metrics` property carries this, defaulting to True. Override it to False on a custom service that hands synthesis off, or back to True on a websocket service that waits for the server to signal the end of synthesis before returning.

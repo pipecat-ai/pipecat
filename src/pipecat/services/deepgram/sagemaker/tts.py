@@ -144,6 +144,17 @@ class DeepgramSageMakerTTSService(TTSService):
         """
         return True
 
+    @property
+    def supports_processing_metrics(self) -> bool:
+        """Whether this service has a meaningful processing-time metric.
+
+        False: the SageMaker endpoint is driven over a bidirectional HTTP/2
+        stream, so ``run_tts`` sends the text and returns while audio arrives
+        on the receive task — the same handoff the websocket services make,
+        over a different transport.
+        """
+        return False
+
     async def start(self, frame: StartFrame):
         """Start the Deepgram SageMaker TTS service.
 
