@@ -6,6 +6,7 @@
 
 """Tests for Google STT streaming responses and adaptation handling."""
 
+import asyncio
 import time
 from types import SimpleNamespace
 
@@ -152,3 +153,50 @@ async def test_google_stt_rejects_invalid_runtime_adaptation_before_commit():
         await service._update_settings(delta)
 
     assert service._settings.adaptation is None
+
+
+async def connected_recognition_config(adaptation, model="latest_long"):
+    """Run _connect() on a bare service and return the config it built."""
+    service = object.__new__(GoogleSTTService)
+    service._settings = GoogleSTTService.Settings(
+        model=model,
+        enable_automatic_punctuation=True,
+        enable_spoken_punctuation=False,
+        enable_spoken_emojis=False,
+        profanity_filter=False,
+        enable_word_time_offsets=False,
+        enable_word_confidence=False,
+        enable_interim_results=True,
+        enable_voice_activity_events=False,
+        adaptation=adaptation,
+    )
+    service._sample_rate = 16000
+    service._get_language_codes = lambda: ["en-US"]
+    service._call_event_handler = lambda *args, **kwargs: asyncio.sleep(0)
+
+    def create_task(coro):
+        coro.close()
+
+    service.create_task = create_task
+
+    await service._connect()
+
+    return service._config.config
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["latest_long", "telephony"])
+async def test_google_connect_sends_adaptation_for_every_model(model):
+    phrase_set = "projects/test/locations/global/phraseSets/catalog"
+
+    config = await connected_recognition_config({"phrase_sets": [phrase_set]}, model=model)
+
+    assert config.model == model
+    assert config.adaptation.phrase_sets[0].phrase_set == phrase_set
+
+
+@pytest.mark.asyncio
+async def test_google_connect_leaves_adaptation_unset_when_not_configured():
+    config = await connected_recognition_config(None)
+
+    assert "adaptation" not in config
