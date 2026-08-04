@@ -83,9 +83,24 @@ class TurnDetection(BaseModel):
 
     Parameters:
         type: Detection type, must be "server_vad" or None for manual.
+        threshold: Voice activity detection threshold (0.1-0.9, server default
+            0.85). ``None`` (the default) leaves the field unset and lets the
+            server pick.
+        prefix_padding_ms: Audio to include before detected speech starts, in
+            milliseconds (0-10000, server default 333). ``None`` leaves the
+            field unset.
+        silence_duration_ms: Silence needed to detect the end of a turn, in
+            milliseconds (0-10000). ``None`` leaves the field unset.
+        idle_timeout_ms: Silence after the agent finishes speaking, after which
+            the model proactively re-engages the user. ``None`` leaves the field
+            unset (no re-engagement).
     """
 
     type: Literal["server_vad"] | None = "server_vad"
+    threshold: float | None = None
+    prefix_padding_ms: int | None = None
+    silence_duration_ms: int | None = None
+    idle_timeout_ms: int | None = None
 
 
 #
@@ -93,14 +108,34 @@ class TurnDetection(BaseModel):
 #
 
 
+class InputAudioTranscription(BaseModel):
+    """Configuration for input audio transcription.
+
+    Parameters:
+        language_hint: BCP-47 language code, e.g. ``"ja"`` or ``"es-MX"``, used
+            to bias ASR towards that language. ``None`` (the default) leaves the
+            field unset.
+        keyterms: Domain-specific terms to bias the transcriber towards (proper
+            nouns, product names). Up to 100 terms of at most 50 characters.
+    """
+
+    # ``model`` is deliberately absent: setting it switches the server onto the
+    # `conversation.item.input_audio_transcription.updated` event, which this
+    # service does not handle yet.
+    language_hint: str | None = None
+    keyterms: list[str] | None = None
+
+
 class AudioInput(BaseModel):
     """Audio input configuration.
 
     Parameters:
         format: The format configuration for input audio.
+        transcription: Configuration for input audio transcription.
     """
 
     format: PCMAudioFormat | PCMUAudioFormat | PCMAAudioFormat | None = None
+    transcription: InputAudioTranscription | None = None
 
 
 class AudioOutput(BaseModel):
@@ -108,9 +143,13 @@ class AudioOutput(BaseModel):
 
     Parameters:
         format: The format configuration for output audio.
+        speed: Playback speed multiplier for the model's spoken response
+            (0.7-1.5, server default 1.0). ``None`` (the default) leaves the
+            field unset and lets the server pick.
     """
 
     format: PCMAudioFormat | PCMUAudioFormat | PCMAAudioFormat | None = None
+    speed: float | None = None
 
 
 class AudioConfiguration(BaseModel):
@@ -123,6 +162,26 @@ class AudioConfiguration(BaseModel):
 
     input: AudioInput | None = None
     output: AudioOutput | None = None
+
+
+#
+# Reasoning configuration
+#
+
+
+class Reasoning(BaseModel):
+    """Reasoning configuration for reasoning-capable Grok voice models.
+
+    Parameters:
+        effort: Whether the model applies reasoning before responding
+            (server default ``"high"``). ``None`` (the default) leaves the
+            field unset. Only reasoning-capable models accept this field.
+    """
+
+    # The Literal documents the two values xAI defines today; ``| str`` is what
+    # makes the field permissive, so a new effort level works without waiting
+    # for a Pipecat release. Same shape as openai/realtime/events.py.
+    effort: Literal["none", "high"] | str | None = None
 
 
 #
@@ -216,6 +275,8 @@ class SessionProperties(BaseModel):
         turn_detection: Configuration for turn detection. Defaults to server-side VAD.
             Set to None for manual turn detection.
         audio: Configuration for input and output audio.
+        reasoning: Reasoning configuration. Only supported by reasoning-capable
+            models; ``None`` (the default) leaves the field unset.
         tools: Available tools for the assistant (web_search, x_search, file_search, function).
     """
 
@@ -228,6 +289,7 @@ class SessionProperties(BaseModel):
         default_factory=lambda: TurnDetection(type="server_vad")
     )
     audio: AudioConfiguration | None = None
+    reasoning: Reasoning | None = None
     # Tools provided by the user may be a ToolsSchema or a plain list of standard
     # tools (the validator below normalizes that to a ToolsSchema); a list of
     # provider-native GrokTool objects passes through.

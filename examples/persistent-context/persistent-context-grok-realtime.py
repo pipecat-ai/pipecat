@@ -141,7 +141,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     session_properties = SessionProperties(
         voice="rex",
-        turn_detection=TurnDetection(type="server_vad"),
+        # Server-side VAD is on by default; silence_duration_ms tunes how long a
+        # pause has to be before Grok treats the turn as finished.
+        turn_detection=TurnDetection(type="server_vad", silence_duration_ms=1000),
         instructions="""You are a helpful and friendly AI assistant powered by Grok.
 
 Your voice and personality should be warm and engaging, with a lively and playful tone.

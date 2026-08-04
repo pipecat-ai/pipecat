@@ -454,10 +454,17 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             props.audio.input = events.AudioInput(
                 format=events.PCMAudioFormat(rate=input_sample_rate)
             )
+        elif not props.audio.input.format:
+            # The user supplied an AudioInput for its other fields (e.g.
+            # transcription) without a format — fill the format in rather than
+            # leaving the session without a sample rate.
+            props.audio.input.format = events.PCMAudioFormat(rate=input_sample_rate)
         if not props.audio.output:
             props.audio.output = events.AudioOutput(
                 format=events.PCMAudioFormat(rate=output_sample_rate)
             )
+        elif not props.audio.output.format:
+            props.audio.output.format = events.PCMAudioFormat(rate=output_sample_rate)
 
     async def start(self, frame: StartFrame):
         """Start the service and establish WebSocket connection.
