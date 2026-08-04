@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from loguru import logger
 from websockets.asyncio.client import connect as websocket_connect
 
+from pipecat.services.openai.realtime import events
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 
 
@@ -50,6 +51,9 @@ class AzureRealtimeLLMService(OpenAIRealtimeLLMService):
         super().__init__(base_url=base_url, api_key=api_key, **kwargs)
         self.api_key = api_key
         self.base_url = base_url
+
+    def _build_response_create_event(self) -> events.ResponseCreateEvent:
+        return events.ResponseCreateEvent()
 
     async def _connect(self):
         try:
