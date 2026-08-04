@@ -116,6 +116,20 @@ def test_normalize_google_speech_adaptation_accepts_single_phrase_set_string(fie
     assert normalized.phrase_sets[0].phrase_set == phrase_set
 
 
+def test_normalize_google_speech_adaptation_accepts_single_inline_phrase_set():
+    normalized = normalize_google_speech_adaptation(
+        {"phrase_sets": {"phrases": [{"value": "pipecat"}]}}
+    )
+
+    assert len(normalized.phrase_sets) == 1
+    assert normalized.phrase_sets[0].inline_phrase_set.phrases[0].value == "pipecat"
+
+
+def test_normalize_google_speech_adaptation_rejects_mapping_phrase_set_references():
+    with pytest.raises(ValueError, match="phrase_set_references"):
+        normalize_google_speech_adaptation({"phrase_set_references": {"phrases": ["hello"]}})
+
+
 def test_normalize_google_speech_adaptation_converts_string_and_inline_phrase_sets():
     normalized = normalize_google_speech_adaptation(
         {

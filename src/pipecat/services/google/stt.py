@@ -371,6 +371,19 @@ def normalize_google_speech_adaptation(
     Supports both:
     - native v2 payloads (``phrase_sets`` with ``phrase_set``/``inline_phrase_set``)
     - v1-style shortcut ``phrase_set_references`` (converted to v2)
+
+    A ``phrase_sets`` entry may be a resource name string, an
+    ``AdaptationPhraseSet`` object, or a bare inline phrase set; a single
+    entry may be given in place of a list.
+
+    Args:
+        adaptation: A ``SpeechAdaptation`` message, or a dict payload to convert.
+
+    Returns:
+        The equivalent ``SpeechAdaptation`` message.
+
+    Raises:
+        ValueError: If the payload has a shape Google's API can't represent.
     """
     if isinstance(adaptation, cloud_speech.SpeechAdaptation):
         return adaptation
@@ -380,9 +393,14 @@ def normalize_google_speech_adaptation(
     references = normalized.pop("phrase_set_references", None)
     if isinstance(references, str):
         references = [references]
+    if isinstance(references, dict):
+        raise ValueError(
+            "Invalid Google SpeechAdaptation phrase_set_references: expected a resource "
+            "name string or a list of them."
+        )
 
     raw_phrase_sets = normalized.get("phrase_sets", [])
-    if isinstance(raw_phrase_sets, str):
+    if isinstance(raw_phrase_sets, (str, dict)):
         raw_phrase_sets = [raw_phrase_sets]
     phrase_sets = list(raw_phrase_sets)
 
