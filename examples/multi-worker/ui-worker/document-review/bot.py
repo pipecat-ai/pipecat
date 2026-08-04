@@ -31,7 +31,7 @@ Architecture::
     ReviewWorker (ReplyToolMixin + UIWorker, keep_history=True):
       ├── inherited: reply(answer, scroll_to, highlight, select_text, fills, click)
       ├── @tool start_review(answer, paragraph_ref, paragraph_text)
-      │     └── start_ui_job_group("clarity", "tone", ...)
+      │     └── request_job_group("clarity", "tone", ui=UIJobGroupOptions(...))
       ├── @ui_event("note_click") → scroll_to + select_text(ref)
       └── on_job_response → emit add_note for each reviewer that completes
 
@@ -85,6 +85,7 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.workers.base_ui_worker import UIJobGroupOptions
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm import tool
 from pipecat.workers.runner import WorkerRunner
@@ -353,7 +354,7 @@ class ReviewWorker(ReplyToolMixin, UIWorker):
     ):
         """Kick off a parallel review of one paragraph.
 
-        Spawns the clarity and tone workers via ``start_ui_job_group``.
+        Spawns the clarity and tone workers via ``request_job_group``.
         Workers run in the background; their progress is forwarded to the
         page automatically. As each completes, ``on_job_response``
         translates the response into an ``add_note`` UI command.
@@ -367,11 +368,11 @@ class ReviewWorker(ReplyToolMixin, UIWorker):
                 this directly.
         """
         logger.info(f"{self}: start_review(ref={paragraph_ref!r})")
-        job_id = await self.start_ui_job_group(
+        job_id = await self.request_job_group(
             "clarity",
             "tone",
             payload={"ref": paragraph_ref, "text": paragraph_text},
-            label=f"Reviewing ¶ {paragraph_ref}",
+            ui=UIJobGroupOptions(label=f"Reviewing ¶ {paragraph_ref}"),
         )
         # Remember which paragraph this review is for so we can attach
         # each worker's response to the right note.
