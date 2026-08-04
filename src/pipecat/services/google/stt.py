@@ -440,8 +440,20 @@ class GoogleSTTSettings(STTSettings):
         enable_word_confidence: Include confidence scores for each word.
         enable_interim_results: Stream partial recognition results.
         enable_voice_activity_events: Detect voice activity in audio.
-        adaptation: Optional Google SpeechAdaptation payload. Support varies by
-            model and language — see
+        adaptation: Phrase sets biasing recognition toward specific words, as a
+            ``SpeechAdaptation`` message or an equivalent dict. Each
+            ``phrase_sets`` entry is either the resource name of a phrase set or
+            an inline one::
+
+                adaptation={
+                    "phrase_sets": [
+                        "projects/my-project/locations/global/phraseSets/catalog",
+                        {"phrases": [{"value": "pipecat", "boost": 15.0}]},
+                    ]
+                }
+
+            Referenced phrase sets must live in the same location as the
+            service. Support varies by model and language — see
             https://cloud.google.com/speech-to-text/v2/docs/speech-to-text-supported-languages
     """
 
