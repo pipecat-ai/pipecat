@@ -520,9 +520,8 @@ class TestExpandNumbers(unittest.IsolatedAsyncioTestCase):
         self.assertIn("7 5", result)
 
     async def test_trailing_fractional_zero_is_spoken(self):
-        # Handing the decimal to num2words as a float loses a trailing zero, because
-        # float("1.0") is 1.0 and num2words returns the bare "one". Every written digit
-        # has to be spoken -- the above-cutoff branch already does this.
+        # Every written digit is spoken, trailing zeros included -- the above-cutoff
+        # branch reads fractions the same way.
         transform = expand_numbers(digit_cutoff=2025)
         cases = {
             "1.0": "one point zero",
@@ -537,8 +536,8 @@ class TestExpandNumbers(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(await transform(text, "*"), expected)
 
     async def test_fractions_without_trailing_zeros_unchanged(self):
-        # Reading the fraction digit by digit must not change any decimal that already
-        # spoke correctly; num2words renders fractional digits one at a time too.
+        # The digit-by-digit reading covers every decimal, not just the ones with a
+        # trailing zero.
         transform = expand_numbers(digit_cutoff=None)
         cases = {
             "3.5": "three point five",
@@ -556,9 +555,9 @@ class TestUnitsAndNumbersComposition(unittest.IsolatedAsyncioTestCase):
     """``expand_units`` and ``expand_numbers`` have to agree on decimal quantities.
 
     ``expand_units`` keeps the plural for a decimal such as "1.0" because it reads as
-    "one point zero" in speech. ``expand_numbers`` runs after it in the default
-    ``VoiceFormatter`` order, so if it renders "1.0" as the single word "one" the two
-    transforms disagree and the output is ungrammatical: "one kilometers".
+    "one point zero" in speech, and ``expand_numbers`` runs after it in the default
+    ``VoiceFormatter`` order. Both have to spell the decimal out the same way, or the
+    composed output is ungrammatical: "one kilometers".
     """
 
     async def test_decimal_one_agrees_with_plural_unit(self):

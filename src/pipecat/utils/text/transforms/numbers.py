@@ -56,12 +56,9 @@ def expand_numbers(
             return result
 
         if frac_str:
-            # Read the fraction digit by digit rather than handing the decimal to
-            # num2words as a float. float("1.0") is 1.0, so num2words returns the bare
-            # "one" and the fractional zero disappears -- "1.0km" reads as "one
-            # kilometers" once expand_units has chosen the plural for the decimal.
-            # num2words already speaks fractional digits one at a time, so this only
-            # changes the trailing-zero case.
+            # Reading the fraction one digit at a time keeps trailing zeros audible,
+            # which also keeps a decimal agreeing with the plural unit expand_units
+            # picks for it ("1.0 kilometers").
             return f"{num2words(whole, lang='en')} point " + " ".join(
                 num2words(int(digit), lang="en") for digit in frac_str
             )
