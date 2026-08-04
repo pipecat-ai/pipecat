@@ -519,6 +519,71 @@ class TestExpandNumbers(unittest.IsolatedAsyncioTestCase):
         self.assertIn("point", result)
         self.assertIn("7 5", result)
 
+    async def test_trailing_fractional_zero_is_spoken(self):
+        # Every written digit is spoken, trailing zeros included -- the above-cutoff
+        # branch reads fractions the same way.
+        transform = expand_numbers(digit_cutoff=2025)
+        cases = {
+            "1.0": "one point zero",
+            "1.00": "one point zero zero",
+            "2.0": "two point zero",
+            "0.50": "zero point five zero",
+            "1.10": "one point one zero",
+            "10.0": "ten point zero",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await transform(text, "*"), expected)
+
+    async def test_fractions_without_trailing_zeros_unchanged(self):
+        # The digit-by-digit reading covers every decimal, not just the ones with a
+        # trailing zero.
+        transform = expand_numbers(digit_cutoff=None)
+        cases = {
+            "3.5": "three point five",
+            "1.05": "one point zero five",
+            "1.25": "one point two five",
+            "12.345": "twelve point three four five",
+            "5.0001": "five point zero zero zero one",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await transform(text, "*"), expected)
+
+
+class TestUnitsAndNumbersComposition(unittest.IsolatedAsyncioTestCase):
+    """``expand_units`` and ``expand_numbers`` have to agree on decimal quantities.
+
+    ``expand_units`` keeps the plural for a decimal such as "1.0" because it reads as
+    "one point zero" in speech, and ``expand_numbers`` runs after it in the default
+    ``VoiceFormatter`` order. Both have to spell the decimal out the same way, or the
+    composed output is ungrammatical: "one kilometers".
+    """
+
+    async def test_decimal_one_agrees_with_plural_unit(self):
+        formatter = VoiceFormatter(expand_numbers=True)
+        cases = {
+            "1.0km left": "one point zero kilometers left",
+            "1.0kg of flour": "one point zero kilograms of flour",
+            "1.0 mi away": "one point zero miles away",
+            "1.00km left": "one point zero zero kilometers left",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await formatter(text, "*"), expected)
+
+    async def test_singular_and_plural_quantities_still_agree(self):
+        formatter = VoiceFormatter(expand_numbers=True)
+        cases = {
+            "1km left": "one kilometer left",
+            "2.0km left": "two point zero kilometers left",
+            "1.5km left": "one point five kilometers left",
+            "1.0hz tone": "one point zero hertz tone",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await formatter(text, "*"), expected)
+
 
 if __name__ == "__main__":
     unittest.main()
