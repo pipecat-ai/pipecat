@@ -14,6 +14,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
+    from pipecat.workers.base_ui_worker import UIJobGroupOptions
     from pipecat.workers.base_worker import BaseWorker
 
 
@@ -186,6 +187,7 @@ class JobGroupContext:
         payload: dict | None = None,
         timeout: float | None = None,
         cancel_on_error: bool = True,
+        ui: UIJobGroupOptions | None = None,
     ):
         """Initialize the JobGroupContext.
 
@@ -198,6 +200,9 @@ class JobGroupContext:
                 ready-wait and job execution.
             cancel_on_error: Whether to cancel the group if a worker
                 errors. Defaults to True.
+            ui: Optional client-visibility options. When set, the group's
+                lifecycle is surfaced to the UI client as ``ui-job-group``
+                envelopes (see ``UIJobGroupOptions``).
         """
         self._worker = worker
         self._worker_names = worker_names
@@ -205,6 +210,7 @@ class JobGroupContext:
         self._payload = payload
         self._timeout = timeout
         self._cancel_on_error = cancel_on_error
+        self._ui = ui
         self._group: JobGroup | None = None
 
     @property
@@ -233,12 +239,16 @@ class JobGroupContext:
         return event
 
     async def __aenter__(self) -> JobGroupContext:
+        # ``ui`` is only understood by ``BaseUIWorker``'s override; omit it
+        # entirely for plain workers (where it is always ``None``).
+        ui_kwargs = {"ui": self._ui} if self._ui is not None else {}
         self._group = await self._worker.create_job_group_and_request_job(
             list(self._worker_names),
             name=self._name,
             payload=self._payload,
             timeout=self._timeout,
             cancel_on_error=self._cancel_on_error,
+            **ui_kwargs,
         )
         self._group.event_queue = asyncio.Queue()
         return self
@@ -289,6 +299,7 @@ class JobContext:
         name: str | None = None,
         payload: dict | None = None,
         timeout: float | None = None,
+        ui: UIJobGroupOptions | None = None,
     ):
         """Initialize the JobContext.
 
@@ -299,12 +310,16 @@ class JobContext:
             payload: Optional structured data describing the work.
             timeout: Optional timeout in seconds covering both the
                 ready-wait and job execution.
+            ui: Optional client-visibility options. When set, the job's
+                lifecycle is surfaced to the UI client as ``ui-job-group``
+                envelopes (see ``UIJobGroupOptions``).
         """
         self._worker = worker
         self._worker_name = worker_name
         self._name = name
         self._payload = payload
         self._timeout = timeout
+        self._ui = ui
         self._group: JobGroup | None = None
 
     @property
@@ -333,12 +348,14 @@ class JobContext:
         return JobEvent(type=event.type, data=event.data)
 
     async def __aenter__(self) -> JobContext:
+        ui_kwargs = {"ui": self._ui} if self._ui is not None else {}
         self._group = await self._worker.create_job_group_and_request_job(
             [self._worker_name],
             name=self._name,
             payload=self._payload,
             timeout=self._timeout,
             cancel_on_error=True,
+            **ui_kwargs,
         )
         self._group.event_queue = asyncio.Queue()
         return self
