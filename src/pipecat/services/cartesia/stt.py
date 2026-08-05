@@ -277,7 +277,7 @@ class CartesiaSTTService(WebsocketSTTService):
         url_parts = urllib.parse.urlsplit(base_url if "//" in base_url else f"//{base_url}")
         self._base_url = url_parts.netloc or "api.cartesia.ai"
         self._scheme = url_parts.scheme or "wss"
-        self._extra_headers = extra_headers or {}
+        self._extra_headers = dict(extra_headers) if extra_headers else {}
         self._receive_task = None
 
         # Init-only audio config (not runtime-updatable).

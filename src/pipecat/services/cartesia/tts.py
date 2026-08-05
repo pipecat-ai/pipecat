@@ -234,6 +234,7 @@ class CartesiaTTSService(WebsocketTTSService):
         container: str = "raw",
         max_buffer_delay_ms: int | None = None,
         params: InputParams | None = None,
+        extra_headers: dict[str, str] | None = None,
         settings: Settings | None = None,
         text_aggregation_mode: TextAggregationMode | None = None,
         aggregate_sentences: bool | None = None,
@@ -272,6 +273,8 @@ class CartesiaTTSService(WebsocketTTSService):
                     Use ``settings=CartesiaTTSService.Settings(...)`` instead. Will
                     be removed in 2.0.0.
 
+            extra_headers: Optional additional HTTP headers to send with the
+                WebSocket handshake.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             text_aggregation_mode: How to aggregate incoming text before synthesis.
@@ -351,6 +354,7 @@ class CartesiaTTSService(WebsocketTTSService):
         self._api_key = api_key
         self._cartesia_version = cartesia_version
         self._url = url
+        self._extra_headers = dict(extra_headers) if extra_headers else {}
 
         # Audio output format — init-only, not runtime-updatable
         self._output_container = container
@@ -554,7 +558,8 @@ class CartesiaTTSService(WebsocketTTSService):
                 return
             logger.debug("Connecting to Cartesia TTS")
             self._websocket = await self._websocket_connect(
-                f"{self._url}?api_key={self._api_key}&cartesia_version={self._cartesia_version}"
+                f"{self._url}?api_key={self._api_key}&cartesia_version={self._cartesia_version}",
+                additional_headers=self._extra_headers,
             )
             await self._call_event_handler("on_connected")
         except Exception as e:
