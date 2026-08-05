@@ -558,8 +558,12 @@ class CartesiaTTSService(WebsocketTTSService):
                 return
             logger.debug("Connecting to Cartesia TTS")
             self._websocket = await self._websocket_connect(
-                f"{self._url}?api_key={self._api_key}&cartesia_version={self._cartesia_version}",
-                additional_headers=self._extra_headers,
+                self._url,
+                additional_headers={
+                    "X-API-Key": self._api_key,
+                    "Cartesia-Version": self._cartesia_version,
+                    **self._extra_headers,
+                },
             )
             await self._call_event_handler("on_connected")
         except Exception as e:
