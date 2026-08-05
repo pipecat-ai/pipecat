@@ -208,6 +208,7 @@ class CartesiaSTTService(WebsocketSTTService):
         encoding: str = "pcm_s16le",
         sample_rate: int | None = None,
         live_options: CartesiaLiveOptions | None = None,
+        extra_headers: dict[str, str] | None = None,
         settings: Settings | None = None,
         ttfs_p99_latency: float | None = CARTESIA_TTFS_P99,
         **kwargs,
@@ -216,7 +217,8 @@ class CartesiaSTTService(WebsocketSTTService):
 
         Args:
             api_key: Authentication key for Cartesia API.
-            base_url: Custom API endpoint URL. If empty, uses default.
+            base_url: Custom API endpoint, either a bare host ("api.cartesia.ai") or a
+                URL with a scheme ("ws://localhost:8000"). If empty, uses default.
             encoding: Audio encoding format. Defaults to "pcm_s16le".
             sample_rate: Audio sample rate in Hz. If None, uses the pipeline
                 sample rate.
@@ -227,6 +229,8 @@ class CartesiaSTTService(WebsocketSTTService):
                     and direct init parameters for encoding/sample_rate instead.
                     Will be removed in 2.0.0.
 
+            extra_headers: Additional headers to send on the websocket handshake. Merged
+                after the default headers, so it can override them.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
@@ -268,7 +272,12 @@ class CartesiaSTTService(WebsocketSTTService):
         )
 
         self._api_key = api_key
-        self._base_url = base_url or "api.cartesia.ai"
+        # Accept either a bare host ("api.cartesia.ai") or a full URL carrying a
+        # scheme ("ws://localhost:8000"); urlsplit only finds a netloc after "//".
+        url_parts = urllib.parse.urlsplit(base_url if "//" in base_url else f"//{base_url}")
+        self._base_url = url_parts.netloc or "api.cartesia.ai"
+        self._scheme = url_parts.scheme or "wss"
+        self._extra_headers = extra_headers or {}
         self._receive_task = None
 
         # Init-only audio config (not runtime-updatable).
@@ -412,8 +421,14 @@ class CartesiaSTTService(WebsocketSTTService):
             # Cartesia expects spaces inside a keyterm as %20, which urlencode
             # only emits with quote_via=quote.
             query = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
-            ws_url = f"wss://{self._base_url}/stt/websocket?{query}"
-            headers = {"Cartesia-Version": "2026-03-01", "X-API-Key": self._api_key}
+            ws_url = urllib.parse.urlunsplit(
+                (self._scheme, self._base_url, "/stt/websocket", query, "")
+            )
+            headers = {
+                "Cartesia-Version": "2026-03-01",
+                "X-API-Key": self._api_key,
+                **self._extra_headers,
+            }
 
             self._websocket = await self._websocket_connect(ws_url, additional_headers=headers)
             await self._call_event_handler("on_connected")
