@@ -51,10 +51,8 @@ target, or an explicit "No replacement." — enforced by
 ``tests/test_deprecation_markers.py``::
 
     .. deprecated:: 1.3.0
-        Use :class:`PipelineWorker` instead.        # rename / use-existing
-        Merged into :class:`LLMContext`.            # capability absorbed
-        Moved to :mod:`pipecat.services.xai.llm`.   # module move
-        No replacement.                             # nothing to migrate to
+        Use :class:`PipelineWorker` instead.
+        Will be removed in 2.0.0.
 
 Prefer Sphinx cross-reference roles (``:class:``, ``:meth:``, ``:func:``,
 ``:attr:``, ``:mod:``) for the target — they encode its kind and resolve in
