@@ -363,6 +363,17 @@ def language_to_google_stt_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
+def _model_supports_adaptation(model: str | None) -> bool:
+    """Return whether a Google STT v2 model accepts a SpeechAdaptation config.
+
+    The telephony model rejects it with ``Recognizer does not support feature:
+    speech_adaptation_boost``. Support elsewhere is a per-model, per-language
+    matrix that Google validates on its own, so every other model is passed
+    through and left to report its own errors.
+    """
+    return (model or "").lower() != "telephony"
+
+
 def _normalize_speech_adaptation(
     adaptation: dict[str, Any] | cloud_speech.SpeechAdaptation,
 ) -> cloud_speech.SpeechAdaptation:
@@ -453,7 +464,8 @@ class GoogleSTTSettings(STTSettings):
                 }
 
             Referenced phrase sets must live in the same location as the
-            service. Support varies by model and language — see
+            service. The telephony model rejects adaptation and transcribes
+            without it; support otherwise varies by model and language — see
             https://cloud.google.com/speech-to-text/v2/docs/speech-to-text-supported-languages
     """
 
@@ -950,7 +962,13 @@ class GoogleSTTService(STTService):
 
         speech_adaptation = self._get_speech_adaptation()
         if speech_adaptation is not None:
-            recognition_config.adaptation = speech_adaptation
+            if _model_supports_adaptation(self._settings.model):
+                recognition_config.adaptation = speech_adaptation
+            else:
+                logger.warning(
+                    "Google STT model '{}' rejects adaptation; transcribing without it.",
+                    self._settings.model,
+                )
 
         self._config = cloud_speech.StreamingRecognitionConfig(
             config=recognition_config,

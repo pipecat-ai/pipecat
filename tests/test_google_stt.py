@@ -185,14 +185,24 @@ async def connected_recognition_config(adaptation, model="latest_long"):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("model", ["latest_long", "telephony"])
-async def test_google_connect_sends_adaptation_for_every_model(model):
+@pytest.mark.parametrize("model", ["latest_long", "short", "chirp_2", "telephony_short"])
+async def test_google_connect_sends_adaptation_for_supporting_models(model):
     phrase_set = "projects/test/locations/global/phraseSets/catalog"
 
     config = await connected_recognition_config({"phrase_sets": [phrase_set]}, model=model)
 
     assert config.model == model
     assert config.adaptation.phrase_sets[0].phrase_set == phrase_set
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["telephony", "TELEPHONY"])
+async def test_google_connect_omits_adaptation_for_the_telephony_model(model):
+    phrase_set = "projects/test/locations/global/phraseSets/catalog"
+
+    config = await connected_recognition_config({"phrase_sets": [phrase_set]}, model=model)
+
+    assert "adaptation" not in config
 
 
 @pytest.mark.asyncio
