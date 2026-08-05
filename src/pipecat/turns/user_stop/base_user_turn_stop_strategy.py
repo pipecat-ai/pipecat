@@ -24,11 +24,11 @@ class UserTurnStoppedParams:
     the user aggregator.
 
     Parameters:
-        enable_user_speaking_frames: Whether the user aggregator should emit
-            frames indicating user speaking state (e.g., user stopped speaking).
-            This is typically enabled by default, but may be disabled when another
-            component (such as an STT service) is already responsible for
-            generating user speaking frames.
+        enable_user_speaking_frames: Whether to emit
+            :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` for this
+            turn. False when the turn end was already announced elsewhere — by a
+            shared :class:`~pipecat.turns.user_turn_processor.UserTurnProcessor`,
+            or by a service that emits turn frames rather than proposing them.
 
     """
 
@@ -58,18 +58,36 @@ class BaseUserTurnStopStrategy(BaseObject):
 
     """
 
-    def __init__(self, *, enable_user_speaking_frames: bool = True, **kwargs):
+    def __init__(self, *, enable_user_speaking_frames: bool | None = None, **kwargs):
         """Initialize the base user turn stop strategy.
 
         Args:
-            enable_user_speaking_frames: If True, the aggregator will emit frames
-                indicating when the user stops speaking. This is enabled by default,
-                but you may want to disable it if another component (e.g., an STT
-                service) is already generating these frames.
+            enable_user_speaking_frames: Whether to emit
+                :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` when a
+                turn ends, unless :meth:`trigger_user_turn_stopped` overrides it
+                for a given turn.
+
+                .. deprecated:: 1.8.0
+                    Use :meth:`trigger_user_turn_stopped`'s
+                    ``enable_user_speaking_frames`` argument instead. Will be
+                    removed in 2.0.0.
+
             **kwargs: Additional keyword arguments.
         """
         super().__init__(**kwargs)
-        self._enable_user_speaking_frames = enable_user_speaking_frames
+        if enable_user_speaking_frames is not None:
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "`BaseUserTurnStopStrategy.enable_user_speaking_frames` is deprecated "
+                    "since 1.8.0 and will be removed in 2.0.0. Use "
+                    "`trigger_user_turn_stopped(enable_user_speaking_frames=...)` instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+        self._enable_user_speaking_frames = (
+            True if enable_user_speaking_frames is None else enable_user_speaking_frames
+        )
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
         self._register_event_handler("on_user_turn_inference_triggered", sync=True)
@@ -185,9 +203,10 @@ class BaseUserTurnStopStrategy(BaseObject):
         the trigger call.
 
         Args:
-            enable_user_speaking_frames: Overrides the configured setting for
-                this trigger only. Pass False when something else in the pipeline
-                has already emitted the turn frame.
+            enable_user_speaking_frames: Whether to emit
+                :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` for this
+                turn. Pass False when something else in the pipeline has already
+                emitted it.
         """
         await self.trigger_user_turn_inference_triggered()
         await self.trigger_user_turn_finalized(
@@ -202,9 +221,10 @@ class BaseUserTurnStopStrategy(BaseObject):
         """Trigger only the `on_user_turn_stopped` event.
 
         Args:
-            enable_user_speaking_frames: Overrides the configured setting for
-                this trigger only. Pass False when something else in the pipeline
-                has already emitted the turn frame.
+            enable_user_speaking_frames: Whether to emit
+                :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` for this
+                turn. Pass False when something else in the pipeline has already
+                emitted it.
         """
         await self._call_event_handler(
             "on_user_turn_stopped",

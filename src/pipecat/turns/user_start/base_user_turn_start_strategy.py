@@ -24,11 +24,11 @@ class UserTurnStartedParams:
     aggregator.
 
     Parameters:
-        enable_user_speaking_frames: Whether the user aggregator should emit
-            frames indicating user speaking state (e.g., user started speaking)
-            during the bot's turn. This is typically enabled by default, but may
-            be disabled when another component (such as an STT service) is already
-            responsible for generating user speaking frames.
+        enable_user_speaking_frames: Whether to emit
+            :class:`~pipecat.frames.frames.UserStartedSpeakingFrame` for this
+            turn. False when the turn was already announced elsewhere — by a
+            shared :class:`~pipecat.turns.user_turn_processor.UserTurnProcessor`,
+            or by a service that emits turn frames rather than proposing them.
 
     """
 
@@ -54,7 +54,7 @@ class BaseUserTurnStartStrategy(BaseObject):
         self,
         *,
         enable_interruptions: bool = True,
-        enable_user_speaking_frames: bool = True,
+        enable_user_speaking_frames: bool | None = None,
         **kwargs,
     ):
         """Initialize the base user turn start strategy.
@@ -62,16 +62,33 @@ class BaseUserTurnStartStrategy(BaseObject):
         Args:
             enable_interruptions: If True, the user aggregator will emit an
                 interruption frame when the user turn starts.
-            enable_user_speaking_frames: If True, the user aggregator will emit
-                frames indicating when the user starts speaking, as well as
-                interruption frames. This is enabled by default, but you may want
-                to disable it if another component (e.g., an STT service) is
-                already generating these frames.
+            enable_user_speaking_frames: Whether to emit
+                :class:`~pipecat.frames.frames.UserStartedSpeakingFrame` when a
+                turn starts, unless :meth:`trigger_user_turn_started` overrides
+                it for a given turn.
+
+                .. deprecated:: 1.8.0
+                    Use :meth:`trigger_user_turn_started`'s
+                    ``enable_user_speaking_frames`` argument instead. Will be
+                    removed in 2.0.0.
+
             **kwargs: Additional keyword arguments.
         """
         super().__init__(**kwargs)
         self._enable_interruptions = enable_interruptions
-        self._enable_user_speaking_frames = enable_user_speaking_frames
+        if enable_user_speaking_frames is not None:
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "`BaseUserTurnStartStrategy.enable_user_speaking_frames` is deprecated "
+                    "since 1.8.0 and will be removed in 2.0.0. Use "
+                    "`trigger_user_turn_started(enable_user_speaking_frames=...)` instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+        self._enable_user_speaking_frames = (
+            True if enable_user_speaking_frames is None else enable_user_speaking_frames
+        )
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
         self._register_event_handler("on_user_turn_started", sync=True)
@@ -178,12 +195,13 @@ class BaseUserTurnStartStrategy(BaseObject):
         """Trigger the `on_user_turn_started` event.
 
         Args:
-            enable_interruptions: Overrides the configured setting for this
-                trigger only. Pass False when something else in the pipeline has
-                already broadcast the interruption for this turn.
-            enable_user_speaking_frames: Overrides the configured setting for
-                this trigger only. Pass False when something else in the pipeline
-                has already emitted the turn frame.
+            enable_interruptions: Whether to broadcast an interruption for this
+                turn, overriding the strategy's configured setting. Pass False
+                when something else in the pipeline has already broadcast one.
+            enable_user_speaking_frames: Whether to emit
+                :class:`~pipecat.frames.frames.UserStartedSpeakingFrame` for this
+                turn. Pass False when something else in the pipeline has already
+                emitted it.
         """
         await self._call_event_handler(
             "on_user_turn_started",

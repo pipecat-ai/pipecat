@@ -5,6 +5,7 @@
 #
 
 import unittest
+import warnings
 
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -16,6 +17,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.turns.user_start import (
+    BaseUserTurnStartStrategy,
     ExternalUserTurnStartStrategy,
     MinWordsUserTurnStartStrategy,
     TranscriptionUserTurnStartStrategy,
@@ -234,6 +236,39 @@ class TestExternalUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         await strategy.process_frame(UserStartedSpeakingFrame())
         self.assertFalse(captured[1].enable_interruptions)
         self.assertFalse(captured[1].enable_user_speaking_frames)
+
+
+class TestBaseUserTurnStartStrategyDeprecations(unittest.IsolatedAsyncioTestCase):
+    async def _capture_params(self, strategy):
+        captured = []
+
+        @strategy.event_handler("on_user_turn_started")
+        async def on_user_turn_started(strategy, params):
+            captured.append(params)
+
+        return captured
+
+    async def test_enable_user_speaking_frames_warns(self):
+        with self.assertWarns(DeprecationWarning) as caught:
+            BaseUserTurnStartStrategy(enable_user_speaking_frames=False)
+        self.assertIn("enable_user_speaking_frames", str(caught.warning))
+
+    async def test_enable_user_speaking_frames_applies(self):
+        with self.assertWarns(DeprecationWarning):
+            strategy = BaseUserTurnStartStrategy(enable_user_speaking_frames=False)
+        captured = await self._capture_params(strategy)
+
+        await strategy.trigger_user_turn_started()
+        self.assertFalse(captured[0].enable_user_speaking_frames)
+
+    async def test_omitting_enable_user_speaking_frames_is_silent(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            strategy = BaseUserTurnStartStrategy()
+        captured = await self._capture_params(strategy)
+
+        await strategy.trigger_user_turn_started()
+        self.assertTrue(captured[0].enable_user_speaking_frames)
 
 
 if __name__ == "__main__":

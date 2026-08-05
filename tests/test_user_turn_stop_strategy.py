@@ -6,6 +6,7 @@
 
 import asyncio
 import unittest
+import warnings
 from unittest.mock import patch
 
 from pipecat.frames.frames import (
@@ -21,6 +22,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.turns.user_stop import (
+    BaseUserTurnStopStrategy,
     ExternalUserTurnCompletionStopStrategy,
     ExternalUserTurnStopStrategy,
     SpeechTimeoutUserTurnStopStrategy,
@@ -801,38 +803,6 @@ class TestSpeechTimeoutStopSecsWarnings(unittest.IsolatedAsyncioTestCase):
         mock_logger.warning.assert_not_called()
 
 
-class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
-    async def test_external_strategy(self):
-        strategy = ExternalUserTurnStopStrategy()
-
-        should_start = None
-
-        @strategy.event_handler("on_user_turn_stopped")
-        async def on_user_turn_stopped(strategy, params):
-            nonlocal should_start
-            should_start = True
-
-        await strategy.process_frame(VADUserStartedSpeakingFrame())
-        self.assertFalse(should_start)
-
-        await strategy.process_frame(UserStartedSpeakingFrame())
-        self.assertFalse(should_start)
-
-        await strategy.process_frame(UserStoppedSpeakingFrame())
-        self.assertFalse(should_start)
-
-        await strategy.process_frame(UserStartedSpeakingFrame())
-        self.assertFalse(should_start)
-
-        await strategy.process_frame(
-            TranscriptionFrame(text="How are you?", user_id="cat", timestamp="")
-        )
-        self.assertFalse(should_start)
-
-        await strategy.process_frame(UserStoppedSpeakingFrame())
-        self.assertTrue(should_start)
-
-
 class TestExternalUserTurnCompletionStopStrategy(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.task_manager = TaskManager()
@@ -881,6 +851,36 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="", timestamp="now"))
         await strategy.process_frame(stopped)
         return params
+
+    async def test_external_strategy(self):
+        strategy = ExternalUserTurnStopStrategy()
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(UserStartedSpeakingFrame())
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(UserStoppedSpeakingFrame())
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(UserStartedSpeakingFrame())
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(
+            TranscriptionFrame(text="How are you?", user_id="cat", timestamp="")
+        )
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(UserStoppedSpeakingFrame())
+        self.assertTrue(should_start)
 
     async def test_proposal_finalizes_with_emission_enabled(self):
         strategy = ExternalUserTurnStopStrategy()
@@ -1030,6 +1030,39 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(stop_params.enable_user_speaking_frames)
 
         await strategy.cleanup()
+
+
+class TestBaseUserTurnStopStrategyDeprecations(unittest.IsolatedAsyncioTestCase):
+    async def _capture_params(self, strategy):
+        captured = []
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            captured.append(params)
+
+        return captured
+
+    async def test_enable_user_speaking_frames_warns(self):
+        with self.assertWarns(DeprecationWarning) as caught:
+            BaseUserTurnStopStrategy(enable_user_speaking_frames=False)
+        self.assertIn("enable_user_speaking_frames", str(caught.warning))
+
+    async def test_enable_user_speaking_frames_applies(self):
+        with self.assertWarns(DeprecationWarning):
+            strategy = BaseUserTurnStopStrategy(enable_user_speaking_frames=False)
+        captured = await self._capture_params(strategy)
+
+        await strategy.trigger_user_turn_stopped()
+        self.assertFalse(captured[0].enable_user_speaking_frames)
+
+    async def test_omitting_enable_user_speaking_frames_is_silent(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            strategy = BaseUserTurnStopStrategy()
+        captured = await self._capture_params(strategy)
+
+        await strategy.trigger_user_turn_stopped()
+        self.assertTrue(captured[0].enable_user_speaking_frames)
 
 
 if __name__ == "__main__":
