@@ -400,6 +400,19 @@ class TTSService(AIService):
         """Whether the service is streaming tokens directly without sentence aggregation."""
         return self._text_aggregation_mode == TextAggregationMode.TOKEN
 
+    @property
+    def supports_processing_metrics(self) -> bool:
+        """Whether this service has a meaningful processing-time metric.
+
+        Processing time is measured around :meth:`run_tts`, so it only means
+        something when synthesis finishes before ``run_tts`` returns. Services
+        that hand the text off and receive audio elsewhere — anything holding a
+        persistent connection with its own receive task — return False, since
+        the measurement would cover the send and nothing else. TTFB and TTFA
+        carry the latency for those.
+        """
+        return True
+
     async def start_tts_usage_metrics(self, text: str):
         """Record TTS usage metrics.
 
@@ -1162,10 +1175,12 @@ class TTSService(AIService):
         if self._is_streaming_tokens:
             self._streamed_text += text
 
-        # Skip per-token processing metrics when streaming. The per-token
-        # processing time is just websocket send overhead (~0.1ms) and not
-        # meaningful. TTFB captures the important timing for streaming TTS.
-        if not self._is_streaming_tokens:
+        # Two things disqualify the measurement. A service that hands text off
+        # for synthesis elsewhere would time only the handoff, and a token is
+        # the wrong unit to report a processing time against — one metric per
+        # token, for work that spans a sentence. TTFB and TTFA carry the timing
+        # that matters in both cases.
+        if self.supports_processing_metrics and not self._is_streaming_tokens:
             await self.start_processing_metrics()
 
         # Process all filters.
@@ -1272,7 +1287,7 @@ class TTSService(AIService):
 
         await self.tts_process_generator(context_id, self.run_tts(prepared_text, context_id))
 
-        if not self._is_streaming_tokens:
+        if self.supports_processing_metrics and not self._is_streaming_tokens:
             await self.stop_processing_metrics()
 
         if self._push_text_frames and not self._is_streaming_tokens:
@@ -1804,6 +1819,17 @@ class WebsocketTTSService(TTSService, WebsocketService):
         """
         TTSService.__init__(self, **kwargs)
         WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
+
+    @property
+    def supports_processing_metrics(self) -> bool:
+        """Whether this service has a meaningful processing-time metric.
+
+        False: ``run_tts`` sends the text and returns, and audio arrives later
+        on the receive task, so there is no synthesis inside the measured
+        window. A subclass that instead waits for the server to signal the end
+        of synthesis before returning can override this back to True.
+        """
+        return False
 
     async def stop(self, frame: EndFrame):
         """Stop the websocket TTS service on a graceful end.
