@@ -106,7 +106,7 @@ def language_to_sarvam_realtime_language(language: Language) -> str:
 
 
 class SarvamRealtimeSTTError(Exception):
-    """Error raised for fatal Sarvam realtime STT payloads."""
+    """Error raised for Sarvam realtime STT payloads."""
 
     def __init__(self, payload: dict[str, Any]):
         """Initialize the error from a raw Sarvam payload.
@@ -558,12 +558,14 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             f"is_fatal={is_fatal} request_id={self._request_id}"
         )
         logger.debug(f"{self} Sarvam realtime error payload: {message}")
-        if not is_fatal:
-            return
         error = SarvamRealtimeSTTError(message)
         await self.push_error(
-            error_msg=f"Sarvam realtime STT fatal error: {error}", exception=error, fatal=True
+            error_msg=f"Sarvam realtime STT error: {json.dumps(message, ensure_ascii=False)}",
+            exception=error,
+            fatal=is_fatal,
         )
+        if not is_fatal:
+            return
         await self.stop_all_metrics()
         raise error
 
