@@ -1,0 +1,26 @@
+name: announcement_custom_prompt
+
+# A custom announcement prompt replaces the shipped instruction. The bot's
+# config tells the model to begin with "Heads up:", so the marker appearing
+# in the reply is proof the application's wording drove the announcement —
+# checked with text_contains rather than a judge, since the assertion is exact.
+
+judge: !include judge_text.yaml
+
+turns:
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, or an offer to help)"
+
+  - user: "Please research the Mariana Trench for me."
+    expect:
+      - event: function_call
+        calls:
+          - name: research
+      - event: response
+        eval: "says the research has been started or is running"
+
+  # The announcement arrives on its own, in the application's wording.
+  - expect:
+      - event: response
+        text_contains: "Heads up"

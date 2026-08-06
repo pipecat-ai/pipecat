@@ -1,0 +1,34 @@
+name: announcement_notify_multiple
+
+# AnnouncementStyle.NOTIFY for a batch (the default): when several background
+# tasks finish together, the bot says the results are ready and offers them
+# instead of reading them all out — announcing a whole batch is a wall of
+# speech nobody asked for.
+#
+# Text mode: this asserts *what* is announced, not when.
+#
+# Both tools finish within milliseconds of each other in an otherwise quiet
+# conversation, so this also covers the batch forming at all: were the first
+# result to release on its own, it would get the single-result treatment and
+# state its finding instead.
+
+judge: !include judge_text.yaml
+
+turns:
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, or an offer to help)"
+
+  - user: "Please research two things for me: the Mariana Trench, and whether France or Italy is better for a family trip."
+    expect:
+      - event: function_call
+        calls:
+          - name: research
+          - name: research
+      - event: response
+        eval: "says the research tasks have been started or are running"
+
+  # Both land together: ready-and-offered, with the findings withheld.
+  - expect:
+      - event: response
+        eval: "says the research tasks have finished and asks whether the user wants to hear the results, WITHOUT stating what the research found"

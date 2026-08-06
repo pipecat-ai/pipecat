@@ -287,6 +287,29 @@ suite:
     scenarios: [dtmf_menu]
 
   #
+  # Assistant-initiated responses: two long-running async research tools finish
+  # mid-conversation, and the bot's DelayedResponseStrategy holds their
+  # announcement until the exchange settles. The harness asserts the timing the
+  # bot's own turns can't show — no results interjected into the turns that
+  # follow the request, then one unprompted announcement covering both.
+  #
+  # The announcement scenarios are text mode: they assert what the bot
+  # volunteers when results land, which needs no audio.
+  #
+  - bot: features/features-delayed-responses.py
+    scenarios:
+      [delayed_response_audio, announcement_result_single, announcement_notify_multiple]
+
+  #
+  # Announcement wording and silence: one tool announces itself in the
+  # application's own words (a custom prompt replacing the shipped
+  # instruction), and one finishes with run_llm=False so nothing is
+  # announced at all, though the result still answers a later question.
+  #
+  - bot: features/features-delayed-responses-announcements.py
+    scenarios: [announcement_silent, announcement_custom_prompt]
+
+  #
   # Video avatar services
   #
   - bot: video-avatar/video-avatar-tavus-video-service.py

@@ -1,0 +1,31 @@
+name: announcement_result_single
+
+# AnnouncementStyle.RESULT for a single completion (the default): when one
+# background task finishes, the bot states the result outright, unprompted.
+#
+# Text mode: this asserts *what* is announced, not when. The release timing
+# (waiting for a conversational opening) needs speaking frames and is covered
+# by delayed_response_audio.
+
+judge: !include judge_text.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking.
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, or an offer to help)"
+
+  - user: "Please research the Mariana Trench for me."
+    expect:
+      - event: function_call
+        calls:
+          - name: research
+      - event: response
+        eval: "says the research has been started or is running"
+
+  # The result arrives on its own and is stated, not merely offered — the
+  # finding's confidence score reaching the user is what separates RESULT
+  # from NOTIFY.
+  - expect:
+      - event: response
+        eval: "announces, unprompted, that the research finished AND states what it found, including the confidence score of 0.82 or that three sources agree"

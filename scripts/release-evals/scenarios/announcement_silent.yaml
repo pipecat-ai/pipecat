@@ -1,0 +1,35 @@
+name: announcement_silent
+
+# A tool that finishes with FunctionCallResultProperties(run_llm=False)
+# announces nothing: the bot never interrupts, but the result lands in the
+# LLM context and answers a later question.
+#
+# The absent: window must outlast the bot's watch_price tool (8s) to prove
+# the silence is the tool's choice rather than the task still running.
+
+judge: !include judge_text.yaml
+
+turns:
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, or an offer to help)"
+
+  - user: "Please watch the price of the blue hiking boots for me."
+    expect:
+      - event: function_call
+        calls:
+          - name: watch_price
+      - event: response
+        eval: "says it is watching or tracking the price"
+
+  # The watch finishes inside this window and the bot stays quiet.
+  - expect:
+      - event: response
+        absent: true
+        within_ms: 20000
+
+  # The reading was in context the whole time: asking retrieves it.
+  - user: "Did the price of those boots ever move?"
+    expect:
+      - event: response
+        eval: "reports that the price dropped, mentioning about 12 percent or a price around 44 dollars"

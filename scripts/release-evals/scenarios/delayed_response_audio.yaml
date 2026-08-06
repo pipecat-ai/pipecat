@@ -1,0 +1,61 @@
+name: delayed_response_audio
+
+# The release-policy contract for assistant-initiated responses: two async
+# research tasks (~15 s each) complete in the middle of an ongoing joke
+# exchange, and the announcement must NOT interrupt it — no research results
+# interjected into the jokes; the announcement arrives as its own unprompted
+# utterance after the exchange settles, covering both finished tasks. This is
+# the timing text mode cannot observe (no speaking frames flow there), so this
+# scenario is the one that fails if the DelayedResponseStrategy's release
+# policy regresses.
+#
+# Choreography notes: the tools' fixed 15 s duration outlasts the research
+# request and its spoken acknowledgment, so the completions land inside the
+# joke back-and-forth that follows — where the user speaking, the bot
+# speaking, and the reactive answers still owed all hold the announcement.
+# within_ms is left at its 60 s default throughout: in audio mode a response
+# event only exists once the bot finishes *speaking* it (playout counts), so
+# tight budgets race utterance length rather than assert anything about the
+# release policy.
+#
+# User speech is synthesized (Kokoro) so the bot's real VAD and STT run; the
+# bot's speech is transcribed (Moonshine) for the judge.
+
+user: !include user_audio.yaml
+
+judge: !include judge_audio.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking.
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, or an offer to help)"
+
+  # Kick off both research tasks: verify both calls are made and that the
+  # bot says they're running.
+  - user: "Can you run two research tasks for me? First, research the Mariana Trench. And second, research whether France or Italy is the better place for a family trip next April."
+    expect:
+      - event: function_call
+        calls:
+          - name: research
+          - name: research
+      - event: response
+        eval: "says the research tasks have been started or are running and the bot will report back"
+
+  # Bot and user back-and-forth to delay the announcement after the research tasks have finished.
+  - user: "While those run, tell me a joke about a sea turtle."
+    expect:
+      - event: response
+        eval: "tells a joke about a sea turtle, and does NOT include research results about the Mariana Trench or the France-Italy comparison"
+
+  - user: "Tell me another one, this time about a cat."
+    expect:
+      - event: response
+        eval: "tells a joke about a cat, and does NOT include research results about the Mariana Trench or the France-Italy comparison"
+
+  # The deferred announcement arrives on its own after the conversation settles —
+  # nothing prompts it — covering the finished research and offering or
+  # sharing the results.
+  - expect:
+      - event: response
+        eval: "announces, unprompted, that the research tasks have finished (the Mariana Trench and/or the France-Italy trip), and offers or begins to share the results"
