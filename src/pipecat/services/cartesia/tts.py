@@ -771,6 +771,7 @@ class CartesiaHttpTTSService(TTSService):
         encoding: str = "pcm_s16le",
         container: str = "raw",
         params: InputParams | None = None,
+        extra_headers: dict[str, str] | None = None,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -803,6 +804,8 @@ class CartesiaHttpTTSService(TTSService):
                     Use ``settings=CartesiaHttpTTSService.Settings(...)`` instead.
                     Will be removed in 2.0.0.
 
+            extra_headers: Optional additional HTTP headers to send with each
+                synthesis request.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent TTSService.
@@ -850,6 +853,7 @@ class CartesiaHttpTTSService(TTSService):
         self._api_key = api_key
         self._base_url = base_url
         self._cartesia_version = cartesia_version
+        self._extra_headers = dict(extra_headers) if extra_headers else {}
 
         # Audio output format — init-only, not runtime-updatable
         self._output_container = container
@@ -944,6 +948,7 @@ class CartesiaHttpTTSService(TTSService):
                 "Cartesia-Version": self._cartesia_version,
                 "X-API-Key": self._api_key,
                 "Content-Type": "application/json",
+                **self._extra_headers,
             }
 
             url = f"{self._base_url}/tts/bytes"
