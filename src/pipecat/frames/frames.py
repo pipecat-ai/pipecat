@@ -552,9 +552,18 @@ class LLMContextFrame(Frame):
 
     Parameters:
         context: The LLM context containing messages, tools, and configuration.
+        run_llm: Whether the service should generate a response for this
+            context. ``None`` (the default) leaves it to the service: cascade
+            LLM services run inference on every context frame, while realtime
+            (speech-to-speech) services — whose sessions run continuously —
+            respond only when the frame carries new tool results. ``True``
+            requests a response explicitly (the context aggregators set it for
+            ``LLMRunFrame`` and for message frames with ``run_llm=True``);
+            ``False`` asks the service to only ingest the context.
     """
 
     context: LLMContext
+    run_llm: bool | None = None
 
 
 @dataclass

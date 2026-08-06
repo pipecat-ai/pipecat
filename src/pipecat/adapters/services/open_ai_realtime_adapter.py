@@ -48,6 +48,15 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
     ) -> OpenAIRealtimeLLMInvocationParams:
         """Get OpenAI Realtime-specific LLM invocation parameters from a universal LLM context.
 
+        The effective system instruction combines the service-level
+        ``system_instruction`` (if any) with every "system"/"developer" message
+        in the context, in order. Both are kept — rather than one overriding
+        the other — because in a continuous realtime session the service-level
+        instruction typically carries the bot's persona while context system
+        messages carry evolving task guidance (e.g. Pipecat Flows node task
+        messages), and a ``session.update`` with the combined instructions is
+        the only reliable way to steer the model mid-session.
+
         Args:
             context: The LLM context containing messages, tools, etc.
             system_instruction: Optional system instruction from service settings.
@@ -56,13 +65,11 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
             Dictionary of parameters for invoking OpenAI Realtime's API.
         """
         messages = self._from_universal_context_messages(self.get_messages(context))
-        effective_system = self._resolve_system_instruction(
-            messages.system_instruction,
-            system_instruction,
-            discard_context_system=True,
-        )
+        instruction_parts = [
+            part for part in (system_instruction, messages.system_instruction) if part
+        ]
         return {
-            "system_instruction": effective_system,
+            "system_instruction": "\n\n".join(instruction_parts) if instruction_parts else None,
             "messages": messages.messages,
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools) or [],
@@ -114,24 +121,28 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
             for m in copy.deepcopy(universal_context_messages)
             if isinstance(m, dict)
         ]
-        system_instruction = None
-
-        # If we have a "system" message as our first message,
-        # pull that out into session "instructions"
-        if messages and messages[0].get("role") == "system":
-            system = messages.pop(0)
-            content = system.get("content")
-            if isinstance(content, str):
-                system_instruction = content
-            elif isinstance(content, list):
-                system_instruction = content[0].get("text")
-            if not messages:
-                return self.ConvertedMessages(messages=[], system_instruction=system_instruction)
-
-        # Convert any remaining "system"/"developer" messages to "user"
+        # Fold every "system"/"developer" message — wherever it appears — into
+        # the session instructions, preserving order. The Realtime API steers an
+        # ongoing session through session.update `instructions`; keeping all
+        # system-level guidance there (rather than converting it to "user"
+        # conversation items that can only be sent when the conversation is
+        # first seeded) is what lets mid-session prompt updates, like Pipecat
+        # Flows node transitions, actually reach the model.
+        system_parts: list[str] = []
+        remaining: list[dict[str, Any]] = []
         for msg in messages:
             if msg.get("role") in ("system", "developer"):
-                msg["role"] = "user"
+                content = msg.get("content")
+                if isinstance(content, str):
+                    system_parts.append(content)
+                elif isinstance(content, list):
+                    system_parts.append(content[0].get("text"))
+            else:
+                remaining.append(msg)
+        system_instruction = "\n\n".join(system_parts) if system_parts else None
+        messages = remaining
+        if not messages:
+            return self.ConvertedMessages(messages=[], system_instruction=system_instruction)
 
         # If we have just a single "user" item, we can just send it normally
         if len(messages) == 1 and messages[0].get("role") == "user":

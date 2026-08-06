@@ -35,7 +35,7 @@ from utils import create_llm
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.flows import FlowManager, NodeConfig
+from pipecat.flows import ContextStrategy, ContextStrategyConfig, FlowManager, NodeConfig
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -73,6 +73,16 @@ transport_params = {
         audio_out_enabled=True,
     ),
 }
+
+
+# The bot's base persona. Nodes can replace the role message mid-conversation
+# (see create_confirmation_node), so it's shared here for reuse.
+ROLE_MESSAGE = (
+    "You are an order-taking assistant. You must ALWAYS use the available functions to"
+    " progress the conversation. This is a phone conversation and your responses will be"
+    " converted to audio. Keep the conversation friendly, casual, and polite. Avoid"
+    " outputting special characters and emojis."
+)
 
 
 # Type definitions
@@ -180,7 +190,7 @@ async def revise_order(flow_manager: FlowManager) -> tuple[None, NodeConfig]:
     """
     User wants to make changes to their order.
     """
-    return None, create_initial_node()
+    return None, create_revise_node()
 
 
 # Node creation functions
@@ -188,7 +198,7 @@ def create_initial_node() -> NodeConfig:
     """Create the initial node for food type selection."""
     return NodeConfig(
         name="initial",
-        role_message="You are an order-taking assistant. You must ALWAYS use the available functions to progress the conversation. This is a phone conversation and your responses will be converted to audio. Keep the conversation friendly, casual, and polite. Avoid outputting special characters and emojis.",
+        role_message=ROLE_MESSAGE,
         task_messages=[
             {
                 "role": "developer",
@@ -248,9 +258,17 @@ Remember to be friendly and casual.""",
 
 
 def create_confirmation_node() -> NodeConfig:
-    """Create the order confirmation node."""
+    """Create the order confirmation node.
+
+    Replaces the role message mid-conversation: the confirmation specialist
+    persona addresses the user as "boss" (the release evals assert this, as
+    proof the new system instruction reached the LLM).
+    """
     return NodeConfig(
         name="confirm",
+        role_message=ROLE_MESSAGE
+        + ' You are now the order confirmation specialist. Address the user as "boss" in every'
+        " response (e.g. 'Alright, boss!').",
         task_messages=[
             {
                 "role": "developer",
@@ -262,6 +280,27 @@ Be friendly and clear when reading back the order details.""",
             }
         ],
         functions=[complete_order, revise_order],
+    )
+
+
+def create_revise_node() -> NodeConfig:
+    """Create the order revision node: start the order over from scratch.
+
+    Demonstrates two Flows features (both exercised by the release evals):
+    ``respond_immediately=False`` so the bot waits silently for the user, and
+    a RESET context strategy that drops the old order from the context.
+    """
+    return NodeConfig(
+        name="revise",
+        task_messages=[
+            {
+                "role": "developer",
+                "content": "The user is revising their order, starting over from scratch. Wait for them to say what they want instead, then progress via the choose functions as with a new order.",
+            }
+        ],
+        context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),
+        respond_immediately=False,
+        functions=[choose_pizza, choose_sushi],
     )
 
 
