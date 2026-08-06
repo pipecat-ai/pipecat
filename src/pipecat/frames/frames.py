@@ -821,6 +821,36 @@ class TTSSpeakFrame(DataFrame):
 
 
 @dataclass
+class ResponseFrame(DataFrame, UninterruptibleFrame):
+    """Frame wrapping an assistant-initiated response for scheduled delivery.
+
+    Wraps a frame that produces assistant output outside the normal reactive
+    request/response flow — content the conversation didn't just ask for, such
+    as the result of a long-running async tool or a timed announcement. The
+    ``LLMAssistantAggregator`` captures this frame and hands it to its
+    configured response strategy (``LLMAssistantAggregatorParams.response_strategy``),
+    which decides *when* the wrapped frame is delivered — for example, at the
+    next conversational opening rather than over the user's speech. If no
+    strategy is configured, the wrapped frame is released immediately (with a
+    warning), behaving as if it were unwrapped.
+
+    This is an uninterruptible frame because a coincidental user interruption
+    must not discard a pending assistant-initiated response from internal
+    queues.
+
+    The frame carries no delivery policy of its own; policy lives entirely in
+    the strategy. Apps that need to distinguish kinds of assistant-initiated
+    responses can subclass this frame and route by ``isinstance`` in a custom
+    strategy.
+
+    Parameters:
+        frame: The frame to deliver when the strategy releases it.
+    """
+
+    frame: Frame
+
+
+@dataclass
 class OutputTransportMessageFrame(DataFrame):
     """Frame containing transport-specific message data.
 
