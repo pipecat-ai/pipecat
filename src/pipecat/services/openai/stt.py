@@ -506,7 +506,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
             self._session_ready = False
             url = f"{self._base_url}?intent=transcription"
-            self._websocket = await websocket_connect(
+            self._websocket = await self._websocket_connect(
                 uri=url,
                 additional_headers={
                     "Authorization": f"Bearer {self._api_key}",

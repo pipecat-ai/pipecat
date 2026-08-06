@@ -17,7 +17,6 @@ from typing import Any
 
 import aiohttp
 from loguru import logger
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -205,11 +204,11 @@ class DeepgramTTSService(WebsocketTTSService):
 
             headers = {"Authorization": f"Token {self._api_key}"}
 
-            websocket = await websocket_connect(url, additional_headers=headers)
+            websocket = await self._websocket_connect(url, additional_headers=headers)
             self._websocket = websocket
 
             # `response` is populated after the handshake completes (which it
-            # has, since `websocket_connect` already returned).
+            # has, since the connect call already returned).
             response_headers = websocket.response.headers if websocket.response else {}
             headers = {k: v for k, v in response_headers.items() if k.startswith("dg-")}
             logger.debug(f'{self}: Websocket connection initialized: {{"headers": {headers}}}')

@@ -13,11 +13,10 @@ the Cartesia Live transcription API for real-time speech recognition.
 import json
 import urllib.parse
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from loguru import logger
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -31,7 +30,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import STTSettings
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
 from pipecat.services.stt_latency import CARTESIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
@@ -39,12 +38,63 @@ from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
+# Cartesia caps a connection at 100 keyterms totaling 1200 characters.
+_MAX_KEYTERMS = 100
+_MAX_KEYTERM_CHARS = 1200
+
+# Keyterms are only honored by the ink-2 model family.
+_KEYTERM_MODEL_PREFIX = "ink-2"
+
+
+def _prepare_keyterms(keyterms: list[str] | None | _NotGiven) -> list[str]:
+    """Normalize keyterms to the limits Cartesia accepts on a connection.
+
+    Drops blank entries and truncates to :data:`_MAX_KEYTERMS` terms totaling
+    :data:`_MAX_KEYTERM_CHARS` characters, warning about whatever is dropped.
+    Truncating keeps an oversized list from failing the connection mid-call.
+
+    Args:
+        keyterms: Keyterms from settings, which may be unset or ``None``.
+
+    Returns:
+        The keyterms to send, in the order given.
+    """
+    if not is_given(keyterms) or not keyterms:
+        return []
+
+    terms = [stripped for term in keyterms if (stripped := term.strip())]
+
+    prepared: list[str] = []
+    total_chars = 0
+    for term in terms:
+        if len(prepared) >= _MAX_KEYTERMS or total_chars + len(term) > _MAX_KEYTERM_CHARS:
+            break
+        prepared.append(term)
+        total_chars += len(term)
+
+    if len(prepared) < len(terms):
+        logger.warning(
+            f"Cartesia accepts at most {_MAX_KEYTERMS} keyterms totaling "
+            f"{_MAX_KEYTERM_CHARS} characters; dropping {len(terms) - len(prepared)} keyterm(s)"
+        )
+
+    return prepared
+
 
 @dataclass
 class CartesiaSTTSettings(STTSettings):
-    """Settings for CartesiaSTTService."""
+    """Settings for CartesiaSTTService.
 
-    pass
+    Parameters:
+        keyterm: Key terms or phrases to bias transcription towards, sent as
+            repeated ``keyterm`` query parameters on the connection URL. Only
+            honored by ink-2 models; keyterms set for any other model are
+            ignored with a warning. Cartesia binds keyterms to a connection,
+            so updating this setting at runtime triggers a reconnect. See
+            https://docs.cartesia.ai/use-the-api/stt/keyterms.
+    """
+
+    keyterm: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @deprecated(
@@ -187,6 +237,7 @@ class CartesiaSTTService(WebsocketSTTService):
         default_settings = self.Settings(
             model="ink-whisper",
             language=Language.EN.value,
+            keyterm=None,
         )
 
         # 2. Apply live_options overrides — only if settings not provided
@@ -343,16 +394,28 @@ class CartesiaSTTService(WebsocketSTTService):
                 return
             logger.debug("Connecting to Cartesia STT")
 
-            params = {
-                "model": self._settings.model,
-                "language": self._settings.language,
-                "encoding": self._encoding,
-                "sample_rate": str(self.sample_rate),
-            }
-            ws_url = f"wss://{self._base_url}/stt/websocket?{urllib.parse.urlencode(params)}"
-            headers = {"Cartesia-Version": "2025-04-16", "X-API-Key": self._api_key}
+            params = [
+                ("model", self._settings.model),
+                ("language", self._settings.language),
+                ("encoding", self._encoding),
+                ("sample_rate", str(self.sample_rate)),
+            ]
+            keyterms = _prepare_keyterms(self._settings.keyterm)
+            if keyterms:
+                if str(self._settings.model).startswith(_KEYTERM_MODEL_PREFIX):
+                    params.extend(("keyterm", term) for term in keyterms)
+                else:
+                    logger.warning(
+                        f"keyterms are only supported on {_KEYTERM_MODEL_PREFIX} models; "
+                        f"ignoring keyterms for model {self._settings.model!r}"
+                    )
+            # Cartesia expects spaces inside a keyterm as %20, which urlencode
+            # only emits with quote_via=quote.
+            query = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
+            ws_url = f"wss://{self._base_url}/stt/websocket?{query}"
+            headers = {"Cartesia-Version": "2026-03-01", "X-API-Key": self._api_key}
 
-            self._websocket = await websocket_connect(ws_url, additional_headers=headers)
+            self._websocket = await self._websocket_connect(ws_url, additional_headers=headers)
             await self._call_event_handler("on_connected")
         except Exception as e:
             self._websocket = None

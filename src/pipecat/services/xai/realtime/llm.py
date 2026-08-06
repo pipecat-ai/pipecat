@@ -188,7 +188,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
     Features:
         - Real-time audio streaming (PCM, PCMU, PCMA formats)
         - Configurable sample rates (8kHz to 48kHz for PCM)
-        - Multiple voice options (Ara, Rex, Sal, Eve, Leo)
+        - Built-in and custom voice IDs
         - Built-in tools (web_search, x_search, file_search)
         - Custom function calling
         - Server-side VAD (Voice Activity Detection)
@@ -226,7 +226,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             base_url: WebSocket base URL for the realtime API.
                 Defaults to "wss://api.x.ai/v1/realtime".
             session_properties: Configuration properties for the realtime session.
-                If None, uses default SessionProperties with voice "Ara".
+                If None, uses default SessionProperties with voice "eve".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GrokRealtimeLLMService.Settings(session_properties=...)``
@@ -235,9 +235,11 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
 
                 To set a different voice, configure it in session_properties:
 
-                    session_properties = events.SessionProperties(voice="Rex")
+                    session_properties = events.SessionProperties(voice="rex")
 
-                Available voices: Ara, Rex, Sal, Eve, Leo.
+                Built-in voice IDs are documented by xAI
+                (https://docs.x.ai/docs/guides/voice/agent); a custom voice ID
+                from the Custom Voices API may be used too.
             settings: Runtime-updatable settings for this service.
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             **kwargs: Additional arguments passed to parent LLMService.

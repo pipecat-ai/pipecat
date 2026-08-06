@@ -16,9 +16,8 @@ focusing on:
 
 import unittest
 import warnings
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock
 
-from pipecat.flows.exceptions import FlowError
 from pipecat.flows.manager import FlowManager
 from pipecat.flows.types import ContextStrategy, ContextStrategyConfig, NodeConfig
 from pipecat.frames.frames import (

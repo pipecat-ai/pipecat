@@ -17,7 +17,8 @@ from typing import Any
 import aiohttp
 from daily.daily import AudioData
 from loguru import logger
-from pydantic import BaseModel, ConfigDict
+from PIL import Image
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -48,8 +49,12 @@ class LemonSliceNewSessionRequest(BaseModel):
     """Request model for creating a new LemonSlice session.
 
     Parameters:
-        agent_image_url: URL to an agent image. Provide either agent_id or agent_image_url.
-        agent_id: ID of a LemonSlice agent. Provide either agent_id or agent_image_url.
+        agent_image_url: URL to an agent image. Provide exactly one of ``agent_image_url``,
+            ``agent_id``, or ``agent_image``.
+        agent_id: ID of a LemonSlice agent. Provide exactly one of ``agent_image_url``,
+            ``agent_id``, or ``agent_image``.
+        agent_image: PIL image uploaded as the agent image. Provide exactly one of
+            ``agent_image_url``, ``agent_id``, or ``agent_image``.
         agent_prompt: A high-level system prompt that subtly influences the avatar's movements,
             expressions, and emotional demeanor.
         idle_timeout: Idle timeout in seconds.
@@ -59,16 +64,33 @@ class LemonSliceNewSessionRequest(BaseModel):
         api_url: Override the LemonSlice API URL.
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
     agent_image_url: str | None = None
     agent_id: str | None = None
+    agent_image: Image.Image | None = None
     agent_prompt: str | None = None
     idle_timeout: int | None = None
     daily_room_url: str | None = None
     daily_token: str | None = None
     lemonslice_properties: dict | None = None
     api_url: str | None = None
+
+    @model_validator(mode="after")
+    def validate_agent_source(self) -> "LemonSliceNewSessionRequest":
+        """Ensure exactly one agent source is provided."""
+        given = [
+            source
+            for source in (self.agent_id, self.agent_image_url, self.agent_image)
+            if source is not None
+        ]
+        if len(given) == 0:
+            raise ValueError("Provide exactly one of agent_id, agent_image_url, or agent_image")
+        if len(given) > 1:
+            raise ValueError(
+                "Provide exactly one of agent_id, agent_image_url, or agent_image, not multiple"
+            )
+        return self
 
 
 class LemonSliceCallbacks(BaseModel):
@@ -125,13 +147,17 @@ class LemonSliceTransportClient:
             params: Optional parameters for LemonSlice operation.
             callbacks: Callback handlers for LemonSlice-related events.
             api_key: API key for authenticating with LemonSlice API.
-            session_request: Optional session creation parameters. If not provided, a default
-                agent will be used.
+            session_request: Session creation parameters.
             session: The aiohttp session for making async HTTP requests.
         """
         self._bot_name = bot_name
         self._api = LemonSliceApi(api_key, session)
-        self._session_request = session_request or LemonSliceNewSessionRequest()
+        if session_request is None:
+            raise ValueError(
+                "session_request is required; provide exactly one of agent_id, "
+                "agent_image_url, or agent_image"
+            )
+        self._session_request = session_request
         self._session_id: str | None = None
         self._control_url: str | None = None
         self._daily_transport_client: DailyTransportClient | None = None
@@ -145,6 +171,7 @@ class LemonSliceTransportClient:
         response = await self._api.create_session(
             agent_image_url=self._session_request.agent_image_url,
             agent_id=self._session_request.agent_id,
+            agent_image=self._session_request.agent_image,
             agent_prompt=self._session_request.agent_prompt,
             idle_timeout=self._session_request.idle_timeout,
             daily_room_url=self._session_request.daily_room_url,
@@ -712,8 +739,8 @@ class LemonSliceTransport(BaseTransport):
             bot_name: The name of the Pipecat bot.
             session: aiohttp session used for async HTTP requests.
             api_key: LemonSlice API key for authentication.
-            session_request: Optional session creation parameters. If not provided, a default
-                agent will be used.
+            session_request: Session creation parameters. Exactly one of agent_id,
+                agent_image_url, or agent_image must be provided.
             params: Optional LemonSlice-specific configuration parameters.
             input_name: Optional name for the input transport.
             output_name: Optional name for the output transport.

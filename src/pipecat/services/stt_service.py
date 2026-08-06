@@ -26,7 +26,6 @@ from pipecat.frames.frames import (
     Frame,
     InterruptionFrame,
     LLMContextAssistantTurnFrame,
-    ServiceSwitcherRequestMetadataFrame,
     StartFrame,
     STTMetadataFrame,
     STTMuteFrame,

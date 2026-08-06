@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -266,7 +265,7 @@ class LmntTTSService(InterruptibleTTSService):
             }
 
             # Connect to LMNT's websocket directly
-            websocket = await websocket_connect("wss://api.lmnt.com/v1/ai/speech/stream")
+            websocket = await self._websocket_connect("wss://api.lmnt.com/v1/ai/speech/stream")
             self._websocket = websocket
 
             # Send initialization message

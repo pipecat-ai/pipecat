@@ -915,6 +915,15 @@ class ServiceRegistry:
             settings_params=["voice"],
         ),
         ServiceDefinition(
+            value="pockettts_tts",
+            label="Pocket TTS",
+            package="pipecat-ai[pocket-tts]",
+            class_name=["PocketTTSService"],
+            env_prefix="POCKET_TTS",
+            settings_params=["voice"],
+            param_defaults={"voice": "alba"},
+        ),
+        ServiceDefinition(
             value="resemble_tts",
             label="Resemble",
             package="pipecat-ai[resembleai]",

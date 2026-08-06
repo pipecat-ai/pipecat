@@ -235,3 +235,5 @@ We aim to review all contributions promptly and provide constructive feedback to
 ➡️ [Read the docs](https://docs.pipecat.ai)
 
 ➡️ [Reach us on X](https://x.com/pipecat_ai)
+
+➡️ [Enterprise support](mailto:help@daily.co) for consulting and support agreements

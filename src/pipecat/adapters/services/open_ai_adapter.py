@@ -201,7 +201,7 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
         *,
         convert_developer_to_user: bool,
     ) -> list[ChatCompletionMessageParam]:
-        result = []
+        result: list[ChatCompletionMessageParam] = []
         for message in messages:
             if isinstance(message, LLMSpecificMessage):
                 # Extract the actual message content from LLMSpecificMessage
@@ -211,9 +211,15 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
                 result.append(_openai_from_llm_standard_message(message))
 
         if convert_developer_to_user:
-            for msg in result:
-                if msg.get("role") == "developer":
-                    msg["role"] = "user"
+            # Copy rather than mutate: the message dicts are shared with the
+            # source LLMContext. Unpacking loses the TypedDict type, so cast
+            # the rewritten message back at the boundary.
+            result = [
+                cast(ChatCompletionMessageParam, {**msg, "role": "user"})
+                if msg.get("role") == "developer"
+                else msg
+                for msg in result
+            ]
 
         return result
 

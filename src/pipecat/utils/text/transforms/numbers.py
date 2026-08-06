@@ -27,6 +27,9 @@ def expand_numbers(
     expanded as quantities (e.g. ``"42"`` → ``"forty two"``). Pass ``None``
     to expand all numbers as words regardless of magnitude.
 
+    Decimals are read as the whole part followed by their fractional digits, one at a
+    time, so every written digit is spoken (``"1.0"`` → ``"one point zero"``).
+
     Args:
         digit_cutoff: Numbers larger than this value are read digit-by-digit.
             ``None`` disables the cutoff so every number is expanded as a word.
@@ -53,11 +56,14 @@ def expand_numbers(
             return result
 
         if frac_str:
-            words = num2words(float(f"{whole_str}.{frac_str}"), lang="en")
-        else:
-            words = num2words(whole, lang="en")
+            # Reading the fraction one digit at a time keeps trailing zeros audible,
+            # which also keeps a decimal agreeing with the plural unit expand_units
+            # picks for it ("1.0 kilometers").
+            return f"{num2words(whole, lang='en')} point " + " ".join(
+                num2words(int(digit), lang="en") for digit in frac_str
+            )
 
-        return words
+        return num2words(whole, lang="en")
 
     async def _transform(text: str, aggregation_type: str | AggregationType) -> str:
         return _NUMBER_RE.sub(_num_to_words, text)

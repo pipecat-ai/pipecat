@@ -96,7 +96,7 @@ class ExotelFrameSerializer(FrameSerializer):
             Serialized data as string or bytes, or None if the frame isn't handled.
         """
         if isinstance(frame, InterruptionFrame):
-            answer = {"event": "clear", "streamSid": self._stream_sid}
+            answer = {"event": "clear", "stream_sid": self._stream_sid}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):
             data = frame.audio
@@ -113,7 +113,7 @@ class ExotelFrameSerializer(FrameSerializer):
 
             answer = {
                 "event": "media",
-                "streamSid": self._stream_sid,
+                "stream_sid": self._stream_sid,
                 "media": {"payload": payload},
             }
 

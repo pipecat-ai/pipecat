@@ -17,7 +17,6 @@ assertions over its validators, plus runtime checks that the converted shims
 still emit ``DeprecationWarning`` without warning at import time.
 """
 
-import asyncio
 import json
 import subprocess
 import sys

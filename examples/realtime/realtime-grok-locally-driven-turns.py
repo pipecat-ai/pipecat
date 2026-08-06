@@ -127,7 +127,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting Grok Voice Agent bot")
 
     session_properties = SessionProperties(
-        voice="Ara",
+        voice="rex",
         # Disable Grok's server-side turn detection (manual mode). This
         # example drives turn boundaries locally via the SileroVADAnalyzer
         # wired into the user aggregator below.

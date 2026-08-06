@@ -14,6 +14,15 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+try:
+    from aws_sdk_sagemaker_runtime_http2.models import ResponseStreamEventPayloadPart
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error(
+        'In order to use Deepgram Flux on SageMaker, you need to `uv add "pipecat-ai[sagemaker]"`.'
+    )
+    raise ImportError(f"Missing module: {e}") from e
+
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -270,7 +279,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
                 if result is None:
                     break
 
-                if hasattr(result, "value") and hasattr(result.value, "bytes_"):
+                if isinstance(result, ResponseStreamEventPayloadPart):
                     if result.value.bytes_:
                         response_data = result.value.bytes_.decode("utf-8")
 

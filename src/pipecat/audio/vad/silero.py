@@ -12,6 +12,7 @@ Supports 8kHz and 16kHz sample rates.
 """
 
 import time
+from typing import cast
 
 import numpy as np
 from loguru import logger
@@ -86,7 +87,7 @@ class SileroOnnxModel:
         self._last_sr = 0
         self._last_batch_size = 0
 
-    def __call__(self, x, sr: int):
+    def __call__(self, x, sr: int) -> np.ndarray:
         """Process audio input through the VAD model."""
         x, sr = self._validate_input(x, sr)
         num_samples = 512 if sr == 16000 else 256
@@ -114,8 +115,8 @@ class SileroOnnxModel:
         if sr in [8000, 16000]:
             ort_inputs = {"input": x, "state": self._state, "sr": np.array(sr, dtype="int64")}
             ort_outs = self.session.run(None, ort_inputs)
-            out, state = ort_outs
-            self._state = state
+            out = cast(np.ndarray, ort_outs[0])
+            self._state = cast(np.ndarray, ort_outs[1])
         else:
             raise ValueError()
 

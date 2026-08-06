@@ -92,6 +92,8 @@ autodoc_mock_imports = [
     # MLX dependencies (Apple Silicon specific)
     "mlx",
     "mlx_whisper",  # Note: might need underscore format too
+    # pocket-tts dependencies (torch is mocked above)
+    "pocket_tts",
     # Pydantic v2 compatibility issues in third-party SDKs
     "hume",
     "hume.tts",

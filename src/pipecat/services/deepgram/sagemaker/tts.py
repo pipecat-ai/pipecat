@@ -20,6 +20,15 @@ from typing import Any
 
 from loguru import logger
 
+try:
+    from aws_sdk_sagemaker_runtime_http2.models import ResponseStreamEventPayloadPart
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error(
+        'In order to use Deepgram on SageMaker, you need to `uv add "pipecat-ai[sagemaker]"`.'
+    )
+    raise ImportError(f"Missing module: {e}") from e
+
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -134,6 +143,17 @@ class DeepgramSageMakerTTSService(TTSService):
             True, as Deepgram SageMaker TTS service supports metrics generation.
         """
         return True
+
+    @property
+    def supports_processing_metrics(self) -> bool:
+        """Whether this service has a meaningful processing-time metric.
+
+        False: the SageMaker endpoint is driven over a bidirectional HTTP/2
+        stream, so ``run_tts`` sends the text and returns while audio arrives
+        on the receive task — the same handoff the websocket services make,
+        over a different transport.
+        """
+        return False
 
     async def start(self, frame: StartFrame):
         """Start the Deepgram SageMaker TTS service.
@@ -261,7 +281,7 @@ class DeepgramSageMakerTTSService(TTSService):
                 if result is None:
                     break
 
-                if hasattr(result, "value") and hasattr(result.value, "bytes_"):
+                if isinstance(result, ResponseStreamEventPayloadPart):
                     if result.value.bytes_:
                         payload = result.value.bytes_
 

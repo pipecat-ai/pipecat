@@ -236,6 +236,48 @@ class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("grams", result)
 
 
+class TestExpandUnitsSingular(unittest.IsolatedAsyncioTestCase):
+    """A quantity of exactly one takes the singular form of the unit."""
+
+    async def test_singular_forms(self):
+        cases = {
+            "Only 1km left": "Only 1 kilometer left",
+            "Only 1mi left": "Only 1 mile left",
+            "Only 1ft left": "Only 1 foot left",
+            "Only 1in left": "Only 1 inch left",
+            "Only 1lb left": "Only 1 pound left",
+            "Only 1gb left": "Only 1 gigabyte left",
+            "Only 1mph left": "Only 1 mile per hour left",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await expand_units(text, "*"), expected)
+
+    async def test_singular_with_space(self):
+        result = await expand_units("1 km away", "*")
+        self.assertEqual(result, "1 kilometer away")
+
+    async def test_plural_forms_kept(self):
+        cases = {
+            "5km away": "5 kilometers away",
+            "0.5 mi away": "0.5 miles away",
+            "21 lb of flour": "21 pounds of flour",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await expand_units(text, "*"), expected)
+
+    async def test_decimal_one_is_plural(self):
+        """A decimal such as "1.0" reads as plural in speech, unlike a bare "1"."""
+        result = await expand_units("1.0km away", "*")
+        self.assertEqual(result, "1.0 kilometers away")
+
+    async def test_invariant_units_unchanged(self):
+        """Units whose singular and plural forms match expand identically."""
+        self.assertEqual(await expand_units("1hz tone", "*"), "1 hertz tone")
+        self.assertEqual(await expand_units("3 GHz processor", "*"), "3 gigahertz processor")
+
+
 class TestExpandUnitsUnambiguous(unittest.IsolatedAsyncioTestCase):
     """Units that are unambiguous even with a space before them should still expand."""
 
@@ -375,6 +417,16 @@ class TestExpandCurrency(unittest.IsolatedAsyncioTestCase):
         self.assertIn("one thousand dollars", result)
         self.assertIn("fifty cents", result)
 
+    async def test_extra_fractional_digits_not_leaked(self):
+        # Regression: a fraction with 3+ digits must be fully consumed by the match,
+        # read to cent precision, with no stray digit glued onto the subunit word.
+        result = await expand_currency("The item costs $5.500 today", "*")
+        self.assertEqual(result, "The item costs five dollars and fifty cents today")
+        self.assertNotIn("cents0", result)
+        # Sub-cent precision is dropped (read like a 2-digit amount), not spoken.
+        self.assertEqual(await expand_currency("$3.567", "*"), "three dollars and fifty-six cents")
+        self.assertEqual(await expand_currency("£1.999", "*"), "one pound and ninety-nine pence")
+
 
 class TestNormalizeDates(unittest.IsolatedAsyncioTestCase):
     async def test_iso_date(self):
@@ -466,6 +518,71 @@ class TestExpandNumbers(unittest.IsolatedAsyncioTestCase):
         self.assertIn("2 5 0 0", result)
         self.assertIn("point", result)
         self.assertIn("7 5", result)
+
+    async def test_trailing_fractional_zero_is_spoken(self):
+        # Every written digit is spoken, trailing zeros included -- the above-cutoff
+        # branch reads fractions the same way.
+        transform = expand_numbers(digit_cutoff=2025)
+        cases = {
+            "1.0": "one point zero",
+            "1.00": "one point zero zero",
+            "2.0": "two point zero",
+            "0.50": "zero point five zero",
+            "1.10": "one point one zero",
+            "10.0": "ten point zero",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await transform(text, "*"), expected)
+
+    async def test_fractions_without_trailing_zeros_unchanged(self):
+        # The digit-by-digit reading covers every decimal, not just the ones with a
+        # trailing zero.
+        transform = expand_numbers(digit_cutoff=None)
+        cases = {
+            "3.5": "three point five",
+            "1.05": "one point zero five",
+            "1.25": "one point two five",
+            "12.345": "twelve point three four five",
+            "5.0001": "five point zero zero zero one",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await transform(text, "*"), expected)
+
+
+class TestUnitsAndNumbersComposition(unittest.IsolatedAsyncioTestCase):
+    """``expand_units`` and ``expand_numbers`` have to agree on decimal quantities.
+
+    ``expand_units`` keeps the plural for a decimal such as "1.0" because it reads as
+    "one point zero" in speech, and ``expand_numbers`` runs after it in the default
+    ``VoiceFormatter`` order. Both have to spell the decimal out the same way, or the
+    composed output is ungrammatical: "one kilometers".
+    """
+
+    async def test_decimal_one_agrees_with_plural_unit(self):
+        formatter = VoiceFormatter(expand_numbers=True)
+        cases = {
+            "1.0km left": "one point zero kilometers left",
+            "1.0kg of flour": "one point zero kilograms of flour",
+            "1.0 mi away": "one point zero miles away",
+            "1.00km left": "one point zero zero kilometers left",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await formatter(text, "*"), expected)
+
+    async def test_singular_and_plural_quantities_still_agree(self):
+        formatter = VoiceFormatter(expand_numbers=True)
+        cases = {
+            "1km left": "one kilometer left",
+            "2.0km left": "two point zero kilometers left",
+            "1.5km left": "one point five kilometers left",
+            "1.0hz tone": "one point zero hertz tone",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await formatter(text, "*"), expected)
 
 
 if __name__ == "__main__":

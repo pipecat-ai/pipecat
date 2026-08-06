@@ -9,8 +9,11 @@
 import unittest
 
 from pipecat.evals.judge import EvalJudge
+from pipecat.evals.services import _cfg_language, cartesia_service
 from pipecat.evals.speech import EvalSpeech, tts_cache_key, tts_sample_rate
 from pipecat.evals.transcribe import EvalTranscriber
+from pipecat.services.settings import NOT_GIVEN
+from pipecat.transcriptions.language import Language
 
 
 def _fake_stt(config, sample_rate):
@@ -58,6 +61,19 @@ class TestVoiceFromConfig(unittest.TestCase):
             tts_cache_key({"service": "kokoro", "voice": "b"}),
         )
 
+    def test_cache_key_distinguishes_language(self):
+        # Two configs identical except for language must not collide, so an
+        # English and a Chinese render of the same text get separate cache slots.
+        self.assertNotEqual(
+            tts_cache_key({"service": "cartesia", "voice": "v", "language": "en"}),
+            tts_cache_key({"service": "cartesia", "voice": "v", "language": "zh"}),
+        )
+        # An absent language and an explicit empty one key to the same slot.
+        self.assertEqual(
+            tts_cache_key({"service": "cartesia", "voice": "v"}),
+            tts_cache_key({"service": "cartesia", "voice": "v", "language": ""}),
+        )
+
     def test_sample_rate_default(self):
         self.assertEqual(tts_sample_rate({}), 16000)
         self.assertEqual(tts_sample_rate({"sample_rate": 24000}), 24000)
@@ -77,6 +93,23 @@ class TestVoiceFromConfig(unittest.TestCase):
         self.assertEqual(v._service[0], "FAKE_TTS")
         self.assertEqual(v._service[2], 24000)
 
+    def test_language_reaches_cartesia_settings(self):
+        # Cartesia is the one builder a unit test can construct: Whisper, Moonshine
+        # and Kokoro load their models at construction time.
+        service = cartesia_service(
+            {"service": "cartesia", "voice": "v", "api_key": "test-key", "language": "zh"},
+            16000,
+        )
+        self.assertEqual(service._settings.language, Language.ZH)
+
+    def test_no_language_leaves_cartesia_default(self):
+        # Omitting language must not force a value; the service keeps its own
+        # default, which for Cartesia is Language.EN.
+        service = cartesia_service(
+            {"service": "cartesia", "voice": "v", "api_key": "test-key"}, 16000
+        )
+        self.assertEqual(service._settings.language, Language.EN)
+
     def test_websocket_service_rejected(self):
         # run_tts can't be driven without a pipeline to manage the connection, so a
         # websocket-streaming TTS service must be rejected at construction.
@@ -94,6 +127,32 @@ class TestVoiceFromConfig(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             EvalSpeech(_FakeWS(), sample_rate=16000, cache_key="k")
+
+
+class TestCfgLanguage(unittest.TestCase):
+    def test_absent_leaves_the_field_unset(self):
+        self.assertIs(_cfg_language({}), NOT_GIVEN)
+        self.assertIs(_cfg_language({"language": None}), NOT_GIVEN)
+
+    def test_blank_leaves_the_field_unset(self):
+        # A key present but empty in the YAML means "unset", not "unknown language".
+        self.assertIs(_cfg_language({"language": ""}), NOT_GIVEN)
+        self.assertIs(_cfg_language({"language": "   "}), NOT_GIVEN)
+
+    def test_code_or_language_accepted(self):
+        self.assertEqual(_cfg_language({"language": "zh"}), Language.ZH)
+        self.assertEqual(_cfg_language({"language": " zh-TW "}), Language.ZH_TW)
+        self.assertEqual(_cfg_language({"language": Language.ES}), Language.ES)
+
+    def test_unknown_code_rejected(self):
+        with self.assertRaises(ValueError):
+            _cfg_language({"language": "notalang"})
+
+    def test_non_string_rejected(self):
+        # YAML 1.1 reads a bare `language: no` as False rather than Norwegian, so
+        # the coercion has to reject non-strings instead of passing them through.
+        with self.assertRaises(ValueError):
+            _cfg_language({"language": False})
 
 
 class _CountingTTS:

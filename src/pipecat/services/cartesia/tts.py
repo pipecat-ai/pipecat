@@ -17,7 +17,6 @@ from typing import Any
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -554,7 +553,7 @@ class CartesiaTTSService(WebsocketTTSService):
             if self._websocket and self._websocket.state is State.OPEN:
                 return
             logger.debug("Connecting to Cartesia TTS")
-            self._websocket = await websocket_connect(
+            self._websocket = await self._websocket_connect(
                 f"{self._url}?api_key={self._api_key}&cartesia_version={self._cartesia_version}"
             )
             await self._call_event_handler("on_connected")

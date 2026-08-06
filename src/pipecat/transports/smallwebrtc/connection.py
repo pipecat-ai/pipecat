@@ -16,7 +16,7 @@ import json
 import os
 import time
 import uuid
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from loguru import logger
 from pydantic import BaseModel, TypeAdapter
@@ -259,9 +259,9 @@ class SmallWebRTCConnection(BaseObject):
         if not ice_servers:
             self.ice_servers: list[IceServer] = []
         elif all(isinstance(s, IceServer) for s in ice_servers):
-            self.ice_servers = ice_servers
+            self.ice_servers = cast(list[IceServer], ice_servers)
         elif all(isinstance(s, str) for s in ice_servers):
-            self.ice_servers = [IceServer(urls=s) for s in ice_servers]
+            self.ice_servers = [IceServer(urls=s) for s in cast(list[str], ice_servers)]
         else:
             raise TypeError("ice_servers must be either List[str] or List[RTCIceServer]")
         self._connect_invoked = False
@@ -429,10 +429,10 @@ class SmallWebRTCConnection(BaseObject):
             # and aiortc does not handle that pretty well.
             video_input_track = self.video_input_track()
             if video_input_track:
-                await self.video_input_track().discard_old_frames()
+                await video_input_track.discard_old_frames()
             screen_video_input_track = self.screen_video_input_track()
             if screen_video_input_track:
-                await self.screen_video_input_track().discard_old_frames()
+                await screen_video_input_track.discard_old_frames()
             if video_input_track or screen_video_input_track:
                 # This prevents an issue where sometimes the WebRTC connection can be established
                 # before the bot is ready to receive video. When that happens, we can lose a couple
@@ -783,6 +783,8 @@ class SmallWebRTCConnection(BaseObject):
         message that was buffered while the channel was unavailable.
         """
         self._cancel_data_channel_timeout()
+        if not self._data_channel:
+            return
         logger.debug("Data channel is open, flushing queued messages")
         while self._outgoing_messages_queue:
             message = self._outgoing_messages_queue.pop(0)

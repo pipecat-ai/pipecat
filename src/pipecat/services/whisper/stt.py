@@ -15,13 +15,14 @@ import platform
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any
 
 import numpy as np
 from loguru import logger
 from typing_extensions import override
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given, is_given
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -325,6 +326,9 @@ class WhisperSTTService(SegmentedSTTService):
         Note:
             If this is the first time this model is being run,
             it will take time to download from the Hugging Face model hub.
+
+        Raises:
+            ValueError: If the model can't transcribe the configured language.
         """
         logger.debug("Loading Whisper model...")
         model_name = assert_given(self._settings.model)
@@ -332,6 +336,50 @@ class WhisperSTTService(SegmentedSTTService):
             raise ValueError("Whisper model must be specified")
         self._model = WhisperModel(model_name, device=self._device, compute_type=self._compute_type)
         logger.debug("Loaded Whisper model")
+        unsupported = self._unsupported_language()
+        if unsupported:
+            raise ValueError(unsupported)
+
+    def _unsupported_language(self) -> str | None:
+        """Describe why the loaded model can't transcribe the current language.
+
+        The English-only models (every ``.en`` one, including the default) accept
+        any language and transcribe as English regardless, so a mismatch would
+        otherwise surface as fluent-looking output in the wrong language rather
+        than as an error.
+
+        Returns:
+            An explanatory message, or ``None`` when the pairing is usable.
+        """
+        supported = getattr(self._model, "supported_languages", None)
+        language = self._settings.language
+        if not supported or not is_given(language) or language in supported:
+            return None
+        return (
+            f"Whisper model '{assert_given(self._settings.model)}' cannot transcribe "
+            f"'{language}' — it supports only {sorted(supported)}. Use a multilingual "
+            "model (e.g. 'large-v3-turbo')."
+        )
+
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta, reporting a language the model can't handle.
+
+        A mid-call switch to an unsupported language is reported rather than
+        raised, so a settings change can't tear down a live pipeline; the model
+        stays loaded and keeps transcribing as English.
+
+        Args:
+            delta: An STT settings delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        changed = await super()._update_settings(delta)
+        if "language" in changed:
+            unsupported = self._unsupported_language()
+            if unsupported:
+                await self.push_error(unsupported)
+        return changed
 
     @traced_stt
     async def _handle_transcription(

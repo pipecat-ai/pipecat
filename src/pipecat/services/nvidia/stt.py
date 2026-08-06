@@ -16,7 +16,7 @@ import asyncio
 from collections.abc import AsyncGenerator, Mapping
 from concurrent.futures import CancelledError as FuturesCancelledError
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 from pydantic import BaseModel
@@ -219,7 +219,9 @@ class AudioChunkIterator:
             self._closed = True
             raise StopIteration
 
-        return audio
+        # Only put() (bytes) and close() (the sentinel, excluded above) write
+        # to the queue.
+        return cast(bytes, audio)
 
 
 class NvidiaSTTService(STTService):
@@ -256,6 +258,9 @@ class NvidiaSTTService(STTService):
         api_key: str | None = None,
         server: str = "grpc.nvcf.nvidia.com:443",
         model_function_map: Mapping[str, str] = {
+            # The function id identifies NVIDIA's hosted deployment of the model
+            # and changes when NVIDIA redeploys it. The current id is on
+            # https://build.nvidia.com/nvidia/nemotron-asr-streaming/api
             "function_id": "bb0837de-8c7b-481f-9ec8-ef5663e9c1fa",
             "model_name": "nemotron-asr-streaming",
         },
@@ -546,7 +551,9 @@ class NvidiaSTTService(STTService):
     def _response_handler(self, iterator: AudioChunkIterator):
         drop_reason = None
         try:
-            responses = self._asr_service.streaming_response_generator(
+            asr_service = self._asr_service
+            assert asr_service is not None, "ASR service not initialized"
+            responses = asr_service.streaming_response_generator(
                 audio_chunks=iterator,
                 streaming_config=self._config,
             )
@@ -606,7 +613,9 @@ class NvidiaSTTService(STTService):
 
             transcript = result.alternatives[0].transcript
             if transcript and len(transcript) > 0:
-                language = assert_given(self._settings.language)
+                # Technically `_settings.language` could be a raw string, but
+                # Language is a StrEnum so downstream handles either.
+                language = cast("Language | None", assert_given(self._settings.language))
                 if result.is_final:
                     await self.stop_processing_metrics()
                     logger.debug(f"Transcription: [{transcript}]")
@@ -700,7 +709,10 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         api_key: str | None = None,
         server: str = "grpc.nvcf.nvidia.com:443",
         model_function_map: Mapping[str, str] = {
-            "function_id": "ee8dc628-76de-4acc-8595-1836e7e857bd",
+            # The function id identifies NVIDIA's hosted deployment of the model
+            # and changes when NVIDIA redeploys it. The current id is on
+            # https://build.nvidia.com/nvidia/canary-1b-asr/api
+            "function_id": "b0e8b4a5-217c-40b7-9b96-17d84e666317",
             "model_name": "canary-1b-asr",
         },
         sample_rate: int | None = None,
@@ -924,7 +936,9 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
                     text = alternatives[0].transcript.strip()
                     if text:
                         logger.debug(f"Transcription: [{text}]")
-                        language = assert_given(self._settings.language)
+                        # Technically `_settings.language` could be a raw string, but
+                        # Language is a StrEnum so downstream handles either.
+                        language = cast("Language | None", assert_given(self._settings.language))
                         yield TranscriptionFrame(
                             text,
                             self._user_id,

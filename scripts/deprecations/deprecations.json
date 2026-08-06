@@ -3215,6 +3215,28 @@
       "location": "pipecat/services/sarvam/tts.py"
     },
     {
+      "subject": "LLMSettings.filter_incomplete_user_turns",
+      "module": "pipecat.services.settings",
+      "kind": "parameter",
+      "deprecated_in": "1.7.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "user_turn_strategies=FilterIncompleteUserTurnStrategies()",
+      "message": "Use ``user_turn_strategies=FilterIncompleteUserTurnStrategies()`` on :class:`~pipecat.processors.aggregators.llm_response_universal.LLMUserAggregatorParams` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/settings.py"
+    },
+    {
+      "subject": "LLMSettings.user_turn_completion_config",
+      "module": "pipecat.services.settings",
+      "kind": "parameter",
+      "deprecated_in": "1.7.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "FilterIncompleteUserTurnStrategies(config=...)",
+      "message": "Pass the config to ``FilterIncompleteUserTurnStrategies(config=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/settings.py"
+    },
+    {
       "subject": "SimliVideoService.InputParams",
       "module": "pipecat.services.simli.video",
       "kind": "class",

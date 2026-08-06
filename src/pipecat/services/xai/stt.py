@@ -18,7 +18,6 @@ from typing import Any
 from urllib.parse import urlencode
 
 from loguru import logger
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat import version as pipecat_version
@@ -283,7 +282,7 @@ class XAISTTService(WebsocketSTTService):
                 "Authorization": f"Bearer {self._api_key}",
                 "User-Agent": f"xAI/1.0 (integration=Pipecat/{pipecat_version()})",
             }
-            self._websocket = await websocket_connect(ws_url, additional_headers=headers)
+            self._websocket = await self._websocket_connect(ws_url, additional_headers=headers)
             await self._call_event_handler("on_connected")
             logger.debug(f"{self} connected to xAI STT WebSocket")
         except Exception as e:

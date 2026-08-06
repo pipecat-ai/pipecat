@@ -38,7 +38,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.settings import LLMSettings
 from tests.flows_test_helpers import (
     assert_tts_speak_frames_queued,
     get_advertised_tool_handlers,
