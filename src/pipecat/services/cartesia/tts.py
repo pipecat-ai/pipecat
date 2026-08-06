@@ -196,11 +196,8 @@ class CartesiaTTSSettings(TTSSettings):
     pronunciation_dict_id: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-# Sentence punctuation and quotes. Cartesia's normalizer discards these, so a transcript
-# made only of them normalizes to an empty string and is rejected -- an LLM resuming a reply
-# that was interrupted typically opens with a bare ellipsis. Symbols such as "&" and "$" are
-# deliberately absent: the normalizer voices them as words. Stripped only at the start of a
-# context; mid-context this punctuation carries pause and prosody.
+# Cartesia's normalizer discards these, so a transcript made only of them is rejected.
+# Symbols like "&" and "$" are absent because it voices them as words.
 LEADING_STRIP_CHARACTERS = ".,;:!?…-–—\"'“”‘’"
 
 
