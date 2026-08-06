@@ -8,6 +8,7 @@
 
 import base64
 import json
+import string
 import re
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -196,10 +197,15 @@ class CartesiaTTSSettings(TTSSettings):
     pronunciation_dict_id: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-# Punctuation Cartesia's text normalizer discards. A transcript made only of these
-# normalizes to an empty string, which the API rejects, so they are stripped when they
-# lead a context. Mid-context they are left alone, where they carry pause and prosody.
-LEADING_STRIP_CHARACTERS = ".,;:!?\u2026-\u2013\u2014_\"'`\u201c\u201d\u2018\u2019\u00ab\u00bb\u2039\u203a()[]{}\u00b7\u3002\u3001\uff0c\uff1b\uff1a\uff01\uff1f"
+# Cartesia's text normalizer discards punctuation, so a transcript made only of it
+# normalizes to an empty string and is rejected. Derived from string.punctuation rather
+# than hand-listed, minus the symbols the normalizer voices as words ("&" -> "and",
+# "$5" -> "five dollars"), plus the non-ASCII punctuation it treats the same way. Only
+# applied at the start of a context; mid-context this punctuation carries pause and prosody.
+_VOICED_SYMBOLS = "#$%&*+<=>@^|~"
+LEADING_STRIP_CHARACTERS = "".join(
+    character for character in string.punctuation if character not in _VOICED_SYMBOLS
+) + "…–—‘’“”‹›«»·。、，；：！？"
 
 
 class CartesiaTTSService(WebsocketTTSService):
