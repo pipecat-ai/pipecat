@@ -196,6 +196,12 @@ class CartesiaTTSSettings(TTSSettings):
     pronunciation_dict_id: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
+# Punctuation Cartesia's text normalizer discards. A transcript made only of these
+# normalizes to an empty string, which the API rejects, so they are stripped when they
+# lead a context. Mid-context they are left alone, where they carry pause and prosody.
+LEADING_STRIP_CHARACTERS = ".,;:!?\u2026-\u2013\u2014_\"'`\u201c\u201d\u2018\u2019\u00ab\u00bb\u2039\u203a()[]{}\u00b7\u3002\u3001\uff0c\uff1b\uff1a\uff01\uff1f"
+
+
 class CartesiaTTSService(WebsocketTTSService):
     """Cartesia TTS service with WebSocket streaming and word timestamps.
 
@@ -334,6 +340,9 @@ class CartesiaTTSService(WebsocketTTSService):
         super().__init__(
             text_aggregation_mode=text_aggregation_mode,
             aggregate_sentences=aggregate_sentences,
+            leading_strip_characters=kwargs.pop(
+                "leading_strip_characters", LEADING_STRIP_CHARACTERS
+            ),
             push_text_frames=False,
             pause_frame_processing=False,
             sample_rate=sample_rate,
