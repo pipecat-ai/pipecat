@@ -776,10 +776,16 @@ async def create_transport(
         params.participant_id = runner_args.participant_id
         params.peer_id = runner_args.peer_id
         params.serve = runner_args.serve
-        params.serve_bind = runner_args.serve_bind
+        params.bind = runner_args.bind
         params.serve_tls_host = runner_args.serve_tls_host
         params.serve_tls_cert = runner_args.serve_tls_cert
         params.serve_tls_key = runner_args.serve_tls_key
+        if runner_args.connection_timeout is not None:
+            params.connection_timeout = runner_args.connection_timeout
+        if runner_args.response_path is not None:
+            params.response_path = runner_args.response_path
+        if runner_args.request_path is not None:
+            params.request_path = runner_args.request_path
 
         transport = MOQTransport(
             params=params,

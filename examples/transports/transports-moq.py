@@ -15,11 +15,23 @@ Requirements:
         --extra openai --extra runner
 
 Usage:
-    uv run python examples/transports/transports-moq.py
+    # Local dev — bot is its own MOQ server, mints a self-signed cert
+    # for `localhost`, browser pins the fingerprint. No relay needed:
+    uv run python examples/transports/transports-moq.py -t moq
 
-    # Open http://localhost:7860
-    # Important!: Choose `Media over QUIC` from the top left dropdown menu
-    # click Connect
+    # Client mode — dial an external relay instead (works behind NAT,
+    # since neither the bot nor the browser needs a reachable address):
+    uv run python examples/transports/transports-moq.py \\
+        -t moq --moq-connect https://cdn.moq.dev/anon
+
+    # Then open http://localhost:7860 and click Connect.
+
+    # Direct mode — the bot dials the relay at startup and waits there,
+    # instead of a browser POSTing /start to bring one up. The relay and
+    # namespace ride in the URL printed at startup, so nothing has to
+    # reach this process over HTTP:
+    uv run python examples/transports/transports-moq.py \\
+        -t moq --moq-connect https://cdn.moq.dev/anon --moq-direct
 """
 
 import os
