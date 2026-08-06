@@ -25,7 +25,9 @@ async def test_deepgram_rejected_api_key_misconfigures_the_service(monkeypatch):
     async def fake_websocket_connect(*args, **kwargs):
         raise _websocket_rejection(401)
 
-    monkeypatch.setattr("pipecat.services.deepgram.tts.websocket_connect", fake_websocket_connect)
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
 
     service = DeepgramTTSService(api_key="wrong-key", sample_rate=24000)
 
@@ -39,7 +41,9 @@ async def test_deepgram_unavailable_service_stays_usable(monkeypatch):
     async def fake_websocket_connect(*args, **kwargs):
         raise _websocket_rejection(503)
 
-    monkeypatch.setattr("pipecat.services.deepgram.tts.websocket_connect", fake_websocket_connect)
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
 
     service = DeepgramTTSService(api_key="test-key", sample_rate=24000)
 
