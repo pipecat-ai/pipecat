@@ -41,8 +41,11 @@ def _new_session_namespace() -> str:
     another's. On an anonymous relay (e.g. ``cdn.moq.dev/anon``) there is
     no authentication either, so the namespace doubles as the session's
     only access control: it must be unguessable, not merely unique.
-    Serve mode doesn't need this — the bot owns the socket, so nothing
-    else can publish alongside it.
+    Serve mode gets a fixed default instead, since a socket bound to
+    localhost isn't reachable to begin with. That's an accident of local
+    dev, not isolation: anything that can reach the socket can publish
+    the request path. Exposing it needs real access control — a
+    path-scoped moq-token — rather than an unguessable name.
     """
     return f"{DEFAULT_MOQ_NAMESPACE}-{secrets.token_hex(8)}"
 

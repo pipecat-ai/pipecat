@@ -945,6 +945,25 @@ class MOQTransportClient:
                 logger.debug(f"MOQ: consumer.cancel() raised: {e}")
         self._active_consumers.clear()
 
+        # Finish what we published before dropping it. ``finish()`` on the
+        # audio track flushes samples still inside the encoder, and
+        # finishing the broadcast unannounces it — a dropped producer is
+        # instead lingered by the origin, so the relay keeps advertising a
+        # dead bot to anyone browsing the namespace until it expires.
+        # Tracks first, then the broadcast that carries them.
+        for producer, what in (
+            (self._audio_out, "audio track"),
+            (self._transcript_out, "transcript stream"),
+            (self._publish_broadcast, "broadcast"),
+        ):
+            if producer is None:
+                continue
+            try:
+                producer.finish()
+            except Exception as e:
+                logger.debug(f"MOQ: finishing the {what} raised: {e}")
+        self._audio_out = None
+
         if self._connection_task is not None and self._task_manager is not None:
             await self._task_manager.cancel_task(self._connection_task)
             self._connection_task = None
