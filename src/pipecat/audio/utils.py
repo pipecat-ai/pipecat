@@ -13,8 +13,8 @@ various audio formats used in Pipecat pipelines.
 
 import audioop
 
+import loudness
 import numpy as np
-import pyloudnorm as pyln
 
 from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
 from pipecat.audio.resamplers.soxr_resampler import SOXRAudioResampler
@@ -123,30 +123,30 @@ def normalize_value(value, min_value, max_value):
 
 
 def calculate_audio_volume(audio: bytes, sample_rate: int) -> float:
-    """Calculate the loudness level of audio data using EBU R128 standard.
-
-    Uses the pyloudnorm library to calculate integrated loudness according
-    to the EBU R128 recommendation, then normalizes the result to [0, 1].
+    """Calculate the loudness level of audio data using ITU-R BS.1770.
 
     Args:
-        audio: Audio data as raw bytes (16-bit signed integers).
+        audio: Audio data as raw bytes (16-bit signed integers). Must hold at
+            least 400ms of audio, the length of a BS.1770 gating block.
         sample_rate: Sample rate of the audio in Hz.
 
     Returns:
         Normalized loudness value between 0 (quiet) and 1 (loud).
+
+    Raises:
+        ValueError: If the audio is shorter than a gating block.
     """
     audio_np = np.frombuffer(audio, dtype=np.int16)
-    audio_float = audio_np.astype(np.float64)
+    audio_float = audio_np.astype(np.float32) / 32768.0
 
-    block_size = audio_np.size / sample_rate
-    meter = pyln.Meter(sample_rate, block_size=block_size)
-    loudness = meter.integrated_loudness(audio_float)
+    level = loudness.integrated_loudness(audio_float, sample_rate)
 
-    # Loudness goes from -20 to 80 (more or less), where -20 is quiet and 80 is
-    # loud.
-    loudness = normalize_value(loudness, -20, 80)
+    # Loudness goes from -110 to -10 LUFS (more or less), where -110 is quiet
+    # and -10 is loud. Audio below the BS.1770 absolute gate measures as -inf,
+    # which normalizes to 0.
+    level = normalize_value(level, -110, -10)
 
-    return loudness
+    return level
 
 
 def exp_smoothing(value: float, prev_value: float, factor: float) -> float:
