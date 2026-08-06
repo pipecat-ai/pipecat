@@ -151,32 +151,28 @@ class UserTurnController(BaseObject):
         self._user_turn_strategies = strategies
         await self._setup_strategies()
 
-    def should_consume_frame(self, frame: Frame) -> bool:
-        """Whether the caller should stop forwarding the given frame.
+    @property
+    def resolves_proposed_turn_start_frames(self) -> bool:
+        """Whether any active start strategy resolves proposed turn starts.
 
-        Most frames travel on regardless of what this controller does with them.
-        A frame is consumed only when passing it along would let something
-        further down the pipeline act on it a second time.
-
-        Args:
-            frame: The frame to check.
-
-        Returns:
-            True if the caller should stop forwarding the frame.
+        A proposal is resolved once, so a caller holding this controller should stop
+        forwarding :class:`~pipecat.frames.frames.ProposedUserStartedSpeakingFrame`
+        when this is True — passing it along would let a resolver further down
+        the pipeline decide the same turn a second time.
         """
-        # A proposal must be resolved once: forwarding it after our own
-        # strategies resolve it would let a resolver further along decide the
-        # same turn a second time.
-        if isinstance(frame, ProposedUserStartedSpeakingFrame):
-            return any(
-                s.resolves_proposed_turn_start_frames
-                for s in self._user_turn_strategies.start or []
-            )
-        if isinstance(frame, ProposedUserStoppedSpeakingFrame):
-            return any(
-                s.resolves_proposed_turn_stop_frames for s in self._user_turn_strategies.stop or []
-            )
-        return False
+        return any(
+            s.resolves_proposed_turn_start_frames for s in self._user_turn_strategies.start or []
+        )
+
+    @property
+    def resolves_proposed_turn_stop_frames(self) -> bool:
+        """Whether any active stop strategy resolves proposed turn stops.
+
+        The end-of-turn counterpart to :attr:`resolves_proposed_turn_start_frames`.
+        """
+        return any(
+            s.resolves_proposed_turn_stop_frames for s in self._user_turn_strategies.stop or []
+        )
 
     async def process_frame(self, frame: Frame):
         """Process an incoming frame to detect user turn start or stop.

@@ -1852,6 +1852,53 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         )
         assert context.messages[0]["content"] == "HELLO"
 
+    async def _run_proposals_through_assistant(self, assistant):
+        received_down, _ = await run_test(
+            Pipeline([assistant]),
+            frames_to_send=[
+                ProposedUserStartedSpeakingFrame(),
+                ProposedUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.2),
+            ],
+            expected_down_frames=None,
+        )
+        return [type(f).__name__ for f in received_down]
+
+    async def test_proposed_frames_are_consumed_when_the_user_half_resolves_them(self):
+        """A service between the halves broadcasts a copy this way; it stops here."""
+        pair = LLMContextAggregatorPair(
+            LLMContext(),
+            user_params=LLMUserAggregatorParams(user_turn_strategies=ExternalUserTurnStrategies()),
+        )
+
+        names = await self._run_proposals_through_assistant(pair.assistant())
+        self.assertNotIn("ProposedUserStartedSpeakingFrame", names)
+        self.assertNotIn("ProposedUserStoppedSpeakingFrame", names)
+
+    async def test_proposed_frames_pass_through_when_the_user_half_ignores_them(self):
+        """Nothing resolved the proposal, so a resolver further along still can."""
+        pair = LLMContextAggregatorPair(
+            LLMContext(),
+            user_params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    start=[VADUserTurnStartStrategy()],
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+                    ],
+                )
+            ),
+        )
+
+        names = await self._run_proposals_through_assistant(pair.assistant())
+        self.assertIn("ProposedUserStartedSpeakingFrame", names)
+        self.assertIn("ProposedUserStoppedSpeakingFrame", names)
+
+    async def test_proposed_frames_pass_through_without_a_paired_user_half(self):
+        """With no user half to have resolved them, the proposals travel on."""
+        names = await self._run_proposals_through_assistant(LLMAssistantAggregator(LLMContext()))
+        self.assertIn("ProposedUserStartedSpeakingFrame", names)
+        self.assertIn("ProposedUserStoppedSpeakingFrame", names)
+
 
 def _function_schema(name: str) -> FunctionSchema:
     return FunctionSchema(name=name, description="", properties={}, required=[])

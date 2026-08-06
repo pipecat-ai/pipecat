@@ -824,7 +824,16 @@ class LLMUserAggregator(LLMContextAggregator):
         elif isinstance(frame, ServiceMetadataFrame):
             await self._handle_service_metadata(frame)
             await self.push_frame(frame, direction)
-        elif not self._user_turn_controller.should_consume_frame(frame):
+        elif isinstance(frame, ProposedUserStartedSpeakingFrame):
+            # A proposal is resolved once. Forwarding one our own strategies
+            # resolve would let a resolver further down the pipeline decide the
+            # same turn a second time.
+            if not self._user_turn_controller.resolves_proposed_turn_start_frames:
+                await self.push_frame(frame, direction)
+        elif isinstance(frame, ProposedUserStoppedSpeakingFrame):
+            if not self._user_turn_controller.resolves_proposed_turn_stop_frames:
+                await self.push_frame(frame, direction)
+        else:
             await self.push_frame(frame, direction)
 
         await self._user_turn_controller.process_frame(frame)
@@ -1606,6 +1615,20 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 # silently dropping user messages).
                 self._require_paired_user_aggregator()
             await self.push_frame(frame, direction)
+        elif isinstance(frame, ProposedUserStartedSpeakingFrame):
+            # A broadcast sends a copy each way, so a proposal from a service
+            # sitting between the two halves — a realtime LLM — reaches the user
+            # half as the upstream copy while this copy travels on. A proposal
+            # should be resolved once, so stop it here if the user half resolves
+            # it. No standard pipeline has a resolver downstream of this half, so
+            # this guards the invariant rather than fixing an observed escape.
+            user = self._paired_user_aggregator
+            if not (user and user._user_turn_controller.resolves_proposed_turn_start_frames):
+                await self.push_frame(frame, direction)
+        elif isinstance(frame, ProposedUserStoppedSpeakingFrame):
+            user = self._paired_user_aggregator
+            if not (user and user._user_turn_controller.resolves_proposed_turn_stop_frames):
+                await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 

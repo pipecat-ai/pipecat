@@ -22,7 +22,11 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.turns.user_start import BaseUserTurnStartStrategy, VADUserTurnStartStrategy
+from pipecat.turns.user_start import (
+    BaseUserTurnStartStrategy,
+    ExternalUserTurnStartStrategy,
+    VADUserTurnStartStrategy,
+)
 from pipecat.turns.user_start.min_words_user_turn_start_strategy import (
     MinWordsUserTurnStartStrategy,
 )
@@ -422,12 +426,11 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
 
         await controller.cleanup()
 
-    async def test_proposals_are_consumed_only_by_resolving_strategies(self):
-        """A controller that can't resolve a proposal passes it along."""
+    async def test_proposals_are_resolved_only_by_resolving_strategies(self):
+        """A controller whose strategies can't resolve a proposal reports so."""
         external = UserTurnController(user_turn_strategies=ExternalUserTurnStrategies())
-        self.assertTrue(external.should_consume_frame(ProposedUserStartedSpeakingFrame()))
-        self.assertTrue(external.should_consume_frame(ProposedUserStoppedSpeakingFrame()))
-        self.assertFalse(external.should_consume_frame(UserStartedSpeakingFrame()))
+        self.assertTrue(external.resolves_proposed_turn_start_frames)
+        self.assertTrue(external.resolves_proposed_turn_stop_frames)
 
         default = UserTurnController(
             user_turn_strategies=UserTurnStrategies(
@@ -435,11 +438,22 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
                 stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)],
             )
         )
-        self.assertFalse(default.should_consume_frame(ProposedUserStartedSpeakingFrame()))
-        self.assertFalse(default.should_consume_frame(ProposedUserStoppedSpeakingFrame()))
+        self.assertFalse(default.resolves_proposed_turn_start_frames)
+        self.assertFalse(default.resolves_proposed_turn_stop_frames)
 
-    async def test_custom_strategies_can_consume_proposals(self):
-        """Consumption follows what a strategy declares, not what class it is."""
+    async def test_each_side_reports_its_own_proposal_resolution(self):
+        """Resolving turn starts says nothing about turn stops, and vice versa."""
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[ExternalUserTurnStartStrategy()],
+                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)],
+            )
+        )
+        self.assertTrue(controller.resolves_proposed_turn_start_frames)
+        self.assertFalse(controller.resolves_proposed_turn_stop_frames)
+
+    async def test_custom_strategies_can_resolve_proposals(self):
+        """Resolution follows what a strategy declares, not what class it is."""
 
         class CustomStartStrategy(BaseUserTurnStartStrategy):
             @property
@@ -457,8 +471,8 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
                 stop=[CustomStopStrategy()],
             )
         )
-        self.assertTrue(controller.should_consume_frame(ProposedUserStartedSpeakingFrame()))
-        self.assertTrue(controller.should_consume_frame(ProposedUserStoppedSpeakingFrame()))
+        self.assertTrue(controller.resolves_proposed_turn_start_frames)
+        self.assertTrue(controller.resolves_proposed_turn_stop_frames)
 
     async def test_deferring_a_strategy_keeps_its_proposal_resolution(self):
         """Deferred finalization changes when the turn ends, not who decides it."""
@@ -467,7 +481,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
                 stop=[deferred(ExternalUserTurnStopStrategy())],
             )
         )
-        self.assertTrue(controller.should_consume_frame(ProposedUserStoppedSpeakingFrame()))
+        self.assertTrue(controller.resolves_proposed_turn_stop_frames)
 
     async def test_late_transcription_between_turns_no_premature_stop(self):
         """Test that a late transcription arriving between turns does not cause a premature stop.
