@@ -9,7 +9,7 @@ import string
 import pytest
 
 from pipecat.services.cartesia.tts import (
-    LEADING_STRIP_CHARACTERS,
+    NON_SPEECH_CHARACTERS,
     CartesiaTTSService,
 )
 from pipecat.services.settings import TTSSettings
@@ -127,33 +127,34 @@ def _configured_service(**kwargs) -> CartesiaTTSService:
 
 
 def test_cartesia_strips_leading_punctuation_by_default():
-    assert _configured_service()._leading_strip_characters == LEADING_STRIP_CHARACTERS
+    assert _configured_service()._leading_non_speech_characters == NON_SPEECH_CHARACTERS
 
 
-def test_cartesia_leading_strip_characters_can_be_overridden():
-    service = _configured_service(leading_strip_characters="")
-    assert service._leading_strip_characters == ""
+def test_cartesia_leading_non_speech_characters_can_be_overridden():
+    service = _configured_service(leading_non_speech_characters="")
+    assert service._leading_non_speech_characters == ""
 
 
 @pytest.mark.parametrize(
-    "text, expected",
+    "text, expected_skipped",
     [
         # An LLM resuming an interrupted reply opens with these; alone they normalize to
         # an empty transcript, which the API rejects.
-        ("...", ""),
-        ("…", ""),
-        ('"...', ""),
-        ("--", ""),
-        ("  ... hello", "hello"),
-        # Punctuation attached to speech is kept.
-        ("Perfetto...", "Perfetto..."),
-        ("hello", "hello"),
+        ("...", True),
+        ("…", True),
+        ('"...', True),
+        ("--", True),
+        (" ... ", True),
+        # Anything carrying speech is left untouched, punctuation included.
+        ("  ... hello", False),
+        ("Perfetto...", False),
+        ("hello", False),
         # Symbols are voiced as words, so they must survive.
-        ("$5 a month", "$5 a month"),
-        ("& company", "& company"),
-        ("50% off", "50% off"),
+        ("$5 a month", False),
+        ("& company", False),
+        ("50% off", False),
     ],
 )
-def test_cartesia_leading_strip_characters_only_remove_unvoiced_text(text: str, expected: str):
-    stripped = text.lstrip().lstrip(string.whitespace + LEADING_STRIP_CHARACTERS)
-    assert stripped == expected
+def test_cartesia_skips_only_chunks_with_nothing_to_voice(text: str, expected_skipped: bool):
+    skipped = not text.strip(string.whitespace + NON_SPEECH_CHARACTERS)
+    assert skipped is expected_skipped

@@ -198,7 +198,7 @@ class CartesiaTTSSettings(TTSSettings):
 
 # Cartesia's normalizer discards these, so a transcript made only of them is rejected.
 # Symbols like "&" and "$" are absent because it voices them as words.
-LEADING_STRIP_CHARACTERS = ".,;:!?…-–—\"'“”‘’"
+NON_SPEECH_CHARACTERS = ".,;:!?…-–—\"'“”‘’"
 
 
 class CartesiaTTSService(WebsocketTTSService):
@@ -339,8 +339,8 @@ class CartesiaTTSService(WebsocketTTSService):
         super().__init__(
             text_aggregation_mode=text_aggregation_mode,
             aggregate_sentences=aggregate_sentences,
-            leading_strip_characters=kwargs.pop(
-                "leading_strip_characters", LEADING_STRIP_CHARACTERS
+            leading_non_speech_characters=kwargs.pop(
+                "leading_non_speech_characters", NON_SPEECH_CHARACTERS
             ),
             push_text_frames=False,
             pause_frame_processing=False,

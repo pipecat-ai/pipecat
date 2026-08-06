@@ -145,7 +145,7 @@ class TTSService(AIService):
         self,
         *,
         text_aggregation_mode: TextAggregationMode | None = None,
-        leading_strip_characters: str = "",
+        leading_non_speech_characters: str = "",
         aggregate_sentences: bool | None = None,
         # if True, TTSService will push TextFrames and LLMFullResponseEndFrames,
         # otherwise subclass must do it
@@ -194,10 +194,11 @@ class TTSService(AIService):
             text_aggregation_mode: How to aggregate incoming text before synthesis.
                 TextAggregationMode.SENTENCE (default) buffers until sentence boundaries,
                 TextAggregationMode.TOKEN streams tokens directly for lower latency.
-            leading_strip_characters: Extra characters to strip from the start of a
-                context, alongside whitespace. Empty by default. Catches non-speech
-                leading tokens such as a bare ellipsis, which normalizes to an empty
-                transcript that some TTS services reject.
+            leading_non_speech_characters: Characters that carry no speech. A chunk
+                opening a context that contains only these and whitespace is skipped,
+                since it normalizes to an empty transcript that some TTS services
+                reject. Empty by default. Chunks that also contain speech are never
+                modified.
             aggregate_sentences: Whether to aggregate text into sentences before synthesis.
 
                 .. deprecated:: 0.0.104
@@ -293,7 +294,7 @@ class TTSService(AIService):
             text_aggregation_mode = TextAggregationMode.SENTENCE
 
         self._text_aggregation_mode: TextAggregationMode = text_aggregation_mode
-        self._leading_strip_characters: str = leading_strip_characters
+        self._leading_non_speech_characters: str = leading_non_speech_characters
         self._push_text_frames: bool = push_text_frames
         self._push_stop_frames: bool = push_stop_frames
         self._push_start_frame: bool = push_start_frame
@@ -1163,16 +1164,21 @@ class TTSService(AIService):
 
         # Whitespace gating depends on aggregation mode:
         # - Token streaming: drop all leading whitespace at the start of a context, plus any
-        #   leading_strip_characters, as nothing substantive has been sent yet for them to
-        #   attach to. Once a non-whitespace token has been sent, send whitespace and
-        #   punctuation as-is, since both influence prosody between non-whitespace tokens.
+        #   nothing substantive has been sent yet for it to attach to, and skip a chunk made
+        #   only of leading_non_speech_characters. Once a non-whitespace token has been sent,
+        #   send whitespace and punctuation as-is, since both influence prosody.
         #
         # - Sentence aggregation: strip leading newlines only and drop pure-whitespace frames.
         if self._is_streaming_tokens:
             if not self._sent_non_whitespace_in_context:
                 text = text.lstrip()
-                if self._leading_strip_characters:
-                    text = text.lstrip(string.whitespace + self._leading_strip_characters)
+                # Skip a context-opening chunk with nothing to voice: it normalizes to an
+                # empty transcript, which some services reject. Chunks that also contain
+                # speech are left as-is, since their punctuation still shapes prosody.
+                if self._leading_non_speech_characters and not text.strip(
+                    string.whitespace + self._leading_non_speech_characters
+                ):
+                    return
             if not text:
                 return
         else:
