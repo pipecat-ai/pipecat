@@ -118,6 +118,7 @@ IMPORTS = {
     "azure_tts": ["from pipecat.services.azure.tts import AzureTTSService"],
     "camb_tts": ["from pipecat.services.camb.tts import CambTTSService"],
     "cartesia_tts": ["from pipecat.services.cartesia.tts import CartesiaTTSService"],
+    "chariot_tts": ["from pipecat.services.chariot.tts import ChariotTTSService"],
     "deepgram_tts": ["from pipecat.services.deepgram.tts import DeepgramTTSService"],
     "deepgram_flux_tts": ["from pipecat.services.deepgram.flux.tts import DeepgramFluxTTSService"],
     "deepgram_sagemaker_tts": [

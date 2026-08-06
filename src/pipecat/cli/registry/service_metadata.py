@@ -737,6 +737,16 @@ class ServiceRegistry:
             param_defaults={"voice": "71a7ad14-091c-4e8e-a314-022ece01c121"},
         ),
         ServiceDefinition(
+            value="chariot_tts",
+            label="Chariot",
+            package="pipecat-ai[chariot]",
+            class_name=["ChariotTTSService"],
+            env_prefix="CHARIOT",
+            include_params=["api_key"],
+            settings_params=["voice"],
+            param_defaults={"voice": "bac7d666-094d-4698-91fa-741d60fce662"},
+        ),
+        ServiceDefinition(
             value="deepgram_tts",
             label="Deepgram",
             package="pipecat-ai[deepgram]",

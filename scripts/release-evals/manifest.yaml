@@ -48,6 +48,8 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-cartesia-turns.py
     scenarios: [capital_question]
+  - bot: voice/voice-chariot.py
+    scenarios: [capital_question]
   - bot: voice/voice-deepgram.py
     scenarios: [capital_question]
   - bot: voice/voice-deepgram-flux.py

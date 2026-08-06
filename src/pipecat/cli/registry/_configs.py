@@ -373,6 +373,14 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "chariot_tts": (
+        "ChariotTTSService(\n"
+        '        api_key=os.getenv("CHARIOT_API_KEY"),\n'
+        "        settings=ChariotTTSService.Settings(\n"
+        '            voice=os.getenv("CHARIOT_VOICE_ID", "bac7d666-094d-4698-91fa-741d60fce662"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "deepgram_tts": (
         "DeepgramTTSService(\n"
         '        api_key=os.getenv("DEEPGRAM_API_KEY"),\n'
