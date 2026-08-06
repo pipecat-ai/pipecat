@@ -7,6 +7,7 @@
 """Base classes for Text-to-speech services."""
 
 import asyncio
+import string
 import uuid
 import warnings
 from abc import abstractmethod
@@ -144,6 +145,7 @@ class TTSService(AIService):
         self,
         *,
         text_aggregation_mode: TextAggregationMode | None = None,
+        leading_strip_characters: str = "",
         aggregate_sentences: bool | None = None,
         # if True, TTSService will push TextFrames and LLMFullResponseEndFrames,
         # otherwise subclass must do it
@@ -192,6 +194,12 @@ class TTSService(AIService):
             text_aggregation_mode: How to aggregate incoming text before synthesis.
                 TextAggregationMode.SENTENCE (default) buffers until sentence boundaries,
                 TextAggregationMode.TOKEN streams tokens directly for lower latency.
+            leading_strip_characters: Extra characters to strip from the start of a
+                context, alongside whitespace. Empty by default, which preserves the
+                whitespace-only behavior. Useful for non-speech characters that carry
+                nothing at the start of a context, such as the leading ellipsis some LLMs
+                emit when resuming a reply that was interrupted; a transcript made only of
+                those normalizes to empty, which some TTS services reject.
             aggregate_sentences: Whether to aggregate text into sentences before synthesis.
 
                 .. deprecated:: 0.0.104
@@ -287,6 +295,7 @@ class TTSService(AIService):
             text_aggregation_mode = TextAggregationMode.SENTENCE
 
         self._text_aggregation_mode: TextAggregationMode = text_aggregation_mode
+        self._leading_strip_characters: str = leading_strip_characters
         self._push_text_frames: bool = push_text_frames
         self._push_stop_frames: bool = push_stop_frames
         self._push_start_frame: bool = push_start_frame
@@ -1155,15 +1164,17 @@ class TTSService(AIService):
             return
 
         # Whitespace gating depends on aggregation mode:
-        # - Token streaming: drop all leading whitespace at the start of a context, as
-        #   nothing substantive has been sent yet for it to attach to. Once a non-whitespace
-        #   token has been sent, send whitespace as-is since it can influence prosody between
-        #   non-whitespace tokens.
+        # - Token streaming: drop all leading whitespace at the start of a context, plus any
+        #   leading_strip_characters, as nothing substantive has been sent yet for them to
+        #   attach to. Once a non-whitespace token has been sent, send whitespace and
+        #   punctuation as-is, since both influence prosody between non-whitespace tokens.
         #
         # - Sentence aggregation: strip leading newlines only and drop pure-whitespace frames.
         if self._is_streaming_tokens:
             if not self._sent_non_whitespace_in_context:
                 text = text.lstrip()
+                if self._leading_strip_characters:
+                    text = text.lstrip(string.whitespace + self._leading_strip_characters)
             if not text:
                 return
         else:
