@@ -195,11 +195,9 @@ class TTSService(AIService):
                 TextAggregationMode.SENTENCE (default) buffers until sentence boundaries,
                 TextAggregationMode.TOKEN streams tokens directly for lower latency.
             leading_strip_characters: Extra characters to strip from the start of a
-                context, alongside whitespace. Empty by default, which preserves the
-                whitespace-only behavior. Useful for non-speech characters that carry
-                nothing at the start of a context, such as the leading ellipsis some LLMs
-                emit when resuming a reply that was interrupted; a transcript made only of
-                those normalizes to empty, which some TTS services reject.
+                context, alongside whitespace. Empty by default. Catches non-speech
+                leading tokens such as a bare ellipsis, which normalizes to an empty
+                transcript that some TTS services reject.
             aggregate_sentences: Whether to aggregate text into sentences before synthesis.
 
                 .. deprecated:: 0.0.104
