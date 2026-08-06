@@ -4,7 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from pipecat.services.cartesia.tts import CartesiaTTSService
+import string
+
+import pytest
+
+from pipecat.services.cartesia.tts import (
+    LEADING_STRIP_CHARACTERS,
+    CartesiaTTSService,
+)
 from pipecat.services.settings import TTSSettings
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 
@@ -109,3 +116,44 @@ def test_cartesia_korean_timestamp_groups_reassemble_with_spaces():
         )
         == "저는 여러분의 AI 어시스턴트입니다."
     )
+
+
+def _configured_service(**kwargs) -> CartesiaTTSService:
+    return CartesiaTTSService(
+        api_key="test-key",
+        settings=CartesiaTTSService.Settings(voice="test-voice"),
+        **kwargs,
+    )
+
+
+def test_cartesia_strips_leading_punctuation_by_default():
+    assert _configured_service()._leading_strip_characters == LEADING_STRIP_CHARACTERS
+
+
+def test_cartesia_leading_strip_characters_can_be_overridden():
+    service = _configured_service(leading_strip_characters="")
+    assert service._leading_strip_characters == ""
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # An LLM resuming an interrupted reply opens with these; alone they normalize to
+        # an empty transcript, which the API rejects.
+        ("...", ""),
+        ("…", ""),
+        ('"...', ""),
+        ("--", ""),
+        ("  ... hello", "hello"),
+        # Punctuation attached to speech is kept.
+        ("Perfetto...", "Perfetto..."),
+        ("hello", "hello"),
+        # Symbols are voiced as words, so they must survive.
+        ("$5 a month", "$5 a month"),
+        ("& company", "& company"),
+        ("50% off", "50% off"),
+    ],
+)
+def test_cartesia_leading_strip_characters_only_remove_unvoiced_text(text: str, expected: str):
+    stripped = text.lstrip().lstrip(string.whitespace + LEADING_STRIP_CHARACTERS)
+    assert stripped == expected
