@@ -73,8 +73,16 @@ class _CapturingLogger:
         self.warning_messages.append(message)
 
 
-def _query(service: SarvamRealtimeSTTService) -> dict[str, list[str]]:
+def _query(service: SarvamRealtimeSTTService, *, sample_rate: int = 16000) -> dict[str, list[str]]:
+    # The URL is only built after StartFrame resolves the rate, so mirror what
+    # STTService.start() does here.
+    service._sample_rate = service._init_sample_rate or sample_rate
     return parse_qs(urlparse(service._build_ws_url()).query)
+
+
+def _seconds_to_bytes(seconds: float, *, sample_rate: int = 16000) -> int:
+    """Byte count for `seconds` of 16-bit mono audio."""
+    return int(seconds * sample_rate * 2)
 
 
 @pytest.mark.parametrize(
@@ -117,8 +125,8 @@ def test_default_url_uses_realtime_contract_params():
         .geturl()
         .startswith("wss://api.sarvam.ai/speech-to-text-realtime/ws?")
     )
-    assert query["language_code"] == ["hi-IN"]
-    assert query["stream_type"] == ["fast"]
+    assert query["language_code"] == ["en-IN"]
+    assert query["stream_type"] == ["balanced"]
     assert query["endpointing"] == ["vad"]
     assert query["encoding"] == ["linear16"]
     assert query["sample_rate"] == ["16000"]
@@ -164,7 +172,8 @@ def test_string_language_setting_does_not_use_enum_converter(monkeypatch):
     )
 
     assert _query(service)["language_code"] == ["hi-IN"]
-    assert converter_calls == [Language.HI_IN]
+    # Resolved through the enum path rather than forwarded as a raw string.
+    assert Language.HI_IN in converter_calls
 
 
 @pytest.mark.parametrize(
@@ -207,36 +216,23 @@ async def test_connect_uses_subscription_key_and_user_agent(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_fast_stream_buffers_and_sends_500ms_binary_chunks():
-    service = SarvamRealtimeSTTService(api_key="test-key")
-    service._websocket = _FakeWebsocket()
-    service._sample_rate = 16000
-
-    await _consume(service.run_stt(b"\x01" * 8000))
-    assert service._websocket.sent == []
-
-    await _consume(service.run_stt(b"\x02" * 8000))
-
-    assert service._websocket.sent == [b"\x01" * 8000 + b"\x02" * 8000]
-    assert service._local_audio_duration_s == 0.5
-
-
-@pytest.mark.asyncio
-async def test_balanced_stream_uses_1000ms_chunks():
+@pytest.mark.parametrize("stream_type", ["fast", "balanced", "simulated"])
+async def test_client_sends_50ms_chunks_regardless_of_stream_type(stream_type):
     service = SarvamRealtimeSTTService(
         api_key="test-key",
-        settings=SarvamRealtimeSTTService.Settings(stream_type="balanced"),
+        settings=SarvamRealtimeSTTService.Settings(stream_type=stream_type),
     )
     service._websocket = _FakeWebsocket()
     service._sample_rate = 16000
 
-    await _consume(service.run_stt(b"\x01" * 16000))
+    # 16 kHz linear16 => 1600 bytes per 50 ms.
+    await _consume(service.run_stt(b"\x01" * 800))
     assert service._websocket.sent == []
 
-    await _consume(service.run_stt(b"\x02" * 16000))
+    await _consume(service.run_stt(b"\x02" * 800))
 
-    assert service._websocket.sent == [b"\x01" * 16000 + b"\x02" * 16000]
-    assert service._local_audio_duration_s == 1.0
+    assert service._websocket.sent == [b"\x01" * 800 + b"\x02" * 800]
+    assert service._local_audio_bytes == 1600
 
 
 @pytest.mark.asyncio
@@ -254,6 +250,28 @@ async def test_manual_endpointing_sends_speech_boundaries():
         json.dumps({"event": "speech_start"}),
         json.dumps({"event": "speech_end"}),
     ]
+
+
+@pytest.mark.asyncio
+async def test_manual_endpointing_flushes_buffered_audio_before_speech_end():
+    service = SarvamRealtimeSTTService(
+        api_key="test-key",
+        settings=SarvamRealtimeSTTService.Settings(endpointing="manual"),
+    )
+    service._websocket = _FakeWebsocket()
+    service._sample_rate = 16000
+
+    # Less than one 50 ms chunk, so it stays buffered until the turn ends.
+    await _consume(service.run_stt(b"\x01" * 400))
+    assert service._websocket.sent == []
+
+    await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    assert service._websocket.sent == [
+        b"\x01" * 400,
+        json.dumps({"event": "speech_end"}),
+    ]
+    assert service._audio_buffer == bytearray()
 
 
 @pytest.mark.asyncio
@@ -288,7 +306,8 @@ async def test_speech_end_emits_eos_before_delayed_final(monkeypatch):
     monkeypatch.setattr(service, "stop_ttfb_metrics", _noop)
     monkeypatch.setattr(service, "stop_processing_metrics", _noop)
 
-    service._audio_position_s = 1.25
+    service._sample_rate = 16000
+    service._audio_position_bytes = _seconds_to_bytes(1.25)
     await service._handle_message({"event": "vad.speech_start", "utterance_idx": 3})
     await service._handle_message({"event": "vad.speech_end", "utterance_idx": 3})
     await service._handle_message({"event": "transcript.final", "utterance_idx": 3, "text": "हेलो।"})
@@ -329,7 +348,8 @@ async def test_post_eos_partial_is_interim_without_changing_eos_timing(monkeypat
     monkeypatch.setattr(service, "stop_ttfb_metrics", _noop)
     monkeypatch.setattr(service, "stop_processing_metrics", _noop)
 
-    service._audio_position_s = 2.0
+    service._sample_rate = 16000
+    service._audio_position_bytes = _seconds_to_bytes(2.0)
     await service._handle_message({"event": "vad.speech_start", "utterance_idx": 2})
     await service._handle_message({"event": "vad.speech_end", "utterance_idx": 2})
     await service._handle_message({"event": "transcript.partial", "utterance_idx": 2, "text": "हेल"})
@@ -522,6 +542,224 @@ async def test_config_update_sends_without_reconnect_and_rejects_simulated_chang
 
     with pytest.raises(ValueError):
         await service.update_config(stream_type="simulated")
+
+
+@pytest.mark.asyncio
+async def test_endpointing_change_is_not_effective_until_acked():
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    service._websocket = _FakeWebsocket()
+
+    await service.update_config(endpointing="manual")
+    service._websocket.sent.clear()
+
+    # Server is still in vad mode until it acknowledges, so no manual boundaries.
+    await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    assert service._websocket.sent == []
+
+    await service._handle_message({"event": "config.updated", "applied": ["endpointing=manual"]})
+    await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    assert service._websocket.sent == [json.dumps({"event": "speech_start"})]
+
+
+@pytest.mark.asyncio
+async def test_unrelated_config_updated_does_not_promote_endpointing():
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    service._websocket = _FakeWebsocket()
+
+    await service.update_config(endpointing="manual")
+    await service._handle_message({"event": "config.updated", "applied": ["prompt=hello"]})
+    service._websocket.sent.clear()
+
+    await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    assert service._websocket.sent == []
+
+
+@pytest.mark.asyncio
+async def test_unusable_applied_payload_falls_back_to_promoting_endpointing():
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    service._websocket = _FakeWebsocket()
+
+    await service.update_config(endpointing="manual")
+    await service._handle_message({"event": "config.updated"})
+    service._websocket.sent.clear()
+
+    await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    assert service._websocket.sent == [json.dumps({"event": "speech_start"})]
+
+
+@pytest.mark.asyncio
+async def test_endpointing_is_not_pending_when_socket_is_closed():
+    service = SarvamRealtimeSTTService(api_key="test-key")
+
+    await service.update_config(endpointing="manual")
+    await service._handle_message({"event": "config.updated", "applied": ["endpointing=manual"]})
+
+    assert service._effective_endpointing == "vad"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("sample_rate", 8000),
+        ("encoding", "mulaw"),
+        ("return_timestamps", True),
+        ("prefix_padding_ms", 200),
+        ("lid_gate_seconds", 1.5),
+        ("lid_confidence_threshold", 0.5),
+    ],
+)
+async def test_connection_only_fields_rejected_by_update_config(field, value):
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    service._websocket = _FakeWebsocket()
+
+    with pytest.raises(ValueError, match="connection"):
+        await service.update_config(**{field: value})
+
+    assert service._websocket.sent == []
+
+
+@pytest.mark.asyncio
+async def test_connection_only_setting_change_is_not_sent_as_config_update():
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    service._websocket = _FakeWebsocket()
+
+    await service._update_settings(SarvamRealtimeSTTService.Settings(lid_gate_seconds=2.0))
+
+    assert service._websocket.sent == []
+
+
+def test_sample_rate_defaults_to_the_pipeline_rate():
+    service = SarvamRealtimeSTTService(api_key="test-key")
+
+    assert service._init_sample_rate is None
+    assert _query(service, sample_rate=8000)["sample_rate"] == ["8000"]
+
+
+def test_explicit_sample_rate_setting_pins_the_rate():
+    service = SarvamRealtimeSTTService(
+        api_key="test-key",
+        settings=SarvamRealtimeSTTService.Settings(sample_rate=8000),
+    )
+
+    assert service._init_sample_rate == 8000
+
+
+def test_unsupported_resolved_sample_rate_raises():
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    service._sample_rate = 44100
+
+    with pytest.raises(ValueError, match="sample_rate"):
+        service._validate_resolved_sample_rate()
+
+
+def test_vad_params_are_omitted_for_manual_endpointing():
+    service = SarvamRealtimeSTTService(
+        api_key="test-key",
+        settings=SarvamRealtimeSTTService.Settings(
+            endpointing="manual",
+            threshold=0.4,
+            silence_duration_ms=700,
+            min_speech_duration_ms=120,
+            prefix_padding_ms=200,
+        ),
+    )
+
+    query = _query(service)
+
+    for param in (
+        "threshold",
+        "silence_duration_ms",
+        "min_speech_duration_ms",
+        "prefix_padding_ms",
+    ):
+        assert param not in query
+
+
+@pytest.mark.asyncio
+async def test_blank_final_still_stops_processing_metrics(monkeypatch):
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    stopped = []
+    monkeypatch.setattr(service, "push_frame", _noop)
+    monkeypatch.setattr(service, "broadcast_frame", _noop)
+    monkeypatch.setattr(service, "broadcast_interruption", _noop)
+    monkeypatch.setattr(service, "start_processing_metrics", _noop)
+    monkeypatch.setattr(service, "start_ttfb_metrics", _noop)
+
+    async def fake_stop_processing_metrics():
+        stopped.append(True)
+
+    monkeypatch.setattr(service, "stop_processing_metrics", fake_stop_processing_metrics)
+
+    await service._handle_message({"event": "vad.speech_start"})
+    await service._handle_message({"event": "vad.speech_end"})
+    await service._handle_message({"event": "transcript.final", "text": "   "})
+
+    assert stopped == [True]
+
+
+@pytest.mark.asyncio
+async def test_session_end_mid_utterance_completes_the_turn(monkeypatch):
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    broadcasted = []
+    monkeypatch.setattr(service, "push_frame", _noop)
+    monkeypatch.setattr(service, "broadcast_frame", _capture_class(broadcasted))
+    monkeypatch.setattr(service, "broadcast_interruption", _noop)
+    monkeypatch.setattr(service, "start_processing_metrics", _noop)
+    monkeypatch.setattr(service, "start_ttfb_metrics", _noop)
+    monkeypatch.setattr(service, "stop_processing_metrics", _noop)
+
+    await service._handle_message({"event": "vad.speech_start"})
+    await service._handle_message({"event": "session.end", "audio_duration_s": 1.0})
+
+    assert broadcasted == [UserStartedSpeakingFrame, UserStoppedSpeakingFrame]
+
+
+@pytest.mark.asyncio
+async def test_disconnect_tolerates_socket_closing_during_flush(monkeypatch):
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    service._sample_rate = 16000
+
+    class _ClosingWebsocket(_FakeWebsocket):
+        async def send(self, message):
+            raise ConnectionResetError("socket went away")
+
+    service._websocket = _ClosingWebsocket()
+    service._audio_buffer.extend(b"\x01" * 400)
+    monkeypatch.setattr(service, "push_error", _noop)
+
+    await service._disconnect()
+
+    assert service._websocket is None
+
+
+@pytest.mark.asyncio
+async def test_confidence_defaults_to_one_when_not_numeric(monkeypatch):
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    pushed = []
+    monkeypatch.setattr(service, "push_frame", _capture(pushed))
+    monkeypatch.setattr(service, "stop_processing_metrics", _noop)
+
+    await service._handle_message({"event": "transcript.partial", "text": "hi"})
+    await service._handle_message({"event": "transcript.final", "text": "hi", "confidence": 0.42})
+
+    assert pushed[0].result["confidence"] == 1.0
+    assert pushed[1].result["confidence"] == 0.42
+
+
+def test_explicit_language_code_is_not_overridden_by_language():
+    service = SarvamRealtimeSTTService(
+        api_key="test-key",
+        settings=SarvamRealtimeSTTService.Settings(
+            language=Language.EN_IN,
+            language_code="hi-IN",
+        ),
+    )
+
+    assert _query(service)["language_code"] == ["hi-IN"]
 
 
 def test_reconnect_on_error_cannot_be_overridden():
