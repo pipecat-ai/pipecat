@@ -15,7 +15,7 @@ import asyncio
 import json
 import warnings
 from abc import abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -57,12 +57,14 @@ from pipecat.frames.frames import (
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
+    ResponseFrame,
     ServiceMetadataFrame,
     StartFrame,
     STTMetadataFrame,
     TextFrame,
     TranscriptionFrame,
     TranslationFrame,
+    TTSSpeakFrame,
     TTSStartedFrame,
     UserImageRawFrame,
     UserMuteStartedFrame,
@@ -87,6 +89,11 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
+from pipecat.turns.response import (
+    BaseResponseStrategy,
+    CompletedToolResult,
+    ResponseActivityState,
+)
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
 from pipecat.turns.user_start import (
@@ -223,6 +230,11 @@ class LLMAssistantAggregatorParams:
             (LLM-specific) tools are ignored. When using
             ``LLMContextAggregatorPair``, prefer setting this via its
             ``add_tool_change_messages`` argument instead. Defaults to False.
+        response_strategy: Strategy deciding when assistant-initiated
+            responses (``ResponseFrame``) are delivered. Not supported with
+            realtime (speech-to-speech) services, which take conversational
+            content over their own session channel rather than from the
+            context. Defaults to None.
         enable_context_summarization: Legacy field name.
 
             .. deprecated:: 1.2.0
@@ -239,6 +251,7 @@ class LLMAssistantAggregatorParams:
     enable_auto_context_summarization: bool = False
     auto_context_summarization_config: LLMAutoContextSummarizationConfig | None = None
     add_tool_change_messages: bool = False
+    response_strategy: BaseResponseStrategy | None = None
 
     # Deprecated field names — kept for backward compatibility. See the
     # ``.. deprecated::`` directives in the class docstring above.
@@ -1339,6 +1352,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
     - on_assistant_turn_stopped: Called when the assistant turn ends
     - on_assistant_thought: Called when an assistant thought is available
     - on_summary_applied: Called when a context summarization is applied
+    - on_response_deferred: Called when a ``ResponseFrame`` is queued by the
+      response strategy rather than released immediately
+    - on_response_released: Called with the batch of ``ResponseFrame``s just
+      delivered by the response strategy
 
     Example::
 
@@ -1411,6 +1428,23 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # arriving in the same speaking window are bundled into a single deferred push.
         self._push_context_on_bot_stopped_speaking: bool = False
 
+        # Assistant-initiated response scheduling (ResponseFrame). Same pattern as the
+        # summarizer below: the aggregator pushes activity state into the
+        # strategy and subscribes to the events it emits; the event handlers
+        # do the frame plumbing.
+        self._response_strategy = params.response_strategy
+        self._llm_response_streaming: bool = False
+        self._llm_inference_requested: bool = False
+        self._no_response_strategy_warned: bool = False
+        self._realtime_strategy_warned: bool = False
+        if self._response_strategy:
+            self._response_strategy.add_event_handler(
+                "on_response_deferred", self._on_response_deferred
+            )
+            self._response_strategy.add_event_handler(
+                "on_response_released", self._on_response_released
+            )
+
         self._assistant_turn_start_timestamp = ""
 
         self._thought_append_to_context = False
@@ -1436,6 +1470,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._register_event_handler("on_assistant_turn_stopped")
         self._register_event_handler("on_assistant_thought")
         self._register_event_handler("on_summary_applied")
+        self._register_event_handler("on_response_deferred")
+        self._register_event_handler("on_response_released")
 
     @property
     def has_function_calls_in_progress(self) -> bool:
@@ -1445,6 +1481,159 @@ class LLMAssistantAggregator(LLMContextAggregator):
             True if function calls are in progress, False otherwise.
         """
         return bool(self._function_calls_in_progress)
+
+    @property
+    def bot_speaking(self) -> bool:
+        """Whether the bot is currently speaking."""
+        return self._bot_speaking
+
+    @property
+    def user_speaking(self) -> bool:
+        """Whether the user is currently speaking."""
+        return self._user_speaking
+
+    @property
+    def response_pending(self) -> bool:
+        """Whether a reactive response is still owed to the user.
+
+        True while an inference has been requested but its response hasn't
+        started streaming yet, an LLM response is streaming, an interruptible
+        function call (``cancel_on_interruption=True``) is in progress, or a
+        post-function-result inference is deferred until the bot stops
+        speaking. Response strategies use this so an assistant-initiated
+        response never jumps in ahead of an answer the user is waiting for —
+        including in the time-to-first-token window between an upstream
+        context push and its ``LLMFullResponseStartFrame`` coming back.
+
+        Async function calls (``cancel_on_interruption=False``) don't count:
+        the conversation explicitly continues without waiting for them — they
+        are the typical *producers* of assistant-initiated responses, and a
+        pending response must not be held until an unrelated long-running tool
+        finishes.
+        """
+        return (
+            self._llm_inference_requested
+            or self._llm_response_streaming
+            or any(
+                in_progress_frame is None or in_progress_frame.cancel_on_interruption
+                for in_progress_frame in self._function_calls_in_progress.values()
+            )
+            or self._push_context_on_bot_stopped_speaking
+        )
+
+    async def _notify_response_strategy_activity(self):
+        """Push a fresh activity snapshot to the response strategy.
+
+        Called on every activity transition (user/bot speaking starts and
+        stops, LLM response starts/ends, interruptions, function-call
+        progress) so the strategy can re-evaluate whether to release pending
+        responses.
+        """
+        if self._response_strategy:
+            await self._response_strategy.on_activity_changed(
+                ResponseActivityState(
+                    bot_speaking=self.bot_speaking,
+                    user_speaking=self.user_speaking,
+                    response_pending=self.response_pending,
+                )
+            )
+
+    async def _handle_response_frame(self, frame: ResponseFrame):
+        """Hand a captured ``ResponseFrame`` to the response strategy.
+
+        The strategy decides when the frame's payload is delivered. With no
+        strategy configured, the payload is released immediately (with a
+        one-time warning), as if it arrived unwrapped.
+        """
+        if self._response_strategy is None:
+            if not self._no_response_strategy_warned:
+                logger.warning(
+                    f"{self}: Received {frame} but no response_strategy is configured "
+                    "(LLMAssistantAggregatorParams.response_strategy) — releasing the "
+                    "payload immediately, as if it were unwrapped."
+                )
+                self._no_response_strategy_warned = True
+            await self._release_response_frames([frame])
+            return
+        await self._response_strategy.queue_response(frame)
+
+    async def _on_response_deferred(self, strategy: BaseResponseStrategy, frame: ResponseFrame):
+        """Strategy event handler: a queued response was held for later.
+
+        Re-emits the aggregator's public ``on_response_deferred`` event.
+        """
+        logger.debug(f"{self}: Deferring {frame} until the response strategy releases it.")
+        await self._call_event_handler("on_response_deferred", frame)
+
+    async def _on_response_released(
+        self, strategy: BaseResponseStrategy, items: Sequence[ResponseFrame | CompletedToolResult]
+    ):
+        """Strategy event handler: a batch of responses should be delivered now."""
+        await self._release_response_frames(items)
+
+    async def _release_response_frames(self, items: Sequence[ResponseFrame | CompletedToolResult]):
+        """Deliver a batch of released assistant-initiated responses.
+
+        Called when the response strategy releases a batch — and directly for
+        unscheduled delivery when no strategy is configured.
+        ``ResponseFrame`` payloads are replayed in FIFO order:
+        ``LLMMessagesAppendFrame`` payloads get special batching treatment —
+        they merge into a single context update, and a single inference is
+        triggered if any of them set ``run_llm=True``. Every other payload is
+        pushed upstream as-is — this aggregator is the last processor in the
+        pipeline, so an upstream push traverses every other processor and
+        reaches whatever handles the frame (``TTSSpeakFrame`` reaching the
+        TTS service is the common case); payloads without a known handler are
+        pushed with a warning rather than dropped. ``CompletedToolResult``
+        items go through the strategy's announcement composer, whose messages
+        join the same merged context update, and always trigger the
+        inference. Emits ``on_response_released`` with the batch.
+
+        Args:
+            items: The responses to deliver, in FIFO order.
+        """
+        messages: list[LLMContextMessage] = []
+        run_llm = False
+        for response_frame in items:
+            if isinstance(response_frame, CompletedToolResult):
+                continue
+            payload = response_frame.frame
+            if isinstance(payload, LLMMessagesAppendFrame):
+                messages.extend(payload.messages)
+                if payload.run_llm:
+                    run_llm = True
+            elif isinstance(payload, TTSSpeakFrame):
+                if self._realtime_service_mode:
+                    # A realtime (speech-to-speech) pipeline has no TTS
+                    # service, so nothing upstream will speak this verbatim
+                    # payload.
+                    logger.warning(
+                        f"{self}: Releasing {payload} in realtime (speech-to-speech) "
+                        "mode — no TTS service is present, so the text will not be "
+                        "spoken. Use an LLMMessagesAppendFrame payload instead."
+                    )
+                await self.push_frame(payload, FrameDirection.UPSTREAM)
+            else:
+                logger.warning(
+                    f"{self}: Releasing ResponseFrame payload {payload} without special "
+                    "handling — pushing it upstream as-is. Payloads with special "
+                    "handling: LLMMessagesAppendFrame, TTSSpeakFrame."
+                )
+                await self.push_frame(payload, FrameDirection.UPSTREAM)
+        completed_tool_results = [item for item in items if isinstance(item, CompletedToolResult)]
+        if completed_tool_results and self._response_strategy:
+            # The composed announcement goes last so it can refer to the
+            # results (and any authored appends) above it. A SILENT style
+            # composes nothing, leaving the results in context unspoken.
+            announcement = self._response_strategy.compose_announcement(completed_tool_results)
+            if announcement:
+                messages.extend(announcement)
+                run_llm = True
+        if messages:
+            self.add_messages(messages)
+        if run_llm:
+            await self.push_context_frame(FrameDirection.UPSTREAM)
+        await self._call_event_handler("on_response_released", list(items))
 
     async def cleanup(self):
         """Release this aggregator's resources at teardown."""
@@ -1510,6 +1699,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_llm_messages_update(frame)
         elif isinstance(frame, LLMMessagesTransformFrame):
             await self._handle_llm_messages_transform(frame)
+        elif isinstance(frame, ResponseFrame):
+            await self._handle_response_frame(frame)
         elif isinstance(frame, LLMSetToolsFrame):
             # Normalize and validate (a plain list of direct functions / FunctionSchema
             # objects becomes a ToolsSchema) so the tool-change diff and
@@ -1521,12 +1712,16 @@ class LLMAssistantAggregator(LLMContextAggregator):
             self.set_tool_choice(frame.tool_choice)
         elif isinstance(frame, FunctionCallsStartedFrame):
             await self._handle_function_calls_started(frame)
+            await self._notify_response_strategy_activity()
         elif isinstance(frame, FunctionCallInProgressFrame):
             await self._handle_function_call_in_progress(frame)
+            await self._notify_response_strategy_activity()
         elif isinstance(frame, FunctionCallResultFrame):
             await self._handle_function_call_result(frame)
+            await self._notify_response_strategy_activity()
         elif isinstance(frame, FunctionCallCancelFrame):
             await self._handle_function_call_cancel(frame)
+            await self._notify_response_strategy_activity()
         elif isinstance(frame, UserImageRawFrame):
             await self._handle_user_image_frame(frame)
         elif isinstance(frame, AssistantImageRawFrame):
@@ -1534,18 +1729,22 @@ class LLMAssistantAggregator(LLMContextAggregator):
         elif isinstance(frame, UserStartedSpeakingFrame):
             self._user_speaking = True
             await self.push_frame(frame, direction)
+            await self._notify_response_strategy_activity()
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
             await self.push_frame(frame, direction)
+            await self._notify_response_strategy_activity()
         elif isinstance(frame, BotStartedSpeakingFrame):
             self._bot_speaking = True
             await self.push_frame(frame, direction)
+            await self._notify_response_strategy_activity()
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_speaking = False
             await self.push_frame(frame, direction)
             if self._push_context_on_bot_stopped_speaking and not self._user_speaking:
                 logger.debug(f"{self}: Bot stopped speaking — pushing deferred context frame!")
                 await self.push_context_frame(FrameDirection.UPSTREAM)
+            await self._notify_response_strategy_activity()
         elif isinstance(frame, LLMServiceMetadataFrame):
             # Auto-configure realtime mode on the assistant half too — the
             # broadcast reaches both halves. The assistant only needs the flag
@@ -1557,6 +1756,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 # this surfaces unsupported direct construction instead of
                 # silently dropping user messages).
                 self._require_paired_user_aggregator()
+                self._warn_response_strategy_unsupported_in_realtime()
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
@@ -1568,8 +1768,31 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _start(self, frame: StartFrame):
         if self._realtime_service_mode:
             self._require_paired_user_aggregator()
+            self._warn_response_strategy_unsupported_in_realtime()
         if self._summarizer:
             await self._summarizer.setup(self.task_manager)
+        if self._response_strategy:
+            await self._response_strategy.setup(self.task_manager)
+
+    def _warn_response_strategy_unsupported_in_realtime(self):
+        """Warn once if a response strategy is configured in realtime mode.
+
+        Realtime (speech-to-speech) services take conversational content over
+        their own session channel and read only tool results out of the
+        context, so a released response's context append reaches the service
+        as nothing at all — the assistant-initiated response is silently never
+        spoken. Warned rather than raised: a realtime pipeline whose
+        assistant-initiated responses all come from async tool completions
+        still works, since those travel the tool-result channel.
+        """
+        if self._response_strategy and not self._realtime_strategy_warned:
+            self._realtime_strategy_warned = True
+            logger.warning(
+                f"{self}: response_strategy is not supported with realtime "
+                "(speech-to-speech) services — assistant-initiated responses "
+                "carrying context messages will not be spoken. Remove the "
+                "strategy, or use a cascaded LLM service."
+            )
 
     def _require_paired_user_aggregator(self):
         """Raise if realtime mode is active without a paired user aggregator.
@@ -1617,6 +1840,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """
         await super().push_context_frame(direction)
         self._push_context_on_bot_stopped_speaking = False
+        if direction == FrameDirection.UPSTREAM:
+            # An upstream context frame requests an inference; count the
+            # response as pending until LLMFullResponseStartFrame arrives
+            # (or an interruption voids the request).
+            self._llm_inference_requested = True
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
         await self.push_context_frame(FrameDirection.UPSTREAM)
@@ -1639,6 +1867,15 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _handle_interruptions(self, frame: InterruptionFrame):
         await self._trigger_assistant_turn_stopped(interrupted=True)
         await self.reset()
+        # The interruption cancels any in-flight LLM response, so its
+        # LLMFullResponseEndFrame may never arrive — and voids any
+        # requested-but-not-started inference.
+        self._llm_response_streaming = False
+        self._llm_inference_requested = False
+        # An interruption is an activity transition: it restarts the response
+        # strategy's settle window, so a pending assistant-initiated response
+        # never lands in the middle of a barge-in.
+        await self._notify_response_strategy_activity()
 
     async def _handle_end_or_cancel(self, frame: Frame):
         await self._trigger_assistant_turn_stopped(interrupted=isinstance(frame, CancelFrame))
@@ -1653,6 +1890,19 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._context_updated_tasks.clear()
         if self._summarizer:
             await self._summarizer.cleanup()
+        if self._response_strategy:
+            # Pending assistant-initiated responses don't survive shutdown:
+            # drop them with a debug log rather than blurting them out
+            # mid-teardown.
+            for response_frame in self._response_strategy.drain():
+                logger.debug(f"{self}: Dropping pending {response_frame} at shutdown.")
+            self._response_strategy.remove_event_handler(
+                "on_response_deferred", self._on_response_deferred
+            )
+            self._response_strategy.remove_event_handler(
+                "on_response_released", self._on_response_released
+            )
+            await self._response_strategy.cleanup()
 
     async def _handle_function_calls_started(self, frame: FunctionCallsStartedFrame):
         function_names = [f"{f.function_name}:{f.tool_call_id}" for f in frame.function_calls]
@@ -1752,7 +2002,24 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 else:
                     run_llm = True
 
-        if run_llm and not self._user_speaking:
+        # An async call's completion can result in assistant-initiated speech:
+        # with a response strategy configured, its announcement is scheduled by
+        # the strategy rather than running inference here. run_llm decides
+        # *whether* to respond (False = record silently); the strategy decides
+        # *when*. The result content is already in context (added above); only
+        # the speech trigger is scheduled. Reactive calls run inference
+        # immediately: the user is waiting on the answer.
+        is_async = in_progress_frame is not None and not in_progress_frame.cancel_on_interruption
+        if run_llm and is_final and is_async and self._response_strategy:
+            await self._response_strategy.queue_response(
+                CompletedToolResult(
+                    function_name=frame.function_name,
+                    tool_call_id=frame.tool_call_id,
+                    arguments=frame.arguments,
+                    result=frame.result,
+                )
+            )
+        elif run_llm and not self._user_speaking:
             await self._maybe_push_context_after_function_result()
 
         # Call the `on_context_updated` callback once the function call result
@@ -1886,6 +2153,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
             )
 
     async def _handle_llm_start(self, _: LLMFullResponseStartFrame):
+        self._llm_response_streaming = True
+        self._llm_inference_requested = False
+        await self._notify_response_strategy_activity()
         # Realtime mode treats LLMFullResponseStartFrame as the user
         # turn's end signal for context-writing purposes — see
         # _realtime_handle_llm_start.
@@ -1908,6 +2178,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await self._trigger_assistant_turn_started()
 
     async def _handle_llm_end(self, _: LLMFullResponseEndFrame):
+        self._llm_response_streaming = False
+        await self._notify_response_strategy_activity()
         # Realtime mode failsafe: by the time the assistant response
         # fully completes, even slow transcripts should have landed.
         # Cancel any still-pending deferred handoff flush and commit
