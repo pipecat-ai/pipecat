@@ -60,7 +60,7 @@ SCENARIOS: dict[str, Scenario] = {
             "webrtc",
             "deployed-relay",
             "local",
-            "SmallWebRTC, TURN-forced via Cloudflare's hosted TURN service",
+            "SmallWebRTC, TURN-forced via a deployed TURN server (coturn or Cloudflare)",
         ),
         Scenario(
             "moq-relay-deployed",

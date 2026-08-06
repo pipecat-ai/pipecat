@@ -31,63 +31,13 @@ a counted drop, not a corrupted number.
 
 ## Run
 
-For a full recorded campaign over all six scenarios, follow
-[RUNBOOK.md](RUNBOOK.md) (procedure + gates; bare command list in
-[COMMANDS.md](COMMANDS.md); OCI relay-box variant in
-[deploy-oci.md](deploy-oci.md)). The sections below cover individual runs.
+All run procedure — commands, gates, relay setup, agent notes — lives in
+[RUNBOOK.md](RUNBOOK.md), with relay-box provisioning in
+[deploy-aws.md](deploy-aws.md) / [deploy-oci.md](deploy-oci.md). This README
+carries no commands; it explains what the benchmark measures and how to read
+the output.
 
-All commands from the pipecat repo root. One-time: `uv sync --group bench`
-(matplotlib for the charts). Floors run automatically when missing, or
-explicitly with `--floors`.
-
-### Local, no containers
-
-```bash
-uv run python benchmarks/transport_latency/transport_latency.py --scenario webrtc-local
-uv run python benchmarks/transport_latency/transport_latency.py --scenario moq-serve
-```
-
-### Local relays (watch the relay logs in their own tab)
-
-```bash
-# tab 1 — moq-relay, foreground (from repos/pipecat-ai)
-../moq-relay-dev.sh relay
-
-# tab 2
-uv run python benchmarks/transport_latency/transport_latency.py --scenario moq-relay-local
-```
-
-```bash
-# tab 1 — coturn, foreground
-../../daily-co/pipecat-coturn/run.sh
-
-# tab 2
-uv run python benchmarks/transport_latency/transport_latency.py --scenario webrtc-turn-local
-```
-
-The harness never starts containers itself; it checks they're reachable and
-prints the command if not.
-
-### Everything local in one go
-
-```bash
-uv run python benchmarks/transport_latency/transport_latency.py --scenario all-local
-```
-
-### Deployed relays
-
-```bash
-# MoQ via a deployed (CA-signed) relay
-uv run python benchmarks/transport_latency/transport_latency.py \
-    --scenario moq-relay-deployed --relay-url https://<your-relay>/<path>
-
-# SmallWebRTC via Cloudflare TURN (create a TURN key under Realtime in the
-# Cloudflare dashboard; short-lived credentials are minted per run)
-export CF_TURN_KEY_ID=... CF_TURN_API_TOKEN=...
-uv run python benchmarks/transport_latency/transport_latency.py --scenario webrtc-turn-deployed
-```
-
-Results land in `results/`: per-trial JSON, per-trial bot logs
+Results land in `results/` (gitignored — never checked in): per-trial JSON, per-trial bot logs
 (`bot-<scenario>-<trial>.log`), `summary.md`, and charts —
 `chart-all.png` plus one sub-chart per tier pairing the WebRTC and MoQ
 scenario (`chart-local-direct.png`, `chart-local-relay.png`,
@@ -111,8 +61,7 @@ segment.
 1. One shared echo bot file (`echo_bot.py`); no VAD, no AI services,
    `audio_in_passthrough=True`.
 2. 48 kHz mono both directions on both transports — no resamplers in either
-   path. (This exposed and required fixing a SmallWebRTC bug where
-   rate-matched stereo input bypassed the mono downmix.)
+   path.
 3. Identical base-transport 10 ms chunking (defaults, both).
 4. Opus 20 ms frames both sides (MoQ `audio_out_frame_ms=20`; aiortc default).
 5. Opus bitrate/FEC: library defaults both sides; encoders differ (moq-ffi

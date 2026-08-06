@@ -3,8 +3,8 @@
 Step-by-step procedure for one full benchmark campaign over the six local +
 deployed scenarios. Anyone with this repo (and its two sibling repos, below)
 should be able to run it end to end and get comparable tables. Background,
-methodology, and fairness rules: [README.md](README.md). Bare command list
-for repeat runs: [COMMANDS.md](COMMANDS.md).
+methodology, and fairness rules: [README.md](README.md). This file is the
+only place run commands live; ad-hoc variants and agent notes are at the end.
 
 **Rules of the road**
 
@@ -36,8 +36,8 @@ for repeat runs: [COMMANDS.md](COMMANDS.md).
   - `../moq-relay-dev.sh` (local relay helper, in the parent dir)
 - `uv sync --group bench --extra moq --extra webrtc --extra runner` completed
   once (the runner extra carries the bot's FastAPI dev server).
-- A cloud account for the relay box — AWS (Phase 3 below) or OCI
-  ([deploy-oci.md](deploy-oci.md)) — and control of `RELAY_HOST` DNS.
+- A cloud account for the relay box — AWS ([deploy-aws.md](deploy-aws.md))
+  or OCI ([deploy-oci.md](deploy-oci.md)) — and control of `RELAY_HOST` DNS.
 
 ---
 
@@ -125,26 +125,17 @@ Tab layout: tab 1 = relay (foreground, logs), tab 2 = harness.
   p50 for each transport is within a few ms of its Phase-1 sibling (a relay
   hop on loopback is nearly free — a big jump means something else moved).
 
-## Phase 3 — AWS box (one-time): moq-relay + coturn on one instance
+## Phase 3 — Cloud box (one-time): moq-relay + coturn on one instance
 
-One small EC2 instance runs **both** relays so the two deployed scenarios
+One small instance runs **both** relays so the two deployed scenarios
 traverse the same box, region, and network path. You run every command;
-steps 3.4+ run **on the box** over SSH. Deploying on OCI instead: follow
-[deploy-oci.md](deploy-oci.md) for 3.1–3.2 and its host-network relay
-variant of 3.5; everything else here applies unchanged.
+steps 3.4+ run **on the box** over SSH.
 
-- [ ] **3.1 Launch the instance** (AWS console or CLI): Ubuntu 24.04 LTS,
-  `t3.small`, your nearest region, your SSH key pair. Allocate and associate
-  an **Elastic IP**. Security group inbound rules:
-
-  | port | proto | purpose |
-  |---|---|---|
-  | 22 | TCP | SSH (restrict to your IP) |
-  | 80 | TCP | certbot HTTP challenge |
-  | 443 | TCP | relay HTTP/WebSocket fallback |
-  | 443 | UDP | relay QUIC/WebTransport |
-  | 3478 | UDP | coturn STUN/TURN |
-  | 49160–49200 | UDP | coturn relay allocations |
+- [ ] **3.1 Provision the instance** — cloud-specific, pick one:
+  [deploy-aws.md](deploy-aws.md) or [deploy-oci.md](deploy-oci.md). Both end
+  with an Ubuntu 24.04 box you can SSH into, a static `PUBLIC_IP`, and the
+  six benchmark ports open. (OCI also swaps 3.5's relay `docker run` for a
+  host-network variant — see its §5.)
 
 - [ ] **3.2 DNS.** Create an A record: `RELAY_HOST` → `PUBLIC_IP`. Gate (laptop):
   `dig +short RELAY_HOST` returns `PUBLIC_IP`.
@@ -165,6 +156,11 @@ variant of 3.5; everything else here applies unchanged.
 
 - [ ] **3.5 moq-relay.** On the box:
   ```bash
+ssh ubuntu@<PUBLIC_IP> mkdir -p pipecat-moq-relay
+  scp ~/Documents/repos/daily-co/pipecat-moq-relay/{Dockerfile,moq-relay.toml} \
+      ubuntu@<PUBLIC_IP>:~/pipecat-moq-relay/
+
+  
   git clone git@github.com:daily-co/pipecat-moq-relay.git && cd pipecat-moq-relay
   docker build -t pipecat-moq-relay .        # add --build-arg MOQ_TAG=... if 3.3 said so
   sudo certbot certonly --standalone -d RELAY_HOST
@@ -173,12 +169,18 @@ variant of 3.5; everything else here applies unchanged.
   sudo mkdir -p /etc/moq/tls
   sudo cp -L /etc/letsencrypt/live/RELAY_HOST/fullchain.pem /etc/letsencrypt/live/RELAY_HOST/privkey.pem /etc/moq/tls/
   sudo chmod 644 /etc/moq/tls/*.pem
-  docker run -d --restart unless-stopped --name moq-relay \
-    -p 443:443/udp -p 443:443/tcp \
+  docker run -d --restart unless-stopped --name moq-relay --network host \
     -v "$PWD/moq-relay.toml:/etc/moq/moq-relay.toml:ro" \
     -v /etc/moq/tls:/etc/moq/tls:ro \
     pipecat-moq-relay
   ```
+
+  (AWS: docker run -d --restart unless-stopped --name moq-relay \
+    -p 443:443/udp -p 443:443/tcp \
+    -v "$PWD/moq-relay.toml:/etc/moq/moq-relay.toml:ro" \
+    -v /etc/moq/tls:/etc/moq/tls:ro \
+    pipecat-moq-relay)
+
   Gate (laptop):
   ```bash
   curl -s -o /dev/null -w '%{http_code}\n' http://RELAY_HOST/        # any HTTP status = TCP up
@@ -208,7 +210,7 @@ variant of 3.5; everything else here applies unchanged.
     coturn/coturn:4.7 --external-ip='PUBLIC_IP/PRIVATE_IP'
   ```
   (`--external-ip` as an argument, not in the conf — the image auto-injects
-  one otherwise, and EC2's NAT needs the `public/private` form.
+  one otherwise, and cloud NAT needs the `public/private` form.
   `PRIVATE_IP` = first address from `hostname -I`.)
   Gate: `docker logs coturn` shows listeners on 3478 with no config errors.
   Real verification is the smoke run in 4.2.
@@ -248,7 +250,7 @@ Tab layout: tab 1 = SSH tailing a relay's logs, tab 2 = harness.
       --scenario webrtc-turn-deployed \
       --turn-url turn:PUBLIC_IP:3478 --turn-username pipecat --turn-credential TURN_PASSWORD
   ```
-  Gate: JSON `ice_pair` = `relay/relay` (both sides through the AWS coturn);
+  Gate: JSON `ice_pair` = `relay/relay` (both sides through the cloud coturn);
   n ≥ 55 per trial. Nonzero drops are **expected** on a real TURN path —
   count them, don't chase them.
 
@@ -273,21 +275,48 @@ Tab layout: tab 1 = SSH tailing a relay's logs, tab 2 = harness.
     (see "Reading the numbers" in the README);
   - drops concentrated where expected (deployed TURN), ~0 elsewhere.
 
-- [ ] **5.3 Preserve the campaign.** `results/` is gitignored; copy the
-  outputs to a tracked campaign dir and commit:
+- [ ] **5.3 Share the campaign.** Results are never checked in — the repo
+  carries only the procedure. `results/` holds everything a write-up needs
+  (`summary.md`, chart PNGs, per-trial JSONs with the environment block);
+  share them out-of-band (PR description, doc, dashboard) alongside the
+  commit hash from 0.1 so numbers stay tied to the code that produced them.
+
+- [ ] **5.4 Park the cloud box.** Between campaigns, stop the instance (the
+  static IP persists; see the cost note in your deploy doc). Terminate the
+  instance and release the IP when the deployed tier is done for good.
+
+---
+
+## Ad-hoc variants (outside a recorded campaign)
+
+- **All four local scenarios back-to-back** (relays must already be up):
   ```bash
-  export CAMPAIGN=benchmarks/transport_latency/campaigns/$(date +%Y-%m-%d)
-  mkdir -p $CAMPAIGN
-  cp benchmarks/transport_latency/results/*.json \
-     benchmarks/transport_latency/results/summary.md \
-     benchmarks/transport_latency/results/chart-*.png $CAMPAIGN/
+  uv run python benchmarks/transport_latency/transport_latency.py --scenario all-local
   ```
+- **Cloudflare TURN instead of self-hosted coturn** for
+  `webrtc-turn-deployed` (create a TURN key under Realtime in the Cloudflare
+  dashboard; short-lived credentials are minted per run — note the media
+  path then differs from the moq relay's, so the tier pairing is weaker):
+  ```bash
+  export CF_TURN_KEY_ID=... CF_TURN_API_TOKEN=...
+  uv run python benchmarks/transport_latency/transport_latency.py --scenario webrtc-turn-deployed
+  ```
+- **Knobs**: `--trials N --duration S` for quick smokes (e.g. `1` × `15`),
+  `--jitter-ms` (default 60) for the pinned MoQ buffers, `--save-wav` to keep
+  the probe audio, `--floors` to re-run floors explicitly.
 
-- [ ] **5.4 Write up.** Update [RESULTS.md](RESULTS.md): headline table
-  (p50 RTT, excess over own floor, jitter, drops per scenario), environment
-  block from any trial JSON, findings narrative. Commit `RESULTS.md` +
-  `campaigns/<date>/` together with the code state from 0.1.
+## Agent notes
 
-- [ ] **5.5 Park the AWS box.** Between campaigns, stop the instance
-  (Elastic IP persists; note it bills a small hourly fee while the instance
-  is stopped). Terminate + release when the deployed tier is done for good.
+This runbook is agent-runnable as written; the differences from a human run:
+
+- No terminal tabs: start relay containers detached (`docker run -d ...`,
+  the same images/mounts as the foreground scripts) and read
+  `docker logs`; remove them at the end of the tier.
+- Verify every gate from the artifacts, not scrollback: per-trial stats,
+  `ice_pair`, and `moq_relay_url` are in `results/<scenario>-<trial>.json`;
+  bot output is in `results/bot-<scenario>-<trial>.log`.
+- macOS may deny the docker engine access to protected folders (Documents),
+  which breaks volume mounts; copy configs to `/tmp` and mount from there.
+- Hard human gates — never do these autonomously: cloud provisioning or any
+  spend (Phase 3), DNS changes, credential creation, and all git operations.
+- Log every deviation from this runbook and report it with the results.
