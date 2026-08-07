@@ -32,6 +32,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
@@ -672,6 +673,10 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             if evt.type == "ping":
                 # Ignore ping events (keep-alive)
                 pass
+            elif evt.type == "session.created":
+                # Default session snapshot on connect. Session configuration is
+                # sent from conversation.created to avoid a duplicate update.
+                pass
             elif evt.type == "conversation.created":
                 await self._handle_evt_conversation_created(evt)
             elif evt.type == "session.updated":
@@ -695,6 +700,12 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
                 pass
             elif evt.type == "conversation.item.added":
                 await self._handle_evt_conversation_item_added(evt)
+            elif evt.type == "conversation.item.deleted":
+                pass
+            elif evt.type == "conversation.item.truncated":
+                pass
+            elif evt.type == "conversation.item.input_audio_transcription.updated":
+                await self._handle_evt_input_audio_transcription_updated(evt)
             elif evt.type == "conversation.item.input_audio_transcription.completed":
                 await self._handle_evt_input_audio_transcription_completed(evt)
             elif evt.type == "response.done":
@@ -703,13 +714,27 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
                 await self._handle_evt_speech_started(evt)
             elif evt.type == "input_audio_buffer.speech_stopped":
                 await self._handle_evt_speech_stopped(evt)
+            elif evt.type in (
+                "input_audio_buffer.committed",
+                "input_audio_buffer.cleared",
+                "input_audio_buffer.timeout_triggered",
+                "input_audio_buffer.dtmf_event_received",
+            ):
+                pass
             elif evt.type == "response.output_audio_transcript.delta":
                 await self._handle_evt_audio_transcript_delta(evt)
+            elif evt.type == "response.output_audio_transcript.done":
+                pass
+            elif evt.type in ("response.output_text.delta", "response.text.delta"):
+                await self._handle_evt_text_delta(evt)
             elif evt.type == "response.function_call_arguments.delta":
                 # Function call arguments streaming - we wait for the .done event
                 pass
             elif evt.type == "response.function_call_arguments.done":
                 await self._handle_evt_function_call_arguments_done(evt)
+            elif evt.type.startswith("mcp_list_tools.") or evt.type.startswith("response.mcp_call"):
+                if evt.type.endswith(".failed"):
+                    logger.warning(f"{self} MCP event failed: {evt.type}")
             elif evt.type == "error":
                 # Match Grok's actual codes/messages for cancel-not-active
                 # and already-active. Grok's error codes diverge from
@@ -734,7 +759,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
                     return
 
     async def _handle_evt_conversation_created(self, evt):
-        """Handle conversation.created event - first event after connecting."""
+        """Handle conversation.created — send the initial session update."""
         await self._send_session_update()
 
     async def _handle_evt_response_created(self, evt):
@@ -796,6 +821,15 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             self._current_assistant_response = evt.item
             await self.push_frame(LLMFullResponseStartFrame())
 
+    async def _handle_evt_input_audio_transcription_updated(self, evt):
+        """Handle cumulative streaming user transcription (grok-transcribe)."""
+        transcript = evt.transcript.strip() if evt.transcript else ""
+        if transcript:
+            await self.push_frame(
+                InterimTranscriptionFrame(transcript, "", time_now_iso8601(), result=evt),
+                FrameDirection.UPSTREAM,
+            )
+
     async def _handle_evt_input_audio_transcription_completed(self, evt):
         """Handle input audio transcription completed event."""
         await self._call_event_handler("on_conversation_item_updated", evt.item_id, None)
@@ -840,6 +874,12 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         """Handle audio transcript delta event."""
         if evt.delta:
             await self._push_output_transcript_text_frames(evt.delta)
+
+    async def _handle_evt_text_delta(self, evt):
+        """Handle text-mode output deltas (``response.*.text.delta``)."""
+        if evt.delta:
+            frame = LLMTextFrame(evt.delta)
+            await self.push_frame(frame)
 
     async def _push_output_transcript_text_frames(self, text: str):
         # In a typical "cascade" LLM + TTS setup, LLMTextFrames would not

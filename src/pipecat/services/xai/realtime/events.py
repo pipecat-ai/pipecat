@@ -456,6 +456,18 @@ class ServerEvent(BaseModel):
     type: str
 
 
+class SessionCreatedEvent(ServerEvent):
+    """Event indicating a session has been created on connect.
+
+    Parameters:
+        type: Event type, always "session.created".
+        session: The created session properties.
+    """
+
+    type: Literal["session.created"]
+    session: SessionProperties
+
+
 class SessionUpdatedEvent(ServerEvent):
     """Event indicating a session has been updated.
 
@@ -471,7 +483,7 @@ class SessionUpdatedEvent(ServerEvent):
 class ConversationCreated(ServerEvent):
     """Event indicating a conversation has been created.
 
-    This is the first message received after connecting.
+    Sent after connect; Pipecat uses this to send the initial session update.
 
     Parameters:
         type: Event type, always "conversation.created".
@@ -496,17 +508,67 @@ class ConversationItemAdded(ServerEvent):
     item: ConversationItem
 
 
+class ConversationItemDeleted(ServerEvent):
+    """Event confirming a conversation item was deleted.
+
+    Parameters:
+        type: Event type, always "conversation.item.deleted".
+        item_id: ID of the deleted conversation item.
+    """
+
+    type: Literal["conversation.item.deleted"]
+    item_id: str
+
+
+class ConversationItemTruncated(ServerEvent):
+    """Event confirming a conversation item was truncated.
+
+    Parameters:
+        type: Event type, always "conversation.item.truncated".
+        item_id: ID of the truncated conversation item.
+        content_index: Index of the content within the item.
+        audio_end_ms: End time in milliseconds for the truncated audio.
+    """
+
+    type: Literal["conversation.item.truncated"]
+    item_id: str
+    content_index: int | None = None
+    audio_end_ms: int | None = None
+
+
+class ConversationItemInputAudioTranscriptionUpdated(ServerEvent):
+    """Cumulative streaming update for user input audio transcription.
+
+    Emitted when ``audio.input.transcription.model`` is ``grok-transcribe``.
+    Unlike a delta, ``transcript`` is the full cumulative text so far and may
+    correct earlier updates.
+
+    Parameters:
+        type: Event type, always "conversation.item.input_audio_transcription.updated".
+        item_id: ID of the conversation item being transcribed.
+        content_index: Index of the content within the item, if provided.
+        transcript: Cumulative transcription text so far.
+    """
+
+    type: Literal["conversation.item.input_audio_transcription.updated"]
+    item_id: str
+    content_index: int | None = None
+    transcript: str
+
+
 class ConversationItemInputAudioTranscriptionCompleted(ServerEvent):
     """Event indicating input audio transcription is complete.
 
     Parameters:
         type: Event type, always "conversation.item.input_audio_transcription.completed".
         item_id: ID of the conversation item that was transcribed.
+        content_index: Index of the content within the item, if provided.
         transcript: Complete transcription text.
     """
 
     type: Literal["conversation.item.input_audio_transcription.completed"]
     item_id: str
+    content_index: int | None = None
     transcript: str
 
 
@@ -560,6 +622,35 @@ class InputAudioBufferCleared(ServerEvent):
     """
 
     type: Literal["input_audio_buffer.cleared"]
+
+
+class InputAudioBufferTimeoutTriggered(ServerEvent):
+    """Event indicating the idle timeout fired with no user speech.
+
+    When ``turn_detection.idle_timeout_ms`` is set, the server commits a silent
+    user turn and generates a proactive check-in.
+
+    Parameters:
+        type: Event type, always "input_audio_buffer.timeout_triggered".
+        item_id: ID of the associated conversation item, if provided.
+    """
+
+    type: Literal["input_audio_buffer.timeout_triggered"]
+    item_id: str | None = None
+
+
+class InputAudioBufferDtmfEventReceived(ServerEvent):
+    """DTMF tone detected on a SIP session.
+
+    Parameters:
+        type: Event type, always "input_audio_buffer.dtmf_event_received".
+        digit: The DTMF digit received.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
+
+    type: Literal["input_audio_buffer.dtmf_event_received"]
+    digit: str | None = None
 
 
 class ResponseOutputItemAdded(ServerEvent):
@@ -805,6 +896,63 @@ class ResponseContentPartDone(ServerEvent):
     output_index: int
 
 
+class ResponseTextDelta(ServerEvent):
+    """Event containing incremental text-mode output from a response.
+
+    xAI emits both ``response.text.delta`` and ``response.output_text.delta``
+    with the same payload; clients should accept either name.
+
+    Parameters:
+        type: ``response.output_text.delta`` or ``response.text.delta``.
+        response_id: ID of the response.
+        item_id: ID of the conversation item.
+        output_index: Index of the output item.
+        content_index: Index of the content part.
+        delta: Incremental text content.
+    """
+
+    type: Literal["response.output_text.delta", "response.text.delta"]
+    response_id: str | None = None
+    item_id: str | None = None
+    output_index: int | None = None
+    content_index: int | None = None
+    delta: str
+
+
+class McpListToolsEvent(ServerEvent):
+    """MCP tool discovery lifecycle event.
+
+    Parameters:
+        type: One of ``mcp_list_tools.in_progress``, ``.completed``, or ``.failed``.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
+
+    type: Literal[
+        "mcp_list_tools.in_progress",
+        "mcp_list_tools.completed",
+        "mcp_list_tools.failed",
+    ]
+
+
+class ResponseMcpCallEvent(ServerEvent):
+    """MCP tool call lifecycle or argument streaming event.
+
+    Parameters:
+        type: An MCP call event name under ``response.mcp_call*``.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
+
+    type: Literal[
+        "response.mcp_call_arguments.delta",
+        "response.mcp_call_arguments.done",
+        "response.mcp_call.in_progress",
+        "response.mcp_call.completed",
+        "response.mcp_call.failed",
+    ]
+
+
 class PingEvent(ServerEvent):
     """Keep-alive ping event from the server.
 
@@ -836,14 +984,24 @@ class ErrorEvent(ServerEvent):
 _server_event_types = {
     "error": ErrorEvent,
     "ping": PingEvent,
+    "session.created": SessionCreatedEvent,
     "session.updated": SessionUpdatedEvent,
     "conversation.created": ConversationCreated,
     "conversation.item.added": ConversationItemAdded,
-    "conversation.item.input_audio_transcription.completed": ConversationItemInputAudioTranscriptionCompleted,
+    "conversation.item.deleted": ConversationItemDeleted,
+    "conversation.item.truncated": ConversationItemTruncated,
+    "conversation.item.input_audio_transcription.updated": (
+        ConversationItemInputAudioTranscriptionUpdated
+    ),
+    "conversation.item.input_audio_transcription.completed": (
+        ConversationItemInputAudioTranscriptionCompleted
+    ),
     "input_audio_buffer.speech_started": InputAudioBufferSpeechStarted,
     "input_audio_buffer.speech_stopped": InputAudioBufferSpeechStopped,
     "input_audio_buffer.committed": InputAudioBufferCommitted,
     "input_audio_buffer.cleared": InputAudioBufferCleared,
+    "input_audio_buffer.timeout_triggered": InputAudioBufferTimeoutTriggered,
+    "input_audio_buffer.dtmf_event_received": InputAudioBufferDtmfEventReceived,
     "response.created": ResponseCreated,
     "response.output_item.added": ResponseOutputItemAdded,
     "response.output_item.done": ResponseOutputItemDone,
@@ -853,8 +1011,18 @@ _server_event_types = {
     "response.output_audio_transcript.done": ResponseAudioTranscriptDone,
     "response.output_audio.delta": ResponseAudioDelta,
     "response.output_audio.done": ResponseAudioDone,
+    "response.output_text.delta": ResponseTextDelta,
+    "response.text.delta": ResponseTextDelta,
     "response.function_call_arguments.delta": ResponseFunctionCallArgumentsDelta,
     "response.function_call_arguments.done": ResponseFunctionCallArgumentsDone,
+    "mcp_list_tools.in_progress": McpListToolsEvent,
+    "mcp_list_tools.completed": McpListToolsEvent,
+    "mcp_list_tools.failed": McpListToolsEvent,
+    "response.mcp_call_arguments.delta": ResponseMcpCallEvent,
+    "response.mcp_call_arguments.done": ResponseMcpCallEvent,
+    "response.mcp_call.in_progress": ResponseMcpCallEvent,
+    "response.mcp_call.completed": ResponseMcpCallEvent,
+    "response.mcp_call.failed": ResponseMcpCallEvent,
     "response.done": ResponseDone,
 }
 
