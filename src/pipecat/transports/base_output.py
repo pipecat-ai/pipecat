@@ -55,6 +55,7 @@ from pipecat.utils.time import nanoseconds_to_seconds
 BOT_VAD_STOP_SECS = 0.35
 # Only used as a fallback
 BOT_VAD_STOP_FALLBACK_SECS = 3
+DRAIN_POLL_SECS = 0.25
 
 
 class BaseOutputTransport(FrameProcessor):
@@ -456,6 +457,7 @@ class BaseOutputTransport(FrameProcessor):
             self._audio_task: asyncio.Task | None = None
             self._video_task: asyncio.Task | None = None
             self._clock_task: asyncio.Task | None = None
+            self._audio_progress_time: float = 0.0
 
             # If timestamps are equal, use this count to preserve the insertion order
             self._clock_queue_counter = itertools.count()
@@ -517,10 +519,34 @@ class BaseOutputTransport(FrameProcessor):
             # that EndFrame to be processed by the audio and clock tasks. We
             # also need to wait for these tasks before cancelling the video task
             # because it might be still rendering.
+            #
+            # Transport writes are unbounded, so wait on progress rather than on
+            # elapsed time: queued audio plays out in real time and a slow drain
+            # is normal, but a stalled one never completes.
+            timeout = self._params.audio_out_drain_timeout_secs
             if self._audio_task:
-                await self._audio_task
+                self._audio_progress_time = time.monotonic()
+                while True:
+                    done, _ = await asyncio.wait({self._audio_task}, timeout=DRAIN_POLL_SECS)
+                    if done:
+                        break
+                    stalled_for = time.monotonic() - self._audio_progress_time
+                    if stalled_for > timeout:
+                        logger.warning(
+                            f"{self} audio task made no progress for {stalled_for:.1f}s "
+                            f"(peer not reading?); cancelling it so {frame} can continue "
+                            "downstream"
+                        )
+                        await self._cancel_audio_task()
+                        break
             if self._clock_task:
-                await self._clock_task
+                done, _ = await asyncio.wait({self._clock_task}, timeout=timeout)
+                if not done:
+                    logger.warning(
+                        f"{self} clock task did not drain in {timeout}s; cancelling it so "
+                        f"{frame} can continue downstream"
+                    )
+                    await self._cancel_clock_task()
 
             # Stop audio mixer.
             if self._mixer:
@@ -887,6 +913,9 @@ class BaseOutputTransport(FrameProcessor):
         async def _audio_task_handler(self):
             """Main audio processing task handler."""
             async for frame in self._next_frame():
+                # Progress signal for the drain in stop().
+                self._audio_progress_time = time.monotonic()
+
                 # No need to push EndFrame, it's pushed from process_frame().
                 if isinstance(frame, EndFrame):
                     # Send some final silence so words don't cut out.

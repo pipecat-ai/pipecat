@@ -17,6 +17,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
+    EndFrame,
     InterruptionFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
@@ -261,3 +262,95 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
             self.assertIn(BotStoppedSpeakingFrame, pushed_types)
         finally:
             await transport.cancel(CancelFrame())
+
+
+class TestBaseOutputTransportShutdown(unittest.IsolatedAsyncioTestCase):
+    async def test_end_frame_proceeds_when_audio_write_never_returns(self):
+        """A wedged transport write must not strand the EndFrame.
+
+        `process_frame()` pushes the EndFrame downstream only after `stop()`
+        returns, so a write that never completes must not block `stop()`.
+        """
+        params = TransportParams(audio_out_enabled=True, audio_out_drain_timeout_secs=0.5)
+        transport = BaseOutputTransport(params)
+        transport.push_frame = AsyncMock()
+
+        never_returns = asyncio.Event()
+
+        async def wedged_write(_frame):
+            await never_returns.wait()  # never set: models a peer that stopped reading
+            return True
+
+        transport.write_audio_frame = AsyncMock(side_effect=wedged_write)
+
+        task_manager = TaskManager()
+        task_manager.setup(TaskManagerParams(loop=asyncio.get_event_loop()))
+        await transport.setup(
+            FrameProcessorSetup(
+                clock=SystemClock(),
+                task_manager=task_manager,
+                pipeline_worker=SimpleNamespace(app_resources=None),  # type: ignore[arg-type]
+            )
+        )
+        start_frame = StartFrame(audio_out_sample_rate=16000)
+        await transport.process_frame(start_frame, FrameDirection.DOWNSTREAM)
+        await transport.set_transport_ready(start_frame)
+
+        # Queue several full chunks so the audio task is inside the wedged
+        # write, with more still queued, when the EndFrame arrives.
+        chunk = transport._media_senders[None].audio_chunk_size
+        await transport.process_frame(
+            OutputAudioRawFrame(audio=b"\x00" * (chunk * 5), sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+        await asyncio.sleep(0.2)
+        self.assertGreater(transport.write_audio_frame.call_count, 0, "audio task never started")
+
+        end_frame = EndFrame()
+        await asyncio.wait_for(
+            transport.process_frame(end_frame, FrameDirection.DOWNSTREAM),
+            timeout=10.0,
+        )
+
+        pushed = [call.args[0] for call in transport.push_frame.call_args_list]
+        self.assertIn(end_frame, pushed, "EndFrame must still be pushed downstream")
+
+    async def test_slow_but_progressing_drain_is_not_cancelled(self):
+        """A long playout is legitimately slow and must not be cut short."""
+        params = TransportParams(audio_out_enabled=True, audio_out_drain_timeout_secs=0.5)
+        transport = BaseOutputTransport(params)
+        transport.push_frame = AsyncMock()
+
+        async def slow_write(_frame):
+            await asyncio.sleep(0.2)  # slower than a chunk, faster than the stall bound
+            return True
+
+        transport.write_audio_frame = AsyncMock(side_effect=slow_write)
+
+        task_manager = TaskManager()
+        task_manager.setup(TaskManagerParams(loop=asyncio.get_event_loop()))
+        await transport.setup(
+            FrameProcessorSetup(
+                clock=SystemClock(),
+                task_manager=task_manager,
+                pipeline_worker=SimpleNamespace(app_resources=None),  # type: ignore[arg-type]
+            )
+        )
+        start_frame = StartFrame(audio_out_sample_rate=16000)
+        await transport.process_frame(start_frame, FrameDirection.DOWNSTREAM)
+        await transport.set_transport_ready(start_frame)
+
+        sender = transport._media_senders[None]
+        chunk = sender.audio_chunk_size
+        for _ in range(10):
+            await transport.process_frame(
+                OutputAudioRawFrame(audio=b"\x00" * chunk, sample_rate=16000, num_channels=1),
+                FrameDirection.DOWNSTREAM,
+            )
+
+        await asyncio.wait_for(
+            transport.process_frame(EndFrame(), FrameDirection.DOWNSTREAM), timeout=30.0
+        )
+
+        # Drained on its own rather than being cancelled by the stall bound.
+        self.assertTrue(sender._audio_queue.empty())
