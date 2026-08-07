@@ -234,7 +234,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="gemini-2.5-flash",
+            model="gemini-3.6-flash",
             system_instruction=None,
             max_tokens=4096,
             temperature=None,

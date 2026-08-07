@@ -83,7 +83,13 @@ _INTERMEDIATE_DESCRIPTION = (
 _FINAL_DESCRIPTION = (
     "This is the final result for the asynchronous task associated with this "
     "tool_call_id. The task has completed. No further results will arrive for "
-    "this tool_call_id."
+    "this tool_call_id. You must convey this result to the user, even if the "
+    "conversation has moved on. Never leave it unsaid. First finish responding "
+    "to whatever the user is talking about now, then deliver the result at the "
+    "end of your response. How you deliver it depends on its size: if the "
+    "result is short, simply state it; if it is long or complex, name what has "
+    "come back and offer the details. Convey it once; do not repeat it in "
+    "later responses."
 )
 
 

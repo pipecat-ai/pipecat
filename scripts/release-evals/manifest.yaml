@@ -235,6 +235,21 @@ suite:
     scenarios: [weather_function_call]
 
   #
+  # Async function calling: the tool keeps running after the LLM's turn ends
+  # (cancel_on_interruption=False). Its result lands ~20s later, by which point
+  # the conversation has moved on — so the bot has to deliver the weather as an
+  # aside on a later turn.
+  #
+  - bot: function-calling/function-calling-anthropic-async.py
+    scenarios: [weather_function_call_async_audio]
+  - bot: function-calling/function-calling-google-async.py
+    scenarios: [weather_function_call_async_audio]
+  - bot: function-calling/function-calling-openai-async.py
+    scenarios: [weather_function_call_async_audio]
+  - bot: function-calling/function-calling-openai-responses-async.py
+    scenarios: [weather_function_call_async_audio]
+
+  #
   # Function calling with video: the bot calls a vision function that requests a
   # user image; the eval transport serves the scenario's `image:` for that turn.
   #
