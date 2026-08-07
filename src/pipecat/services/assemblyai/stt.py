@@ -580,6 +580,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         self._connected = False
 
         self._receive_task = None
+        self._connect_task = None
 
         self._audio_buffer = bytearray()
         self._chunk_size_ms = 50
@@ -744,7 +745,8 @@ class AssemblyAISTTService(WebsocketSTTService):
         """
         await super().start(frame)
         self._chunk_size_bytes = int(self._chunk_size_ms * self.sample_rate * 2 / 1000)
-        await self._connect()
+        self._clear_audio_ready()
+        self._connect_task = self.create_task(self._connect())
 
     async def stop(self, frame: EndFrame):
         """Stop the speech-to-text service.
@@ -981,6 +983,12 @@ class AssemblyAISTTService(WebsocketSTTService):
         """
         await super()._disconnect()
 
+        self._clear_audio_ready()
+
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
+
         if not self._connected or not self._websocket:
             return
 
@@ -1034,6 +1042,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 additional_headers=headers,
             )
             self._connected = True
+            self._set_audio_ready()
             await self._call_event_handler("on_connected")
             logger.debug(f"{self} Connected to AssemblyAI WebSocket")
         except Exception as e:
