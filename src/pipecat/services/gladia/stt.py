@@ -322,6 +322,7 @@ class GladiaSTTService(WebsocketSTTService):
         self._region = region
         self._url = url
         self._receive_task = None
+        self._connect_task = None
 
         # Init-only connection config
         self._encoding = encoding
@@ -426,11 +427,16 @@ class GladiaSTTService(WebsocketSTTService):
     async def start(self, frame: StartFrame):
         """Start the Gladia STT websocket connection.
 
+        Session setup and the websocket handshake run in the background so they
+        are not added to pipeline startup. Audio arriving before the connection
+        is live is held by the base class and transcribed once it is.
+
         Args:
             frame: The start frame triggering service startup.
         """
         await super().start(frame)
-        await self._connect()
+        self._clear_audio_ready()
+        self._connect_task = self.create_task(self._connect())
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply settings delta.
@@ -537,6 +543,11 @@ class GladiaSTTService(WebsocketSTTService):
         await super()._disconnect()
 
         self._connection_active = False
+        self._clear_audio_ready()
+
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
 
         if self._receive_task:
             await self.cancel_task(self._receive_task)
@@ -548,6 +559,7 @@ class GladiaSTTService(WebsocketSTTService):
         """Establish the websocket connection to Gladia."""
         try:
             if self._websocket and self._websocket.state is State.OPEN:
+                self._set_audio_ready()
                 return
 
             logger.debug(f"{self}Connecting to Gladia WebSocket")
@@ -566,10 +578,14 @@ class GladiaSTTService(WebsocketSTTService):
             # Send buffered audio if any
             await self._send_buffered_audio()
 
+            # Buffered audio has gone out, so the socket can now carry live audio.
+            self._set_audio_ready()
+
             logger.debug(f"{self} Connected to Gladia WebSocket")
         except Exception as e:
             self._websocket = None
             self._connection_active = False
+            self._clear_audio_ready()
             await self.push_error(error_msg=f"Unable to connect to Gladia: {e}", exception=e)
 
     async def _disconnect_websocket(self):
