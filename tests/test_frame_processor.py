@@ -473,6 +473,89 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(code_after_ran, "Code after broadcast_interruption() should execute")
 
+    async def test_input_handler_survives_cancelled_error(self):
+        """Test that the input handler survives a CancelledError during interruption.
+
+        Regression test: if CancelledError escapes from process_frame during
+        InterruptionFrame handling (e.g. from an event handler or push_frame),
+        the input handler must catch it and continue processing subsequent
+        frames instead of dying silently.
+        """
+        cancellederror_raised = False
+
+        class CancelledErrorOnInterruptProcessor(FrameProcessor):
+            """Processor whose event handler raises CancelledError on InterruptionFrame."""
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                await self.push_frame(frame, direction)
+
+        processor = CancelledErrorOnInterruptProcessor()
+
+        @processor.event_handler("on_after_process_frame")
+        async def on_after_process_frame(proc, frame):
+            nonlocal cancellederror_raised
+            if isinstance(frame, InterruptionFrame) and not cancellederror_raised:
+                cancellederror_raised = True
+                raise asyncio.CancelledError()
+
+        pipeline = Pipeline([processor])
+
+        frames_to_send = [
+            TextFrame(text="before"),
+            SleepFrame(),
+            InterruptionFrame(),
+            SleepFrame(),
+            TextFrame(text="after"),
+        ]
+        expected_down_frames = [
+            TextFrame,
+            InterruptionFrame,
+            TextFrame,
+        ]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.assertTrue(cancellederror_raised, "CancelledError should have been raised")
+
+    async def test_interrupted_processor_handles_subsequent_frames(self):
+        """Test that a processor still handles frames after an interruption.
+
+        Verifies the overall interruption recovery flow: a slow processor is
+        interrupted, its process task is cancelled, and subsequent frames are
+        still processed by the replacement task.
+        """
+
+        class SlowProcessor(FrameProcessor):
+            """Processor that delays during non-system frame processing."""
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, TextFrame) and frame.text == "slow":
+                    await asyncio.sleep(3.0)
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([SlowProcessor()])
+
+        frames_to_send = [
+            TextFrame(text="slow"),
+            SleepFrame(sleep=0.1),
+            InterruptionFrame(),
+            SleepFrame(sleep=1.5),
+            TextFrame(text="after"),
+        ]
+        expected_down_frames = [
+            InterruptionFrame,
+            TextFrame,
+        ]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
