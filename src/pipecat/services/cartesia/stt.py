@@ -279,6 +279,7 @@ class CartesiaSTTService(WebsocketSTTService):
         self._scheme = url_parts.scheme or "wss"
         self._extra_headers = dict(extra_headers) if extra_headers else {}
         self._receive_task = None
+        self._connect_task = None
 
         # Init-only audio config (not runtime-updatable).
         self._encoding = encoding
@@ -298,7 +299,8 @@ class CartesiaSTTService(WebsocketSTTService):
             frame: Frame indicating service should start.
         """
         await super().start(frame)
-        await self._connect()
+        self._clear_audio_ready()
+        self._connect_task = self.create_task(self._connect())
 
     async def stop(self, frame: EndFrame):
         """Stop the STT service and close connection.
@@ -373,6 +375,12 @@ class CartesiaSTTService(WebsocketSTTService):
     async def _disconnect(self):
         await super()._disconnect()
 
+        self._clear_audio_ready()
+
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -431,6 +439,7 @@ class CartesiaSTTService(WebsocketSTTService):
             }
 
             self._websocket = await self._websocket_connect(ws_url, additional_headers=headers)
+            self._set_audio_ready()
             await self._call_event_handler("on_connected")
         except Exception as e:
             self._websocket = None
