@@ -45,8 +45,9 @@ class TestParseVerdict(unittest.TestCase):
         self.assertTrue(v.passed)
 
     def test_trailing_prose_after_json(self):
-        # gemma2 and similar models sometimes append chatty text after the JSON
-        # object (and "know" contains "no", which used to defeat the fallback).
+        # Judge models sometimes append chatty text after the JSON object, and
+        # "know" contains "no", so a substring-matching fallback would misread
+        # the trailing sentence as a rejection.
         v = _parse_verdict(
             ' {"verdict": "yes", "reason": "The bot greets the user."}\n\n'
             "Let me know if you'd like to evaluate any further turns!"

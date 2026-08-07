@@ -21,7 +21,7 @@ turns:
         calls:
           - name: get_current_weather
 
-  - user: "Tell me a short story about a sea turtle. Keep it to 4 sentences max."
+  - user: "Tell me a three-sentence short story about a sea turtle."
     expect:
       - event: response
         eval: "tells a short story about a sea turtle"
