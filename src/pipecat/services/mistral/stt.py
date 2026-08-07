@@ -132,6 +132,7 @@ class MistralSTTService(STTService):
         self._target_streaming_delay_ms = target_streaming_delay_ms
         self._connection: RealtimeConnection | None = None
         self._receive_task = None
+        self._connect_task = None
         self._accumulated_text = ""
         self._detected_language: Language | None = None
 
@@ -146,11 +147,16 @@ class MistralSTTService(STTService):
     async def start(self, frame: StartFrame):
         """Start the STT service and establish connection.
 
+        The connection is established in the background so the handshake is not
+        added to pipeline startup. Audio arriving before it is ready is held by
+        the base class and transcribed once it is.
+
         Args:
             frame: Frame indicating service should start.
         """
         await super().start(frame)
-        await self._connect()
+        self._clear_audio_ready()
+        self._connect_task = self.create_task(self._connect())
 
     async def stop(self, frame: EndFrame):
         """Stop the STT service and close connection.
@@ -239,11 +245,19 @@ class MistralSTTService(STTService):
             self._receive_task = self.create_task(
                 self._receive_events(), name="mistral_stt_receive"
             )
+
+            self._set_audio_ready()
         except Exception as e:
             await self.push_error(error_msg=f"Error connecting to Mistral STT: {e}", exception=e)
 
     async def _disconnect(self):
         """Close the connection and cancel the receive task."""
+        self._clear_audio_ready()
+
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
