@@ -4,40 +4,34 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Standalone Quail VAD analyzer for Pipecat.
+"""Standalone VAD analyzer for Pipecat backed by the ai-coustics SDK.
 
-Runs a standalone Quail VAD-only model from the ai-coustics SDK (e.g. Quail VAD
-2.0 or VF VAD 2.0) as a dedicated VAD processor. Unlike
-:class:`pipecat.audio.vad.aic_vad.AICVADAnalyzer`, which queries the
-model-internal VAD of :class:`pipecat.audio.filters.aic_filter.AICFilter`, this
-analyzer owns its own :class:`aic_sdk.Processor` instance and can be placed
-anywhere in the pipeline.
+Runs a dedicated ai-coustics VAD model as its own detector. The analyzer owns
+its :class:`aic_sdk.Vad` instance and can be placed anywhere in the pipeline.
 
 Classes:
-    AICQuailVADAnalyzer: Standalone Quail VAD analyzer.
+    AICQuailVADAnalyzer: Standalone ai-coustics VAD analyzer.
 """
 
 from __future__ import annotations
 
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import numpy as np
 from aic_sdk import (
     Model,
-    Processor,
     ProcessorConfig,
-    set_sdk_id,
+    Vad,
+    VadContext,
+    # Exported at runtime but absent from aic-sdk 3.0.0's type stub.
+    set_sdk_id,  # type: ignore[attr-defined]
 )
 from loguru import logger
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 
-if TYPE_CHECKING:
-    from aic_sdk import VadContext
-
-DEFAULT_QUAIL_VAD_MODEL_ID = "quail-vad-2.0-xxs-16khz"
+DEFAULT_QUAIL_VAD_MODEL_ID = "vad-2.1-xxs-16khz"
 
 # Telemetry identifier registered with the AIC SDK; identifies pipecat to the
 # vendor's usage pipeline. Mirrors the value used by AICFilter; kept private
@@ -50,30 +44,25 @@ _INT16_SCALE = 32768.0
 
 
 class AICQuailVADAnalyzer(VADAnalyzer):
-    """Standalone Quail VAD analyzer powered by the ai-coustics SDK.
+    """Standalone VAD analyzer powered by the ai-coustics SDK.
 
-    The analyzer owns a dedicated :class:`aic_sdk.Processor` initialized with a
-    Quail VAD-only model. Each :meth:`voice_confidence` call processes one audio
-    window through the processor and returns the model's raw speech probability
-    in ``[0.0, 1.0]`` (:meth:`aic_sdk.VadContext.raw_vad_probability`). The base
+    The analyzer owns a dedicated :class:`aic_sdk.Vad` initialized with a
+    VAD-only model. Each :meth:`voice_confidence` call processes one audio
+    window and returns the model's raw speech probability in ``[0.0, 1.0]``
+    (:meth:`aic_sdk.VadContext.raw_vad_probability`). The base
     :class:`VADAnalyzer` state machine then gates speech start/stop using its own
     :class:`VADParams` (``confidence`` threshold, ``start_secs``, ``stop_secs``),
     so the SDK's own VAD post-processing (sensitivity thresholding, speech-hold)
-    is intentionally bypassed — Pipecat owns the thresholding.
+    is bypassed — Pipecat owns the thresholding.
 
-    Comparison to :class:`pipecat.audio.vad.aic_vad.AICVADAnalyzer` (deprecated):
-
-    - **Model:** Quail VAD-only model (e.g. ``quail-vad-2.0-xxs-16khz``); the
-      deprecated analyzer uses the enhancement model's internal VAD as a
-      side-channel.
-    - **Audio path:** runs on whatever the pipeline feeds it (raw or enhanced).
-      The deprecated analyzer reads post-enhancement VAD state from
-      :class:`AICFilter`'s processor.
-    - **Confidence:** a continuous raw probability gated by Pipecat's
-      ``VADParams.confidence``. The deprecated analyzer exposes only a boolean
-      gated by the enhancement model's energy threshold (``[1.0, 15.0]``).
-    - **Coupling:** independent — owns its own ``Processor``. The deprecated
-      analyzer is bound to an :class:`AICFilter` instance.
+    This analyzer reads whatever audio the pipeline feeds it. When
+    :class:`pipecat.audio.filters.aic_filter.AICFilter` is installed as the
+    transport's ``audio_in_filter``, that audio is already enhanced, and the AIC
+    SDK expects a VAD to see the original signal instead. For enhancement plus
+    detection, give the filter a VAD model and use
+    :class:`pipecat.audio.vad.aic_filter_vad.AICFilterVADAnalyzer`, which reads
+    the filter's pre-enhancement predictions. This analyzer is the right choice
+    when no AIC enhancement is in the path.
 
     Example::
 
@@ -95,7 +84,7 @@ class AICQuailVADAnalyzer(VADAnalyzer):
         sample_rate: int | None = None,
         params: VADParams | None = None,
     ) -> None:
-        """Initialize the Quail VAD analyzer.
+        """Initialize the VAD analyzer.
 
         Loads the model eagerly so the cold-start CDN download happens at
         construction time (typically before the event loop starts), rather than
@@ -103,10 +92,10 @@ class AICQuailVADAnalyzer(VADAnalyzer):
 
         Args:
             license_key: ai-coustics SDK license key.
-            model_id: Quail VAD model identifier. Defaults to the published
-                standalone VAD model ``"quail-vad-2.0-xxs-16khz"``. See
-                https://artifacts.ai-coustics.io/ for the catalogue. Ignored if
-                ``model_path`` is provided.
+            model_id: Dedicated VAD model identifier. Defaults to
+                ``"vad-2.1-xxs-16khz"``. See https://artifacts.ai-coustics.io/
+                for the catalogue. Ignored if ``model_path`` is provided.
+                Enhancement models are rejected by the SDK.
             model_path: Optional path to a local ``.aicmodel`` file. Overrides
                 ``model_id`` when set.
             model_download_dir: Directory for downloaded models. Defaults to
@@ -173,16 +162,16 @@ class AICQuailVADAnalyzer(VADAnalyzer):
         )
 
         self._model: Model | None = None
-        self._processor: Processor | None = None
+        self._vad: Vad | None = None
         self._vad_ctx: VadContext | None = None
         self._frames_per_block: int = 0
         # Pre-allocated float32 buffer used by voice_confidence; sized at
-        # processor init. Avoids per-call heap allocations on the audio path.
+        # VAD init. Avoids per-call heap allocations on the audio path.
         self._in_f32: np.ndarray | None = None
         # Latches so we log inference / buffer-size errors at ERROR once and
         # drop subsequent occurrences to DEBUG. The inference latch resets on a
         # successful inference so a recovery followed by a new failure surfaces
-        # at ERROR again. The buffer-size latch resets on processor re-init.
+        # at ERROR again. The buffer-size latch resets on VAD re-init.
         self._inference_error_logged = False
         self._buffer_size_warning_logged = False
 
@@ -194,7 +183,7 @@ class AICQuailVADAnalyzer(VADAnalyzer):
             set_sdk_id(_AIC_SDK_PIPECAT_ID)
             self._ensure_model_loaded()
             if sample_rate is not None:
-                self._initialize_processor(sample_rate)
+                self._initialize_vad(sample_rate)
         except Exception:
             try:
                 self._executor.shutdown(wait=False)
@@ -206,82 +195,82 @@ class AICQuailVADAnalyzer(VADAnalyzer):
         if self._model is not None:
             return
         if self._model_path is not None:
-            logger.debug(f"Loading Quail VAD model from file: {self._model_path}")
+            logger.debug(f"Loading AIC VAD model from file: {self._model_path}")
             self._model = Model.from_file(str(self._model_path))
             return
         # model_id path (validated in __init__).
         assert self._model_id is not None
         self._model_download_dir.mkdir(parents=True, exist_ok=True)
-        logger.debug(
-            f"Downloading Quail VAD model {self._model_id!r} to {self._model_download_dir}"
-        )
+        logger.debug(f"Downloading AIC VAD model {self._model_id!r} to {self._model_download_dir}")
         model_path = Model.download(self._model_id, str(self._model_download_dir))
         self._model = Model.from_file(model_path)
 
-    def _initialize_processor(self, sample_rate: int) -> None:
+    def _initialize_vad(self, sample_rate: int) -> None:
         self._ensure_model_loaded()
         assert self._model is not None
 
-        num_frames = self._model.get_optimal_num_frames(sample_rate)
+        block_size = self._model.get_optimal_block_size(sample_rate)
         config = ProcessorConfig(
             sample_rate=sample_rate,
-            num_channels=1,
-            num_frames=num_frames,
-            allow_variable_frames=False,
+            block_size=block_size,
         )
 
         try:
-            processor = Processor(self._model, self._license_key, config)
+            vad = Vad(self._model, self._license_key, config)
         except Exception:
             logger.error(
-                f"AICQuailVADAnalyzer failed to construct Processor at {sample_rate} Hz; "
-                "check license key and SDK version."
+                f"AICQuailVADAnalyzer failed to construct Vad at {sample_rate} Hz; "
+                "check license key, model type and SDK version."
             )
             raise
 
-        # New processor constructed successfully; only now is it safe to reset
-        # the previous one. Resetting before construction would wipe in-flight
-        # VAD state on the rollback path if Processor() raised.
-        previous_processor = self._processor
-        if previous_processor is not None:
+        # New VAD constructed successfully; only now is it safe to tear the
+        # previous one down. Terminating before construction would wipe
+        # in-flight state on the rollback path if Vad() raised.
+        previous_vad = self._vad
+        if previous_vad is not None:
             try:
-                previous_processor.get_processor_context().reset()
-            except Exception as e:  # noqa: BLE001 - reset is best-effort
-                logger.debug(f"Old Processor reset failed during re-init: {e}")
+                previous_vad.terminate_session()
+            except Exception as e:  # noqa: BLE001 - teardown is best-effort
+                logger.debug(f"Old Vad termination failed during re-init: {e}")
 
-        self._processor = processor
-        self._vad_ctx = processor.get_vad_context()
-        self._frames_per_block = num_frames
-        self._in_f32 = np.zeros((1, num_frames), dtype=np.float32)
+        vad_ctx = vad.get_context()
+        self._vad = vad
+        self._vad_ctx = vad_ctx
+        self._frames_per_block = block_size
+        self._in_f32 = np.zeros(block_size, dtype=np.float32)
         self._inference_error_logged = False
         self._buffer_size_warning_logged = False
-        logger.debug(f"AICQuailVADAnalyzer initialized at {sample_rate} Hz, frames={num_frames}")
+        logger.debug(
+            f"AICQuailVADAnalyzer initialized at {sample_rate} Hz, block_size={block_size}, "
+            f"prediction delay={vad_ctx.get_prediction_delay()} samples"
+        )
 
     def set_sample_rate(self, sample_rate: int) -> None:
-        """Set the sample rate. Recreates the SDK processor if the rate changed.
+        """Set the sample rate. Recreates the SDK VAD if the rate changed.
 
-        Initializes the processor before delegating to the base class so the
+        Initializes the VAD before delegating to the base class so the
         base's internal sizing uses the correct ``num_frames_required()``
-        (driven by the model's optimal frame count) instead of the pre-init
-        fallback. If processor initialization fails, the previous
-        processor/state is restored so the analyzer stays usable at its old
-        sample rate rather than half-initialized.
+        (driven by the model's optimal block size) instead of the pre-init
+        fallback. If VAD initialization fails, the previous VAD/state is
+        restored so the analyzer stays usable at its old sample rate rather
+        than half-initialized.
 
         Args:
             sample_rate: Audio sample rate in Hz.
         """
-        # Snapshot current state for rollback if _initialize_processor raises.
+        # Snapshot current state for rollback if _initialize_vad raises.
         snapshot = (
-            self._processor,
+            self._vad,
             self._vad_ctx,
             self._in_f32,
             self._frames_per_block,
         )
         try:
-            self._initialize_processor(sample_rate)
+            self._initialize_vad(sample_rate)
         except Exception:
             (
-                self._processor,
+                self._vad,
                 self._vad_ctx,
                 self._in_f32,
                 self._frames_per_block,
@@ -298,7 +287,7 @@ class AICQuailVADAnalyzer(VADAnalyzer):
         return int(self.sample_rate * 0.01) if self.sample_rate else 160
 
     def voice_confidence(self, buffer: bytes) -> float:
-        """Run the Quail VAD model on one audio window.
+        """Run the VAD model on one audio window.
 
         Args:
             buffer: int16 little-endian audio samples for one window of
@@ -307,18 +296,17 @@ class AICQuailVADAnalyzer(VADAnalyzer):
         Returns:
             The model's raw speech probability in ``[0.0, 1.0]``. The base
             :class:`VADAnalyzer` compares this against ``VADParams.confidence``
-            to decide speech. Returns ``0.0`` if the processor is not yet
-            initialized (i.e. :meth:`set_sample_rate` has not run), if the buffer
-            size does not match the expected window, or if an SDK inference error
-            occurs.
+            to decide speech. Returns ``0.0`` if the VAD is not yet initialized
+            (i.e. :meth:`set_sample_rate` has not run), if the buffer size does
+            not match the expected window, or if an SDK inference error occurs.
         """
-        if self._processor is None or self._vad_ctx is None or self._in_f32 is None:
+        if self._vad is None or self._vad_ctx is None or self._in_f32 is None:
             return 0.0
         expected_bytes = self._frames_per_block * 2  # int16 = 2 bytes per sample
         if len(buffer) != expected_bytes:
             if not self._buffer_size_warning_logged:
                 logger.warning(
-                    f"Quail VAD buffer size {len(buffer)} != expected {expected_bytes}; "
+                    f"AIC VAD buffer size {len(buffer)} != expected {expected_bytes}; "
                     "skipping window. Subsequent size-mismatch warnings will be silenced."
                 )
                 self._buffer_size_warning_logged = True
@@ -326,9 +314,9 @@ class AICQuailVADAnalyzer(VADAnalyzer):
         try:
             # Reuse the pre-allocated buffer; np.copyto casts int16 -> float32,
             # then the in-place divide normalizes to [-1.0, 0.99997].
-            np.copyto(self._in_f32[0], np.frombuffer(buffer, dtype=_INT16_DTYPE))
+            np.copyto(self._in_f32, np.frombuffer(buffer, dtype=_INT16_DTYPE))
             self._in_f32 /= _INT16_SCALE
-            self._processor.process(self._in_f32)
+            self._vad.process(self._in_f32)
             # Successful inference re-arms the error latch so a fresh error
             # after a recovery is reported at ERROR rather than buried at DEBUG.
             self._inference_error_logged = False
@@ -338,14 +326,14 @@ class AICQuailVADAnalyzer(VADAnalyzer):
             return max(0.0, min(1.0, probability))
         except Exception as e:  # noqa: BLE001 - keep the pipeline alive on SDK errors
             if not self._inference_error_logged:
-                logger.error(f"Quail VAD inference error: {e}")
+                logger.error(f"AIC VAD inference error: {e}")
                 self._inference_error_logged = True
             else:
-                logger.debug(f"Quail VAD inference error: {e}")
+                logger.debug(f"AIC VAD inference error: {e}")
             return 0.0
 
     async def cleanup(self) -> None:
-        """Release the dedicated Processor and Model handles.
+        """Terminate the VAD session and release the model handle.
 
         Concurrency contract: callers must ensure no :meth:`voice_confidence`
         call is in flight when ``cleanup`` runs. The pipeline always orders
@@ -355,12 +343,12 @@ class AICQuailVADAnalyzer(VADAnalyzer):
         first.
         """
         await super().cleanup()
-        if self._processor is not None:
+        if self._vad is not None:
             try:
-                self._processor.get_processor_context().reset()
+                self._vad.terminate_session()
             except Exception as e:  # noqa: BLE001 - cleanup is best-effort
-                logger.debug(f"Quail VAD processor reset failed during cleanup: {e}")
-        self._processor = None
+                logger.debug(f"AIC VAD session termination failed during cleanup: {e}")
+        self._vad = None
         self._vad_ctx = None
         self._model = None
         self._in_f32 = None

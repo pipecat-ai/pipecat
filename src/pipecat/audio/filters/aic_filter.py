@@ -325,10 +325,10 @@ class AICFilter(BaseAudioFilter):
         )
 
         # Get optimal frames for this sample rate
-        self._frames_per_block = self._model.get_optimal_num_frames(self._sample_rate)
+        self._frames_per_block = self._model.get_optimal_block_size(self._sample_rate)
 
         # Allocate processing buffers now that we know the block size
-        self._in_f32 = np.zeros((1, self._frames_per_block), dtype=np.float32)
+        self._in_f32 = np.zeros(self._frames_per_block, dtype=np.float32)
         self._out_i16 = np.zeros(self._frames_per_block, dtype=np.int16)
 
         # Create configuration
@@ -351,7 +351,7 @@ class AICFilter(BaseAudioFilter):
             return
 
         # Get context for parameter control
-        self._processor_ctx = self._processor.get_processor_context()
+        self._processor_ctx = self._processor.get_context()
 
         # Apply initial control parameters
         self._apply_bypass()
@@ -368,33 +368,35 @@ class AICFilter(BaseAudioFilter):
             logger.debug("  Enhancement level not configured; using the model's default behavior.")
         logger.debug(f"  Optimal sample rate: {self._model.get_optimal_sample_rate()} Hz")
         logger.debug(
-            f"  Optimal number of frames for {self._sample_rate} Hz: "
-            f"{self._model.get_optimal_num_frames(self._sample_rate)}"
+            f"  Optimal block size for {self._sample_rate} Hz: "
+            f"{self._model.get_optimal_block_size(self._sample_rate)}"
         )
         logger.debug(
-            f"  Output delay: {self._processor_ctx.get_output_delay()} samples "
-            f"({self._processor_ctx.get_output_delay() / self._sample_rate * 1000:.2f}ms)"
+            f"  Audio delay: {self._processor_ctx.get_audio_delay()} samples "
+            f"({self._processor_ctx.get_audio_delay() / self._sample_rate * 1000:.2f}ms)"
         )
 
     async def stop(self):
-        """Clean up the AIC processor when stopping.
+        """Terminate the AIC session and release the model when stopping.
 
         Returns:
             None
         """
-        try:
-            if self._processor_ctx is not None:
-                self._processor_ctx.reset()
-        finally:
-            self._processor = None
-            self._processor_ctx = None
-            self._model = None
-            self._aic_ready = False
-            self._audio_buffer.clear()
+        if self._processor is not None:
+            try:
+                await self._processor.terminate_session_async()
+            except Exception as e:  # noqa: BLE001 - teardown is best-effort
+                logger.debug(f"AIC processor session termination failed: {e}")
 
-            if self._model_cache_key is not None:
-                AICModelManager.release(self._model_cache_key)
-                self._model_cache_key = None
+        self._processor = None
+        self._processor_ctx = None
+        self._model = None
+        self._aic_ready = False
+        self._audio_buffer.clear()
+
+        if self._model_cache_key is not None:
+            AICModelManager.release(self._model_cache_key)
+            self._model_cache_key = None
 
     async def process_frame(self, frame: FilterControlFrame):
         """Process control frames to enable/disable filtering.
@@ -448,7 +450,7 @@ class AICFilter(BaseAudioFilter):
             block_i16 = np.frombuffer(blocks_data[start : start + block_size], dtype=self._dtype)
 
             # Reuse input buffer, in-place divide
-            np.copyto(self._in_f32[0], block_i16)
+            np.copyto(self._in_f32, block_i16)
             self._in_f32 /= self._scale
 
             out_f32 = await self._processor.process_async(self._in_f32)
@@ -456,7 +458,7 @@ class AICFilter(BaseAudioFilter):
             # Convert float32 output back to int16
             np.multiply(out_f32, self._scale, out=self._in_f32)  # reuse in_f32 as temp
             np.clip(self._in_f32, -self._scale, self._scale - 1, out=self._in_f32)
-            np.copyto(self._out_i16, self._in_f32[0].astype(self._dtype))
+            np.copyto(self._out_i16, self._in_f32.astype(self._dtype))
 
             filtered_chunks.append(self._out_i16.tobytes())
 

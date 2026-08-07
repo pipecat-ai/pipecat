@@ -290,7 +290,7 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
             await filter_instance.stop()
 
         mock_release.assert_called_once_with(cache_key)
-        self.assertTrue(self.mock_processor.processor_ctx.reset_called)
+        self.assertTrue(self.mock_processor.terminated)
         self.assertIsNone(filter_instance._processor)
         self.assertIsNone(filter_instance._processor_ctx)
         self.assertIsNone(filter_instance._model)
@@ -588,6 +588,17 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(output_audio), 320)  # 1 frame
         self.assertEqual(len(filter_instance._audio_buffer), 180)  # 90 samples * 2 bytes
+
+    async def test_filter_passes_audio_through_after_stop(self):
+        """Test a late chunk after stop is passed through instead of erroring."""
+        filter_instance = self._create_filter_with_mocks()
+        await self._start_filter_with_mocks(filter_instance)
+        await filter_instance.stop()
+
+        samples = np.random.randint(-32768, 32767, size=160, dtype=np.int16)
+        input_audio = samples.tobytes()
+
+        self.assertEqual(await filter_instance.filter(input_audio), input_audio)
 
     async def test_multiple_start_stop_cycles(self):
         """Test multiple start/stop cycles."""
