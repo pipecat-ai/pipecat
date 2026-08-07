@@ -479,7 +479,6 @@ class STTService(AIService):
             if frame.service is not None and frame.service is not self:
                 await self.push_frame(frame, direction)
             elif frame.delta is not None:
-                assert isinstance(frame.delta, STTSettings)
                 await self._update_settings(frame.delta)
             elif frame.settings:
                 # Backward-compatible path: convert legacy dict to settings object.
