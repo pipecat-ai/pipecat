@@ -597,6 +597,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         self._base_url = base_url
         self._audio_format = ""  # initialized in start()
         self._receive_task = None
+        self._connect_task = None
 
         # Init-only config (not runtime-updatable).
         self._commit_strategy = commit_strategy
@@ -643,7 +644,8 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         """
         await super().start(frame)
         self._audio_format = audio_format_from_sample_rate(self.sample_rate)
-        await self._connect()
+        self._clear_audio_ready()
+        self._connect_task = self.create_task(self._connect())
 
     async def _start_metrics(self):
         """Start performance metrics collection for transcription processing."""
@@ -730,6 +732,12 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         """Close WebSocket connection and cleanup tasks."""
         await super()._disconnect()
 
+        self._clear_audio_ready()
+
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -813,6 +821,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             headers = {"xi-api-key": self._api_key}
 
             self._websocket = await self._websocket_connect(ws_url, additional_headers=headers)
+            self._set_audio_ready()
             await self._call_event_handler("on_connected")
             logger.debug("Connected to ElevenLabs Realtime STT")
         except Exception as e:
