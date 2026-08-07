@@ -31,10 +31,11 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 class SmallestTTSModel(StrEnum):
@@ -92,7 +93,7 @@ class SmallestTTSSettings(TTSSettings):
         speed: Speech speed multiplier (0.5–2.0).
     """
 
-    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SmallestTTSService(InterruptibleTTSService):

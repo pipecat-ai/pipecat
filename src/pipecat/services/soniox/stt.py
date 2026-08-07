@@ -31,7 +31,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import SONIOX_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -39,6 +39,7 @@ from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 KEEPALIVE_MESSAGE = '{"type": "keepalive"}'
 
@@ -246,19 +247,19 @@ class SonioxSTTSettings(STTSettings):
     disabled and these settings are ignored.
     """
 
-    language_hints: list[Language] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language_hints_strict: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    context: SonioxContextObject | str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enable_speaker_diarization: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enable_language_identification: bool | None | _NotGiven = field(
+    language_hints: list[Language] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_hints_strict: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    context: SonioxContextObject | str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_speaker_diarization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_language_identification: bool | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    max_endpoint_delay_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    endpoint_sensitivity: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    endpoint_latency_adjustment_level: int | None | _NotGiven = field(
+    max_endpoint_delay_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpoint_sensitivity: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpoint_latency_adjustment_level: int | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    client_reference_id: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    client_reference_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SonioxSTTService(WebsocketSTTService):

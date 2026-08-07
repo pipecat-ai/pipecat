@@ -30,7 +30,6 @@ from websockets.protocol import State
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.direct_function import DirectFunction, DirectFunctionWrapper
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -62,7 +61,7 @@ from pipecat.processors.aggregators.llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
-from pipecat.services.settings import LLMSettings, assert_given
+from pipecat.services.settings import LLMSettings
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServiceMixin
 from pipecat.utils.async_tool_cancellation import (
@@ -75,6 +74,7 @@ from pipecat.utils.context.llm_context_summarization import (
     LLMContextSummarizationUtil,
 )
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.types import assert_given
 
 if TYPE_CHECKING:
     from pipecat.pipeline.worker import PipelineWorker
@@ -255,9 +255,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
     _settings: LLMSettings
     _adapter: TAdapter
 
-    # OpenAILLMAdapter is used as the default adapter since it aligns with most LLM implementations.
-    # However, subclasses should override this with a more specific adapter when necessary.
-    adapter_class: type[BaseLLMAdapter] = OpenAILLMAdapter
+    # Subclasses should set this to a more specific adapter when necessary.
+    # ``None`` selects OpenAILLMAdapter, which aligns with most LLM
+    # implementations; it is resolved at construction rather than named here so
+    # that importing an LLM service doesn't pull in the OpenAI SDK.
+    adapter_class: type[BaseLLMAdapter] | None = None
 
     # Returned to the LLM as the tool result when an unavailable function is
     # called. Deliberately neutral about future availability so the LLM can
@@ -324,7 +326,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # (backward compatibility for 3rd-party providers outside this repo).
         # Cast to TAdapter to keep `_adapter` and `get_llm_adapter()` precisely
         # typed for callers that opt into `LLMService[XAdapter]`.
-        self._adapter = cast(TAdapter, self.adapter_class())
+        self._adapter = cast(TAdapter, self._resolve_adapter_class()())
         self._functions: dict[str | None, FunctionCallRegistryItem] = {}
         # Names we've already warned about for a redundant manual registration
         # (an explicit register_function call for a tool whose advertised
@@ -348,6 +350,16 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self._register_event_handler("on_function_calls_started")
         self._register_event_handler("on_function_calls_cancelled")
         self._register_event_handler("on_completion_timeout")
+
+    @classmethod
+    def _resolve_adapter_class(cls) -> type[BaseLLMAdapter]:
+        """Return the adapter class to instantiate for this service."""
+        if cls.adapter_class is not None:
+            return cls.adapter_class
+
+        from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
+
+        return OpenAILLMAdapter
 
     def get_llm_adapter(self) -> TAdapter:
         """Get the LLM adapter instance.

@@ -29,7 +29,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import (
     InterruptibleTTSService,
     TextAggregationMode,
@@ -40,6 +40,7 @@ from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 def language_to_rime_language(language: Language) -> str:
@@ -81,18 +82,18 @@ class RimeTTSSettings(TTSSettings):
             Values above 1.0 slow down the audio; values below 1.0 speed it up.
     """
 
-    segment: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speedAlpha: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    reduceLatency: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    pauseBetweenBrackets: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    phonemizeBetweenBrackets: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    noTextNormalization: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    saveOovs: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    inlineSpeedAlpha: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    repetition_penalty: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    top_p: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    timeScaleFactor: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    segment: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speedAlpha: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    reduceLatency: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pauseBetweenBrackets: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    phonemizeBetweenBrackets: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    noTextNormalization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    saveOovs: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    inlineSpeedAlpha: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    repetition_penalty: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    top_p: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    timeScaleFactor: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[dict[str, str]] = {"speaker": "voice"}
 
@@ -108,10 +109,10 @@ class RimeNonJsonTTSSettings(TTSSettings):
         top_p: Cumulative probability threshold (0.0-1.0).
     """
 
-    segment: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    repetition_penalty: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    top_p: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    segment: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    repetition_penalty: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    top_p: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[dict[str, str]] = {"speaker": "voice"}
 

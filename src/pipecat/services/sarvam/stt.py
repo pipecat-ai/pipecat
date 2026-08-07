@@ -33,19 +33,14 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.sarvam._sdk import sdk_headers
-from pipecat.services.settings import (
-    NOT_GIVEN,
-    STTSettings,
-    _NotGiven,
-    assert_given,
-    is_given,
-)
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import SARVAM_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 try:
     from sarvamai import AsyncSarvamAI
@@ -175,21 +170,21 @@ class SarvamSTTSettings(STTSettings):
             connection start. Only for saaras:v3.
     """
 
-    prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    vad_signals: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    high_vad_sensitivity: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    positive_speech_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    negative_speech_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    min_speech_frames: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    first_turn_min_speech_frames: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    negative_frames_count: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    negative_frames_window: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    start_speech_volume_threshold: float | None | _NotGiven = field(
+    prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad_signals: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    high_vad_sensitivity: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    positive_speech_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    negative_speech_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    min_speech_frames: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    first_turn_min_speech_frames: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    negative_frames_count: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    negative_frames_window: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    start_speech_volume_threshold: float | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    interrupt_min_speech_frames: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    pre_speech_pad_frames: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    num_initial_ignored_frames: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    interrupt_min_speech_frames: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pre_speech_pad_frames: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    num_initial_ignored_frames: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SarvamSTTService(STTService):

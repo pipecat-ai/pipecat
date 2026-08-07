@@ -18,7 +18,8 @@ from typing import Any, Literal
 
 import httpx
 from loguru import logger
-from openai import NOT_GIVEN, AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient
+from openai import NOT_GIVEN as OPENAI_NOT_GIVEN
+from openai import AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.responses import (
     ResponseCompletedEvent,
@@ -58,9 +59,9 @@ from pipecat.services.llm_service import (
     WebsocketLLMService,
     WebsocketReconnectedError,
 )
-from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
-from pipecat.services.settings import LLMSettings, _NotGiven, assert_given
+from pipecat.services.settings import LLMSettings
 from pipecat.utils.tracing.service_decorators import traced_llm
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 # ---------------------------------------------------------------------------
 # Private retry exception classes
@@ -135,18 +136,16 @@ class OpenAIResponsesLLMSettings(LLMSettings):
             not reason.
     """
 
-    # Override inherited LLMSettings fields to also accept openai's NotGiven
-    # sentinel. The service stores openai's NOT_GIVEN in these fields so they
-    # can be passed through unchanged to the AsyncOpenAI client.
-    temperature: float | None | _NotGiven | OpenAINotGiven = field(
-        default_factory=lambda: _NOT_GIVEN
+    # Override inherited LLMSettings fields to also accept the OpenAI SDK's
+    # sentinel, which the service stores here so these fields can be passed
+    # through unchanged to the AsyncOpenAI client.
+    temperature: float | None | NotGiven | OpenAINotGiven = field(default_factory=lambda: NOT_GIVEN)
+    top_p: float | None | NotGiven | OpenAINotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_completion_tokens: int | NotGiven | OpenAINotGiven = field(
+        default_factory=lambda: NOT_GIVEN
     )
-    top_p: float | None | _NotGiven | OpenAINotGiven = field(default_factory=lambda: _NOT_GIVEN)
-    max_completion_tokens: int | _NotGiven | OpenAINotGiven = field(
-        default_factory=lambda: _NOT_GIVEN
-    )
-    reasoning: OpenAIResponsesReasoningConfig | None | _NotGiven = field(
-        default_factory=lambda: _NOT_GIVEN
+    reasoning: OpenAIResponsesReasoningConfig | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
     )
 
 
@@ -237,11 +236,11 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             frequency_penalty=None,
             presence_penalty=None,
             seed=None,
-            temperature=NOT_GIVEN,
-            top_p=NOT_GIVEN,
+            temperature=OPENAI_NOT_GIVEN,
+            top_p=OPENAI_NOT_GIVEN,
             top_k=None,
             max_tokens=None,
-            max_completion_tokens=NOT_GIVEN,
+            max_completion_tokens=OPENAI_NOT_GIVEN,
             reasoning=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
@@ -351,7 +350,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
         # Tools
         tools = invocation_params.get("tools")
-        if tools is not None and not isinstance(tools, type(NOT_GIVEN)):
+        if tools is not None and not isinstance(tools, type(OPENAI_NOT_GIVEN)):
             params["tools"] = tools
 
         # Reasoning

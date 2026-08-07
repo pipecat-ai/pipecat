@@ -41,15 +41,10 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchResponseFrame
 from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import (
-    NOT_GIVEN,
-    LLMSettings,
-    _NotGiven,
-    assert_given,
-    is_given,
-)
+from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_llm
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
@@ -116,10 +111,10 @@ class GoogleLLMSettings(LLMSettings):
             left unspecified keep the Gemini API defaults.
     """
 
-    thinking: Union["GoogleLLMService.ThinkingConfig", None, _NotGiven] = field(
+    thinking: Union["GoogleLLMService.ThinkingConfig", None, NotGiven] = field(
         default_factory=lambda: NOT_GIVEN
     )
-    safety_settings: list[SafetySetting] | None | _NotGiven = field(
+    safety_settings: list[SafetySetting] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 

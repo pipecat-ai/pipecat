@@ -35,13 +35,14 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import ASSEMBLYAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 from .models import (
     AssemblyAIConnectionParams,
@@ -74,7 +75,7 @@ HOT_UPDATABLE_SETTINGS = frozenset({"agent_context", "language_codes"})
 MAX_LANGUAGE_CODES = 10
 
 
-def is_u3_pro_model(model: str | None | _NotGiven) -> bool:
+def is_u3_pro_model(model: str | None | NotGiven) -> bool:
     """Return whether a model name is a Universal-3 Pro streaming variant.
 
     Matches the ``u3-rt-pro`` family (``u3-rt-pro``, ``u3-rt-pro-beta-1``, and
@@ -84,7 +85,7 @@ def is_u3_pro_model(model: str | None | _NotGiven) -> bool:
 
     Args:
         model: The model identifier. Accepts the ``Settings.model`` union
-            (``str | None | _NotGiven``); anything that is not a matching
+            (``str | None | NotGiven``); anything that is not a matching
             string returns False.
 
     Returns:
@@ -256,33 +257,33 @@ class AssemblyAISTTSettings(STTSettings):
             to None (not sent).
     """
 
-    formatted_finals: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    word_finalization_max_wait_time: int | None | _NotGiven = field(
+    formatted_finals: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    word_finalization_max_wait_time: int | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    end_of_turn_confidence_threshold: float | None | _NotGiven = field(
+    end_of_turn_confidence_threshold: float | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    min_turn_silence: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    max_turn_silence: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    keyterms_prompt: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language_detection: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language_code: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language_codes: list[Language] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    format_turns: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaker_labels: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    vad_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    domain: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    continuous_partials: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    interruption_delay: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    agent_context: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    previous_context_n_turns: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    voice_focus: Literal["near-field", "far-field"] | None | _NotGiven = field(
+    min_turn_silence: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_turn_silence: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterms_prompt: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_detection: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_code: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_codes: list[Language] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    format_turns: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_labels: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    domain: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    continuous_partials: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    interruption_delay: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    agent_context: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    previous_context_n_turns: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    voice_focus: Literal["near-field", "far-field"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    voice_focus_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    mode: Literal["min_latency", "balanced", "max_accuracy"] | None | _NotGiven = field(
+    voice_focus_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    mode: Literal["min_latency", "balanced", "max_accuracy"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 

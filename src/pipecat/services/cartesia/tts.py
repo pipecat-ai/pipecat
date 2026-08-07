@@ -27,11 +27,12 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 # The Cartesia API version these services are written against. The request
 # payloads and message handling below are tied to it, so it is pinned here
@@ -211,10 +212,8 @@ class CartesiaTTSSettings(TTSSettings):
             custom pronunciations.
     """
 
-    generation_config: GenerationConfig | None | _NotGiven = field(
-        default_factory=lambda: NOT_GIVEN
-    )
-    pronunciation_dict_id: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    generation_config: GenerationConfig | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pronunciation_dict_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class CartesiaTTSService(WebsocketTTSService):

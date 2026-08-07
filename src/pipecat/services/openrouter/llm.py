@@ -18,7 +18,7 @@ from loguru import logger
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.settings import assert_given
+from pipecat.utils.types import assert_given
 
 
 @dataclass

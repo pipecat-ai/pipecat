@@ -36,12 +36,13 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import SMALLEST_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 def language_to_smallest_stt_language(language: Language) -> str:
@@ -115,16 +116,16 @@ class SmallestSTTSettings(STTSettings):
         format: Apply punctuation and capitalization to transcripts.
     """
 
-    word_timestamps: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    full_transcript: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    sentence_timestamps: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    redact_pii: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    redact_pci: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    numerals: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    diarize: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    endpointing: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    keywords: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    format: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    word_timestamps: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    full_transcript: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    sentence_timestamps: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    redact_pii: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    redact_pci: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    numerals: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    diarize: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpointing: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keywords: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    format: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SmallestSTTService(WebsocketSTTService):
