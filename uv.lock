@@ -3445,6 +3445,41 @@ wheels = [
 ]
 
 [[package]]
+name = "loudness"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c6/38/ba4379e1725ab776c9b1ee795841899d5678f0c362a95597d91cfe32e459/loudness-0.2.0.tar.gz", hash = "sha256:282da508fc3251fccc132973d7e3dc32e1b7388f6328a3ee168708ce47cb7576", size = 766572, upload-time = "2025-12-26T15:20:12.437Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d4/e5/76d1e34351474d3b0ed4b17116f640bbe3d51b21b219f315a5c55052831f/loudness-0.2.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:14edca0644bf000e8b878a949892007f8e81bb17fe2d824d53008b7d1be10dd6", size = 98011, upload-time = "2025-12-26T15:19:44.753Z" },
+    { url = "https://files.pythonhosted.org/packages/19/e0/b4b639f7928e303dd3873efaf6743029f79bcd5761b1c4cf9da1b0b382c2/loudness-0.2.0-cp311-cp311-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:11535cf94a6d95ad2bdce1a0858b42944261b68be6108964b7d0355b5b749dfd", size = 111023, upload-time = "2025-12-26T15:19:45.65Z" },
+    { url = "https://files.pythonhosted.org/packages/9c/44/c01c21c105cff58eaaefbb34767794a3ba5e8b1ac35e0ace7008d972fb23/loudness-0.2.0-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:dddd75c107e54e12b44b12a943b2bef0e588d1c38874ececfc40d383ba769a33", size = 121448, upload-time = "2025-12-26T15:19:46.734Z" },
+    { url = "https://files.pythonhosted.org/packages/79/4f/663a91f9c075964db90d7b28ab66fe3e7164851069dbfe968d316f623ec1/loudness-0.2.0-cp311-cp311-musllinux_1_2_aarch64.whl", hash = "sha256:6c8ff5deed50f4782a2356cd6803c100fb186ad34d7018f750f0737e7cf14dc6", size = 1092899, upload-time = "2025-12-26T15:19:47.888Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/61/1b9cb3b7b38390564f09dbba9a9f3eac4b5ee56c614c4b871b126f8404f6/loudness-0.2.0-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:d15ca87e7413c873e16f7056a61f0e849481515a6e50af6ad1d49db280be7fe1", size = 1153315, upload-time = "2025-12-26T15:19:49.612Z" },
+    { url = "https://files.pythonhosted.org/packages/76/d5/f94a1aaf17bf35a321a797055608ccc01211f23df6f43db05737c41cbf8a/loudness-0.2.0-cp311-cp311-win_amd64.whl", hash = "sha256:5bd6aa6665d258147046e7b30312f9178e010bc3cdbd1d5c72b1a862bff5c0c4", size = 99103, upload-time = "2025-12-26T15:19:51.004Z" },
+    { url = "https://files.pythonhosted.org/packages/15/1d/65de79ad4d9d69ddc7449da0f419fd64e480bf4bfe9ccdc49464abc7b6d2/loudness-0.2.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:fc13fe88c3d6fe44c2261013b4f80ed48f97dff266da55429fb3fbc4c8aa7240", size = 98194, upload-time = "2025-12-26T15:19:52.125Z" },
+    { url = "https://files.pythonhosted.org/packages/a6/40/d1bf29dce9360d5bf9c4dbea163b5065f44a2cebda4e6976ec59dc559b97/loudness-0.2.0-cp312-cp312-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:6a244213b0e343ed64cb9601ae9789c44f32cc9014ac7374df1941a7d9b10869", size = 111498, upload-time = "2025-12-26T15:19:53.03Z" },
+    { url = "https://files.pythonhosted.org/packages/fa/b6/d399ce4c98528a23c9347129e5dcea28d90493b2bb4e028890d5e45ddc78/loudness-0.2.0-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:51d607b94db8f48bdf931921cc4739de62b73ff6997209f9e4b3604fe7872a42", size = 121315, upload-time = "2025-12-26T15:19:54.477Z" },
+    { url = "https://files.pythonhosted.org/packages/cd/8a/8f211972721a6e9a66349bfc3f4462ab89266d2045fe0adfb419bfda1b01/loudness-0.2.0-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:65b2884af4358d65f1828aa4bf83f47a6b6fc3dff1469f9cfa3a1a0b2771e3ef", size = 1093677, upload-time = "2025-12-26T15:19:55.695Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/27/dc04108b0c67078bb1af85f2ff639dc099b0b28c99b39296e090e76ea3e1/loudness-0.2.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:fa0e4c55c356f05a664134e7e1f959523e5477232ee7a367339061ec707de3ef", size = 1154671, upload-time = "2025-12-26T15:19:57.228Z" },
+    { url = "https://files.pythonhosted.org/packages/4c/d4/ca7ef29878c7210b116cac40d53adc89622a78cb194580154f63bb7dfb01/loudness-0.2.0-cp312-cp312-win_amd64.whl", hash = "sha256:fac6b39d3b7c94efce9539221812dbfcdc2e237308561faea2abfc5de0fa1d95", size = 100020, upload-time = "2025-12-26T15:19:58.25Z" },
+    { url = "https://files.pythonhosted.org/packages/c4/6f/13a13d6315faabe9a13d37e8a3bb3ef18b4d0d088301db48e9057238aa61/loudness-0.2.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:d271da009b54c25573b6a03b0cc226ace5870d614bc5e11502f171f2d4dce69b", size = 98204, upload-time = "2025-12-26T15:19:59.128Z" },
+    { url = "https://files.pythonhosted.org/packages/7a/e0/d5ee676091de8f52c38a2fab253fbf6a0810ebdc2405d9788a0d60bd049e/loudness-0.2.0-cp313-cp313-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:f94c220cf05f0ae5cacf51cb61a0a44ea85538d38698f520b2c9e5b49fce6d8d", size = 112921, upload-time = "2025-12-26T15:20:00.033Z" },
+    { url = "https://files.pythonhosted.org/packages/3e/b4/c1fea67385037aff4254b73cec1838a0809eae74ae843c78f4562591dabe/loudness-0.2.0-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b0bc9b34dc9fdd3b158883be4cb8bcc993f42ff0d0fc18d4d1e5a63a5b6e6496", size = 121163, upload-time = "2025-12-26T15:20:01.013Z" },
+    { url = "https://files.pythonhosted.org/packages/22/fd/ba866784451c531c8d2007b41ae83e3a668539a885a582a4f2134b9be6a1/loudness-0.2.0-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:6bf2ff290b53f61f6a035ad3a2dd0bd39db4faa8051b1ec2b2be417ad975e606", size = 1094672, upload-time = "2025-12-26T15:20:01.955Z" },
+    { url = "https://files.pythonhosted.org/packages/16/00/8f0993b3f0f61ed18d210c8c26ef3ff4d4f677ae7b9c704f7a8f7d274d1a/loudness-0.2.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:e0389c7007643876f57a830ae2acb57c86e54accf4ffca83cf45da20e2d8b95d", size = 1154729, upload-time = "2025-12-26T15:20:03.073Z" },
+    { url = "https://files.pythonhosted.org/packages/a4/84/5c2fb311b8b3545d6e1050bcbb1eb4dd482e48dd053e222a4a2ac8667c70/loudness-0.2.0-cp313-cp313-win_amd64.whl", hash = "sha256:3f32765424429ab7d605b12c547b8a0b946baaed7087a99f58d2ac6d6f6ae9d1", size = 99995, upload-time = "2025-12-26T15:20:04.749Z" },
+    { url = "https://files.pythonhosted.org/packages/e1/db/9931f348a367f78bb2d5a453240e97614c8ea553e652f4a6994747f48071/loudness-0.2.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:674856b0d2defcd3277eee89cd5c08b2665f880973dd6da5059f4d08923c7c84", size = 98458, upload-time = "2025-12-26T15:20:05.998Z" },
+    { url = "https://files.pythonhosted.org/packages/d8/70/886146cbf8035da15c624fb55c74ec837f5994d268757021524fdee90984/loudness-0.2.0-cp314-cp314-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:c462452c6060124c75cc9b8e02232da778b21b2d1ffaecaa6bf886fe3eadb0ed", size = 113033, upload-time = "2025-12-26T15:20:06.906Z" },
+    { url = "https://files.pythonhosted.org/packages/8a/7b/d6b6873ef676abe0957c851aa24222a6a9ba30a17bc1e8e26d2083e3cdad/loudness-0.2.0-cp314-cp314-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e8547a798f6ce90bb609008918d863e69fe07899a573f7e6c4495ef3a5639b90", size = 121234, upload-time = "2025-12-26T15:20:07.798Z" },
+    { url = "https://files.pythonhosted.org/packages/59/2e/2e63c3b3c0af236478aec61772a20d31c9f414cbd750b5915f4ae04a338c/loudness-0.2.0-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:d533da1f235b6f0e87010f56fa603d02796192dbeb0fab400117edccf414830b", size = 1094998, upload-time = "2025-12-26T15:20:09.045Z" },
+    { url = "https://files.pythonhosted.org/packages/92/3d/b4b2a1ca82bedd3ea788a8997bcfe021a215cb0a4de59f7efcd0bd135247/loudness-0.2.0-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:ad7f2acf0d534adb101a5b0f09442780847106b9b4611b73dab50fb91ac22673", size = 1154783, upload-time = "2025-12-26T15:20:10.399Z" },
+    { url = "https://files.pythonhosted.org/packages/e8/12/1c18b261884c5164d10cee4d6fb1113364c21358bcc5f19992d0cff674bc/loudness-0.2.0-cp314-cp314-win_amd64.whl", hash = "sha256:6a29f89f89572d44979e239e2f8094cffc53457130fc480a4c06f6eb1f6446dc", size = 102144, upload-time = "2025-12-26T15:20:11.476Z" },
+]
+
+[[package]]
 name = "markdown"
 version = "3.10.2"
 source = { registry = "https://pypi.org/simple" }
@@ -4807,6 +4842,7 @@ dependencies = [
     { name = "audioop-lts", marker = "python_full_version >= '3.13'" },
     { name = "docstring-parser" },
     { name = "loguru" },
+    { name = "loudness" },
     { name = "markdown" },
     { name = "nltk" },
     { name = "num2words" },
@@ -4818,7 +4854,6 @@ dependencies = [
     { name = "protobuf" },
     { name = "pydantic", version = "2.11.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.13.*'" },
     { name = "pydantic", version = "2.13.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version != '3.13.*'" },
-    { name = "pyloudnorm" },
     { name = "pyyaml" },
     { name = "resampy" },
     { name = "soxr" },
@@ -5091,6 +5126,7 @@ requires-dist = [
     { name = "livekit", marker = "extra == 'livekit'", specifier = ">=1.0.13,<2" },
     { name = "livekit-api", marker = "extra == 'livekit'", specifier = ">=1.0.5,<2" },
     { name = "loguru", specifier = "~=0.7.3" },
+    { name = "loudness", specifier = ">=0.2.0,<1" },
     { name = "markdown", specifier = ">=3.7,<4" },
     { name = "mcp", extras = ["cli"], marker = "extra == 'mcp'", specifier = ">=1.11.0,<2" },
     { name = "mem0ai", marker = "extra == 'mem0'", specifier = ">=2,<3" },
@@ -5128,7 +5164,6 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.10.6,<3" },
     { name = "pygobject", marker = "extra == 'gstreamer'", specifier = "~=3.50.0" },
     { name = "pyjwt", marker = "extra == 'livekit'", specifier = ">=2.12.0,<3" },
-    { name = "pyloudnorm", specifier = "~=0.2.0" },
     { name = "pyrnnoise", marker = "extra == 'rnnoise'", specifier = "~=0.4.3" },
     { name = "python-dotenv", marker = "extra == 'runner'", specifier = ">=1.0.0,<2.0.0" },
     { name = "pyvips", extras = ["binary"], marker = "extra == 'moondream'", specifier = "~=3.0.0" },
@@ -6013,19 +6048,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/1e/51/2e9b34f484cbdd3bac999bf1f48b696d7389433e900639089e8fc4e0da0d/pylibsrtp-1.0.0-cp310-abi3-win32.whl", hash = "sha256:bae377c3b402b17b9bbfbfe2534c2edba17aa13bea4c64ce440caacbe0858b55", size = 1247503, upload-time = "2025-10-13T16:12:27.39Z" },
     { url = "https://files.pythonhosted.org/packages/c3/70/43db21af194580aba2d9a6d4c7bd8c1a6e887fa52cd810b88f89096ecad2/pylibsrtp-1.0.0-cp310-abi3-win_amd64.whl", hash = "sha256:8d6527c4a78a39a8d397f8862a8b7cdad4701ee866faf9de4ab8c70be61fd34d", size = 1601659, upload-time = "2025-10-13T16:12:29.037Z" },
     { url = "https://files.pythonhosted.org/packages/8e/ec/6e02b2561d056ea5b33046e3cad21238e6a9097b97d6ccc0fbe52b50c858/pylibsrtp-1.0.0-cp310-abi3-win_arm64.whl", hash = "sha256:2696bdb2180d53ac55d0eb7b58048a2aa30cd4836dd2ca683669889137a94d2a", size = 1159246, upload-time = "2025-10-13T16:12:30.285Z" },
-]
-
-[[package]]
-name = "pyloudnorm"
-version = "0.2.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy" },
-    { name = "scipy" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/23/00/f915eaa75326f4209941179c2b93ac477f2040e4aeff5bb21d16eb8058f9/pyloudnorm-0.2.0.tar.gz", hash = "sha256:8bf597658ea4e1975c275adf490f6deb5369ea409f2901f939915efa4b681b16", size = 14037, upload-time = "2026-01-04T11:43:35.265Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/aa/b6/65a49a05614b2548edbba3aab118f2ebe7441dfd778accdcdce9f6567f20/pyloudnorm-0.2.0-py3-none-any.whl", hash = "sha256:9bb69afb904f59d007a7f9ba3d75d16fb8aeef35c44d6df822a9f192d69cf13f", size = 10879, upload-time = "2026-01-04T11:43:34.534Z" },
 ]
 
 [[package]]

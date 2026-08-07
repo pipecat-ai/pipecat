@@ -19,7 +19,8 @@ from enum import Enum
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.audio.utils import calculate_audio_volume, exp_smoothing
+from pipecat.audio.utils import exp_smoothing
+from pipecat.audio.volume import AudioVolumeTracker
 
 VAD_CONFIDENCE = 0.7
 VAD_START_SECS = 0.2
@@ -80,10 +81,11 @@ class VADAnalyzer(ABC):
         self._num_channels = 1
 
         self._vad_buffer = b""
+        self._volume_tracker = AudioVolumeTracker()
 
         # Volume exponential smoothing
         self._smoothing_factor = 0.2
-        self._prev_volume = 0
+        self._prev_volume = 0.0
 
         # Thread executor that will run the model. We only need one thread per
         # analyzer because one analyzer just handles one audio stream.
@@ -161,14 +163,17 @@ class VADAnalyzer(ABC):
 
         self._vad_start_frames = round(self._params.start_secs / vad_frames_per_sec)
         self._vad_stop_frames = round(self._params.stop_secs / vad_frames_per_sec)
+        # VAD state resets, but volume state doesn't: the rolling window and its
+        # smoothing follow the audio stream, which is continuous across
+        # parameter changes.
         self._vad_starting_count = 0
         self._vad_stopping_count = 0
         self._vad_state: VADState = VADState.QUIET
 
     def _get_smoothed_volume(self, audio: bytes) -> float:
         """Calculate smoothed audio volume using exponential smoothing."""
-        volume = calculate_audio_volume(audio, self.sample_rate)
-        return exp_smoothing(volume, self._prev_volume, self._smoothing_factor)
+        self._volume_tracker.update(audio, self.sample_rate)
+        return exp_smoothing(self._volume_tracker.volume, self._prev_volume, self._smoothing_factor)
 
     async def analyze_audio(self, buffer: bytes) -> VADState:
         """Analyze audio buffer and return current VAD state.
