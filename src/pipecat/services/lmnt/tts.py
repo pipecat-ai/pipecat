@@ -129,7 +129,7 @@ class LmntTTSService(InterruptibleTTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="aurora",
+            model="blizzard",
             voice=None,
             language=Language.EN,
         )
