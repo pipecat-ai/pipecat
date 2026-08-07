@@ -180,13 +180,20 @@ class ParallelPipeline(BasePipeline):
                 await self.push_frame(frame, direction)
 
     async def _pipeline_sink_push_frame(self, frame: Frame, direction: FrameDirection):
-        # Parallel pipeline synchronized frames.
-        if isinstance(frame, (StartFrame, EndFrame, CancelFrame)):
+        # Parallel pipeline synchronized frames. Only frames registered by
+        # process_frame() (i.e. ones that arrived from outside this
+        # ParallelPipeline) participate in synchronization. A StartFrame/
+        # EndFrame/CancelFrame pushed internally by a processor inside a
+        # branch is never registered, so it's handled like any other
+        # internal frame instead of being mistaken for a synchronized frame
+        # whose counter has reached zero.
+        if (
+            isinstance(frame, (StartFrame, EndFrame, CancelFrame))
+            and frame.id in self._frame_counter
+        ):
             # Decrement counter.
-            frame_counter = self._frame_counter.get(frame.id, 0)
-            if frame_counter > 0:
-                self._frame_counter[frame.id] -= 1
-                frame_counter = self._frame_counter[frame.id]
+            self._frame_counter[frame.id] -= 1
+            frame_counter = self._frame_counter[frame.id]
 
             # Only push the frame when all pipelines have processed it.
             if frame_counter == 0:
