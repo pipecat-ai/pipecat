@@ -81,6 +81,50 @@ class TestEvalManifestLoad(unittest.TestCase):
         self.assertFalse(m.record)
         self.assertEqual(m.spawn, "x {bot}")
 
+    def test_multi_scenario_file_expands_manifest_runs(self):
+        (self.base / "collection.yaml").write_text(
+            "scenarios:\n"
+            "  - name: greeting\n"
+            "    turns: [{user: hello}]\n"
+            "  - name: capital_question\n"
+            "    turns: [{user: 'What is the capital of France?'}]\n"
+        )
+        (self.base / "collection-manifest.yaml").write_text(
+            "suite:\n  - bot: voice.py\n    scenarios: [collection.yaml]\n"
+        )
+
+        manifest = EvalManifest.load(self.base / "collection-manifest.yaml")
+
+        self.assertEqual([run.scenario for run in manifest.runs], ["greeting", "capital_question"])
+        self.assertEqual(
+            [run.scenario_data.name for run in manifest.runs if run.scenario_data],
+            ["greeting", "capital_question"],
+        )
+
+    def test_one_item_collection_uses_scenario_name(self):
+        (self.base / "collection.yaml").write_text(
+            "scenarios:\n  - name: internal_name\n    turns: []\n"
+        )
+        (self.base / "collection-manifest.yaml").write_text(
+            "suite:\n  - bot: voice.py\n    scenarios: [collection.yaml]\n"
+        )
+
+        manifest = EvalManifest.load(self.base / "collection-manifest.yaml")
+
+        self.assertEqual([run.scenario for run in manifest.runs], ["internal_name"])
+
+    def test_malformed_scenario_is_deferred_to_run_validation(self):
+        (self.base / "malformed.yaml").write_text("name: malformed\nturns: [\n")
+        (self.base / "malformed-manifest.yaml").write_text(
+            "suite:\n  - bot: voice.py\n    scenarios: [malformed.yaml]\n"
+        )
+
+        manifest = EvalManifest.load(self.base / "malformed-manifest.yaml")
+
+        self.assertEqual(len(manifest.runs), 1)
+        self.assertEqual(manifest.runs[0].scenario, "malformed")
+        self.assertIsNone(manifest.runs[0].scenario_data)
+
 
 class TestCapturePipelineLogs(unittest.TestCase):
     def test_writes_sections_per_pipeline(self):

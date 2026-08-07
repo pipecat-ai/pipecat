@@ -137,6 +137,22 @@ relative to the scenario file's directory. This is handy for sharing the
 
     user: !include user_audio.yaml
     judge: !include judge_audio.yaml
+
+A file can also group multiple independently executed scenarios under a
+top-level ``scenarios:`` key::
+
+    scenarios:
+      - name: greeting
+        turns:
+          - user: "Hello"
+            expect: [{event: response}]
+      - name: capital_question
+        turns:
+          - user: "What is the capital of France?"
+            expect: [{event: response, text_contains: "Paris"}]
+
+Use :meth:`EvalScenario.load_many` when loading a file that may contain either
+the single-scenario or collection format.
 """
 
 import re
@@ -371,6 +387,8 @@ class EvalScenario:
             bot's disconnect path. Independent of ``--stop-bot``, which tears the
             bot down via ``eval-cancel`` regardless of the handler.
         source_path: Path the scenario was loaded from, for error messages.
+        source_index: Zero-based position in a multi-scenario file, or ``None``
+            when loaded from the original single-scenario format.
     """
 
     name: str
@@ -382,10 +400,11 @@ class EvalScenario:
     user_audio: dict | None = None
     trigger_disconnect: bool = False
     source_path: Path | None = None
+    source_index: int | None = None
 
     @classmethod
     def load(cls, path: str | Path) -> "EvalScenario":
-        """Parse a scenario YAML file into an :class:`EvalScenario`.
+        """Parse a YAML file containing exactly one scenario.
 
         Args:
             path: Path to a YAML file with the scenario schema.
@@ -395,6 +414,32 @@ class EvalScenario:
 
         Raises:
             ValueError: If the file structure is invalid.
+            FileNotFoundError: If the path doesn't exist.
+        """
+        scenarios = cls.load_many(path)
+        if len(scenarios) != 1:
+            raise ValueError(
+                f"{Path(path)}: expected one scenario, found {len(scenarios)}; "
+                "use EvalScenario.load_many()"
+            )
+        return scenarios[0]
+
+    @classmethod
+    def load_many(cls, path: str | Path) -> list["EvalScenario"]:
+        """Parse every scenario from a single- or multi-scenario YAML file.
+
+        The existing single-scenario mapping is returned as a one-element list.
+        A multi-scenario file uses a top-level ``scenarios:`` list and requires
+        every scenario name in that file to be unique.
+
+        Args:
+            path: Path to a YAML file with either supported scenario schema.
+
+        Returns:
+            The parsed scenarios in file order.
+
+        Raises:
+            ValueError: If the file or any contained scenario is invalid.
             FileNotFoundError: If the path doesn't exist.
         """
         path = Path(path)
@@ -414,6 +459,49 @@ class EvalScenario:
         if not isinstance(data, dict):
             raise ValueError(f"{path}: top level must be a mapping")
 
+        if "scenarios" not in data:
+            return [cls._from_mapping(data, path)]
+
+        raw_scenarios = data["scenarios"]
+        if not isinstance(raw_scenarios, list) or not raw_scenarios:
+            raise ValueError(f"{path}: 'scenarios:' must be a non-empty list")
+
+        scenarios: list[EvalScenario] = []
+        name_indices: dict[str, int] = {}
+        for index, raw_scenario in enumerate(raw_scenarios, start=1):
+            if not isinstance(raw_scenario, dict):
+                raise ValueError(f"{path}: scenario #{index}: entry must be a mapping")
+
+            name = raw_scenario.get("name")
+            label = f"scenario #{index}"
+            if isinstance(name, str) and name:
+                label += f" ({name!r})"
+
+            try:
+                scenario = cls._from_mapping(raw_scenario, path, source_index=index - 1)
+            except ValueError as e:
+                detail = str(e)
+                path_prefix = f"{path}: "
+                if detail.startswith(path_prefix):
+                    detail = detail[len(path_prefix) :]
+                raise ValueError(f"{path}: {label}: {detail}") from e
+
+            previous_index = name_indices.get(scenario.name)
+            if previous_index is not None:
+                raise ValueError(
+                    f"{path}: duplicate scenario name {scenario.name!r} "
+                    f"at scenarios #{previous_index} and #{index}"
+                )
+            name_indices[scenario.name] = index
+            scenarios.append(scenario)
+
+        return scenarios
+
+    @classmethod
+    def _from_mapping(
+        cls, data: dict, path: Path, *, source_index: int | None = None
+    ) -> "EvalScenario":
+        """Parse one scenario mapping from ``path``."""
         name = data.get("name")
         if not name or not isinstance(name, str):
             raise ValueError(f"{path}: missing or invalid 'name:' field")
@@ -457,6 +545,7 @@ class EvalScenario:
             user_audio=user_audio,
             trigger_disconnect=bool(data.get("trigger_disconnect", False)),
             source_path=path,
+            source_index=source_index,
         )
 
 

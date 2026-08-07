@@ -26,6 +26,53 @@ def _write(yaml_text: str) -> Path:
 
 
 class TestEvalsScenarioParser(unittest.TestCase):
+    def test_load_many_accepts_single_scenario_format(self):
+        scenarios = EvalScenario.load_many(_write("name: one\nturns: [{user: hello}]\n"))
+
+        self.assertEqual([scenario.name for scenario in scenarios], ["one"])
+
+    def test_load_many_parses_scenario_collection(self):
+        scenarios = EvalScenario.load_many(
+            _write(
+                "scenarios:\n"
+                "  - name: greeting\n"
+                "    turns: [{user: hello}]\n"
+                "  - name: capital_question\n"
+                "    turns: [{user: 'What is the capital of France?'}]\n"
+            )
+        )
+
+        self.assertEqual(
+            [scenario.name for scenario in scenarios], ["greeting", "capital_question"]
+        )
+        self.assertEqual([scenario.source_index for scenario in scenarios], [0, 1])
+        self.assertEqual(scenarios[1].turns[0].user, "What is the capital of France?")
+
+    def test_load_rejects_collection_with_multiple_scenarios(self):
+        path = _write("scenarios:\n  - name: one\n    turns: []\n  - name: two\n    turns: []\n")
+
+        with self.assertRaisesRegex(ValueError, "use EvalScenario.load_many"):
+            EvalScenario.load(path)
+
+    def test_load_many_rejects_duplicate_names(self):
+        path = _write(
+            "scenarios:\n  - name: repeated\n    turns: []\n  - name: repeated\n    turns: []\n"
+        )
+
+        with self.assertRaisesRegex(ValueError, "duplicate scenario name 'repeated'"):
+            EvalScenario.load_many(path)
+
+    def test_load_many_identifies_invalid_collection_entry(self):
+        path = _write(
+            "scenarios:\n  - name: valid\n    turns: []\n  - name: invalid\n    turns: not-a-list\n"
+        )
+
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load_many(path)
+
+        self.assertIn("scenario #2 ('invalid')", str(cm.exception))
+        self.assertIn("'turns:' must be a list", str(cm.exception))
+
     def test_minimal_valid(self):
         s = EvalScenario.load(
             _write(

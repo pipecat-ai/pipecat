@@ -57,6 +57,7 @@ import yaml
 from loguru import logger
 
 from pipecat.evals.harness import DEFAULT_EVENT_TIMEOUT_MS, EvalResult, EvalSession
+from pipecat.evals.scenario import EvalScenario
 
 DEFAULT_BASE_PORT = 7900
 DEFAULT_CONCURRENCY = 4
@@ -139,6 +140,8 @@ class EvalRun:
         bot: Display name — the manifest's ``bot:`` (suite) or the bot URL (run).
         scenario: Display name (the scenario, without ``.yaml``).
         scenario_path: Path to the scenario file.
+        scenario_data: Parsed scenario when it was loaded while expanding a
+            multi-scenario file. ``None`` defers loading until execution.
         bot_path: The bot to spawn (suite); ``None`` when connecting to ``bot_url``.
         bot_url: Connect here instead of spawning (used by ``pipecat eval run``).
         runner_body_path: Optional ``--runner-body`` JSON for the bot's runner args.
@@ -160,6 +163,7 @@ class EvalRun:
     error: str | None = None
     started_at: float | None = None
     duration_ms: int | None = None
+    scenario_data: EvalScenario | None = None
 
 
 @dataclass
@@ -277,15 +281,36 @@ class EvalManifest:
                 else:
                     scenario_path = (scenarios_dir_p / f"{scenario}.yaml").resolve()
                     name = scenario
-                runs.append(
-                    EvalRun(
-                        bot=bot,
-                        scenario=name,
-                        bot_path=bot_path,
-                        scenario_path=scenario_path,
-                        runner_body_path=runner_body_path,
+
+                # Expand collection files into independent runs. Missing or invalid
+                # files retain the previous deferred-error behavior so they still
+                # appear as one failed run in the suite dashboard.
+                try:
+                    parsed_scenarios = EvalScenario.load_many(scenario_path)
+                except Exception:  # noqa: BLE001
+                    parsed_scenarios = []
+
+                if parsed_scenarios:
+                    # Preserve the manifest's existing display/filter name for
+                    # ordinary files; collection entries use their own names.
+                    run_scenarios = [
+                        (parsed.name if parsed.source_index is not None else name, parsed)
+                        for parsed in parsed_scenarios
+                    ]
+                else:
+                    run_scenarios = [(name, None)]
+
+                for run_name, parsed in run_scenarios:
+                    runs.append(
+                        EvalRun(
+                            bot=bot,
+                            scenario=run_name,
+                            scenario_path=scenario_path,
+                            scenario_data=parsed,
+                            bot_path=bot_path,
+                            runner_body_path=runner_body_path,
+                        )
                     )
-                )
 
         return cls(
             runs=runs,
@@ -445,8 +470,6 @@ class EvalSuite:
                     run.error = f"body not found: {run.runner_body_path}"
                     return
 
-                from pipecat.evals.scenario import EvalScenario
-
                 # Spawn the bot with the body file's directory as cwd, so relative
                 # paths inside the body (e.g. an image) resolve next to the file.
                 cwd = str(run.runner_body_path.parent) if run.runner_body_path else None
@@ -459,7 +482,7 @@ class EvalSuite:
                     cwd=cwd,
                 )
 
-                scenario = EvalScenario.load(run.scenario_path)
+                scenario = run.scenario_data or EvalScenario.load(run.scenario_path)
                 record_path = str(record_dir / f"{safe}.wav") if record_dir else None
                 # Under --debug, capture the harness's own logs (transcription / voice
                 # / judge) into a single <safe>.debug.log, scoped by this run's id so

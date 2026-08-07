@@ -137,23 +137,30 @@ def _record_path(record_dir: str | None, scenario_name: str) -> str | None:
 
 
 def _build_scenario_runs(paths: list[Path], bot_url: str) -> list[EvalRun]:
-    """Build an EvalRun per scenario YAML, each run against ``bot_url`` (no spawn).
+    """Build an EvalRun per parsed scenario, each against ``bot_url`` (no spawn).
 
-    A scenario that fails to load becomes an EvalRun already marked done with an
+    A file that fails to load becomes an EvalRun already marked done with an
     error, so it shows in the dashboard and the final tally like any other failure.
     """
     runs: list[EvalRun] = []
     for path in paths:
         try:
-            scenario = EvalScenario.load(path)
-        except (ValueError, FileNotFoundError) as e:
+            scenarios = EvalScenario.load_many(path)
+        except Exception as e:  # noqa: BLE001
             run = EvalRun(bot=bot_url, scenario=path.stem, scenario_path=path, bot_url=bot_url)
             run.status = "done"
             run.error = f"failed to load: {e}"
             runs.append(run)
             continue
-        runs.append(
-            EvalRun(bot=bot_url, scenario=scenario.name, scenario_path=path, bot_url=bot_url)
+        runs.extend(
+            EvalRun(
+                bot=bot_url,
+                scenario=scenario.name,
+                scenario_path=path,
+                bot_url=bot_url,
+                scenario_data=scenario,
+            )
+            for scenario in scenarios
         )
     return runs
 
@@ -183,7 +190,7 @@ async def _execute_scenario(
     url = run.bot_url
     assert url is not None  # always set by _build_scenario_runs
     try:
-        scenario = EvalScenario.load(run.scenario_path)
+        scenario = run.scenario_data or EvalScenario.load(run.scenario_path)
         record_path = _record_path(record_dir, run.scenario) if audio else None
         with capture_pipeline_logs(Path(logs_dir), run.scenario, name=run.scenario, enabled=debug):
             run.result = await EvalSession.from_scenario(
@@ -512,7 +519,8 @@ def _print_scenario_configs(runs: list[EvalRun]) -> None:
             continue
         seen.add(r.scenario)
         try:
-            cfg = describe_config(EvalScenario.load(r.scenario_path), color=sys.stdout.isatty())
+            scenario = r.scenario_data or EvalScenario.load(r.scenario_path)
+            cfg = describe_config(scenario, color=sys.stdout.isatty())
         except Exception as e:  # noqa: BLE001
             cfg = f"(failed to load: {e})"
         print(f"  {_color(r.scenario + ':', '1;36')}")
