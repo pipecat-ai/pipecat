@@ -39,7 +39,7 @@ from __future__ import annotations
 import copy
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
-from typing import TYPE_CHECKING, Any, ClassVar, TypeGuard, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeGuard, TypeVar
 
 from loguru import logger
 
@@ -76,7 +76,7 @@ class _NotGiven:
     def __repr__(self) -> str:
         return "NOT_GIVEN"
 
-    def __bool__(self) -> bool:
+    def __bool__(self) -> Literal[False]:
         return False
 
 
