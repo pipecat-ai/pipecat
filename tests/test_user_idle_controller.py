@@ -18,7 +18,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.turns.user_idle_controller import UserIdleController
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 USER_IDLE_TIMEOUT = 0.2
 
@@ -26,7 +26,6 @@ USER_IDLE_TIMEOUT = 0.2
 class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.task_manager = TaskManager()
-        self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
 
     async def test_idle_after_bot_stops_speaking(self):
         """Test that idle event fires after BotStoppedSpeakingFrame + timeout."""

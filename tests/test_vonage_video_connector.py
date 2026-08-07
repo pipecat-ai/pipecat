@@ -32,7 +32,7 @@ from pipecat.frames.frames import (
     UserImageRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 # Mock the vonage_video module since it's not available in test environment
 vonage_video_mock = MagicMock()
@@ -250,7 +250,6 @@ class TestVonageVideoConnectorTransport:
 
         clock: SystemClock = SystemClock()  # type: ignore[no-untyped-call]
         task_manager = TaskManager()
-        task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
         self._frame_processor_setup = FrameProcessorSetup(
             clock=clock,
             task_manager=task_manager,

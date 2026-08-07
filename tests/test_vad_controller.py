@@ -11,7 +11,7 @@ from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
 from pipecat.audio.vad.vad_controller import VADController
 from pipecat.frames.frames import Frame, InputAudioRawFrame, SpeechControlParamsFrame, StartFrame
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 
 class MockVADAnalyzer(VADAnalyzer):
@@ -213,7 +213,6 @@ AUDIO_IDLE_TIMEOUT = 0.1
 class TestVADControllerAudioIdle(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.task_manager = TaskManager()
-        self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
 
     async def test_audio_idle_forces_speech_stop(self):
         """Test that on_speech_stopped fires when no audio arrives while SPEAKING."""

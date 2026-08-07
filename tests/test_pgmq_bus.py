@@ -22,7 +22,7 @@ from pipecat.bus import (
 from pipecat.bus.serializers import JSONMessageSerializer
 from pipecat.frames.frames import TextFrame
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.workers.base_worker import BaseWorker
 
 try:
@@ -138,7 +138,6 @@ async def create_test_pgmq_bus(
         max_poll_seconds=1,
     )
     tm = TaskManager()
-    tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
     await bus.setup(tm)
     return bus, pgmq, serializer
 
@@ -262,7 +261,6 @@ class TestPgmqBusBroadcast(unittest.IsolatedAsyncioTestCase):
         self.pgmq = FakePgmq()
         self.serializer = JSONMessageSerializer()
         self.tm = TaskManager()
-        self.tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
 
         self.bus_a = PgmqBus(
             pgmq=self.pgmq,
@@ -339,7 +337,6 @@ class TestPgmqBusEdgeCases(unittest.IsolatedAsyncioTestCase):
             max_poll_seconds=1,
         )
         tm = TaskManager()
-        tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
         await bus.setup(tm)
         await bus.start()
         self.assertTrue(bus._queue_name.startswith("custom_channel_"))
@@ -355,7 +352,6 @@ class TestPgmqBusEdgeCases(unittest.IsolatedAsyncioTestCase):
             max_poll_seconds=1,
         )
         tm = TaskManager()
-        tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
         await bus.setup(tm)
         await bus.start()
 
@@ -371,7 +367,6 @@ class TestPgmqBusEdgeCases(unittest.IsolatedAsyncioTestCase):
         pgmq = FakePgmq()
         bus = PgmqBus(pgmq=pgmq, channel="cleanup_test", poll_interval_ms=10, max_poll_seconds=1)
         tm = TaskManager()
-        tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
         await bus.setup(tm)
 
         await bus.start()
@@ -395,7 +390,6 @@ class TestPgmqBusEdgeCases(unittest.IsolatedAsyncioTestCase):
             max_poll_seconds=1,
         )
         tm = TaskManager()
-        tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
         await bus.setup(tm)
 
         received = []
@@ -426,7 +420,6 @@ class TestPgmqBusErrorPaths(unittest.IsolatedAsyncioTestCase):
         pgmq = FakePgmq()
         bus = PgmqBus(pgmq=pgmq, channel="123corp", poll_interval_ms=10, max_poll_seconds=1)
         tm = TaskManager()
-        tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
         await bus.setup(tm)
         await bus.start()
         try:
@@ -439,7 +432,6 @@ class TestPgmqBusErrorPaths(unittest.IsolatedAsyncioTestCase):
         pgmq = FakePgmq()
         bus = PgmqBus(pgmq=pgmq, channel="cache_hit", poll_interval_ms=10, max_poll_seconds=1)
         tm = TaskManager()
-        tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
         await bus.setup(tm)
         await bus.start()
         try:
@@ -475,7 +467,6 @@ class TestPgmqBusErrorPaths(unittest.IsolatedAsyncioTestCase):
             max_poll_seconds=1,
         )
         tm = TaskManager()
-        tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
         await bus.setup(tm)
         await bus.start()
         try:
@@ -495,7 +486,6 @@ class TestPgmqBusErrorPaths(unittest.IsolatedAsyncioTestCase):
             max_poll_seconds=1,
         )
         tm = TaskManager()
-        tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
         await bus.setup(tm)
         await bus.start()
         try:
@@ -525,7 +515,6 @@ class TestPgmqBusErrorPaths(unittest.IsolatedAsyncioTestCase):
         pgmq = BadDropPgmq()
         bus = PgmqBus(pgmq=pgmq, channel="bad_drop", poll_interval_ms=10, max_poll_seconds=1)
         tm = TaskManager()
-        tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
         await bus.setup(tm)
         await bus.start()
 
@@ -550,7 +539,6 @@ class TestPgmqBusErrorPaths(unittest.IsolatedAsyncioTestCase):
         pgmq = FlakyReadPgmq()
         bus = PgmqBus(pgmq=pgmq, channel="flaky_read", poll_interval_ms=10, max_poll_seconds=1)
         tm = TaskManager()
-        tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
         await bus.setup(tm)
         await bus.start()
         try:
@@ -576,7 +564,6 @@ class TestPgmqBusErrorPaths(unittest.IsolatedAsyncioTestCase):
             max_poll_seconds=1,
         )
         tm = TaskManager()
-        tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
         await bus.setup(tm)
         await bus.start()
         try:
@@ -596,7 +583,6 @@ class TestPgmqBusErrorPaths(unittest.IsolatedAsyncioTestCase):
         pgmq = BadDeletePgmq()
         bus = PgmqBus(pgmq=pgmq, channel="bad_delete", poll_interval_ms=10, max_poll_seconds=1)
         tm = TaskManager()
-        tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
         await bus.setup(tm)
 
         received = []
