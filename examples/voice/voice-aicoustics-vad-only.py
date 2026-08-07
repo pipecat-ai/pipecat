@@ -4,13 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Minimal VAD-only test bot for AICQuailVADAnalyzer.
+"""Minimal VAD-only test bot for AICFilterVADAnalyzer.
 
 Strips out STT / LLM / TTS / audio recording so the only things exercised on
-the audio path are the AICFilter (noise cancellation) and the
-AICQuailVADAnalyzer (voice activity detection). Useful for sanity-checking
-VAD behavior under speech / silence / background noise without paying for
-STT/LLM/TTS API calls.
+the audio path are the AICFilter (noise cancellation plus its dedicated VAD)
+and the AICFilterVADAnalyzer that reports the filter's predictions. Useful for
+sanity-checking VAD behavior under speech / silence / background noise without
+paying for STT/LLM/TTS API calls.
 
 Wiring note: in modern Pipecat, VADAnalyzer instances are driven by a
 :class:`pipecat.processors.audio.vad_processor.VADProcessor` placed in the
@@ -28,7 +28,7 @@ Logging:
       to ~0% in silence is the direct signal that the VAD is processing audio
       correctly.
     - INFO "audio frame batch" every ~5s confirming input audio is flowing.
-    - DEBUG init lines from AICFilter + AICQuailVADAnalyzer (run with
+    - DEBUG init lines from AICFilter + AICFilterVADAnalyzer (run with
       LOGURU_LEVEL=DEBUG to see them).
 
 Required env vars:
@@ -47,7 +47,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.filters.aic_filter import AICFilter
-from pipecat.audio.vad.aic_quail_vad import AICQuailVADAnalyzer
+from pipecat.audio.vad.aic_filter_vad import AICFilterVADAnalyzer
 from pipecat.frames.frames import (
     EndFrame,
     Frame,
@@ -76,7 +76,7 @@ _HEARTBEAT_FRAMES = 100
 _AUDIO_HEARTBEAT_FRAMES = 250
 
 
-class LoggingAICQuailVADAnalyzer(AICQuailVADAnalyzer):
+class LoggingAICFilterVADAnalyzer(AICFilterVADAnalyzer):
     """Adds a once-per-second heartbeat with confidence + state stats."""
 
     def __init__(self, *args, **kwargs) -> None:
@@ -146,10 +146,9 @@ aic_filter = AICFilter(
     license_key=os.environ["AIC_SDK_LICENSE"],
     model_id="quail-vf-2.2-l-16khz",
     enhancement_level=0.8,
+    vad_model_id="vad-2.1-xxs-16khz",
 )
-aic_vad_analyzer = LoggingAICQuailVADAnalyzer(
-    license_key=os.environ["AIC_SDK_LICENSE"],
-)
+aic_vad_analyzer = LoggingAICFilterVADAnalyzer(aic_filter=aic_filter)
 
 # VAD is driven by a VADProcessor in the pipeline (modern pipecat path).
 # TransportParams here only enables audio input + the AICFilter; the VAD

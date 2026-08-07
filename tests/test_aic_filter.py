@@ -37,6 +37,7 @@ def _model_manager_ref_count(manager, key: str) -> int:
 from tests.aic_mocks import (  # noqa: E402
     MockModel,
     MockProcessorContext,
+    MockVadAsync,
 )
 from tests.aic_mocks import (
     MockProcessorAsync as MockProcessor,
@@ -77,6 +78,7 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
         """Set up test fixtures before each test method."""
         self.mock_model = MockModel()
         self.mock_processor = MockProcessor()
+        self.mock_vad = MockVadAsync()
 
     def _create_filter_with_mocks(self, **kwargs):
         """Create an AICFilter with mocked SDK components."""
@@ -95,6 +97,7 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
             patch(f"{AIC_FILTER_MODULE}.AICModelManager") as mock_manager_cls,
             patch(f"{AIC_FILTER_MODULE}.ProcessorConfig") as mock_config_cls,
             patch(f"{AIC_FILTER_MODULE}.ProcessorAsync", return_value=self.mock_processor),
+            patch(f"{AIC_FILTER_MODULE}.VadAsync", return_value=self.mock_vad),
         ):
             mock_manager_cls.acquire = AsyncMock(return_value=(self.mock_model, cache_key))
             mock_config_cls.optimal.return_value = MagicMock()
@@ -222,6 +225,8 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
             mock_config_cls.optimal.assert_called_once()
             mock_processor_cls.assert_called_once()
             self.assertIsNotNone(filter_instance._processor_ctx)
+            # No VAD model configured, so the filter runs enhancement only.
+            self.assertIsNone(filter_instance._vad_ctx)
 
     async def test_start_applies_initial_bypass_parameter(self):
         """Test that start applies bypass parameter."""
@@ -293,6 +298,7 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.mock_processor.terminated)
         self.assertIsNone(filter_instance._processor)
         self.assertIsNone(filter_instance._processor_ctx)
+        self.assertIsNone(filter_instance._vad_ctx)
         self.assertIsNone(filter_instance._model)
         self.assertIsNone(filter_instance._model_cache_key)
         self.assertFalse(filter_instance._aic_ready)
@@ -588,6 +594,113 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(output_audio), 320)  # 1 frame
         self.assertEqual(len(filter_instance._audio_buffer), 180)  # 90 samples * 2 bytes
+
+    async def test_get_vad_context_without_vad_model(self):
+        """Test that get_vad_context rejects a filter configured without a VAD."""
+        filter_instance = self._create_filter_with_mocks()
+        self.assertFalse(filter_instance.has_vad_model)
+
+        with self.assertRaises(ValueError) as context:
+            filter_instance.get_vad_context()
+
+        self.assertIn("no VAD model", str(context.exception))
+
+    async def test_get_vad_context_before_start(self):
+        """Test that get_vad_context raises before start when a VAD is configured."""
+        filter_instance = self._create_filter_with_mocks(vad_model_id="test-vad-model")
+        self.assertTrue(filter_instance.has_vad_model)
+
+        with self.assertRaises(RuntimeError) as context:
+            filter_instance.get_vad_context()
+
+        self.assertIn("not initialized", str(context.exception))
+
+    async def test_get_vad_context_after_start(self):
+        """Test that get_vad_context returns the dedicated VAD's context after start."""
+        filter_instance = self._create_filter_with_mocks(vad_model_id="test-vad-model")
+        await self._start_filter_with_mocks(filter_instance)
+
+        vad_ctx = filter_instance.get_vad_context()
+
+        self.assertIs(vad_ctx, self.mock_vad.vad_ctx)
+
+    async def test_vad_sized_to_filter_block(self):
+        """Test the VAD is configured with the filter's block size, not its own."""
+        filter_instance = self._create_filter_with_mocks(vad_model_id="test-vad-model")
+
+        with (
+            patch(f"{AIC_FILTER_MODULE}.AICModelManager") as mock_manager_cls,
+            patch(f"{AIC_FILTER_MODULE}.ProcessorConfig") as mock_config_cls,
+            patch(f"{AIC_FILTER_MODULE}.ProcessorAsync", return_value=self.mock_processor),
+            patch(f"{AIC_FILTER_MODULE}.VadAsync", return_value=self.mock_vad),
+        ):
+            mock_manager_cls.acquire = AsyncMock(return_value=(self.mock_model, "test-cache-key"))
+            mock_config_cls.optimal.return_value = MagicMock()
+
+            await filter_instance.start(16000)
+
+            # The explicit ProcessorConfig(...) call is the VAD's; optimal() is
+            # the enhancement processor's.
+            vad_config_kw = mock_config_cls.call_args[1]
+            self.assertEqual(vad_config_kw["sample_rate"], 16000)
+            self.assertEqual(vad_config_kw["block_size"], filter_instance.frames_per_block)
+
+    async def test_vad_reads_pre_enhancement_audio(self):
+        """Test the VAD sees the original block, not the processor's output."""
+        filter_instance = self._create_filter_with_mocks(vad_model_id="test-vad-model")
+
+        # Make enhancement change the signal so the two paths are distinguishable.
+        async def halving_process_async(audio_array):
+            self.mock_processor.process_calls.append(audio_array.copy())
+            return audio_array * 0.5
+
+        self.mock_processor.process_async = halving_process_async
+        await self._start_filter_with_mocks(filter_instance)
+
+        samples = np.full(160, 10000, dtype=np.int16)
+        await filter_instance.filter(samples.tobytes())
+
+        self.assertEqual(len(self.mock_vad.process_calls), 1)
+        vad_block = self.mock_vad.process_calls[0]
+        expected = samples.astype(np.float32) / 32768.0
+        np.testing.assert_allclose(vad_block, expected, rtol=1e-6)
+
+    async def test_vad_not_run_when_unconfigured(self):
+        """Test no VAD work happens when the filter has no VAD model."""
+        filter_instance = self._create_filter_with_mocks()
+        await self._start_filter_with_mocks(filter_instance)
+
+        samples = np.random.randint(-32768, 32767, size=160, dtype=np.int16)
+        await filter_instance.filter(samples.tobytes())
+
+        self.assertEqual(self.mock_vad.process_calls, [])
+
+    async def test_stop_terminates_vad_session(self):
+        """Test stop terminates the VAD session and releases its model."""
+        filter_instance = self._create_filter_with_mocks(vad_model_id="test-vad-model")
+        await self._start_filter_with_mocks(filter_instance)
+
+        with patch(f"{AIC_FILTER_MODULE}.AICModelManager.release") as mock_release:
+            await filter_instance.stop()
+
+        self.assertTrue(self.mock_vad.terminated)
+        self.assertIsNone(filter_instance._vad)
+        self.assertIsNone(filter_instance._vad_ctx)
+        # Enhancement model and VAD model are both released.
+        self.assertEqual(mock_release.call_count, 2)
+
+    async def test_stop_terminates_processor_when_vad_termination_fails(self):
+        """A failing VAD termination must not strand the processor's session."""
+        filter_instance = self._create_filter_with_mocks(vad_model_id="test-vad-model")
+        await self._start_filter_with_mocks(filter_instance)
+
+        self.mock_vad.terminate_session_async = AsyncMock(side_effect=RuntimeError("nope"))
+
+        with patch(f"{AIC_FILTER_MODULE}.AICModelManager.release") as mock_release:
+            await filter_instance.stop()  # must not raise
+
+        self.assertTrue(self.mock_processor.terminated)
+        self.assertEqual(mock_release.call_count, 2)
 
     async def test_filter_passes_audio_through_after_stop(self):
         """Test a late chunk after stop is passed through instead of erroring."""

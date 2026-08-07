@@ -6,8 +6,8 @@
 
 """Shared aic_sdk test mocks for the AIC test suite.
 
-Importing in: ``tests/test_aic_filter.py`` and ``tests/test_aic_quail_vad.py``. Keep
-behavior aligned with the live
+Importing in: ``tests/test_aic_filter.py``, ``tests/test_aic_quail_vad.py``,
+``tests/test_aic_filter_vad.py``. Keep behavior aligned with the live
 ``aic_sdk`` 3.0 surface so the suite stays representative.
 """
 
@@ -92,6 +92,26 @@ class MockProcessorAsync:
     async def process_async(self, audio_array: np.ndarray) -> np.ndarray:
         self.process_calls.append(audio_array.copy())
         return audio_array.copy()
+
+    async def terminate_session_async(self) -> None:
+        self.terminated = True
+
+
+class MockVadAsync:
+    """Stand-in for ``aic_sdk.VadAsync`` used by :class:`AICFilter`."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.vad_ctx = MockVadContext()
+        self.process_calls: list[np.ndarray] = []
+        self.terminated = False
+
+    def get_context(self) -> MockVadContext:
+        return self.vad_ctx
+
+    async def process_async(self, audio: np.ndarray) -> None:
+        # The real VAD leaves its input untouched; copy so assertions can see
+        # the block as it was when the VAD read it.
+        self.process_calls.append(audio.copy())
 
     async def terminate_session_async(self) -> None:
         self.terminated = True

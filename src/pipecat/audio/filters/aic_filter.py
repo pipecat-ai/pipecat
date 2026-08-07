@@ -26,6 +26,8 @@ from aic_sdk import (
     ProcessorAsync,
     ProcessorConfig,
     ProcessorParameter,
+    VadAsync,
+    VadContext,
     set_sdk_id,
 )
 from loguru import logger
@@ -215,6 +217,13 @@ class AICFilter(BaseAudioFilter):
 
     Buffers incoming audio to the model's preferred block size and processes
     frames using float32 samples normalized to the range -1 to +1.
+
+    The filter can additionally run a dedicated VAD model. Because the filter
+    is the only component that sees audio before enhancement, the VAD runs on
+    the original block rather than the enhanced output — the ordering the AIC
+    SDK requires when enhancement and detection are used together. Pair it with
+    :class:`pipecat.audio.vad.aic_filter_vad.AICFilterVADAnalyzer` to surface
+    those predictions to the pipeline.
     """
 
     def __init__(
@@ -225,6 +234,8 @@ class AICFilter(BaseAudioFilter):
         model_path: Path | None = None,
         model_download_dir: Path | None = None,
         enhancement_level: float | None = None,
+        vad_model_id: str | None = None,
+        vad_model_path: Path | None = None,
     ) -> None:
         """Initialize the AIC filter.
 
@@ -235,9 +246,16 @@ class AICFilter(BaseAudioFilter):
             model_path: Optional path to a local .aicmodel file. If provided,
                 model_id is ignored and no download occurs.
             model_download_dir: Directory for downloading models as a Path object.
-                Defaults to a cache directory in user's home folder.
+                Defaults to a cache directory in user's home folder. Shared by the
+                enhancement model and the VAD model.
             enhancement_level: Optional overall enhancement strength (0.0..1.0).
                 If None, the model default is used.
+            vad_model_id: Optional dedicated VAD model identifier to download from
+                CDN, e.g. ``"vad-2.1-xxs-16khz"``. When set, the filter runs that
+                VAD on pre-enhancement audio and exposes it via
+                :meth:`get_vad_context`.
+            vad_model_path: Optional path to a local VAD ``.aicmodel`` file. If
+                provided, vad_model_id is ignored.
 
         Raises:
             ValueError: If neither model_id nor model_path is provided, or if
@@ -262,6 +280,8 @@ class AICFilter(BaseAudioFilter):
             Path.home() / ".cache" / "pipecat" / "aic-models"
         )
         self._enhancement_level = enhancement_level
+        self._vad_model_id = vad_model_id
+        self._vad_model_path = vad_model_path
         self._bypass = False
 
         self._sample_rate = 0
@@ -276,15 +296,55 @@ class AICFilter(BaseAudioFilter):
             32768.0  # 2^15, for normalizing int16 (-32768 to 32767) to float32 (-1.0 to 1.0)
         )
 
-        # AIC SDK objects; model is shared via AICModelManager
+        # AIC SDK objects; models are shared via AICModelManager
         self._model_cache_key: str | None = None
         self._model = None
         self._processor = None
         self._processor_ctx = None
+        self._vad_model_cache_key: str | None = None
+        self._vad_model = None
+        self._vad = None
+        self._vad_ctx = None
 
         # Pre-allocated buffers (resized in start() once frames_per_block is known)
         self._in_f32 = None
         self._out_i16 = None
+
+    @property
+    def has_vad_model(self) -> bool:
+        """Whether the filter was configured to run a dedicated VAD."""
+        return self._vad_model_id is not None or self._vad_model_path is not None
+
+    @property
+    def frames_per_block(self) -> int:
+        """Number of samples the filter feeds to the SDK per processing call.
+
+        Returns:
+            The block size in frames, or 0 before :meth:`start` has run.
+        """
+        return self._frames_per_block
+
+    def get_vad_context(self) -> VadContext:
+        """Return the context of the filter's dedicated VAD.
+
+        The VAD advances on pre-enhancement audio, so its predictions describe
+        the original signal rather than the enhanced output.
+
+        Returns:
+            The VadContext bound to the filter's VAD.
+
+        Raises:
+            ValueError: If the filter was constructed without a VAD model.
+            RuntimeError: If the filter has not been started yet.
+        """
+        if self._vad_model_id is None and self._vad_model_path is None:
+            raise ValueError(
+                "AICFilter has no VAD model. Pass 'vad_model_id' or 'vad_model_path' "
+                "to enable voice activity detection."
+            )
+        if self._vad_ctx is None:
+            raise RuntimeError("AIC VAD not initialized yet. Call start(sample_rate) first.")
+        return self._vad_ctx
 
     def _apply_enhancement_level(self):
         """Apply enhancement_level if configured and supported by the active model."""
@@ -306,6 +366,33 @@ class AICFilter(BaseAudioFilter):
 
         self._processor_ctx.set_parameter(ProcessorParameter.Bypass, 1.0 if self._bypass else 0.0)
 
+    async def _start_vad(self):
+        """Create the dedicated VAD, sized to the enhancement block.
+
+        The VAD shares the filter's block size so both objects can be fed the
+        same original buffer, as the SDK requires.
+        """
+        if self._vad_model_id is None and self._vad_model_path is None:
+            return
+
+        self._vad_model, self._vad_model_cache_key = await AICModelManager.acquire(
+            model_path=self._vad_model_path,
+            model_id=self._vad_model_id,
+            model_download_dir=self._model_download_dir,
+        )
+
+        vad_config = ProcessorConfig(
+            sample_rate=self._sample_rate,
+            block_size=self._frames_per_block,
+        )
+        self._vad = VadAsync(self._vad_model, self._license_key, vad_config)
+        self._vad_ctx = self._vad.get_context()
+
+        logger.debug(
+            f"  VAD model: {self._vad_model.get_id()}, "
+            f"prediction delay: {self._vad_ctx.get_prediction_delay()} samples"
+        )
+
     async def start(self, sample_rate: int):
         """Initialize the filter with the transport's sample rate.
 
@@ -324,7 +411,7 @@ class AICFilter(BaseAudioFilter):
             model_download_dir=self._model_download_dir,
         )
 
-        # Get optimal frames for this sample rate
+        # Get optimal block size for this sample rate
         self._frames_per_block = self._model.get_optimal_block_size(self._sample_rate)
 
         # Allocate processing buffers now that we know the block size
@@ -376,27 +463,39 @@ class AICFilter(BaseAudioFilter):
             f"({self._processor_ctx.get_audio_delay() / self._sample_rate * 1000:.2f}ms)"
         )
 
+        await self._start_vad()
+
     async def stop(self):
-        """Terminate the AIC session and release the model when stopping.
+        """Terminate the AIC sessions and release the models when stopping.
 
         Returns:
             None
         """
-        if self._processor is not None:
+        # Terminate independently so one failure doesn't strand the other session.
+        for label, obj in (("VAD", self._vad), ("processor", self._processor)):
+            if obj is None:
+                continue
             try:
-                await self._processor.terminate_session_async()
+                await obj.terminate_session_async()
             except Exception as e:  # noqa: BLE001 - teardown is best-effort
-                logger.debug(f"AIC processor session termination failed: {e}")
+                logger.debug(f"AIC {label} session termination failed: {e}")
 
         self._processor = None
         self._processor_ctx = None
+        self._vad = None
+        self._vad_ctx = None
         self._model = None
+        self._vad_model = None
         self._aic_ready = False
         self._audio_buffer.clear()
 
         if self._model_cache_key is not None:
             AICModelManager.release(self._model_cache_key)
             self._model_cache_key = None
+
+        if self._vad_model_cache_key is not None:
+            AICModelManager.release(self._vad_model_cache_key)
+            self._vad_model_cache_key = None
 
     async def process_frame(self, frame: FilterControlFrame):
         """Process control frames to enable/disable filtering.
@@ -421,6 +520,9 @@ class AICFilter(BaseAudioFilter):
 
         Buffers incoming audio and processes it in chunks that match the AIC
         model's required block length. Returns enhanced audio data.
+
+        When a VAD model is configured, each block advances the VAD before it is
+        enhanced, so predictions describe the original signal.
 
         Args:
             audio: Raw audio data as bytes (int16 PCM).
@@ -452,6 +554,11 @@ class AICFilter(BaseAudioFilter):
             # Reuse input buffer, in-place divide
             np.copyto(self._in_f32, block_i16)
             self._in_f32 /= self._scale
+
+            # VAD first: it reads the original block without modifying it, so
+            # the prediction describes the unenhanced signal.
+            if self._vad is not None:
+                await self._vad.process_async(self._in_f32)
 
             out_f32 = await self._processor.process_async(self._in_f32)
 
