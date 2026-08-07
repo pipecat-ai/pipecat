@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     STTMuteFrame,
     STTUpdateSettingsFrame,
     TranscriptionFrame,
+    UserAudioRawFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -336,7 +337,8 @@ class STTService(AIService):
         Yields:
             Frame: Frames containing transcription results (typically TextFrame).
         """
-        pass
+        raise NotImplementedError
+        yield  # pragma: no cover
 
     async def start(self, frame: StartFrame):
         """Start the STT service.
@@ -431,7 +433,7 @@ class STTService(AIService):
         self._last_audio_time = time.monotonic()
 
         # UserAudioRawFrame contains a user_id (e.g. Daily, Livekit)
-        if hasattr(frame, "user_id"):
+        if isinstance(frame, UserAudioRawFrame):
             self._user_id = frame.user_id
         # AudioRawFrame does not have a user_id (e.g. SmallWebRTCTransport, websockets)
         else:
@@ -477,6 +479,7 @@ class STTService(AIService):
             if frame.service is not None and frame.service is not self:
                 await self.push_frame(frame, direction)
             elif frame.delta is not None:
+                assert isinstance(frame.delta, STTSettings)
                 await self._update_settings(frame.delta)
             elif frame.settings:
                 # Backward-compatible path: convert legacy dict to settings object.
@@ -728,6 +731,9 @@ class STTService(AIService):
         If so, it generates silent 16-bit mono PCM audio and passes it to
         _send_keepalive() for service-specific formatting and sending.
         """
+        # This task is only started when a keepalive timeout is configured.
+        assert self._keepalive_timeout is not None
+
         while True:
             await asyncio.sleep(self._keepalive_interval)
             try:
@@ -887,7 +893,7 @@ class SegmentedSTTService(STTService):
             direction: The direction of frame processing.
         """
         # UserAudioRawFrame contains a user_id (e.g. Daily, Livekit)
-        if hasattr(frame, "user_id"):
+        if isinstance(frame, UserAudioRawFrame):
             self._user_id = frame.user_id
         # AudioRawFrame does not have a user_id (e.g. SmallWebRTCTransport, websockets)
         else:

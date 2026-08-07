@@ -27,7 +27,6 @@
     "src/pipecat/services/sarvam/stt.py",
     "src/pipecat/services/simli/video.py",
     "src/pipecat/services/speechmatics/stt.py",
-    "src/pipecat/services/stt_service.py",
     "src/pipecat/services/tavus/video.py",
     "src/pipecat/services/tts_service.py",
     "src/pipecat/services/ultravox/llm.py",
