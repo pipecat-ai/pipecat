@@ -530,6 +530,7 @@ class SpeechmaticsSTTService(STTService):
         # Message queue
         self._stt_msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._stt_msg_task: asyncio.Task | None = None
+        self._connect_task: asyncio.Task | None = None
 
         # Speaking states
         self._is_speaking: bool = False
@@ -560,7 +561,8 @@ class SpeechmaticsSTTService(STTService):
     async def start(self, frame: StartFrame):
         """Called when the new session starts."""
         await super().start(frame)
-        await self._connect()
+        self._clear_audio_ready()
+        self._connect_task = self.create_task(self._connect())
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply settings delta, reconnecting only when necessary.
@@ -684,6 +686,7 @@ class SpeechmaticsSTTService(STTService):
         # Connect to the client
         try:
             await self._client.connect()
+            self._set_audio_ready()
             logger.debug(f"{self} connected")
         except Exception as e:
             self._client = None
@@ -700,10 +703,17 @@ class SpeechmaticsSTTService(STTService):
         - Disconnect the client
         - Emit on_disconnected event handler for clients
         """
+        self._clear_audio_ready()
+
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
+
         # Cancel the message processing task
         if self._stt_msg_task:
             await self.cancel_task(self._stt_msg_task)
             self._stt_msg_task = None
+        self._connect_task = None
 
         # Disconnect the client
         logger.debug(f"{self} disconnecting from Speechmatics STT service")
