@@ -21,7 +21,6 @@
     "src/pipecat/services/inworld/realtime/llm.py",
     "src/pipecat/services/llm_service.py",
     "src/pipecat/services/mem0/memory.py",
-    "src/pipecat/services/mistral/tts.py",
     "src/pipecat/services/nvidia/tts.py",
     "src/pipecat/services/openai/base_llm.py",
     "src/pipecat/services/openai/realtime/llm.py",
