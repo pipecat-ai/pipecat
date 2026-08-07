@@ -726,7 +726,7 @@ wheels = [
 
 [[package]]
 name = "camb-sdk"
-version = "1.5.13"
+version = "1.5.17"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -737,9 +737,9 @@ dependencies = [
     { name = "websocket-client" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bd/3e/b5ab4bb3b9c76c0cbad9f2a4696c504e80ecb9b44a09c811c6923c48dcbc/camb_sdk-1.5.13.tar.gz", hash = "sha256:a2e16d338419681f25973082386b6cdc5c1ae6b804c082d3a210fba9c446ef01", size = 101920, upload-time = "2026-05-27T08:52:55.931Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/be/a2/dad5e1b03cc2b6582a7df90fe030e5381cb41328a6b04e40f3965454f522/camb_sdk-1.5.17.tar.gz", hash = "sha256:85fb1bfcf5f8edb710a3ebcb592e0e81275578c714004a522a7b7f4fb595819b", size = 108373, upload-time = "2026-07-27T14:31:13.201Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d6/79/758eb34167b174884ae100301cdb2cd06b9a129892b487af3e8de26eaf0d/camb_sdk-1.5.13-py3-none-any.whl", hash = "sha256:98954cc999584f16bd1726780cb21213996561329cd9f25c81423a8edc10fc0d", size = 174906, upload-time = "2026-05-27T08:52:53.529Z" },
+    { url = "https://files.pythonhosted.org/packages/76/25/fd42e743a9fb99e23e8eefd46c9128350204fdb993b4cdb5f6821bb3f14c/camb_sdk-1.5.17-py3-none-any.whl", hash = "sha256:9745df0db0650ce7f2bd6b5f219e8499760615754290bc916689fa881ed9366d", size = 183145, upload-time = "2026-07-27T14:31:10.974Z" },
 ]
 
 [[package]]
