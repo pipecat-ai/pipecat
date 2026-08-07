@@ -8,6 +8,7 @@
 
 from typing import Any, TypedDict, TypeGuard, TypeVar, cast
 
+from openai._types import NOT_GIVEN as OPENAI_NOT_GIVEN
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.chat import (
     ChatCompletionMessageParam,
@@ -25,6 +26,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMStandardMessage,
     NotGiven,
 )
+from pipecat.processors.aggregators.llm_context import is_given as is_llm_context_given
 
 _T = TypeVar("_T")
 
@@ -34,13 +36,28 @@ def _openai_from_llm_context_tool_choice(
 ) -> ChatCompletionToolChoiceOptionParam | OpenAINotGiven:
     """Reinterpret an LLMContext ``tool_choice`` as OpenAI's type.
 
-    The underlying types are currently aliased — ``LLMContextToolChoice`` is
-    ``ChatCompletionToolChoiceOptionParam`` and LLMContext's ``NotGiven`` is
-    OpenAI's — so this is a typed no-op today. It's kept as a named boundary
-    so that if the LLMContext side ever diverges from OpenAI's types, every
-    crossing is visible and easy to update.
+    The value types are aliased — ``LLMContextToolChoice`` is
+    ``ChatCompletionToolChoiceOptionParam`` — so only the "not provided"
+    sentinel needs translating: LLMContext has its own, and the SDK recognizes
+    only its own.
     """
-    return cast("ChatCompletionToolChoiceOptionParam | OpenAINotGiven", tool_choice)
+    if not is_llm_context_given(tool_choice):
+        return OPENAI_NOT_GIVEN
+    return cast("ChatCompletionToolChoiceOptionParam", tool_choice)
+
+
+def _openai_from_llm_context_tools(
+    tools: list[ChatCompletionToolParam] | NotGiven | None,
+) -> list[ChatCompletionToolParam] | OpenAINotGiven | None:
+    """Reinterpret converted LLMContext tools as OpenAI's type.
+
+    Same boundary as :func:`_openai_from_llm_context_tool_choice`: the tool
+    entries are already in OpenAI's format by this point, so only LLMContext's
+    "not provided" sentinel has to become the SDK's.
+    """
+    if isinstance(tools, NotGiven):
+        return OPENAI_NOT_GIVEN
+    return tools
 
 
 def _openai_from_llm_standard_message(
@@ -148,7 +165,7 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             {
                 "messages": messages,
                 # NOTE; LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
-                "tools": self.from_standard_tools(context.tools),
+                "tools": _openai_from_llm_context_tools(self.from_standard_tools(context.tools)),
                 "tool_choice": _openai_from_llm_context_tool_choice(context.tool_choice),
             },
         )

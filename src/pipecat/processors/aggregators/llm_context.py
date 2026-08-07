@@ -21,15 +21,9 @@ import io
 import wave
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, TypeAlias, TypeGuard, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, TypeAlias, TypeGuard, TypeVar, cast, overload
 
 from loguru import logger
-from openai._types import NOT_GIVEN as OPEN_AI_NOT_GIVEN
-from openai._types import NotGiven as OpenAINotGiven
-from openai.types.chat import (
-    ChatCompletionMessageParam,
-    ChatCompletionToolChoiceOptionParam,
-)
 from PIL import Image
 
 from pipecat.adapters.schemas.direct_function import DirectFunction
@@ -38,18 +32,60 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import AudioRawFrame
 
 # "Re-export" types from OpenAI that we're using as universal context types.
-# NOTE: these are aliased to OpenAI's today, but callers should treat them as
-# LLMContext's own types — independent definitions that happen to coincide
-# with OpenAI's as an implementation detail. If universal context types need
-# to someday diverge from OpenAI's, we should consider managing our own
+# NOTE: these are aliased to OpenAI's for type checking, but callers should
+# treat them as LLMContext's own types — independent definitions that happen to
+# coincide with OpenAI's as an implementation detail. If universal context types
+# need to someday diverge from OpenAI's, we should consider managing our own
 # definitions (but with care, since OpenAI's types are somewhat of a standard
 # and we want to continue supporting them). In the meantime, code at the
 # LLMContext/OpenAI boundary should use explicit casts rather than rely on
 # the aliasing.
-LLMStandardMessage: TypeAlias = ChatCompletionMessageParam
-LLMContextToolChoice: TypeAlias = ChatCompletionToolChoiceOptionParam
-NOT_GIVEN = OPEN_AI_NOT_GIVEN
-NotGiven: TypeAlias = OpenAINotGiven
+#
+# The aliases resolve under type checking only. Every LLM service reaches this
+# module, so importing the OpenAI SDK here would put its load on the startup
+# path of pipelines that never talk to OpenAI. At runtime both are structurally
+# dicts or strings, which is all the annotations need them to be.
+if TYPE_CHECKING:
+    from openai.types.chat import (
+        ChatCompletionMessageParam,
+        ChatCompletionToolChoiceOptionParam,
+    )
+
+    LLMStandardMessage: TypeAlias = ChatCompletionMessageParam
+    LLMContextToolChoice: TypeAlias = ChatCompletionToolChoiceOptionParam
+else:
+    LLMStandardMessage: TypeAlias = Any
+    LLMContextToolChoice: TypeAlias = Any
+
+
+class NotGiven:
+    """Sentinel type meaning "this value was not provided".
+
+    Distinct from ``None``, which is a meaningful value for several context
+    fields. ``NOT_GIVEN`` is the singleton instance; use :func:`is_given` to
+    test for it rather than comparing directly.
+
+    Mirrors the OpenAI SDK's sentinel of the same name, including its falsy
+    truth value, so that adapters can map between the two at their boundary.
+    """
+
+    _instance: "NotGiven | None" = None
+
+    def __new__(cls) -> "NotGiven":
+        """Return the singleton instance, creating it on first use."""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __repr__(self) -> str:
+        return "NOT_GIVEN"
+
+    def __bool__(self) -> bool:
+        return False
+
+
+NOT_GIVEN = NotGiven()
+"""Singleton meaning "this value was not provided"."""
 
 
 _T = TypeVar("_T")
