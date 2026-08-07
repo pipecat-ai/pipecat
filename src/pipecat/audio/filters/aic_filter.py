@@ -16,7 +16,6 @@ Classes:
 """
 
 import asyncio
-import warnings
 from pathlib import Path
 from threading import Lock
 
@@ -32,9 +31,7 @@ from aic_sdk import (
 from loguru import logger
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
-from pipecat.audio.vad.aic_vad import AICVADAnalyzer
 from pipecat.frames.frames import FilterControlFrame, FilterEnableFrame
-from pipecat.utils.deprecation import deprecated
 
 # Telemetry identifier registered with the AIC SDK; identifies pipecat to the
 # vendor's usage pipeline. Kept private (leading underscore) to avoid making it
@@ -284,77 +281,10 @@ class AICFilter(BaseAudioFilter):
         self._model = None
         self._processor = None
         self._processor_ctx = None
-        self._vad_ctx = None
 
         # Pre-allocated buffers (resized in start() once frames_per_block is known)
         self._in_f32 = None
         self._out_i16 = None
-
-    def get_vad_context(self):
-        """Return the VAD context once the processor exists.
-
-        Returns:
-            The VadContext instance bound to the underlying processor.
-            Raises RuntimeError if the processor has not been initialized.
-        """
-        if self._vad_ctx is None:
-            raise RuntimeError("AIC processor not initialized yet. Call start(sample_rate) first.")
-        return self._vad_ctx
-
-    @deprecated(
-        "`AICFilter.create_vad_analyzer` is deprecated since 1.4.0 and will be removed in 1.6.0. "
-        "Use `AICQuailVADAnalyzer` instead."
-    )
-    def create_vad_analyzer(
-        self,
-        *,
-        speech_hold_duration: float | None = None,
-        minimum_speech_duration: float | None = None,
-        sensitivity: float | None = None,
-    ):
-        """Return an analyzer that will lazily instantiate the AIC VAD when ready.
-
-        .. deprecated:: 1.4.0
-            Construct :class:`AICQuailVADAnalyzer` directly instead.
-            Will be removed in 1.6.0.
-
-        AIC VAD parameters:
-          - speech_hold_duration:
-              How long VAD continues detecting after speech ends (in seconds).
-              Range: 0.0 to 100x model window length, Default (SDK): 0.05s
-          - minimum_speech_duration:
-              Minimum duration of speech required before VAD reports speech detected
-              (in seconds). Range: 0.0 to 1.0, Default (SDK): 0.0s
-          - sensitivity:
-              Energy threshold sensitivity. Energy threshold = 10 ** (-sensitivity).
-              Range: 1.0 to 15.0, Default (SDK): 6.0
-
-        Args:
-            speech_hold_duration: Optional speech hold duration to configure on the VAD.
-                If None, SDK default (0.05s) is used.
-            minimum_speech_duration: Optional minimum speech duration before VAD reports
-                speech detected. If None, SDK default (0.0s) is used.
-            sensitivity: Optional sensitivity (energy threshold) to configure on the VAD.
-                Range: 1.0 to 15.0. If None, SDK default (6.0) is used.
-
-        Returns:
-            A lazily-initialized AICVADAnalyzer that will bind to the VAD context
-            once the filter's processor has been created (after start(sample_rate)).
-        """
-        # Suppress AICVADAnalyzer's own DeprecationWarning here — the factory's
-        # warning already informed the caller; emitting both would surface two
-        # warnings for one factory call (and uncaught the inner one before
-        # reaching this return under -W error::DeprecationWarning). Filter on
-        # category alone so a message-text change in AICVADAnalyzer doesn't
-        # break this suppression.
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            return AICVADAnalyzer(
-                vad_context_factory=lambda: self.get_vad_context(),
-                speech_hold_duration=speech_hold_duration,
-                minimum_speech_duration=minimum_speech_duration,
-                sensitivity=sensitivity,
-            )
 
     def _apply_enhancement_level(self):
         """Apply enhancement_level if configured and supported by the active model."""
@@ -420,9 +350,8 @@ class AICFilter(BaseAudioFilter):
             logger.debug(f"ai-coustics filter is not ready.")
             return
 
-        # Get contexts for parameter control and VAD
+        # Get context for parameter control
         self._processor_ctx = self._processor.get_processor_context()
-        self._vad_ctx = self._processor.get_vad_context()
 
         # Apply initial control parameters
         self._apply_bypass()
@@ -459,7 +388,6 @@ class AICFilter(BaseAudioFilter):
         finally:
             self._processor = None
             self._processor_ctx = None
-            self._vad_ctx = None
             self._model = None
             self._aic_ready = False
             self._audio_buffer.clear()

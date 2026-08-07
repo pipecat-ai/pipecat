@@ -7,21 +7,11 @@
 import asyncio
 import time
 import unittest
-import warnings
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
-
-# The create_vad_analyzer factory and AICVADAnalyzer constructor now emit
-# DeprecationWarnings of their own (covered by their dedicated test files).
-# Suppress here so this file's primary coverage stays quiet.
-warnings.filterwarnings(
-    "ignore",
-    category=DeprecationWarning,
-    message=".*(AICVADAnalyzer|create_vad_analyzer) is deprecated.*",
-)
 
 # Check if aic_sdk is available
 aic_sdk: Any
@@ -232,7 +222,6 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
             mock_config_cls.optimal.assert_called_once()
             mock_processor_cls.assert_called_once()
             self.assertIsNotNone(filter_instance._processor_ctx)
-            self.assertIsNotNone(filter_instance._vad_ctx)
 
     async def test_start_applies_initial_bypass_parameter(self):
         """Test that start applies bypass parameter."""
@@ -304,7 +293,6 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.mock_processor.processor_ctx.reset_called)
         self.assertIsNone(filter_instance._processor)
         self.assertIsNone(filter_instance._processor_ctx)
-        self.assertIsNone(filter_instance._vad_ctx)
         self.assertIsNone(filter_instance._model)
         self.assertIsNone(filter_instance._model_cache_key)
         self.assertFalse(filter_instance._aic_ready)
@@ -600,48 +588,6 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(output_audio), 320)  # 1 frame
         self.assertEqual(len(filter_instance._audio_buffer), 180)  # 90 samples * 2 bytes
-
-    async def test_get_vad_context_before_start(self):
-        """Test that get_vad_context raises before start."""
-        filter_instance = self._create_filter_with_mocks()
-
-        with self.assertRaises(RuntimeError) as context:
-            filter_instance.get_vad_context()
-
-        self.assertIn("not initialized", str(context.exception))
-
-    async def test_get_vad_context_after_start(self):
-        """Test that get_vad_context returns context after start."""
-        filter_instance = self._create_filter_with_mocks()
-        await self._start_filter_with_mocks(filter_instance)
-
-        vad_ctx = filter_instance.get_vad_context()
-
-        self.assertEqual(vad_ctx, self.mock_processor.vad_ctx)
-
-    async def test_create_vad_analyzer(self):
-        """Test create_vad_analyzer returns analyzer with factory."""
-        filter_instance = self._create_filter_with_mocks()
-
-        analyzer = filter_instance.create_vad_analyzer()
-
-        self.assertIsNotNone(analyzer)
-        # Factory should be set
-        self.assertIsNotNone(analyzer._vad_context_factory)
-
-    async def test_create_vad_analyzer_with_params(self):
-        """Test create_vad_analyzer with custom parameters."""
-        filter_instance = self._create_filter_with_mocks()
-
-        analyzer = filter_instance.create_vad_analyzer(
-            speech_hold_duration=0.1,
-            minimum_speech_duration=0.05,
-            sensitivity=8.0,
-        )
-
-        self.assertEqual(analyzer._pending_speech_hold_duration, 0.1)
-        self.assertEqual(analyzer._pending_minimum_speech_duration, 0.05)
-        self.assertEqual(analyzer._pending_sensitivity, 8.0)
 
     async def test_multiple_start_stop_cycles(self):
         """Test multiple start/stop cycles."""
