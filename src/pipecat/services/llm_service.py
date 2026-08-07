@@ -565,9 +565,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             self._base_system_instruction = base_si if isinstance(base_si, str) else None
 
         if "user_turn_completion_config" in changed and self._filter_incomplete_user_turns:
-            config = assert_given(self._settings.user_turn_completion_config)
-            if config is not None:
-                self.set_user_turn_completion_config(config)
+            self.set_user_turn_completion_config(
+                assert_given(self._settings.user_turn_completion_config)
+            )
 
         # Any of these fields changes the composed instruction; rebuild it.
         if changed.keys() & {
