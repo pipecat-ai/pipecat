@@ -110,7 +110,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                 if enable_prompt_caching
                 else converted.messages
             ),
-            # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or ANTHROPIC_NOT_GIVEN)
+            # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools) or [],
         }
 

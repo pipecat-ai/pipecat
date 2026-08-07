@@ -135,9 +135,9 @@ class OpenAIResponsesLLMSettings(LLMSettings):
             not reason.
     """
 
-    # Override inherited LLMSettings fields to also accept openai's NotGiven
-    # sentinel. The service stores openai's OPENAI_NOT_GIVEN in these fields so they
-    # can be passed through unchanged to the AsyncOpenAI client.
+    # Override inherited LLMSettings fields to also accept the OpenAI SDK's
+    # sentinel, which the service stores here so these fields can be passed
+    # through unchanged to the AsyncOpenAI client.
     temperature: float | None | NotGiven | OpenAINotGiven = field(default_factory=lambda: NOT_GIVEN)
     top_p: float | None | NotGiven | OpenAINotGiven = field(default_factory=lambda: NOT_GIVEN)
     max_completion_tokens: int | NotGiven | OpenAINotGiven = field(
