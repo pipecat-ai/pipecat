@@ -564,7 +564,7 @@ class TestToolHandlerErrorClassification(unittest.IsolatedAsyncioTestCase):
 
         errors = []
 
-        async def capture_error(error, processor_became_unusable=False):
+        async def capture_error(error):
             errors.append(error)
 
         service.push_error_frame = capture_error

@@ -793,9 +793,12 @@ class FrameProcessor(BaseObject):
             processor=self,
             category=category,
         )
-        await self.push_error_frame(
-            error=error_frame, processor_became_unusable=processor_became_unusable
-        )
+        # Only passed on when there is something to say, so that reporting an
+        # ordinary error stays a one-argument call.
+        if processor_became_unusable:
+            await self.push_error_frame(error=error_frame, processor_became_unusable=True)
+        else:
+            await self.push_error_frame(error=error_frame)
 
     async def push_error_frame(self, error: ErrorFrame, processor_became_unusable: bool = False):
         """Push an error frame upstream.

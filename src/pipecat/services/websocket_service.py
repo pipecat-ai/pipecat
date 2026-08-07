@@ -89,9 +89,9 @@ class WebsocketService(ABC):
     Reconnection gives up in two ways, both leaving the service unusable: the
     provider rejects the configuration, which no amount of retrying will fix,
     or the attempts are exhausted. Errors are reported through a
-    ``report_error`` callback, which takes the same
+    ``report_error`` callback, which takes the same optional
     ``processor_became_unusable`` flag as
-    :meth:`~pipecat.processors.frame_processor.FrameProcessor.push_error_frame`
+    :meth:`~pipecat.processors.frame_processor.FrameProcessor.push_error_frame`,
     so that giving up and saying so are the same act.
     """
 
