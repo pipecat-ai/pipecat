@@ -146,6 +146,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         }
 
         self._receive_task = None
+        self._connect_task = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -186,7 +187,8 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             frame: Start frame signaling service initialization.
         """
         await super().start(frame)
-        await self._connect()
+        self._clear_audio_ready()
+        self._connect_task = self.create_task(self._connect())
 
     async def stop(self, frame: EndFrame):
         """Stop the service and disconnect from AWS Transcribe.
@@ -247,6 +249,12 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         Sends end-stream message and cleans up.
         """
         await super()._disconnect()
+
+        self._clear_audio_ready()
+
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
 
         if self._receive_task:
             await self.cancel_task(self._receive_task)
@@ -330,6 +338,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                 compression=None,
             )
 
+            self._set_audio_ready()
             await self._call_event_handler("on_connected")
             logger.info(f"{self} Successfully connected to AWS Transcribe")
         except Exception as e:
