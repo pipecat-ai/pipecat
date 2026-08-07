@@ -315,10 +315,10 @@ class WebsocketService(ABC):
             success = await self._try_reconnect(report_error=report_error)
             return success
         else:
-            # Reconnection disabled, so a dropped connection is the end of it.
-            await report_error(
-                ErrorFrame(error_message, exception=error), processor_became_unusable=True
-            )
+            # `reconnect_on_error` governs this loop only: services that turn it
+            # off reconnect on demand in `send_with_retry` instead. Reporting
+            # the drop as terminal would close that path too.
+            await report_error(ErrorFrame(error_message, exception=error))
             return False
 
     async def _receive_task_handler(self, report_error: ReportErrorCallback):
