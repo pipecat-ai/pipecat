@@ -13,28 +13,35 @@ model or an unsupported voice, or when a service has failed enough times to
 stop trying, retrying will keep failing. Those flip ``is_usable`` to False,
 which stops the processor from reconnecting or accepting more work.
 
-Three things to watch, all wired up below:
+The TTS here is a ``ServiceSwitcher`` over two providers, which is the useful
+thing to do about it: when Cartesia stops being usable, the switcher moves the
+work to ElevenLabs and the bot keeps talking. Nothing upstream even hears about
+it — the switcher recovered, so there is no error left to act on. Only when the
+last provider is gone does the switcher report itself unusable, and that is what
+ends the bot.
+
+Four things to watch, all wired up below:
 
 - ``on_usable_changed`` fires on each processor whose health changes, so you can
-  tell *which* one is in trouble.
-- ``on_pipeline_error`` fires for every error. Reading
+  tell *which* one is in trouble. A switcher raises it for itself too, once none
+  of its services can work.
+- ``on_service_switched`` fires when the switcher moves to another provider.
+- ``on_pipeline_error`` fires for every error that isn't recovered from. Reading
   ``frame.processor.is_usable`` in the handler is what separates an error the
-  processor will recover from and one that ended its usefulness — the verdict is
-  always in before the error reaches you.
+  processor will carry on from and one that ended its usefulness — the verdict
+  is always in before the error reaches you.
 - ``PipelineWorker(processor_unusable_policy=...)`` decides what happens next.
   ``END`` stops the bot, ``CANCEL`` stops it immediately, and ``CONTINUE`` (the
-  default) leaves the decision to your handlers — use it when the application
-  can recover on its own, for example by failing over to another provider with a
-  ``ServiceSwitcher``, or by calling ``set_usable(True)`` once the underlying
-  problem is dealt with.
+  default) leaves the decision to your handlers.
 
-To see it work, run with a deliberately wrong key for any of the services::
+To watch the failover, run with a Cartesia key the provider will reject::
 
-    OPENAI_API_KEY=not-a-real-key python features-processor-usable.py
+    CARTESIA_API_KEY=not-a-real-key python features-processor-usable.py
 
-The provider rejects the key, the service reports ``authentication`` and stops
-being usable, both handlers below fire, and the bot ends — instead of retrying a
-key that will keep being rejected for as long as it runs.
+Cartesia is rejected, the switcher moves to ElevenLabs, and the conversation
+carries on. Break both keys and the switcher runs out of providers, reports
+itself unusable, and the bot ends — instead of retrying keys that will keep
+being rejected for as long as it runs.
 """
 
 import os
@@ -46,17 +53,23 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import ErrorFrame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.service_switcher import (
+    ServiceSwitcher,
+    ServiceSwitcherStrategy,
+    ServiceSwitcherStrategyFailover,
+)
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.ai_service import AIService
 from pipecat.services.cartesia.stt import CartesiaSTTService
 from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -92,11 +105,26 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = CartesiaSTTService(api_key=os.environ["CARTESIA_API_KEY"])
 
-    tts = CartesiaTTSService(
+    tts_cartesia = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
             voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         ),
+    )
+
+    tts_elevenlabs = ElevenLabsTTSService(
+        api_key=os.environ["ELEVENLABS_API_KEY"],
+        settings=ElevenLabsTTSService.Settings(
+            voice=os.getenv("ELEVENLABS_VOICE_ID", ""),
+        ),
+    )
+
+    # The failover strategy moves to the next provider that can still work, and
+    # only once the active one can't. An error Cartesia can carry on from — a
+    # dropped websocket it reconnects — costs no switch.
+    tts_switcher = ServiceSwitcher(
+        services=[tts_cartesia, tts_elevenlabs],
+        strategy_type=ServiceSwitcherStrategyFailover,
     )
 
     llm = OpenAILLMService(
@@ -118,7 +146,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             stt,
             user_aggregator,  # User responses
             llm,  # LLM
-            tts,  # TTS
+            tts_switcher,  # TTS, with a second provider to fall back on
             transport.output(),  # Transport bot output
             assistant_aggregator,  # Assistant spoken responses
         ]
@@ -131,21 +159,27 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-        # End the bot once a service can no longer do its job. Without this the
-        # pipeline keeps running with a dead service, which is rarely what you
-        # want in development.
+        # End the bot once a processor can no longer do its job. For the TTS
+        # that means both providers are gone, since the switcher answers for
+        # them: losing one is something it recovers from on its own.
         processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
-    # Watch each service, so you can tell which one is in trouble.
-    for service in (stt, tts, llm):
+    # Watch each processor, so you can tell which one is in trouble. The
+    # switcher is in the list on its own account: losing one of its providers
+    # doesn't show here, but running out of them does.
+    for processor in (stt, tts_cartesia, tts_elevenlabs, tts_switcher, llm):
 
-        @service.event_handler("on_usable_changed")
-        async def on_usable_changed(service: AIService, is_usable: bool):
+        @processor.event_handler("on_usable_changed")
+        async def on_usable_changed(processor: FrameProcessor, is_usable: bool):
             if not is_usable:
                 logger.error(
-                    f"{service} needs attention: check its API key, model and voice settings"
+                    f"{processor} needs attention: check its API key, model and voice settings"
                 )
+
+    @tts_switcher.strategy.event_handler("on_service_switched")
+    async def on_service_switched(strategy: ServiceSwitcherStrategy, service: FrameProcessor):
+        logger.info(f"TTS failed over to {service.name}; the bot keeps talking")
 
     @worker.event_handler("on_pipeline_error")
     async def on_pipeline_error(worker: PipelineWorker, frame: ErrorFrame):
