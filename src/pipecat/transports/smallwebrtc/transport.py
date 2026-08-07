@@ -42,7 +42,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
+from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection, SmallWebRTCTrack
 
 try:
     from aiortc import VideoStreamTrack
@@ -228,14 +228,14 @@ class SmallWebRTCClient:
 
         self._audio_output_track = None
         self._video_output_track = None
-        self._audio_input_track: AudioStreamTrack | None = None
-        self._video_input_track: VideoStreamTrack | None = None
-        self._screen_video_track: VideoStreamTrack | None = None
+        self._audio_input_track: SmallWebRTCTrack | None = None
+        self._video_input_track: SmallWebRTCTrack | None = None
+        self._screen_video_track: SmallWebRTCTrack | None = None
 
         self._params = None
-        self._audio_in_channels = None
-        self._in_sample_rate = None
-        self._out_sample_rate = None
+        self._audio_in_channels = 0
+        self._in_sample_rate = 0
+        self._out_sample_rate = 0
         self._leave_counter = 0
 
         # Audio resampler - will be configured during setup with target sample rate/layout
@@ -380,6 +380,9 @@ class SmallWebRTCClient:
         Yields:
             InputAudioRawFrame objects containing audio data from the peer.
         """
+        # setup() builds the resampler before the reader task is started.
+        assert self._audio_in_resampler is not None
+
         while True:
             if self._audio_input_track is None:
                 await asyncio.sleep(0.01)
