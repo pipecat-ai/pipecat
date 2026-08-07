@@ -4,29 +4,32 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Async tasks — the UIWorker fans out long-running work and streams progress.
+"""Async tasks — fan out long-running work and stream progress to the client.
 
-The user asks the assistant to research a topic. The UIWorker dispatches
-three peer workers (Wikipedia, news, scholarly papers) in parallel via
-``start_ui_job_group``. Each worker emits progress updates while it
-works. ``UIWorker`` forwards every lifecycle event to the client as
-``ui-job-group`` envelopes (``group_started``, ``job_update``,
-``job_completed``, ``group_completed``), which the client renders as
-in-flight cards with per-worker status. The user can cancel a group
-mid-flight via ``client.cancelUIJobGroup(job_id)``, which sends a reserved
-``__cancel_job_group`` event that the worker turns into a ``cancel_job_group``
-call.
+The user asks the assistant to research a topic. The main pipeline's own
+LLM calls the ``research`` tool, which dispatches three peer workers
+(Wikipedia, news, scholarly papers) in parallel via a ``BaseUIWorker``
+dispatcher registered on the runner:
+``request_job_group(..., ui=UIJobGroupOptions(...))`` — no LLM in the
+dispatch path, no ``UIWorker`` required. Each peer emits progress updates while it works; the group's
+lifecycle reaches the client as ``ui-job-group`` envelopes
+(``group_started``, ``job_update``, ``job_completed``,
+``group_completed``), which the client renders as in-flight cards with
+per-worker status. The user can cancel a group mid-flight via
+``client.cancelUIJobGroup(job_id)``, which sends a reserved
+``__cancel_job_group`` event that the dispatching worker turns into a
+``cancel_job_group`` call.
 
 Architecture::
 
     Main worker (PipelineWorker, owns transport + RTVI):
       transport.in → STT → user_agg → LLM → TTS → transport.out → assistant_agg
-        └── answer_about_screen(query) tool
-              └── params.pipeline_worker.job("ui", name="respond", payload={query})
+        └── research(query) tool
+              └── ui_jobs.request_job_group(          # via app_resources
+                      "wikipedia", "news", "scholar",
+                      payload={"query": query}, ui=UIJobGroupOptions(label=...))
 
-    ResearchWorker (UIWorker):
-      └── @tool reply(answer, research_query=None)
-            └── (if research_query) start_ui_job_group("wikipedia", "news", "scholar")
+    ui_jobs (BaseUIWorker): the client-visible job-group dispatcher (no LLM)
 
     Three peer workers (BaseWorker each):
       WikipediaResearcher · NewsResearcher · ScholarResearcher
@@ -35,9 +38,12 @@ The workers are deliberately simulated with ``asyncio.sleep`` and canned
 summaries so the demo focuses on the protocol, not the AI. A real app
 would wire each worker to its own data source.
 
-``start_ui_job_group`` dispatches the group on a background task and
+``request_job_group`` dispatches the group fire-and-forget and
 returns immediately, so the spoken "researching X" acknowledgement frees
-the main LLM to take new turns while the workers continue.
+the LLM to take new turns while the workers continue. Results land on
+the page as they arrive. (When the LLM must also *read or drive* the
+page — snapshots, deixis, UI commands — reach for ``UIWorker``; see the
+document-review example.)
 
 Run::
 
@@ -64,7 +70,6 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus.messages import BusJobRequestMessage
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
-from pipecat.pipeline.job_context import JobError
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -80,10 +85,9 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.workers.base_ui_worker import BaseUIWorker, UIJobGroupOptions
 from pipecat.workers.base_worker import BaseWorker
-from pipecat.workers.llm import tool
 from pipecat.workers.runner import WorkerRunner
-from pipecat.workers.ui import UIWorker
 
 load_dotenv(override=True)
 
@@ -100,61 +104,28 @@ transport_params = {
 
 
 VOICE_PROMPT = """\
-You are the voice layer of a research assistant. A separate UI \
-layer sees the page and dispatches research tasks.
+You are a research assistant. You can fan out background research on \
+any topic; progress and results stream to a panel on the user's screen.
 
-For every user utterance involving research (asking about a topic, \
-launching a search, asking for follow-ups), call \
-``answer_about_screen`` with the user's request verbatim. The \
-tool's response is the spoken reply, already TTS-ready.
+## Tool: research
 
-Only respond directly for pure pleasantries (greetings, thanks, \
-goodbyes). Keep direct replies to one short spoken sentence."""
-
-
-# The UI wire-format guide (UI_STATE_PROMPT_GUIDE) is appended to the LLM's
-# system instruction automatically by UIWorker, so this prompt only needs the
-# app-specific behavior.
-UI_PROMPT = """\
-You help the user research topics. When the user names something \
-to look up, kick off a parallel research task across three worker \
-sources (Wikipedia, news, scholarly papers).
-
-## Tool: reply
-
-Every turn calls ``reply`` exactly once. One tool call per turn.
-
-``reply(answer, research_query=None)``:
-
-- ``answer`` (REQUIRED): the spoken reply, plain language, one \
-short sentence. No markdown, no symbols.
-- ``research_query`` (OPTIONAL): the topic to research. When set, \
-the server fans out three workers in parallel and streams \
-their progress to an in-flight panel on the page. The workers run \
-in the background; you do NOT wait for results. Just speak a brief \
-acknowledgement.
+``research(query)`` starts three background workers (Wikipedia, news, \
+scholarly papers) on the topic. They run in the background; you do NOT \
+wait for results — they appear on the user's screen as they land. After \
+calling it, speak a one-sentence acknowledgement.
 
 ## Decision rules
 
-- **User asks to research / look up / find out about something** → \
-set ``research_query`` to the topic and answer with a brief \
-acknowledgement ("Researching the Mariana Trench now"). The server \
-handles the rest; results stream onto the page.
+- **User asks to research / look up / find out about something** → call \
+``research`` with the topic, then acknowledge briefly \
+("Researching the Mariana Trench now.").
 - **User asks a quick question you can answer immediately** → just \
-``answer``. Don't kick off a research task for trivia or for \
-questions about the in-flight tasks themselves.
-- **User asks about ongoing research** → just ``answer`` (the \
-results panel on screen shows progress).
+answer it. Don't start research for trivia.
+- **User asks about ongoing research** → tell them progress and results \
+are on their screen. Don't start a duplicate task.
 
-## Examples
-
-- "Research the Mariana Trench." → \
-``reply(answer="Researching the Mariana Trench now.", research_query="Mariana Trench")``
-- "Look up octopus cognition." → \
-``reply(answer="Looking that up.", research_query="octopus cognition")``
-- "How many neurons does an octopus have?" (quick question, no \
-research needed) → ``reply(answer="About five hundred million.")``
-- "Hi." → ``reply(answer="Hi! What would you like to research?")``"""
+Your replies are spoken aloud: plain language, one short sentence, no \
+markdown or symbols."""
 
 
 class _SimulatedResearcher(BaseWorker):
@@ -227,77 +198,33 @@ class ScholarResearcher(_SimulatedResearcher):
         )
 
 
-class ResearchWorker(UIWorker):
-    """UIWorker that kicks off background research job groups.
+@tool_options(cancel_on_interruption=False)
+async def research(params: FunctionCallParams, query: str):
+    """Start background research on a topic across three worker sources.
 
-    The custom ``@tool reply`` has a ``research_query`` field. When the
-    LLM sets it, the tool fires ``start_ui_job_group(...)`` against the
-    three peer workers — fire-and-forget from the LLM's perspective, so
-    the tool returns immediately with the spoken acknowledgement. The
-    ``UIWorker`` forwards every job lifecycle event to the client as
-    ``ui-job-group`` envelopes, where the client renders progress and a cancel
-    button.
-    """
-
-    def __init__(self):
-        llm = OpenAILLMService(
-            api_key=os.environ["OPENAI_API_KEY"],
-            settings=OpenAILLMService.Settings(system_instruction=UI_PROMPT),
-        )
-        super().__init__("ui", llm=llm)
-
-    @tool
-    async def reply(
-        self,
-        params: FunctionCallParams,
-        answer: str,
-        research_query: str | None = None,
-    ):
-        """Reply to the user. Optionally kick off background research.
-
-        Always called exactly once per turn. ``answer`` is required.
-
-        Args:
-            answer: The spoken reply in plain language. One short
-                sentence. For research turns, a brief acknowledgement
-                like "Researching X now."
-            research_query: Optional topic to research. When set, the
-                server fans out three workers in parallel and
-                streams progress to the page. Workers run in the
-                background; the LLM does NOT wait for results.
-        """
-        logger.info(f"{self}: reply(answer={answer!r}, research_query={research_query!r})")
-        if research_query:
-            await self.start_ui_job_group(
-                "wikipedia",
-                "news",
-                "scholar",
-                payload={"query": research_query},
-                label=f"Research: {research_query}",
-            )
-        await self.respond_to_job(answer)
-        await params.result_callback(None)
-
-
-@tool_options(cancel_on_interruption=False, timeout_secs=30)
-async def answer_about_screen(params: FunctionCallParams, query: str):
-    """Forward the user's request to the screen-aware research worker.
+    Dispatches the workers fire-and-forget: the group's progress and
+    results stream to the client as ``ui-job-group`` envelopes, so this
+    tool returns immediately and the LLM speaks a short acknowledgement.
 
     Args:
-        query (str): The user's request, passed verbatim.
+        query (str): The topic to research, e.g. "Mariana Trench".
     """
-    logger.info(f"answer_about_screen('{query}')")
-    try:
-        async with params.pipeline_worker.job(
-            "ui", name="respond", payload={"query": query}, timeout=10
-        ) as t:
-            pass
-    except JobError as e:
-        logger.warning(f"ui job failed: {e}")
-        await params.result_callback("Something went wrong on my side.")
-        return
-
-    await params.result_callback(t.response)
+    logger.info(f"research('{query}')")
+    ui_jobs: BaseUIWorker = params.app_resources
+    job_id = await ui_jobs.request_job_group(
+        "wikipedia",
+        "news",
+        "scholar",
+        payload={"query": query},
+        ui=UIJobGroupOptions(label=f"Research: {query}"),
+    )
+    await params.result_callback(
+        {
+            "status": "started",
+            "job_id": job_id,
+            "note": "Workers run in the background; results stream to the user's screen.",
+        }
+    )
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
@@ -317,7 +244,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         settings=OpenAILLMService.Settings(system_instruction=VOICE_PROMPT),
     )
 
-    context = LLMContext(tools=[answer_about_screen])
+    context = LLMContext(tools=[research])
     aggregators = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -335,11 +262,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ]
     )
 
+    # The dispatcher for client-visible job groups: a plain BaseUIWorker on
+    # the bus (no LLM). Tools reach it through ``app_resources``; its
+    # envelopes reach the client through the main worker's RTVI bridge.
+    ui_jobs = BaseUIWorker("ui-jobs")
+
     worker = PipelineWorker(
         pipeline,
         name=MAIN_NAME,
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        app_resources=ui_jobs,
     )
 
     @transport.event_handler("on_client_connected")
@@ -362,7 +295,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await runner.cancel()
 
     await runner.add_workers(
-        ResearchWorker(),
+        ui_jobs,
         WikipediaResearcher("wikipedia"),
         NewsResearcher("news"),
         ScholarResearcher("scholar"),

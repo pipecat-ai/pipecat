@@ -3840,6 +3840,39 @@
       "replacement": "add_workers",
       "message": "Register the worker with :meth:`add_workers` before calling ``run()`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/workers/runner.py"
+    },
+    {
+      "subject": "UIJobGroupContext",
+      "module": "pipecat.workers.ui.ui_job_context",
+      "kind": "class",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "JobGroupContext",
+      "message": "`UIJobGroupContext` is deprecated since 1.8.0 and will be removed in 2.0.0. Use `JobGroupContext` with `ui=UIJobGroupOptions(...)` instead.",
+      "location": "pipecat/workers/ui/ui_job_context.py"
+    },
+    {
+      "subject": "UIWorker.start_ui_job_group",
+      "module": "pipecat.workers.ui.ui_worker",
+      "kind": "method",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "request_job_group",
+      "message": "`UIWorker.start_ui_job_group` is deprecated since 1.8.0 and will be removed in 2.0.0. Use `request_job_group` with `ui=UIJobGroupOptions(...)` instead.",
+      "location": "pipecat/workers/ui/ui_worker.py"
+    },
+    {
+      "subject": "UIWorker.ui_job_group",
+      "module": "pipecat.workers.ui.ui_worker",
+      "kind": "method",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "job_group",
+      "message": "`UIWorker.ui_job_group` is deprecated since 1.8.0 and will be removed in 2.0.0. Use `job_group` with `ui=UIJobGroupOptions(...)` instead.",
+      "location": "pipecat/workers/ui/ui_worker.py"
     }
   ]
 }
