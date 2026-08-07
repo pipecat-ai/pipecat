@@ -58,7 +58,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.sarvam._sdk import sdk_headers
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given, is_given
+from pipecat.services.settings import NOT_GIVEN, NotGiven, TTSSettings, assert_given, is_given
 from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
@@ -266,11 +266,11 @@ class SarvamHttpTTSSettings(TTSSettings):
             **Note:** Only supported for bulbul:v3-beta. Ignored for v2.
     """
 
-    enable_preprocessing: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    pace: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    pitch: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    loudness: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_preprocessing: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pace: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    loudness: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -288,8 +288,8 @@ class SarvamTTSSettings(SarvamHttpTTSSettings):
 
     _aliases: ClassVar[dict[str, str]] = {"target_language_code": "language"}
 
-    min_buffer_size: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    max_chunk_length: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    min_buffer_size: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_chunk_length: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SarvamHttpTTSService(TTSService):

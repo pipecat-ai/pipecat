@@ -60,7 +60,7 @@ from pipecat.services.openai._constants import OPENAI_REALTIME_WHISPER_MODEL, OP
 from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
-    _NotGiven,
+    NotGiven,
     assert_given,
     is_given,
 )
@@ -111,7 +111,7 @@ class OpenAIRealtimeLLMSettings(LLMSettings):
             ``system_instruction`` fields.
     """
 
-    session_properties: events.SessionProperties | _NotGiven = field(
+    session_properties: events.SessionProperties | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 

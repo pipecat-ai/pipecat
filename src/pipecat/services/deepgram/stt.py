@@ -28,8 +28,8 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import (
     NOT_GIVEN,
+    NotGiven,
     STTSettings,
-    _NotGiven,
     is_given,
 )
 from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
@@ -207,21 +207,21 @@ class DeepgramSTTSettings(STTSettings):
         utterance_end_ms: Silence duration in ms before an utterance-end event.
     """
 
-    detect_entities: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    diarize: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    dictation: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    endpointing: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    interim_results: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    keyterm: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    keywords: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    numerals: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    profanity_filter: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    punctuate: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    redact: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    replace: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    search: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    smart_format: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    utterance_end_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    detect_entities: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    diarize: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    dictation: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpointing: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterm: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keywords: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    numerals: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    profanity_filter: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    punctuate: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    redact: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    replace: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    search: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    smart_format: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    utterance_end_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     def _sync_extra_to_fields(self) -> None:
         """Sync values from extra dict to declared fields.

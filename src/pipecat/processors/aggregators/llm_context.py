@@ -21,7 +21,7 @@ import io
 import wave
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeAlias, TypeGuard, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, TypeAlias, cast, overload
 
 from loguru import logger
 from PIL import Image
@@ -30,6 +30,13 @@ from pipecat.adapters.schemas.direct_function import DirectFunction
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import AudioRawFrame
+
+# The sentinel is part of LLMContext's public surface — tools and tool_choice
+# default to it — so it is re-exported here for callers. The redundant aliases
+# mark that intent; a plain import would look unused and be stripped.
+from pipecat.utils.types import NOT_GIVEN as NOT_GIVEN
+from pipecat.utils.types import NotGiven as NotGiven
+from pipecat.utils.types import is_given as is_given
 
 # "Re-export" types from OpenAI that we're using as universal context types.
 # NOTE: these are aliased to OpenAI's for type checking, but callers should
@@ -56,61 +63,6 @@ if TYPE_CHECKING:
 else:
     LLMStandardMessage: TypeAlias = Any
     LLMContextToolChoice: TypeAlias = Any
-
-
-class NotGiven:
-    """Sentinel type meaning "this value was not provided".
-
-    Distinct from ``None``, which is a meaningful value for several context
-    fields. ``NOT_GIVEN`` is the singleton instance; use :func:`is_given` to
-    test for it rather than comparing directly.
-
-    Mirrors the OpenAI SDK's sentinel of the same name, including its falsy
-    truth value, so that adapters can map between the two at their boundary.
-    """
-
-    _instance: "NotGiven | None" = None
-
-    def __new__(cls) -> "NotGiven":
-        """Return the singleton instance, creating it on first use."""
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
-    def __repr__(self) -> str:
-        return "NOT_GIVEN"
-
-    def __bool__(self) -> bool:
-        return False
-
-
-NOT_GIVEN = NotGiven()
-"""Singleton meaning "this value was not provided"."""
-
-
-_T = TypeVar("_T")
-
-
-def is_given(value: _T | NotGiven) -> TypeGuard[_T]:
-    """Check whether a value was explicitly provided.
-
-    Typically used when checking whether a ``NotGiven``-valued field or
-    parameter was set::
-
-        if is_given(context.tools):
-            ...
-
-    Also acts as a type guard: inside a true branch, the value is narrowed
-    to exclude ``NotGiven`` (e.g. ``ToolsSchema | NotGiven`` becomes
-    ``ToolsSchema``).
-
-    Args:
-        value: The value to check.
-
-    Returns:
-        ``True`` if *value* is anything other than ``NOT_GIVEN``.
-    """
-    return not isinstance(value, NotGiven)
 
 
 @dataclass

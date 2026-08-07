@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
+from pipecat.services.settings import NOT_GIVEN, NotGiven, STTSettings, assert_given
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -132,13 +132,13 @@ class DeepgramFluxSTTSettings(STTSettings):
             mid-stream via ``STTUpdateSettingsFrame``.
     """
 
-    eager_eot_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    eot_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    eot_timeout_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    keyterm: list | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    min_confidence: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    numerals: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language_hints: list[Language] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    eager_eot_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    eot_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    eot_timeout_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterm: list | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    min_confidence: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    numerals: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_hints: list[Language] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class DeepgramFluxSTTBase(STTService):
@@ -312,7 +312,7 @@ class DeepgramFluxSTTBase(STTService):
 
         # Add language_hint parameters (only valid on flux-general-multi)
         hints = self._settings.language_hints
-        if hints and not isinstance(hints, _NotGiven):
+        if hints and not isinstance(hints, NotGiven):
             if self._settings.model == self._MULTILINGUAL_MODEL:
                 for code in _prepare_language_hints(hints):
                     params.append(urlencode({"language_hint": code}))
@@ -481,7 +481,7 @@ class DeepgramFluxSTTBase(STTService):
                 hints = self._settings.language_hints
                 # Empty list clears hints; NOT_GIVEN/None also treated as clear
                 # since we only reach this branch when the user set the field.
-                if hints is None or isinstance(hints, _NotGiven):
+                if hints is None or isinstance(hints, NotGiven):
                     message["language_hints"] = []
                 else:
                     message["language_hints"] = _prepare_language_hints(hints)

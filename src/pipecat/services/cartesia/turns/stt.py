@@ -30,7 +30,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.services.cartesia.stt import _prepare_keyterms
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, NotGiven, STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -53,7 +53,7 @@ class CartesiaTurnsSTTSettings(STTSettings):
             https://docs.cartesia.ai/use-the-api/stt/keyterms.
     """
 
-    keyterm: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterm: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class CartesiaTurnsSTTService(WebsocketSTTService):

@@ -26,7 +26,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMStandardMessage,
     NotGiven,
 )
-from pipecat.processors.aggregators.llm_context import is_given as is_llm_context_given
+from pipecat.utils.types import is_given as is_pipecat_given
 
 _T = TypeVar("_T")
 
@@ -41,7 +41,7 @@ def _openai_from_llm_context_tool_choice(
     sentinel needs translating: LLMContext has its own, and the SDK recognizes
     only its own.
     """
-    if not is_llm_context_given(tool_choice):
+    if not is_pipecat_given(tool_choice):
         return OPENAI_NOT_GIVEN
     return cast("ChatCompletionToolChoiceOptionParam", tool_choice)
 

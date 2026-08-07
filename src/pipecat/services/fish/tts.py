@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.services.settings import NOT_GIVEN, NotGiven, TTSSettings, assert_given
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated
@@ -57,12 +57,12 @@ class FishAudioTTSSettings(TTSSettings):
         prosody_volume: Volume adjustment in dB (-20 to 20). Defaults to 0.
     """
 
-    latency: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    normalize: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    top_p: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    prosody_speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    prosody_volume: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    latency: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    normalize: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    top_p: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prosody_speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prosody_volume: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     @classmethod
     def from_mapping(cls, settings: Mapping[str, Any]) -> Self:

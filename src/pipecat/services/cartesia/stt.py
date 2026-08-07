@@ -30,7 +30,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
+from pipecat.services.settings import NOT_GIVEN, NotGiven, STTSettings, is_given
 from pipecat.services.stt_latency import CARTESIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
@@ -46,7 +46,7 @@ _MAX_KEYTERM_CHARS = 1200
 _KEYTERM_MODEL_PREFIX = "ink-2"
 
 
-def _prepare_keyterms(keyterms: list[str] | None | _NotGiven) -> list[str]:
+def _prepare_keyterms(keyterms: list[str] | None | NotGiven) -> list[str]:
     """Normalize keyterms to the limits Cartesia accepts on a connection.
 
     Drops blank entries and truncates to :data:`_MAX_KEYTERMS` terms totaling
@@ -94,7 +94,7 @@ class CartesiaSTTSettings(STTSettings):
             https://docs.cartesia.ai/use-the-api/stt/keyterms.
     """
 
-    keyterm: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterm: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @deprecated(

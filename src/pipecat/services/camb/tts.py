@@ -31,7 +31,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.services.settings import NOT_GIVEN, NotGiven, TTSSettings, assert_given
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
@@ -149,8 +149,8 @@ class CambTTSSettings(TTSSettings):
             Ignored for other models. Max 1000 characters.
     """
 
-    voice: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    user_instructions: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    voice: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    user_instructions: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class CambTTSService(TTSService):

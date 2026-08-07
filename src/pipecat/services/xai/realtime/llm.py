@@ -57,7 +57,7 @@ from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
-    _NotGiven,
+    NotGiven,
     assert_given,
     is_given,
 )
@@ -94,7 +94,7 @@ class GrokRealtimeLLMSettings(LLMSettings):
             top-level ``system_instruction`` field.
     """
 
-    session_properties: events.SessionProperties | _NotGiven = field(
+    session_properties: events.SessionProperties | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 

@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.image_service import ImageGenService
-from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven, assert_given
+from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, NotGiven, assert_given
 from pipecat.utils.deprecation import deprecated
 
 try:
@@ -49,8 +49,8 @@ class GoogleImageGenSettings(ImageGenSettings):
         negative_prompt: Text describing what not to include in generated images.
     """
 
-    number_of_images: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    negative_prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    number_of_images: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    negative_prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GoogleImageGenService(ImageGenService):

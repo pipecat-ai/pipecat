@@ -30,7 +30,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
+from pipecat.services.settings import NOT_GIVEN, NotGiven, STTSettings, assert_given
 from pipecat.services.stt_latency import NVIDIA_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -120,15 +120,15 @@ class _NvidiaBaseSTTSettings(STTSettings):
         diarization_max_speakers: Maximum number of speakers for diarization.
     """
 
-    profanity_filter: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    automatic_punctuation: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    verbatim_transcripts: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    boosted_lm_words: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    boosted_lm_score: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    max_alternatives: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    word_time_offsets: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaker_diarization: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    diarization_max_speakers: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    profanity_filter: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    automatic_punctuation: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    verbatim_transcripts: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    boosted_lm_words: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    boosted_lm_score: float | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_alternatives: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    word_time_offsets: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_diarization: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    diarization_max_speakers: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -139,7 +139,7 @@ class NvidiaSTTSettings(_NvidiaBaseSTTSettings):
         interim_results: Whether to return interim (partial) results.
     """
 
-    interim_results: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass

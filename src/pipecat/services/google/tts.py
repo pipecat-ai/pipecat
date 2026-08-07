@@ -39,8 +39,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.settings import (
     NOT_GIVEN,
+    NotGiven,
     TTSSettings,
-    _NotGiven,
     assert_given,
     is_given,
 )
@@ -505,18 +505,18 @@ class GoogleHttpTTSSettings(TTSSettings):
         google_style: Google-specific voice style.
     """
 
-    pitch: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    rate: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaking_rate: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    volume: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    emphasis: Literal["strong", "moderate", "reduced", "none"] | None | _NotGiven = field(
+    pitch: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    rate: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaking_rate: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    volume: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    emphasis: Literal["strong", "moderate", "reduced", "none"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    gender: Literal["male", "female", "neutral"] | None | _NotGiven = field(
+    gender: Literal["male", "female", "neutral"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
     google_style: (
-        Literal["apologetic", "calm", "empathetic", "firm", "lively"] | None | _NotGiven
+        Literal["apologetic", "calm", "empathetic", "firm", "lively"] | None | NotGiven
     ) = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -528,7 +528,7 @@ class GoogleTTSSettings(TTSSettings):
         speaking_rate: The speaking rate, in the range [0.25, 2.0].
     """
 
-    speaking_rate: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaking_rate: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 #: *Deprecated since 0.0.105:* Use ``GoogleTTSService.Settings`` instead.
@@ -545,9 +545,9 @@ class GeminiTTSSettings(TTSSettings):
         speaker_configs: List of speaker configurations for multi-speaker mode.
     """
 
-    prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    multi_speaker: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaker_configs: list[dict[str, Any]] | None | _NotGiven = field(
+    prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    multi_speaker: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_configs: list[dict[str, Any]] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 

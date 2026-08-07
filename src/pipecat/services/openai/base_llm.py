@@ -16,7 +16,9 @@ from typing import Any
 import httpx
 from loguru import logger
 from openai import (
-    NOT_GIVEN,
+    NOT_GIVEN as OPENAI_NOT_GIVEN,
+)
+from openai import (
     APITimeoutError,
     AsyncOpenAI,
     AsyncStream,
@@ -38,8 +40,7 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
-from pipecat.services.settings import LLMSettings, _NotGiven, assert_given
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, NotGiven, assert_given
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_llm
 
@@ -52,23 +53,21 @@ class OpenAILLMSettings(LLMSettings):
         max_completion_tokens: Maximum completion tokens to generate.
     """
 
-    # Override inherited LLMSettings fields to also accept openai's NotGiven
-    # sentinel. The service stores openai's NOT_GIVEN in these fields so they
-    # can be passed through unchanged to the AsyncOpenAI client.
-    frequency_penalty: float | None | _NotGiven | OpenAINotGiven = field(
-        default_factory=lambda: _NOT_GIVEN
+    # Override inherited LLMSettings fields to also accept the OpenAI SDK's
+    # sentinel, which the service stores here so these fields can be passed
+    # through unchanged to the AsyncOpenAI client.
+    frequency_penalty: float | None | NotGiven | OpenAINotGiven = field(
+        default_factory=lambda: NOT_GIVEN
     )
-    presence_penalty: float | None | _NotGiven | OpenAINotGiven = field(
-        default_factory=lambda: _NOT_GIVEN
+    presence_penalty: float | None | NotGiven | OpenAINotGiven = field(
+        default_factory=lambda: NOT_GIVEN
     )
-    seed: int | None | _NotGiven | OpenAINotGiven = field(default_factory=lambda: _NOT_GIVEN)
-    temperature: float | None | _NotGiven | OpenAINotGiven = field(
-        default_factory=lambda: _NOT_GIVEN
-    )
-    top_p: float | None | _NotGiven | OpenAINotGiven = field(default_factory=lambda: _NOT_GIVEN)
-    max_tokens: int | None | _NotGiven | OpenAINotGiven = field(default_factory=lambda: _NOT_GIVEN)
-    max_completion_tokens: int | None | _NotGiven | OpenAINotGiven = field(
-        default_factory=lambda: _NOT_GIVEN
+    seed: int | None | NotGiven | OpenAINotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | None | NotGiven | OpenAINotGiven = field(default_factory=lambda: NOT_GIVEN)
+    top_p: float | None | NotGiven | OpenAINotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_tokens: int | None | NotGiven | OpenAINotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_completion_tokens: int | None | NotGiven | OpenAINotGiven = field(
+        default_factory=lambda: NOT_GIVEN
     )
 
 
@@ -118,17 +117,21 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             extra: Additional model-specific parameters.
         """
 
-        frequency_penalty: float | None = Field(default_factory=lambda: NOT_GIVEN, ge=-2.0, le=2.0)
-        presence_penalty: float | None = Field(default_factory=lambda: NOT_GIVEN, ge=-2.0, le=2.0)
-        seed: int | None = Field(default_factory=lambda: NOT_GIVEN, ge=0)
-        temperature: float | None = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=2.0)
+        frequency_penalty: float | None = Field(
+            default_factory=lambda: OPENAI_NOT_GIVEN, ge=-2.0, le=2.0
+        )
+        presence_penalty: float | None = Field(
+            default_factory=lambda: OPENAI_NOT_GIVEN, ge=-2.0, le=2.0
+        )
+        seed: int | None = Field(default_factory=lambda: OPENAI_NOT_GIVEN, ge=0)
+        temperature: float | None = Field(default_factory=lambda: OPENAI_NOT_GIVEN, ge=0.0, le=2.0)
         # Note: top_k is currently not supported by the OpenAI client library,
         # so top_k is ignored right now.
         top_k: int | None = Field(default=None, ge=0)
-        top_p: float | None = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
-        max_tokens: int | None = Field(default_factory=lambda: NOT_GIVEN, ge=1)
-        max_completion_tokens: int | None = Field(default_factory=lambda: NOT_GIVEN, ge=1)
-        service_tier: str | None = Field(default_factory=lambda: NOT_GIVEN)
+        top_p: float | None = Field(default_factory=lambda: OPENAI_NOT_GIVEN, ge=0.0, le=1.0)
+        max_tokens: int | None = Field(default_factory=lambda: OPENAI_NOT_GIVEN, ge=1)
+        max_completion_tokens: int | None = Field(default_factory=lambda: OPENAI_NOT_GIVEN, ge=1)
+        service_tier: str | None = Field(default_factory=lambda: OPENAI_NOT_GIVEN)
         extra: dict[str, Any] | None = Field(default_factory=dict)
 
     def __init__(
@@ -178,14 +181,14 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         default_settings = self.Settings(
             model="gpt-4.1",
             system_instruction=None,
-            frequency_penalty=NOT_GIVEN,
-            presence_penalty=NOT_GIVEN,
-            seed=NOT_GIVEN,
-            temperature=NOT_GIVEN,
-            top_p=NOT_GIVEN,
+            frequency_penalty=OPENAI_NOT_GIVEN,
+            presence_penalty=OPENAI_NOT_GIVEN,
+            seed=OPENAI_NOT_GIVEN,
+            temperature=OPENAI_NOT_GIVEN,
+            top_p=OPENAI_NOT_GIVEN,
             top_k=None,
-            max_tokens=NOT_GIVEN,
-            max_completion_tokens=NOT_GIVEN,
+            max_tokens=OPENAI_NOT_GIVEN,
+            max_completion_tokens=OPENAI_NOT_GIVEN,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
             extra={},
@@ -352,7 +355,9 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             "top_p": self._settings.top_p,
             "max_tokens": self._settings.max_tokens,
             "max_completion_tokens": self._settings.max_completion_tokens,
-            "service_tier": self._service_tier if self._service_tier is not None else NOT_GIVEN,
+            "service_tier": self._service_tier
+            if self._service_tier is not None
+            else OPENAI_NOT_GIVEN,
         }
 
         # Messages, tools, tool_choice

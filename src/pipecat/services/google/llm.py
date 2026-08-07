@@ -44,7 +44,7 @@ from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
-    _NotGiven,
+    NotGiven,
     assert_given,
     is_given,
 )
@@ -116,10 +116,10 @@ class GoogleLLMSettings(LLMSettings):
             left unspecified keep the Gemini API defaults.
     """
 
-    thinking: Union["GoogleLLMService.ThinkingConfig", None, _NotGiven] = field(
+    thinking: Union["GoogleLLMService.ThinkingConfig", None, NotGiven] = field(
         default_factory=lambda: NOT_GIVEN
     )
-    safety_settings: list[SafetySetting] | None | _NotGiven = field(
+    safety_settings: list[SafetySetting] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 

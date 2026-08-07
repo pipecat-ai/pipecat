@@ -40,7 +40,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.services.settings import NOT_GIVEN, NotGiven, TTSSettings, assert_given
 from pipecat.services.tts_service import (
     TextAggregationMode,
     TTSService,
@@ -225,12 +225,12 @@ class ElevenLabsTTSSettings(TTSSettings):
         apply_text_normalization: Text normalization mode ("auto", "on", "off").
     """
 
-    stability: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    similarity_boost: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    style: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    use_speaker_boost: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    apply_text_normalization: Literal["auto", "on", "off"] | None | _NotGiven = field(
+    stability: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    similarity_boost: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    style: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    use_speaker_boost: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    apply_text_normalization: Literal["auto", "on", "off"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -258,13 +258,13 @@ class ElevenLabsHttpTTSSettings(TTSSettings):
         apply_text_normalization: Text normalization mode ("auto", "on", "off").
     """
 
-    optimize_streaming_latency: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    stability: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    similarity_boost: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    style: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    use_speaker_boost: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    apply_text_normalization: Literal["auto", "on", "off"] | None | _NotGiven = field(
+    optimize_streaming_latency: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    stability: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    similarity_boost: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    style: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    use_speaker_boost: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    apply_text_normalization: Literal["auto", "on", "off"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 

@@ -36,7 +36,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
+from pipecat.services.settings import NOT_GIVEN, NotGiven, STTSettings, is_given
 from pipecat.services.stt_latency import ELEVENLABS_REALTIME_TTFS_P99, ELEVENLABS_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -181,8 +181,8 @@ class ElevenLabsSTTSettings(STTSettings):
         keyterms: List of key terms or phrases to bias transcription towards.
     """
 
-    tag_audio_events: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    keyterms: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    tag_audio_events: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterms: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -200,12 +200,12 @@ class ElevenLabsRealtimeSTTSettings(STTSettings):
         filter_background_audio: Whether ElevenLabs filters out background audio before transcription.
     """
 
-    keyterms: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    vad_silence_threshold_secs: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    vad_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    min_speech_duration_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    min_silence_duration_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    filter_background_audio: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterms: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad_silence_threshold_secs: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    min_speech_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    min_silence_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    filter_background_audio: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class ElevenLabsSTTService(SegmentedSTTService):

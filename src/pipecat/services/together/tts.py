@@ -30,7 +30,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, NotGiven, TTSSettings
 from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -49,7 +49,7 @@ class TogetherTTSSettings(TTSSettings):
         max_partial_length: Maximum partial text length for streaming.
     """
 
-    max_partial_length: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_partial_length: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class TogetherTTSService(WebsocketTTSService):
