@@ -10,6 +10,7 @@ This module provides Google Gemini integration for the Pipecat framework,
 including LLM services, context management, and message aggregation.
 """
 
+import asyncio
 import io
 import os
 import uuid
@@ -201,6 +202,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         tools: list[dict[str, Any]] | None = None,
         tool_config: dict[str, Any] | None = None,
         http_options: HttpOptions | None = None,
+        stream_idle_timeout_secs: float | None = 20.0,
         **kwargs,
     ):
         """Initialize the Google LLM service.
@@ -231,6 +233,14 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             tools: List of available tools/functions.
             tool_config: Configuration for tool usage.
             http_options: HTTP options for the client.
+            stream_idle_timeout_secs: How long to wait for the next chunk of a streamed
+                response before giving up on it. Bounds the wait when the API accepts a
+                request and then stops producing without closing the stream. This is a
+                gap between chunks, not a limit on how long a response may take overall.
+                The first chunk is the slowest, since its wait spans the whole round trip
+                including any thinking the model does before it emits anything; raise this
+                for models configured to think at length. Set to ``None`` to wait
+                indefinitely.
             **kwargs: Additional arguments passed to parent class.
         """
         # 1. Initialize default_settings with hardcoded defaults
@@ -281,6 +291,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         self._http_options = update_google_client_http_options(http_options)
         self._tools = tools
         self._tool_config = tool_config
+        self._stream_idle_timeout_secs = stream_idle_timeout_secs
 
         # Initialize the API client. Subclasses can override this if needed.
         self.create_client()
@@ -457,6 +468,40 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             config=generation_config,
         )
 
+    async def _iter_stream(
+        self, response: AsyncIterator[GenerateContentResponse]
+    ) -> AsyncIterator[GenerateContentResponse]:
+        """Yield streamed chunks, giving up if the stream stalls between them.
+
+        A stream that stops producing without closing would otherwise leave the
+        response open indefinitely, since the API client applies no timeout of its
+        own. The timeout covers the gap between chunks rather than the response as
+        a whole, so a slow but healthy stream is never cut short.
+
+        Args:
+            response: The streamed response to consume.
+
+        Yields:
+            Each chunk of the streamed response.
+
+        Raises:
+            TimeoutError: If the next chunk doesn't arrive in time.
+        """
+        if self._stream_idle_timeout_secs is None:
+            async for chunk in response:
+                yield chunk
+            return
+
+        chunks = response.__aiter__()
+        while True:
+            try:
+                chunk = await asyncio.wait_for(
+                    chunks.__anext__(), timeout=self._stream_idle_timeout_secs
+                )
+            except StopAsyncIteration:
+                return
+            yield chunk
+
     def _handle_finish_reason(self, finish_reason: FinishReason):
         """Log why Gemini stopped generating, when it stopped for a notable reason.
 
@@ -488,7 +533,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             response = await self._stream_content(context)
 
             function_calls = []
-            async for chunk in response:
+            async for chunk in self._iter_stream(response):
                 # Stop TTFB metrics after the first chunk
                 await self.stop_ttfb_metrics()
                 # Gemini may send usage_metadata in multiple chunks with varying behavior:
@@ -639,8 +684,9 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                         self._handle_finish_reason(candidate.finish_reason)
 
             await self.run_function_calls(function_calls)
-        except DeadlineExceeded:
+        except (TimeoutError, DeadlineExceeded) as e:
             await self._call_event_handler("on_completion_timeout")
+            await self.push_error(error_msg="LLM completion timeout", exception=e)
         except LLMContextConversionError as e:
             await self.push_error(error_msg=str(e), exception=e)
         except Exception as e:
