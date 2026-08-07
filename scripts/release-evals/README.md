@@ -25,11 +25,23 @@ The harness runs the judge, the user's voice, and the bot-speech transcriber
 
 - **A judge LLM.** Scenarios judge with [Ollama](https://ollama.com) by default
   (`http://localhost:11434`). Install Ollama, start it, and pull the model the
-  scenarios use: `ollama pull gemma2:9b`. We use `gemma2:9b` because smaller
-  judges (e.g. `llama3:latest`, `qwen2.5:7b`) too often reject a correct spoken
-  answer the transcriber mangled into a homophone — "four" heard as "for" — and
-  it still fits a 16GB GPU alongside the audio models. (A scenario's `judge:`
-  block can point at OpenAI instead — set `service: openai` and `$OPENAI_API_KEY`.)
+  scenarios use: `ollama pull gemma4:12b`. The judge is called once per `eval:`
+  expectation and every concurrent run shares one resident copy of it, so judge
+  latency sets the pace of the whole suite — a judge has to be accurate *and*
+  fast, and has to return the same verdict on the same input. `gemma4:12b`
+  answers in under a second and is stable across repeats. Smaller judges keep up
+  on speed but misread short interim replies: a bot that has so far only said
+  "Let me check on that." should score `continue` (wait for the rest), and
+  scoring it `yes` passes a turn in which the bot said nothing. Older judges also
+  reject correct spoken answers the transcriber mangled into a homophone — "four"
+  heard as "for".
+
+  The judge config passes `reasoning_effort: none` through its `extra:` block.
+  `gemma4` is thinking-capable, and only the JSON verdict is ever read, so
+  reasoning costs several times the latency per call — enough to stall a `-c 4`
+  run — while eating into the token budget the verdict itself needs. Leaving it
+  on is both slower and less accurate. (A scenario's `judge:` block can point at
+  OpenAI instead — set `service: openai` and `$OPENAI_API_KEY`.)
 - **Local audio models** (audio-mode scenarios only). The user's voice is
   synthesized with Kokoro TTS and the bot's speech is transcribed with
   [Moonshine](https://github.com/moonshine-ai/moonshine) (Whisper is available
@@ -91,13 +103,15 @@ can be just a `suite:` list with the rest supplied as flags.
 ### Concurrency and GPU
 
 Only the judge LLM runs on the GPU. Ollama keeps one copy of the judge model
-resident (`gemma2:9b` is ~7.4GB), so GPU use is roughly constant (~8.5GB peak)
-regardless of `-c/--concurrency`. The user's voice (Kokoro) and the bot-speech
-transcriber (Moonshine by default) both run on the CPU via ONNX Runtime, so they
-cost no GPU memory; concurrency is bounded by CPU and RAM rather than GPU. A
-16GB GPU (e.g. an RTX A4000) runs the default setup comfortably; swapping in a
-much larger judge is what would pressure GPU memory, and an out-of-memory run
-surfaces as a harness error in that run's `.eval.log`.
+resident (`gemma4:12b` is ~8.9GB, much of it the large context window it loads),
+so GPU use is roughly constant (~9GB peak) regardless of `-c/--concurrency`. The
+user's voice (Kokoro) and the bot-speech transcriber (Moonshine by default) both
+run on the CPU via ONNX Runtime, so they cost no GPU memory; concurrency is
+bounded by CPU and RAM rather than GPU. A 16GB GPU (e.g. an RTX A4000) runs the
+default setup with room to spare; swapping in a much larger judge is what would
+pressure GPU memory, and an out-of-memory run surfaces as a harness error in
+that run's `.eval.log`. On a tighter card, `num_ctx` in the judge's `extra:`
+block trims the context — the judge never needs more than a few thousand tokens.
 
 Whisper is available as an alternative transcriber (`transcription: {service:
 whisper}`); it also defaults to the CPU (`device: cpu`, see `whisper_service`),

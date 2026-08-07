@@ -118,7 +118,7 @@ uv run pipecat eval run evals/starter_audio.yaml -v   # full audio round trip (l
 {% endif %}
 ```
 
-`eval:` criteria are scored by a judge LLM — a local Ollama by default (`ollama pull gemma2:9b`). The comments in the scenario files cover the schema and how to use an OpenAI judge instead.
+`eval:` criteria are scored by a judge LLM — a local Ollama by default (`ollama pull gemma4:12b`). The comments in the scenario files cover the schema and how to use an OpenAI judge instead.
 {% endif %}
 {% if generate_client %}
 

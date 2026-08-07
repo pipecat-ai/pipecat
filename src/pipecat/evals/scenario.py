@@ -148,6 +148,7 @@ import yaml
 from loguru import logger
 
 from pipecat.audio.dtmf.types import KeypadEntry
+from pipecat.evals.services import DEFAULT_OLLAMA_JUDGE_EXTRA, DEFAULT_OLLAMA_JUDGE_MODEL
 
 
 class _ScenarioLoader(yaml.SafeLoader):
@@ -345,8 +346,10 @@ class EvalScenario:
             Omitted or empty (the default): the harness sends nothing and the
             bot keeps the context it set up itself.
         judge: Judge LLM configuration dict with keys ``service``, ``model``,
-            and optional ``endpoint``. Defaults to
-            ``{"service": "ollama", "model": "gemma2:9b"}``.
+            optional ``endpoint``, and an optional ``extra`` mapping forwarded to
+            the model as top-level request parameters. Defaults to
+            ``{"service": "ollama", "model": "gemma4:12b",
+            "extra": {"reasoning_effort": "none"}}``.
         bot_audio: Whether the bot produces speech, derived from
             ``judge.modality``. False (text, the default): the bot skips TTS —
             the harness configures skip-TTS at connect, so even an on-connect
@@ -376,7 +379,7 @@ class EvalScenario:
     name: str
     turns: list[EvalTurn]
     context: list[dict] = field(default_factory=list)
-    judge: dict = field(default_factory=lambda: {"service": "ollama", "model": "gemma2:9b"})
+    judge: dict = field(default_factory=lambda: dict(_DEFAULT_JUDGE))
     bot_audio: bool = False
     transcriber: dict | None = None
     user_audio: dict | None = None
@@ -460,7 +463,11 @@ class EvalScenario:
         )
 
 
-_DEFAULT_JUDGE = {"service": "ollama", "model": "gemma2:9b"}
+_DEFAULT_JUDGE = {
+    "service": "ollama",
+    "model": DEFAULT_OLLAMA_JUDGE_MODEL,
+    "extra": dict(DEFAULT_OLLAMA_JUDGE_EXTRA),
+}
 
 
 def _parse_user_block(user: Any, path: Path) -> dict | None:
@@ -550,7 +557,7 @@ def describe_config(scenario: EvalScenario, *, color: bool = False) -> str:
         separated by ``|``, e.g.::
 
             user  -> modality: audio | speech: kokoro/af_heart
-            judge -> modality: audio | transcription: moonshine/small-streaming | eval: ollama/gemma2:9b
+            judge -> modality: audio | transcription: moonshine/small-streaming | eval: ollama/gemma4:12b
     """
 
     def paint(text: str, code: str) -> str:

@@ -27,7 +27,7 @@ Example::
 
     from pipecat.services.ollama.llm import OLLamaLLMService
 
-    service = OLLamaLLMService(settings=OLLamaLLMService.Settings(model="gemma2:9b"))
+    service = OLLamaLLMService(settings=OLLamaLLMService.Settings(model="gemma4:12b"))
     judge = EvalJudge(service)
     judge.add_user_message("What can you help me with?")
     judge.add_assistant_message("I can answer questions, set reminders, and look things up.")
@@ -140,8 +140,10 @@ class EvalJudge:
 
         Args:
             judge_config: Mapping with keys ``service`` (default ``"ollama"``),
-                ``model`` (default ``"gemma2:9b"``), and optional ``endpoint``
-                (service-specific default if omitted). ``None`` uses all defaults.
+                ``model`` (default ``"gemma4:12b"``), optional ``endpoint``
+                (service-specific default if omitted), and an optional ``extra``
+                mapping forwarded to the model as top-level request parameters.
+                ``None`` uses all defaults.
 
         Returns:
             A configured EvalJudge.
