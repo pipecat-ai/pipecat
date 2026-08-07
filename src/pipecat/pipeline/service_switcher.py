@@ -399,14 +399,17 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         the inactive services, so that the update the rest of the pipeline sees
         is the one travelling the active service's branch.
 
-        A non-fatal ``ErrorFrame`` that leaves the active service unable to do
-        its job is forwarded to the strategy via ``handle_error``, so
-        strategies like ``ServiceSwitcherStrategyFailover`` can perform
-        failover. A successful failover absorbs the error: the switcher went on
-        doing its job, so nothing upstream needs to hear about it. Without one,
-        the error is reported against the switcher instead, so that the rest of
-        the pipeline judges it by what the switcher has left rather than by the
-        one service that failed. Every other error travels upstream as usual.
+        Non-fatal ``ErrorFrame`` instances from the services being switched
+        between are answered for here rather than travelling on, since the rest
+        of the pipeline deals with the switcher and not with what it holds.
+        Errors from a service the switcher isn't using stop here outright. An
+        error that leaves the active service unable to do its job is forwarded
+        to the strategy via ``handle_error``, so strategies like
+        ``ServiceSwitcherStrategyFailover`` can perform failover; a successful
+        failover absorbs it, the switcher having gone on doing its job. Failing
+        that, it is reported against the switcher, so that the rest of the
+        pipeline judges it by what the switcher has left rather than by the one
+        service that failed. Every other error travels upstream as usual.
         """
         # Consume ServiceSwitcherRequestMetadataFrame once the targeted service
         # has handled it (i.e. the active service).
@@ -430,14 +433,19 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         # upstream from other processors.
         if isinstance(frame, ErrorFrame) and not frame.fatal:
             failed_service = frame.processor
-            if (
-                failed_service
-                and failed_service == self.strategy.active_service
-                and not failed_service.is_usable
-            ):
-                if await self.strategy.handle_error(frame):
-                    return
-                await self._report_service_failure(failed_service, frame)
+            active_service = self.strategy.active_service
+            # A service the switcher isn't using can't stop it doing its job,
+            # so its errors go no further. Watch a service's own
+            # ``on_usable_changed`` to hear about the ones held in reserve.
+            if failed_service in self._services and failed_service is not active_service:
+                return
+            # An error that costs us the active service is the switcher's to
+            # answer for: it either moves the work elsewhere or reports the
+            # failure as its own. The ones the service can carry on from
+            # travel upstream as they are.
+            if failed_service is active_service and not failed_service.is_usable:
+                if not await self.strategy.handle_error(frame):
+                    await self._report_service_failure(failed_service, frame)
                 return
 
         await super().push_frame(frame, direction)
