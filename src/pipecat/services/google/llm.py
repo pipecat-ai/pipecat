@@ -57,6 +57,7 @@ try:
     import google.genai as genai
     from google.api_core.exceptions import DeadlineExceeded
     from google.genai.types import (
+        FinishReason,
         GenerateContentConfig,
         GenerateContentResponse,
         HttpOptions,
@@ -456,6 +457,19 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             config=generation_config,
         )
 
+    def _handle_finish_reason(self, finish_reason: FinishReason):
+        """Log why Gemini stopped generating, when it stopped for a notable reason.
+
+        Anything other than a normal stop leaves the turn short of what the model
+        would otherwise have said: the response was withheld (safety, recitation,
+        prohibited content), a tool call was rejected, or the output hit the token
+        limit. Whatever text did arrive is still passed downstream.
+        """
+        if finish_reason in (FinishReason.STOP, FinishReason.FINISH_REASON_UNSPECIFIED):
+            return
+
+        logger.warning(f"{self}: response incomplete, the model stopped for {finish_reason.name}")
+
     @traced_llm
     async def _process_context(self, context: LLMContext):
         await self.push_frame(LLMFullResponseStartFrame())
@@ -620,6 +634,9 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                             "rendered_content": rendered_content,
                             "origins": origins,
                         }
+
+                    if candidate.finish_reason:
+                        self._handle_finish_reason(candidate.finish_reason)
 
             await self.run_function_calls(function_calls)
         except DeadlineExceeded:
