@@ -18,13 +18,13 @@ import os
 from typing import Any
 
 from pipecat.services.llm_service import LLMService
-from pipecat.services.settings import NOT_GIVEN, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, NotGiven
 from pipecat.services.stt_service import STTService
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 
 
-def _cfg_language(cfg: dict) -> Language | _NotGiven:
+def _cfg_language(cfg: dict) -> Language | NotGiven:
     """Coerce a config's optional ``language`` value to a :class:`Language`.
 
     ``Language`` is a ``StrEnum``, so both a code string (e.g. ``"zh"``) and a

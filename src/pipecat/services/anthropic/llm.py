@@ -39,13 +39,13 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
-from pipecat.services.settings import LLMSettings, _NotGiven, assert_given, is_given
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, NotGiven, assert_given, is_given
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
-    from anthropic import NOT_GIVEN, APITimeoutError, AsyncAnthropic
+    from anthropic import NOT_GIVEN as ANTHROPIC_NOT_GIVEN
+    from anthropic import APITimeoutError, AsyncAnthropic
     from anthropic import NotGiven as AnthropicNotGiven
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -81,17 +81,17 @@ class AnthropicLLMSettings(LLMSettings):
         thinking: Extended thinking configuration.
     """
 
-    enable_prompt_caching: bool | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
-    # Override inherited LLMSettings fields to also accept anthropic's NotGiven
-    # sentinel. The service stores anthropic's NOT_GIVEN in these fields so
-    # they can be passed through unchanged to the AsyncAnthropic client.
-    temperature: float | None | _NotGiven | AnthropicNotGiven = field(
-        default_factory=lambda: _NOT_GIVEN
+    enable_prompt_caching: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    # Override inherited LLMSettings fields to also accept the Anthropic SDK's
+    # sentinel, which the service stores here so these fields can be passed
+    # through unchanged to the AsyncAnthropic client.
+    temperature: float | None | NotGiven | AnthropicNotGiven = field(
+        default_factory=lambda: NOT_GIVEN
     )
-    top_k: int | None | _NotGiven | AnthropicNotGiven = field(default_factory=lambda: _NOT_GIVEN)
-    top_p: float | None | _NotGiven | AnthropicNotGiven = field(default_factory=lambda: _NOT_GIVEN)
-    thinking: Union["AnthropicLLMService.ThinkingConfig", _NotGiven, AnthropicNotGiven] = field(
-        default_factory=lambda: _NOT_GIVEN
+    top_k: int | None | NotGiven | AnthropicNotGiven = field(default_factory=lambda: NOT_GIVEN)
+    top_p: float | None | NotGiven | AnthropicNotGiven = field(default_factory=lambda: NOT_GIVEN)
+    thinking: Union["AnthropicLLMService.ThinkingConfig", NotGiven, AnthropicNotGiven] = field(
+        default_factory=lambda: NOT_GIVEN
     )
 
     @classmethod
@@ -153,16 +153,16 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         enable_prompt_caching: bool | None = None
         max_tokens: int | None = Field(default_factory=lambda: 4096, ge=1)
         temperature: float | None = Field(  # pyright: ignore[reportAssignmentType]
-            default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0
+            default_factory=lambda: ANTHROPIC_NOT_GIVEN, ge=0.0, le=1.0
         )
         top_k: int | None = Field(  # pyright: ignore[reportAssignmentType]
-            default_factory=lambda: NOT_GIVEN, ge=0
+            default_factory=lambda: ANTHROPIC_NOT_GIVEN, ge=0
         )
         top_p: float | None = Field(  # pyright: ignore[reportAssignmentType]
-            default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0
+            default_factory=lambda: ANTHROPIC_NOT_GIVEN, ge=0.0, le=1.0
         )
         thinking: Optional["AnthropicLLMService.ThinkingConfig"] = Field(  # pyright: ignore[reportAssignmentType]
-            default_factory=lambda: NOT_GIVEN
+            default_factory=lambda: ANTHROPIC_NOT_GIVEN
         )
         extra: dict[str, Any] | None = Field(default_factory=dict)
 
@@ -208,15 +208,15 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             system_instruction=None,
             max_tokens=4096,
             enable_prompt_caching=False,
-            temperature=NOT_GIVEN,
-            top_k=NOT_GIVEN,
-            top_p=NOT_GIVEN,
+            temperature=ANTHROPIC_NOT_GIVEN,
+            top_k=ANTHROPIC_NOT_GIVEN,
+            top_p=ANTHROPIC_NOT_GIVEN,
             frequency_penalty=None,
             presence_penalty=None,
             seed=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
-            thinking=NOT_GIVEN,
+            thinking=ANTHROPIC_NOT_GIVEN,
             extra={},
         )
 
@@ -305,7 +305,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             The LLM's response as a string, or None if no response is generated.
         """
         messages = []
-        system = NOT_GIVEN
+        system = ANTHROPIC_NOT_GIVEN
         tools = []
         effective_instruction = system_instruction or assert_given(
             self._settings.system_instruction

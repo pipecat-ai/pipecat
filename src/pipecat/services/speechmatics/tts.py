@@ -20,7 +20,7 @@ from pipecat.frames.frames import (
     Frame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.services.settings import NOT_GIVEN, NotGiven, TTSSettings, assert_given
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.network import exponential_backoff_time
@@ -44,8 +44,8 @@ class SpeechmaticsTTSSettings(TTSSettings):
 
     # Speechmatics requires a voice (the URL path includes it), so narrow
     # the inherited TTSSettings.voice field to disallow None.
-    voice: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    max_retries: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    voice: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_retries: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SpeechmaticsTTSService(TTSService):

@@ -27,7 +27,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
+from pipecat.services.settings import NOT_GIVEN, NotGiven, STTSettings, assert_given
 from pipecat.services.stt_latency import AZURE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -86,7 +86,7 @@ class AzureSTTSettings(STTSettings):
             <https://learn.microsoft.com/en-us/python/api/azure-cognitiveservices-speech/azure.cognitiveservices.speech.speechconfig#azure-cognitiveservices-speech-speechconfig-set-profanity>`_.
     """
 
-    profanity: AzureProfanity | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    profanity: AzureProfanity | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AzureSTTService(STTService):

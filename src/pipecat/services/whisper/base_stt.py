@@ -19,7 +19,7 @@ from openai import AsyncOpenAI
 from openai.types.audio import Transcription
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, NotGiven, STTSettings
 from pipecat.services.stt_latency import WHISPER_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -37,8 +37,8 @@ class BaseWhisperSTTSettings(STTSettings):
         temperature: Sampling temperature between 0 and 1.
     """
 
-    prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 def language_to_whisper_language(language: Language) -> str:

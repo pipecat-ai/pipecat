@@ -60,7 +60,7 @@ from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
-    _NotGiven,
+    NotGiven,
     assert_given,
     is_given,
 )
@@ -98,7 +98,7 @@ class InworldRealtimeLLMSettings(LLMSettings):
             ``system_instruction`` fields.
     """
 
-    session_properties: events.SessionProperties | _NotGiven = field(
+    session_properties: events.SessionProperties | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 

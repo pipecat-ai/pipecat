@@ -21,10 +21,10 @@ from pipecat.services.openai.realtime.llm import (
 from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
+    NotGiven,
     ServiceSettings,
     STTSettings,
     TTSSettings,
-    _NotGiven,
     is_given,
 )
 from pipecat.services.xai.realtime import events as grok_events
@@ -39,8 +39,8 @@ from pipecat.transcriptions.language import Language
 class TestNotGiven:
     def test_singleton(self):
         """NOT_GIVEN is a singleton — every reference is the same object."""
-        assert _NotGiven() is _NotGiven()
-        assert NOT_GIVEN is _NotGiven()
+        assert NotGiven() is NotGiven()
+        assert NOT_GIVEN is NotGiven()
 
     def test_repr(self):
         assert repr(NOT_GIVEN) == "NOT_GIVEN"

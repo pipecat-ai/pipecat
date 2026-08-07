@@ -37,7 +37,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given, is_given
+from pipecat.services.settings import NOT_GIVEN, NotGiven, STTSettings, assert_given, is_given
 from pipecat.services.stt_latency import GOOGLE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -469,20 +469,18 @@ class GoogleSTTSettings(STTSettings):
             https://cloud.google.com/speech-to-text/v2/docs/speech-to-text-supported-languages
     """
 
-    languages: list[Language] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language_codes: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    use_separate_recognition_per_channel: bool | _NotGiven = field(
-        default_factory=lambda: NOT_GIVEN
-    )
-    enable_automatic_punctuation: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enable_spoken_punctuation: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enable_spoken_emojis: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    profanity_filter: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enable_word_time_offsets: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enable_word_confidence: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enable_interim_results: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enable_voice_activity_events: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    adaptation: dict[str, Any] | cloud_speech.SpeechAdaptation | None | _NotGiven = field(
+    languages: list[Language] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_codes: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    use_separate_recognition_per_channel: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_automatic_punctuation: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_spoken_punctuation: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_spoken_emojis: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    profanity_filter: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_word_time_offsets: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_word_confidence: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_voice_activity_events: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    adaptation: dict[str, Any] | cloud_speech.SpeechAdaptation | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -875,7 +873,7 @@ class GoogleSTTService(STTService):
         enable_word_confidence: bool | None = None,
         enable_interim_results: bool | None = None,
         enable_voice_activity_events: bool | None = None,
-        adaptation: dict[str, Any] | cloud_speech.SpeechAdaptation | None | _NotGiven = NOT_GIVEN,
+        adaptation: dict[str, Any] | cloud_speech.SpeechAdaptation | None | NotGiven = NOT_GIVEN,
         location: str | None = None,
     ) -> None:
         """Update service options dynamically.

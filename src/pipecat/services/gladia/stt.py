@@ -42,7 +42,7 @@ from pipecat.services.gladia.config import (
     PreProcessingConfig,
     RealtimeProcessingConfig,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
+from pipecat.services.settings import NOT_GIVEN, NotGiven, STTSettings, assert_given
 from pipecat.services.stt_latency import GLADIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -184,20 +184,18 @@ class GladiaSTTSettings(STTSettings):
         enable_vad: Enable VAD to trigger end of utterance detection.
     """
 
-    language_config: LanguageConfig | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    custom_metadata: dict[str, Any] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    endpointing: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    maximum_duration_without_endpointing: int | None | _NotGiven = field(
+    language_config: LanguageConfig | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    custom_metadata: dict[str, Any] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpointing: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    maximum_duration_without_endpointing: int | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    pre_processing: PreProcessingConfig | None | _NotGiven = field(
+    pre_processing: PreProcessingConfig | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    realtime_processing: RealtimeProcessingConfig | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    realtime_processing: RealtimeProcessingConfig | None | _NotGiven = field(
-        default_factory=lambda: NOT_GIVEN
-    )
-    messages_config: MessagesConfig | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enable_vad: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    messages_config: MessagesConfig | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_vad: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GladiaSTTService(WebsocketSTTService):

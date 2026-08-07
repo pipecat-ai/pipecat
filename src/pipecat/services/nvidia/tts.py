@@ -43,7 +43,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStartedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, is_given
+from pipecat.services.settings import NOT_GIVEN, NotGiven, TTSSettings, is_given
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated
@@ -98,8 +98,8 @@ class NvidiaTTSSettings(TTSSettings):
             multiple sentences across a single streaming request.
     """
 
-    quality: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    synthesis_mode: NvidiaTTSSynthesisMode | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    quality: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    synthesis_mode: NvidiaTTSSynthesisMode | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass

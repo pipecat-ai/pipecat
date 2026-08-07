@@ -29,7 +29,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, NotGiven, TTSSettings
 from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
@@ -72,7 +72,7 @@ class NeuphonicTTSSettings(TTSSettings):
         speed: Speech speed multiplier. Defaults to 1.0.
     """
 
-    speed: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class NeuphonicTTSService(InterruptibleTTSService):
