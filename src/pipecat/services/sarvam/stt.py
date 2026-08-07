@@ -395,6 +395,7 @@ class SarvamSTTService(STTService):
         self._websocket_context = None
         self._socket_client = None
         self._receive_task = None
+        self._connect_task = None
 
         if default_settings.vad_signals:
             self._register_event_handler("on_speech_started")
@@ -550,11 +551,16 @@ class SarvamSTTService(STTService):
     async def start(self, frame: StartFrame):
         """Start the Sarvam STT service.
 
+        The connection is established in the background so the handshake is not
+        added to pipeline startup. Audio arriving before the socket is ready is
+        held by the base class and transcribed once it is.
+
         Args:
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        await self._connect()
+        self._clear_audio_ready()
+        self._connect_task = self.create_task(self._connect())
 
     async def stop(self, frame: EndFrame):
         """Stop the Sarvam STT service.
@@ -735,6 +741,8 @@ class SarvamSTTService(STTService):
 
             self._create_keepalive_task()
 
+            self._set_audio_ready()
+
             logger.info("Connected to Sarvam successfully")
 
         except ApiError as e:
@@ -748,7 +756,12 @@ class SarvamSTTService(STTService):
 
     async def _disconnect(self):
         """Disconnect from Sarvam WebSocket API using SDK."""
+        self._clear_audio_ready()
         await self._cancel_keepalive_task()
+
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
 
         if self._receive_task:
             await self.cancel_task(self._receive_task)
