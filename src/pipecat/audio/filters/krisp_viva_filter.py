@@ -205,6 +205,8 @@ class KrispVivaFilter(BaseAudioFilter):
             True when noise cancellation should activate, False while still in the
             TTS detection phase.
         """
+        assert self._tts_detector is not None
+
         frame_duration_s = self._frame_duration_ms / 1000.0
 
         for tts_frame in frames:
@@ -216,6 +218,8 @@ class KrispVivaFilter(BaseAudioFilter):
                 self._tts_last_detected_s = self._tts_elapsed_s
 
         if self._tts_ever_detected:
+            assert self._tts_last_detected_s is not None  # Recorded whenever the flag above is set
+
             if self._tts_elapsed_s - self._tts_last_detected_s >= _TTS_CLEARED_COOLDOWN:
                 logger.debug("TTS cleared, starting NC filter")
                 return True
@@ -298,7 +302,7 @@ class KrispVivaFilter(BaseAudioFilter):
             Noise-reduced audio data as bytes, or the original audio while in
             the TTS detection phase.
         """
-        if not self._filtering:
+        if not self._filtering or self._session is None or self._samples_per_frame is None:
             return audio
 
         try:

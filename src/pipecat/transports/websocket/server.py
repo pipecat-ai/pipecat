@@ -16,12 +16,14 @@ import io
 import time
 import wave
 from collections.abc import Awaitable, Callable
+from typing import cast
 
 import websockets
 from loguru import logger
 from pydantic import BaseModel, Field
 from websockets.asyncio.server import serve as websocket_serve
 from websockets.protocol import State
+from websockets.typing import Origin
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -74,9 +76,18 @@ class SingleClientWebsocketServerCallbacks(BaseModel):
         on_websocket_ready: Called when the WebSocket server is ready to accept connections.
     """
 
-    on_client_connected: Callable[[websockets.WebSocketServerProtocol], Awaitable[None]]
-    on_client_disconnected: Callable[[websockets.WebSocketServerProtocol], Awaitable[None]]
-    on_session_timeout: Callable[[websockets.WebSocketServerProtocol], Awaitable[None]]
+    on_client_connected: Callable[
+        [websockets.WebSocketServerProtocol],  # pyright: ignore[reportAttributeAccessIssue]
+        Awaitable[None],
+    ]
+    on_client_disconnected: Callable[
+        [websockets.WebSocketServerProtocol],  # pyright: ignore[reportAttributeAccessIssue]
+        Awaitable[None],
+    ]
+    on_session_timeout: Callable[
+        [websockets.WebSocketServerProtocol],  # pyright: ignore[reportAttributeAccessIssue]
+        Awaitable[None],
+    ]
     on_websocket_ready: Callable[[], Awaitable[None]]
 
 
@@ -89,7 +100,7 @@ class SingleClientWebsocketServerInputTransport(BaseInputTransport):
 
     def __init__(
         self,
-        transport: BaseTransport,
+        transport: "SingleClientWebsocketServerTransport",
         host: str,
         port: int,
         params: SingleClientWebsocketServerParams,
@@ -114,7 +125,7 @@ class SingleClientWebsocketServerInputTransport(BaseInputTransport):
         self._params = params
         self._callbacks = callbacks
 
-        self._websocket: websockets.WebSocketServerProtocol | None = None
+        self._websocket: websockets.WebSocketServerProtocol | None = None  # pyright: ignore[reportAttributeAccessIssue]
 
         self._server_task = None
 
@@ -221,14 +232,15 @@ class SingleClientWebsocketServerInputTransport(BaseInputTransport):
     async def _server_task_handler(self):
         """Handle WebSocket server startup and client connections."""
         logger.info(f"Starting websocket server on {self._host}:{self._port}")
-        origins = self._params.allowed_origins or None
+        # websockets types each origin as its own Origin alias over str.
+        origins = cast("list[Origin] | None", self._params.allowed_origins or None)
         async with websocket_serve(
             self._client_handler, self._host, self._port, origins=origins
         ) as server:
             await self._callbacks.on_websocket_ready()
             await self._stop_server_event.wait()
 
-    async def _client_handler(self, websocket: websockets.WebSocketServerProtocol):
+    async def _client_handler(self, websocket: websockets.WebSocketServerProtocol):  # pyright: ignore[reportAttributeAccessIssue]
         """Handle individual client connections and message processing."""
         logger.info(f"New client connection from {websocket.remote_address}")
 
@@ -291,7 +303,9 @@ class SingleClientWebsocketServerInputTransport(BaseInputTransport):
         logger.info(f"Client {websocket.remote_address} disconnected")
 
     async def _monitor_websocket(
-        self, websocket: websockets.WebSocketServerProtocol, session_timeout: int
+        self,
+        websocket: websockets.WebSocketServerProtocol,  # pyright: ignore[reportAttributeAccessIssue]
+        session_timeout: int,
     ):
         """Monitor WebSocket connection for session timeout."""
         try:
@@ -311,7 +325,10 @@ class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
     """
 
     def __init__(
-        self, transport: BaseTransport, params: SingleClientWebsocketServerParams, **kwargs
+        self,
+        transport: "SingleClientWebsocketServerTransport",
+        params: SingleClientWebsocketServerParams,
+        **kwargs,
     ):
         """Initialize the WebSocket server output transport.
 
@@ -325,7 +342,7 @@ class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
         self._transport = transport
         self._params = params
 
-        self._websocket: websockets.WebSocketServerProtocol | None = None
+        self._websocket: websockets.WebSocketServerProtocol | None = None  # pyright: ignore[reportAttributeAccessIssue]
 
         # write_audio_frame() is called quickly, as soon as we get audio
         # (e.g. from the TTS), and since this is just a network connection we
@@ -338,7 +355,10 @@ class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
         # Whether we have seen a StartFrame already.
         self._initialized = False
 
-    async def set_client_connection(self, websocket: websockets.WebSocketServerProtocol | None):
+    async def set_client_connection(
+        self,
+        websocket: websockets.WebSocketServerProtocol | None,  # pyright: ignore[reportAttributeAccessIssue]
+    ):
         """Set the active client WebSocket connection.
 
         Args:
@@ -547,7 +567,7 @@ class SingleClientWebsocketServerTransport(BaseTransport):
         )
         self._input: SingleClientWebsocketServerInputTransport | None = None
         self._output: SingleClientWebsocketServerOutputTransport | None = None
-        self._websocket: websockets.WebSocketServerProtocol | None = None
+        self._websocket: websockets.WebSocketServerProtocol | None = None  # pyright: ignore[reportAttributeAccessIssue]
 
         # Register supported handlers. The user will only be able to register
         # these handlers.

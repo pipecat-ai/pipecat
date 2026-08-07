@@ -31,7 +31,7 @@ class SambaNovaLLMSettings(BaseOpenAILLMService.Settings):
     pass
 
 
-class SambaNovaLLMService(OpenAILLMService):  # type: ignore
+class SambaNovaLLMService(OpenAILLMService):
     """A service for interacting with SambaNova using the OpenAI-compatible interface.
 
     This service extends OpenAILLMService to connect to SambaNova's API endpoint while
@@ -52,7 +52,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         model: str | None = None,
         base_url: str = "https://api.sambanova.ai/v1",
         settings: Settings | None = None,
-        **kwargs: dict[Any, Any],
+        **kwargs,
     ) -> None:
         """Initialize SambaNova LLM service.
 
@@ -89,7 +89,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         self,
         api_key: str | None = None,
         base_url: str | None = None,
-        **kwargs: dict[Any, Any],
+        **kwargs,
     ) -> Any:
         """Create OpenAI-compatible client for SambaNova API endpoint.
 
@@ -135,7 +135,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
 
         return params
 
-    @traced_llm  # type: ignore
+    @traced_llm
     async def _process_context(self, context: LLMContext):
         """Process OpenAI LLM context and stream chat completion chunks.
 
@@ -169,14 +169,16 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
             async with chunk_stream:
                 async for chunk in chunk_stream:
                     if chunk.usage:
+                        prompt_tokens_details = getattr(chunk.usage, "prompt_tokens_details", None)
                         cached_tokens = (
-                            chunk.usage.prompt_tokens_details.cached_tokens
-                            if getattr(chunk.usage, "prompt_tokens_details", None)
-                            else None
+                            prompt_tokens_details.cached_tokens if prompt_tokens_details else None
+                        )
+                        completion_tokens_details = getattr(
+                            chunk.usage, "completion_tokens_details", None
                         )
                         reasoning_tokens = (
-                            chunk.usage.completion_tokens_details.reasoning_tokens
-                            if getattr(chunk.usage, "completion_tokens_details", None)
+                            completion_tokens_details.reasoning_tokens
+                            if completion_tokens_details
                             else None
                         )
                         token_usage = LLMTokenUsage(
@@ -218,7 +220,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
                             func_idx += 1
                         if tool_call.function and tool_call.function.name:
                             function_name += tool_call.function.name
-                            tool_call_id = tool_call.id  # type: ignore
+                            tool_call_id = tool_call.id
                         if tool_call.function and tool_call.function.arguments:
                             # Keep iterating through the response to collect all the argument fragments
                             arguments += tool_call.function.arguments
@@ -227,12 +229,10 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
 
                     # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
                     # we need to get LLMTextFrame for the transcript
-                    elif hasattr(chunk.choices[0].delta, "audio") and chunk.choices[
-                        0
-                    ].delta.audio.get("transcript"):
-                        await self.push_frame(
-                            LLMTextFrame(chunk.choices[0].delta.audio["transcript"])
-                        )
+                    elif (audio := getattr(chunk.choices[0].delta, "audio", None)) and audio.get(
+                        "transcript"
+                    ):
+                        await self.push_frame(LLMTextFrame(audio["transcript"]))
         finally:
             # Report even if the response is interrupted or cancelled mid-stream.
             if token_usage:
