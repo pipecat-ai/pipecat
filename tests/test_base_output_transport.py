@@ -261,3 +261,52 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
             self.assertIn(BotStoppedSpeakingFrame, pushed_types)
         finally:
             await transport.cancel(CancelFrame())
+
+
+class TestBaseOutputTransportCustomMediaSender(unittest.IsolatedAsyncioTestCase):
+    """The media sender class is resolved via ``type(self).MediaSender``, so a
+    transport subclass can provide its own sender implementation by shadowing
+    the inner class.
+    """
+
+    class _CustomOutputTransport(BaseOutputTransport):
+        class MediaSender(BaseOutputTransport.MediaSender):
+            pass
+
+    async def _make_transport(self, cls, **params_kwargs) -> BaseOutputTransport:
+        params = TransportParams(audio_out_enabled=True, **params_kwargs)
+        transport = cls(params)
+        transport.push_frame = AsyncMock()
+        transport.write_audio_frame = AsyncMock(return_value=True)
+
+        task_manager = TaskManager()
+        task_manager.setup(TaskManagerParams(loop=asyncio.get_event_loop()))
+        await transport.setup(
+            FrameProcessorSetup(
+                clock=SystemClock(),
+                task_manager=task_manager,
+                pipeline_worker=SimpleNamespace(app_resources=None),  # type: ignore[arg-type]
+            )
+        )
+        start_frame = StartFrame(audio_out_sample_rate=16000)
+        await transport.process_frame(start_frame, FrameDirection.DOWNSTREAM)
+        await transport.set_transport_ready(start_frame)
+        return transport
+
+    async def test_default_sender_is_base_media_sender(self):
+        transport = await self._make_transport(BaseOutputTransport)
+        try:
+            self.assertIs(type(transport._media_senders[None]), BaseOutputTransport.MediaSender)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_subclass_media_sender_is_used_for_default_and_destinations(self):
+        transport = await self._make_transport(
+            self._CustomOutputTransport, audio_out_destinations=["screenAudio"]
+        )
+        try:
+            custom_cls = self._CustomOutputTransport.MediaSender
+            self.assertIs(type(transport._media_senders[None]), custom_cls)
+            self.assertIs(type(transport._media_senders["screenAudio"]), custom_cls)
+        finally:
+            await transport.cancel(CancelFrame())

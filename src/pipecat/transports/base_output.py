@@ -171,8 +171,9 @@ class BaseOutputTransport(FrameProcessor):
         for destination in self._params.video_out_destinations:
             await self.register_video_destination(destination)
 
-        # Start default media sender.
-        self._media_senders[None] = BaseOutputTransport.MediaSender(
+        # Start default media sender. Resolve via type(self) so transport
+        # subclasses can provide a custom MediaSender implementation.
+        self._media_senders[None] = type(self).MediaSender(
             self,
             destination=None,
             sample_rate=self.sample_rate,
@@ -189,7 +190,7 @@ class BaseOutputTransport(FrameProcessor):
 
         # Start media senders.
         for destination in destinations:
-            self._media_senders[destination] = BaseOutputTransport.MediaSender(
+            self._media_senders[destination] = type(self).MediaSender(
                 self,
                 destination=destination,
                 sample_rate=self.sample_rate,
