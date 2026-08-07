@@ -6,7 +6,7 @@
 
 """Tests for the MoQ (Media over QUIC) transport.
 
-Three areas covered:
+Four areas covered:
 
 1. **``_downmix_s16_to_mono``** — the workaround for ``@moq/publish``'s
    browser-side encoder publishing stereo even when the source mic
@@ -18,7 +18,13 @@ Three areas covered:
    conversion). We hit a real ``certHash=None`` bug here once; locking
    the round-trip in stops a regression.
 
-3. **``MOQTransportClient.__init__`` characterization** — the publish
+3. **Mode + namespace resolution in ``runner/moq.py``** — which of serve
+   and client mode a given set of flags selects, and the namespace each
+   gets. Client mode meets the browser on a shared relay, so the
+   namespace carries isolation duty that serve mode's private socket
+   handles for free.
+
+4. **``MOQTransportClient.__init__`` characterization** — the publish
    broadcast and transcript track must be created synchronously,
    because :class:`MOQOutputTransport.start` opens the audio track
    immediately without waiting for ``_run()``'s async bring-up. If a
@@ -27,6 +33,7 @@ Three areas covered:
    self-review fixed).
 """
 
+import argparse
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -37,10 +44,13 @@ import pytest
 # doesn't pull optional extras.
 pytest.importorskip("moq")
 
+import moq  # noqa: E402
+
 from pipecat.transports.moq.transport import (  # noqa: E402
     MOQParams,
     MOQTransport,
     _downmix_s16_to_mono,
+    _is_peer_gone,
 )
 
 # ----------------------------------------------------------------------
@@ -185,11 +195,34 @@ def _self_signed_pem(tmp_path):
 # The runner module pulls in FastAPI/uvicorn (the `runner` extra). Skip
 # the cert-hash helper tests when that's not installed; the helpers are
 # defined in run.py, so import = require runner extra.
+class TestIsPeerGone(unittest.TestCase):
+    """``_is_peer_gone`` decides whether a per-peer subscription error is
+    the normal end of a call (peer closed its session, relay tore down
+    its broadcast) or a real failure that must propagate."""
+
+    def test_remote_error_code_is_peer_gone(self):
+        """The peer hanging up surfaces as ``remote error: code=N`` on the
+        audio/transcript subscription being consumed."""
+        self.assertTrue(_is_peer_gone(moq.MoqError.Audio("moq: remote error: code=4")))
+
+    def test_normal_close_is_peer_gone(self):
+        """Session-level normal close counts as the peer leaving too."""
+        self.assertTrue(_is_peer_gone(moq.MoqError.Protocol("webtransport error: closed")))
+
+    def test_other_moq_errors_propagate(self):
+        self.assertFalse(_is_peer_gone(moq.MoqError.Mux("json: cancelled")))
+
+    def test_non_moq_errors_propagate(self):
+        self.assertFalse(_is_peer_gone(RuntimeError("remote error: code=4")))
+
+
 fastapi = pytest.importorskip("fastapi")
 from pipecat.runner.moq import (  # noqa: E402
     _build_moq_client_config,
     _cert_hash_from_pem,
     _hex_to_b64,
+    _new_session_namespace,
+    _validate_moq_args,
 )
 
 
@@ -262,8 +295,8 @@ class TestCertHashHelpers(unittest.TestCase):
         args.moq_path = "/"
         args.moq_serve = True
         args.moq_tls_cert = None  # serve-mode: no PEM on disk
-        args.moq_client_id = "client0"
-        args.moq_bot_id = "bot0"
+        args.moq_client_id = "request"
+        args.moq_bot_id = "response"
 
         digest = bytes(range(32))
         cfg = _build_moq_client_config(args, namespace="pipecat", cert_fingerprints=[digest.hex()])
@@ -295,8 +328,8 @@ class TestCertHashHelpers(unittest.TestCase):
             args.moq_path = "/moq"
             args.moq_serve = False
             args.moq_tls_cert = pem_path
-            args.moq_client_id = "client0"
-            args.moq_bot_id = "bot0"
+            args.moq_client_id = "request"
+            args.moq_bot_id = "response"
 
             cfg = _build_moq_client_config(args, namespace="pipecat", cert_fingerprints=[])
             self.assertEqual(cfg["certHash"], expected)
@@ -312,11 +345,108 @@ class TestCertHashHelpers(unittest.TestCase):
         args.moq_path = "/moq"
         args.moq_serve = False
         args.moq_tls_cert = None
-        args.moq_client_id = "client0"
-        args.moq_bot_id = "bot0"
+        args.moq_client_id = "request"
+        args.moq_bot_id = "response"
 
         cfg = _build_moq_client_config(args, namespace="pipecat", cert_fingerprints=None)
         self.assertIsNone(cfg["certHash"])
+
+
+# ----------------------------------------------------------------------
+# Mode + namespace resolution
+# ----------------------------------------------------------------------
+
+
+def _moq_args(**overrides) -> argparse.Namespace:
+    """Build an args namespace the way the parser leaves it before validation."""
+    defaults = dict(
+        moq_serve=None,
+        moq_connect=None,
+        moq_bind=None,
+        moq_namespace=None,
+        moq_tls_cert=None,
+        moq_tls_key=None,
+        moq_tls_generate=None,
+        moq_tls_insecure=False,
+        moq_bot_id="response",
+        moq_client_id="request",
+    )
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
+
+
+class TestMoqModeResolution(unittest.TestCase):
+    """Naming a relay with ``--moq-connect`` is the only thing that selects
+    client mode; there's no default relay. Server mode stays the default for
+    a bare ``-t moq`` so local dev keeps working offline."""
+
+    def test_no_flags_defaults_to_serve(self):
+        args = _moq_args()
+        self.assertTrue(_validate_moq_args(args))
+        self.assertTrue(args.moq_serve)
+
+    def test_connect_url_selects_client_mode(self):
+        """Passing a relay is what opts into client mode."""
+        args = _moq_args(moq_connect="https://relay.example.com:4443/moq")
+        self.assertTrue(_validate_moq_args(args))
+        self.assertFalse(args.moq_serve)
+        self.assertEqual(args.moq_host, "relay.example.com")
+        self.assertEqual(args.moq_port, 4443)
+        self.assertEqual(args.moq_path, "/moq")
+
+    def test_connect_url_may_omit_the_port(self):
+        """A relay on standard HTTPS needn't spell out :443."""
+        args = _moq_args(moq_connect="https://cdn.moq.dev/anon")
+        self.assertTrue(_validate_moq_args(args))
+        self.assertFalse(args.moq_serve)
+        self.assertEqual(args.moq_host, "cdn.moq.dev")
+        self.assertEqual(args.moq_port, 443)
+        self.assertEqual(args.moq_path, "/anon")
+
+    def test_explicit_serve_wins_over_connect(self):
+        """--moq-serve is explicit, so it isn't overridden by --moq-connect."""
+        args = _moq_args(moq_serve=True, moq_connect="https://relay.example.com:4443/moq")
+        self.assertTrue(_validate_moq_args(args))
+        self.assertTrue(args.moq_serve)
+
+
+class TestMoqNamespaceResolution(unittest.TestCase):
+    """In client mode the namespace is the only thing separating one
+    session from another on a shared relay — and on an anonymous relay,
+    the only thing gating access. So it must be per-session and
+    unguessable there, while serve mode can keep a stable, readable name."""
+
+    def test_serve_mode_gets_the_fixed_default(self):
+        args = _moq_args(moq_serve=True)
+        self.assertTrue(_validate_moq_args(args))
+        self.assertEqual(args.moq_namespace, "pipecat")
+
+    def test_client_mode_left_unresolved_for_per_session_minting(self):
+        """Left as None so each /start mints its own; a fixed default here
+        would silently put every session on the same public path."""
+        args = _moq_args(moq_connect="https://cdn.moq.dev/anon")
+        self.assertTrue(_validate_moq_args(args))
+        self.assertIsNone(args.moq_namespace)
+
+    def test_explicit_namespace_survives_both_modes(self):
+        for extra in ({"moq_serve": True}, {"moq_connect": "https://cdn.moq.dev/anon"}):
+            args = _moq_args(moq_namespace="my-room", **extra)
+            self.assertTrue(_validate_moq_args(args))
+            self.assertEqual(args.moq_namespace, "my-room")
+
+    def test_minted_namespaces_are_unique_and_unguessable(self):
+        minted = {_new_session_namespace() for _ in range(100)}
+        self.assertEqual(len(minted), 100)
+        # 8 bytes of entropy, rendered hex, on a readable prefix.
+        for ns in minted:
+            self.assertTrue(ns.startswith("pipecat-"))
+            self.assertEqual(len(ns.removeprefix("pipecat-")), 16)
+
+    def test_minted_namespace_is_a_single_path_segment(self):
+        """The namespace is joined into ``<namespace>/<id>``; a stray
+        separator would silently reshape the broadcast path."""
+        for _ in range(20):
+            self.assertNotIn("/", _new_session_namespace())
 
 
 # ----------------------------------------------------------------------
@@ -404,6 +534,87 @@ class TestMOQTransportInit(unittest.TestCase):
 
         self.assertEqual(transport._client._broadcast_path, "myroom/alice")
         self.assertEqual(transport._client._peer_broadcast_path, "myroom/bob")
+
+    def _paths_for(self, **kwargs):
+        params = MOQParams(audio_in_enabled=True, audio_out_enabled=True, **kwargs)
+        with patch("pipecat.transports.moq.transport.moq") as moq_mock:
+            moq_mock.BroadcastProducer.return_value = MagicMock()
+            transport = MOQTransport(params=params, host="localhost", port=4080)
+        return transport._client._broadcast_path, transport._client._peer_broadcast_path
+
+    def _bind_for(self, **kwargs):
+        params = MOQParams(audio_in_enabled=True, audio_out_enabled=True, **kwargs)
+        with patch("pipecat.transports.moq.transport.moq") as moq_mock:
+            moq_mock.BroadcastProducer.return_value = MagicMock()
+            transport = MOQTransport(params=params, host="localhost", port=4080)
+        return transport._client._bind
+
+    def test_serve_mode_defaults_the_bind_to_the_port(self):
+        """Serve mode needs a concrete listen address; unset, it falls
+        back to the constructor's port."""
+        self.assertEqual(self._bind_for(serve=True), "[::]:4080")
+
+    def test_serve_mode_honors_an_explicit_bind(self):
+        self.assertEqual(self._bind_for(serve=True, bind="[::]:9000"), "[::]:9000")
+
+    def test_client_mode_binds_ephemeral_by_default(self):
+        """None means moq.Client picks an ephemeral source port — the
+        port default is serve-only and must not leak into client mode."""
+        self.assertIsNone(self._bind_for(serve=False))
+
+    def test_client_mode_honors_an_explicit_bind(self):
+        """A chosen, non-ephemeral source port is valid when dialing a
+        relay — it isn't ignored."""
+        self.assertEqual(self._bind_for(serve=False, bind="[::]:9000"), "[::]:9000")
+
+    def test_explicit_paths_override_the_namespace_layer(self):
+        """``response_path``/``request_path`` win over ``<namespace>/<id>``.
+
+        The namespace model needs both peers to agree on a namespace up
+        front. That works when one side hands the other a config blob, but
+        not when the paths are assigned externally — e.g. a relay that routes
+        on a path prefix and derives the bot's path from the peer's, so
+        there's no namespace to agree on.
+        """
+        publish, subscribe = self._paths_for(
+            namespace="ignored",
+            participant_id="ignored",
+            peer_id="ignored",
+            response_path="room1/agent.hang",
+            request_path="room1.hang",
+        )
+        self.assertEqual(publish, "room1/agent.hang")
+        self.assertEqual(subscribe, "room1.hang")
+
+    def test_paths_override_independently(self):
+        """Either path may be overridden alone; the other still derives.
+
+        Nothing requires both to come from the same place, and silently
+        ignoring one because the other was set would be a nasty surprise.
+        """
+        publish, subscribe = self._paths_for(
+            namespace="myroom",
+            participant_id="alice",
+            peer_id="bob",
+            response_path="somewhere/else",
+        )
+        self.assertEqual(publish, "somewhere/else")
+        self.assertEqual(subscribe, "myroom/bob")
+
+        publish, subscribe = self._paths_for(
+            namespace="myroom",
+            participant_id="alice",
+            peer_id="bob",
+            request_path="somewhere/else",
+        )
+        self.assertEqual(publish, "myroom/alice")
+        self.assertEqual(subscribe, "somewhere/else")
+
+    def test_paths_default_to_the_namespace_layer(self):
+        """Unset (the default), the namespace model is unchanged."""
+        publish, subscribe = self._paths_for()
+        self.assertEqual(publish, "pipecat/response")
+        self.assertEqual(subscribe, "pipecat/request")
 
     def test_cert_fingerprints_initially_empty(self):
         """Serve-mode cert fingerprints get populated by ``_run()`` once

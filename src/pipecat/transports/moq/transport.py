@@ -14,8 +14,14 @@ resampling for raw audio tracks. This module just wires it into the
 pipecat Frame pipeline.
 
 Each participant publishes under a per-participant broadcast path
-``<namespace>/<participant_id>`` (e.g. ``pipecat/bot0``); the bot
-subscribes to the peer at ``<namespace>/<peer_id>``. Audio rides on a
+``<namespace>/<participant_id>`` (e.g. ``pipecat/response``); the bot
+subscribes to the peer at ``<namespace>/<peer_id>`` (e.g.
+``pipecat/request``). The ids default to the direction each side carries
+-- the bot's own broadcast is the ``response``, the peer's the
+``request``. That layer assumes
+both peers agree on a namespace up front; when the paths are instead
+assigned externally, ``response_path``/``request_path`` set them
+directly and the namespace is unused. Audio rides on a
 single Opus track; RTVI JSON rides on a fixed-name ``transcript.json.z``
 track carried by moq's JSON stream helper (``publish_json_stream`` /
 ``subscribe_json_stream``). The stream is an ordered, lossless append-log
@@ -37,19 +43,18 @@ Daily and WebSocket transports.
 
 Two modes:
 
-- **Server mode** (``serve=True``, currently the only supported mode):
-  the bot binds its own UDP socket via ``moq.Server`` and accepts the
-  browser's direct connection. Removes the need for a separate
-  ``moq-relay`` process for local dev. The self-signed cert fingerprints
-  are exposed via :attr:`MOQTransport.cert_fingerprints` so a browser
-  can pin them.
-- **Client mode** (default): MoQ client mode is not yet supported. The
-  bot would dial a relay at ``relay_url`` (or the constructor's
-  ``host``/``port``/``path``); transport-level wiring exists but the
-  runner blocks this mode at arg-parse time until the cert-fingerprint
-  plumbing to the browser is finished and we've validated the flow
-  against an external relay. See
-  :func:`pipecat.runner.moq._validate_moq_args` for the guard.
+- **Server mode** (``serve=True``): the bot binds its own UDP socket via
+  ``moq.Server`` and accepts the browser's direct connection. Removes
+  the need for a separate ``moq-relay`` process for local dev. The
+  self-signed cert fingerprints are exposed via
+  :attr:`MOQTransport.cert_fingerprints` so a browser can pin them.
+- **Client mode** (``serve=False``): the bot dials a relay at
+  ``relay_url`` (or the constructor's ``host``/``port``/``path``) and
+  the browser dials the same relay independently. Neither peer needs a
+  reachable address, so this is the mode that works when the bot sits
+  behind NAT. Both peers must agree on the namespace, since that's what
+  they rendezvous on — the dev runner mints a random one per session
+  and hands it to the browser (see :mod:`pipecat.runner.moq`).
 """
 
 import asyncio
@@ -88,6 +93,12 @@ except ModuleNotFoundError as e:
     logger.error("In order to use MOQ transport, you need to `pip install pipecat-ai[moq]`.")
     raise Exception(f"Missing module: {e}")
 
+# UniFFI's generated bindings declare ``MoqError`` twice — the Exception
+# subclass, then a plain namespace class for the variants — so static type
+# checkers resolve it as a non-Exception type even though the Exception
+# subclass is restored at runtime. Re-type it for use in ``except`` clauses.
+_MoqError = cast("type[BaseException]", moq.MoqError)
+
 
 def _is_normal_close(exc: BaseException) -> bool:
     """Return True for the MoQ session-closed error we see when the peer hangs up.
@@ -103,6 +114,21 @@ def _is_normal_close(exc: BaseException) -> bool:
         return False
     msg = str(exc)
     return "webtransport error: closed" in msg or "session error" in msg and "closed" in msg
+
+
+def _is_peer_gone(exc: BaseException) -> bool:
+    """Return True when a peer subscription ended because the remote side left.
+
+    When the peer closes its session (or the relay tears down its
+    broadcast), moq-rs surfaces the close code the remote sent as
+    ``"remote error: code=N"`` on whatever subscription we were
+    consuming. For the per-peer catalog/audio/transcript subscriptions
+    that's the normal end of every call — treat it like a disconnect,
+    not a transport failure.
+    """
+    if not isinstance(exc, moq.MoqError):
+        return False
+    return "remote error" in str(exc) or _is_normal_close(exc)
 
 
 _moq_task_filter_installed = False
@@ -142,8 +168,8 @@ def _install_moq_task_exception_filter() -> None:
 
 
 DEFAULT_NAMESPACE = "pipecat"
-DEFAULT_PARTICIPANT_ID = "bot0"
-DEFAULT_PEER_ID = "client0"
+DEFAULT_PARTICIPANT_ID = "response"
+DEFAULT_PEER_ID = "request"
 DEFAULT_AUDIO_OUT_TRACK = "bot-audio"
 # Fixed-name JSON side-channel track (cf. ``catalog.json``). Carries RTVI
 # events as a lossless, ordered append-log via moq's JSON stream helper —
@@ -195,7 +221,7 @@ class MOQTrack:
     """Identifies a MOQ track for event callbacks.
 
     Parameters:
-        broadcast_path: The full broadcast path (e.g. ``pipecat/bot0``).
+        broadcast_path: The full broadcast path (e.g. ``pipecat/response``).
         name: The track name (e.g. ``bot-audio``).
         track_type: The track media type.
     """
@@ -219,9 +245,19 @@ class MOQParams(TransportParams):
             ``host``/``port``/``path``. Ignored in serve mode.
         namespace: Top-level namespace shared by all participants.
         participant_id: This bot's id; the bot publishes under
-            ``<namespace>/<participant_id>``.
+            ``<namespace>/<participant_id>``. Defaults to ``response``,
+            the direction the bot's own broadcast carries.
         peer_id: The id of the peer (browser/client) the bot subscribes
-            to: ``<namespace>/<peer_id>``.
+            to: ``<namespace>/<peer_id>``. Defaults to ``request``.
+        response_path: Full broadcast path the bot publishes on (its
+            responses), overriding ``<namespace>/<participant_id>``. Set
+            this when the paths come from somewhere other than a shared
+            namespace, e.g. a relay that routes on a path prefix and
+            derives the bot's path from the peer's rather than
+            rendezvousing both on a namespace.
+        request_path: Full broadcast path the bot subscribes to (incoming
+            requests), overriding ``<namespace>/<peer_id>``. See
+            :attr:`response_path`.
         audio_out_track: Name of the bot's outgoing audio track.
         transcript_track: Name of the bot's outgoing transcript track. A
             fixed-name JSON stream track carrying RTVI messages as a
@@ -233,8 +269,11 @@ class MOQParams(TransportParams):
             announced before giving up.
         serve: When ``True``, the bot binds its own UDP socket and accepts
             incoming MOQ sessions instead of dialing a relay.
-        serve_bind: Address to bind in serve mode (e.g. ``"[::]:4080"``).
-            Defaults to ``"[::]:<port>"`` based on the constructor's port.
+        bind: Local UDP socket bind address. In serve mode it's the
+            listen address (e.g. ``"[::]:4080"``), defaulting to
+            ``"[::]:<port>"`` from the constructor's port. In client mode
+            it's the source address to dial from; unset binds an
+            ephemeral port.
         serve_tls_host: Hostname to use in the generated self-signed
             certificate when ``serve_tls_cert``/``serve_tls_key`` aren't
             provided. The browser pins this cert via its SHA-256
@@ -278,12 +317,14 @@ class MOQParams(TransportParams):
     namespace: str = DEFAULT_NAMESPACE
     participant_id: str = DEFAULT_PARTICIPANT_ID
     peer_id: str = DEFAULT_PEER_ID
+    response_path: str | None = None
+    request_path: str | None = None
     audio_out_track: str = DEFAULT_AUDIO_OUT_TRACK
     transcript_track: str = DEFAULT_TRANSCRIPT_TRACK
     verify_ssl: bool = True
     connection_timeout: float = 30.0
     serve: bool = False
-    serve_bind: str | None = None
+    bind: str | None = None
     serve_tls_host: str = "localhost"
     serve_tls_cert: str | None = None
     serve_tls_key: str | None = None
@@ -338,7 +379,7 @@ class MOQTransportClient:
         self,
         params: MOQParams,
         url: str,
-        serve_bind: str,
+        bind: str | None,
         callbacks: MOQCallbacks,
     ):
         """Initialize the MOQ transport client.
@@ -352,12 +393,13 @@ class MOQTransportClient:
         Args:
             params: MOQ configuration parameters.
             url: Full relay URL to dial in client mode.
-            serve_bind: Address to bind in serve mode.
+            bind: Local UDP bind address (serve: listen address; client:
+                source address, ephemeral if ``None``).
             callbacks: Event/data callbacks back to the owning transport.
         """
         self._params = params
         self._url = url
-        self._serve_bind = serve_bind
+        self._bind = bind
         self._callbacks = callbacks
 
         self._connection_task: asyncio.Task | None = None
@@ -399,8 +441,11 @@ class MOQTransportClient:
 
         self._cert_fingerprints: list[str] = []
 
-        self._broadcast_path = f"{params.namespace}/{params.participant_id}"
-        self._peer_broadcast_path = f"{params.namespace}/{params.peer_id}"
+        # `<namespace>/<id>` is a convenience layer over the paths: it only
+        # works when both peers agree on a namespace up front. Callers whose
+        # paths are assigned externally set them directly instead.
+        self._broadcast_path = params.response_path or f"{params.namespace}/{params.participant_id}"
+        self._peer_broadcast_path = params.request_path or f"{params.namespace}/{params.peer_id}"
         self._cleaned_up = False
         # Number of input/output transports currently holding the session
         # open. Both call :meth:`connect` on start and :meth:`stop`/
@@ -585,10 +630,16 @@ class MOQTransportClient:
         ``moq.Server`` (serve mode). Returns once the session closes or
         :meth:`disconnect` is called.
 
-        Both modes share a single :class:`moq.OriginProducer`. The bot
-        publishes its broadcast through the origin and consumes the
-        peer's broadcast through the same origin — only the transport
-        bring-up differs.
+        The bot publishes its broadcast through ``publish_origin`` and
+        consumes the peer's broadcast through ``subscribe_origin``. In
+        serve mode these are the same :class:`moq.OriginProducer` — the
+        shared origin is what routes broadcasts between accepted
+        sessions. In client mode they must be distinct: with a single
+        shared origin, the relay's announcement of the peer broadcast
+        lands in the consume origin — which is also the publish origin —
+        so the client re-announces the peer's path as its own and the
+        relay routes our subscription back to us, where no producer
+        exists, killing it with ``Mux('... cancelled')``.
         """
         # Install the loop-level filter that swallows the normal-close
         # unretrieved-task warning from moq.Server's internal tasks.
@@ -596,16 +647,17 @@ class MOQTransportClient:
         # helper's docstring for why we can't scope it to _run.
         _install_moq_task_exception_filter()
 
-        origin = moq.OriginProducer()
+        publish_origin = moq.OriginProducer()
+        subscribe_origin = publish_origin if self._params.serve else moq.OriginProducer()
 
         if self._params.serve:
-            ctx_label = f"serving {self._serve_bind} as {self._broadcast_path}"
+            ctx_label = f"serving {self._bind} as {self._broadcast_path}"
         else:
             ctx_label = f"connecting to {self._url} as {self._broadcast_path}"
         logger.debug(f"MOQ: {ctx_label}")
 
         try:
-            async with self._make_transport(origin) as transport:
+            async with self._make_transport(publish_origin, subscribe_origin) as transport:
                 if self._params.serve:
                     server = cast(moq.Server, transport)
                     self._cert_fingerprints = server.cert_fingerprints()
@@ -614,7 +666,7 @@ class MOQTransportClient:
                         f"(cert sha256: {self._cert_fingerprints})"
                     )
 
-                origin.publish(self._broadcast_path, self._publish_broadcast)
+                publish_origin.publish(self._broadcast_path, self._publish_broadcast)
                 logger.debug(
                     f"MOQ: published broadcast {self._broadcast_path!r} "
                     f"(transcript: {self._params.transcript_track!r}, "
@@ -641,7 +693,7 @@ class MOQTransportClient:
                     # writing frames into self._audio_out /
                     # self._transcript_out from whichever task is running
                     # the pipeline.
-                    await self._consume_peer(origin)
+                    await self._consume_peer(subscribe_origin)
                 finally:
                     if serve_task is not None and self._task_manager is not None:
                         await self._task_manager.cancel_task(serve_task)
@@ -655,21 +707,30 @@ class MOQTransportClient:
                 # close, expected at end-of-call.
                 logger.debug(f"MOQ transport closed: {e}")
             else:
-                logger.error(f"MOQ transport error: {e}", exc_info=True)
+                # Loguru ignores stdlib-style ``exc_info=``; ``opt(exception=...)``
+                # is what captures the traceback.
+                logger.opt(exception=e).error(f"MOQ transport error: {e}")
                 await self._callbacks.on_error(str(e), e)
         finally:
             self._audio_out = None
             self._cert_fingerprints = []
             await self._callbacks.on_disconnected()
 
-    def _make_transport(self, origin: "moq.OriginProducer"):
+    def _make_transport(
+        self,
+        publish_origin: "moq.OriginProducer",
+        subscribe_origin: "moq.OriginProducer",
+    ):
         """Return the async-context-manager that owns the MOQ session.
 
         Client mode dials the relay; serve mode binds a local socket and
-        accepts incoming sessions. Both wire ``origin`` for publish and
-        subscribe so the rest of ``_run`` is shape-identical.
+        accepts incoming sessions. See :meth:`_run` for why the origins
+        are shared in serve mode but distinct in client mode.
         """
         if self._params.serve:
+            # Serve mode always resolves a concrete listen address (the
+            # constructor defaults it); only client mode leaves it None.
+            assert self._bind is not None, "serve mode requires a bind address"
             tls_kwargs: dict = {}
             if self._params.serve_tls_cert and self._params.serve_tls_key:
                 tls_kwargs["tls_cert"] = [self._params.serve_tls_cert]
@@ -677,17 +738,20 @@ class MOQTransportClient:
             else:
                 tls_kwargs["tls_generate"] = [self._params.serve_tls_host]
             return moq.Server(
-                self._serve_bind,
-                publish=origin,
-                subscribe=origin,
+                self._bind,
+                publish=publish_origin,
+                subscribe=subscribe_origin,
                 **tls_kwargs,
             )
 
+        # ``bind`` is optional here: unset dials from an ephemeral source
+        # port; set pins a specific local address/port.
         return moq.Client(
             self._url,
             tls_verify=self._params.verify_ssl,
-            publish=origin,
-            subscribe=origin,
+            bind=self._bind,
+            publish=publish_origin,
+            subscribe=subscribe_origin,
         )
 
     async def _consume_peer(self, origin: "moq.OriginProducer"):
@@ -765,6 +829,11 @@ class MOQTransportClient:
                     )
         except (asyncio.CancelledError, StopAsyncIteration):
             return
+        except _MoqError as e:
+            if not _is_peer_gone(e):
+                raise
+            logger.debug(f"MOQ: peer catalog subscription ended: {e}")
+            return
         except TimeoutError:
             logger.warning(
                 f"MOQ: peer broadcast never advertised audio within "
@@ -827,6 +896,10 @@ class MOQTransportClient:
                     await self._callbacks.on_audio_received(pcm, target_rate)
         except asyncio.CancelledError:
             pass
+        except _MoqError as e:
+            if not _is_peer_gone(e):
+                raise
+            logger.debug(f"MOQ: peer audio subscription ended: {e}")
 
     async def _forward_peer_transcript(self, peer_broadcast: "moq.BroadcastConsumer"):
         """Subscribe to the peer's transcript stream and forward RTVI messages inbound.
@@ -856,6 +929,10 @@ class MOQTransportClient:
                 await self._callbacks.on_message_received(message)
         except asyncio.CancelledError:
             pass
+        except _MoqError as e:
+            if not _is_peer_gone(e):
+                raise
+            logger.debug(f"MOQ: peer transcript subscription ended: {e}")
 
     def _track(self, consumer):
         """Remember a consumer so ``disconnect()`` can cancel it.
@@ -1259,10 +1336,13 @@ class MOQTransport(BaseTransport):
             on_audio_received=self._on_audio_received,
             on_message_received=self._on_message_received,
         )
+        # Serve mode needs a concrete listen address; client mode passes
+        # the optional local bind straight through (``None`` = ephemeral).
+        bind = params.bind or (f"[::]:{port}" if params.serve else None)
         self._client = MOQTransportClient(
             params=params,
             url=params.relay_url or f"https://{host}:{port}{path}",
-            serve_bind=params.serve_bind or f"[::]:{port}",
+            bind=bind,
             callbacks=callbacks,
         )
 
