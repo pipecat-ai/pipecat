@@ -22,8 +22,7 @@
     "src/pipecat/services/tts_service.py",
     "src/pipecat/services/xai/realtime/llm.py",
     "src/pipecat/transports/livekit/transport.py",
-    "src/pipecat/transports/tavus/transport.py",
-    "src/pipecat/transports/websocket/server.py"
+    "src/pipecat/transports/tavus/transport.py"
   ],
   "reportMissingImports": false
 }
