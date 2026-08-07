@@ -4,31 +4,390 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for BlandTTSService."""
+"""Tests for BlandTTSService and BlandHttpTTSService."""
 
+import json
 import struct
+import unittest
+from unittest.mock import AsyncMock
 
 import aiohttp
 import pytest
+import websockets
 from aiohttp import web
+from websockets.asyncio.server import serve
 
 from pipecat.frames.frames import (
     ErrorFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.bland.tts import BlandTTSService
-from pipecat.tests.utils import run_test
+from pipecat.services.bland.tts import BlandHttpTTSService, BlandTTSService
+from pipecat.services.tts_service import TextAggregationMode
+from pipecat.tests.utils import SleepFrame, run_test
 
 DEFAULT_VOICE_ID = "f04af0e5-1a80-48a9-b02d-52f30d417cfa"
 OTHER_VOICE_ID = "c18a1cd5-91ef-4b06-841a-e58b8b487e8c"
+
+AUDIO_CHUNK_1 = b"\x00\x01" * 512
+AUDIO_CHUNK_2 = b"\x02\x03" * 512
 
 
 def _pcm_bytes(num_samples: int = 4096) -> bytes:
     """Bare little-endian int16 PCM, which is what ``container: raw`` returns."""
     return struct.pack(f"<{num_samples}h", *(((i * 97) % 2000) - 1000 for i in range(num_samples)))
+
+
+def _audio_of(frames) -> bytes:
+    return b"".join(f.audio for f in frames if isinstance(f, TTSAudioRawFrame))
+
+
+# --- /v2/tts/ws ----------------------------------------------------------------------
+
+
+def _ws_server_handler(
+    captured: dict,
+    *,
+    init_error: dict | None = None,
+    turn_error: dict | None = None,
+    end_reason: str = "complete",
+):
+    """Build a fake Bland realtime server following the documented turn flow."""
+
+    async def handler(ws):
+        captured["auth_header"] = ws.request.headers.get("Authorization")
+        captured["sessions"] = captured.get("sessions", 0) + 1
+
+        try:
+            async for raw in ws:
+                msg = json.loads(raw)
+                captured["messages"].append(msg)
+                msg_type = msg.get("type")
+
+                if msg_type == "init":
+                    if init_error is not None:
+                        await ws.send(json.dumps({"type": "error", **init_error}))
+                        await ws.close()
+                        return
+                    await ws.send(json.dumps({"type": "ready", "session_id": "test-session"}))
+                elif msg_type == "end_of_turn":
+                    context_id = msg["context_id"]
+                    if turn_error is not None:
+                        await ws.send(
+                            json.dumps({"type": "error", "context_id": context_id, **turn_error})
+                        )
+                        continue
+                    await ws.send(json.dumps({"type": "utterance_start", "context_id": context_id}))
+                    await ws.send(AUDIO_CHUNK_1)
+                    await ws.send(AUDIO_CHUNK_2)
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "utterance_end",
+                                "context_id": context_id,
+                                "reason": end_reason,
+                                "frames": 2,
+                                "duration_ms": 100,
+                            }
+                        )
+                    )
+                elif msg_type == "close":
+                    await ws.send(json.dumps({"type": "done", "session_id": "test-session"}))
+                    await ws.close()
+        except websockets.ConnectionClosed:
+            pass
+
+    return handler
+
+
+def _of_type(captured: dict, type: str) -> list[dict]:
+    return [m for m in captured["messages"] if m.get("type") == type]
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_protocol_roundtrip():
+    """init/speak/end_of_turn are sent, and the turn's audio is emitted."""
+    captured: dict = {"messages": []}
+
+    async with serve(_ws_server_handler(captured), "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+
+        tts = BlandTTSService(
+            api_key="test-key",
+            url=f"ws://{host}:{port}/v2/tts/ws",
+            sample_rate=24000,
+        )
+
+        down_frames, up_frames = await run_test(
+            tts,
+            frames_to_send=[TTSSpeakFrame(text="Hello from Bland."), SleepFrame(sleep=0.3)],
+        )
+
+    frame_types = [type(frame) for frame in down_frames]
+    assert TTSStartedFrame in frame_types
+    assert TTSAudioRawFrame in frame_types
+    assert TTSStoppedFrame in frame_types
+    assert not any(isinstance(frame, ErrorFrame) for frame in down_frames + up_frames)
+
+    audio_frames = [frame for frame in down_frames if isinstance(frame, TTSAudioRawFrame)]
+    assert all(frame.sample_rate == 24000 for frame in audio_frames)
+    assert all(frame.num_channels == 1 for frame in audio_frames)
+    assert _audio_of(down_frames) == AUDIO_CHUNK_1 + AUDIO_CHUNK_2
+
+    assert captured["auth_header"] == "Bearer test-key"
+    init = _of_type(captured, "init")[0]
+    assert init["voice"] == DEFAULT_VOICE_ID
+    assert init["audio"] == {"encoding": "pcm_s16le", "sample_rate": 24000}
+    assert "controls" not in init
+
+    speak = _of_type(captured, "speak")[0]
+    end_of_turn = _of_type(captured, "end_of_turn")[0]
+    assert speak["text"] == "Hello from Bland."
+    # the turn is ended under the id its deltas were sent with
+    assert end_of_turn["context_id"] == speak["context_id"]
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_token_streaming_sends_tokens_verbatim():
+    """In the default TOKEN mode, LLM tokens map 1:1 to speak messages, unaltered."""
+    captured: dict = {"messages": []}
+
+    async with serve(_ws_server_handler(captured), "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+
+        tts = BlandTTSService(
+            api_key="test-key",
+            url=f"ws://{host}:{port}/v2/tts/ws",
+            sample_rate=24000,
+        )
+
+        down_frames, up_frames = await run_test(
+            tts,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                LLMTextFrame("Unbelieva"),
+                LLMTextFrame("ble"),
+                LLMTextFrame(" isn't it?"),
+                LLMFullResponseEndFrame(),
+                SleepFrame(sleep=0.3),
+            ],
+        )
+
+    assert not any(isinstance(frame, ErrorFrame) for frame in down_frames + up_frames)
+    assert any(isinstance(frame, TTSAudioRawFrame) for frame in down_frames)
+
+    speaks = _of_type(captured, "speak")
+    # Bland appends each delta verbatim, so an inserted space would split words.
+    assert [m["text"] for m in speaks] == ["Unbelieva", "ble", " isn't it?"]
+    # every delta of one response belongs to one turn, ended once
+    assert len({m["context_id"] for m in speaks}) == 1
+    assert len(_of_type(captured, "end_of_turn")) == 1
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_sentence_mode_appends_trailing_space():
+    """In SENTENCE mode a trailing space separates consecutive generations."""
+    captured: dict = {"messages": []}
+
+    async with serve(_ws_server_handler(captured), "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+
+        tts = BlandTTSService(
+            api_key="test-key",
+            url=f"ws://{host}:{port}/v2/tts/ws",
+            sample_rate=24000,
+            text_aggregation_mode=TextAggregationMode.SENTENCE,
+        )
+
+        down_frames, up_frames = await run_test(
+            tts,
+            frames_to_send=[TTSSpeakFrame(text="Hello from Bland."), SleepFrame(sleep=0.3)],
+        )
+
+    assert not any(isinstance(frame, ErrorFrame) for frame in down_frames + up_frames)
+    assert _of_type(captured, "speak")[0]["text"] == "Hello from Bland. "
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_init_carries_controls():
+    """Voice and controls are fixed at init for the life of the session."""
+    captured: dict = {"messages": []}
+
+    async with serve(_ws_server_handler(captured), "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+
+        tts = BlandTTSService(
+            api_key="test-key",
+            url=f"ws://{host}:{port}/v2/tts/ws",
+            sample_rate=24000,
+            settings=BlandTTSService.Settings(
+                voice=OTHER_VOICE_ID, expressiveness=0.9, stability=0.4
+            ),
+        )
+
+        await run_test(tts, frames_to_send=[])
+
+    init = _of_type(captured, "init")[0]
+    assert init["voice"] == OTHER_VOICE_ID
+    assert init["controls"] == {"expressiveness": 0.9, "stability": 0.4}
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_partial_controls():
+    """Only controls the caller set are sent, so unset ones keep Bland's defaults."""
+    captured: dict = {"messages": []}
+
+    async with serve(_ws_server_handler(captured), "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+
+        tts = BlandTTSService(
+            api_key="test-key",
+            url=f"ws://{host}:{port}/v2/tts/ws",
+            sample_rate=24000,
+            settings=BlandTTSService.Settings(stability=0.4),
+        )
+
+        await run_test(tts, frames_to_send=[])
+
+    assert _of_type(captured, "init")[0]["controls"] == {"stability": 0.4}
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_unsupported_pipeline_rate_falls_back():
+    """A rate Bland cannot render is replaced by its native 48 kHz."""
+    captured: dict = {"messages": []}
+
+    async with serve(_ws_server_handler(captured), "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+
+        tts = BlandTTSService(
+            api_key="test-key",
+            url=f"ws://{host}:{port}/v2/tts/ws",
+            sample_rate=22050,
+        )
+
+        down_frames, _ = await run_test(
+            tts, frames_to_send=[TTSSpeakFrame(text="Hi."), SleepFrame(sleep=0.3)]
+        )
+
+    assert _of_type(captured, "init")[0]["audio"]["sample_rate"] == 48000
+    audio_frames = [frame for frame in down_frames if isinstance(frame, TTSAudioRawFrame)]
+    # frames are tagged with the rate Bland actually rendered; the output
+    # transport resamples to the pipeline rate
+    assert all(frame.sample_rate == 48000 for frame in audio_frames)
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_interruption_cancels_without_reconnecting():
+    """Barge-in sends cancel, so the session and its warm voice survive."""
+    tts = BlandTTSService(api_key="test-key", sample_rate=24000)
+
+    websocket = AsyncMock()
+    tts._websocket = websocket
+
+    await tts.on_audio_context_interrupted("turn-17")
+
+    sent = [json.loads(call.args[0]) for call in websocket.send.call_args_list]
+    assert sent == [{"type": "cancel", "context_id": "turn-17"}]
+    assert not websocket.close.called
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_turn_error_surfaces():
+    """A turn-scoped error frame becomes an ErrorFrame carrying code and message."""
+    captured: dict = {"messages": []}
+    error = {"code": "insufficient_credits", "message": "Your account is out of credits."}
+
+    async with serve(_ws_server_handler(captured, turn_error=error), "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+
+        tts = BlandTTSService(
+            api_key="test-key",
+            url=f"ws://{host}:{port}/v2/tts/ws",
+            sample_rate=24000,
+        )
+
+        down_frames, up_frames = await run_test(
+            tts, frames_to_send=[TTSSpeakFrame(text="Hi."), SleepFrame(sleep=0.3)]
+        )
+
+    errors = [f for f in down_frames + up_frames if isinstance(f, ErrorFrame)]
+    assert errors
+    assert "insufficient_credits" in errors[0].error
+    assert "Your account is out of credits." in errors[0].error
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_failed_turn_surfaces():
+    """A turn that ends as `failed` reports rather than hanging on missing audio."""
+    captured: dict = {"messages": []}
+
+    async with serve(_ws_server_handler(captured, end_reason="failed"), "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+
+        tts = BlandTTSService(
+            api_key="test-key",
+            url=f"ws://{host}:{port}/v2/tts/ws",
+            sample_rate=24000,
+        )
+
+        down_frames, up_frames = await run_test(
+            tts, frames_to_send=[TTSSpeakFrame(text="Hi."), SleepFrame(sleep=0.3)]
+        )
+
+    errors = [f for f in down_frames + up_frames if isinstance(f, ErrorFrame)]
+    assert errors
+    assert "failed" in errors[0].error
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_rejected_init_surfaces():
+    """A session Bland refuses fails at connect, not on the first turn."""
+    captured: dict = {"messages": []}
+    error = {"code": "voice_not_found", "message": "Voice was not found."}
+
+    async with serve(_ws_server_handler(captured, init_error=error), "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+
+        tts = BlandTTSService(
+            api_key="test-key",
+            url=f"ws://{host}:{port}/v2/tts/ws",
+            sample_rate=24000,
+        )
+
+        down_frames, up_frames = await run_test(tts, frames_to_send=[])
+
+    errors = [f for f in down_frames + up_frames if isinstance(f, ErrorFrame)]
+    assert errors
+    assert "voice_not_found" in errors[0].error
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_close_settles_the_session():
+    """Shutdown asks Bland to settle usage instead of dropping the socket."""
+    captured: dict = {"messages": []}
+
+    async with serve(_ws_server_handler(captured), "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+
+        tts = BlandTTSService(
+            api_key="test-key",
+            url=f"ws://{host}:{port}/v2/tts/ws",
+            sample_rate=24000,
+        )
+
+        await run_test(tts, frames_to_send=[TTSSpeakFrame(text="Hi."), SleepFrame(sleep=0.3)])
+
+    assert len(_of_type(captured, "close")) == 1
+    assert captured["sessions"] == 1
+
+
+# --- /v2/tts -------------------------------------------------------------------------
 
 
 async def _serve(handler):
@@ -37,12 +396,8 @@ async def _serve(handler):
     return app
 
 
-def _audio_of(frames) -> bytes:
-    return b"".join(f.audio for f in frames if isinstance(f, TTSAudioRawFrame))
-
-
 @pytest.mark.asyncio
-async def test_run_bland_tts_success(aiohttp_client):
+async def test_run_bland_http_tts_success(aiohttp_client):
     """Sends the documented request and emits PCM frames from the response."""
     requests = []
     payload = _pcm_bytes()
@@ -55,7 +410,7 @@ async def test_run_bland_tts_success(aiohttp_client):
     base_url = str(client.make_url("/v2"))
 
     async with aiohttp.ClientSession() as session:
-        tts = BlandTTSService(
+        tts = BlandHttpTTSService(
             api_key="test-key",
             base_url=base_url,
             aiohttp_session=session,
@@ -89,7 +444,7 @@ async def test_run_bland_tts_success(aiohttp_client):
 
 
 @pytest.mark.asyncio
-async def test_bland_tts_resamples_unsupported_pipeline_rate(aiohttp_client):
+async def test_bland_http_tts_resamples_unsupported_pipeline_rate(aiohttp_client):
     """A pipeline rate Bland cannot emit falls back to 48 kHz and is resampled down."""
     requests = []
     payload = _pcm_bytes(4800)
@@ -102,7 +457,7 @@ async def test_bland_tts_resamples_unsupported_pipeline_rate(aiohttp_client):
     base_url = str(client.make_url("/v2"))
 
     async with aiohttp.ClientSession() as session:
-        tts = BlandTTSService(
+        tts = BlandHttpTTSService(
             api_key="test-key",
             base_url=base_url,
             aiohttp_session=session,
@@ -118,7 +473,7 @@ async def test_bland_tts_resamples_unsupported_pipeline_rate(aiohttp_client):
 
 
 @pytest.mark.asyncio
-async def test_bland_tts_reassembles_audio_split_across_chunks(aiohttp_client):
+async def test_bland_http_tts_reassembles_audio_split_across_chunks(aiohttp_client):
     """A split at an odd byte lands mid-sample; nothing may be dropped or reordered."""
     payload = _pcm_bytes()
     splits = [1, 3, 1000, 2001, len(payload)]
@@ -137,7 +492,7 @@ async def test_bland_tts_reassembles_audio_split_across_chunks(aiohttp_client):
     base_url = str(client.make_url("/v2"))
 
     async with aiohttp.ClientSession() as session:
-        tts = BlandTTSService(
+        tts = BlandHttpTTSService(
             api_key="test-key",
             base_url=base_url,
             aiohttp_session=session,
@@ -149,7 +504,7 @@ async def test_bland_tts_reassembles_audio_split_across_chunks(aiohttp_client):
 
 
 @pytest.mark.asyncio
-async def test_bland_tts_settings_payload(aiohttp_client):
+async def test_bland_http_tts_settings_payload(aiohttp_client):
     """Settings map into the request body."""
     requests = []
 
@@ -161,12 +516,12 @@ async def test_bland_tts_settings_payload(aiohttp_client):
     base_url = str(client.make_url("/v2"))
 
     async with aiohttp.ClientSession() as session:
-        tts = BlandTTSService(
+        tts = BlandHttpTTSService(
             api_key="test-key",
             base_url=base_url,
             aiohttp_session=session,
             sample_rate=24000,
-            settings=BlandTTSService.Settings(
+            settings=BlandHttpTTSService.Settings(
                 voice=OTHER_VOICE_ID, expressiveness=0.9, stability=0.4
             ),
         )
@@ -178,7 +533,7 @@ async def test_bland_tts_settings_payload(aiohttp_client):
 
 
 @pytest.mark.asyncio
-async def test_bland_tts_partial_controls(aiohttp_client):
+async def test_bland_http_tts_partial_controls(aiohttp_client):
     """Only controls the caller set are sent, so unset ones keep Bland's defaults."""
     requests = []
 
@@ -190,12 +545,12 @@ async def test_bland_tts_partial_controls(aiohttp_client):
     base_url = str(client.make_url("/v2"))
 
     async with aiohttp.ClientSession() as session:
-        tts = BlandTTSService(
+        tts = BlandHttpTTSService(
             api_key="test-key",
             base_url=base_url,
             aiohttp_session=session,
             sample_rate=24000,
-            settings=BlandTTSService.Settings(stability=0.4),
+            settings=BlandHttpTTSService.Settings(stability=0.4),
         )
         await run_test(tts, frames_to_send=[TTSSpeakFrame(text="Hi.")])
 
@@ -203,7 +558,7 @@ async def test_bland_tts_partial_controls(aiohttp_client):
 
 
 @pytest.mark.asyncio
-async def test_bland_tts_error_response(aiohttp_client):
+async def test_bland_http_tts_error_response(aiohttp_client):
     """A non-200 response yields an ErrorFrame carrying the v2 error code and message."""
 
     async def handler(request):
@@ -216,7 +571,7 @@ async def test_bland_tts_error_response(aiohttp_client):
     base_url = str(client.make_url("/v2"))
 
     async with aiohttp.ClientSession() as session:
-        tts = BlandTTSService(
+        tts = BlandHttpTTSService(
             api_key="test-key",
             base_url=base_url,
             aiohttp_session=session,
@@ -231,7 +586,7 @@ async def test_bland_tts_error_response(aiohttp_client):
 
 
 @pytest.mark.asyncio
-async def test_bland_tts_non_json_error_response(aiohttp_client):
+async def test_bland_http_tts_non_json_error_response(aiohttp_client):
     """A gateway error with an HTML body still surfaces as an ErrorFrame."""
 
     async def handler(request):
@@ -241,7 +596,7 @@ async def test_bland_tts_non_json_error_response(aiohttp_client):
     base_url = str(client.make_url("/v2"))
 
     async with aiohttp.ClientSession() as session:
-        tts = BlandTTSService(
+        tts = BlandHttpTTSService(
             api_key="test-key",
             base_url=base_url,
             aiohttp_session=session,
@@ -252,3 +607,7 @@ async def test_bland_tts_non_json_error_response(aiohttp_client):
     errors = [f for f in up_frames if isinstance(f, ErrorFrame)]
     assert errors
     assert "502" in errors[0].error
+
+
+if __name__ == "__main__":
+    unittest.main()
