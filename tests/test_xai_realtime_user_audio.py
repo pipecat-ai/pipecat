@@ -50,9 +50,9 @@ def _audio_frame(data: bytes = b"\xaa\xbb") -> InputAudioRawFrame:
     return InputAudioRawFrame(audio=data, sample_rate=24000, num_channels=1)
 
 
-def test_default_model_is_think_fast_2():
+def test_default_model_is_grok_voice_latest():
     service = GrokRealtimeLLMService(api_key="test-key")
-    assert service._settings.model == "grok-voice-think-fast-2.0"
+    assert service._settings.model == "grok-voice-latest"
 
 
 @pytest.mark.asyncio

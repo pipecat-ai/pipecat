@@ -249,7 +249,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="grok-voice-think-fast-2.0",
+            model="grok-voice-latest",
             system_instruction=None,
             temperature=None,
             max_tokens=None,
