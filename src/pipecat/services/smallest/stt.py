@@ -209,6 +209,7 @@ class SmallestSTTService(WebsocketSTTService):
         self._receive_task = None
         self._connected_event = asyncio.Event()
         self._connected_event.set()
+        self._connect_task = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics."""
@@ -226,9 +227,15 @@ class SmallestSTTService(WebsocketSTTService):
         return language_to_smallest_stt_language(language)
 
     async def start(self, frame: StartFrame):
-        """Start the service and connect to the WebSocket."""
+        """Start the service and connect to the WebSocket.
+
+        The connection is established in the background so the handshake is not
+        added to pipeline startup. Audio arriving before the socket is ready is
+        held by the base class and transcribed once it is.
+        """
         await super().start(frame)
-        await self._connect()
+        self._clear_audio_ready()
+        self._connect_task = self.create_task(self._connect())
 
     async def stop(self, frame: EndFrame):
         """Stop the service and disconnect from the WebSocket."""
@@ -302,6 +309,10 @@ class SmallestSTTService(WebsocketSTTService):
     async def _disconnect(self):
         await super()._disconnect()
 
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -348,6 +359,7 @@ class SmallestSTTService(WebsocketSTTService):
                 },
             )
             await self._call_event_handler("on_connected")
+            self._set_audio_ready()
             logger.debug("Connected to Smallest STT")
         except Exception as e:
             await self.push_error(error_msg=f"Smallest STT connection error: {e}", exception=e)
@@ -364,6 +376,7 @@ class SmallestSTTService(WebsocketSTTService):
             logger.error(f"{self} error closing websocket: {e}")
         finally:
             self._websocket = None
+            self._clear_audio_ready()
             await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
