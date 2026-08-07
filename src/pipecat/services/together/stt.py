@@ -106,6 +106,7 @@ class TogetherSTTService(WebsocketSTTService):
         self._api_key = api_key
         self._base_url = base_url
         self._receive_task = None
+        self._connect_task = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics."""
@@ -135,11 +136,16 @@ class TogetherSTTService(WebsocketSTTService):
     async def start(self, frame: StartFrame):
         """Start the Together AI STT service.
 
+        The connection is established in the background so the handshake is not
+        added to pipeline startup. Audio arriving before the socket is ready is
+        held by the base class and transcribed once it is.
+
         Args:
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        await self._connect()
+        self._clear_audio_ready()
+        self._connect_task = self.create_task(self._connect())
 
     async def stop(self, frame: EndFrame):
         """Stop the Together AI STT service.
@@ -199,6 +205,9 @@ class TogetherSTTService(WebsocketSTTService):
     async def _disconnect(self):
         """Disconnect and clean up background tasks."""
         await super()._disconnect()
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
         if self._receive_task:
             await self.cancel_task(self._receive_task, timeout=1.0)
             self._receive_task = None
@@ -222,6 +231,9 @@ class TogetherSTTService(WebsocketSTTService):
             }
 
             self._websocket = await self._websocket_connect(url, additional_headers=headers)
+            # The session is configured through the URL, so the socket can carry
+            # audio as soon as it is open.
+            self._set_audio_ready()
             await self._call_event_handler("on_connected")
         except Exception as e:
             await self.push_error(
@@ -242,6 +254,7 @@ class TogetherSTTService(WebsocketSTTService):
             )
         finally:
             self._websocket = None
+            self._clear_audio_ready()
             await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
