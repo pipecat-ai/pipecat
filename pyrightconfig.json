@@ -16,7 +16,6 @@
     "src/pipecat/services/heygen/client.py",
     "src/pipecat/services/heygen/video.py",
     "src/pipecat/services/inworld/realtime/llm.py",
-    "src/pipecat/services/nvidia/tts.py",
     "src/pipecat/services/openai/base_llm.py",
     "src/pipecat/services/openai/realtime/llm.py",
     "src/pipecat/services/sarvam/stt.py",
