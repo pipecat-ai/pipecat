@@ -75,6 +75,7 @@ from pipecat.utils.context.llm_context_summarization import (
     LLMContextSummarizationUtil,
 )
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory
 
 if TYPE_CHECKING:
     from pipecat.pipeline.worker import PipelineWorker
@@ -1460,7 +1461,15 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         except Exception as e:
             error_message = f"Error executing function call [{runner_item.function_name}]: {e}"
             logger.error(f"{self} {error_message}")
-            await self.push_error(error_msg=error_message, exception=e, fatal=False)
+            # The handler is application code: whatever it called and however it
+            # failed says nothing about this service. Classifying the exception
+            # here would read another API's 401 as our own credentials failing.
+            await self.push_error(
+                error_msg=error_message,
+                exception=e,
+                fatal=False,
+                category=ErrorCategory.APPLICATION,
+            )
         finally:
             if timeout_task and not timeout_task.done():
                 await self.cancel_task(timeout_task)
@@ -1858,6 +1867,6 @@ class WebsocketLLMService(LLMService[TAdapter], WebsocketService, Generic[TAdapt
             "not via a continuous background loop"
         )
 
-    async def _report_error(self, error: ErrorFrame):
+    async def _report_error(self, error: ErrorFrame, processor_became_unusable: bool = False):
         await self._call_event_handler("on_connection_error", error.error)
-        await self.push_error_frame(error)
+        await self.push_error_frame(error, processor_became_unusable=processor_became_unusable)
