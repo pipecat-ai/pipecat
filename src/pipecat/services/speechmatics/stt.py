@@ -559,7 +559,12 @@ class SpeechmaticsSTTService(STTService):
     # ============================================================================
 
     async def start(self, frame: StartFrame):
-        """Called when the new session starts."""
+        """Called when the new session starts.
+
+        The connection is established in the background so the handshake is not
+        added to pipeline startup. Audio arriving before the socket is ready is
+        held by the base class and transcribed once it is.
+        """
         await super().start(frame)
         self._clear_audio_ready()
         self._connect_task = self.create_task(self._connect())

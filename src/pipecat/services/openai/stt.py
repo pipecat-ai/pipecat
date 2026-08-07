@@ -415,6 +415,10 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
     async def start(self, frame: StartFrame):
         """Start the service and establish WebSocket connection.
 
+        The connection is established in the background so the handshake is not
+        added to pipeline startup. Audio arriving before the socket is ready is
+        held by the base class and transcribed once it is.
+
         Args:
             frame: The start frame triggering service initialization.
         """

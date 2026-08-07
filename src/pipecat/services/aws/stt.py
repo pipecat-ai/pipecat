@@ -183,6 +183,10 @@ class AWSTranscribeSTTService(WebsocketSTTService):
     async def start(self, frame: StartFrame):
         """Initialize the connection when the service starts.
 
+        The connection is established in the background so the handshake is not
+        added to pipeline startup. Audio arriving before the socket is ready is
+        held by the base class and transcribed once it is.
+
         Args:
             frame: Start frame signaling service initialization.
         """

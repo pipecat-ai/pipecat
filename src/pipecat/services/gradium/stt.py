@@ -276,6 +276,10 @@ class GradiumSTTService(WebsocketSTTService):
     async def start(self, frame: StartFrame):
         """Start the speech-to-text service.
 
+        The connection is established in the background so the handshake is not
+        added to pipeline startup. Audio arriving before the socket is ready is
+        held by the base class and transcribed once it is.
+
         Args:
             frame: Start frame to begin processing.
         """
