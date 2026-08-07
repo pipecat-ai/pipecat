@@ -117,6 +117,7 @@ IMPORTS = {
     "aws_polly_tts": ["from pipecat.services.aws.tts import AWSPollyTTSService"],
     "azure_tts": ["from pipecat.services.azure.tts import AzureTTSService"],
     "camb_tts": ["from pipecat.services.camb.tts import CambTTSService"],
+    "bland_tts": ["from pipecat.services.bland.tts import BlandTTSService"],
     "cartesia_tts": ["from pipecat.services.cartesia.tts import CartesiaTTSService"],
     "deepgram_tts": ["from pipecat.services.deepgram.tts import DeepgramTTSService"],
     "deepgram_flux_tts": ["from pipecat.services.deepgram.flux.tts import DeepgramFluxTTSService"],
