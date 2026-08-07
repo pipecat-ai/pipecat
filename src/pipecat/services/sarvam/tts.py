@@ -58,11 +58,12 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.sarvam._sdk import sdk_headers
-from pipecat.services.settings import NOT_GIVEN, NotGiven, TTSSettings, assert_given, is_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 
 class SarvamTTSModel(StrEnum):

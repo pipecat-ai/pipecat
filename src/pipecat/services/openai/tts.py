@@ -26,10 +26,11 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
 )
 from pipecat.services.openai._constants import OPENAI_SAMPLE_RATE
-from pipecat.services.settings import NOT_GIVEN, NotGiven, TTSSettings, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 ValidVoice = Literal[
     "alloy",

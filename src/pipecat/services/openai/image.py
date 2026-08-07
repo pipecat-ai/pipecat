@@ -26,7 +26,8 @@ from pipecat.frames.frames import (
     URLImageRawFrame,
 )
 from pipecat.services.image_service import ImageGenService
-from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, NotGiven, assert_given
+from pipecat.services.settings import ImageGenSettings
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 # Hint set for the `size` argument to `images.generate`. The values mirror the
 # Literal that `openai.resources.images.Images.generate` accepts on its `size`

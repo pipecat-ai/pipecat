@@ -18,10 +18,10 @@ import os
 from typing import Any
 
 from pipecat.services.llm_service import LLMService
-from pipecat.services.settings import NOT_GIVEN, NotGiven
 from pipecat.services.stt_service import STTService
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 def _cfg_language(cfg: dict) -> Language | NotGiven:

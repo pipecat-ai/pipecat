@@ -30,13 +30,13 @@ from pipecat.processors.aggregators.llm_context import (
 _T = TypeVar("_T")
 
 
-def is_given(value: _T | AnthropicNotGiven) -> TypeGuard[_T]:
-    """Check whether a value was explicitly provided.
+def anthropic_is_given(value: _T | AnthropicNotGiven) -> TypeGuard[_T]:
+    """Check whether a value was explicitly provided to the Anthropic SDK.
 
-    Typically used when checking whether a parameter or field typed with the
-    Anthropic SDK's sentinel was set::
+    Asks about the SDK's sentinel, not Pipecat's — use
+    :func:`pipecat.utils.types.is_given` for values that are still Pipecat's::
 
-        if is_given(system):
+        if anthropic_is_given(system):
             ...
 
     Also acts as a type guard: inside a true branch, the value is narrowed
@@ -46,7 +46,7 @@ def is_given(value: _T | AnthropicNotGiven) -> TypeGuard[_T]:
         value: The value to check.
 
     Returns:
-        ``True`` if *value* is anything other than ``ANTHROPIC_NOT_GIVEN``.
+        ``True`` if *value* is anything other than the SDK's ``NOT_GIVEN``.
     """
     return not isinstance(value, AnthropicNotGiven)
 
@@ -99,7 +99,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         if ensure_last_message_is_user:
             self._ensure_last_message_is_user(converted.messages)
         system = self._resolve_system_instruction(
-            converted.system if is_given(converted.system) else None,
+            converted.system if anthropic_is_given(converted.system) else None,
             system_instruction,
             discard_context_system=True,
         )

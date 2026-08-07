@@ -40,7 +40,8 @@ import pytest
 
 import pipecat.services
 from pipecat.services.ai_service import AIService
-from pipecat.services.settings import ServiceSettings, is_given
+from pipecat.services.settings import ServiceSettings
+from pipecat.utils.types import is_given
 
 # Modules that define abstract base service classes (not concrete services).
 _BASE_MODULES = frozenset(

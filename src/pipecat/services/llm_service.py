@@ -61,7 +61,7 @@ from pipecat.processors.aggregators.llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
-from pipecat.services.settings import LLMSettings, assert_given
+from pipecat.services.settings import LLMSettings
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServiceMixin
 from pipecat.utils.async_tool_cancellation import (
@@ -74,6 +74,7 @@ from pipecat.utils.context.llm_context_summarization import (
     LLMContextSummarizationUtil,
 )
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.types import assert_given
 
 if TYPE_CHECKING:
     from pipecat.pipeline.worker import PipelineWorker
