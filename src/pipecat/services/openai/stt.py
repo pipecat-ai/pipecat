@@ -350,6 +350,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         self._should_interrupt = should_interrupt
 
         self._receive_task = None
+        self._connect_task = None
         self._session_ready = False
         self._resampler = create_stream_resampler()
 
@@ -418,7 +419,8 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             frame: The start frame triggering service initialization.
         """
         await super().start(frame)
-        await self._connect()
+        self._clear_audio_ready()
+        self._connect_task = self.create_task(self._connect())
 
     async def stop(self, frame: EndFrame):
         """Stop the service and close WebSocket connection.
@@ -490,6 +492,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
     async def _disconnect(self):
         """Disconnect and clean up background tasks."""
         await super()._disconnect()
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
         if self._receive_task:
             await self.cancel_task(self._receive_task, timeout=1.0)
             self._receive_task = None
@@ -505,6 +510,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
                 return
 
             self._session_ready = False
+            self._clear_audio_ready()
             url = f"{self._base_url}?intent=transcription"
             self._websocket = await self._websocket_connect(
                 uri=url,
@@ -524,6 +530,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         """Close the WebSocket connection."""
         try:
             self._session_ready = False
+            self._clear_audio_ready()
             if self._websocket:
                 await self._websocket.close()
         except Exception as e:
@@ -695,6 +702,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         """
         logger.debug("Transcription session configured and ready")
         self._session_ready = True
+        # Audio sent before this point lands on an unconfigured session, so this
+        # is the earliest the socket can carry it.
+        self._set_audio_ready()
 
     async def _handle_transcription_delta(self, evt: dict):
         """Handle incremental transcription text.
