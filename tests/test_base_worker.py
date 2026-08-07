@@ -35,7 +35,7 @@ from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.registry import WorkerRegistry
 from pipecat.registry.types import WorkerReadyData
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.runner import WorkerRunner
 
@@ -55,7 +55,6 @@ async def create_test_bus():
     """Create an AsyncQueueBus with a TaskManager for testing."""
     bus = AsyncQueueBus()
     tm = TaskManager()
-    tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
     await bus.setup(tm)
     return bus, tm
 

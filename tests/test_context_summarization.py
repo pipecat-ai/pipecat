@@ -814,10 +814,9 @@ class TestDedicatedLLMSummarization(unittest.IsolatedAsyncioTestCase):
     """Tests for dedicated LLM summarization in LLMContextSummarizer."""
 
     async def asyncSetUp(self):
-        from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+        from pipecat.utils.asyncio.task_manager import TaskManager
 
         self.task_manager = TaskManager()
-        self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
 
     def _create_context_and_config(self, dedicated_llm):
         """Create a context with enough messages and a config with a dedicated LLM."""

@@ -27,7 +27,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import TransportParams
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 
 class _PassthroughMixer(BaseAudioMixer):
@@ -53,7 +53,6 @@ async def _make_transport(mixer: BaseAudioMixer | None = None) -> BaseOutputTran
     transport.write_audio_frame = AsyncMock(return_value=True)
 
     task_manager = TaskManager()
-    task_manager.setup(TaskManagerParams(loop=asyncio.get_event_loop()))
     await transport.setup(
         FrameProcessorSetup(
             clock=SystemClock(),

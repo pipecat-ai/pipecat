@@ -32,7 +32,7 @@ from pipecat.turns.user_stop import (
 )
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 USER_TURN_STOP_TIMEOUT = 0.2
 TRANSCRIPTION_TIMEOUT = 0.1
@@ -41,7 +41,6 @@ TRANSCRIPTION_TIMEOUT = 0.1
 class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.task_manager = TaskManager()
-        self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
 
     async def test_completion_dropped_while_user_speaking(self):
         """A completion arriving while the user speaks must not stop the turn.
