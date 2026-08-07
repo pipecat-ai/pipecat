@@ -431,7 +431,7 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         # Let the strategy react to errors that cost us the active service,
         # ignoring errors it can carry on from and errors just propagating
         # upstream from other processors.
-        if isinstance(frame, ErrorFrame) and not frame.fatal:
+        if isinstance(frame, ErrorFrame) and not frame.fatal and frame.processor is not None:
             failed_service = frame.processor
             active_service = self.strategy.active_service
             # A service the switcher isn't using can't stop it doing its job,
