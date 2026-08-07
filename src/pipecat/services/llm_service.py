@@ -565,9 +565,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             self._base_system_instruction = base_si if isinstance(base_si, str) else None
 
         if "user_turn_completion_config" in changed and self._filter_incomplete_user_turns:
-            self.set_user_turn_completion_config(
-                assert_given(self._settings.user_turn_completion_config)
-            )
+            config = assert_given(self._settings.user_turn_completion_config)
+            if config is not None:
+                self.set_user_turn_completion_config(config)
 
         # Any of these fields changes the composed instruction; rebuild it.
         if changed.keys() & {
@@ -596,6 +596,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             if frame.service is not None and frame.service is not self:
                 await self.push_frame(frame, direction)
             elif frame.delta is not None:
+                assert isinstance(frame.delta, LLMSettings)
                 await self._update_settings(frame.delta)
             elif frame.settings:
                 # Backward-compatible path: convert legacy dict to settings object.
@@ -912,12 +913,15 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 f"'{CANCEL_ASYNC_TOOL_NAME}' is a reserved built-in tool name and cannot be "
                 "registered by user code."
             )
-        cancel_on_interruption = self._resolve_tool_option(
-            wrapper.name,
-            cancel_on_interruption,
-            handler,
-            "_pipecat_cancel_on_interruption",
-            default=True,
+        cancel_on_interruption = cast(
+            bool,
+            self._resolve_tool_option(
+                wrapper.name,
+                cancel_on_interruption,
+                handler,
+                "_pipecat_cancel_on_interruption",
+                default=True,
+            ),
         )
         timeout_secs = self._resolve_tool_option(
             wrapper.name,
@@ -997,12 +1001,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # True and the normalizer rejects None, so guard it explicitly.
         if tools is None:
             return
-        tools = LLMContext._normalize_and_validate_tools(tools)
-        if not is_given(tools):
+        normalized = LLMContext._normalize_and_validate_tools(tools)
+        if not is_given(normalized):
             return
 
         # Register direct functions.
-        for wrapper in tools.direct_functions:
+        for wrapper in normalized.direct_functions:
             if wrapper.name in self._functions:
                 continue
             if wrapper.name in self._explicitly_unregistered_function_names:
@@ -1023,7 +1027,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # registers like any classic handler — register_function reads its
         # @tool_options off the handler — only marked auto_registered so it's
         # pruned when no longer advertised.
-        for schema in tools.standard_tools:
+        for schema in normalized.standard_tools:
             if schema.handler is None:
                 continue
             if schema.name in self._functions:
@@ -1415,6 +1419,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         async def timeout_handler():
             try:
                 effective_timeout = item.timeout_secs or self._function_call_timeout_secs
+                # This task is only started when one of the two is set.
+                assert effective_timeout is not None
                 await asyncio.sleep(effective_timeout)
                 logger.warning(
                     f"{self} Function call [{runner_item.function_name}:{runner_item.tool_call_id}] timed out after {effective_timeout} seconds."
