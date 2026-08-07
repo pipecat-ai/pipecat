@@ -735,3 +735,136 @@ async def test_bland_http_tts_non_json_error_response(aiohttp_client):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --- turns that cannot finish --------------------------------------------------------
+
+
+def _refusing_server(captured: dict, *, code: str = "insufficient_credits"):
+    """A server that refuses admission on every `speak`, as it does per delta."""
+
+    async def handler(ws):
+        try:
+            async for raw in ws:
+                msg = json.loads(raw)
+                captured["messages"].append(msg)
+                if msg["type"] == "init":
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "ready",
+                                "session_id": "s1",
+                                "encoding": "pcm_s16le",
+                                "sample_rate": 24000,
+                            }
+                        )
+                    )
+                elif msg["type"] == "speak":
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "error",
+                                "context_id": msg["context_id"],
+                                "code": code,
+                                "message": "wallet depleted",
+                            }
+                        )
+                    )
+                elif msg["type"] == "close":
+                    await ws.send(json.dumps({"type": "done", "session_id": "s1"}))
+                    return
+        except websockets.ConnectionClosed:
+            pass
+
+    return handler
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_stops_feeding_a_refused_turn():
+    """A refused turn is reported once, not re-asked for every remaining token."""
+    captured: dict = {"messages": []}
+
+    async with serve(_refusing_server(captured), "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+        tts = BlandTTSService(
+            api_key="test-key", url=f"ws://{host}:{port}/v2/tts/ws", sample_rate=24000
+        )
+
+        down, up = await run_test(
+            tts,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                LLMTextFrame("first"),
+                SleepFrame(sleep=0.2),
+                LLMTextFrame(" second"),
+                SleepFrame(sleep=0.2),
+                LLMTextFrame(" third"),
+                LLMFullResponseEndFrame(),
+                SleepFrame(sleep=0.2),
+            ],
+        )
+
+    speaks = _of_type(captured, "speak")
+    assert [m["text"] for m in speaks] == ["first"]
+    # The refusal still reaches the pipeline, exactly once.
+    errors = [f for f in down + up if isinstance(f, ErrorFrame)]
+    assert len(errors) == 1
+    assert "insufficient_credits" in errors[0].error
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_drops_a_turn_whose_socket_died_midway():
+    """Losing the socket mid-turn reports the loss instead of speaking the tail."""
+    sessions: list[list[dict]] = []
+
+    async def handler(ws):
+        messages: list[dict] = []
+        sessions.append(messages)
+        first_session = len(sessions) == 1
+        try:
+            async for raw in ws:
+                msg = json.loads(raw)
+                messages.append(msg)
+                if msg["type"] == "init":
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "ready",
+                                "session_id": f"s{len(sessions)}",
+                                "encoding": "pcm_s16le",
+                                "sample_rate": 24000,
+                            }
+                        )
+                    )
+                elif msg["type"] == "speak" and first_session:
+                    await ws.close(code=1011, reason="injected failure")
+                    return
+                elif msg["type"] == "close":
+                    await ws.send(json.dumps({"type": "done", "session_id": "s"}))
+                    return
+        except websockets.ConnectionClosed:
+            pass
+
+    async with serve(handler, "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+        tts = BlandTTSService(
+            api_key="test-key", url=f"ws://{host}:{port}/v2/tts/ws", sample_rate=24000
+        )
+
+        down, up = await run_test(
+            tts,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                LLMTextFrame("The weather is clear"),
+                SleepFrame(sleep=0.3),
+                LLMTextFrame(" and warm today."),
+                LLMFullResponseEndFrame(),
+                SleepFrame(sleep=0.3),
+            ],
+        )
+
+    # The replacement session must not be handed the tail of the lost turn.
+    later_speaks = [m for messages in sessions[1:] for m in messages if m["type"] == "speak"]
+    assert later_speaks == []
+    errors = [f for f in down + up if isinstance(f, ErrorFrame)]
+    assert any("mid-turn" in f.error for f in errors)
