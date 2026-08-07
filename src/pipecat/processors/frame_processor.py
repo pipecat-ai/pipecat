@@ -48,6 +48,7 @@ from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMet
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory, classify_exception
 from pipecat.utils.frame_queue import FrameQueue
 
 if TYPE_CHECKING:
@@ -189,6 +190,14 @@ class FrameProcessor(BaseObject):
     - on_before_push_frame: Called before a frame is pushed
     - on_after_push_frame: Called after a frame is pushed
     - on_error: Called when an error is raised in the frame processing.
+    - on_usable_changed: Called with the new value of `is_usable` when the
+      processor stops or starts being able to do its job.
+
+    Example::
+
+        @processor.event_handler("on_usable_changed")
+        async def on_usable_changed(processor, is_usable):
+            ...
     """
 
     def __init__(
@@ -270,12 +279,17 @@ class FrameProcessor(BaseObject):
         self.__process_frame_task: asyncio.Task | None = None
         self.__process_current_frame: Frame | None = None
 
+        # Whether this processor can still do its job. Flipped by the errors it
+        # reports, so it is already up to date by the time an error travels.
+        self._is_usable = True
+
         # Frame processor events.
         self._register_event_handler("on_before_process_frame", sync=True)
         self._register_event_handler("on_after_process_frame", sync=True)
         self._register_event_handler("on_before_push_frame", sync=True)
         self._register_event_handler("on_after_push_frame", sync=True)
         self._register_event_handler("on_error", sync=True)
+        self._register_event_handler("on_usable_changed")
 
     @property
     def id(self) -> int:
@@ -294,6 +308,44 @@ class FrameProcessor(BaseObject):
             The name of this processor instance.
         """
         return self._name
+
+    @property
+    def is_usable(self) -> bool:
+        """Whether this processor can still do its job.
+
+        A processor stays usable through failures it might recover from, and
+        becomes unusable once its work can no longer succeed: a provider has
+        rejected its configuration, or it has failed enough times to stop
+        trying. Sending it more work would only produce more of the same error,
+        so services stop accepting work and stop reconnecting once this is
+        False.
+
+        Errors set this as they are reported, so an error handler reading
+        ``frame.processor.is_usable`` sees the verdict that came with the error
+        it is handling.
+
+        Returns:
+            True while the processor can still be given work.
+        """
+        return self._is_usable
+
+    async def set_usable(self, is_usable: bool):
+        """Set whether this processor can be given work.
+
+        Call this to bring back a processor that became unusable, once
+        whatever stopped it working has been dealt with — new credentials, or
+        a provider that has come back up. Services also do this for themselves
+        when their settings change, since new settings may be the fix.
+
+        Args:
+            is_usable: Whether the processor can be given work.
+        """
+        if is_usable == self._is_usable:
+            return
+
+        self._is_usable = is_usable
+        logger.debug(f"{self}: {'usable' if is_usable else 'no longer usable'}")
+        await self._call_event_handler("on_usable_changed", is_usable)
 
     @property
     def processors(self) -> list[FrameProcessor]:
@@ -674,11 +726,28 @@ class FrameProcessor(BaseObject):
         elif isinstance(frame, (FrameProcessorResumeFrame, FrameProcessorResumeUrgentFrame)):
             await self.__resume(frame)
 
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Classify an exception this processor knows the shape of.
+
+        Override for providers that signal failures through SDK-specific
+        exceptions rather than a status code, or whose credentials can be
+        rejected for reasons a reconnection would clear.
+
+        Args:
+            exception: The exception to classify.
+
+        Returns:
+            The category, or None to fall back to :func:`classify_exception`.
+        """
+        return None
+
     async def push_error(
         self,
         error_msg: str,
         exception: Exception | None = None,
         fatal: bool = False,
+        category: ErrorCategory | None = None,
+        processor_became_unusable: bool = False,
     ):
         """Creates and pushes an ErrorFrame upstream.
 
@@ -693,6 +762,16 @@ class FrameProcessor(BaseObject):
             fatal: Whether this error should be considered fatal to the pipeline.
                 Fatal errors typically cause the entire pipeline to stop processing.
                 Defaults to False for non-fatal errors.
+            category: Why the error occurred, when the caller knows. Leave it
+                unset to let the category be worked out from the exception, or
+                pass `ErrorCategory.UNKNOWN` to report an error whose cause
+                can't be attributed — an unexpected one caught by a broad
+                ``except``, say, which may not have come from this processor at
+                all.
+            processor_became_unusable: Whether this error leaves the processor
+                unable to do any more work, such as having failed too many
+                times to keep trying. A rejected configuration implies this on
+                its own, so it doesn't need to be passed for that.
 
         Example::
 
@@ -707,21 +786,47 @@ class FrameProcessor(BaseObject):
                 await self.push_error("Critical operation failed", exception=e, fatal=True)
             ```
         """
-        error_frame = ErrorFrame(error=error_msg, fatal=fatal, exception=exception, processor=self)
-        await self.push_error_frame(error=error_frame)
+        error_frame = ErrorFrame(
+            error=error_msg,
+            fatal=fatal,
+            exception=exception,
+            processor=self,
+            category=category,
+        )
+        await self.push_error_frame(
+            error=error_frame, processor_became_unusable=processor_became_unusable
+        )
 
-    async def push_error_frame(self, error: ErrorFrame):
+    async def push_error_frame(self, error: ErrorFrame, processor_became_unusable: bool = False):
         """Push an error frame upstream.
 
         Args:
             error: The error frame to push.
+            processor_became_unusable: Whether this error leaves the processor
+                unable to do any more work. See :meth:`push_error`.
         """
         if not error.processor:
             error.processor = self
+        # Anything still unset by now is going to stay that way, so settle it
+        # here and let handlers read a category off every error they receive.
+        if error.category is None and error.exception:
+            error.category = self._classify_error(error.exception) or classify_exception(
+                error.exception
+            )
+        if error.category is None:
+            error.category = ErrorCategory.UNKNOWN
+
+        # Before anything sees the error, so that handlers reading
+        # `frame.processor.is_usable` get the verdict that came with it.
+        if processor_became_unusable or error.category.is_configuration_error:
+            await self.set_usable(False)
+
         await self._call_event_handler("on_error", error)
 
-        if error.exception:
-            tb = traceback.extract_tb(error.exception.__traceback__)
+        # An exception carries a traceback only once it has been raised, so fall
+        # back to the plain message rather than losing the error entirely.
+        tb = traceback.extract_tb(error.exception.__traceback__) if error.exception else []
+        if tb:
             last = tb[-1]
             error_message = (
                 f"{error.processor} exception ({last.filename}:{last.lineno}): {error.error}"
@@ -891,6 +996,9 @@ class FrameProcessor(BaseObject):
             await self.push_error(
                 error_msg=f"Uncaught exception handling _start_interruption: {e}",
                 exception=e,
+                # A broad catch: this may not have come from this processor at
+                # all, so its cause can't be attributed.
+                category=ErrorCategory.UNKNOWN,
             )
 
     async def __internal_push_frame(self, frame: Frame, direction: FrameDirection):
@@ -928,7 +1036,13 @@ class FrameProcessor(BaseObject):
                     await self._observer.on_push_frame(data)
                 await self._prev.queue_frame(frame, direction)
         except Exception as e:
-            await self.push_error(error_msg=f"Uncaught exception: {e}", exception=e)
+            # Observers and the downstream processor run inside this
+            # block, so the cause of an unexpected failure can't be attributed.
+            await self.push_error(
+                error_msg=f"Uncaught exception: {e}",
+                exception=e,
+                category=ErrorCategory.UNKNOWN,
+            )
 
     def _check_started(self, frame: Frame):
         """Check if the processor has been started.
@@ -1018,7 +1132,13 @@ class FrameProcessor(BaseObject):
 
             await self._call_event_handler("on_after_process_frame", frame)
         except Exception as e:
-            await self.push_error(error_msg=f"Error processing frame: {e}", exception=e)
+            # The frame callback runs inside this block, so the cause of an
+            # unexpected failure can't be attributed.
+            await self.push_error(
+                error_msg=f"Error processing frame: {e}",
+                exception=e,
+                category=ErrorCategory.UNKNOWN,
+            )
 
     async def __input_frame_task_handler(self):
         """Handle frames from the input queue.
