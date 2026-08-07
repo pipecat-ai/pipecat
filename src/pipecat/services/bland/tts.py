@@ -10,6 +10,7 @@ See https://docs.bland.ai/api-v2/post/tts-ws for the realtime WebSocket API and
 https://docs.bland.ai/api-v2/post/tts for the HTTP API.
 """
 
+import asyncio
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -37,7 +38,9 @@ _SAMPLE_RATES = (8000, 16000, 24000, 44100, 48000)
 # generates natively, so it is the shortest path to audio.
 _DEFAULT_SAMPLE_RATE = 48000
 
-_DEFAULT_VOICE_ID = "f04af0e5-1a80-48a9-b02d-52f30d417cfa"
+_DEFAULT_VOICE_ID = "2f29fdbb-c55e-4add-9c7c-93437ebf379d"
+_READY_TIMEOUT_SECONDS = 10.0
+_CLOSE_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass
@@ -91,7 +94,7 @@ class BlandTTSService(WebsocketTTSService):
     the connection.
 
     The voice sets the model; ``expressiveness`` and ``stability`` are calibrated
-    for ``BTTS_V3`` and newer.
+    for ``BTTS_V3``.
 
     Event handlers:
 
@@ -104,7 +107,7 @@ class BlandTTSService(WebsocketTTSService):
         tts = BlandTTSService(
             api_key=os.getenv("BLAND_API_KEY"),
             settings=BlandTTSService.Settings(
-                voice="29158307-9893-4149-8a75-bc9ce313d64e"
+                voice="2f29fdbb-c55e-4add-9c7c-93437ebf379d"
             ),
         )
     """
@@ -137,6 +140,8 @@ class BlandTTSService(WebsocketTTSService):
             settings: Runtime-updatable settings.
             **kwargs: Additional arguments passed to ``WebsocketTTSService``.
         """
+        if not api_key:
+            raise ValueError("Bland API key is required")
         super().__init__(
             sample_rate=sample_rate,
             push_start_frame=True,
@@ -197,6 +202,7 @@ class BlandTTSService(WebsocketTTSService):
 
     async def _connect_websocket(self):
         """Open the socket and hold the session at ``ready``."""
+        websocket = None
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
@@ -216,39 +222,68 @@ class BlandTTSService(WebsocketTTSService):
                 init["controls"] = controls
             await websocket.send(json.dumps(init))
 
-            # `ready` also reports the wallet and concurrency admission, so a
+            # `ready` confirms wallet and concurrency admission, so a
             # rejected session fails here rather than on the first turn.
-            message = json.loads(await websocket.recv())
+            message = json.loads(
+                await asyncio.wait_for(websocket.recv(), timeout=_READY_TIMEOUT_SECONDS)
+            )
             if message.get("type") != "ready":
                 raise Exception(
                     f"Bland rejected the session: "
                     f"{message.get('code')}: {message.get('message', message)}"
+                )
+            if (
+                message.get("encoding") != "pcm_s16le"
+                or message.get("sample_rate") != self._bland_sample_rate
+            ):
+                raise Exception(
+                    "Bland acknowledged an unexpected audio format: "
+                    f"{message.get('encoding')} at {message.get('sample_rate')} Hz"
                 )
 
             logger.debug(f"{self}: session ready (session_id: {message.get('session_id')})")
             self._websocket = websocket
             self._utterance_context_id = None
             await self._call_event_handler("on_connected")
-        except Exception as e:
+        except BaseException as e:
+            if websocket is not None:
+                try:
+                    await websocket.close()
+                except Exception:
+                    pass
+            if not isinstance(e, Exception):
+                raise
             logger.error(f"{self} exception: {e}")
             await self.push_error_frame(ErrorFrame(error=f"{self} error: {e}"))
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
+        websocket = self._websocket
         try:
             await self.stop_all_metrics()
 
-            if self._websocket:
+            if websocket:
                 logger.debug("Disconnecting from Bland")
-                # `close` cancels any active turn, settles usage, and lets the
-                # server reply with `done` before the socket goes away.
-                await self._websocket.send(json.dumps({"type": "close"}))
-                await self._websocket.close()
+                # `done` is sent only after the server settles outstanding usage.
+                # The receive task has already stopped, so consume it here before
+                # starting the WebSocket close handshake.
+                await websocket.send(json.dumps({"type": "close"}))
+                async with asyncio.timeout(_CLOSE_TIMEOUT_SECONDS):
+                    async for raw in websocket:
+                        if isinstance(raw, str):
+                            message = json.loads(raw)
+                            if message.get("type") == "done":
+                                break
         except Exception as e:
             logger.error(f"{self} exception: {e}")
             await self.push_error_frame(ErrorFrame(error=f"{self} error: {e}"))
         finally:
+            if websocket:
+                try:
+                    await websocket.close()
+                except Exception as e:
+                    logger.debug(f"{self} failed to close Bland websocket: {e}")
             await self.remove_active_audio_context()
             self._utterance_context_id = None
             self._websocket = None
@@ -333,15 +368,37 @@ class BlandTTSService(WebsocketTTSService):
                     await self.remove_audio_context(context_id)
                 elif reason == "failed":
                     await self.push_error(error_msg=f"{self} turn {context_id} failed")
+                    await self.append_to_audio_context(
+                        context_id, TTSStoppedFrame(context_id=context_id)
+                    )
                     await self.remove_audio_context(context_id)
                 else:
-                    # `preempted` and `cancelled` follow an interruption, which
-                    # already tore the context down.
                     logger.trace(f"{self}: turn {context_id} ended as {reason}")
+                    # An explicit Pipecat interruption normally removed this
+                    # context already. A server-side preemption can also arrive
+                    # first, so retain the guard and close whichever side still
+                    # owns it.
+                    if context_id and self.audio_context_available(context_id):
+                        await self.append_to_audio_context(
+                            context_id, TTSStoppedFrame(context_id=context_id)
+                        )
+                        await self.remove_audio_context(context_id)
             elif msg_type == "error":
                 await self.push_error(
                     error_msg=f"{self} error {msg.get('code')}: {msg.get('message', msg)}"
                 )
+                # Turn admission happens on the first `speak`. If it is refused,
+                # Bland sends an error but never creates the turn, so there is no
+                # `utterance_end` to release Pipecat's pre-created audio context.
+                if (
+                    msg.get("code") in {"insufficient_credits", "rate_limited"}
+                    and context_id
+                    and self.audio_context_available(context_id)
+                ):
+                    await self.append_to_audio_context(
+                        context_id, TTSStoppedFrame(context_id=context_id)
+                    )
+                    await self.remove_audio_context(context_id)
             elif msg_type == "done":
                 logger.debug(f"{self}: session settled (session_id: {msg.get('session_id')})")
             else:
@@ -413,6 +470,8 @@ class BlandHttpTTSService(TTSService):
             settings: Runtime-updatable settings.
             **kwargs: Additional arguments passed to ``TTSService``.
         """
+        if not api_key:
+            raise ValueError("Bland API key is required")
         super().__init__(
             sample_rate=sample_rate,
             push_start_frame=True,
@@ -422,7 +481,7 @@ class BlandHttpTTSService(TTSService):
         )
 
         self._api_key = api_key
-        self._base_url = base_url
+        self._base_url = base_url.rstrip("/")
         self._session = aiohttp_session
         self._session_owner = aiohttp_session is None
 
