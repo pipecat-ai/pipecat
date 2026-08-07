@@ -169,14 +169,16 @@ class SambaNovaLLMService(OpenAILLMService):
             async with chunk_stream:
                 async for chunk in chunk_stream:
                     if chunk.usage:
+                        prompt_tokens_details = getattr(chunk.usage, "prompt_tokens_details", None)
                         cached_tokens = (
-                            chunk.usage.prompt_tokens_details.cached_tokens
-                            if getattr(chunk.usage, "prompt_tokens_details", None)
-                            else None
+                            prompt_tokens_details.cached_tokens if prompt_tokens_details else None
+                        )
+                        completion_tokens_details = getattr(
+                            chunk.usage, "completion_tokens_details", None
                         )
                         reasoning_tokens = (
-                            chunk.usage.completion_tokens_details.reasoning_tokens
-                            if getattr(chunk.usage, "completion_tokens_details", None)
+                            completion_tokens_details.reasoning_tokens
+                            if completion_tokens_details
                             else None
                         )
                         token_usage = LLMTokenUsage(
