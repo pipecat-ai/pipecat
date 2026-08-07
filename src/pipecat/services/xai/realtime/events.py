@@ -83,9 +83,18 @@ class TurnDetection(BaseModel):
 
     Parameters:
         type: Detection type, must be "server_vad" or None for manual.
+        threshold: VAD activation threshold (0.1–0.9). Higher requires louder audio.
+        silence_duration_ms: Silence before the server ends the user turn.
+        prefix_padding_ms: Audio (ms) included before detected speech start.
+        idle_timeout_ms: When set, the server re-engages after this many ms of
+            silence following an assistant response (``timeout_triggered``).
     """
 
     type: Literal["server_vad"] | None = "server_vad"
+    threshold: float | None = None
+    silence_duration_ms: int | None = None
+    prefix_padding_ms: int | None = None
+    idle_timeout_ms: int | None = None
 
 
 #
@@ -93,14 +102,33 @@ class TurnDetection(BaseModel):
 #
 
 
+class InputAudioTranscription(BaseModel):
+    """Input audio transcription settings for the voice agent.
+
+    Parameters:
+        model: Transcription model. Use ``grok-transcribe`` for streaming
+            ``conversation.item.input_audio_transcription.updated`` events.
+        language_hint: BCP-47 language code to bias ASR.
+        keyterms: Domain terms to bias transcription (max 100, ≤50 chars each).
+    """
+
+    model: str | None = None
+    language_hint: str | None = None
+    keyterms: list[str] | None = None
+
+
 class AudioInput(BaseModel):
     """Audio input configuration.
 
     Parameters:
         format: The format configuration for input audio.
+        transcription: Optional input transcription settings.
+        transport: Wire path for input audio (``json`` or ``binary``).
     """
 
     format: PCMAudioFormat | PCMUAudioFormat | PCMAAudioFormat | None = None
+    transcription: InputAudioTranscription | None = None
+    transport: Literal["json", "binary"] | None = None
 
 
 class AudioOutput(BaseModel):
@@ -108,9 +136,13 @@ class AudioOutput(BaseModel):
 
     Parameters:
         format: The format configuration for output audio.
+        speed: Playback speed multiplier (0.7–1.5).
+        transport: Wire path for assistant audio (``json`` or ``binary``).
     """
 
     format: PCMAudioFormat | PCMUAudioFormat | PCMAAudioFormat | None = None
+    speed: float | None = None
+    transport: Literal["json", "binary"] | None = None
 
 
 class AudioConfiguration(BaseModel):
@@ -123,6 +155,26 @@ class AudioConfiguration(BaseModel):
 
     input: AudioInput | None = None
     output: AudioOutput | None = None
+
+
+class Reasoning(BaseModel):
+    """Reasoning controls for voice-agent models.
+
+    Parameters:
+        effort: ``high`` enables reasoning; ``none`` disables it.
+    """
+
+    effort: Literal["high", "none"] | None = None
+
+
+class SessionResumption(BaseModel):
+    """Session resumption opt-in for reconnecting with conversation history.
+
+    Parameters:
+        enabled: When true, the server caches turns for ``conversation_id`` replay.
+    """
+
+    enabled: bool | None = None
 
 
 #
@@ -185,8 +237,20 @@ class FunctionTool(BaseModel):
     parameters: dict[str, Any]
 
 
+class McpTool(BaseModel):
+    """Remote MCP tool configuration managed by xAI.
+
+    Parameters:
+        type: Tool type, always "mcp".
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    type: Literal["mcp"] = "mcp"
+
+
 # Union type for all Grok tools
-GrokTool = WebSearchTool | XSearchTool | FileSearchTool | FunctionTool | dict[str, Any]
+GrokTool = WebSearchTool | XSearchTool | FileSearchTool | FunctionTool | McpTool | dict[str, Any]
 
 
 #
@@ -216,11 +280,19 @@ class SessionProperties(BaseModel):
         turn_detection: Configuration for turn detection. Defaults to server-side VAD.
             Set to None for manual turn detection.
         audio: Configuration for input and output audio.
-        tools: Available tools for the assistant (web_search, x_search, file_search, function).
+        tools: Available tools for the assistant (web_search, x_search, file_search,
+            function, mcp).
+        reasoning: Optional reasoning effort controls.
+        resumption: Optional session-resumption opt-in.
+        replace: Optional pronunciation replacement map applied before TTS.
+        id: Session id when present on server snapshots (``session.created``).
+        object: Object type from server snapshots.
+        model: Model id echoed on server snapshots.
     """
 
-    # Needed to support ToolSchema in tools field.
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    # Needed to support ToolSchema in tools field. Ignore unknown server fields
+    # so session.created / session.updated snapshots remain parseable.
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="ignore")
 
     instructions: str | None = None
     voice: str | None = "eve"
@@ -232,6 +304,12 @@ class SessionProperties(BaseModel):
     # tools (the validator below normalizes that to a ToolsSchema); a list of
     # provider-native GrokTool objects passes through.
     tools: ToolsSchema | list[FunctionSchema | DirectFunction] | list[GrokTool] | None = None
+    reasoning: Reasoning | None = None
+    resumption: SessionResumption | None = None
+    replace: dict[str, str] | None = None
+    id: str | None = None
+    object: str | None = None
+    model: str | None = None
 
     @field_validator("tools", mode="before")
     @classmethod
@@ -273,7 +351,7 @@ class ConversationItem(BaseModel):
     Parameters:
         id: Unique identifier for the item, auto-generated if not provided.
         object: Object type identifier for the realtime API.
-        type: Item type (message, function_call, or function_call_output).
+        type: Item type (message, function_call, function_call_output, or force_message).
         status: Current status of the item.
         role: Speaker role for message items (user, assistant, or system).
         content: Content list for message items.
@@ -283,9 +361,11 @@ class ConversationItem(BaseModel):
         output: Function output as JSON string for function_call_output items.
     """
 
+    model_config = ConfigDict(extra="ignore")
+
     id: str = Field(default_factory=lambda: str(uuid.uuid4().hex))
     object: Literal["realtime.item"] | None = None
-    type: Literal["message", "function_call", "function_call_output"]
+    type: Literal["message", "function_call", "function_call_output", "force_message"]
     status: Literal["completed", "in_progress", "incomplete"] | None = None
     role: Literal["user", "assistant", "system", "tool"] | None = None
     content: list[ItemContent] | None = None
@@ -312,9 +392,12 @@ class ResponseProperties(BaseModel):
 
     Parameters:
         modalities: Output modalities for the response (text, audio, or both).
+        instructions: Per-response system prompt override (session instructions
+            resume on the next response).
     """
 
     modalities: list[Literal["text", "audio"]] | None = ["text", "audio"]
+    instructions: str | None = None
 
 
 #
@@ -435,6 +518,34 @@ class ResponseCancelEvent(ClientEvent):
     """
 
     type: Literal["response.cancel"] = "response.cancel"
+
+
+class ConversationItemTruncateEvent(ClientEvent):
+    """Event to truncate a previous assistant audio item.
+
+    Parameters:
+        type: Event type, always "conversation.item.truncate".
+        item_id: ID of the item to truncate.
+        content_index: Index of the content to truncate within the item.
+        audio_end_ms: End time in milliseconds for the truncated audio.
+    """
+
+    type: Literal["conversation.item.truncate"] = "conversation.item.truncate"
+    item_id: str
+    content_index: int
+    audio_end_ms: int
+
+
+class ConversationItemDeleteEvent(ClientEvent):
+    """Event to delete a conversation item by ID.
+
+    Parameters:
+        type: Event type, always "conversation.item.delete".
+        item_id: ID of the item to delete.
+    """
+
+    type: Literal["conversation.item.delete"] = "conversation.item.delete"
+    item_id: str
 
 
 #

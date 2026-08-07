@@ -25,6 +25,7 @@ from websockets.asyncio.client import connect as websocket_connect
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     AggregationType,
     BotStoppedSpeakingFrame,
@@ -32,6 +33,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InputDTMFFrame,
     InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextFrame,
@@ -303,8 +305,17 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         self._pending_function_calls = {}
         self._completed_tool_calls = set()
 
+        self._session_id: str | None = None
+        self._conversation_id: str | None = None
+        self._current_response_id: str | None = None
+
         self._register_event_handler("on_conversation_item_created")
         self._register_event_handler("on_conversation_item_updated")
+        self._register_event_handler("on_conversation_item_deleted")
+        self._register_event_handler("on_conversation_item_truncated")
+        self._register_event_handler("on_idle_timeout")
+        self._register_event_handler("on_dtmf_received")
+        self._register_event_handler("on_mcp_event")
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate usage metrics.
@@ -429,18 +440,64 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         return int(duration_seconds * 1000)
 
     async def _truncate_current_audio_response(self):
-        """Truncates the current audio response.
+        """Truncate the in-flight assistant audio item on the server and locally.
 
-        Note: Grok may not support truncation events like OpenAI.
-        This is a best-effort cleanup.
+        Sends ``conversation.item.truncate`` at the shorter of wall-clock elapsed
+        time and bytes received so conversation history matches what the user
+        heard. Failures are non-fatal — ``response.cancel`` still stops playback.
         """
         if not self._current_audio_response:
             return
 
         try:
+            current = self._current_audio_response
             self._current_audio_response = None
+
+            audio_duration_ms = self._calculate_audio_duration_ms(current.total_size)
+            elapsed_ms = int(time.time() * 1000 - current.start_time_ms)
+            truncate_ms = max(0, min(elapsed_ms, audio_duration_ms))
+
+            logger.trace(
+                f"Truncating audio: duration={audio_duration_ms}ms, "
+                f"elapsed={elapsed_ms}ms, truncate={truncate_ms}ms"
+            )
+
+            await self.send_client_event(
+                events.ConversationItemTruncateEvent(
+                    item_id=current.item_id,
+                    content_index=current.content_index,
+                    audio_end_ms=truncate_ms,
+                )
+            )
         except Exception as e:
-            logger.warning(f"Audio truncation cleanup failed (non-fatal): {e}")
+            logger.warning(f"Audio truncation failed (non-fatal): {e}")
+
+    async def delete_conversation_item(self, item_id: str):
+        """Delete a conversation item by id.
+
+        Args:
+            item_id: ID of the conversation item to delete.
+        """
+        await self.send_client_event(events.ConversationItemDeleteEvent(item_id=item_id))
+
+    async def force_message(self, text: str):
+        """Speak a hard-coded TTS line without involving the model.
+
+        Sends a ``force_message`` conversation item. Do not follow with
+        ``response.create`` — the server injects the response lifecycle.
+
+        Args:
+            text: Verbatim text to synthesize and play.
+        """
+        await self.send_client_event(
+            events.ConversationItemCreateEvent(
+                item=events.ConversationItem(
+                    type="force_message",
+                    role="assistant",
+                    content=[events.ItemContent(type="text", text=text)],
+                )
+            )
+        )
 
     #
     # Standard AIService frame handling
@@ -681,9 +738,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
                 # Ignore ping events (keep-alive)
                 pass
             elif evt.type == "session.created":
-                # Default session snapshot on connect. Session configuration is
-                # sent from conversation.created to avoid a duplicate update.
-                pass
+                await self._handle_evt_session_created(evt)
             elif evt.type == "conversation.created":
                 await self._handle_evt_conversation_created(evt)
             elif evt.type == "session.updated":
@@ -694,23 +749,18 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
                 await self._handle_evt_audio_delta(evt)
             elif evt.type == "response.output_audio.done":
                 await self._handle_evt_audio_done(evt)
-            elif evt.type == "response.content_part.added":
-                # Content part added - we can ignore this for now
-                pass
-            elif evt.type == "response.content_part.done":
-                # Content part done - we can ignore this for now
+            elif evt.type in ("response.content_part.added", "response.content_part.done"):
                 pass
             elif evt.type == "response.output_item.added":
                 await self._handle_evt_conversation_item_added(evt)
             elif evt.type == "response.output_item.done":
-                # Output item done - we can ignore this for now
                 pass
             elif evt.type == "conversation.item.added":
                 await self._handle_evt_conversation_item_added(evt)
             elif evt.type == "conversation.item.deleted":
-                pass
+                await self._handle_evt_conversation_item_deleted(evt)
             elif evt.type == "conversation.item.truncated":
-                pass
+                await self._handle_evt_conversation_item_truncated(evt)
             elif evt.type == "conversation.item.input_audio_transcription.updated":
                 await self._handle_evt_input_audio_transcription_updated(evt)
             elif evt.type == "conversation.item.input_audio_transcription.completed":
@@ -721,13 +771,14 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
                 await self._handle_evt_speech_started(evt)
             elif evt.type == "input_audio_buffer.speech_stopped":
                 await self._handle_evt_speech_stopped(evt)
-            elif evt.type in (
-                "input_audio_buffer.committed",
-                "input_audio_buffer.cleared",
-                "input_audio_buffer.timeout_triggered",
-                "input_audio_buffer.dtmf_event_received",
-            ):
+            elif evt.type == "input_audio_buffer.committed":
                 pass
+            elif evt.type == "input_audio_buffer.cleared":
+                pass
+            elif evt.type == "input_audio_buffer.timeout_triggered":
+                await self._handle_evt_timeout_triggered(evt)
+            elif evt.type == "input_audio_buffer.dtmf_event_received":
+                await self._handle_evt_dtmf_received(evt)
             elif evt.type == "response.output_audio_transcript.delta":
                 await self._handle_evt_audio_transcript_delta(evt)
             elif evt.type == "response.output_audio_transcript.done":
@@ -740,8 +791,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             elif evt.type == "response.function_call_arguments.done":
                 await self._handle_evt_function_call_arguments_done(evt)
             elif evt.type.startswith("mcp_list_tools.") or evt.type.startswith("response.mcp_call"):
-                if evt.type.endswith(".failed"):
-                    logger.warning(f"{self} MCP event failed: {evt.type}")
+                await self._handle_evt_mcp(evt)
             elif evt.type == "error":
                 # Match Grok's actual codes/messages for cancel-not-active
                 # and already-active. Grok's error codes diverge from
@@ -759,26 +809,76 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
                     )
                     or "no active response" in msg
                     or "already has an active response" in msg
+                    or "truncat" in msg
                 ):
                     logger.debug(f"{self} {evt.error.message}")
                 else:
                     await self._handle_evt_error(evt)
                     return
 
+    async def _handle_evt_session_created(self, evt):
+        """Record the server session snapshot; config is sent on conversation.created."""
+        self._session_id = getattr(evt.session, "id", None) or self._session_id
+
     async def _handle_evt_conversation_created(self, evt):
         """Handle conversation.created — send the initial session update."""
+        self._conversation_id = evt.conversation.id
         await self._send_session_update()
 
     async def _handle_evt_response_created(self, evt):
         """Handle response.created event - response generation started."""
-        pass
+        self._current_response_id = evt.response.id if evt.response else None
 
     async def _handle_evt_session_updated(self, evt):
         """Handle session.updated event."""
+        if getattr(evt.session, "id", None):
+            self._session_id = evt.session.id
         self._api_session_ready = True
         if self._run_llm_when_api_session_ready:
             self._run_llm_when_api_session_ready = False
             await self._create_response()
+
+    async def _handle_evt_conversation_item_deleted(self, evt):
+        """Handle conversation.item.deleted confirmation."""
+        await self._call_event_handler("on_conversation_item_deleted", evt.item_id)
+
+    async def _handle_evt_conversation_item_truncated(self, evt):
+        """Handle conversation.item.truncated confirmation."""
+        await self._call_event_handler(
+            "on_conversation_item_truncated",
+            evt.item_id,
+            evt.content_index,
+            evt.audio_end_ms,
+        )
+
+    async def _handle_evt_timeout_triggered(self, evt):
+        """Handle idle timeout — server starts a proactive check-in response."""
+        logger.debug(f"{self} Idle timeout triggered; server will check in")
+        await self._call_event_handler("on_idle_timeout", evt.item_id)
+        await self.start_ttfb_metrics()
+        await self.start_processing_metrics()
+
+    async def _handle_evt_dtmf_received(self, evt):
+        """Push SIP DTMF digits into the pipeline as InputDTMFFrame."""
+        digit = getattr(evt, "digit", None)
+        if not digit:
+            return
+        try:
+            button = KeypadEntry(digit)
+        except ValueError:
+            logger.warning(f"{self} Ignoring unsupported DTMF digit: {digit!r}")
+            return
+        await self._call_event_handler("on_dtmf_received", button)
+        await self.push_frame(InputDTMFFrame(button=button), FrameDirection.UPSTREAM)
+
+    async def _handle_evt_mcp(self, evt):
+        """Handle MCP discovery / call lifecycle events."""
+        await self._call_event_handler("on_mcp_event", evt.type, evt)
+        if evt.type.endswith(".failed"):
+            await self.push_error(
+                error_msg=f"Grok Realtime MCP failure: {evt.type}",
+                fatal=False,
+            )
 
     async def _handle_evt_audio_delta(self, evt):
         """Handle audio delta event - streaming audio from assistant."""
@@ -864,6 +964,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         await self.stop_processing_metrics()
         await self.push_frame(LLMFullResponseEndFrame())
         self._current_assistant_response = None
+        self._current_response_id = None
 
         # Error handling
         if evt.response.status == "failed":

@@ -103,3 +103,56 @@ async def test_manual_turn_interruption_clears_and_cancels():
         "InputAudioBufferClearEvent",
         "ResponseCancelEvent",
     ]
+
+
+@pytest.mark.asyncio
+async def test_interruption_truncates_in_flight_audio_on_the_wire():
+    import time
+
+    from pipecat.services.xai.realtime.events import (
+        AudioConfiguration,
+        AudioOutput,
+        PCMAudioFormat,
+    )
+    from pipecat.services.xai.realtime.llm import CurrentAudioResponse
+
+    service, recorder = _make_service(server_vad=True)
+    service._settings.session_properties.audio = AudioConfiguration(
+        output=AudioOutput(format=PCMAudioFormat(rate=24000))
+    )
+    service._current_audio_response = CurrentAudioResponse(
+        item_id="item-audio",
+        content_index=0,
+        start_time_ms=int(time.time() * 1000) - 500,
+        total_size=48000,  # 1s at 24kHz mono 16-bit
+    )
+
+    await service._handle_interruption()
+
+    assert "ResponseCancelEvent" in recorder.kinds()
+    assert "ConversationItemTruncateEvent" in recorder.kinds()
+    truncate = next(
+        e for e in recorder.events if isinstance(e, events.ConversationItemTruncateEvent)
+    )
+    assert truncate.item_id == "item-audio"
+    assert truncate.content_index == 0
+    assert 0 < truncate.audio_end_ms <= 1000
+    assert service._current_audio_response is None
+
+
+@pytest.mark.asyncio
+async def test_delete_conversation_item_sends_client_event():
+    service, recorder = _make_service(server_vad=True)
+    await service.delete_conversation_item("item-1")
+    assert recorder.kinds() == ["ConversationItemDeleteEvent"]
+    assert recorder.events[0].item_id == "item-1"
+
+
+@pytest.mark.asyncio
+async def test_force_message_sends_force_message_item():
+    service, recorder = _make_service(server_vad=True)
+    await service.force_message("This call is being recorded.")
+    assert recorder.kinds() == ["ConversationItemCreateEvent"]
+    item = recorder.events[0].item
+    assert item.type == "force_message"
+    assert item.content[0].text == "This call is being recorded."

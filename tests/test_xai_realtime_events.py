@@ -122,3 +122,35 @@ def test_documented_server_events_are_registered(event_type):
 def test_unknown_event_still_raises():
     with pytest.raises(Exception, match="Unimplemented server event type"):
         events.parse_server_event(_event({"type": "not.a.real.event", "event_id": "e"}))
+
+
+def test_client_truncate_and_delete_events_serialize():
+    truncate = events.ConversationItemTruncateEvent(
+        item_id="item-1", content_index=0, audio_end_ms=250
+    )
+    delete = events.ConversationItemDeleteEvent(item_id="item-1")
+    assert truncate.model_dump(exclude_none=True)["type"] == "conversation.item.truncate"
+    assert delete.model_dump(exclude_none=True)["type"] == "conversation.item.delete"
+
+
+def test_session_properties_accept_extended_fields():
+    props = events.SessionProperties(
+        reasoning=events.Reasoning(effort="none"),
+        resumption=events.SessionResumption(enabled=True),
+        replace={"Acme Mobile": "Acme Mobull"},
+        turn_detection=events.TurnDetection(
+            type="server_vad",
+            idle_timeout_ms=5000,
+            threshold=0.85,
+        ),
+        audio=events.AudioConfiguration(
+            input=events.AudioInput(
+                transcription=events.InputAudioTranscription(model="grok-transcribe")
+            )
+        ),
+    )
+    dumped = props.model_dump(exclude_none=True)
+    assert dumped["reasoning"]["effort"] == "none"
+    assert dumped["resumption"]["enabled"] is True
+    assert dumped["turn_detection"]["idle_timeout_ms"] == 5000
+    assert dumped["audio"]["input"]["transcription"]["model"] == "grok-transcribe"
