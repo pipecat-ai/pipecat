@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from typing import Any, TypedDict, cast
 
 from loguru import logger
-from openai import NotGiven
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
@@ -21,6 +20,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMContextMessage,
     LLMSpecificMessage,
     LLMStandardMessage,
+    NotGiven,
 )
 
 try:
