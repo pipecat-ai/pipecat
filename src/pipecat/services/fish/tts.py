@@ -133,7 +133,7 @@ class FishAudioTTSService(InterruptibleTTSService):
                     Use ``settings=FishAudioTTSService.Settings(voice=...)`` instead.
                     Will be removed in 2.0.0.
 
-            model_id: Specify which Fish Audio TTS model to use (e.g. "s1").
+            model_id: Specify which Fish Audio TTS model to use (e.g. "s2.1-pro").
 
                 .. deprecated:: 0.0.105
                     Use ``settings=FishAudioTTSService.Settings(model=...)`` instead.
@@ -153,7 +153,7 @@ class FishAudioTTSService(InterruptibleTTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="s2-pro",
+            model="s2.1-pro",
             voice=None,
             language=None,
             latency="balanced",

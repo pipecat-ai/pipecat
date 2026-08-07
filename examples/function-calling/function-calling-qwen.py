@@ -90,6 +90,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = QwenLLMService(
         api_key=os.environ["QWEN_API_KEY"],
         settings=QwenLLMService.Settings(
+            model="qwen3.6-27b",
+            extra={"extra_body": {"enable_thinking": False}},  # Disable thinking for better latency
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
