@@ -318,6 +318,7 @@ class DeepgramSTTService(STTService):
         addons: dict | None = None,
         settings: Settings | None = None,
         ttfs_p99_latency: float | None = DEEPGRAM_TTFS_P99,
+        start_connect_timeout: float = 5.0,
         **kwargs,
     ):
         """Initialize the Deepgram STT service.
@@ -348,6 +349,11 @@ class DeepgramSTTService(STTService):
                 after the ``live_options`` merge).
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
+            start_connect_timeout: Seconds ``start()`` waits for the initial
+                WebSocket handshake before proceeding anyway. Audio that arrives
+                before the connection is ready is discarded, so this wait is what
+                prevents the speaker's first word being missing from the
+                transcript. Defaults to 5.0.
             **kwargs: Additional arguments passed to the parent STTService.
         """
         # 1. Initialize default_settings with hardcoded defaults
@@ -461,6 +467,12 @@ class DeepgramSTTService(STTService):
         self._connection = None
         self._connection_task = None
         self._connection_ready = asyncio.Event()
+        # How long start() waits for the initial WebSocket handshake before
+        # giving up and letting the pipeline run. Audio that arrives before the
+        # connection is ready is discarded by run_stt(), so waiting here is what
+        # keeps the first word out of the gap. Matches the timeout _do_reconnect()
+        # already uses.
+        self._start_connect_timeout = start_connect_timeout
         # Rapid failure detection: if the connection dies within
         # QuickFailureTracker.min_stable_duration of connecting (e.g. an invalid
         # API key rejected at the WebSocket handshake) enough times in a row,
@@ -511,11 +523,39 @@ class DeepgramSTTService(STTService):
     async def start(self, frame: StartFrame):
         """Start the Deepgram STT service.
 
+        Waits for the WebSocket to be ready before returning. ``_connect()``
+        only launches a background task, so without this wait the service
+        reports started while the handshake is still in flight. Audio arriving
+        in that window reaches ``run_stt()`` with ``self._connection`` still
+        ``None`` and is silently discarded, so the speaker's first word or two
+        is missing from the transcript. ``STTService``'s
+        ``_reconnect_audio_buffer`` does not cover this: it is gated on
+        ``_reconnecting``, which only ``_reconnect()`` sets.
+
+        This mirrors ``_do_reconnect()``, which already waits on
+        ``_connection_ready`` for the same reason, and
+        ``DeepgramFluxSageMakerSTTService._connect()``, which waits for the
+        provider's ``Connected`` message before returning.
+
+        A connection that is not ready within ``_start_connect_timeout`` seconds
+        is logged and start proceeds anyway, leaving the existing reconnect and
+        error-reporting paths to handle it. That is no worse than the previous
+        behaviour, which never waited at all.
+
         Args:
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
         await self._connect()
+        try:
+            await asyncio.wait_for(
+                self._connection_ready.wait(), timeout=self._start_connect_timeout
+            )
+        except TimeoutError:
+            logger.warning(
+                f"{self}: connection not ready within {self._start_connect_timeout}s; "
+                "starting anyway, audio may be dropped until it is established"
+            )
 
     async def stop(self, frame: EndFrame):
         """Stop the Deepgram STT service.

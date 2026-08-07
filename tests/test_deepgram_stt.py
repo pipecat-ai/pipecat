@@ -14,6 +14,7 @@ from deepgram.core import ApiError
 from loguru import logger
 
 from pipecat.services.deepgram.stt import DeepgramSTTService, _derive_deepgram_urls
+from pipecat.services.stt_service import STTService
 from pipecat.utils.network import QuickFailureTracker
 
 
@@ -312,3 +313,69 @@ async def test_final_transcript_emits_usage_before_transcription_frame(monkeypat
     assert isinstance(data, STTUsageMetricsData)
     assert data.value.audio_seconds == 1.25
     assert service._stt_usage_pending_seconds == 0.0
+
+
+@pytest.mark.asyncio
+async def test_start_waits_for_connection_ready(monkeypatch):
+    """start() must not return until the WebSocket handshake has completed.
+
+    Regression test. _connect() only launches a background task, so start()
+    used to return while the handshake was still in flight. Audio arriving in
+    that window reaches run_stt() with self._connection still None and is
+    silently discarded (see test_run_stt_skips_send_when_connection_is_none),
+    which drops the speaker's first word or two from the transcript.
+    STTService's _reconnect_audio_buffer does not cover this: it is gated on
+    _reconnecting, which only _reconnect() sets.
+    """
+    monkeypatch.setattr(STTService, "start", AsyncMock())
+
+    service = DeepgramSTTService.__new__(DeepgramSTTService)
+    service._name = "DeepgramSTTService"
+    service._connection = None
+    service._connection_ready = asyncio.Event()
+    service._start_connect_timeout = 5.0
+
+    handshake_done = False
+
+    async def slow_handshake():
+        nonlocal handshake_done
+        await asyncio.sleep(0.2)
+        service._connection = MagicMock()
+        handshake_done = True
+        service._connection_ready.set()
+
+    service._connect = AsyncMock(side_effect=lambda: asyncio.create_task(slow_handshake()))
+
+    await DeepgramSTTService.start(service, MagicMock())
+
+    # start() returned, so the connection must already be usable. Before the
+    # fix this failed: start() returned with _connection still None.
+    assert handshake_done is True
+    assert service._connection is not None
+    assert service._connection_ready.is_set()
+
+
+@pytest.mark.asyncio
+async def test_start_proceeds_when_connection_never_becomes_ready(monkeypatch):
+    """A handshake that never completes must not hang the pipeline forever.
+
+    start() logs and proceeds after _start_connect_timeout, leaving the existing
+    reconnect and error-reporting paths to handle the dead connection. That is
+    no worse than the previous behaviour, which never waited at all.
+    """
+    monkeypatch.setattr(STTService, "start", AsyncMock())
+
+    service = DeepgramSTTService.__new__(DeepgramSTTService)
+    service._name = "DeepgramSTTService"
+    service._connection = None
+    service._connection_ready = asyncio.Event()  # never set
+    service._start_connect_timeout = 0.05
+    service._connect = AsyncMock()
+
+    sink = io.StringIO()
+    handler_id = logger.add(sink, format="{message}")
+    try:
+        await asyncio.wait_for(DeepgramSTTService.start(service, MagicMock()), timeout=2.0)
+        assert "connection not ready" in sink.getvalue()
+    finally:
+        logger.remove(handler_id)
