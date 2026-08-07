@@ -1960,8 +1960,13 @@ class LLMAssistantAggregator(LLMContextAggregator):
             # assistant turn — e.g. the ○ / ◐ incomplete-turn signals,
             # where the spoken response is suppressed and the marker
             # is the only artifact.
+            #
+            # Do not push an LLMContextFrame here. Emitting one would
+            # start a new inference that ends on a model turn (Gemini
+            # rejects that with 400) and would cancel the incomplete-
+            # timeout re-prompt watchdog that injects a developer
+            # nudge before running.
             self._context.add_message({"role": "assistant", "content": frame.marker})
-            await self.push_context_frame()
             timestamp_frame = LLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
             await self.push_frame(timestamp_frame)
             return

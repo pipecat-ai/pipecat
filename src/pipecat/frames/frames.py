@@ -368,11 +368,11 @@ class LLMMarkerFrame(DataFrame):
             single character).
         append_to_context_immediately: If True, the marker is written
             to the context as its own standalone assistant message as
-            soon as it's received. If False, the marker is appended to
-            the running assistant aggregation and flushed to the
-            context together with the following text as a single
-            message (e.g. for the ✓ case the context message ends up
-            as "✓ <response>").
+            soon as it's received, without starting a new LLM run. If
+            False, the marker is appended to the running assistant
+            aggregation and flushed to the context together with the
+            following text as a single message (e.g. for the ✓ case
+            the context message ends up as "✓ <response>").
     """
 
     marker: str

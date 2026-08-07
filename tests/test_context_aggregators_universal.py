@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMarkerFrame,
     LLMMessagesAppendFrame,
     LLMMessagesTransformFrame,
     LLMMessagesUpdateFrame,
@@ -1549,6 +1550,57 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         # The incomplete marker should be stripped (resulting in empty content)
         self.assertEqual(len(stop_messages), 1)
         self.assertEqual(stop_messages[0].content, "")
+
+    async def test_incomplete_marker_records_without_llm_run(self):
+        """Stand-alone ○/◐ markers must persist without emitting LLMContextFrame.
+
+        Emitting a context frame here would start an inference that ends on a
+        model turn (rejected by Gemini) and cancel the incomplete-timeout
+        re-prompt path that injects a developer nudge before running.
+        """
+        from pipecat.turns.user_turn_completion_mixin import (
+            USER_TURN_INCOMPLETE_LONG_MARKER,
+            USER_TURN_INCOMPLETE_SHORT_MARKER,
+        )
+
+        for marker in (
+            USER_TURN_INCOMPLETE_SHORT_MARKER,
+            USER_TURN_INCOMPLETE_LONG_MARKER,
+        ):
+            with self.subTest(marker=marker):
+                context = LLMContext(
+                    messages=[
+                        {"role": "assistant", "content": "What did you do last weekend?"},
+                        {"role": "user", "content": "I went to the"},
+                    ]
+                )
+                aggregator = LLMAssistantAggregator(context)
+
+                received_down, received_up = await run_test(
+                    aggregator,
+                    frames_to_send=[LLMMarkerFrame(marker)],
+                )
+
+                self.assertEqual(
+                    context.get_messages()[-1],
+                    {"role": "assistant", "content": marker},
+                )
+                context_frames = [
+                    f
+                    for f in (*received_down, *received_up)
+                    if isinstance(f, LLMContextFrame)
+                ]
+                self.assertEqual(
+                    context_frames,
+                    [],
+                    "incomplete marker must not start a new LLM run",
+                )
+                self.assertTrue(
+                    any(
+                        isinstance(f, LLMContextAssistantTimestampFrame)
+                        for f in (*received_down, *received_up)
+                    )
+                )
 
     async def test_llm_run(self):
         context = LLMContext()
