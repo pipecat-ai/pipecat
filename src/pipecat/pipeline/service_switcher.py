@@ -273,6 +273,51 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         # update crosses its service long before the ring wraps.
         self._inactive_service_updates: deque[int] = deque(maxlen=64)
 
+        # What this switcher reports is a reading of its services rather than a
+        # flag of its own, so the last reading announced is kept here to tell
+        # movement worth announcing from a service change that doesn't show.
+        self._announced_usable = self.is_usable
+        for service in services:
+            service.add_event_handler("on_usable_changed", self._on_service_usable_changed)
+
+    async def set_usable(self, is_usable: bool):
+        """Take this switcher out of service, or put it back.
+
+        This vetoes the services rather than speaking for them: taking a
+        switcher out of service leaves them as they are, so putting it back
+        restores what they already had instead of declaring them all well
+        again. Bring an individual service back with its own
+        :meth:`~pipecat.processors.frame_processor.FrameProcessor.set_usable`.
+
+        Args:
+            is_usable: Whether the switcher can be given work.
+        """
+        self._is_usable = is_usable
+        # Lifting the veto is not the same as having somewhere to send work,
+        # and a switcher that stays unusable anyway is worth saying out loud.
+        if is_usable and not self.is_usable:
+            logger.warning(f"{self.name} stays unusable: none of its services can be given work")
+        await self._announce_usable()
+
+    async def _on_service_usable_changed(self, service: FrameProcessor, is_usable: bool):
+        """Announce this switcher's usability after a service changed its own.
+
+        Args:
+            service: The service whose usability changed.
+            is_usable: Whether that service can now be given work.
+        """
+        await self._announce_usable()
+
+    async def _announce_usable(self):
+        """Raise ``on_usable_changed`` if what this switcher reports has moved."""
+        is_usable = self.is_usable
+        if is_usable == self._announced_usable:
+            return
+
+        self._announced_usable = is_usable
+        logger.debug(f"{self}: {'usable' if is_usable else 'no longer usable'}")
+        await self._call_event_handler("on_usable_changed", is_usable)
+
     @property
     def strategy(self) -> StrategyType:
         """Return the active switching strategy."""
@@ -293,6 +338,8 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         :meth:`~pipecat.processors.frame_processor.FrameProcessor.set_usable`
         therefore brings the switcher back too — while calling that on the
         switcher itself takes it out of service regardless of what it holds.
+        Either way the switcher raises ``on_usable_changed`` for itself, so
+        watching it is enough to hear about the services it holds.
 
         Returns:
             True while at least one service can be given work.

@@ -10,6 +10,8 @@ import asyncio
 import unittest
 from dataclasses import dataclass
 
+from loguru import logger
+
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -1050,6 +1052,95 @@ class TestServiceSwitcherStrategyFailover(unittest.IsolatedAsyncioTestCase):
         # Bringing one back brings the switcher back with it.
         await second.set_usable(True)
         self.assertTrue(switcher.is_usable)
+
+    async def test_switcher_announces_its_own_usability(self):
+        """Test that a switcher reports the changes its services cause in it."""
+        first = MockFrameProcessor("first")
+        second = MockFrameProcessor("second")
+        switcher = ServiceSwitcher([first, second])
+
+        announced = []
+        heard = asyncio.Event()
+
+        @switcher.event_handler("on_usable_changed")
+        async def on_usable_changed(switcher, is_usable):
+            announced.append(is_usable)
+            heard.set()
+
+        async def wait_for_announcement():
+            async with asyncio.timeout(5):
+                await heard.wait()
+            heard.clear()
+
+        # Losing one service of two changes nothing the switcher can't absorb.
+        await first.set_usable(False)
+        # Losing the last one does.
+        await second.set_usable(False)
+        await wait_for_announcement()
+        self.assertEqual(announced, [False])
+
+        # And getting one back brings the switcher back with it.
+        await first.set_usable(True)
+        await wait_for_announcement()
+        self.assertEqual(announced, [False, True])
+
+    async def test_taking_the_switcher_out_of_service_is_announced(self):
+        """Test that a switcher taken out of service reports it, and reports coming back."""
+        first = MockFrameProcessor("first")
+        switcher = ServiceSwitcher([first])
+
+        announced = []
+        heard = asyncio.Event()
+
+        @switcher.event_handler("on_usable_changed")
+        async def on_usable_changed(switcher, is_usable):
+            announced.append(is_usable)
+            heard.set()
+
+        async def wait_for_announcement():
+            async with asyncio.timeout(5):
+                await heard.wait()
+            heard.clear()
+
+        await switcher.set_usable(False)
+        await wait_for_announcement()
+        self.assertEqual(announced, [False])
+
+        await switcher.set_usable(True)
+        await wait_for_announcement()
+        self.assertEqual(announced, [False, True])
+
+    async def test_the_switcher_cannot_be_put_back_without_a_service(self):
+        """Test that a switcher with nothing that works stays unusable when put back.
+
+        Its own flag is only half the answer, so saying it can be given work
+        again means nothing while it has nowhere to send that work.
+        """
+        first = MockFrameProcessor("first")
+        switcher = ServiceSwitcher([first])
+        await first.set_usable(False)
+
+        announced = []
+
+        @switcher.event_handler("on_usable_changed")
+        async def on_usable_changed(switcher, is_usable):
+            announced.append(is_usable)
+
+        messages = []
+        handler_id = logger.add(messages.append, level="WARNING", format="{message}")
+        try:
+            await switcher.set_usable(True)
+            await asyncio.sleep(0.1)
+        finally:
+            logger.remove(handler_id)
+
+        self.assertFalse(switcher.is_usable)
+        self.assertNotIn(True, announced)
+        # Silently doing nothing would leave the caller to work that out.
+        self.assertTrue(
+            any("stays unusable" in message for message in messages),
+            f"the switcher did not report that it stayed unusable: {messages}",
+        )
 
     async def test_manual_switch_refuses_a_service_that_cannot_work(self):
         """Test that a service that can't be given work is never made active."""
