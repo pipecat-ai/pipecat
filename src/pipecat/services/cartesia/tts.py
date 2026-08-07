@@ -9,6 +9,7 @@
 import base64
 import json
 import re
+import warnings
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -31,6 +32,26 @@ from pipecat.services.tts_service import TextAggregationMode, TTSService, Websoc
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
+
+# The Cartesia API version these services are written against. The request
+# payloads and message handling below are tied to it, so it is pinned here
+# rather than configured.
+_CARTESIA_API_VERSION = "2026-03-01"
+
+
+def _resolve_cartesia_version(cartesia_version: str | None) -> str:
+    """Resolve the API version header value, warning on a deprecated override."""
+    if cartesia_version is None:
+        return _CARTESIA_API_VERSION
+
+    warnings.warn(
+        "`cartesia_version` is deprecated since 1.8.0 and will be removed in 2.0.0. "
+        "No replacement. The service sends the API version it is written against, "
+        "so overriding it can break request and response handling.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+    return cartesia_version
 
 
 class GenerationConfig(BaseModel):
@@ -226,7 +247,7 @@ class CartesiaTTSService(WebsocketTTSService):
         *,
         api_key: str,
         voice_id: str | None = None,
-        cartesia_version: str = "2026-03-01",
+        cartesia_version: str | None = None,
         url: str = "wss://api.cartesia.ai/tts/websocket",
         model: str | None = None,
         sample_rate: int | None = None,
@@ -251,6 +272,11 @@ class CartesiaTTSService(WebsocketTTSService):
                     Will be removed in 2.0.0.
 
             cartesia_version: API version string for Cartesia service.
+
+                .. deprecated:: 1.8.0
+                    No replacement. The API version is pinned to the one this
+                    service implements. Will be removed in 2.0.0.
+
             url: WebSocket URL for Cartesia TTS API.
             model: TTS model to use.
 
@@ -352,7 +378,7 @@ class CartesiaTTSService(WebsocketTTSService):
         )
 
         self._api_key = api_key
-        self._cartesia_version = cartesia_version
+        self._cartesia_version = _resolve_cartesia_version(cartesia_version)
         self._url = url
         self._extra_headers = dict(extra_headers) if extra_headers else {}
 
@@ -765,7 +791,7 @@ class CartesiaHttpTTSService(TTSService):
         voice_id: str | None = None,
         model: str | None = None,
         base_url: str = "https://api.cartesia.ai",
-        cartesia_version: str = "2026-03-01",
+        cartesia_version: str | None = None,
         aiohttp_session: aiohttp.ClientSession | None = None,
         sample_rate: int | None = None,
         encoding: str = "pcm_s16le",
@@ -793,6 +819,11 @@ class CartesiaHttpTTSService(TTSService):
 
             base_url: Base URL for Cartesia HTTP API.
             cartesia_version: API version string for Cartesia service.
+
+                .. deprecated:: 1.8.0
+                    No replacement. The API version is pinned to the one this
+                    service implements. Will be removed in 2.0.0.
+
             aiohttp_session: Optional aiohttp ClientSession for HTTP requests.
                 If not provided, a session will be created and managed internally.
             sample_rate: Audio sample rate. If None, uses default.
@@ -852,7 +883,7 @@ class CartesiaHttpTTSService(TTSService):
 
         self._api_key = api_key
         self._base_url = base_url
-        self._cartesia_version = cartesia_version
+        self._cartesia_version = _resolve_cartesia_version(cartesia_version)
         self._extra_headers = dict(extra_headers) if extra_headers else {}
 
         # Audio output format — init-only, not runtime-updatable
