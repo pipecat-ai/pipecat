@@ -6,10 +6,11 @@
 
 """Tests for BlandTTSService and BlandHttpTTSService."""
 
+import asyncio
 import json
 import struct
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import aiohttp
 import pytest
@@ -31,7 +32,7 @@ from pipecat.services.bland.tts import BlandHttpTTSService, BlandTTSService
 from pipecat.services.tts_service import TextAggregationMode
 from pipecat.tests.utils import SleepFrame, run_test
 
-DEFAULT_VOICE_ID = "f04af0e5-1a80-48a9-b02d-52f30d417cfa"
+DEFAULT_VOICE_ID = "2f29fdbb-c55e-4add-9c7c-93437ebf379d"
 OTHER_VOICE_ID = "c18a1cd5-91ef-4b06-841a-e58b8b487e8c"
 
 AUDIO_CHUNK_1 = b"\x00\x01" * 512
@@ -56,6 +57,9 @@ def _ws_server_handler(
     init_error: dict | None = None,
     turn_error: dict | None = None,
     end_reason: str = "complete",
+    ready_encoding: str = "pcm_s16le",
+    ready_sample_rate: int | None = None,
+    acknowledge_init: bool = True,
 ):
     """Build a fake Bland realtime server following the documented turn flow."""
 
@@ -74,15 +78,39 @@ def _ws_server_handler(
                         await ws.send(json.dumps({"type": "error", **init_error}))
                         await ws.close()
                         return
-                    await ws.send(json.dumps({"type": "ready", "session_id": "test-session"}))
-                elif msg_type == "end_of_turn":
+                    if not acknowledge_init:
+                        continue
+                    requested_rate = msg.get("audio", {}).get("sample_rate", 48000)
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "ready",
+                                "session_id": "test-session",
+                                "encoding": ready_encoding,
+                                "sample_rate": (
+                                    ready_sample_rate
+                                    if ready_sample_rate is not None
+                                    else requested_rate
+                                ),
+                            }
+                        )
+                    )
+                elif msg_type == "speak":
                     context_id = msg["context_id"]
                     if turn_error is not None:
                         await ws.send(
                             json.dumps({"type": "error", "context_id": context_id, **turn_error})
                         )
                         continue
-                    await ws.send(json.dumps({"type": "utterance_start", "context_id": context_id}))
+                    if context_id not in captured.setdefault("started_contexts", set()):
+                        captured["started_contexts"].add(context_id)
+                        await ws.send(
+                            json.dumps({"type": "utterance_start", "context_id": context_id})
+                        )
+                elif msg_type == "end_of_turn":
+                    context_id = msg["context_id"]
+                    if turn_error is not None:
+                        continue
                     await ws.send(AUDIO_CHUNK_1)
                     await ws.send(AUDIO_CHUNK_2)
                     await ws.send(
@@ -98,6 +126,7 @@ def _ws_server_handler(
                     )
                 elif msg_type == "close":
                     await ws.send(json.dumps({"type": "done", "session_id": "test-session"}))
+                    captured["done_sent"] = True
                     await ws.close()
         except websockets.ConnectionClosed:
             pass
@@ -298,10 +327,11 @@ async def test_bland_tts_interruption_cancels_without_reconnecting():
 
 
 @pytest.mark.asyncio
-async def test_bland_tts_turn_error_surfaces():
+@pytest.mark.parametrize("code", ["insufficient_credits", "rate_limited"])
+async def test_bland_tts_turn_error_surfaces(code):
     """A turn-scoped error frame becomes an ErrorFrame carrying code and message."""
     captured: dict = {"messages": []}
-    error = {"code": "insufficient_credits", "message": "Your account is out of credits."}
+    error = {"code": code, "message": "Turn admission refused."}
 
     async with serve(_ws_server_handler(captured, turn_error=error), "127.0.0.1", 0) as server:
         host, port = next(iter(server.sockets)).getsockname()[:2]
@@ -318,8 +348,9 @@ async def test_bland_tts_turn_error_surfaces():
 
     errors = [f for f in down_frames + up_frames if isinstance(f, ErrorFrame)]
     assert errors
-    assert "insufficient_credits" in errors[0].error
-    assert "Your account is out of credits." in errors[0].error
+    assert code in errors[0].error
+    assert "Turn admission refused." in errors[0].error
+    assert tts.get_audio_contexts() == []
 
 
 @pytest.mark.asyncio
@@ -343,6 +374,26 @@ async def test_bland_tts_failed_turn_surfaces():
     errors = [f for f in down_frames + up_frames if isinstance(f, ErrorFrame)]
     assert errors
     assert "failed" in errors[0].error
+    assert tts.get_audio_contexts() == []
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_server_preemption_releases_audio_context():
+    """A server-side terminal cleans up even if Pipecat did not interrupt first."""
+    captured: dict = {"messages": []}
+
+    async with serve(
+        _ws_server_handler(captured, end_reason="preempted"), "127.0.0.1", 0
+    ) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+        tts = BlandTTSService(
+            api_key="test-key",
+            url=f"ws://{host}:{port}/v2/tts/ws",
+            sample_rate=24000,
+        )
+        await run_test(tts, frames_to_send=[TTSSpeakFrame(text="Hi."), SleepFrame(sleep=0.3)])
+
+    assert tts.get_audio_contexts() == []
 
 
 @pytest.mark.asyncio
@@ -368,6 +419,78 @@ async def test_bland_tts_rejected_init_surfaces():
 
 
 @pytest.mark.asyncio
+async def test_bland_tts_init_timeout_closes_provisional_connection():
+    """A peer that upgrades but never acknowledges init cannot hang startup."""
+    captured: dict = {"messages": []}
+
+    async with serve(
+        _ws_server_handler(captured, acknowledge_init=False), "127.0.0.1", 0
+    ) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+        tts = BlandTTSService(
+            api_key="test-key",
+            url=f"ws://{host}:{port}/v2/tts/ws",
+            sample_rate=24000,
+        )
+        with patch("pipecat.services.bland.tts._READY_TIMEOUT_SECONDS", 0.05):
+            down_frames, up_frames = await run_test(tts, frames_to_send=[])
+
+    errors = [f for f in down_frames + up_frames if isinstance(f, ErrorFrame)]
+    assert errors
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_cancelled_init_closes_provisional_connection():
+    """Task cancellation during init must not leak the upgraded socket."""
+    tts = BlandTTSService(api_key="test-key")
+    websocket = AsyncMock()
+    websocket.recv.side_effect = asyncio.CancelledError
+    tts._websocket_connect = AsyncMock(return_value=websocket)
+
+    with pytest.raises(asyncio.CancelledError):
+        await tts._connect_websocket()
+
+    websocket.close.assert_awaited_once()
+
+
+@pytest.mark.parametrize("service", [BlandTTSService, BlandHttpTTSService])
+def test_bland_tts_requires_nonempty_api_key(service):
+    with pytest.raises(ValueError, match="API key"):
+        service(api_key="")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("encoding", "sample_rate"),
+    [("mulaw", 24000), ("pcm_s16le", 16000)],
+)
+async def test_bland_tts_rejects_mismatched_ready_format(encoding, sample_rate):
+    """Audio must never be tagged with a format the server did not acknowledge."""
+    captured: dict = {"messages": []}
+
+    async with serve(
+        _ws_server_handler(
+            captured,
+            ready_encoding=encoding,
+            ready_sample_rate=sample_rate,
+        ),
+        "127.0.0.1",
+        0,
+    ) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+        tts = BlandTTSService(
+            api_key="test-key",
+            url=f"ws://{host}:{port}/v2/tts/ws",
+            sample_rate=24000,
+        )
+        down_frames, up_frames = await run_test(tts, frames_to_send=[])
+
+    errors = [f for f in down_frames + up_frames if isinstance(f, ErrorFrame)]
+    assert errors
+    assert "unexpected audio format" in errors[0].error
+
+
+@pytest.mark.asyncio
 async def test_bland_tts_close_settles_the_session():
     """Shutdown asks Bland to settle usage instead of dropping the socket."""
     captured: dict = {"messages": []}
@@ -384,6 +507,7 @@ async def test_bland_tts_close_settles_the_session():
         await run_test(tts, frames_to_send=[TTSSpeakFrame(text="Hi."), SleepFrame(sleep=0.3)])
 
     assert len(_of_type(captured, "close")) == 1
+    assert captured["done_sent"] is True
     assert captured["sessions"] == 1
 
 
@@ -412,7 +536,7 @@ async def test_run_bland_http_tts_success(aiohttp_client):
     async with aiohttp.ClientSession() as session:
         tts = BlandHttpTTSService(
             api_key="test-key",
-            base_url=base_url,
+            base_url=f"{base_url}/",
             aiohttp_session=session,
             sample_rate=24000,
         )

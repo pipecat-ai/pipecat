@@ -369,7 +369,7 @@ SERVICE_CONFIGS = {
         "BlandTTSService(\n"
         '        api_key=os.getenv("BLAND_API_KEY"),\n'
         "        settings=BlandTTSService.Settings(\n"
-        '            voice=os.getenv("BLAND_VOICE_ID", "f04af0e5-1a80-48a9-b02d-52f30d417cfa"),\n'
+        '            voice=os.getenv("BLAND_VOICE_ID", "2f29fdbb-c55e-4add-9c7c-93437ebf379d"),\n'
         "        ),\n"
         "    )\n"
     ),
