@@ -27,6 +27,7 @@ def _make_bare_service() -> DeepgramSTTService:
     service._name = "DeepgramSTTService"
     service._connection = None
     service._connection_ready = asyncio.Event()
+    service._audio_ready = asyncio.Event()
     service._quick_failure_tracker = QuickFailureTracker()
     service._build_connect_kwargs = MagicMock(return_value={})
     service.push_error = AsyncMock()

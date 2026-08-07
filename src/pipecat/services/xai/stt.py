@@ -275,7 +275,11 @@ class XAISTTService(WebsocketSTTService):
                 return
 
             logger.debug("Connecting to xAI STT WebSocket")
+            # The socket opening is not enough to send audio: xAI acknowledges
+            # the session separately, and run_stt() waits for that. Hold audio
+            # until it arrives.
             self._session_ready.clear()
+            self._clear_audio_ready()
 
             ws_url = self._build_ws_url()
             headers = {
@@ -288,6 +292,7 @@ class XAISTTService(WebsocketSTTService):
         except Exception as e:
             self._websocket = None
             self._session_ready.clear()
+            self._clear_audio_ready()
             await self.push_error(error_msg=f"Unable to connect to xAI STT: {e}", exception=e)
 
     async def _disconnect_websocket(self):
@@ -301,6 +306,7 @@ class XAISTTService(WebsocketSTTService):
         finally:
             self._websocket = None
             self._session_ready.clear()
+            self._clear_audio_ready()
             await self._call_event_handler("on_disconnected")
 
     async def _receive_messages(self):
@@ -321,6 +327,7 @@ class XAISTTService(WebsocketSTTService):
 
         if msg_type == "transcript.created":
             self._session_ready.set()
+            self._set_audio_ready()
             logger.debug(f"{self} xAI STT session ready")
         elif msg_type == "transcript.partial":
             await self._handle_transcript(message)

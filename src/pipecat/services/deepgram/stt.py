@@ -618,6 +618,9 @@ class DeepgramSTTService(STTService):
 
     async def _connect(self):
         logger.debug("Connecting to Deepgram")
+        # The handshake runs in the background, so start() returns before the
+        # connection exists. Hold audio until it does.
+        self._clear_audio_ready()
         self._quick_failure_tracker.reset()
         self._connection_task = self.create_task(self._connection_handler())
 
@@ -660,6 +663,7 @@ class DeepgramSTTService(STTService):
                 async with self._client.listen.v1.connect(**connect_kwargs) as connection:
                     self._connection = connection
                     self._connection_ready.set()
+                    self._set_audio_ready()
                     connection.on(EventType.MESSAGE, self._on_message)
                     connection.on(EventType.ERROR, self._on_error)
 
@@ -681,6 +685,7 @@ class DeepgramSTTService(STTService):
                 await self.push_error(error_msg=f"connection error: {e}", exception=e)
             finally:
                 self._connection_ready.clear()
+                self._clear_audio_ready()
                 self._connection = None
                 if keepalive_task:
                     await self.cancel_task(keepalive_task)

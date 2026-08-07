@@ -12,6 +12,7 @@ import time
 import warnings
 import wave
 from abc import abstractmethod
+from collections import deque
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -92,6 +93,7 @@ class STTService(AIService):
         ttfs_p99_latency: float | None = None,
         keepalive_timeout: float | None = None,
         keepalive_interval: float = 5.0,
+        max_pending_audio_seconds: float = 5.0,
         settings: STTSettings | None = None,
         **kwargs,
     ):
@@ -118,6 +120,9 @@ class STTService(AIService):
                 connection alive. None disables keepalive. Useful for services that
                 close idle connections (e.g. behind a ServiceSwitcher).
             keepalive_interval: Seconds between idle checks when keepalive is enabled.
+            max_pending_audio_seconds: Most audio, in seconds, held while the service
+                cannot accept it (see :meth:`_clear_audio_ready`). Once the buffer is
+                full the oldest audio is discarded to make room. Defaults to 5.0.
             settings: The runtime-updatable settings for the STT service.
             **kwargs: Additional arguments passed to the parent AIService.
         """
@@ -180,10 +185,18 @@ class STTService(AIService):
         self._can_reconnect: bool = True
         # Whether a reconnect has been requested but deferred until speaking ends.
         self._need_reconnect: bool = False
-        # Whether a reconnect cycle is currently in progress.
-        self._reconnecting: bool = False
-        # Audio frames received while _reconnecting is True, replayed after reconnect.
-        self._reconnect_audio_buffer: list[tuple[AudioRawFrame, FrameDirection]] = []
+
+        # Audio readiness state. Starts ready: services that establish their
+        # connection before start() returns never need the gate.
+        self._audio_ready = asyncio.Event()
+        self._audio_ready.set()
+        # Audio held while not ready, replayed in order once ready again.
+        self._pending_audio: deque[tuple[AudioRawFrame, FrameDirection]] = deque()
+        self._pending_audio_bytes: int = 0
+        self._max_pending_audio_seconds = max_pending_audio_seconds
+        # Whether audio has already been discarded from a full buffer, so the
+        # warning is logged once per hold rather than per frame.
+        self._pending_audio_trimmed: bool = False
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
@@ -370,7 +383,7 @@ class STTService(AIService):
         await super().cleanup()
         await self._cancel_ttfb_timeout()
         await self._cancel_keepalive_task()
-        self._reconnect_audio_buffer.clear()
+        self._clear_pending_audio()
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply an STT settings delta.
@@ -412,19 +425,41 @@ class STTService(AIService):
     async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
         """Process an audio frame for speech recognition.
 
-        If a reconnect is in progress, the frame is buffered and replayed
-        once the connection is restored. If the service is muted, the frame
-        is dropped. Otherwise the frame is sent to the STT service and, if
-        a user_id is present, it is stored for use in transcription results.
+        While the service cannot accept audio, the frame is held and replayed
+        once it can, so nothing is lost across an initial connection or a
+        reconnect. Held audio is drained here, on the audio path, rather than
+        by whichever task signals readiness: that keeps every frame on one task
+        and so preserves ordering against audio still arriving.
 
         Args:
             frame: The audio frame to process.
             direction: The direction of frame processing.
         """
-        if self._reconnecting:
-            self._reconnect_audio_buffer.append((frame, direction))
+        if not self._audio_ready.is_set():
+            self._hold_audio(frame, direction)
             return
 
+        if self._pending_audio:
+            pending = self._pending_audio
+            self._pending_audio = deque()
+            self._pending_audio_bytes = 0
+            self._pending_audio_trimmed = False
+            for pending_frame, pending_direction in pending:
+                await self._send_audio_frame(pending_frame, pending_direction)
+
+        await self._send_audio_frame(frame, direction)
+
+    async def _send_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
+        """Hand a single audio frame to the STT service.
+
+        If the service is muted the frame is dropped. Otherwise it is sent to
+        the service and, if a user_id is present, it is stored for use in
+        transcription results.
+
+        Args:
+            frame: The audio frame to send.
+            direction: The direction of frame processing.
+        """
         if self._muted:
             return
 
@@ -447,6 +482,58 @@ class STTService(AIService):
         self._record_stt_audio_usage(frame.audio)
 
         await self.process_generator(self.run_stt(frame.audio))
+
+    def _set_audio_ready(self):
+        """Signal that the service can accept audio again.
+
+        Held audio is not replayed here. It drains on the next audio frame, so
+        that replay and live audio stay on the same task and in order.
+        """
+        self._audio_ready.set()
+
+    def _clear_audio_ready(self):
+        """Signal that the service cannot currently accept audio.
+
+        Audio arriving from now on is held, up to ``max_pending_audio_seconds``,
+        until :meth:`_set_audio_ready` is called. Services whose connection is
+        not usable the moment ``start()`` returns should call this before
+        connecting, and :meth:`_set_audio_ready` once the connection can carry
+        audio — which is not always when the socket opens: a service that must
+        wait for the server to acknowledge a session should signal readiness
+        there instead.
+        """
+        self._audio_ready.clear()
+
+    def _hold_audio(self, frame: AudioRawFrame, direction: FrameDirection):
+        """Hold an audio frame until the service can accept it.
+
+        The buffer holds at most ``max_pending_audio_seconds`` of audio,
+        discarding the oldest to make room, so what survives is the most recent
+        speech — the part still worth transcribing. The budget is measured in
+        bytes, derived from the frame's own format, so the accounting stays
+        exact and does not depend on the service's sample rate being known yet.
+        """
+        self._pending_audio.append((frame, direction))
+        self._pending_audio_bytes += len(frame.audio)
+
+        max_bytes = int(
+            self._max_pending_audio_seconds * frame.sample_rate * frame.num_channels * 2
+        )
+        while self._pending_audio_bytes > max_bytes and len(self._pending_audio) > 1:
+            dropped_frame, _ = self._pending_audio.popleft()
+            self._pending_audio_bytes -= len(dropped_frame.audio)
+            if not self._pending_audio_trimmed:
+                self._pending_audio_trimmed = True
+                logger.warning(
+                    f"{self}: still not ready for audio with "
+                    f"{self._max_pending_audio_seconds}s held, discarding the oldest"
+                )
+
+    def _clear_pending_audio(self):
+        """Discard any held audio."""
+        self._pending_audio.clear()
+        self._pending_audio_bytes = 0
+        self._pending_audio_trimmed = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames, handling VAD events and audio segmentation.
@@ -494,6 +581,7 @@ class STTService(AIService):
             self._muted = frame.mute
             logger.debug(f"STT service {'muted' if frame.mute else 'unmuted'}")
         elif isinstance(frame, InterruptionFrame):
+            self._clear_pending_audio()
             await self._reset_stt_ttfb_state()
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMContextAssistantTurnFrame):
@@ -671,15 +759,20 @@ class STTService(AIService):
     async def _reconnect(self):
         """Perform a full reconnect cycle with audio buffering.
 
-        Sets ``_reconnecting`` so incoming audio frames are buffered rather than
-        sent to a dead connection. Delegates the actual connection reset to
-        ``_do_reconnect()``. After the new connection is established all buffered
-        frames are replayed. On failure the error is reported via ``push_error``
-        and the ``on_connection_error`` event handler.
+        Holds incoming audio rather than sending it to a dead connection, and
+        delegates the actual connection reset to ``_do_reconnect()``. Held audio
+        is replayed once the new connection is up.
+
+        Readiness is restored only on success, for two reasons: a service whose
+        reconnect failed cannot transcribe anyway, so continuing to hold means a
+        later successful reconnect still receives the most recent speech; and a
+        service that manages readiness itself must not have the gate reopened
+        underneath it. Failures are reported via ``push_error`` and the
+        ``on_connection_error`` event handler.
         """
         logger.info(f"{self} reconnecting...")
-        self._reconnect_audio_buffer.clear()
-        self._reconnecting = True
+        self._clear_pending_audio()
+        self._clear_audio_ready()
         self._need_reconnect = False
         try:
             await self._do_reconnect()
@@ -688,13 +781,7 @@ class STTService(AIService):
             await self._call_event_handler("on_connection_error", str(e))
             await self.push_error(f"{self} reconnect failed: {e}", exception=e)
             return
-        finally:
-            self._reconnecting = False
-
-        # Replay audio frames that arrived while the connection was down.
-        for buffered_frame, buffered_direction in self._reconnect_audio_buffer:
-            await self.process_audio_frame(buffered_frame, buffered_direction)
-        self._reconnect_audio_buffer.clear()
+        self._set_audio_ready()
 
     async def _do_reconnect(self):
         """Perform the service-specific connection reset.
