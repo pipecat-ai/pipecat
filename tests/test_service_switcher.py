@@ -32,6 +32,7 @@ from pipecat.pipeline.service_switcher import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import run_test
+from pipecat.utils.errors import ErrorCategory
 
 
 class MockFrameProcessor(FrameProcessor):
@@ -125,18 +126,32 @@ class ErrorInjectorProcessor(FrameProcessor):
 class ErrorOnTextService(FrameProcessor):
     """A mock service that pushes an error on the first TextFrame it receives.
 
-    Simulates a managed service inside a ServiceSwitcher that encounters an error.
+    Simulates a managed service inside a ServiceSwitcher that encounters an
+    error. ``becomes_unusable`` chooses between an error the service can carry
+    on from and one that ends its usefulness.
     """
 
-    def __init__(self, test_name: str, **kwargs):
+    def __init__(
+        self,
+        test_name: str,
+        becomes_unusable: bool = True,
+        category: ErrorCategory | None = None,
+        **kwargs,
+    ):
         super().__init__(name=test_name, **kwargs)
+        self._becomes_unusable = becomes_unusable
+        self._category = category
         self._errored = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, TextFrame) and not self._errored:
             self._errored = True
-            await self.push_error("service connection lost")
+            await self.push_error(
+                "service connection lost",
+                category=self._category,
+                processor_became_unusable=self._becomes_unusable,
+            )
         await self.push_frame(frame, direction)
 
 
@@ -884,11 +899,171 @@ class TestServiceSwitcherStrategyFailover(unittest.IsolatedAsyncioTestCase):
             switcher,
             frames_to_send=[TextFrame(text="test")],
             expected_down_frames=[TextFrame],
-            expected_up_frames=[ErrorFrame],
+            expected_up_frames=[],
         )
 
         # Active service SHOULD have changed — the error came from a managed service
         self.assertEqual(switcher.strategy.active_service, backup_service)
+
+    async def test_failover_absorbs_the_error(self):
+        """Test that an error the switcher recovered from goes no further.
+
+        The switcher went on doing its job by moving work to another service,
+        so there is nothing left for the rest of the pipeline to act on.
+        """
+        error_service = ErrorOnTextService("error_service")
+        backup_service = MockFrameProcessor("backup_service")
+        switcher = ServiceSwitcher(
+            [error_service, backup_service],
+            strategy_type=ServiceSwitcherStrategyFailover,
+        )
+
+        await run_test(
+            switcher,
+            frames_to_send=[TextFrame(text="test")],
+            expected_down_frames=[TextFrame],
+            expected_up_frames=[],
+        )
+
+        self.assertTrue(switcher.is_usable)
+
+    async def test_recoverable_error_does_not_trigger_failover(self):
+        """Test that an error the service can carry on from costs no failover."""
+        error_service = ErrorOnTextService("error_service", becomes_unusable=False)
+        backup_service = MockFrameProcessor("backup_service")
+        switcher = ServiceSwitcher(
+            [error_service, backup_service],
+            strategy_type=ServiceSwitcherStrategyFailover,
+        )
+
+        await run_test(
+            switcher,
+            frames_to_send=[TextFrame(text="test")],
+            expected_down_frames=[TextFrame],
+            expected_up_frames=[ErrorFrame],
+        )
+
+        self.assertEqual(switcher.strategy.active_service, error_service)
+
+    async def test_error_with_no_service_left_is_reported(self):
+        """Test that running out of services is reported as the switcher's own error."""
+        error_service = ErrorOnTextService("error_service")
+        switcher = ServiceSwitcher(
+            [error_service],
+            strategy_type=ServiceSwitcherStrategyFailover,
+        )
+
+        _, up = await run_test(
+            switcher,
+            frames_to_send=[TextFrame(text="test")],
+            expected_down_frames=[TextFrame],
+            expected_up_frames=[ErrorFrame],
+        )
+
+        self.assertEqual(up[0].processor, switcher)
+        self.assertIn("service connection lost", up[0].error)
+        self.assertFalse(switcher.is_usable)
+
+    async def test_a_lost_service_does_not_write_off_the_switcher(self):
+        """Test that a switcher with a service left over is still reported as working.
+
+        The pipeline deals with the switcher, not with the services inside it,
+        so an error that costs one service must not read as the switcher being
+        spent while it still has somewhere to send work. A manual strategy
+        never switches on its own, which is what leaves the pair in this state.
+        """
+        error_service = ErrorOnTextService("error_service")
+        backup_service = MockFrameProcessor("backup_service")
+        switcher = ServiceSwitcher(
+            [error_service, backup_service],
+            strategy_type=ServiceSwitcherStrategyManual,
+        )
+
+        _, up = await run_test(
+            switcher,
+            frames_to_send=[TextFrame(text="test")],
+            expected_down_frames=[TextFrame],
+            expected_up_frames=[ErrorFrame],
+        )
+
+        self.assertEqual(up[0].processor, switcher)
+        self.assertTrue(up[0].processor.is_usable)
+        # The failing service is named, so the report still leads somewhere.
+        self.assertIn("error_service", up[0].error)
+
+    async def test_a_rejected_service_does_not_misconfigure_the_switcher(self):
+        """Test that a service's rejected configuration is not read as the switcher's.
+
+        Inheriting the category would write the switcher off for good, taking
+        its remaining services with it.
+        """
+        error_service = ErrorOnTextService("error_service", category=ErrorCategory.AUTHENTICATION)
+        backup_service = MockFrameProcessor("backup_service")
+        switcher = ServiceSwitcher(
+            [error_service, backup_service],
+            strategy_type=ServiceSwitcherStrategyManual,
+        )
+
+        _, up = await run_test(
+            switcher,
+            frames_to_send=[TextFrame(text="test")],
+            expected_down_frames=[TextFrame],
+            expected_up_frames=[ErrorFrame],
+        )
+
+        self.assertEqual(up[0].category, ErrorCategory.UNKNOWN)
+        self.assertTrue(switcher.is_usable)
+
+    async def test_failover_skips_services_that_cannot_work(self):
+        """Test that failover passes over a service that can't be given work."""
+        error_service = ErrorOnTextService("error_service")
+        spent_service = MockFrameProcessor("spent_service")
+        backup_service = MockFrameProcessor("backup_service")
+        await spent_service.set_usable(False)
+
+        switcher = ServiceSwitcher(
+            [error_service, spent_service, backup_service],
+            strategy_type=ServiceSwitcherStrategyFailover,
+        )
+
+        await run_test(
+            switcher,
+            frames_to_send=[TextFrame(text="test")],
+            expected_down_frames=[TextFrame],
+            expected_up_frames=[],
+        )
+
+        self.assertEqual(switcher.strategy.active_service, backup_service)
+
+    async def test_switcher_is_usable_while_any_service_is(self):
+        """Test that a switcher outlives the services it has lost."""
+        first = MockFrameProcessor("first")
+        second = MockFrameProcessor("second")
+        switcher = ServiceSwitcher([first, second])
+
+        await first.set_usable(False)
+        self.assertTrue(switcher.is_usable)
+
+        await second.set_usable(False)
+        self.assertFalse(switcher.is_usable)
+
+        # Bringing one back brings the switcher back with it.
+        await second.set_usable(True)
+        self.assertTrue(switcher.is_usable)
+
+    async def test_manual_switch_refuses_a_service_that_cannot_work(self):
+        """Test that a service that can't be given work is never made active."""
+        first = MockFrameProcessor("first")
+        second = MockFrameProcessor("second")
+        strategy = ServiceSwitcherStrategyManual([first, second])
+        await second.set_usable(False)
+
+        switched = await strategy.handle_frame(
+            ManuallySwitchServiceFrame(service=second), FrameDirection.DOWNSTREAM
+        )
+
+        self.assertIsNone(switched)
+        self.assertEqual(strategy.active_service, first)
 
     async def test_on_service_switched_event_fires_on_error(self):
         """Test that on_service_switched event fires when an error triggers a switch."""
@@ -900,6 +1075,7 @@ class TestServiceSwitcherStrategyFailover(unittest.IsolatedAsyncioTestCase):
         async def on_service_switched(strategy, service):
             switched_events.append(service)
 
+        await self.service1.set_usable(False)
         await strategy.handle_error(ErrorFrame(error="error"))
         await asyncio.sleep(0)
 
