@@ -1586,9 +1586,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
                     {"role": "assistant", "content": marker},
                 )
                 context_frames = [
-                    f
-                    for f in (*received_down, *received_up)
-                    if isinstance(f, LLMContextFrame)
+                    f for f in (*received_down, *received_up) if isinstance(f, LLMContextFrame)
                 ]
                 self.assertEqual(
                     context_frames,
