@@ -18,28 +18,42 @@ Dependencies:
 """
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from functools import cache
 
-import nltk
 from loguru import logger
-from nltk.tokenize import sent_tokenize
 
-# Ensure punkt_tab tokenizer data is available
-try:
-    nltk.data.find("tokenizers/punkt_tab")
-except LookupError:
+
+@cache
+def _sent_tokenizer() -> Callable[[str], list[str]]:
+    """Load NLTK's sentence tokenizer and its ``punkt_tab`` data.
+
+    NLTK reaches scikit-learn through its optional classifier backends, so
+    importing it costs a few hundred milliseconds. Loading it here rather than
+    at module import keeps that cost off the startup path of pipelines that
+    never tokenize.
+    """
+    import nltk
+    from nltk.tokenize import sent_tokenize
+
     try:
-        nltk.download("punkt_tab", quiet=True)
-    except (OSError, PermissionError) as e:
-        logger.error(
-            f"Failed to download NLTK 'punkt_tab' tokenizer data: {e}. "
-            "This data is required for sentence tokenization features. "
-            "The download failed due to filesystem permissions. "
-            "To resolve: pre-install the data in a location with appropriate read permissions, "
-            "or set the NLTK_DATA environment variable to point to a writable directory. "
-            "See https://www.nltk.org/data.html for more information."
-        )
+        nltk.data.find("tokenizers/punkt_tab")
+    except LookupError:
+        try:
+            nltk.download("punkt_tab", quiet=True)
+        except (OSError, PermissionError) as e:
+            logger.error(
+                f"Failed to download NLTK 'punkt_tab' tokenizer data: {e}. "
+                "This data is required for sentence tokenization features. "
+                "The download failed due to filesystem permissions. "
+                "To resolve: pre-install the data in a location with appropriate read permissions, "
+                "or set the NLTK_DATA environment variable to point to a writable directory. "
+                "See https://www.nltk.org/data.html for more information."
+            )
+
+    return sent_tokenize
+
 
 SENTENCE_ENDING_PUNCTUATION: frozenset[str] = frozenset(
     {
@@ -141,7 +155,7 @@ def match_endofsentence(text: str) -> int:
         return 0
 
     # Use NLTK's sentence tokenizer to find sentence boundaries
-    sentences = sent_tokenize(text)
+    sentences = _sent_tokenizer()(text)
 
     if not sentences:
         return 0

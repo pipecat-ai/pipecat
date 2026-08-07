@@ -13,10 +13,12 @@ information to bot functions.
 import argparse
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from fastapi import WebSocket
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from fastapi import WebSocket
 
 
 class DialinSettings(BaseModel):
@@ -214,7 +216,7 @@ class WebSocketRunnerArguments(RunnerArguments):
         body: Additional request data
     """
 
-    websocket: WebSocket
+    websocket: "WebSocket"
     transport_type: str | None = None
 
 
