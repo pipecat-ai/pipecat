@@ -1412,6 +1412,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._push_context_on_bot_stopped_speaking: bool = False
 
         self._assistant_turn_start_timestamp = ""
+        self._aggregation_has_turn_completion_marker = False
 
         self._thought_append_to_context = False
         self._thought_llm: str = ""
@@ -1454,6 +1455,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def reset(self):
         """Reset the aggregation state."""
         await super().reset()
+        self._aggregation_has_turn_completion_marker = False
         await self._reset_thought_aggregation()  # Just to be safe
         self._push_context_on_bot_stopped_speaking = False
 
@@ -1596,7 +1598,15 @@ class LLMAssistantAggregator(LLMContextAggregator):
             return ""
 
         aggregation = self.aggregation_string()
+        has_turn_completion_marker = self._aggregation_has_turn_completion_marker
         await self.reset()
+
+        # A turn-completion marker without response text carries no useful
+        # assistant context and teaches the LLM to repeat the invalid shape.
+        if has_turn_completion_marker and not self._maybe_strip_turn_completion_markers(
+            aggregation
+        ):
+            return ""
 
         self._context.add_message({"role": "assistant", "content": aggregation})
 
@@ -1974,6 +1984,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # from the transcript via
         # `_maybe_strip_turn_completion_markers` so consumers see
         # clean text.
+        self._aggregation_has_turn_completion_marker = True
         self._aggregation.append(
             TextPartForConcatenation(frame.marker, includes_inter_part_spaces=False)
         )

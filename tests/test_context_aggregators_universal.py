@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMarkerFrame,
     LLMMessagesAppendFrame,
     LLMMessagesTransformFrame,
     LLMMessagesUpdateFrame,
@@ -1549,6 +1550,74 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         # The incomplete marker should be stripped (resulting in empty content)
         self.assertEqual(len(stop_messages), 1)
         self.assertEqual(stop_messages[0].content, "")
+
+    async def test_marker_only_aggregation_not_added_to_context(self):
+        """A sideband completion marker without response text carries no context."""
+        from pipecat.turns.user_turn_completion_mixin import USER_TURN_COMPLETE_MARKER
+
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                LLMMarkerFrame(USER_TURN_COMPLETE_MARKER, append_to_context_immediately=False),
+                LLMFullResponseEndFrame(),
+            ],
+        )
+
+        self.assertEqual(context.messages, [])
+        self.assertEqual(len(stop_messages), 1)
+        self.assertEqual(stop_messages[0].content, "")
+
+    async def test_complete_marker_with_text_is_added_to_context(self):
+        """The marker-only guard should preserve complete responses with text."""
+        from pipecat.turns.user_turn_completion_mixin import USER_TURN_COMPLETE_MARKER
+
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                LLMMarkerFrame(USER_TURN_COMPLETE_MARKER, append_to_context_immediately=False),
+                LLMTextFrame("Hello from Pipecat!"),
+                LLMFullResponseEndFrame(),
+            ],
+        )
+
+        self.assertEqual(
+            context.messages,
+            [{"role": "assistant", "content": f"{USER_TURN_COMPLETE_MARKER} Hello from Pipecat!"}],
+        )
+
+    async def test_text_only_complete_marker_is_added_to_context(self):
+        """A checkmark sent as ordinary text is not treated as a sideband marker."""
+        from pipecat.turns.user_turn_completion_mixin import USER_TURN_COMPLETE_MARKER
+
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                LLMTextFrame(USER_TURN_COMPLETE_MARKER),
+                LLMFullResponseEndFrame(),
+            ],
+        )
+
+        self.assertEqual(
+            context.messages,
+            [{"role": "assistant", "content": USER_TURN_COMPLETE_MARKER}],
+        )
 
     async def test_llm_run(self):
         context = LLMContext()

@@ -10,10 +10,12 @@ from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMarkerFrame,
     LLMMessagesAppendFrame,
+    LLMRunFrame,
     LLMTextFrame,
     UserStartedSpeakingFrame,
     UserTurnInferenceCompletedFrame,
@@ -171,6 +173,199 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         # The marker must now be cleared — ready for the next response
         self.assertIsNone(processor._turn_marker)
         self.assertEqual(processor._turn_text_buffer, "")
+
+    async def test_complete_marker_with_text_does_not_reprompt(self):
+        """A normal complete response must not schedule a recovery inference."""
+        processor = MockProcessor()
+        pushed_frames = []
+
+        async def capture_frame(_processor, frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Normal response")
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        self.assertEqual(
+            [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)],
+            ["Normal response"],
+        )
+        self.assertFalse(any(isinstance(f, LLMMessagesAppendFrame) for f in pushed_frames))
+        self.assertFalse(any(isinstance(f, LLMRunFrame) for f in pushed_frames))
+        self.assertFalse(processor._bare_complete_retry_attempted)
+
+    async def test_complete_marker_without_text_reprompts_once(self):
+        """A bare complete marker should trigger one recovery inference."""
+        processor = MockProcessor()
+        pushed_frames = []
+
+        async def capture_frame(_processor, frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
+            await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} \n")
+            await processor._push_turn_text("\t")
+            await processor.push_frame(LLMFullResponseEndFrame())
+            self.assertFalse(processor._user_turn_completion_voiced)
+
+            # Simulate the recovery inference also disobeying the format. The
+            # guard must not start an unbounded retry loop.
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor._push_turn_text(USER_TURN_COMPLETE_MARKER)
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        append_frames = [f for f in pushed_frames if isinstance(f, LLMMessagesAppendFrame)]
+        run_frames = [f for f in pushed_frames if isinstance(f, LLMRunFrame)]
+        text_frames = [f for f in pushed_frames if isinstance(f, LLMTextFrame) and f.text.strip()]
+
+        self.assertEqual(len(append_frames), 1)
+        self.assertEqual(append_frames[0].messages[0]["role"], "developer")
+        self.assertIn(USER_TURN_COMPLETE_MARKER, append_frames[0].messages[0]["content"])
+        self.assertEqual(len(run_frames), 1)
+        self.assertEqual(text_frames, [])
+
+        first_end_index = next(
+            i for i, frame in enumerate(pushed_frames) if isinstance(frame, LLMFullResponseEndFrame)
+        )
+        self.assertGreater(pushed_frames.index(append_frames[0]), first_end_index)
+        self.assertGreater(
+            pushed_frames.index(run_frames[0]), pushed_frames.index(append_frames[0])
+        )
+
+    async def test_successful_bare_complete_recovery_speaks_once(self):
+        """The recovery inference can produce the turn's spoken response."""
+        processor = MockProcessor()
+        pushed_frames = []
+
+        async def capture_frame(_processor, frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
+            await processor._push_turn_text(USER_TURN_COMPLETE_MARKER)
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Recovered response")
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        append_frames = [f for f in pushed_frames if isinstance(f, LLMMessagesAppendFrame)]
+        run_frames = [f for f in pushed_frames if isinstance(f, LLMRunFrame)]
+        text_frames = [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)]
+
+        self.assertEqual(len(append_frames), 1)
+        self.assertEqual(len(run_frames), 1)
+        self.assertEqual(text_frames, ["Recovered response"])
+        self.assertTrue(processor._user_turn_completion_voiced)
+
+    async def test_user_resume_disarms_bare_complete_marker_reprompt(self):
+        """Do not re-prompt after the user resumes speaking during the response."""
+        processor = MockProcessor()
+        pushed_frames = []
+
+        async def capture_frame(_processor, frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
+            await processor._push_turn_text(USER_TURN_COMPLETE_MARKER)
+            processor._bare_complete_retry_attempted = True
+            with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+                await processor.process_frame(
+                    VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM
+                )
+            self.assertFalse(processor._bare_complete_retry_attempted)
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        self.assertFalse(any(isinstance(f, LLMMessagesAppendFrame) for f in pushed_frames))
+        self.assertFalse(any(isinstance(f, LLMRunFrame) for f in pushed_frames))
+
+    async def test_interruption_disarms_bare_complete_marker_reprompt(self):
+        """An interrupted response must not start a recovery inference."""
+        processor = MockProcessor()
+        pushed_frames = []
+
+        async def capture_frame(_processor, frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
+            await processor._push_turn_text(USER_TURN_COMPLETE_MARKER)
+            with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+                await processor.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        self.assertFalse(any(isinstance(f, LLMMessagesAppendFrame) for f in pushed_frames))
+        self.assertFalse(any(isinstance(f, LLMRunFrame) for f in pushed_frames))
+
+    async def test_new_user_turn_resets_bare_complete_retry_budget(self):
+        """A new user turn disarms stale recovery and receives its own retry budget."""
+        processor = MockProcessor()
+        pushed_frames = []
+
+        async def capture_frame(_processor, frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
+            await processor._push_turn_text(USER_TURN_COMPLETE_MARKER)
+            processor._bare_complete_retry_attempted = True
+            with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+                await processor.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+            self.assertFalse(processor._bare_complete_retry_attempted)
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+            self.assertFalse(any(isinstance(f, LLMMessagesAppendFrame) for f in pushed_frames))
+            self.assertFalse(any(isinstance(f, LLMRunFrame) for f in pushed_frames))
+
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor._push_turn_text(USER_TURN_COMPLETE_MARKER)
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        self.assertEqual(
+            len([f for f in pushed_frames if isinstance(f, LLMMessagesAppendFrame)]), 1
+        )
+        self.assertEqual(len([f for f in pushed_frames if isinstance(f, LLMRunFrame)]), 1)
+
+    async def test_function_call_disarms_bare_complete_marker_reprompt(self):
+        """A pending post-tool inference makes a separate recovery redundant."""
+        processor = MockProcessor()
+        pushed_frames = []
+
+        async def capture_frame(_processor, frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
+            await processor._push_turn_text(USER_TURN_COMPLETE_MARKER)
+            processor._bare_complete_retry_attempted = True
+            await processor.push_frame(FunctionCallsStartedFrame(function_calls=[]))
+            self.assertFalse(processor._bare_complete_retry_attempted)
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        self.assertFalse(any(isinstance(f, LLMMessagesAppendFrame) for f in pushed_frames))
+        self.assertFalse(any(isinstance(f, LLMRunFrame) for f in pushed_frames))
+
+    async def test_requested_run_disarms_current_bare_complete_reprompt(self):
+        """An application-requested inference supersedes the current recovery."""
+        processor = MockProcessor()
+        pushed_frames = []
+
+        async def capture_frame(_processor, frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
+            await processor._push_turn_text(USER_TURN_COMPLETE_MARKER)
+            processor._bare_complete_retry_attempted = True
+            with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+                await processor.process_frame(
+                    LLMMessagesAppendFrame(
+                        messages=[{"role": "developer", "content": "Try again."}],
+                        run_llm=True,
+                    ),
+                    FrameDirection.DOWNSTREAM,
+                )
+            self.assertFalse(processor._bare_complete_retry_attempted)
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        self.assertFalse(any(isinstance(f, LLMMessagesAppendFrame) for f in pushed_frames))
+        self.assertFalse(any(isinstance(f, LLMRunFrame) for f in pushed_frames))
 
     async def test_new_response_cancels_pending_incomplete_timeout(self):
         """A new LLM response starting must cancel a pending incomplete timeout.

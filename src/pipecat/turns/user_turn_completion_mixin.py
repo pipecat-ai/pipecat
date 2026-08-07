@@ -91,6 +91,10 @@ Example format: ✓ No rush! Let me know when you're ready to continue.
 
 Generate your ✓ response now."""
 
+DEFAULT_BARE_COMPLETE_RETRY_PROMPT = """Your previous response contained only the ✓ turn completion marker, so the user received no response.
+
+IMPORTANT: Respond now with ✓ followed by your full response. Never output the marker alone."""
+
 # System prompt instructions for turn completion that can be appended to any base prompt
 USER_TURN_COMPLETION_INSTRUCTIONS = """
 CRITICAL INSTRUCTION - MANDATORY RESPONSE FORMAT:
@@ -266,6 +270,12 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         # (see UserTurnController._trigger_user_turn_stop) doesn't
         # permanently silence the turn.
         self._user_turn_completion_voiced = False
+        # A COMPLETE verdict is only useful when the current response also
+        # emits non-whitespace text. Track that output separately so a bare ✓
+        # can trigger one recovery inference instead of leaving the user waiting.
+        self._turn_has_speakable_text = False
+        self._turn_reprompt_allowed = True
+        self._bare_complete_retry_attempted = False
 
         # Timeout handling
         self._user_turn_completion_config = UserTurnCompletionConfig()
@@ -382,6 +392,7 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         self._turn_text_buffer = ""
         self._turn_marker = None
         self._turn_completion_broadcasted = False
+        self._turn_has_speakable_text = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames, handling turn completion state resets.
@@ -392,18 +403,24 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         """
         # Handle interruptions by cancelling timeout and resetting state
         if isinstance(frame, InterruptionFrame):
+            self._turn_reprompt_allowed = False
             await self._cancel_incomplete_timeout()
             await self._turn_reset()
             self._user_turn_completion_voiced = False
+            self._bare_complete_retry_attempted = False
         elif isinstance(frame, UserStartedSpeakingFrame):
             # A new user turn begins, so allow one fresh spoken completion.
+            self._turn_reprompt_allowed = False
             self._user_turn_completion_voiced = False
+            self._bare_complete_retry_attempted = False
         elif isinstance(frame, LLMMessagesAppendFrame) and frame.run_llm:
             # An externally appended message that asks for a run (e.g. a user-idle
             # check-in) is an explicit request for fresh speech, and it arrives
             # precisely while the user is silent. Clear the voiced latch so the ✓
             # guard in ``_push_turn_text`` does not drop its text.
+            self._turn_reprompt_allowed = False
             self._user_turn_completion_voiced = False
+            self._bare_complete_retry_attempted = False
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             # The user resumed speaking within the same open turn. A new turn's
             # InterruptionFrame does not fire for a resume inside an already-open
@@ -414,12 +431,14 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             #    nudge (talking over) a user who is speaking again. Cancel it.
             #    The ○/◐ response already ended and reset the per-response
             #    state; the next inference re-arms a fresh timer if needed.
+            self._turn_reprompt_allowed = False
             await self._cancel_incomplete_timeout()
             # 2. Allow one fresh spoken completion: resetting on a mid-turn
             #    resume is required so a completion stale-dropped by the
             #    controller (see UserTurnController._trigger_user_turn_stop)
             #    doesn't permanently silence the turn.
             self._user_turn_completion_voiced = False
+            self._bare_complete_retry_attempted = False
 
         # Pass frame to parent
         await super().process_frame(frame, direction)
@@ -434,7 +453,13 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             frame: The frame to push downstream.
             direction: The direction of frame flow. Defaults to downstream.
         """
+        retry_bare_complete = False
+
         if isinstance(frame, FunctionCallsStartedFrame):
+            # A post-tool inference is already expected, so a marker-only
+            # pre-tool response does not need a separate recovery inference.
+            self._turn_reprompt_allowed = False
+            self._bare_complete_retry_attempted = False
             # Broadcast turn completion now, before the function dispatches
             # — gives ``UserStoppedSpeakingFrame`` maximum time to propagate
             # so the assistant aggregator's ``_user_speaking`` is False by
@@ -448,6 +473,8 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             # latch guard.
             self._user_turn_completion_voiced = False
         elif isinstance(frame, LLMFullResponseStartFrame):
+            self._turn_has_speakable_text = False
+            self._turn_reprompt_allowed = True
             # A new LLM response is starting. If an incomplete timeout is still
             # pending from a prior ○/◐, the LLM is already re-engaging: either
             # the user's turn completed and this response carries the ✓, or the
@@ -458,9 +485,32 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             # starts first cancels the timeout before its text is parsed.
             await self._cancel_incomplete_timeout()
         elif isinstance(frame, LLMFullResponseEndFrame):
+            retry_bare_complete = (
+                self._turn_marker == TurnMarker.COMPLETE
+                and not self._turn_has_speakable_text
+                and self._turn_reprompt_allowed
+                and not self._bare_complete_retry_attempted
+            )
+            if retry_bare_complete:
+                logger.warning(
+                    f"{self}: LLM response contained only the complete turn marker "
+                    f"({USER_TURN_COMPLETE_MARKER}). Retrying once."
+                )
+                self._bare_complete_retry_attempted = True
+                # The bare marker set the per-turn voiced latch, but no text was
+                # actually spoken. Let the recovery response produce the turn's reply.
+                self._user_turn_completion_voiced = False
             await self._turn_reset()
 
         await super().push_frame(frame, direction)
+
+        if retry_bare_complete:
+            await self.push_frame(
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "developer", "content": DEFAULT_BARE_COMPLETE_RETRY_PROMPT}]
+                )
+            )
+            await self.push_frame(LLMRunFrame())
 
     async def _push_turn_text(self, text: str):
         """Push LLM text with turn completion detection.
@@ -492,6 +542,8 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
 
         # If ✓ (COMPLETE) was already found, push text immediately without buffering
         if self._turn_marker == TurnMarker.COMPLETE:
+            if text.strip():
+                self._turn_has_speakable_text = True
             await self.push_frame(LLMTextFrame(text))
             return
 
@@ -572,6 +624,8 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
                 if remaining_text.startswith(" "):
                     remaining_text = remaining_text[1:]
                 if remaining_text:
+                    if remaining_text.strip():
+                        self._turn_has_speakable_text = True
                     await self.push_frame(LLMTextFrame(remaining_text))
 
             # Mark complete - all subsequent text flows through immediately
