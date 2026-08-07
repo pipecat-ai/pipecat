@@ -247,7 +247,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="grok-voice-think-fast-1.0",
+            model="grok-voice-think-fast-2.0",
             system_instruction=None,
             temperature=None,
             max_tokens=None,
@@ -385,10 +385,17 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         )
 
     async def _handle_interruption(self):
-        """Handle user interruption of assistant speech."""
+        """Handle user interruption of assistant speech.
+
+        Always send ``response.cancel`` so in-flight assistant audio stops on
+        the wire promptly. When server VAD is off, also clear the input buffer
+        (manual turn mode owns commit/cancel). With server VAD on, leave the
+        input buffer intact so the interrupting user speech is not wiped.
+        """
         if not self._is_turn_detection_enabled():
             await self.send_client_event(events.InputAudioBufferClearEvent())
-            await self.send_client_event(events.ResponseCancelEvent())
+
+        await self.send_client_event(events.ResponseCancelEvent())
 
         await self._truncate_current_audio_response()
         await self.stop_all_metrics()
@@ -1062,13 +1069,18 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             await self._create_response()
 
     async def _send_user_audio(self, frame):
-        """Send user audio to Grok."""
-        # Don't send audio if conversation setup is still pending, as it can
-        # lead to errors. For example: audio sent before conversation setup
-        # will be interpreted as having Grok's default sample rate (24000),
-        # and if that differs from the sample rate we eventually set through
-        # the conversation setup, Grok will error out.
-        if self._llm_needs_conversation_setup:
+        """Send user audio to Grok.
+
+        Audio is gated on ``_api_session_ready`` (set after ``session.updated``),
+        once the session sample rate has been applied. Conversation seeding
+        (``_llm_needs_conversation_setup``) is independent so audio-only
+        pipelines can stream without calling ``_create_response``.
+        """
+        if not self._api_session_ready:
+            logger.warning(
+                f"{self} Dropping user audio; realtime session is not ready yet "
+                "(waiting for session.updated)"
+            )
             return
 
         payload = base64.b64encode(frame.audio).decode("utf-8")

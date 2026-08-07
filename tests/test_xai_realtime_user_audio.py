@@ -1,0 +1,105 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""Tests for user-audio and interruption handling in GrokRealtimeLLMService."""
+
+import base64
+from typing import Any
+
+import pytest
+
+from pipecat.frames.frames import InputAudioRawFrame
+from pipecat.services.xai.realtime import events
+from pipecat.services.xai.realtime.events import SessionProperties, TurnDetection
+from pipecat.services.xai.realtime.llm import GrokRealtimeLLMService
+
+
+class _EventRecorder:
+    def __init__(self):
+        self.events: list[Any] = []
+
+    async def __call__(self, event):
+        self.events.append(event)
+
+    def kinds(self) -> list[str]:
+        return [type(e).__name__ for e in self.events]
+
+
+def _make_service(*, server_vad: bool) -> tuple[GrokRealtimeLLMService, _EventRecorder]:
+    turn_detection = TurnDetection(type="server_vad") if server_vad else None
+    service = GrokRealtimeLLMService(
+        api_key="test-key",
+        settings=GrokRealtimeLLMService.Settings(
+            session_properties=SessionProperties(turn_detection=turn_detection),
+        ),
+    )
+    recorder = _EventRecorder()
+    service.send_client_event = recorder  # type: ignore[method-assign]
+
+    async def _noop(*args, **kwargs):
+        pass
+
+    service.stop_all_metrics = _noop  # type: ignore[method-assign]
+    return service, recorder
+
+
+def _audio_frame(data: bytes = b"\xaa\xbb") -> InputAudioRawFrame:
+    return InputAudioRawFrame(audio=data, sample_rate=24000, num_channels=1)
+
+
+def test_default_model_is_think_fast_2():
+    service = GrokRealtimeLLMService(api_key="test-key")
+    assert service._settings.model == "grok-voice-think-fast-2.0"
+
+
+@pytest.mark.asyncio
+async def test_user_audio_dropped_until_session_ready():
+    service, recorder = _make_service(server_vad=True)
+    assert service._api_session_ready is False
+
+    await service._send_user_audio(_audio_frame())
+
+    assert recorder.kinds() == []
+
+
+@pytest.mark.asyncio
+async def test_user_audio_flows_after_session_ready_without_conversation_setup():
+    """Audio-only pipelines never call _create_response; audio must still flow."""
+    service, recorder = _make_service(server_vad=True)
+    service._api_session_ready = True
+    assert service._llm_needs_conversation_setup is True
+
+    await service._send_user_audio(_audio_frame(b"\x11\x22"))
+
+    assert recorder.kinds() == ["InputAudioBufferAppendEvent"]
+    assert recorder.events[0].audio == base64.b64encode(b"\x11\x22").decode()
+
+
+@pytest.mark.asyncio
+async def test_server_vad_interruption_cancels_without_clearing_input():
+    service, recorder = _make_service(server_vad=True)
+    service._api_session_ready = True
+
+    await service._send_user_audio(_audio_frame())
+    await service._handle_interruption()
+
+    assert recorder.kinds() == [
+        "InputAudioBufferAppendEvent",
+        "ResponseCancelEvent",
+    ]
+    assert "InputAudioBufferClearEvent" not in recorder.kinds()
+
+
+@pytest.mark.asyncio
+async def test_manual_turn_interruption_clears_and_cancels():
+    service, recorder = _make_service(server_vad=False)
+
+    await service._handle_interruption()
+
+    assert recorder.kinds() == [
+        "InputAudioBufferClearEvent",
+        "ResponseCancelEvent",
+    ]
