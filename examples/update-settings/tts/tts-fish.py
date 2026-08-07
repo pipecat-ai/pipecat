@@ -60,8 +60,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = FishAudioTTSService(
         api_key=os.environ["FISH_API_KEY"],
         settings=FishAudioTTSService.Settings(
-            voice="4ce7e917cedd4bc2bb2e6ff3a46acaa1"
-        ),  # Barack Obama
+            voice="933563129e564b19a115bedd57b7406a",
+        ),
     )
 
     llm = OpenAILLMService(
