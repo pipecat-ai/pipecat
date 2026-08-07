@@ -16,7 +16,7 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal, Optional, Union, cast
 
 from loguru import logger
 from PIL import Image
@@ -66,7 +66,7 @@ try:
     )
 
     # Temporary hack to be able to process Nano Banana returned images.
-    genai._api_client.READ_BUFFER_SIZE = 5 * 1024 * 1024
+    genai._api_client.READ_BUFFER_SIZE = 5 * 1024 * 1024  # pyright: ignore[reportAttributeAccessIssue]
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Google AI, you need to `uv add "pipecat-ai[google]"`.')
@@ -329,7 +329,9 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         messages = []
         system = []
         tools = []
-        effective_instruction = system_instruction or self._settings.system_instruction
+        effective_instruction = system_instruction or assert_given(
+            self._settings.system_instruction
+        )
         adapter = self.get_llm_adapter()
         params = adapter.get_llm_invocation_params(
             context, system_instruction=effective_instruction
@@ -350,15 +352,20 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         generation_config = GenerateContentConfig(**generation_params)
 
         # Use the new google-genai client's async method
+        assert self._client is not None
+
+        model = assert_given(self._settings.model)
+        assert model is not None
+
         response = await self._client.aio.models.generate_content(
-            model=self._settings.model,
-            contents=messages,
+            model=model,
+            contents=cast(Any, messages),
             config=generation_config,
         )
 
         # Extract text from response
         if response.candidates and response.candidates[0].content:
-            for part in response.candidates[0].content.parts:
+            for part in response.candidates[0].content.parts or []:
                 if part.text:
                     return part.text
 
@@ -462,9 +469,14 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         generation_config = GenerateContentConfig(**generation_params)
 
         await self.start_ttfb_metrics()
+        assert self._client is not None
+
+        model = assert_given(self._settings.model)
+        assert model is not None
+
         return await self._client.aio.models.generate_content_stream(
-            model=self._settings.model,
-            contents=messages,
+            model=model,
+            contents=cast(Any, messages),
             config=generation_config,
         )
 
@@ -577,7 +589,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                                     FunctionCallFromLLM(
                                         context=context,
                                         tool_call_id=function_call_id,
-                                        function_name=function_call.name,
+                                        function_name=function_call.name or "",
                                         arguments=function_call.args or {},
                                     )
                                 )
