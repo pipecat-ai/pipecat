@@ -35,7 +35,6 @@ import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
-from fastapi import WebSocket
 from loguru import logger
 
 from pipecat.runner.types import (
@@ -56,6 +55,8 @@ if TYPE_CHECKING:
     # Imported for type-checking only so the typed guard functions (e.g.
     # _is_daily) can narrow to the concrete transport types
     from typing import TypeGuard
+
+    from fastapi import WebSocket
 
     from pipecat.transports.daily.transport import DailyTransport
     from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
@@ -109,7 +110,7 @@ def _detect_transport_type_from_message(message_data: dict) -> str:
     return "unknown"
 
 
-async def parse_telephony_websocket(websocket: WebSocket):
+async def parse_telephony_websocket(websocket: "WebSocket"):
     """Parse telephony WebSocket messages and return transport type and call data.
 
     Args:
@@ -482,7 +483,7 @@ def _get_transport_params(transport_key: str, transport_params: dict[str, Callab
 
 
 async def _create_telephony_transport(
-    websocket: WebSocket,
+    websocket: "WebSocket",
     params: Any,
     transport_type: str,
     call_data: CallData,
