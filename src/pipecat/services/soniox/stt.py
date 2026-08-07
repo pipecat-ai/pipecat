@@ -395,6 +395,7 @@ class SonioxSTTService(WebsocketSTTService):
         self._user_turn_open = False
 
         self._receive_task = None
+        self._connect_task = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -451,11 +452,16 @@ class SonioxSTTService(WebsocketSTTService):
     async def start(self, frame: StartFrame):
         """Start the Soniox STT websocket connection.
 
+        The connection is established in the background so the handshake is not
+        added to pipeline startup. Audio arriving before the socket is ready is
+        held by the base class and transcribed once it is.
+
         Args:
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        await self._connect()
+        self._clear_audio_ready()
+        self._connect_task = self.create_task(self._connect())
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply settings delta and reconnect if anything changed.
@@ -570,6 +576,10 @@ class SonioxSTTService(WebsocketSTTService):
         """
         await super()._disconnect()
 
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -580,6 +590,7 @@ class SonioxSTTService(WebsocketSTTService):
         """Establish the websocket connection to Soniox."""
         try:
             if self._websocket and self._websocket.state is State.OPEN:
+                self._set_audio_ready()
                 return
 
             logger.debug("Connecting to Soniox STT")
@@ -623,6 +634,8 @@ class SonioxSTTService(WebsocketSTTService):
             await self._websocket.send(json.dumps(config))
 
             await self._call_event_handler("on_connected")
+            # The config message is sent, so the socket can now carry audio.
+            self._set_audio_ready()
             logger.debug("Connected to Soniox STT")
         except Exception as e:
             self._websocket = None
@@ -638,6 +651,7 @@ class SonioxSTTService(WebsocketSTTService):
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:
             self._websocket = None
+            self._clear_audio_ready()
             await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
