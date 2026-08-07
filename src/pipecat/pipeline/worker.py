@@ -15,6 +15,7 @@ import asyncio
 import warnings
 from collections.abc import AsyncIterable, Iterable
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, TypeVar
 
 from loguru import logger
@@ -134,6 +135,24 @@ class IdleFrameObserver(BaseObserver):
             self._idle_event.set()
 
 
+class ProcessorUnusablePolicy(Enum):
+    """What a pipeline worker does when a processor can no longer do its job.
+
+    An unusable processor keeps failing for as long as the pipeline keeps
+    using it, so the pipeline has to decide whether it is still worth running.
+
+    Parameters:
+        CONTINUE: Report the error and keep running. The application decides
+            what to do, for example by failing over to another provider.
+        END: End the pipeline gracefully, letting queued frames drain first.
+        CANCEL: Cancel the pipeline immediately, abandoning queued frames.
+    """
+
+    CONTINUE = "continue"
+    END = "end"
+    CANCEL = "cancel"
+
+
 class PipelineParams(BaseModel):
     """Configuration parameters for pipeline execution.
 
@@ -195,7 +214,9 @@ class PipelineWorker(BaseWorker):
           Use this event for cleanup, logging, or post-processing tasks. Users can inspect
           the frame if they need to handle specific cases.
 
-    - on_pipeline_error: Called when an error occurs with ErrorFrame
+    - on_pipeline_error: Called when an error occurs with ErrorFrame. Read
+          ``frame.processor.is_usable`` to tell an error the processor can carry
+          on from apart from one that ends its usefulness.
 
     Example::
 
@@ -246,6 +267,7 @@ class PipelineWorker(BaseWorker):
         idle_timeout_secs: float | None = IDLE_TIMEOUT_SECS,
         name: str | None = None,
         observers: list[BaseObserver] | None = None,
+        processor_unusable_policy: ProcessorUnusablePolicy = ProcessorUnusablePolicy.CONTINUE,
         params: PipelineParams | None = None,
         rtvi_processor: RTVIProcessor | None = None,
         rtvi_observer_params: RTVIObserverParams | None = None,
@@ -310,6 +332,11 @@ class PipelineWorker(BaseWorker):
                 automatically.
             name: Optional worker name (used for worker-style addressing on the bus).
             observers: List of observers for monitoring pipeline execution.
+            processor_unusable_policy: What to do when a processor reports an
+                error that leaves it unable to do its job, such as a service
+                whose API key was rejected. Defaults to
+                :attr:`ProcessorUnusablePolicy.CONTINUE`, leaving the decision
+                to ``on_pipeline_error`` handlers.
             params: Configuration parameters for the pipeline.
             rtvi_observer_params: The RTVI observer parameter to use if RTVI is enabled.
             rtvi_processor: The RTVI processor to add if RTVI is enabled.
@@ -349,6 +376,11 @@ class PipelineWorker(BaseWorker):
         self._enable_turn_tracking = enable_turn_tracking
         self._idle_timeout_secs = idle_timeout_secs
         self._app_resources = app_resources
+        self._processor_unusable_policy = processor_unusable_policy
+        # Processors the policy has already been applied for, so a service that
+        # keeps failing is acted on once instead of on every frame it can't
+        # handle.
+        self._unusable_processors: set[FrameProcessor] = set()
         observers = observers or []
         self._turn_tracking_observer: TurnTrackingObserver | None = None
         self._user_bot_latency_observer: UserBotLatencyObserver | None = None
@@ -1154,8 +1186,31 @@ class PipelineWorker(BaseWorker):
                 logger.error(f"A fatal error occurred: {frame}")
                 # Cancel all tasks downstream.
                 await self.queue_frame(CancelFrame())
+            elif frame.processor and not frame.processor.is_usable:
+                await self._handle_unusable_processor(frame.processor)
             else:
                 logger.warning(f"{self}: Something went wrong: {frame}")
+
+    async def _handle_unusable_processor(self, processor: FrameProcessor):
+        """Apply the unusable-processor policy, once per processor.
+
+        A processor that can no longer do its job keeps failing for as long as
+        the pipeline keeps using it, so the policy is applied to the first
+        error that says so and not to the ones that follow.
+
+        Args:
+            processor: The processor that can no longer do its job.
+        """
+        if processor in self._unusable_processors:
+            return
+        self._unusable_processors.add(processor)
+
+        logger.error(f"{self}: {processor} can no longer do its job")
+
+        if self._processor_unusable_policy is ProcessorUnusablePolicy.END:
+            await self.stop_when_done()
+        elif self._processor_unusable_policy is ProcessorUnusablePolicy.CANCEL:
+            await self.queue_frame(CancelFrame())
 
     async def _sink_push_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames coming downstream from the pipeline.

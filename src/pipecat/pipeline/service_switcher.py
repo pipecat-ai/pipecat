@@ -25,6 +25,7 @@ from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.errors import ErrorCategory
 
 
 class ServiceSwitcherStrategy(BaseObject):
@@ -74,6 +75,11 @@ class ServiceSwitcherStrategy(BaseObject):
         """Return the currently active service."""
         return self._active_service
 
+    @property
+    def usable_services(self) -> list[FrameProcessor]:
+        """Return the services that can still be given work, in order."""
+        return [service for service in self._services if service.is_usable]
+
     async def handle_frame(
         self, frame: ServiceSwitcherFrame, direction: FrameDirection
     ) -> FrameProcessor | None:
@@ -94,9 +100,9 @@ class ServiceSwitcherStrategy(BaseObject):
     async def handle_error(self, error: ErrorFrame) -> FrameProcessor | None:
         """Handle an error from the active service.
 
-        Called by ``ServiceSwitcher`` when a non-fatal ``ErrorFrame`` is pushed
-        upstream by the currently active service. Subclasses can override this
-        to implement automatic failover.
+        Called by ``ServiceSwitcher`` when the active service pushes a
+        non-fatal ``ErrorFrame`` upstream that leaves it unable to do its job.
+        Subclasses can override this to implement automatic failover.
 
         Args:
             error: The error frame pushed by the active service.
@@ -110,20 +116,30 @@ class ServiceSwitcherStrategy(BaseObject):
         """Set the active service to the given one, if it is in the list of available services.
 
         If it's not in the list, the request is ignored, as it may have been
-        intended for another ServiceSwitcher in the pipeline.
+        intended for another ServiceSwitcher in the pipeline. A service that
+        can no longer do its job is refused, since making it active would only
+        route work to something that can't handle it; call
+        :meth:`~pipecat.processors.frame_processor.FrameProcessor.set_usable`
+        on it first once whatever stopped it working has been dealt with.
 
         Args:
             service: The service to set as active.
 
         Returns:
-            The newly active service, or None if the service was not found.
+            The newly active service, or None if the service was not found or
+            can no longer be given work.
         """
-        if service in self.services:
-            self._active_service = service
-            await service.queue_frame(ServiceSwitcherRequestMetadataFrame(service=service))
-            await self._call_event_handler("on_service_switched", service)
-            return service
-        return None
+        if service not in self.services:
+            return None
+
+        if not service.is_usable:
+            logger.warning(f"Not switching to {service.name}: it can no longer do its job")
+            return None
+
+        self._active_service = service
+        await service.queue_frame(ServiceSwitcherRequestMetadataFrame(service=service))
+        await self._call_event_handler("on_service_switched", service)
+        return service
 
 
 class ServiceSwitcherStrategyManual(ServiceSwitcherStrategy):
@@ -161,9 +177,11 @@ class ServiceSwitcherStrategyManual(ServiceSwitcherStrategy):
 class ServiceSwitcherStrategyFailover(ServiceSwitcherStrategyManual):
     """A strategy that automatically switches to a backup service on failure.
 
-    When the active service produces a non-fatal error, this strategy switches
-    to the next available service in the list. Recovery and fallback policies
-    are left to application code via the ``on_service_switched`` event.
+    When the active service reports an error that leaves it unable to do its
+    job, this strategy switches to the next service in the list that can still
+    do its own. Errors a service can carry on from are left alone, so a
+    provider hiccup doesn't cost a failover. Recovery and fallback policies are
+    left to application code via the ``on_service_switched`` event.
 
     Event handlers available:
 
@@ -185,27 +203,31 @@ class ServiceSwitcherStrategyFailover(ServiceSwitcherStrategyManual):
     async def handle_error(self, error: ErrorFrame) -> FrameProcessor | None:
         """Handle an error from the active service by failing over.
 
-        Switches to the next service in the list. The failed service remains
-        in the list and can be switched back to manually or via application
-        logic in the ``on_service_switched`` event handler.
+        Switches to the next service in the list that can still do its job,
+        wrapping around from the end. The failed service stays in the list and
+        can be switched back to once it has been brought back with
+        :meth:`~pipecat.processors.frame_processor.FrameProcessor.set_usable`.
 
         Args:
             error: The error frame pushed by the active service.
 
         Returns:
-            The newly active service if a switch occurred, or None if no
-            other service is available.
+            The newly active service if a switch occurred, or None if no other
+            service can be given work.
         """
         service_name = error.processor.name if error.processor else self._active_service.name
         logger.warning(f"Service {service_name} reported an error: {error.error}")
 
-        if len(self._services) <= 1:
-            logger.error("No other service available to switch to")
-            return None
-
+        # Walk the list from the one after the active service so failover
+        # follows the order the services were given in.
         current_idx = self._services.index(self._active_service)
-        next_idx = (current_idx + 1) % len(self._services)
-        return await self._set_active_if_available(self._services[next_idx])
+        for offset in range(1, len(self._services)):
+            candidate = self._services[(current_idx + offset) % len(self._services)]
+            if candidate.is_usable:
+                return await self._set_active_if_available(candidate)
+
+        logger.error("No other service available to switch to")
+        return None
 
 
 StrategyType = TypeVar("StrategyType", bound=ServiceSwitcherStrategy)
@@ -251,6 +273,51 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         # update crosses its service long before the ring wraps.
         self._inactive_service_updates: deque[int] = deque(maxlen=64)
 
+        # What this switcher reports is a reading of its services rather than a
+        # flag of its own, so the last reading announced is kept here to tell
+        # movement worth announcing from a service change that doesn't show.
+        self._announced_usable = self.is_usable
+        for service in services:
+            service.add_event_handler("on_usable_changed", self._on_service_usable_changed)
+
+    async def set_usable(self, is_usable: bool):
+        """Take this switcher out of service, or put it back.
+
+        This vetoes the services rather than speaking for them: taking a
+        switcher out of service leaves them as they are, so putting it back
+        restores what they already had instead of declaring them all well
+        again. Bring an individual service back with its own
+        :meth:`~pipecat.processors.frame_processor.FrameProcessor.set_usable`.
+
+        Args:
+            is_usable: Whether the switcher can be given work.
+        """
+        self._is_usable = is_usable
+        # Lifting the veto is not the same as having somewhere to send work,
+        # and a switcher that stays unusable anyway is worth saying out loud.
+        if is_usable and not self.is_usable:
+            logger.warning(f"{self.name} stays unusable: none of its services can be given work")
+        await self._announce_usable()
+
+    async def _on_service_usable_changed(self, service: FrameProcessor, is_usable: bool):
+        """Announce this switcher's usability after a service changed its own.
+
+        Args:
+            service: The service whose usability changed.
+            is_usable: Whether that service can now be given work.
+        """
+        await self._announce_usable()
+
+    async def _announce_usable(self):
+        """Raise ``on_usable_changed`` if what this switcher reports has moved."""
+        is_usable = self.is_usable
+        if is_usable == self._announced_usable:
+            return
+
+        self._announced_usable = is_usable
+        logger.debug(f"{self}: {'usable' if is_usable else 'no longer usable'}")
+        await self._call_event_handler("on_usable_changed", is_usable)
+
     @property
     def strategy(self) -> StrategyType:
         """Return the active switching strategy."""
@@ -260,6 +327,24 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
     def services(self) -> list[FrameProcessor]:
         """Return the list of available services."""
         return self._services
+
+    @property
+    def is_usable(self) -> bool:
+        """Whether any of the switched services can still be given work.
+
+        A switcher is only as dead as its last service: it can keep doing its
+        job by moving work to a different one, so it reports itself unusable
+        only once none of them can do theirs. Bringing a service back with
+        :meth:`~pipecat.processors.frame_processor.FrameProcessor.set_usable`
+        therefore brings the switcher back too — while calling that on the
+        switcher itself takes it out of service regardless of what it holds.
+        Either way the switcher raises ``on_usable_changed`` for itself, so
+        watching it is enough to hear about the services it holds.
+
+        Returns:
+            True while at least one service can be given work.
+        """
+        return super().is_usable and any(service.is_usable for service in self._services)
 
     @staticmethod
     def _make_pipeline_definitions(
@@ -314,10 +399,17 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         the inactive services, so that the update the rest of the pipeline sees
         is the one travelling the active service's branch.
 
-        Non-fatal ``ErrorFrame`` instances are forwarded to the strategy via
-        ``handle_error`` so strategies like ``ServiceSwitcherStrategyFailover``
-        can perform failover. The error frame is still propagated upstream so
-        that application-level error handlers can observe it.
+        Non-fatal ``ErrorFrame`` instances from the services being switched
+        between are answered for here rather than travelling on, since the rest
+        of the pipeline deals with the switcher and not with what it holds.
+        Errors from a service the switcher isn't using stop here outright. An
+        error that leaves the active service unable to do its job is forwarded
+        to the strategy via ``handle_error``, so strategies like
+        ``ServiceSwitcherStrategyFailover`` can perform failover; a successful
+        failover absorbs it, the switcher having gone on doing its job. Failing
+        that, it is reported against the switcher, so that the rest of the
+        pipeline judges it by what the switcher has left rather than by the one
+        service that failed. Every other error travels upstream as usual.
         """
         # Consume ServiceSwitcherRequestMetadataFrame once the targeted service
         # has handled it (i.e. the active service).
@@ -336,13 +428,49 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
             if frame.id in self._inactive_service_updates:
                 return
 
-        # Let the strategy react to non-fatal errors from the active service,
-        # ignoring errors just propagating upstream from other processors.
-        if isinstance(frame, ErrorFrame) and not frame.fatal:
-            if frame.processor and frame.processor == self.strategy.active_service:
-                await self.strategy.handle_error(frame)
+        # Let the strategy react to errors that cost us the active service,
+        # ignoring errors it can carry on from and errors just propagating
+        # upstream from other processors.
+        if isinstance(frame, ErrorFrame) and not frame.fatal and frame.processor is not None:
+            failed_service = frame.processor
+            active_service = self.strategy.active_service
+            # A service the switcher isn't using can't stop it doing its job,
+            # so its errors go no further. Watch a service's own
+            # ``on_usable_changed`` to hear about the ones held in reserve.
+            if failed_service in self._services and failed_service is not active_service:
+                return
+            # An error that costs us the active service is the switcher's to
+            # answer for: it either moves the work elsewhere or reports the
+            # failure as its own. The ones the service can carry on from
+            # travel upstream as they are.
+            if failed_service is active_service and not failed_service.is_usable:
+                if not await self.strategy.handle_error(frame):
+                    await self._report_service_failure(failed_service, frame)
+                return
 
         await super().push_frame(frame, direction)
+
+    async def _report_service_failure(self, failed_service: FrameProcessor, error: ErrorFrame):
+        """Report a service failure the switcher could not switch away from.
+
+        Re-attributes the error to the switcher, which is the processor the
+        rest of the pipeline deals with. Whether losing this service matters
+        depends on what the switcher has left, not on the service that just
+        failed, so `is_usable` on the reported error answers for the switcher
+        as a whole.
+
+        Args:
+            failed_service: The service that can no longer do its job.
+            error: The error it reported.
+        """
+        await self.push_error(
+            f"{failed_service.name} can no longer do its job: {error.error}",
+            exception=error.exception,
+            # The switcher's own configuration is never what a service's
+            # rejection calls into question, and inheriting the category would
+            # write the switcher off along with the one service that failed.
+            category=ErrorCategory.UNKNOWN,
+        )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process a frame, handling frames which affect service switching.

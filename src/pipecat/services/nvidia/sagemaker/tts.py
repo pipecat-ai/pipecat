@@ -29,6 +29,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
+from pipecat.utils.errors import ErrorCategory, extract_status_code
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
@@ -241,6 +242,17 @@ class NvidiaSageMakerTTSService(InterruptibleTTSService):
     """
 
     Settings = NvidiaSageMakerTTSSettings
+
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Treat rejected credentials as recoverable.
+
+        AWS credentials are resolved when the client is built, so a rejection
+        can be an expired credential rather than a misconfigured service, and
+        reconnecting is what clears it.
+        """
+        if extract_status_code(exception) in (401, 403):
+            return ErrorCategory.CONNECTIVITY
+        return None
 
     def __init__(
         self,

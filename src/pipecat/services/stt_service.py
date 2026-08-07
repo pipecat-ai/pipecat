@@ -428,6 +428,11 @@ class STTService(AIService):
         if self._muted:
             return
 
+        # A service that can no longer work can't transcribe anything, and
+        # services that connect on demand would attempt a handshake per chunk.
+        if not self.is_usable:
+            return
+
         self._last_audio_time = time.monotonic()
 
         # UserAudioRawFrame contains a user_id (e.g. Daily, Livekit)
@@ -849,6 +854,11 @@ class SegmentedSTTService(STTService):
     async def _handle_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         self._user_speaking = False
 
+        # A service that can no longer work can't transcribe this segment.
+        if not self.is_usable:
+            self._audio_buffer.clear()
+            return
+
         # Report usage for the raw segment before transcription so tracing can
         # attach it to the STT span the resulting TranscriptionFrame closes.
         self._record_stt_audio_usage(self._audio_buffer)
@@ -1011,6 +1021,6 @@ class WebsocketSTTService(STTService, WebsocketService):
         # counts toward usage.
         self._record_stt_audio_usage(silence)
 
-    async def _report_error(self, error: ErrorFrame):
+    async def _report_error(self, error: ErrorFrame, processor_became_unusable: bool = False):
         await self._call_event_handler("on_connection_error", error.error)
-        await self.push_error_frame(error)
+        await self.push_error_frame(error, processor_became_unusable=processor_became_unusable)

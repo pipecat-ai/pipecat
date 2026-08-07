@@ -52,6 +52,7 @@ from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.frame_queue import FrameQueue
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.pattern_pair_aggregator import PatternMatch
@@ -1239,7 +1240,19 @@ class TTSService(AIService):
         transformed_text = text
         for aggregation_type, transform in self._text_transforms:
             if aggregation_type == type or aggregation_type == "*":
-                transformed_text = await transform(transformed_text, type)
+                try:
+                    transformed_text = await transform(transformed_text, type)
+                except Exception as e:
+                    # The transformer is application code: its failures say
+                    # nothing about this service. Speaking the untransformed
+                    # text isn't safe either — a transformer may exist to
+                    # remove something — so this turn produces no audio.
+                    await self.push_error(
+                        error_msg=f"Error transforming text for TTS [{transformed_text}]: {e}",
+                        exception=e,
+                        category=ErrorCategory.APPLICATION,
+                    )
+                    return
 
         self._tts_contexts[context_id] = TTSContext(
             append_to_context=append_tts_text_to_context,
@@ -1285,7 +1298,16 @@ class TTSService(AIService):
         else:
             logger.debug(f"{self}: Generating TTS [{prepared_text}]")
 
-        await self.tts_process_generator(context_id, self.run_tts(prepared_text, context_id))
+        # A service that can no longer work can't synthesize anything, and
+        # services that connect on demand would attempt a handshake per request.
+        # The surrounding bookkeeping still runs, so the turn completes with no
+        # audio rather than stalling.
+        if not self.is_usable:
+            # Name the text that goes unspoken: silence from the bot is
+            # otherwise hard to trace back to the service that caused it.
+            logger.warning(f"{self}: service is no longer usable, not speaking [{prepared_text}]")
+        else:
+            await self.tts_process_generator(context_id, self.run_tts(prepared_text, context_id))
 
         if self.supports_processing_metrics and not self._is_streaming_tokens:
             await self.stop_processing_metrics()
@@ -1859,9 +1881,9 @@ class WebsocketTTSService(TTSService, WebsocketService):
         await super().cleanup()
         await self._disconnect()
 
-    async def _report_error(self, error: ErrorFrame):
+    async def _report_error(self, error: ErrorFrame, processor_became_unusable: bool = False):
         await self._call_event_handler("on_connection_error", error.error)
-        await self.push_error_frame(error)
+        await self.push_error_frame(error, processor_became_unusable=processor_became_unusable)
 
 
 class InterruptibleTTSService(WebsocketTTSService):
