@@ -44,29 +44,17 @@ from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 from loguru import logger
 
 from pipecat.transcriptions.language import Language
-
-# Re-exported so settings code gets the sentinel and its helpers from the
-# settings module. The redundant aliases mark that intent; a plain import of
-# a name this module doesn't itself call would look unused and be stripped.
-from pipecat.utils.types import NOT_GIVEN as NOT_GIVEN
-from pipecat.utils.types import NotGiven as NotGiven
-from pipecat.utils.types import assert_given as assert_given
-from pipecat.utils.types import is_given as is_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 if TYPE_CHECKING:
     from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 
 
-# ---------------------------------------------------------------------------
-# NOT_GIVEN sentinel
-# ---------------------------------------------------------------------------
-
-# Settings use the sentinel shared with the rest of Pipecat. In a settings
-# object it means "this field was not included in the delta": distinct from
-# ``None``, which is a valid stored value typically meaning "this service
-# doesn't support this field". Every delta field defaults to it so deltas stay
-# sparse and ``apply_update`` can skip untouched fields. It must never appear in
-# a store-mode object — see ``validate_complete()``.
+# In a settings object ``NOT_GIVEN`` means "this field was not included in the
+# delta": distinct from ``None``, which is a valid stored value typically meaning
+# "this service doesn't support this field". Every delta field defaults to it so
+# deltas stay sparse and ``apply_update`` can skip untouched fields. It must
+# never appear in a store-mode object — see ``validate_complete()``.
 
 
 # ---------------------------------------------------------------------------

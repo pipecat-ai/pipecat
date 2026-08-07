@@ -27,8 +27,9 @@ from pydantic import BaseModel, Field
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.image_service import ImageGenService
-from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, NotGiven, assert_given
+from pipecat.services.settings import ImageGenSettings
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     import google.genai as genai

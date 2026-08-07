@@ -41,15 +41,10 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchResponseFrame
 from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import (
-    NOT_GIVEN,
-    LLMSettings,
-    NotGiven,
-    assert_given,
-    is_given,
-)
+from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_llm
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"

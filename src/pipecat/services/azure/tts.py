@@ -25,11 +25,12 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.settings import NOT_GIVEN, NotGiven, TTSSettings, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     from azure.cognitiveservices.speech import (

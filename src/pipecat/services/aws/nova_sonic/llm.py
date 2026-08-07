@@ -62,9 +62,10 @@ from pipecat.services.aws.nova_sonic.session_continuation import (
     SessionContinuationParams,
 )
 from pipecat.services.llm_service import LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, NotGiven, assert_given
+from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     from aws_sdk_bedrock_runtime.client import (

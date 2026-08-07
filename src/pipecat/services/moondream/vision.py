@@ -25,8 +25,9 @@ from pipecat.frames.frames import (
     VisionFullResponseStartFrame,
     VisionTextFrame,
 )
-from pipecat.services.settings import VisionSettings, assert_given
+from pipecat.services.settings import VisionSettings
 from pipecat.services.vision_service import VisionService
+from pipecat.utils.types import assert_given
 
 try:
     import torch

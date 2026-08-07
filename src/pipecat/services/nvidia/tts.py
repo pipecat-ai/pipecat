@@ -43,10 +43,11 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStartedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, NotGiven, TTSSettings, is_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 try:
     import grpc

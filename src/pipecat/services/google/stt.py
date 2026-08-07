@@ -37,12 +37,13 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, NotGiven, STTSettings, assert_given, is_given
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import GOOGLE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 try:
     from google.api_core.client_options import ClientOptions

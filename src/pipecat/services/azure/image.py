@@ -20,7 +20,8 @@ from PIL import Image
 
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.image_service import ImageGenService
-from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, NotGiven
+from pipecat.services.settings import ImageGenSettings
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 @dataclass

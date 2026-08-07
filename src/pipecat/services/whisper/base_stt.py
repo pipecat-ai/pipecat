@@ -19,12 +19,13 @@ from openai import AsyncOpenAI
 from openai.types.audio import Transcription
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
-from pipecat.services.settings import NOT_GIVEN, NotGiven, STTSettings
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import WHISPER_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 @dataclass

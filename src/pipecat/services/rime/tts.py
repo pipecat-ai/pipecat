@@ -29,7 +29,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, NotGiven, TTSSettings
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import (
     InterruptibleTTSService,
     TextAggregationMode,
@@ -40,6 +40,7 @@ from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 def language_to_rime_language(language: Language) -> str:

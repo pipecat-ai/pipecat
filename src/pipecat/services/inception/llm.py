@@ -14,7 +14,7 @@ from loguru import logger
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.settings import NOT_GIVEN, NotGiven, is_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 
 @dataclass

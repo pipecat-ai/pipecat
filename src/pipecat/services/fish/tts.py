@@ -26,11 +26,12 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, NotGiven, TTSSettings, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     import ormsgpack

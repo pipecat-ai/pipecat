@@ -26,7 +26,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMStandardMessage,
     NotGiven,
 )
-from pipecat.utils.types import is_given as is_pipecat_given
+from pipecat.utils.types import is_given
 
 _T = TypeVar("_T")
 
@@ -41,7 +41,7 @@ def _openai_from_llm_context_tool_choice(
     sentinel needs translating: LLMContext has its own, and the SDK recognizes
     only its own.
     """
-    if not is_pipecat_given(tool_choice):
+    if not is_given(tool_choice):
         return OPENAI_NOT_GIVEN
     return cast("ChatCompletionToolChoiceOptionParam", tool_choice)
 
@@ -72,13 +72,13 @@ def _openai_from_llm_standard_message(
     return cast("ChatCompletionMessageParam", message)
 
 
-def is_given(value: _T | OpenAINotGiven) -> TypeGuard[_T]:
-    """Check whether a value was explicitly provided.
+def openai_is_given(value: _T | OpenAINotGiven) -> TypeGuard[_T]:
+    """Check whether a value was explicitly provided to the OpenAI SDK.
 
-    Typically used when checking whether a parameter or field typed with
-    OpenAI's ``NotGiven`` was set::
+    Asks about the SDK's sentinel, not Pipecat's — use
+    :func:`pipecat.utils.types.is_given` for values that are still Pipecat's::
 
-        if is_given(tool_choice):
+        if openai_is_given(tool_choice):
             ...
 
     Also acts as a type guard: inside a true branch, the value is narrowed
@@ -90,7 +90,7 @@ def is_given(value: _T | OpenAINotGiven) -> TypeGuard[_T]:
         value: The value to check.
 
     Returns:
-        ``True`` if *value* is anything other than ``NOT_GIVEN``.
+        ``True`` if *value* is anything other than the SDK's ``NOT_GIVEN``.
     """
     return not isinstance(value, OpenAINotGiven)
 

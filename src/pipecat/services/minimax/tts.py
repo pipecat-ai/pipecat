@@ -25,11 +25,12 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, NotGiven, TTSSettings
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 def language_to_minimax_language(language: Language) -> str:

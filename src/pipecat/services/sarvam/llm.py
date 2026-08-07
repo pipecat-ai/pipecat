@@ -13,12 +13,11 @@ from typing import Literal
 from loguru import logger
 from openai import NOT_GIVEN as OPENAI_NOT_GIVEN
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
-from pipecat.adapters.services.open_ai_adapter import is_given as openai_is_given
+from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams, openai_is_given
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.sarvam._sdk import sdk_headers
-from pipecat.services.settings import NOT_GIVEN, NotGiven, is_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 
 @dataclass

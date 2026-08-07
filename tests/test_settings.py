@@ -18,18 +18,11 @@ from pipecat.services.openai.realtime.llm import (
     OpenAIRealtimeLLMService,
     OpenAIRealtimeLLMSettings,
 )
-from pipecat.services.settings import (
-    NOT_GIVEN,
-    LLMSettings,
-    NotGiven,
-    ServiceSettings,
-    STTSettings,
-    TTSSettings,
-    is_given,
-)
+from pipecat.services.settings import LLMSettings, ServiceSettings, STTSettings, TTSSettings
 from pipecat.services.xai.realtime import events as grok_events
 from pipecat.services.xai.realtime.llm import GrokRealtimeLLMSettings
 from pipecat.transcriptions.language import Language
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 # ---------------------------------------------------------------------------
 # NOT_GIVEN sentinel
