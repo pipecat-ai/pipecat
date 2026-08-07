@@ -6,7 +6,6 @@
   "exclude": ["**/*_pb2.py", "**/__pycache__"],
   "ignore": [
     "tests",
-    "src/pipecat/audio/filters/aic_filter.py",
     "src/pipecat/audio/filters/krisp_viva_filter.py",
     "src/pipecat/audio/turn/smart_turn/local_smart_turn_v2.py",
     "src/pipecat/processors/aggregators/llm_response_universal.py",
