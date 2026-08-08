@@ -19,6 +19,7 @@ from typing import Any
 import aiohttp
 from loguru import logger
 
+from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -32,6 +33,12 @@ from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_
 from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
+
+# Identifies the integration to Speechify's platform attribution.
+CALLER_HEADERS = {
+    "Speechify-Caller": "pipecat",
+    "X-Pipecat-Version": pipecat_version(),
+}
 
 # PCM rates Speechify can synthesize, as the `pcm_<rate>` output formats.
 SPEECHIFY_PCM_SAMPLE_RATES = (8000, 16000, 22050, 24000, 44100, 48000)
@@ -418,6 +425,7 @@ class SpeechifyHttpTTSService(TTSService):
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
+            **CALLER_HEADERS,
         }
 
         try:
