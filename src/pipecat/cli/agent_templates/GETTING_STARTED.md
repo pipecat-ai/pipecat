@@ -4,25 +4,24 @@
 files here (`AGENTS.md`, `CLAUDE.md`) are the agent's guide, instructing
 it how to write, run, and test Pipecat code.
 
-## First: set up the Pipecat Context Hub
+## The Context Hub
 
 Your agent needs a live source of Pipecat truth — its #1 failure mode is
-confidently writing outdated APIs from memory. Set up the **Pipecat Context
-Hub**, a local index of Pipecat source, examples, and docs:
+confidently writing outdated APIs from memory. The **Pipecat Context Hub** is a
+local index of Pipecat source, examples, and docs that it queries instead.
+
+`pipecat init` set it up: it registered the hub's MCP server with the coding
+agents it found, and offered to build the index. If you declined, build it before
+your first session — the MCP server won't start against an empty index, so your
+agent would begin with no Pipecat tools at all:
 
 ```bash
-# One-time index build, using latest package; allow a few minutes
-uvx pipecat-ai-context-hub@latest refresh
-# Add the MCP server (use the line for your agent)
-claude mcp add pipecat-context-hub -- uvx pipecat-ai-context-hub serve   # Claude Code
-codex mcp add pipecat-context-hub -- uvx pipecat-ai-context-hub serve    # Codex
+pipecat context-hub refresh
 ```
 
-MCP servers load at session start, so do this *before* opening the coding
-session.
-
-Re-run the refresh command to index newer content — after bumping your Pipecat
-version, or periodically, since Pipecat moves fast.
+Re-run the same command to pick up newer content — after bumping your Pipecat
+version, or periodically, since Pipecat moves fast. The CLI reminds you when the
+index is stale or was built for a different Pipecat version.
 
 ## Your first prompt: write a spec, not a wish
 

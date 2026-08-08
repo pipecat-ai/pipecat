@@ -45,6 +45,16 @@ pipecat init . \
 
 **Choose *with* the user, not for them.** Map their requirements to the real options and confirm transport / services / mode / deployment (§7) before scaffolding — don't silently pick or guess. Mode affects testing speed — **cascade (STT→LLM→TTS)** gets the fast text-mode eval loop (§6); **realtime (speech-to-speech)** is tested in audio mode — but both run headless, so pick the mode the use case needs.
 
+**No Context Hub tools in this session?** (Check your tool list — §3 rung 1.) Nothing is blocked: the §3 rung-2 shell commands run the same handlers and return the same JSON, and they work right now. Use them and carry on.
+
+`pipecat init` registers the hub's MCP server when it writes the agent guides, but not on this scaffold path — and MCP servers are read only at session start either way. Register it so later sessions have it:
+
+```bash
+pipecat context-hub install --no-refresh   # instant and idempotent; skips the index build
+```
+
+Then *offer* the restart rather than pressing for it: it loads the tools directly, but costs the user their session, and the CLI is equivalent. Worth raising at the start of a task, not in the middle of one. The index build is theirs to decide too — minutes and ~900 MB.
+
 The scaffold pins a Pipecat version (treat it as the world you're building in — §3) and produces:
 
 ```
@@ -94,23 +104,27 @@ You have live sources for current truth — never substitute your memory. Use th
    - **Learn the concept** (before building something unfamiliar): `search_docs` — how a capability works (the Learn guides) and how to use an optional feature (the Fundamentals guides — recording, transcripts, metrics, idle detection, muting, IVR, voicemail, …); `get_doc` — read a page in full. `search_examples` / `get_example` — a working implementation to start from. When asked for a feature, search it rather than guess.
    - **Verify a specific API** (as you write): `check_deprecation` — **run on any symbol you're unsure about** (the stale-training antidote, e.g. `PipelineTask`→`PipelineWorker`); `search_api` / `get_code_snippet` — exact current signatures and usage. Examples can lag the framework — `check_deprecation` any symbol you copy from one.
 
-   The index is **local** — check `get_hub_status` for `last_refresh_at`, and refresh (`uvx pipecat-ai-context-hub@latest refresh`) when it's stale or after a Pipecat version bump.
-2. **No MCP? Query the same index from your shell** — zero setup beyond `uv`:
+   The index is **local** — check `get_hub_status` for `last_refresh_at`, and refresh (`pipecat context-hub refresh`, or `uvx pipecat-ai-context-hub@latest refresh`) when it's stale or after a Pipecat version bump.
+2. **No MCP? Query the same index from your shell** — same handlers, same JSON. The Context Hub ships with `pipecat-ai[cli]`, so wherever `pipecat` is on PATH these work; `pipecat context-hub --help` lists them. Where it isn't, the `uvx` form below needs no install at all.
    ```bash
-   uvx pipecat-ai-context-hub search-docs "turn detection"       # learn a concept
-   uvx pipecat-ai-context-hub check-deprecation PipelineTask     # the reflex check; <1s
-   uvx pipecat-ai-context-hub search-api "EvalTransportParams"
-   uvx pipecat-ai-context-hub search-examples "twilio bot" --domain backend
-   uvx pipecat-ai-context-hub status                             # index health / freshness
+   pipecat context-hub search-docs "turn detection"                      # learn a concept
+   pipecat context-hub check-deprecation PipelineTask                    # the reflex check; <1s
+   pipecat context-hub search-api "EvalTransportParams"
+   pipecat context-hub search-examples "twilio bot" --domain backend
+   pipecat context-hub status                                            # index health / freshness
+
+   uvx pipecat-ai-context-hub search-docs "turn detection"       # same, without the CLI
    ```
-   Stdout is the tool's JSON. **Exit 2 means the local index isn't built yet** — run `uvx pipecat-ai-context-hub@latest refresh` once (downloads the package + local models and indexes the sources; allow several minutes), then re-run the query. Afterwards, **set up future sessions** with your agent's MCP command — `claude mcp add pipecat-context-hub -- uvx pipecat-ai-context-hub serve` (Codex: same args, `codex mcp add`). A newly added MCP server loads at the *next* session start, never mid-session — so keep using the CLI for the current one.
+   Stdout is the tool's JSON. **Exit 2 means the local index isn't built yet** — tell the user, since building it costs upwards of three minutes and ~900 MB and is their call: `pipecat context-hub refresh` (or `uvx pipecat-ai-context-hub@latest refresh`). Then re-run the query.
+
+   **Mention how the MCP tools get enabled**, without pressing for it: `pipecat context-hub install --no-refresh` registers the server, and restarting loads it. MCP servers are read only at session start, never mid-session — so keep using these shell commands for the current one. They are equivalent, so a restart is a convenience, not a fix.
 3. **Installed package source** — the pinned version is on disk; the code cannot be stale. Read it when the index is ambiguous:
    ```bash
    python -c "import pipecat, os; print(os.path.dirname(pipecat.__file__))"
    ```
 4. **`llms.txt`** — machine-readable docs index at `https://docs.pipecat.ai/llms.txt` (full content: `llms-full.txt`). The last resort when nothing local works.
 
-(Naming: the *package* is `pipecat-ai-context-hub`; the command and MCP server are `pipecat-context-hub`. Both spellings of the command work once installed.)
+(Naming: the *package* is `pipecat-ai-context-hub`; the standalone command and MCP server are `pipecat-context-hub`; mounted in the CLI it is `pipecat context-hub`. All resolve to the same tool.)
 
 For browsing examples directly, the **`pipecat-examples` repo** groups demos by category in its README (telephony, vision, etc.); `scripts/demos.json` lists each example's run command.
 
