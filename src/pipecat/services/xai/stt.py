@@ -163,6 +163,7 @@ class XAISTTService(WebsocketSTTService):
         self._encoding = encoding
 
         self._receive_task: asyncio.Task | None = None
+        self._connect_task: asyncio.Task | None = None
         self._session_ready = asyncio.Event()
 
     def can_generate_metrics(self) -> bool:
@@ -193,7 +194,10 @@ class XAISTTService(WebsocketSTTService):
     async def start(self, frame: StartFrame):
         """Start the speech-to-text service."""
         await super().start(frame)
-        await self._connect()
+        # The socket opening is not enough to send audio: xAI acknowledges the
+        # session separately, so hold frames until it does.
+        self._connect_task = self.create_task(self._connect())
+        await self.pause_processing_all_frames_until(self._session_ready.wait)
 
     async def stop(self, frame: EndFrame):
         """Stop the speech-to-text service."""
@@ -256,6 +260,10 @@ class XAISTTService(WebsocketSTTService):
     async def _disconnect(self):
         """Tear down the WebSocket connection and cancel the receive task."""
         await super()._disconnect()
+
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 await self._websocket.send(json.dumps({"type": "audio.done"}))
