@@ -1,107 +1,76 @@
 ---
 name: code-review
-description: Automated code review for pull requests using multiple specialized agents
+description: Multi-agent review of a GitHub pull request for bugs, performance issues, repository convention alignment, and docstring quality. Posts validated findings as inline review comments.
 disable-model-invocation: true
-allowed-tools: Bash(gh issue view:*), Bash(gh search:*), Bash(gh issue list:*), Bash(gh pr comment:*), Bash(gh pr diff:*), Bash(gh pr view:*), Bash(gh pr list:*)
+allowed-tools: Bash(gh issue view:*), Bash(gh search:*), Bash(gh issue list:*), Bash(gh pr comment:*), Bash(gh pr diff:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr review:*)
 ---
 
-Provide a code review for the given pull request.
+Runs a multi-agent review of a GitHub pull request and posts validated findings as inline comments.
 
-**Agent assumptions (applies to all agents and subagents):**
+Use the `gh` CLI to interact with GitHub. Do not use web fetch.
 
-- All tools are functional and will work without error. Do not test tools or make exploratory calls. Make sure this is clear to every subagent that is launched.
-- Only call a tool if it is required to complete the task. Every tool call should have a clear purpose.
+Create a todo list before starting.
 
-To do this, follow these steps precisely:
+## 1. Preflight
 
-1. Launch a haiku agent to check if any of the following are true:
-   - The pull request is closed
-   - The pull request is a draft
-   - The pull request does not need code review (e.g. automated PR, trivial change that is obviously correct)
-   - Claude has already commented on this PR (check `gh pr view <PR> --comments` for comments left by claude)
+Launch a Haiku agent to check whether any of the following is true:
 
-   If any condition is true, stop and do not proceed.
+- the pull request is closed,
+- the pull request is a draft,
+- the pull request does not need code review (e.g. an automated PR, or a trivial change that is obviously correct),
+- Claude has already commented on this PR (check `gh pr view <PR> --comments` for comments left by Claude).
 
-Note: Still review Claude generated PR's.
+If any condition is true, stop and do not proceed.
 
-2. Launch a haiku agent to return a list of file paths (not their contents) for all relevant CLAUDE.md files including:
-   - The root CLAUDE.md file, if it exists
-   - Any CLAUDE.md files in directories containing files modified by the pull request
+Review Claude-generated PRs as normal — being authored by Claude is not a reason to skip.
 
-3. Launch a sonnet agent to view the pull request and return a summary of the changes
+## 2. Scope the review
 
-4. Launch 4 agents in parallel to independently review the changes. Each agent should return the list of issues, where each issue includes a description and the reason it was flagged (e.g. "CLAUDE.md adherence", "bug"). The agents should do the following:
+Read the PR with `gh pr view <PR>` and `gh pr diff <PR>`.
 
-   Agents 1 + 2: CLAUDE.md compliance sonnet agents
-   Audit changes for CLAUDE.md compliance in parallel. Note: When evaluating CLAUDE.md compliance for a file, you should only consider CLAUDE.md files that share a file path with the file or parents.
+Record the PR's head commit SHA — findings are anchored to it, and the permalink format in step 4 requires it.
 
-   Agent 3: Opus bug agent (parallel subagent with agent 4)
-   Scan for obvious bugs. Focus only on the diff itself without reading extra context. Flag only significant bugs; ignore nitpicks and likely false positives. Do not flag issues that you cannot validate without looking at context outside of the git diff.
+Use the PR title and description to write a one-paragraph **intent summary** describing what the PR is trying to accomplish. Do not launch an agent for this.
 
-   Agent 4: Opus bug agent (parallel subagent with agent 3)
-   Look for problems that exist in the introduced code. This could be security issues, incorrect logic, etc. Only look for issues that fall within the changed code.
+The **scope recipe** to hand every agent is `gh pr diff <PR>` together with the recorded head SHA, so all agents review identically-scoped changes.
 
-   **CRITICAL: We only want HIGH SIGNAL issues.** Flag issues where:
-   - The code will fail to compile or parse (syntax errors, type errors, missing imports, unresolved references)
-   - The code will definitely produce wrong results regardless of inputs (clear logic errors)
-   - Clear, unambiguous CLAUDE.md violations where you can quote the exact rule being broken
+## 3. Review
 
-   Do NOT flag:
-   - Code style or quality concerns
-   - Potential issues that depend on specific inputs or state
-   - Subjective suggestions or improvements
+Read `.claude/skills/review-policy.md` and apply it, passing it the scope recipe, the changed file list, and the intent summary.
 
-   If you are not certain an issue is real, do not flag it. False positives erode trust and waste reviewer time.
+## 4. Post the review
 
-   In addition to the above, each subagent should be told the PR title and description. This will help provide context regarding the author's intent.
+First, assemble the complete list of comments you plan to leave and check that you are comfortable with every one. This list is for you only — do not post it anywhere.
 
-5. For each issue found in the previous step by agents 3 and 4, launch parallel subagents to validate the issue. These subagents should get the PR title and description along with a description of the issue. The agent's job is to review the issue to validate that the stated issue is truly an issue with high confidence. For example, if an issue such as "variable is not defined" was flagged, the subagent's job would be to validate that is actually true in the code. Another example would be CLAUDE.md issues. The agent should validate that the CLAUDE.md rule that was violated is scoped for this file and is actually violated. Use Opus subagents for bugs and logic issues, and sonnet agents for CLAUDE.md violations.
+If no findings survived validation, post a summary comment with `gh pr comment`:
 
-6. Filter out any issues that were not validated in step 5. This step will give us our list of high signal issues for our review.
-
-7. If issues were found, skip to step 8 to post comments.
-
-   If NO issues were found, post a summary comment using `gh pr comment` (if `--comment` argument is provided):
-   "No issues found. Checked for bugs and CLAUDE.md compliance."
-
-8. Create a list of all comments that you plan on leaving. This is only for you to make sure you are comfortable with the comments. Do not post this list anywhere.
-
-9. Post inline comments for each issue using `gh pr review` with inline comments. For each comment:
-   - Provide a brief description of the issue
-   - For small, self-contained fixes, include a committable suggestion block
-   - For larger fixes (6+ lines, structural changes, or changes spanning multiple locations), describe the issue and suggested fix without a suggestion block
-   - Never post a committable suggestion UNLESS committing the suggestion fixes the issue entirely. If follow up steps are required, do not leave a committable suggestion.
-
-   **IMPORTANT: Only post ONE comment per unique issue. Do not post duplicate comments.**
-
-Use this list when evaluating issues in Steps 4 and 5 (these are false positives, do NOT flag):
-
-- Pre-existing issues
-- Something that appears to be a bug but is actually correct
-- Pedantic nitpicks that a senior engineer would not flag
-- Issues that a linter will catch (do not run the linter to verify)
-- General code quality concerns (e.g., lack of test coverage, general security issues) unless explicitly required in CLAUDE.md
-- Issues mentioned in CLAUDE.md but explicitly silenced in the code (e.g., via a lint ignore comment)
-
-Notes:
-
-- Use gh CLI to interact with GitHub (e.g., fetch pull requests, create comments). Do not use web fetch.
-- Create a todo list before starting.
-- You must cite and link each issue in inline comments (e.g., if referring to a CLAUDE.md, include a link to it).
-- If no issues are found, post a comment with the following format:
-
----
-
+```markdown
 ## Code review
 
-No issues found. Checked for bugs and CLAUDE.md compliance.
+No issues found. Checked for bugs, performance, and repository convention compliance.
+```
 
----
+Otherwise, post one inline comment per finding using `gh pr review`. For each comment:
 
-- When linking to code in inline comments, follow the following format precisely, otherwise the Markdown preview won't render correctly: `https://github.com/OWNER/REPO/blob/FULL_SHA/path/to/file.py#L10-L15`
-  - Requires full git sha
-  - You must provide the full sha. Commands like `https://github.com/owner/repo/blob/$(git rev-parse HEAD)/foo/bar` will not work, since your comment will be directly rendered in Markdown.
-  - Repo name must match the repo you're code reviewing
-  - # sign after the file name
-  - Line range format is L[start]-L[end]
-  - Provide at least 1 line of context before and after, centered on the line you are commenting about (eg. if you are commenting about lines 5-6, you should link to `L4-7`)
+- lead with the severity (**High** / **Medium** / **Low**),
+- give a brief description of the issue,
+- cite and link the source of any rule you invoke (e.g. the `AGENTS.md` or `CLAUDE.md` it came from),
+- for small, self-contained fixes, include a committable suggestion block,
+- for larger fixes (6+ lines, structural changes, or changes spanning multiple locations), describe the issue and suggested fix without a suggestion block,
+- never post a committable suggestion unless committing it fixes the issue entirely. If follow-up steps are required, do not leave a suggestion block.
+
+**Post only ONE comment per unique issue. Do not post duplicate comments.**
+
+When linking to code, follow this format precisely, otherwise the Markdown preview won't render correctly:
+
+`https://github.com/OWNER/REPO/blob/FULL_SHA/path/to/file.py#L10-L15`
+
+- requires the full git SHA — command substitution such as `$(git rev-parse HEAD)` will not work, since the comment is rendered directly as Markdown,
+- the repo name must match the repo being reviewed,
+- `#` sign after the file name,
+- line range format is `L[start]-L[end]`,
+- provide at least 1 line of context before and after, centered on the line being commented on (e.g. to comment on lines 5-6, link `L4-L7`).
+
+## 5. Report completion
+
+Respond in chat with the number of findings posted in each category, and a link to the review. Do not paste the full review into chat.
