@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.filters.aic_filter import AICFilter
-from pipecat.audio.vad.aic_quail_vad import AICQuailVADAnalyzer
+from pipecat.audio.vad.aic_filter_vad import AICFilterVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -40,17 +40,18 @@ load_dotenv(override=True)
 def _create_aic_filter() -> AICFilter:
     license_key = os.environ["AIC_SDK_LICENSE"]
 
+    # The VAD model lives on the filter so it runs on the original audio
+    # rather than on the enhanced output.
     return AICFilter(
         license_key=license_key,
         model_id="quail-vf-2.2-l-16khz",
         enhancement_level=0.8,
+        vad_model_id="vad-2.1-xxs-16khz",
     )
 
 
 aic_filter = _create_aic_filter()
-aic_vad_analyzer = AICQuailVADAnalyzer(
-    license_key=os.environ["AIC_SDK_LICENSE"],
-)
+aic_vad_analyzer = AICFilterVADAnalyzer(aic_filter=aic_filter)
 
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.

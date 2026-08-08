@@ -3,17 +3,6 @@
   "schema_version": 1,
   "deprecations": [
     {
-      "subject": "AICFilter.create_vad_analyzer",
-      "module": "pipecat.audio.filters.aic_filter",
-      "kind": "method",
-      "deprecated_in": "1.4.0",
-      "removed_in": "1.6.0",
-      "relation": "use_existing",
-      "replacement": "AICQuailVADAnalyzer",
-      "message": "`AICFilter.create_vad_analyzer` is deprecated since 1.4.0 and will be removed in 1.6.0. Use `AICQuailVADAnalyzer` instead.",
-      "location": "pipecat/audio/filters/aic_filter.py"
-    },
-    {
       "subject": "ResampyResampler",
       "module": "pipecat.audio.resamplers.resampy_resampler",
       "kind": "class",
@@ -78,28 +67,6 @@
       "replacement": "VADParams",
       "message": "Use :class:`VADParams` (``start_secs``/``stop_secs``) instead. ``speech_hold_duration`` is ignored and will be removed in 2.0.0.",
       "location": "pipecat/audio/vad/aic_quail_vad.py"
-    },
-    {
-      "subject": "AICVADAnalyzer",
-      "module": "pipecat.audio.vad.aic_vad",
-      "kind": "class",
-      "deprecated_in": "1.4.0",
-      "removed_in": "1.6.0",
-      "relation": "use_existing",
-      "replacement": "AICQuailVADAnalyzer",
-      "message": "`AICVADAnalyzer` is deprecated since 1.4.0 and will be removed in 1.6.0. Use `AICQuailVADAnalyzer` instead.",
-      "location": "pipecat/audio/vad/aic_vad.py"
-    },
-    {
-      "subject": "pipecat.audio.vad.aic_vad",
-      "module": "pipecat.audio.vad.aic_vad",
-      "kind": "module",
-      "deprecated_in": "1.4.0",
-      "removed_in": "1.6.0",
-      "relation": "use_existing",
-      "replacement": "AICQuailVADAnalyzer",
-      "message": "Use :class:`AICQuailVADAnalyzer` instead. Will be removed in 1.6.0.",
-      "location": "pipecat/audio/vad/aic_vad.py"
     },
     {
       "subject": "FlowManager.task",

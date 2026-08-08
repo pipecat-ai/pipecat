@@ -6,9 +6,9 @@
 
 """Shared aic_sdk test mocks for the AIC test suite.
 
-Importing in: ``tests/test_aic_filter.py``, ``tests/test_aic_vad.py``,
-``tests/test_aic_quail_vad.py``. Keep behavior aligned with the live
-``aic_sdk`` 2.5.0 surface so the suite stays representative.
+Importing in: ``tests/test_aic_filter.py``, ``tests/test_aic_quail_vad.py``,
+``tests/test_aic_filter_vad.py``. Keep behavior aligned with the live
+``aic_sdk`` 3.0 surface so the suite stays representative.
 """
 
 from typing import Any
@@ -25,6 +25,7 @@ class MockVadContext:
         raw_probability: float = 0.0,
         raise_on_detect: bool = False,
         raise_on_set_param: bool = False,
+        prediction_delay: int = 0,
     ) -> None:
         self.speech_detected = speech_detected
         self.raw_probability = raw_probability
@@ -33,7 +34,9 @@ class MockVadContext:
         # raw_vad_probability).
         self.raise_on_detect = raise_on_detect
         self.raise_on_set_param = raise_on_set_param
+        self.prediction_delay = prediction_delay
         self.parameters_set: list[tuple] = []
+        self.reset_called = False
 
     def is_speech_detected(self) -> bool:
         if self.raise_on_detect:
@@ -50,17 +53,23 @@ class MockVadContext:
             raise RuntimeError("Param error")
         self.parameters_set.append((param, value))
 
+    def get_prediction_delay(self) -> int:
+        return self.prediction_delay
+
+    def reset(self) -> None:
+        self.reset_called = True
+
 
 class MockProcessorContext:
-    """Stand-in for ``aic_sdk.ProcessorContext`` (sync surface)."""
+    """Stand-in for ``aic_sdk.ProcessorContext``."""
 
     def __init__(self) -> None:
         self.parameters_set: list[tuple] = []
         self.reset_called = False
-        self._output_delay = 0
+        self._audio_delay = 0
 
-    def get_output_delay(self) -> int:
-        return self._output_delay
+    def get_audio_delay(self) -> int:
+        return self._audio_delay
 
     def set_parameter(self, param: Any, value: float) -> None:
         self.parameters_set.append((param, value))
@@ -70,63 +79,79 @@ class MockProcessorContext:
 
 
 class MockProcessorAsync:
-    """Stand-in for ``aic_sdk.ProcessorAsync`` used by :class:`AICFilter`.
-
-    In aic-sdk 2.3.0 the sync ``Processor`` and async ``ProcessorAsync`` both
-    expose sync ``get_*_context()`` (the async getters were reverted before
-    release). This mock matches that final shape.
-    """
+    """Stand-in for ``aic_sdk.ProcessorAsync`` used by :class:`AICFilter`."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self.processor_ctx = MockProcessorContext()
-        self.vad_ctx = MockVadContext()
-
-    def get_processor_context(self) -> MockProcessorContext:
-        return self.processor_ctx
-
-    def get_vad_context(self) -> MockVadContext:
-        return self.vad_ctx
-
-    async def process_async(self, audio_array: np.ndarray) -> np.ndarray:
-        return audio_array.copy()
-
-
-class MockProcessorSync:
-    """Stand-in for ``aic_sdk.Processor`` used by :class:`AICQuailVADAnalyzer`."""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self.vad_ctx = MockVadContext()
         self.processor_ctx = MockProcessorContext()
         self.process_calls: list[np.ndarray] = []
+        self.terminated = False
 
-    def get_vad_context(self) -> MockVadContext:
-        return self.vad_ctx
-
-    def get_processor_context(self) -> MockProcessorContext:
+    def get_context(self) -> MockProcessorContext:
         return self.processor_ctx
 
-    def process(self, audio: np.ndarray) -> np.ndarray:
+    async def process_async(self, audio_array: np.ndarray) -> np.ndarray:
+        self.process_calls.append(audio_array.copy())
+        return audio_array.copy()
+
+    async def terminate_session_async(self) -> None:
+        self.terminated = True
+
+
+class MockVadAsync:
+    """Stand-in for ``aic_sdk.VadAsync`` used by :class:`AICFilter`."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.vad_ctx = MockVadContext()
+        self.process_calls: list[np.ndarray] = []
+        self.terminated = False
+
+    def get_context(self) -> MockVadContext:
+        return self.vad_ctx
+
+    async def process_async(self, audio: np.ndarray) -> None:
+        # The real VAD leaves its input untouched; copy so assertions can see
+        # the block as it was when the VAD read it.
         self.process_calls.append(audio.copy())
-        return audio.copy()
+
+    async def terminate_session_async(self) -> None:
+        self.terminated = True
+
+
+class MockVadSync:
+    """Stand-in for ``aic_sdk.Vad`` used by :class:`AICQuailVADAnalyzer`."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.vad_ctx = MockVadContext()
+        self.process_calls: list[np.ndarray] = []
+        self.terminated = False
+
+    def get_context(self) -> MockVadContext:
+        return self.vad_ctx
+
+    def process(self, audio: np.ndarray) -> None:
+        self.process_calls.append(audio.copy())
+
+    def terminate_session(self) -> None:
+        self.terminated = True
 
 
 class MockModel:
     """Stand-in for ``aic_sdk.Model``.
 
-    ``optimal_num_frames`` is configurable so tests can exercise paths where
-    the model's optimal frame count differs from the 10 ms / 160-frame fallback.
+    ``optimal_block_size`` is configurable so tests can exercise paths where
+    the model's optimal block size differs from the 10 ms / 160-sample fallback.
     """
 
-    def __init__(self, model_id: str = "test-model", optimal_num_frames: int = 160) -> None:
+    def __init__(self, model_id: str = "test-model", optimal_block_size: int = 160) -> None:
         self._model_id = model_id
-        self._optimal_num_frames = optimal_num_frames
+        self._optimal_block_size = optimal_block_size
         self._optimal_sample_rate = 16000
 
     def get_id(self) -> str:
         return self._model_id
 
-    def get_optimal_num_frames(self, sample_rate: int) -> int:
-        return self._optimal_num_frames
+    def get_optimal_block_size(self, sample_rate: int) -> int:
+        return self._optimal_block_size
 
     def get_optimal_sample_rate(self) -> int:
         return self._optimal_sample_rate
