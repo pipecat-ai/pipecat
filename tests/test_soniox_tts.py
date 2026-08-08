@@ -4,8 +4,18 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import unittest
+
+from pipecat.frames.frames import (
+    AggregatedTextFrame,
+    AggregatedTextProgressFrame,
+    AggregationType,
+    TTSTextFrame,
+)
 from pipecat.services.settings import TTSSettings
 from pipecat.services.soniox.tts import SonioxTTSService
+from pipecat.transcriptions.language import Language
+from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 
@@ -137,3 +147,77 @@ def test_soniox_japanese_punctuation_recovered_by_word_tracker():
 
     assert complete
     assert tracker.get_accumulated_user_facing_text() == text
+
+
+class TestSonioxUpdateSettingsFinalizesOldContext(unittest.IsolatedAsyncioTestCase):
+    """A mid-reply voice/model/language/speed change re-mints the turn context. The
+    old context's still-pending sentence must be finalized first, or the
+    already-heard prefix's word-timestamps land on no slot and drop from the
+    transcript.
+    """
+
+    async def _service_with_pending_prefix(self, old_ctx: str):
+        service = SonioxTTSService.__new__(SonioxTTSService)
+        service._name = "SonioxTTSService#0"
+        service._settings = SonioxTTSService.Settings(
+            model="tts-rt-v1",
+            voice="Adrian",
+            language=Language.EN,
+            speed=None,
+        )
+        # Real streaming sequencer with a mid-sentence prefix pending on the turn ctx.
+        seq = AggregatedFrameSequencer(name=service._name, streaming=True)
+        service._aggregated_frame_sequencer = seq
+        service._turn_context_id = old_ctx
+        for token in ("Hi", " there"):
+            frame = AggregatedTextFrame(token, AggregationType.SENTENCE, raw_text=token)
+            await seq.register_spoken(frame, old_ctx, token, append_to_context=True)
+        assert seq._slots == []  # nothing promoted — sentence has no boundary yet
+
+        pushed: list = []
+
+        async def fake_push(frames, context_id):
+            pushed.extend(frames)
+
+        async def fake_flush(context_id=None):
+            service._flushed = context_id
+
+        service._flushed = None
+        service._push_sequencer_frames = fake_push
+        service.flush_audio = fake_flush
+        service.audio_context_available = lambda context_id: True
+        service.create_context_id = lambda: "ctx-new"
+        return service, seq, pushed
+
+    async def test_voice_change_finalizes_and_rescues_prefix(self):
+        old_ctx = "ctx-old"
+        service, seq, pushed = await self._service_with_pending_prefix(old_ctx)
+
+        await service._update_settings(SonioxTTSService.Settings(voice="Hannah"))
+
+        # The old context's pending sentence was force-promoted into a real slot.
+        self.assertEqual([s.frame.text for s in seq._slots], ["Hi there"])
+        self.assertEqual(seq._slots[0].context_id, old_ctx)
+        self.assertTrue(
+            any(isinstance(f, AggregatedTextFrame) and f.text == "Hi there" for f in pushed)
+        )
+        self.assertEqual(service._flushed, old_ctx)
+        self.assertEqual(service._turn_context_id, "ctx-new")
+
+        # A word-timestamp for the flushed prefix (on the OLD context) still finds
+        # the promoted slot and emits a progress frame.
+        result = seq.process_word("Hi", pts=10, context_id=old_ctx)
+        self.assertTrue(any(isinstance(f, TTSTextFrame) and f.text == "Hi" for f in result))
+        progress = [f for f in result if isinstance(f, AggregatedTextProgressFrame)]
+        self.assertEqual(len(progress), 1)
+        self.assertEqual(progress[0].accumulated_text, "Hi")
+
+    async def test_speed_change_also_finalizes(self):
+        # Soniox additionally re-mints on a speed change, so it must finalize too.
+        old_ctx = "ctx-old"
+        service, seq, pushed = await self._service_with_pending_prefix(old_ctx)
+
+        await service._update_settings(SonioxTTSService.Settings(speed=1.2))
+
+        self.assertEqual([s.frame.text for s in seq._slots], ["Hi there"])
+        self.assertEqual(service._turn_context_id, "ctx-new")
