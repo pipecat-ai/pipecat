@@ -11,6 +11,7 @@ API. It supports real-time transcription with Voice Activity Detection (VAD) and
 can handle multiple audio formats for Indian language speech recognition.
 """
 
+import asyncio
 import base64
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -395,6 +396,10 @@ class SarvamSTTService(STTService):
         self._websocket_context = None
         self._socket_client = None
         self._receive_task = None
+        self._connect_task = None
+        # Set once the connection can carry audio, which is what start()
+        # holds frames on.
+        self._connection_ready = asyncio.Event()
 
         if default_settings.vad_signals:
             self._register_event_handler("on_speech_started")
@@ -554,7 +559,10 @@ class SarvamSTTService(STTService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        await self._connect()
+        # _connect() runs in the background, so hold what follows the
+        # StartFrame until the connection can carry it.
+        self._connect_task = self.create_task(self._connect())
+        await self.pause_processing_all_frames_until(self._connection_ready.wait)
 
     async def stop(self, frame: EndFrame):
         """Stop the Sarvam STT service.
@@ -735,6 +743,8 @@ class SarvamSTTService(STTService):
 
             self._create_keepalive_task()
 
+            self._connection_ready.set()
+
             logger.info("Connected to Sarvam successfully")
 
         except ApiError as e:
@@ -748,6 +758,11 @@ class SarvamSTTService(STTService):
 
     async def _disconnect(self):
         """Disconnect from Sarvam WebSocket API using SDK."""
+        self._connection_ready.clear()
+
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
         await self._cancel_keepalive_task()
 
         if self._receive_task:
