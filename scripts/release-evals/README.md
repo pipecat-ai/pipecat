@@ -50,6 +50,8 @@ The harness runs the judge, the user's voice, and the bot-speech transcriber
   `~/.cache/pipecat/evals/tts`). No keys, no per-run cost. Non-English
   transcription needs a multilingual model, which the English-only defaults
   aren't — `language_switch_audio` pulls Whisper's `tiny` (75MB).
+- **Node.js** (MCP bot only). `mcp/mcp-stdio.py` spawns its memory MCP server
+  with `npx`; the server package downloads on first use.
 - **Each bot's own credentials.** A bot is a real example, so it needs the same
   service API keys it normally would, in your `.env` (e.g. `$OPENAI_API_KEY`,
   `$CARTESIA_API_KEY`, `$DEEPGRAM_API_KEY`, ...). A bot whose keys are missing
