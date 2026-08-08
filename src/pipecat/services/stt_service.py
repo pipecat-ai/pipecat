@@ -61,6 +61,14 @@ class STTService(AIService):
     keepalive must override ``_send_keepalive()`` to deliver the silence in the
     appropriate service-specific protocol.
 
+    A streaming STT reports latency through TTFB — speech end to final transcript —
+    and not through processing metrics. Audio arrives continuously, so there is no
+    discrete request whose duration a
+    :meth:`~pipecat.processors.frame_processor.FrameProcessor.start_processing_metrics`
+    window could measure; anchoring one to a speech or turn boundary measures how
+    long the user talked. :class:`SegmentedSTTService` does issue a discrete
+    request per utterance, so its subclasses time that call and report both.
+
     Event handlers:
         on_connected: Called when connected to the STT service.
         on_disconnected: Called when disconnected from the STT service.

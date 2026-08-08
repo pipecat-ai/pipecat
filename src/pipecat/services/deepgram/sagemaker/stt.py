@@ -37,7 +37,6 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -502,7 +501,6 @@ class DeepgramSageMakerSTTService(STTService):
                 )
             )
             await self._handle_transcription(transcript, is_final, language)
-            await self.stop_processing_metrics()
         else:
             # Interim transcription
             await self.push_frame(
@@ -532,10 +530,6 @@ class DeepgramSageMakerSTTService(STTService):
         """
         pass
 
-    async def _start_metrics(self):
-        """Start processing metrics collection."""
-        await self.start_processing_metrics()
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames with Deepgram SageMaker-specific handling.
 
@@ -545,10 +539,7 @@ class DeepgramSageMakerSTTService(STTService):
         """
         await super().process_frame(frame, direction)
 
-        # Start metrics when user starts speaking (if VAD is not provided by Deepgram)
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self._start_metrics()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             # https://developers.deepgram.com/docs/finalize
             # Mark that we're awaiting a from_finalize response
             self.request_finalize()

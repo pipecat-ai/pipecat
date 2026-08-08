@@ -24,11 +24,11 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     StartFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -43,6 +43,7 @@ from pipecat.services.settings import (
 from pipecat.services.stt_latency import SARVAM_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -429,19 +430,31 @@ class SarvamSTTService(STTService):
         """
         return True
 
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Request external turn strategies when Sarvam's VAD signals drive turns.
+
+        With ``vad_signals`` enabled Sarvam detects speech boundaries server-side
+        and this service proposes turns from them, so the user aggregator resolves
+        those rather than running local VAD/smart-turn. Without it the defaults are
+        left in place. Applied unless the user passed their own
+        ``user_turn_strategies``.
+        """
+        frame = super().service_metadata_frame()
+        if self._settings.vad_signals:
+            frame.user_turn_strategies = ExternalUserTurnStrategies()
+        return frame
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames.
 
-        Handles VAD frames for TTFB tracking when using Pipecat's VAD
-        instead of Sarvam's built-in VAD.
+        Flushes on Pipecat's VAD turn end when Sarvam's built-in VAD signals
+        aren't driving the turn.
         """
         await super().process_frame(frame, direction)
 
         # Only handle VAD frames when not using Sarvam's VAD signals
         if not self._settings.vad_signals:
-            if isinstance(frame, VADUserStartedSpeakingFrame):
-                await self._start_metrics()
-            elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            if isinstance(frame, VADUserStoppedSpeakingFrame):
                 if self._socket_client:
                     await self._socket_client.flush()
 
@@ -805,16 +818,14 @@ class SarvamSTTService(STTService):
                 logger.debug(f"VAD Signal: {signal}, Occurred at: {timestamp}")
 
                 if signal == "START_SPEECH":
-                    await self._start_metrics()
                     logger.debug("User started speaking")
                     await self._call_event_handler("on_speech_started")
-                    await self.broadcast_frame(UserStartedSpeakingFrame)
-                    await self.broadcast_interruption()
+                    await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
 
                 elif signal == "END_SPEECH":
                     logger.debug("User stopped speaking")
                     await self._call_event_handler("on_speech_stopped")
-                    await self.broadcast_frame(UserStoppedSpeakingFrame)
+                    await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
             elif message.type == "data":
                 transcript = message.data.transcript
@@ -847,9 +858,6 @@ class SarvamSTTService(STTService):
                             result=(message.dict() if hasattr(message, "dict") else str(message)),
                         )
                     )
-
-                await self.stop_processing_metrics()
-
         except Exception as e:
             await self.push_error(error_msg=f"Failed to handle message: {e}", exception=e)
             await self.stop_all_metrics()
@@ -908,7 +916,3 @@ class SarvamSTTService(STTService):
             await self._socket_client.translate(**method_kwargs)
         else:
             await self._socket_client.transcribe(**method_kwargs)
-
-    async def _start_metrics(self):
-        """Start processing metrics collection."""
-        await self.start_processing_metrics()

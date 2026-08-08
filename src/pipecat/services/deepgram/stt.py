@@ -22,7 +22,6 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -715,10 +714,6 @@ class DeepgramSTTService(STTService):
                 except Exception as e:
                     logger.warning(f"{self}: Keepalive failed: {e}")
 
-    async def _start_metrics(self):
-        """Start processing metrics collection for this utterance."""
-        await self.start_processing_metrics()
-
     async def _on_error(self, error):
         logger.warning(f"{self} connection error, will retry: {error}")
         await self.push_error(error_msg=f"{error}")
@@ -763,7 +758,6 @@ class DeepgramSTTService(STTService):
                         )
                     )
                     await self._handle_transcription(transcript, is_final, language)
-                    await self.stop_processing_metrics()
                 elif from_finalize:
                     # Deepgram already sent the transcript via a regular is_final
                     # before the finalize response arrived (empty). Report STT TTFB
@@ -791,9 +785,7 @@ class DeepgramSTTService(STTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self._start_metrics()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             # https://developers.deepgram.com/docs/finalize
             # Mark that we're awaiting a from_finalize response
             if self._connection:

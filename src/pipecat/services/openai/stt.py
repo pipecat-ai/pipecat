@@ -30,11 +30,11 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     StartFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -47,6 +47,7 @@ from pipecat.services.whisper.base_stt import (
     Transcription,
 )
 from pipecat.transcriptions.language import Language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -211,10 +212,12 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
     audio buffer so that the server begins transcription for the completed
     speech segment.
 
-    **Server-side VAD** (``turn_detection=None``): The OpenAI server performs voice-activity
-    detection. The service broadcasts ``UserStartedSpeakingFrame`` and
-    ``UserStoppedSpeakingFrame`` when the server detects speech boundaries.
-    Do **not** use a separate VAD processor in the pipeline in this mode.
+    **Server-side VAD** (``turn_detection={"type": "server_vad"}``): The OpenAI server
+    performs voice-activity detection. The service proposes turn boundaries when the
+    server detects them, and recommends the external user turn strategies that resolve
+    those proposals into turn frames. Do **not** use a separate VAD processor in the
+    pipeline in this mode. Requires a model that supports turn detection —
+    ``gpt-4o-transcribe`` does, the default ``gpt-realtime-whisper`` does not.
 
     Audio is sent as 24 kHz 16-bit mono PCM as required by the OpenAI Realtime
     API. If the pipeline runs at a different sample rate (e.g. 16 kHz for Silero
@@ -280,9 +283,12 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
             turn_detection: Server-side VAD configuration. Defaults to
                 ``False`` (disabled), which relies on a local VAD
-                processor in the pipeline. Pass ``None`` to use server
-                defaults (``server_vad``), or a dict with custom
+                processor in the pipeline. Pass a dict to enable it — at
+                minimum ``{"type": "server_vad"}``, optionally with custom
                 settings (e.g. ``{"type": "server_vad", "threshold": 0.5}``).
+                Requires a model that supports turn detection; see ``model``.
+                ``None`` omits the field entirely, leaving the session's own
+                default in place.
             noise_reduction: Noise reduction mode. ``"near_field"`` for
                 close microphones, ``"far_field"`` for distant
                 microphones, or ``None`` to disable.
@@ -293,7 +299,10 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
             should_interrupt: Whether to interrupt bot output when
                 speech is detected by server-side VAD. Only applies when
-                turn detection is enabled. Defaults to True.
+                turn detection is enabled. Passed along to the user turn
+                strategies this service recommends, which own the interruption;
+                a user-supplied ``user_turn_strategies`` overrides the
+                recommendation and this setting with it. Defaults to True.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
@@ -391,6 +400,22 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         """
         return True
 
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Request external turn strategies when server-side VAD drives turns.
+
+        With server-side VAD enabled the OpenAI server detects speech boundaries
+        and this service proposes turns from them, so the user aggregator resolves
+        those rather than running local VAD/smart-turn. With ``turn_detection=False``
+        (the default) the server emits no VAD events and the defaults are left in
+        place. Applied unless the user passed their own ``user_turn_strategies``.
+        """
+        frame = super().service_metadata_frame()
+        if self._server_vad_enabled:
+            frame.user_turn_strategies = ExternalUserTurnStrategies(
+                enable_interruptions=self._should_interrupt,
+            )
+        return frame
+
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta and send session update if needed.
 
@@ -471,9 +496,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
         # Handle local VAD events when server-side VAD is disabled.
         if not self._server_vad_enabled:
-            if isinstance(frame, VADUserStartedSpeakingFrame):
-                await self.start_processing_metrics()
-            elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            if isinstance(frame, VADUserStoppedSpeakingFrame):
                 await self._commit_audio_buffer()
 
     # ------------------------------------------------------------------
@@ -740,7 +763,6 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
                 )
             )
             await self._handle_transcription_trace(transcript, True)
-            await self.stop_processing_metrics()
 
     @traced_stt
     async def _handle_transcription_trace(
@@ -761,29 +783,26 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
     async def _handle_speech_started(self, evt: dict):
         """Handle server-side VAD speech start.
 
-        Broadcasts ``UserStartedSpeakingFrame`` and optionally triggers
-        interruption of current bot output.
+        Proposes a turn start, which the user turn strategies resolve into a
+        ``UserStartedSpeakingFrame`` and an interruption.
 
         Args:
             evt: The ``input_audio_buffer.speech_started`` event.
         """
         logger.debug("Server VAD: speech started")
-        await self.broadcast_frame(UserStartedSpeakingFrame)
-        if self._should_interrupt:
-            await self.broadcast_interruption()
-        await self.start_processing_metrics()
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
 
     async def _handle_speech_stopped(self, evt: dict):
         """Handle server-side VAD speech stop.
 
-        Broadcasts ``UserStoppedSpeakingFrame``. The audio buffer is
-        automatically committed by the server when VAD is enabled.
+        Proposes a turn stop. The audio buffer is automatically committed by the
+        server when VAD is enabled.
 
         Args:
             evt: The ``input_audio_buffer.speech_stopped`` event.
         """
         logger.debug("Server VAD: speech stopped")
-        await self.broadcast_frame(UserStoppedSpeakingFrame)
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
     async def _handle_transcription_failed(self, evt: dict):
         """Handle a transcription failure for a speech segment.

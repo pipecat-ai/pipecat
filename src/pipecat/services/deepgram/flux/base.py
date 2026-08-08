@@ -20,11 +20,11 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     InterimTranscriptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
 )
 from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
 from pipecat.services.stt_service import STTService
@@ -184,7 +184,10 @@ class DeepgramFluxSTTBase(STTService):
             mip_opt_out: Opt out of the Deepgram Model Improvement Program.
             tag: Tags to label requests for identification during usage reporting.
             should_interrupt: Whether to interrupt the bot when Flux detects that
-                the user is speaking.
+                the user is speaking. Passed along to the user turn strategies
+                this service recommends, which own the interruption; a
+                user-supplied ``user_turn_strategies`` overrides the
+                recommendation and this setting with it.
             watchdog_min_timeout: minimum idle timeout before sending silence to
                 prevent dangling turns. The actual threshold is
                 ``max(chunk_duration * 2, watchdog_min_timeout)``. Defaults to 0.5.
@@ -238,12 +241,14 @@ class DeepgramFluxSTTBase(STTService):
         """Recommend external turn strategies: Flux detects turns server-side.
 
         Flux emits its own start-of-turn and end-of-turn events (as
-        ``UserStarted/StoppedSpeakingFrame``), so the user aggregator defers to
-        those rather than running local VAD/smart-turn. Applied unless the user
-        passed their own ``user_turn_strategies``.
+        ``ProposedUserStarted/StoppedSpeakingFrame``), so the user aggregator
+        resolves those rather than running local VAD/smart-turn. Applied unless
+        the user passed their own ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
-        frame.user_turn_strategies = ExternalUserTurnStrategies()
+        frame.user_turn_strategies = ExternalUserTurnStrategies(
+            enable_interruptions=self._should_interrupt,
+        )
         return frame
 
     # ------------------------------------------------------------------
@@ -410,16 +415,6 @@ class DeepgramFluxSTTBase(STTService):
         """Release Deepgram Flux STT resources at teardown."""
         await super().cleanup()
         await self._disconnect()
-
-    async def start_metrics(self):
-        """Start TTFB and processing metrics collection."""
-        # TTFB (Time To First Byte) metrics are currently disabled for Deepgram Flux.
-        # Ideally, TTFB should measure the time from when a user starts speaking
-        # until we receive the first transcript. However, Deepgram Flux delivers
-        # both the "user started speaking" event and the first transcript simultaneously,
-        # making this timing measurement meaningless in this context.
-        # await self.start_ttfb_metrics()
-        await self.start_processing_metrics()
 
     @traced_stt
     async def _handle_transcription(
@@ -674,23 +669,18 @@ class DeepgramFluxSTTBase(STTService):
         """Handle StartOfTurn events from Deepgram Flux.
 
         StartOfTurn events are fired when Deepgram Flux detects the beginning
-        of a new speaking turn. This triggers bot interruption to stop any
-        ongoing speech synthesis and signals the start of user speech detection.
+        of a new speaking turn.
 
         The service will:
-        - Send a BotInterruptionFrame upstream to stop bot speech
-        - Send a UserStartedSpeakingFrame downstream to notify other components
-        - Start metrics collection for measuring response times
+        - Propose a turn start, which the user turn strategies resolve into a
+          UserStartedSpeakingFrame and an interruption
 
         Args:
             transcript: maybe the first few words of the turn.
         """
         logger.debug("User started speaking")
         self._user_is_speaking = True
-        await self.broadcast_frame(UserStartedSpeakingFrame)
-        if self._should_interrupt:
-            await self.broadcast_interruption()
-        await self.start_metrics()
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
         await self._call_event_handler("on_start_of_turn", transcript)
         if transcript:
             logger.trace(f"Start of turn transcript: {transcript}")
@@ -749,8 +739,8 @@ class DeepgramFluxSTTBase(STTService):
         The service will:
         - Create and send a final TranscriptionFrame with the complete transcript
         - Trigger transcription handling with tracing for metrics
-        - Stop processing metrics collection
-        - Send a UserStoppedSpeakingFrame to signal turn completion
+        - Propose a turn stop, which the user turn strategies resolve into a
+          UserStoppedSpeakingFrame
 
         Args:
             transcript: The final transcript text for the completed turn.
@@ -790,8 +780,7 @@ class DeepgramFluxSTTBase(STTService):
             )
 
         await self._handle_transcription(transcript, True, detected_language)
-        await self.stop_processing_metrics()
-        await self.broadcast_frame(UserStoppedSpeakingFrame)
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
         await self._call_event_handler("on_end_of_turn", transcript)
 
     async def _handle_eager_end_of_turn(self, transcript: str, data: dict[str, Any]):
