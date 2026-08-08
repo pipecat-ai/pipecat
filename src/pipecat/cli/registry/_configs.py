@@ -583,6 +583,15 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "speechify_tts": (
+        "SpeechifyHttpTTSService(\n"
+        '        api_key=os.getenv("SPEECHIFY_API_KEY"),\n'
+        "        aiohttp_session=session,\n"
+        "        settings=SpeechifyHttpTTSService.Settings(\n"
+        '            voice=os.getenv("SPEECHIFY_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "xai_tts": (
         "XAITTSService(\n"
         '        api_key=os.getenv("XAI_API_KEY"),\n'
