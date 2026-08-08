@@ -36,4 +36,8 @@ turns:
       delay_ms: 10000
     expect:
       - event: response
-        eval: "first, tells a joke, then informs that the weather in San Francisco is 75 degrees"
+        eval: "tells a joke"
+
+  - expect:
+      - event: response
+        eval: "informs that the weather in San Francisco is 75 degrees"
