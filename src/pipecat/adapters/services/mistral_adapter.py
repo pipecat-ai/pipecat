@@ -6,22 +6,31 @@
 
 """Mistral LLM adapter for Pipecat.
 
-Mistral's API uses an OpenAI-compatible interface but imposes three
-conversation-history constraints that OpenAI does not:
+Mistral's API uses an OpenAI-compatible interface but imposes one strict
+conversation-history constraint that OpenAI does not, plus two narrower
+fix-ups for common edge cases:
 
-1. **Tool messages must be followed by an assistant message.** A ``"tool"``
-   role message that isn't followed by an ``"assistant"`` message is
-   rejected.
+1. **Mid-conversation tool messages must be followed by an assistant
+   message.** A ``"tool"`` role message in the middle of the conversation
+   that isn't followed by an ``"assistant"`` message is rejected. A
+   *trailing* ``"tool"`` is accepted — Mistral generates the next
+   assistant turn from scratch.
 
 2. **Only the initial contiguous system block is permitted.** A
    ``"system"`` message appearing after any non-system message must be
    converted to ``"user"``.
 
-3. **A trailing assistant message requires ``prefix=True``.** When the
-   conversation ends on an assistant message, Mistral expects the
-   ``prefix`` flag set so it can continue from that partial reply.
+3. **A trailing assistant message with non-empty content needs
+   ``prefix=True``.** When the conversation ends on an assistant
+   message that has real partial text, Mistral expects the ``prefix``
+   flag set so it can continue from that partial reply. An *empty* or
+   whitespace-only trailing assistant is left alone — setting
+   ``prefix=True`` on it tells Mistral to invent a continuation from
+   nothing, which produces training-data junk on current Mistral models
+   (XML ``<tool_call>`` tags, ``IN_PROGRESS`` / ``[FINAL_ANSWER]``
+   markers).
 
-This adapter extends ``OpenAILLMAdapter`` and applies those three fixups
+This adapter extends ``OpenAILLMAdapter`` and applies those three fix-ups
 before the messages reach ``build_chat_completion_params``.
 """
 
@@ -106,12 +115,20 @@ class MistralLLMAdapter(OpenAILLMAdapter):
         # Mistral's extended schema even though it doesn't fit OpenAI's.
         msgs: list[dict[str, Any]] = copy.deepcopy([dict(m) for m in messages])
 
-        # Step 1: ensure every "tool" message is followed by an "assistant".
+        # Step 1: ensure every mid-conversation "tool" message is followed
+        # by an "assistant". A TRAILING tool message is left as-is —
+        # Mistral accepts it and generates the next assistant turn from
+        # scratch. Inserting a placeholder ``{"role":"assistant",
+        # "content":" "}`` at the tail and then setting prefix=True on
+        # it (step 3) tells Mistral to continue from the prefix " ",
+        # which on current Mistral models produces training-data junk.
         insert_at: list[int] = []
         for i, msg in enumerate(msgs):
             if msg.get("role") == "tool":
                 is_last = i == len(msgs) - 1
-                if is_last or msgs[i + 1].get("role") != "assistant":
+                if is_last:
+                    continue
+                if msgs[i + 1].get("role") != "assistant":
                     insert_at.append(i + 1)
         for idx in reversed(insert_at):
             msgs.insert(idx, {"role": "assistant", "content": " "})
@@ -126,10 +143,18 @@ class MistralLLMAdapter(OpenAILLMAdapter):
             if msgs[i].get("role") == "system":
                 msgs[i]["role"] = "user"
 
-        # Step 3: set prefix on a trailing assistant message so Mistral will
-        # continue it rather than rejecting the turn.
+        # Step 3: set prefix on a trailing assistant message ONLY when it
+        # has real content to continue from. Setting prefix=True on an
+        # empty / whitespace-only assistant asks Mistral to invent a
+        # continuation from nothing, which yields training-data junk
+        # on current Mistral models. Real continuation (assistant with
+        # partial text the application wants Mistral to extend) still
+        # gets prefix=True so Mistral continues it cleanly.
         last = msgs[-1]
         if last.get("role") == "assistant" and "prefix" not in last:
-            last["prefix"] = True
+            content = last.get("content")
+            has_real_content = isinstance(content, str) and content.strip() != ""
+            if has_real_content:
+                last["prefix"] = True
 
         return cast(list[ChatCompletionMessageParam], msgs)
