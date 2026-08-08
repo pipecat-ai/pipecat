@@ -17,9 +17,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 try:
     from livekit import rtc
 
+    from pipecat.frames.frames import InputTransportMessageFrame
     from pipecat.transports.livekit.transport import (
         LiveKitCallbacks,
+        LiveKitInputTransport,
         LiveKitParams,
+        LiveKitTransport,
         LiveKitTransportClient,
     )
 
@@ -384,3 +387,115 @@ class TestLiveKitSipDtmfInput(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitInboundApplicationMessages(unittest.IsolatedAsyncioTestCase):
+    """Regression tests for inbound application-message routing (#5218).
+
+    The bug: `push_app_message` wrapped the client's message in a
+    `LiveKitOutputTransportMessageUrgentFrame` — an *output* frame.
+    `RTVIProcessor` dispatches on `InputTransportMessageFrame`, and the two are
+    siblings under `SystemFrame` with neither extending the other, so the
+    `isinstance` check never matched. The frame rode past RTVI and was then
+    matched by `BaseOutputTransport`, which did its job and sent it back to the
+    client — addressed with the participant's SID, which LiveKit resolves
+    against identity, so it was silently undeliverable. Separately, the payload
+    was forwarded as a `str` where `_handle_transport_message` needs a mapping.
+
+    The fix: decode the payload, broadcast an `InputTransportMessageFrame` (what
+    `SmallWebRTCInputTransport` already does), and report the sender by identity.
+    """
+
+    def _create_input_transport(self) -> LiveKitInputTransport:
+        transport = MagicMock()
+        client = MagicMock()
+        return LiveKitInputTransport(transport, client, LiveKitParams())
+
+    async def test_inbound_message_is_broadcast_as_an_input_frame(self):
+        """An output frame here is invisible to RTVI and is re-sent to the client."""
+        input_transport = self._create_input_transport()
+        input_transport.broadcast_frame = AsyncMock()
+        input_transport.push_frame = AsyncMock()
+
+        message = {"id": "1", "label": "rtvi-ai", "type": "client-ready", "data": {}}
+        await input_transport.push_app_message(message, "staff-7")
+
+        input_transport.broadcast_frame.assert_awaited_once_with(
+            InputTransportMessageFrame, message=message
+        )
+        input_transport.push_frame.assert_not_awaited()
+
+    async def test_payload_is_decoded_before_it_reaches_the_pipeline(self):
+        """`RTVIProcessor` calls `.get("label")` on the message; a `str` has no `.get`."""
+        transport = LiveKitTransport(
+            url="wss://test.livekit.cloud",
+            token="test-token",
+            room_name="test-room",
+            params=LiveKitParams(),
+        )
+        transport._input = MagicMock()
+        transport._input.push_app_message = AsyncMock()
+        transport._call_event_handler = AsyncMock()
+
+        payload = b'{"id": "1", "label": "rtvi-ai", "type": "client-ready", "data": {}}'
+        await transport._on_data_received(payload, "staff-7")
+
+        pushed = transport._input.push_app_message.await_args[0][0]
+        self.assertIsInstance(pushed, dict)
+        self.assertEqual(pushed["label"], "rtvi-ai")
+
+    async def test_a_non_json_packet_is_ignored_rather_than_raising(self):
+        """The data channel is shared; a foreign packet must not break the session."""
+        transport = LiveKitTransport(
+            url="wss://test.livekit.cloud",
+            token="test-token",
+            room_name="test-room",
+            params=LiveKitParams(),
+        )
+        transport._input = MagicMock()
+        transport._input.push_app_message = AsyncMock()
+        transport._call_event_handler = AsyncMock()
+
+        await transport._on_data_received(b"not json at all", "staff-7")
+
+        transport._input.push_app_message.assert_not_awaited()
+        # The event handler still fires, so application code that registered
+        # `on_data_received` for non-RTVI traffic keeps working.
+        transport._call_event_handler.assert_awaited_once()
+
+    async def test_sender_is_reported_by_identity_not_sid(self):
+        """`destination_identities` matches on identity, so a SID here makes any
+        directed reply silently undeliverable."""
+        params = LiveKitParams()
+        callbacks = LiveKitCallbacks(
+            on_connected=AsyncMock(),
+            on_disconnected=AsyncMock(),
+            on_before_disconnect=AsyncMock(),
+            on_participant_connected=AsyncMock(),
+            on_participant_disconnected=AsyncMock(),
+            on_audio_track_subscribed=AsyncMock(),
+            on_audio_track_unsubscribed=AsyncMock(),
+            on_video_track_subscribed=AsyncMock(),
+            on_video_track_unsubscribed=AsyncMock(),
+            on_data_received=AsyncMock(),
+            on_first_participant_joined=AsyncMock(),
+            on_dtmf_event=AsyncMock(),
+        )
+        client = LiveKitTransportClient(
+            url="wss://test.livekit.cloud",
+            token="test-token",
+            room_name="test-room",
+            params=params,
+            callbacks=callbacks,
+            transport_name="test-transport",
+        )
+
+        packet = MagicMock()
+        packet.data = b"{}"
+        packet.participant.sid = "PA_opaquehandle"
+        packet.participant.identity = "staff-7"
+
+        await client._async_on_data_received(packet)
+
+        callbacks.on_data_received.assert_awaited_once_with(b"{}", "staff-7")

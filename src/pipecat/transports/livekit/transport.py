@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     Frame,
     ImageRawFrame,
     InputDTMFFrame,
+    InputTransportMessageFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
@@ -610,7 +611,7 @@ class LiveKitTransportClient:
 
     async def _async_on_data_received(self, data: rtc.DataPacket):
         """Handle data received events."""
-        await self._callbacks.on_data_received(data.data, data.participant.sid)
+        await self._callbacks.on_data_received(data.data, data.participant.identity)
 
     async def _async_on_connected(self):
         """Handle connected events."""
@@ -774,14 +775,13 @@ class LiveKitInputTransport(BaseInputTransport):
             self._video_in_task = None
 
     async def push_app_message(self, message: Any, sender: str):
-        """Push an application message as an urgent transport frame.
+        """Push an application message into the pipeline.
 
         Args:
-            message: The message data to send.
+            message: The application message to process.
             sender: ID of the message sender.
         """
-        frame = LiveKitOutputTransportMessageUrgentFrame(message=message, participant_id=sender)
-        await self.push_frame(frame)
+        await self.broadcast_frame(InputTransportMessageFrame, message=message)
 
     async def _audio_in_task_handler(self):
         """Handle incoming audio frames from participants."""
@@ -1268,7 +1268,12 @@ class LiveKitTransport(BaseTransport):
     async def _on_data_received(self, data: bytes, participant_id: str):
         """Handle data received events."""
         if self._input:
-            await self._input.push_app_message(data.decode(), participant_id)
+            try:
+                message = json.loads(data.decode())
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                logger.warning(f"{self} received a data packet that is not JSON; ignoring")
+            else:
+                await self._input.push_app_message(message, participant_id)
         await self._call_event_handler("on_data_received", data, participant_id)
 
     async def _on_dtmf_event(self, data: Any):
