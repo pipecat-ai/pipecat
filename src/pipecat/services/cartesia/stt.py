@@ -10,6 +10,7 @@ This module provides a WebSocket-based STT service that integrates with
 the Cartesia Live transcription API for real-time speech recognition.
 """
 
+import asyncio
 import json
 import urllib.parse
 from collections.abc import AsyncGenerator
@@ -279,6 +280,10 @@ class CartesiaSTTService(WebsocketSTTService):
         self._scheme = url_parts.scheme or "wss"
         self._extra_headers = dict(extra_headers) if extra_headers else {}
         self._receive_task = None
+        self._connect_task = None
+        # Set once the connection can carry audio, which is what start()
+        # holds frames on.
+        self._connection_ready = asyncio.Event()
 
         # Init-only audio config (not runtime-updatable).
         self._encoding = encoding
@@ -298,7 +303,10 @@ class CartesiaSTTService(WebsocketSTTService):
             frame: Frame indicating service should start.
         """
         await super().start(frame)
-        await self._connect()
+        # _connect() runs in the background, so hold what follows the
+        # StartFrame until the connection can carry it.
+        self._connect_task = self.create_task(self._connect())
+        await self.pause_processing_all_frames_until(self._connection_ready.wait)
 
     async def stop(self, frame: EndFrame):
         """Stop the STT service and close connection.
@@ -373,6 +381,12 @@ class CartesiaSTTService(WebsocketSTTService):
     async def _disconnect(self):
         await super()._disconnect()
 
+        self._connection_ready.clear()
+
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -431,6 +445,7 @@ class CartesiaSTTService(WebsocketSTTService):
             }
 
             self._websocket = await self._websocket_connect(ws_url, additional_headers=headers)
+            self._connection_ready.set()
             await self._call_event_handler("on_connected")
         except Exception as e:
             self._websocket = None
