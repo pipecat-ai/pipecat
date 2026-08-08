@@ -359,6 +359,16 @@ class SonioxTTSService(WebsocketTTSService):
             return changed
 
         if changed.keys() & {"voice", "model", "language", "speed"}:
+            if self._turn_context_id:
+                # Finalize the old context's still-pending sentence so its
+                # already-heard prefix still emits progress frames (mirrors the
+                # LLMFullResponseEnd / TTSSpeak close paths). A mid-sentence
+                # settings change would otherwise abandon it before promotion,
+                # dropping that prefix from the transcript.
+                await self._push_sequencer_frames(
+                    await self._aggregated_frame_sequencer.finalize(self._turn_context_id),
+                    self._turn_context_id,
+                )
             if self._turn_context_id and self.audio_context_available(self._turn_context_id):
                 await self.flush_audio(context_id=self._turn_context_id)
             # Assign a new turn context ID so subsequent sentences in this turn
