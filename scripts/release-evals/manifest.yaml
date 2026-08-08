@@ -241,13 +241,13 @@ suite:
   # aside on a later turn.
   #
   - bot: function-calling/function-calling-anthropic-async.py
-    scenarios: [weather_function_call_async_audio]
+    scenarios: [weather_function_call_async_audio, weather_function_call_async_deferred_audio]
   - bot: function-calling/function-calling-google-async.py
-    scenarios: [weather_function_call_async_audio]
+    scenarios: [weather_function_call_async_audio, weather_function_call_async_deferred_audio]
   - bot: function-calling/function-calling-openai-async.py
-    scenarios: [weather_function_call_async_audio]
+    scenarios: [weather_function_call_async_audio, weather_function_call_async_deferred_audio]
   - bot: function-calling/function-calling-openai-responses-async.py
-    scenarios: [weather_function_call_async_audio]
+    scenarios: [weather_function_call_async_audio, weather_function_call_async_deferred_audio]
 
   #
   # Function calling with video: the bot calls a vision function that requests a
