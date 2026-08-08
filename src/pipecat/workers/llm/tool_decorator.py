@@ -38,8 +38,9 @@ def tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None, timeout=Non
             an interruption occurs. Defaults to True. Only applies to
             ``LLMWorker`` tools.
         timeout_secs: Optional timeout in seconds for this tool call.
-            Defaults to None (uses the LLM service default). Only applies
-            to ``LLMWorker`` tools.
+            Defaults to None (uses the LLM service default). Expiry requests
+            cooperative handler cancellation and emits a terminal ``None`` result
+            without waiting for cleanup. Only applies to ``LLMWorker`` tools.
         timeout: Deprecated alias for ``timeout_secs``.
 
             .. deprecated:: 1.4.0

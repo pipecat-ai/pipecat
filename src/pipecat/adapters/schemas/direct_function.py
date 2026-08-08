@@ -319,7 +319,9 @@ def tool_options(
         cancel_on_interruption: Whether to cancel this function call when an
             interruption occurs. Defaults to True.
         timeout_secs: Optional per-tool timeout in seconds. Defaults to None (uses
-            the LLM service default).
+            the LLM service default). Expiry requests cooperative cancellation of
+            the handler and emits a terminal ``None`` result without waiting for
+            cancellation cleanup.
 
     Returns:
         The decorated function, unchanged except for pipecat call-option metadata
