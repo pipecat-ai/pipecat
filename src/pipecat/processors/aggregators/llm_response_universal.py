@@ -1468,6 +1468,13 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # arriving in the same speaking window are bundled into a single deferred push.
         self._push_context_on_bot_stopped_speaking: bool = False
 
+        # Async function call results whose message is in the context but which no
+        # inference has seen yet, keyed by tool call id and holding the function's
+        # name so the reminder can say which results are outstanding. Unlike the
+        # deferred-push flag above, this survives an interruption: the result is
+        # still waiting to be told to the user however the turn it arrived on ended.
+        self._unseen_async_results: dict[str, str] = {}
+
         self._assistant_turn_start_timestamp = ""
 
         self._thought_append_to_context = False
@@ -1602,6 +1609,19 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
             if self._push_context_on_bot_stopped_speaking and not self._user_speaking:
                 logger.debug(f"{self}: Bot stopped speaking — pushing deferred context frame!")
+                # The result's own inference, just delayed until the bot was quiet.
+                self._unseen_async_results.clear()
+                await self.push_context_frame(FrameDirection.UPSTREAM)
+            elif self._unseen_async_results and not self._user_speaking:
+                # The bot has gone quiet with async results still unreported: their
+                # own inference never ran, and whatever inferences did run in the
+                # meantime were about something else and passed the results over.
+                # The results have been sitting in the context all along, so naming
+                # them is what makes this inference about reporting them.
+                names = list(self._unseen_async_results.values())
+                logger.debug(f"{self}: Bot stopped speaking — reporting unseen results: {names}")
+                self._unseen_async_results.clear()
+                self.add_messages([async_tool_messages.build_unreported_results_message(names)])
                 await self.push_context_frame(FrameDirection.UPSTREAM)
         elif isinstance(frame, LLMServiceMetadataFrame):
             # Auto-configure realtime mode on the assistant half too — the
@@ -1865,6 +1885,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
             self._push_context_on_bot_stopped_speaking = True
         else:
             logger.debug(f"{self}: Pushing context frame!")
+            # This inference is the result's own: the result message is the last
+            # thing in the context, so the model answers it without being asked to.
+            self._unseen_async_results.clear()
             await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_function_call_intermediate_result(
@@ -1904,6 +1927,15 @@ class LLMAssistantAggregator(LLMContextAggregator):
             self._context.add_message(
                 async_tool_messages.build_final_result_message(frame.tool_call_id, result)
             )
+            # An async result arrives on its own schedule, so the inference that
+            # would put it in front of the model is the one thing that may never
+            # happen: the push is skipped outright while the user speaks, and a
+            # deferred one is dropped by the interruption that resets this
+            # aggregator. Remember the result until an inference has run *for it*
+            # and take the next opening if none has. Inferences driven by anything
+            # else don't count: the conversation has moved on by then, and a result
+            # buried behind the turns that followed goes unmentioned.
+            self._unseen_async_results[frame.tool_call_id] = frame.function_name
         else:
             self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
 

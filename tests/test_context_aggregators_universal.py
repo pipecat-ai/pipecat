@@ -1406,6 +1406,85 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         assert json.loads(context.messages[-1]["content"]) == {"conditions": "Sunny"}
         assert context_updated
 
+    async def test_async_function_call_result_stranded_by_user_speech_is_reported(self):
+        """An async result arriving while the user speaks is reported once the bot goes quiet.
+
+        The push that would have put the result in front of the model is skipped
+        outright while the user is speaking, so nothing else will draw the model's
+        attention to it — the bot going quiet is the only opening left.
+        """
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                cancel_on_interruption=False,  # async
+            ),
+            SleepFrame(),
+            # The user is speaking when the result lands, so no push happens.
+            UserStartedSpeakingFrame(),
+            FunctionCallResultFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                result={"conditions": "Sunny"},
+            ),
+            SleepFrame(),
+            UserStoppedSpeakingFrame(),
+            # The bot answers something else and goes quiet: the opening to report.
+            BotStartedSpeakingFrame(),
+            SleepFrame(),
+            BotStoppedSpeakingFrame(),
+            SleepFrame(),
+        ]
+        # The assertion is about what landed in the context, not the frame flow.
+        await run_test(aggregator, frames_to_send=frames_to_send)
+        reminder = context.messages[-1]
+        assert reminder["role"] == "developer"
+        assert "have not been told to the user yet" in reminder["content"]
+        assert "get_weather" in reminder["content"]
+
+    async def test_async_function_call_result_seen_by_inference_is_not_reported_again(self):
+        """A result an inference already saw doesn't get a reminder when the bot goes quiet.
+
+        The reminder exists for results nothing looked at; appending one for a
+        result the reply just delivered would ask the model to say it twice.
+        """
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                cancel_on_interruption=False,  # async
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                result={"conditions": "Sunny"},
+            ),
+            SleepFrame(),
+            # An inference runs with the result in the context and speaks it.
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("It's sunny in Los Angeles."),
+            LLMFullResponseEndFrame(),
+            BotStartedSpeakingFrame(),
+            SleepFrame(),
+            BotStoppedSpeakingFrame(),
+            SleepFrame(),
+        ]
+        # The assertion is about what landed in the context, not the frame flow.
+        await run_test(aggregator, frames_to_send=frames_to_send)
+        assert not any(
+            "have not been told to the user yet" in str(m.get("content", ""))
+            for m in context.messages
+        )
+
     async def test_thought(self):
         context = LLMContext()
 

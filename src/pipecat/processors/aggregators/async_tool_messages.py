@@ -40,6 +40,7 @@ functions, e.g.::
 """
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -79,17 +80,30 @@ _INTERMEDIATE_DESCRIPTION = (
     "'status=finished'."
 )
 
-# Description shipped on the final-result message.
+# Description shipped on the final-result message. Purely descriptive: a result
+# that arrives and drives the next inference is the last thing in the context, so
+# the model reports it without being told to. Telling it to here would apply on
+# every later inference too, long after the result was delivered, which reads as
+# an instruction to say it all again.
 _FINAL_DESCRIPTION = (
     "This is the final result for the asynchronous task associated with this "
     "tool_call_id. The task has completed. No further results will arrive for "
-    "this tool_call_id. You must convey this result to the user, even if the "
-    "conversation has moved on. Never leave it unsaid. First finish responding "
-    "to whatever the user is talking about now, then deliver the result at the "
-    "end of your response. How you deliver it depends on its size: if the "
-    "result is short, simply state it; if it is long or complex, name what has "
-    "come back and offer the details. Convey it once; do not repeat it in "
-    "later responses."
+    "this tool_call_id."
+)
+
+# Instruction appended when results have gone unreported — the inference that
+# would have delivered them never ran, so they are sitting in the context with
+# nothing having drawn the model's attention to them. Unlike the final-result
+# message this is not part of the protocol and carries no payload: it is issued
+# once, at the moment of delivery, so it never becomes a standing order to
+# re-report something already said.
+_UNREPORTED_INSTRUCTION = (
+    "The following asynchronous {task_word} finished and {have_word} results in this "
+    "conversation that have not been told to the user yet: {names}. Tell the user now, "
+    "even though the conversation has moved on — never leave a result unsaid. Do not "
+    "repeat anything you have already said. How you deliver each result depends on its "
+    "size: if it is short, simply state it; if it is long or complex, name what has come "
+    "back and offer the details. Convey each one once; do not bring it up again later."
 )
 
 
@@ -237,6 +251,36 @@ def build_final_result_message(tool_call_id: str, result: str) -> LLMStandardMes
             result=result,
         )
     )
+
+
+def build_unreported_results_message(function_names: Sequence[str]) -> LLMStandardMessage:
+    """Build a message asking the model to report async results it hasn't told the user.
+
+    Append this when an async result has landed in the context but no inference
+    ever ran with it — the push that would have delivered it was skipped while the
+    user was speaking, or dropped by an interruption. The result is already in the
+    context, so this only draws attention to it.
+
+    Not part of the async-tool protocol: it carries no ``tool_call_id`` and no
+    payload, so :func:`parse_message` ignores it and a realtime service won't
+    mistake it for a tool result to re-deliver.
+
+    Args:
+        function_names: Names of the functions whose results are unreported, in
+            the order they finished.
+
+    Returns:
+        A message ready to pass to ``LLMContext.add_message``.
+    """
+    plural = len(function_names) != 1
+    return {
+        "role": "developer",
+        "content": _UNREPORTED_INSTRUCTION.format(
+            task_word="tasks" if plural else "task",
+            have_word="have" if plural else "has",
+            names=", ".join(function_names),
+        ),
+    }
 
 
 # --- Parsing -----------------------------------------------------------------
