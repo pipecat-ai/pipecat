@@ -756,17 +756,20 @@ class EvalSession:
         self._debug(f"event: {event['type']}" + (f"  {str(preview)!r}" if preview else ""))
         await self._queue.put(event)
 
-    def _discard_interrupted_output(self) -> None:
-        """Drop the bot's interrupted, un-matched output (on user interruption).
+    def _drop_pending_bot_output(self, why: str) -> None:
+        """Drop the bot's un-matched output, so a later turn can't match it.
 
         Clears the response buffers and drains the bot's pending output from the
-        event queue, so a greeting (or any prior bot output) the user just
-        interrupted can't be matched against this turn. ``user_transcription`` is
-        preserved: a DTMF keypress emits its transcription immediately before the
-        turn-start interruption, and that transcription is the turn's *input*, not
-        the stale bot output this discard is meant to clear — dropping it would
-        race the matcher. Diagnostics (``events_seen``, ``latest_event_times``)
-        are left intact for send_after lookups.
+        event queue, so a greeting (or any prior bot output) can't be matched
+        against this turn. ``user_transcription`` is preserved: a DTMF keypress
+        emits its transcription immediately before the turn-start interruption,
+        and that transcription is the turn's *input*, not the stale bot output
+        this discard is meant to clear — dropping it would race the matcher.
+        Diagnostics (``events_seen``, ``latest_event_times``) are left intact for
+        send_after lookups.
+
+        Args:
+            why: What prompted the drop, for the debug trace.
         """
         self._text_buffer = []
         self._tts_audio = bytearray()
@@ -784,7 +787,7 @@ class EvalSession:
         for event in preserved:
             self._queue.put_nowait(event)
         if dropped:
-            self._debug(f"discard: dropped {dropped} queued event(s) on interruption")
+            self._debug(f"discard: dropped {dropped} queued event(s) {why}")
 
     async def _handle_tts_audio(self, message: dict) -> None:
         """Accumulate the bot's audio and emit a ``response`` per spoken turn.
@@ -828,7 +831,7 @@ class EvalSession:
             case "user-started-speaking":
                 # A new user turn in audio mode. Drop any leftover bot output from
                 # a prior turn so it isn't aggregated into this one.
-                self._discard_interrupted_output()
+                self._drop_pending_bot_output("on interruption")
                 self._awaiting_llm_restart = True
                 return [{"type": "user_started_speaking"}]
             case "bot-interrupted":
@@ -836,7 +839,7 @@ class EvalSession:
                 # run_immediately text interrupt. Drop it so only what the bot says
                 # *after* the interruption is matched. Service-independent, the same
                 # path for both modalities, and no timestamps.
-                self._discard_interrupted_output()
+                self._drop_pending_bot_output("on interruption")
                 self._awaiting_llm_restart = True
                 return [{"type": "bot_interrupted"}]
             case "user-stopped-speaking":
@@ -958,6 +961,21 @@ class EvalSession:
         # serve it when it requests a user image during the turn.
         if turn.image is not None:
             await self._send_image(turn.image)
+
+        # Anything still queued belongs to an earlier turn: this turn's input hasn't
+        # been sent, so the bot cannot have responded to it yet. Drop it, or an
+        # expectation here can match — and a judge can rule on — output the bot
+        # produced for a previous turn. The bot's own interruption events close this
+        # window too, but only once the input reaches it, which is far too late when
+        # `send_after` holds the send back for seconds.
+        #
+        # Before the send, not after: by the time the input has streamed, the bot has
+        # begun reacting to it, and this turn's own `user_started_speaking` /
+        # `bot_interrupted` would be dropped along with the stale output. Turns that
+        # send nothing are observation-only and exist to match exactly this pending
+        # output (a bot-first greeting), so they keep it.
+        if turn.user is not None or turn.dtmf is not None:
+            self._drop_pending_bot_output("before send")
 
         if turn.user is not None:
             self._debug(f"send: {turn.user!r} ({'audio' if self._speech is not None else 'text'})")
