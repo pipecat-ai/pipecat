@@ -45,6 +45,7 @@ async def get_current_weather(params: FunctionCallParams, location: str, format:
     """
     # Simulate a long-running API call, so we can test async function calls.
     await asyncio.sleep(15)
+    logger.debug(f"Returning get_current_weather result.")
     await params.result_callback({"conditions": "nice", "temperature": "75"})
 
 

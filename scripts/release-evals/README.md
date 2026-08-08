@@ -77,7 +77,7 @@ the full per-pipeline debug logs are saved (see below), and forwards any extra
 flags:
 
 ```sh
-uv run python -m pipecat.evals suite -d manifest.yaml [-p PATTERN] [-s SCENARIO] [-c N] [-n NAME] [-t SECS] [-a] [--no-cache]
+uv run python -m pipecat.evals suite -d manifest.yaml [-p PATTERN] [-s SCENARIO] [-c N] [-n NAME] [-t SECS] [-a] [--no-cache] [--repeat N]
 ```
 
 Each run writes to `test-runs/<name>/` (a timestamp when `-n` is omitted):
@@ -99,6 +99,45 @@ Everything in the manifest header except the `suite:` list can also be overridde
 on the command line (the command line wins) — `--bots-dir`, `--scenarios-dir`,
 `--runs-dir`, `--base-port`, `--cache-dir`, `--spawn`, `--python` — so a manifest
 can be just a `suite:` list with the rest supplied as flags.
+
+### Measuring flakiness
+
+A single pass answers "did this bot pass?"; `--repeat N` answers "how often does
+it?" — the question that matters for behaviors with a race in them (interruptions,
+async function results, turn detection), where a bot can pass a scenario half the
+time and look reliable in any one run.
+
+```sh
+./run.sh -p function-calling -s weather_function_call_async_audio --repeat 50 -c 3
+```
+
+Attempts interleave across bots (`A#1, B#1, C#1, A#2, ...`) and run from one queue
+with no barrier between them, so every bot meets the same machine conditions in the
+same stretch — a transient slowdown shows up as a band across all of them rather
+than as a regression in whichever bot happened to be running. Each attempt appends
+its number to its artifact filenames (`..._001.log`, `..._002.log`), so nothing
+overwrites anything.
+
+The tally becomes a pass rate per (bot, scenario), and failures are grouped by
+*kind* — `timeout`, `judge_no`, `missing_function_call`, ... (see `FAILURE_KINDS`
+in `pipecat.evals.harness`) — rather than listed one line per failing run:
+
+```
+  Failures (35 of 150):
+     10x  turn 3  response       timeout                 google 4, openai-async 4, anthropic 2
+      7x  turn 3  response       judge_no                google 4, openai-responses 3
+      3x  turn 1  function_call  missing_function_call   anthropic 2, openai-async 1
+```
+
+A repeated sweep always exits 0: it reports a rate, and what rate is acceptable is
+your policy, not the harness's.
+
+Every run (repeated or not) also writes `results.jsonl`, one JSON line per run with
+its outcome, its failures (each with a `kind`), and paths to its artifacts —
+appended as each run finishes, so an interrupted sweep keeps everything already
+done. It's the machine-readable counterpart to the printed tally; group and count
+it however your question needs. Runs that didn't pass also carry `events_seen`, the
+record of what the bot actually did, which is usually where a root cause is found.
 
 ### Concurrency and GPU
 

@@ -3,7 +3,7 @@ name: weather_function_call_async_audio
 # Audio modality, end to end: an async function call
 # (cancel_on_interruption=False) whose result arrives after the conversation has
 # moved on. The bot has to finish the turn it's on, then report the weather it
-# looked up several turns earlier.
+# looked up earlier, unprompted.
 
 user: !include user_audio.yaml
 
@@ -21,12 +21,17 @@ turns:
         calls:
           - name: get_current_weather
 
-  - user: "Tell me a three-sentence short story about a sea turtle."
+  # The delay lets a bot's "let me check on that" filler finish before the joke
+  # request arrives.
+  - user: "Tell me a joke about cats."
+    send_after:
+      delay_ms: 3000
     expect:
       - event: response
-        eval: "tells a short story about a sea turtle"
+        eval: "tells a joke about cats"
 
-  - user: "Tell me a joke about a sea turtle."
-    expect:
+  # No user turn: the weather lookup's result arrived while the bot was telling
+  # the joke, and the bot reports it on its own once the joke is done.
+  - expect:
       - event: response
-        eval: "first, tells a joke about a sea turtle, then informs that the weather in San Francisco is 75 degrees"
+        eval: "informs that the weather in San Francisco is 75 degrees"
