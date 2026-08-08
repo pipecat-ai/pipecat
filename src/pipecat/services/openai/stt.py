@@ -14,6 +14,7 @@ Provides two STT services:
   using the Realtime API in transcription-only mode.
 """
 
+import asyncio
 import base64
 import json
 from collections.abc import AsyncGenerator
@@ -350,7 +351,10 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         self._should_interrupt = should_interrupt
 
         self._receive_task = None
-        self._session_ready = False
+        self._connect_task = None
+        # Audio sent before the session is configured lands on an unconfigured
+        # session, so this is what start() holds frames on.
+        self._session_ready = asyncio.Event()
         self._resampler = create_stream_resampler()
 
         # Server-side VAD is disabled by default (turn_detection=False).
@@ -406,7 +410,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         for field, previous_value in self._omit_unsupported_prompt(self._settings).items():
             changed.setdefault(field, previous_value)
 
-        if changed and self._session_ready:
+        if changed and self._session_ready.is_set():
             await self._send_session_update()
 
         return changed
@@ -418,7 +422,10 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             frame: The start frame triggering service initialization.
         """
         await super().start(frame)
-        await self._connect()
+        # The socket opening is not enough to send audio: the session is only
+        # configured once the server acknowledges it, so hold frames until then.
+        self._connect_task = self.create_task(self._connect())
+        await self.pause_processing_all_frames_until(self._session_ready.wait)
 
     async def stop(self, frame: EndFrame):
         """Stop the service and close WebSocket connection.
@@ -490,6 +497,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
     async def _disconnect(self):
         """Disconnect and clean up background tasks."""
         await super()._disconnect()
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
         if self._receive_task:
             await self.cancel_task(self._receive_task, timeout=1.0)
             self._receive_task = None
@@ -504,7 +514,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             if self._websocket and self._websocket.state is State.OPEN:
                 return
 
-            self._session_ready = False
+            self._session_ready.clear()
             url = f"{self._base_url}?intent=transcription"
             self._websocket = await self._websocket_connect(
                 uri=url,
@@ -523,7 +533,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
     async def _disconnect_websocket(self):
         """Close the WebSocket connection."""
         try:
-            self._session_ready = False
+            self._session_ready.clear()
             if self._websocket:
                 await self._websocket.close()
         except Exception as e:
@@ -694,7 +704,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             evt: The session updated event from the server.
         """
         logger.debug("Transcription session configured and ready")
-        self._session_ready = True
+        self._session_ready.set()
 
     async def _handle_transcription_delta(self, evt: dict):
         """Handle incremental transcription text.
