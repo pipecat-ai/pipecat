@@ -1178,8 +1178,6 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         pipelines can stream without calling ``_create_response``.
         """
         if not self._api_session_ready:
-            # Expected while the session is still configuring; debug to avoid
-            # spamming on every early audio frame.
             logger.debug(
                 f"{self} Dropping user audio; realtime session is not ready yet "
                 "(waiting for session.updated)"
