@@ -172,6 +172,55 @@ class TestBusBridgeProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertIn("from_child", texts)
         self.assertIn("after_bridge", texts)
 
+    async def test_bus_frame_before_start_is_buffered_and_replayed(self):
+        """A frame arriving via `on_bus_message` before the bridge's own
+        StartFrame is processed must not be dropped: it should be buffered
+        and replayed once StartFrame lands (regression test for #4913 —
+        a bridged child worker's `on_activated` frame, e.g. LLMSetToolsFrame,
+        racing ahead of the parent's StartFrame reaching the bridge)."""
+        from pipecat.frames.frames import EndFrame
+        from pipecat.pipeline.worker import PipelineWorker
+        from pipecat.processors.frame_processor import FrameProcessor
+        from pipecat.workers.runner import WorkerRunner
+
+        class Recorder(FrameProcessor):
+            def __init__(self, observed, **kwargs):
+                super().__init__(**kwargs)
+                self._observed = observed
+
+            async def process_frame(self, frame, direction):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, TextFrame):
+                    self._observed.append(frame.text)
+                await self.push_frame(frame, direction)
+
+        observed: list[str] = []
+        bus = AsyncQueueBus()
+        bridge = BusBridgeProcessor(bus=bus, worker_name="main_task")
+        worker = PipelineWorker(
+            Pipeline([bridge, Recorder(observed)]), cancel_on_idle_timeout=False
+        )
+
+        msg = BusFrameMessage(
+            source="child_task",
+            frame=TextFrame(text="from_child_early"),
+            direction=FrameDirection.DOWNSTREAM,
+        )
+
+        async def inject_before_start_and_end():
+            # Deliver the bus message before the runner even starts the
+            # worker, so it necessarily arrives before the bridge's own
+            # StartFrame is processed.
+            await bridge.on_bus_message(msg)
+            await asyncio.sleep(0.2)
+            await worker.queue_frame(EndFrame())
+
+        runner = WorkerRunner(bus=bus, handle_sigint=False)
+        await runner.add_workers(worker)
+        await asyncio.gather(runner.run(), inject_before_start_and_end())
+
+        self.assertIn("from_child_early", observed)
+
     async def test_skips_own_frames(self):
         """Bridge ignores bus frames from its own worker."""
         bus = AsyncQueueBus()
@@ -208,6 +257,9 @@ class TestBusBridgeProcessor(unittest.IsolatedAsyncioTestCase):
             worker_name="main_task",
             target_task="specific_child",
         )
+        # Simulate an already-started bridge (StartFrame processed) so
+        # matching frames are pushed immediately rather than buffered.
+        processor._started = True
 
         injected = []
         original_push = processor.push_frame

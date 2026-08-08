@@ -75,6 +75,8 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
         self._target_task = target_task
         self._bridge = bridge
         self._exclude_frames = exclude_frames or ()
+        self._started = False
+        self._pending_inbound: list[tuple[Frame, FrameDirection]] = []
 
     async def setup(self, setup: FrameProcessorSetup):
         """Subscribe to the bus during processor setup."""
@@ -98,6 +100,11 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
         # Lifecycle frames never cross the bus
         if isinstance(frame, _LIFECYCLE_FRAMES):
             await self.push_frame(frame, direction)
+            if isinstance(frame, StartFrame):
+                self._started = True
+                for pending_frame, pending_direction in self._pending_inbound:
+                    await self.push_frame(pending_frame, pending_direction)
+                self._pending_inbound.clear()
             return
 
         # Urgent transport frames pass through directly. They need to
@@ -143,6 +150,14 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
 
         # If message targeted at someone else, skip
         if message.target and message.target != self._worker_name:
+            return
+
+        # Frames that arrive before our own StartFrame would otherwise be
+        # silently dropped by `push_frame`'s started check (e.g. a bridged
+        # child worker whose `on_activated` fires before this bridge's
+        # StartFrame has arrived). Buffer and replay them once started.
+        if not self._started:
+            self._pending_inbound.append((message.frame, message.direction))
             return
 
         await self.push_frame(message.frame, message.direction)
