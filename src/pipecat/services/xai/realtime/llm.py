@@ -297,6 +297,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         self._disconnecting = False
         self._api_session_ready = False
         self._run_llm_when_api_session_ready = False
+        self._logged_audio_drop_before_session_ready = False
 
         self._current_assistant_response = None
         self._current_audio_response = None
@@ -649,6 +650,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         try:
             self._disconnecting = True
             self._api_session_ready = False
+            self._logged_audio_drop_before_session_ready = False
             await self.stop_all_metrics()
 
             if self._websocket:
@@ -1178,10 +1180,12 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         pipelines can stream without calling ``_create_response``.
         """
         if not self._api_session_ready:
-            logger.debug(
-                f"{self} Dropping user audio; realtime session is not ready yet "
-                "(waiting for session.updated)"
-            )
+            if not self._logged_audio_drop_before_session_ready:
+                self._logged_audio_drop_before_session_ready = True
+                logger.debug(
+                    f"{self} Dropping user audio; realtime session is not ready yet "
+                    "(waiting for session.updated)"
+                )
             return
 
         payload = base64.b64encode(frame.audio).decode("utf-8")

@@ -57,12 +57,19 @@ def test_default_model_is_grok_voice_latest():
 
 @pytest.mark.asyncio
 async def test_user_audio_dropped_until_session_ready():
+    from unittest.mock import patch
+
     service, recorder = _make_service(server_vad=True)
     assert service._api_session_ready is False
 
-    await service._send_user_audio(_audio_frame())
+    with patch("pipecat.services.xai.realtime.llm.logger.debug") as mock_debug:
+        await service._send_user_audio(_audio_frame())
+        await service._send_user_audio(_audio_frame())
 
     assert recorder.kinds() == []
+    assert service._logged_audio_drop_before_session_ready is True
+    drop_calls = [c for c in mock_debug.call_args_list if "Dropping user audio" in str(c)]
+    assert len(drop_calls) == 1
 
 
 @pytest.mark.asyncio
