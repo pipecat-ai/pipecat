@@ -231,6 +231,10 @@ class GradiumSTTService(WebsocketSTTService):
         self._json_config = json_config
 
         self._receive_task = None
+        self._connect_task = None
+        # Set once the connection can carry audio, which is what start()
+        # holds frames on.
+        self._connection_ready = asyncio.Event()
 
         self._input_format = ""
 
@@ -281,7 +285,10 @@ class GradiumSTTService(WebsocketSTTService):
         await super().start(frame)
         self._input_format = _input_format_from_encoding(self._encoding, self.sample_rate)
         self._chunk_size_bytes = int(self._chunk_size_ms * self.sample_rate * 2 / 1000)
-        await self._connect()
+        # _connect() runs in the background, so hold what follows the
+        # StartFrame until the connection can carry it.
+        self._connect_task = self.create_task(self._connect())
+        await self.pause_processing_all_frames_until(self._connection_ready.wait)
 
     async def stop(self, frame: EndFrame):
         """Stop the speech-to-text service.
@@ -392,6 +399,7 @@ class GradiumSTTService(WebsocketSTTService):
                 additional_headers=headers,
             )
             self._websocket = websocket
+            self._connection_ready.set()
             await self._call_event_handler("on_connected")
             setup_msg = {
                 "type": "setup",
@@ -429,6 +437,12 @@ class GradiumSTTService(WebsocketSTTService):
 
     async def _disconnect(self):
         await super()._disconnect()
+
+        self._connection_ready.clear()
+
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
 
         if self._transcript_aggregation_task:
             await self.cancel_task(self._transcript_aggregation_task)
