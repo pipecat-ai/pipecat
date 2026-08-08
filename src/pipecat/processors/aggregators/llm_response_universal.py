@@ -691,6 +691,11 @@ class LLMUserAggregator(LLMContextAggregator):
 
         self._user_is_muted = False
         self._user_turn_start_timestamp = ""
+        # Aggregation length observed at the top of the current
+        # process_frame call. Lets _on_user_turn_started tell apart text
+        # appended by the frame that started the turn (which belongs to
+        # the new turn) from text left over from before it.
+        self._aggregation_len_before_frame = 0
         # One-shot guard: whether the first realtime LLM service metadata frame
         # has been handled this session — see _handle_llm_service_metadata.
         self._realtime_metadata_handled = False
@@ -769,6 +774,8 @@ class LLMUserAggregator(LLMContextAggregator):
             direction: The direction of frame flow in the pipeline.
         """
         await super().process_frame(frame, direction)
+
+        self._aggregation_len_before_frame = len(self._aggregation)
 
         if await self._maybe_mute_frame(frame):
             return
@@ -1195,6 +1202,23 @@ class LLMUserAggregator(LLMContextAggregator):
         params: UserTurnStartedParams,
     ):
         logger.debug(f"{self}: User started speaking (strategy: {strategy})")
+
+        # In cascade mode the previous turn pushed its aggregation when it
+        # stopped, so any text still buffered when a new turn starts is a
+        # late transcript from that closed turn and must not bleed into the
+        # new turn's user message. Only parts that predate the frame that
+        # started this turn are dropped: a transcription that itself starts
+        # the turn (TranscriptionUserTurnStartStrategy) is already in the
+        # buffer and is kept. Realtime mode keeps the buffer, since it is
+        # flushed on assistant response start rather than at turn stop.
+        if not self._realtime_service_mode:
+            stale = self._aggregation[: self._aggregation_len_before_frame]
+            if stale:
+                logger.debug(
+                    f"{self}: dropping stale aggregation from a previous turn: "
+                    f"{[p.text for p in stale]}"
+                )
+                del self._aggregation[: self._aggregation_len_before_frame]
 
         self._user_turn_start_timestamp = time_now_iso8601()
         self._full_user_turn_aggregation = None
