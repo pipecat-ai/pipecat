@@ -969,6 +969,15 @@ class ServiceRegistry:
             settings_params=["voice"],
         ),
         ServiceDefinition(
+            value="speechify_tts",
+            label="Speechify",
+            package="pipecat-ai",
+            class_name=["SpeechifyHttpTTSService"],
+            env_prefix="SPEECHIFY",
+            include_params=["api_key"],
+            settings_params=["voice"],
+        ),
+        ServiceDefinition(
             value="xai_tts",
             label="XAI",
             package="pipecat-ai[xai]",

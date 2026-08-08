@@ -148,6 +148,7 @@ IMPORTS = {
     "sarvam_tts": ["from pipecat.services.sarvam.tts import SarvamTTSService"],
     "smallest_tts": ["from pipecat.services.smallest.tts import SmallestTTSService"],
     "soniox_tts": ["from pipecat.services.soniox.tts import SonioxTTSService"],
+    "speechify_tts": ["from pipecat.services.speechify.tts import SpeechifyHttpTTSService"],
     "xai_tts": ["from pipecat.services.xai.tts import XAITTSService"],
     "xtts_tts": ["from pipecat.services.xtts.tts import XTTSService"],
     # Realtime Services
