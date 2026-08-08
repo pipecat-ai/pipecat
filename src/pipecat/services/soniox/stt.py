@@ -6,6 +6,7 @@
 
 """Soniox speech-to-text service implementation."""
 
+import asyncio
 import json
 import time
 from collections import Counter
@@ -395,6 +396,10 @@ class SonioxSTTService(WebsocketSTTService):
         self._user_turn_open = False
 
         self._receive_task = None
+        self._connect_task = None
+        # Set once the connection can carry audio, which is what start()
+        # holds frames on.
+        self._connection_ready = asyncio.Event()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -455,7 +460,10 @@ class SonioxSTTService(WebsocketSTTService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        await self._connect()
+        # _connect() runs in the background, so hold what follows the
+        # StartFrame until the connection can carry it.
+        self._connect_task = self.create_task(self._connect())
+        await self.pause_processing_all_frames_until(self._connection_ready.wait)
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply settings delta and reconnect if anything changed.
@@ -570,6 +578,12 @@ class SonioxSTTService(WebsocketSTTService):
         """
         await super()._disconnect()
 
+        self._connection_ready.clear()
+
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -622,6 +636,8 @@ class SonioxSTTService(WebsocketSTTService):
             # Send the configuration message.
             await self._websocket.send(json.dumps(config))
 
+            # The config message is sent, so the socket can now carry audio.
+            self._connection_ready.set()
             await self._call_event_handler("on_connected")
             logger.debug("Connected to Soniox STT")
         except Exception as e:

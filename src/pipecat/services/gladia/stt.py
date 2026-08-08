@@ -322,6 +322,10 @@ class GladiaSTTService(WebsocketSTTService):
         self._region = region
         self._url = url
         self._receive_task = None
+        self._connect_task = None
+        # Set once the connection can carry audio, which is what start()
+        # holds frames on.
+        self._connection_ready = asyncio.Event()
 
         # Init-only connection config
         self._encoding = encoding
@@ -430,7 +434,10 @@ class GladiaSTTService(WebsocketSTTService):
             frame: The start frame triggering service startup.
         """
         await super().start(frame)
-        await self._connect()
+        # Session setup and the handshake run in the background, so hold what
+        # follows the StartFrame until the connection can carry it.
+        self._connect_task = self.create_task(self._connect())
+        await self.pause_processing_all_frames_until(self._connection_ready.wait)
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply settings delta.
@@ -537,6 +544,11 @@ class GladiaSTTService(WebsocketSTTService):
         await super()._disconnect()
 
         self._connection_active = False
+        self._connection_ready.clear()
+
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
 
         if self._receive_task:
             await self.cancel_task(self._receive_task)
@@ -565,6 +577,9 @@ class GladiaSTTService(WebsocketSTTService):
 
             # Send buffered audio if any
             await self._send_buffered_audio()
+
+            # Buffered audio has gone out, so the socket can now carry live audio.
+            self._connection_ready.set()
 
             logger.debug(f"{self} Connected to Gladia WebSocket")
         except Exception as e:

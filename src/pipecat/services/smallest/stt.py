@@ -207,6 +207,10 @@ class SmallestSTTService(WebsocketSTTService):
         self._base_url = base_url.rstrip("/")
         self._encoding = encoding
         self._receive_task = None
+        self._connect_task = None
+        # Set once the connection can carry audio, which is what start()
+        # holds frames on.
+        self._connection_ready = asyncio.Event()
         self._connected_event = asyncio.Event()
         self._connected_event.set()
 
@@ -228,7 +232,10 @@ class SmallestSTTService(WebsocketSTTService):
     async def start(self, frame: StartFrame):
         """Start the service and connect to the WebSocket."""
         await super().start(frame)
-        await self._connect()
+        # _connect() runs in the background, so hold what follows the
+        # StartFrame until the connection can carry it.
+        self._connect_task = self.create_task(self._connect())
+        await self.pause_processing_all_frames_until(self._connection_ready.wait)
 
     async def stop(self, frame: EndFrame):
         """Stop the service and disconnect from the WebSocket."""
@@ -302,6 +309,12 @@ class SmallestSTTService(WebsocketSTTService):
     async def _disconnect(self):
         await super()._disconnect()
 
+        self._connection_ready.clear()
+
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -347,6 +360,7 @@ class SmallestSTTService(WebsocketSTTService):
                     "X-Pipecat-Version": pipecat_version(),
                 },
             )
+            self._connection_ready.set()
             await self._call_event_handler("on_connected")
             logger.debug("Connected to Smallest STT")
         except Exception as e:

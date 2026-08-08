@@ -10,6 +10,7 @@ This module provides a real-time STT service that integrates with Mistral's
 Voxtral Realtime transcription API using the Mistral SDK's RealtimeConnection.
 """
 
+import asyncio
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any, cast
@@ -132,6 +133,10 @@ class MistralSTTService(STTService):
         self._target_streaming_delay_ms = target_streaming_delay_ms
         self._connection: RealtimeConnection | None = None
         self._receive_task = None
+        self._connect_task = None
+        # Set once the connection can carry audio, which is what start()
+        # holds frames on.
+        self._connection_ready = asyncio.Event()
         self._accumulated_text = ""
         self._detected_language: Language | None = None
 
@@ -150,7 +155,10 @@ class MistralSTTService(STTService):
             frame: Frame indicating service should start.
         """
         await super().start(frame)
-        await self._connect()
+        # _connect() runs in the background, so hold what follows the
+        # StartFrame until the connection can carry it.
+        self._connect_task = self.create_task(self._connect())
+        await self.pause_processing_all_frames_until(self._connection_ready.wait)
 
     async def stop(self, frame: EndFrame):
         """Stop the STT service and close connection.
@@ -239,11 +247,19 @@ class MistralSTTService(STTService):
             self._receive_task = self.create_task(
                 self._receive_events(), name="mistral_stt_receive"
             )
+
+            self._connection_ready.set()
+
         except Exception as e:
             await self.push_error(error_msg=f"Error connecting to Mistral STT: {e}", exception=e)
 
     async def _disconnect(self):
         """Close the connection and cancel the receive task."""
+        self._connection_ready.clear()
+
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None

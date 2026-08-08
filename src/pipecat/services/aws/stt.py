@@ -10,6 +10,7 @@ This module provides a WebSocket-based connection to AWS Transcribe for real-tim
 speech-to-text transcription with support for multiple languages and audio formats.
 """
 
+import asyncio
 import json
 import random
 import string
@@ -146,6 +147,10 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         }
 
         self._receive_task = None
+        self._connect_task = None
+        # Set once the connection can carry audio, which is what start()
+        # holds frames on.
+        self._connection_ready = asyncio.Event()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -186,7 +191,10 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             frame: Start frame signaling service initialization.
         """
         await super().start(frame)
-        await self._connect()
+        # _connect() runs in the background, so hold what follows the
+        # StartFrame until the connection can carry it.
+        self._connect_task = self.create_task(self._connect())
+        await self.pause_processing_all_frames_until(self._connection_ready.wait)
 
     async def stop(self, frame: EndFrame):
         """Stop the service and disconnect from AWS Transcribe.
@@ -247,6 +255,12 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         Sends end-stream message and cleans up.
         """
         await super()._disconnect()
+
+        self._connection_ready.clear()
+
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
 
         if self._receive_task:
             await self.cancel_task(self._receive_task)
@@ -330,6 +344,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                 compression=None,
             )
 
+            self._connection_ready.set()
             await self._call_event_handler("on_connected")
             logger.info(f"{self} Successfully connected to AWS Transcribe")
         except Exception as e:
