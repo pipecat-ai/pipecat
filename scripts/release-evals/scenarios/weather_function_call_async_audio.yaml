@@ -21,12 +21,18 @@ turns:
         calls:
           - name: get_current_weather
 
-  - user: "Tell me a three-sentence short story about a sea turtle."
+  # The delay lets a bot's "let me check on that" filler finish before the story
+  # request arrives.
+  - user: "Tell me a short story about a sea turtle."
+    send_after:
+      delay_ms: 3000
     expect:
-      - event: response
-        eval: "tells a short story about a sea turtle"
+      - event: llm_started
 
-  - user: "Tell me a joke about a sea turtle."
+  - user: "Actually, I've changed my mind. Tell me a dad joke instead."
+    send_after:
+      event: llm_started
+      delay_ms: 10000
     expect:
       - event: response
-        eval: "first, tells a joke about a sea turtle, then informs that the weather in San Francisco is 75 degrees"
+        eval: "first, tells a joke, then informs that the weather in San Francisco is 75 degrees"
