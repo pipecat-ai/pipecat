@@ -580,6 +580,10 @@ class AssemblyAISTTService(WebsocketSTTService):
         self._connected = False
 
         self._receive_task = None
+        self._connect_task = None
+        # Set once the connection can carry audio, which is what start()
+        # holds frames on.
+        self._connection_ready = asyncio.Event()
 
         self._audio_buffer = bytearray()
         self._chunk_size_ms = 50
@@ -744,7 +748,10 @@ class AssemblyAISTTService(WebsocketSTTService):
         """
         await super().start(frame)
         self._chunk_size_bytes = int(self._chunk_size_ms * self.sample_rate * 2 / 1000)
-        await self._connect()
+        # _connect() runs in the background, so hold what follows the
+        # StartFrame until the connection can carry it.
+        self._connect_task = self.create_task(self._connect())
+        await self.pause_processing_all_frames_until(self._connection_ready.wait)
 
     async def stop(self, frame: EndFrame):
         """Stop the speech-to-text service.
@@ -981,6 +988,12 @@ class AssemblyAISTTService(WebsocketSTTService):
         """
         await super()._disconnect()
 
+        self._connection_ready.clear()
+
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
+
         if not self._connected or not self._websocket:
             return
 
@@ -1034,6 +1047,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 additional_headers=headers,
             )
             self._connected = True
+            self._connection_ready.set()
             await self._call_event_handler("on_connected")
             logger.debug(f"{self} Connected to AssemblyAI WebSocket")
         except Exception as e:
