@@ -12,6 +12,7 @@ This module provides a STT service using Together AI's WebSocket API:
   OpenAI-compatible realtime transcription endpoint.
 """
 
+import asyncio
 import base64
 import json
 from collections.abc import AsyncGenerator
@@ -106,6 +107,10 @@ class TogetherSTTService(WebsocketSTTService):
         self._api_key = api_key
         self._base_url = base_url
         self._receive_task = None
+        self._connect_task = None
+        # Set once the connection can carry audio, which is what start()
+        # holds frames on.
+        self._connection_ready = asyncio.Event()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics."""
@@ -139,7 +144,10 @@ class TogetherSTTService(WebsocketSTTService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        await self._connect()
+        # _connect() runs in the background, so hold what follows the
+        # StartFrame until the connection can carry it.
+        self._connect_task = self.create_task(self._connect())
+        await self.pause_processing_all_frames_until(self._connection_ready.wait)
 
     async def stop(self, frame: EndFrame):
         """Stop the Together AI STT service.
@@ -199,6 +207,12 @@ class TogetherSTTService(WebsocketSTTService):
     async def _disconnect(self):
         """Disconnect and clean up background tasks."""
         await super()._disconnect()
+
+        self._connection_ready.clear()
+
+        if self._connect_task:
+            await self.cancel_task(self._connect_task)
+            self._connect_task = None
         if self._receive_task:
             await self.cancel_task(self._receive_task, timeout=1.0)
             self._receive_task = None
@@ -222,6 +236,7 @@ class TogetherSTTService(WebsocketSTTService):
             }
 
             self._websocket = await self._websocket_connect(url, additional_headers=headers)
+            self._connection_ready.set()
             await self._call_event_handler("on_connected")
         except Exception as e:
             await self.push_error(
