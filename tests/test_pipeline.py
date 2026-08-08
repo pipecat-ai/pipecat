@@ -817,6 +817,68 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
 
         assert worker.has_finished()
 
+    async def test_task_end_frame_swallowed_finishes_after_cancel_timeout(self):
+        """A processor that never forwards the terminal EndFrame (e.g. a
+        transport torn down mid-shutdown) used to wedge
+        ``_wait_for_pipeline_end`` forever, because only the CancelFrame
+        branch had a timeout. The EndFrame branch is now bounded by
+        ``cancel_timeout_secs`` too, so the worker finishes on its own
+        instead of dead-locking until an external task cancellation.
+        """
+
+        class EndFrameSwallower(FrameProcessor):
+            """Drops the downstream EndFrame; forwards everything else."""
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, EndFrame) and direction == FrameDirection.DOWNSTREAM:
+                    return
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([EndFrameSwallower()])
+        worker = PipelineWorker(pipeline, cancel_timeout_secs=0.2)
+
+        await worker.queue_frame(EndFrame())
+
+        sink = io.StringIO()
+        handler_id = logger.add(sink, level="WARNING", format="{message}")
+        try:
+            await asyncio.wait_for(
+                worker.run(WorkerParams(task_manager=TaskManager())), timeout=1.0
+            )
+        finally:
+            logger.remove(handler_id)
+
+        assert worker.has_finished()
+        assert "timeout waiting for" in sink.getvalue()
+
+    async def test_task_stop_frame_swallowed_finishes_after_cancel_timeout(self):
+        """StopFrame gets the same bounded wait as EndFrame."""
+
+        class StopFrameSwallower(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, StopFrame) and direction == FrameDirection.DOWNSTREAM:
+                    return
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([StopFrameSwallower()])
+        worker = PipelineWorker(pipeline, cancel_timeout_secs=0.2)
+
+        await worker.queue_frame(StopFrame())
+
+        sink = io.StringIO()
+        handler_id = logger.add(sink, level="WARNING", format="{message}")
+        try:
+            await asyncio.wait_for(
+                worker.run(WorkerParams(task_manager=TaskManager())), timeout=1.0
+            )
+        finally:
+            logger.remove(handler_id)
+
+        assert worker.has_finished()
+        assert "timeout waiting for" in sink.getvalue()
+
     async def test_task_error(self):
         class ErrorProcessor(FrameProcessor):
             def __init__(self, **kwargs):
