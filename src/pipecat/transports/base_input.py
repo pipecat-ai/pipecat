@@ -11,6 +11,7 @@ input processing.
 """
 
 import asyncio
+import time
 
 from loguru import logger
 
@@ -267,8 +268,11 @@ class BaseInputTransport(FrameProcessor):
     async def _audio_task_handler(self):
         """Main audio processing task handler."""
         # Skip timeout handling until the first audio frame arrives (e.g. client
-        # not yet connected).
+        # not yet connected). Warn once when audio stalls after that, and once
+        # when it recovers — not on every timeout poll (see #3633 / #5230).
         audio_received = False
+        stalled = False
+        last_audio_at = 0.0
         while True:
             try:
                 frame: InputAudioRawFrame = await asyncio.wait_for(
@@ -277,6 +281,14 @@ class BaseInputTransport(FrameProcessor):
 
                 # From now on, timeout should warn if there's no audio.
                 audio_received = True
+
+                if stalled:
+                    stalled = False
+                    logger.warning(
+                        f"{self}: input audio recovered after "
+                        f"{time.monotonic() - last_audio_at:.1f}s without a frame"
+                    )
+                last_audio_at = time.monotonic()
 
                 # Filter audio, if an audio filter is available.
                 if self._params.audio_in_filter:
@@ -295,3 +307,10 @@ class BaseInputTransport(FrameProcessor):
             except TimeoutError:
                 if not audio_received:
                     continue
+                if not stalled:
+                    stalled = True
+                    logger.warning(
+                        f"{self}: no input audio for {AUDIO_INPUT_TIMEOUT_SECS}s "
+                        f"(last frame {time.monotonic() - last_audio_at:.1f}s ago); "
+                        "input stream may have stalled"
+                    )
