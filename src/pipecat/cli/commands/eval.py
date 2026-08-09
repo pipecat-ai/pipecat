@@ -553,17 +553,17 @@ class _EvalDashboard:
             done = [r for r in group if r.status == "done"]
             passed = sum(1 for r in group if _eval_verdict(r) == "passed")
             # Three states, and only the last is a verdict: spinning while a slot is
-            # held, a slow dim blink while waiting for one, and ✓/✗ once every
-            # attempt is in. Separating the first two makes concurrency legible —
-            # the bright spinners are the runs in flight — and keeps a long sweep
-            # calm, since most rows are waiting rather than running.
+            # held, a still dot while waiting for one, and ✓/✗ once every attempt is
+            # in. Motion is reserved for the runs actually in flight — most rows of a
+            # long sweep are waiting, and animating those too would leave nothing for
+            # movement to mean.
             if len(done) == len(group):
                 glyph, style, _ = _EVAL_GLYPH["passed" if passed == len(group) else "failed"]
                 status = Text(glyph, style=style)
             elif any(r.status == "running" for r in group):
                 status = Spinner("dots", style="cyan")
             else:
-                status = Spinner("toggle2", style="dim", speed=0.25)
+                status = Text("·", style="dim")
             # The rate is over attempts that finished, so it reads as a real rate
             # while the sweep is still going; what's left is its own column rather
             # than a second denominator competing with it.
