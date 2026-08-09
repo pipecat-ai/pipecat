@@ -60,24 +60,23 @@ _STATUS_RUNNING = "running"
 # Status value for the final message (task complete).
 _STATUS_FINISHED = "finished"
 
-# Description shipped on the started message. The text is intentionally
-# self-explanatory so a model reading the context can tell what's about to
-# happen even without out-of-band knowledge of the protocol.
+# Description shipped on the started message. It says only what the model has to
+# act on — wait, and don't answer from nothing — and deliberately does not
+# describe the message the result will arrive in. A model told the shape of a
+# message it should expect will try to produce one, and a function call is the
+# only structured channel it has, so it calls the tool again with the protocol
+# payload as the arguments. The payload's own fields are read by parse_message,
+# never by the model, so describing them buys nothing either.
 _STARTED_DESCRIPTION = (
-    "An asynchronous task associated with this tool_call_id has started "
-    "running. Expect results to arrive later as developer messages that look "
-    "roughly like this one (with 'type=async_tool' and a matching tool_call_id) "
-    "but with a 'result' field. Note that there *may* be more than one result "
-    "(i.e., a stream of results), but there doesn't have to be (there may be "
-    "only one). The last result will come in a message with 'status=finished'."
+    "This tool is still running. You will be given its result later. Do not call it "
+    "again and do not invent a result in the meantime."
 )
 
-# Description shipped on each intermediate-result message.
+# Description shipped on each intermediate-result message. Names no message shape
+# either, for the same reason as the started message above.
 _INTERMEDIATE_DESCRIPTION = (
-    "This is an intermediate result for the asynchronous task associated with "
-    "this tool_call_id. The task is still running. More intermediate results "
-    "may follow, or the next result may be the final one with "
-    "'status=finished'."
+    "This is a partial result and the task is still running. More may follow. Do not "
+    "call this tool again and do not treat this as the final answer."
 )
 
 # Description shipped on the final-result message. Purely descriptive: a result
