@@ -366,6 +366,126 @@ class PatternPairAggregator(SimpleTextAggregator):
                 )
                 self._text = ""
 
+    async def flush(self) -> Aggregation | None:
+        """Flush any remaining text in the buffer.
+
+        Degrades incomplete pattern state the same way a closed pair's
+        action would, without knowing whether the pair would ever have
+        closed:
+
+        - REMOVE and AGGREGATE: an unclosed start delimiter and everything
+          from it onward is dropped (their content is either stripped or
+          treated as a side channel once closed, so it's never spoken
+          incomplete). The pattern handler is not invoked. Text before the
+          earliest such unclosed start delimiter is kept.
+        - KEEP: a closed KEEP pair is spoken verbatim, delimiters included
+          (see :meth:`aggregate`), so an unclosed one degrades to the same
+          thing rather than being dropped.
+
+        If the buffer ends with a proper prefix of a REMOVE/AGGREGATE start
+        delimiter (the stream cut off mid-delimiter), that trailing partial
+        text is trimmed too. This accepts an inherent ambiguity: a legitimate
+        trailing character sequence that happens to match a delimiter prefix
+        (e.g. a stray ``<``) is trimmed the same way.
+
+        Returns:
+            Any remaining text with incomplete REMOVE/AGGREGATE pattern
+            content dropped, or None if there is nothing left to return.
+        """
+        cut_index = self._find_earliest_droppable_start(self._text)
+        result_text = self._text if cut_index is None else self._text[:cut_index]
+        result_text = self._trim_trailing_partial_start(result_text)
+
+        await self.reset()
+
+        stripped = result_text.strip()
+        if not stripped:
+            return None
+        agg_type = (
+            AggregationType.TOKEN
+            if self._aggregation_type == AggregationType.TOKEN
+            else AggregationType.SENTENCE
+        )
+        return PatternMatch(content=stripped, type=agg_type, full_match=result_text)
+
+    def _find_earliest_droppable_start(self, text: str) -> int | None:
+        """Find the earliest unmatched start delimiter that flush() should cut at.
+
+        For each registered pattern, replicates the same left-to-right,
+        non-overlapping pairing that :meth:`_process_complete_patterns` uses
+        (earliest start paired with earliest following end) to determine
+        which start-delimiter occurrences are still unmatched. Only
+        REMOVE/AGGREGATE patterns' unmatched starts are candidates: KEEP
+        patterns are excluded because unclosed KEEP content is kept, not cut.
+
+        Args:
+            text: The buffered text to scan.
+
+        Returns:
+            The index of the earliest droppable unmatched start delimiter,
+            or None if there isn't one.
+        """
+        earliest = None
+
+        for pattern_info in self._patterns.values():
+            if pattern_info.get("action", MatchAction.REMOVE) == MatchAction.KEEP:
+                continue
+
+            start = pattern_info["start"]
+            end = pattern_info["end"]
+            regex = f"{re.escape(start)}(.*?){re.escape(end)}"
+            matched_spans = [match.span() for match in re.finditer(regex, text, re.DOTALL)]
+
+            search_from = 0
+            while True:
+                index = text.find(start, search_from)
+                if index == -1:
+                    break
+
+                span = next((s for s in matched_spans if s[0] <= index < s[1]), None)
+                if span is not None:
+                    # This occurrence belongs to a completed match; skip past
+                    # it entirely so a start nested inside its content isn't
+                    # mistaken for an unmatched one.
+                    search_from = span[1]
+                    continue
+
+                if earliest is None or index < earliest:
+                    earliest = index
+                break
+
+        return earliest
+
+    def _trim_trailing_partial_start(self, text: str) -> str:
+        """Trim a trailing partial REMOVE/AGGREGATE start delimiter, if any.
+
+        The stream can end mid-delimiter (e.g. buffered text ending in
+        ``<te`` of ``<test>``). That partial text isn't a complete start
+        delimiter, so :meth:`_find_earliest_droppable_start` won't catch it,
+        but it also isn't safe to speak. KEEP patterns are excluded since a
+        KEEP delimiter is kept whether or not it's complete.
+
+        Args:
+            text: The text to check for a trailing partial delimiter.
+
+        Returns:
+            The text with a trailing partial start delimiter removed, or the
+            original text if there isn't one.
+        """
+        max_trim = 0
+
+        for pattern_info in self._patterns.values():
+            if pattern_info.get("action", MatchAction.REMOVE) == MatchAction.KEEP:
+                continue
+
+            start = pattern_info["start"]
+            for length in range(min(len(start) - 1, len(text)), 0, -1):
+                if text.endswith(start[:length]):
+                    max_trim = max(max_trim, length)
+                    break
+
+        return text[:-max_trim] if max_trim else text
+
     async def handle_interruption(self):
         """Handle interruptions by clearing the buffer and pattern state.
 
