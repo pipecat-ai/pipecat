@@ -69,12 +69,22 @@ def get_advertised_tool_handlers(mock_task):
 
 
 def make_mock_task():
-    """Create a mock PipelineTask wired up so that actions don't hang."""
+    """Create a mock PipelineTask wired up so that actions don't hang.
+
+    Setting ``mock_task.interrupted = True`` mirrors what an interruption does to a real
+    pipeline's queues (see ``FrameQueue.reset()``): frames that aren't
+    ``UninterruptibleFrame`` are dropped instead of reaching downstream.
+    """
+    from pipecat.frames.frames import UninterruptibleFrame
+
     mock_task = AsyncMock()
+    mock_task.interrupted = False
 
     # Mock queue_frame method that simulates queued frames reaching all the way downstream.
     # This is necessary for action execution to not hang, waiting.
     async def queue_frame(frame):
+        if mock_task.interrupted and not isinstance(frame, UninterruptibleFrame):
+            return
         handler = getattr(mock_task, "on_frame_reached_downstream", None)
         if handler:
             await handler(mock_task, frame)
