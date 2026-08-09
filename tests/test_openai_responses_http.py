@@ -11,6 +11,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from openai.types.responses import (
     ResponseCompletedEvent,
+    ResponseErrorEvent,
+    ResponseFailedEvent,
+    ResponseFunctionCallArgumentsDeltaEvent,
+    ResponseFunctionToolCall,
+    ResponseIncompleteEvent,
+    ResponseOutputItemAddedEvent,
     ResponseOutputItemDoneEvent,
     ResponseReasoningItem,
     ResponseReasoningSummaryTextDeltaEvent,
@@ -22,13 +28,19 @@ from openai.types.responses.response_usage import (
 )
 
 from pipecat.frames.frames import (
+    ErrorFrame,
+    LLMContextFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
+    LLMServiceMetadataFrame,
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.openai.responses.llm import OpenAIResponsesHttpLLMService
+from pipecat.tests.utils import run_test
 
 
 def _make_service(**kwargs):
@@ -230,3 +242,157 @@ class TestHttpReasoningCapture:
             "summary": [{"type": "summary_text", "text": "Thinking..."}],
             "encrypted_content": "ENCRYPTED",
         }
+
+
+# ---------------------------------------------------------------------------
+# _process_context — terminal error stream events (regression for #5138)
+# ---------------------------------------------------------------------------
+
+
+def _failed_event(event_cls=ResponseFailedEvent, event_type="response.failed", **response_kwargs):
+    """Build a Response{Failed,Incomplete}Event carrying the given response fields."""
+    response = MagicMock(**response_kwargs)
+    event = MagicMock(spec=event_cls)
+    event.type = event_type
+    event.response = response
+    return event
+
+
+def _error_event(message="rate limited", code="rate_limit_exceeded"):
+    event = MagicMock(spec=ResponseErrorEvent)
+    event.type = "error"
+    event.message = message
+    event.code = code
+    return event
+
+
+class TestHttpStreamErrorEvents:
+    @pytest.mark.asyncio
+    async def test_response_failed_with_top_level_error_pushes_error(self):
+        """A ResponseFailedEvent with `response.error` populated must push an error."""
+        service = _make_service()
+        service.push_error = AsyncMock()
+
+        error = MagicMock()
+        error.message = "upstream provider error"
+        event = _failed_event(error=error)
+
+        await _run(service, event)
+
+        service.push_error.assert_called_once()
+        assert "upstream provider error" in service.push_error.call_args.kwargs["error_msg"]
+
+    @pytest.mark.asyncio
+    async def test_response_failed_with_status_details_pushes_error(self):
+        """Some third-party servers populate the older `status_details` shape
+        instead of the typed `error` field. That must still surface an error."""
+        service = _make_service()
+        service.push_error = AsyncMock()
+
+        event = _failed_event(
+            error=None,
+            status_details={"error": {"message": "provider outage"}},
+        )
+
+        await _run(service, event)
+
+        service.push_error.assert_called_once()
+        assert "provider outage" in service.push_error.call_args.kwargs["error_msg"]
+
+    @pytest.mark.asyncio
+    async def test_response_failed_with_no_error_details_uses_fallback_message(self):
+        """When neither `error` nor `status_details` carry a message, fall back
+        to a generic message derived from the event type rather than raising."""
+        service = _make_service()
+        service.push_error = AsyncMock()
+
+        event = _failed_event(error=None, status_details=None)
+
+        await _run(service, event)
+
+        service.push_error.assert_called_once()
+        assert "failed" in service.push_error.call_args.kwargs["error_msg"]
+
+    @pytest.mark.asyncio
+    async def test_response_incomplete_pushes_error(self):
+        """A ResponseIncompleteEvent mid-stream must also push an error."""
+        service = _make_service()
+        service.push_error = AsyncMock()
+
+        error = MagicMock()
+        error.message = "max output tokens reached"
+        event = _failed_event(
+            event_cls=ResponseIncompleteEvent,
+            event_type="response.incomplete",
+            error=error,
+        )
+
+        await _run(service, event)
+
+        service.push_error.assert_called_once()
+        assert "max output tokens reached" in service.push_error.call_args.kwargs["error_msg"]
+
+    @pytest.mark.asyncio
+    async def test_response_error_event_pushes_error(self):
+        """The generic in-stream `error` event must push an error with its message."""
+        service = _make_service()
+        service.push_error = AsyncMock()
+
+        await _run(service, _error_event(message="rate limited"))
+
+        service.push_error.assert_called_once()
+        assert "rate limited" in service.push_error.call_args.kwargs["error_msg"]
+
+    @pytest.mark.asyncio
+    async def test_terminal_error_does_not_run_announced_function_call(self):
+        """A function call whose arguments never finished streaming before a
+        terminal error must not be executed with fabricated empty arguments."""
+        service = _make_service()
+        service.push_error = AsyncMock()
+        service.run_function_calls = AsyncMock()
+
+        item = MagicMock(spec=ResponseFunctionToolCall)
+        item.id = "item_1"
+        item.name = "get_weather"
+        item.call_id = "call_1"
+        added = MagicMock(spec=ResponseOutputItemAddedEvent)
+        added.item = item
+
+        delta = MagicMock(spec=ResponseFunctionCallArgumentsDeltaEvent)
+        delta.item_id = "item_1"
+        delta.delta = '{"city": "SF"'
+
+        error = MagicMock()
+        error.message = "upstream provider error"
+
+        await _run(service, added, delta, _failed_event(error=error))
+
+        service.push_error.assert_called_once()
+        service.run_function_calls.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_response_failed_reaches_pipeline_as_error_frame(self):
+        """Full pipeline-level check: an in-stream response.failed event must
+        surface as an ErrorFrame, not a silent, empty turn."""
+        service = _make_service()
+
+        error = MagicMock()
+        error.message = "upstream provider error"
+        service._client.responses.create = AsyncMock(
+            return_value=_FakeAsyncStream([_failed_event(error=error)])
+        )
+
+        context = LLMContext()
+
+        down_frames, up_frames = await run_test(
+            service,
+            frames_to_send=[LLMContextFrame(context=context)],
+            expected_down_frames=[
+                LLMServiceMetadataFrame,
+                LLMFullResponseStartFrame,
+                LLMFullResponseEndFrame,
+            ],
+        )
+
+        error_frames = [f for f in list(down_frames) + list(up_frames) if isinstance(f, ErrorFrame)]
+        assert error_frames, "Expected an ErrorFrame after an in-stream response.failed event"

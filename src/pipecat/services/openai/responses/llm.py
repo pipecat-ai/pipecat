@@ -22,9 +22,12 @@ from openai import NOT_GIVEN, AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.responses import (
     ResponseCompletedEvent,
+    ResponseErrorEvent,
+    ResponseFailedEvent,
     ResponseFunctionCallArgumentsDeltaEvent,
     ResponseFunctionCallArgumentsDoneEvent,
     ResponseFunctionToolCall,
+    ResponseIncompleteEvent,
     ResponseOutputItemAddedEvent,
     ResponseOutputItemDoneEvent,
     ResponseReasoningItem,
@@ -1211,6 +1214,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
         function_calls: dict[str, dict[str, str]] = {}  # item_id -> {name, call_id, arguments}
         current_arguments: dict[str, str] = {}  # item_id -> accumulated arguments
         reasoning_summary_open = False
+        stream_errored = False
 
         # Ensure stream and its async iterator are closed on cancellation/exception
         # to prevent socket leaks and uvloop crashes. Closing the iterator first
@@ -1319,8 +1323,30 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                     # model name in tracing spans
                     self._full_model_name = response.model
 
-        # Process any function calls
-        if function_calls:
+                elif isinstance(event, (ResponseFailedEvent, ResponseIncompleteEvent)):
+                    response = event.response
+                    error_msg = response.error.message if response.error else None
+                    if not error_msg:
+                        # Some third-party Responses API servers populate an
+                        # older status_details shape instead of `error`.
+                        status_details = getattr(response, "status_details", None) or {}
+                        if isinstance(status_details, dict):
+                            error_msg = (status_details.get("error") or {}).get("message")
+                    if not error_msg:
+                        error_msg = f"Response {event.type.split('.')[-1]}"
+                    await self.push_error(error_msg=f"LLM response error: {error_msg}")
+                    stream_errored = True
+                    break
+
+                elif isinstance(event, ResponseErrorEvent):
+                    await self.push_error(error_msg=f"LLM stream error: {event.message}")
+                    stream_errored = True
+                    break
+
+        # Process any function calls. A stream that ended in a terminal error
+        # may have announced a function call whose arguments never finished
+        # streaming — don't run those with fabricated empty arguments.
+        if function_calls and not stream_errored:
             fc_list = self._process_function_calls(context, function_calls)
             await self.run_function_calls(fc_list)
 
