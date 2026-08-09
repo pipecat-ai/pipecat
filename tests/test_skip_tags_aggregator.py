@@ -129,6 +129,13 @@ class TestSkipTagsAggregatorTokenMode(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].text, "more text")
 
+    async def test_token_flush_empty_buffer(self):
+        """Flush with nothing buffered returns None."""
+        async for _ in self.aggregator.aggregate("Hello!"):
+            pass
+        result = await self.aggregator.flush()
+        self.assertIsNone(result)
+
     async def test_token_text_around_tags(self):
         """Simulate word-by-word token delivery with tags."""
         results = []

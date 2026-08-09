@@ -344,6 +344,22 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result)
         self.code_handler.assert_not_called()
 
+    async def test_flush_skips_completed_pair_still_in_buffer(self):
+        """A completed pair still sitting in the buffer at flush time is not
+        mistaken for an unmatched one: its start delimiter (and any start
+        nested inside its span) is skipped, and the cut happens at the
+        genuinely unmatched occurrence that follows it.
+        """
+        # Seed the buffer directly: aggregate() strips closed REMOVE pairs
+        # eagerly, so flush() seeing one only happens in edge cases (e.g. a
+        # pair completing while _last_processed_position is stale).
+        self.aggregator._text = "Start <test>closed</test> middle <test>unclosed"
+
+        result = await self.aggregator.flush()
+        self.assertIsNotNone(result)
+        self.assertEqual(result.text, "Start <test>closed</test> middle")
+        self.assertNotIn("unclosed", result.text)
+
     async def test_flush_trims_trailing_partial_start_delimiter(self):
         """Buffer ending mid-delimiter (stream cut off inside '<test>') has
         the partial delimiter trimmed rather than spoken as plain text.
