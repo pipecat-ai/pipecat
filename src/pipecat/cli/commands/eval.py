@@ -17,7 +17,6 @@ import shutil
 import sys
 import time
 import traceback
-from collections import Counter
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -651,6 +650,40 @@ def _print_scenario_configs(runs: list[EvalRun]) -> None:
     print()
 
 
+def _print_failures(failed: list[EvalRun], total: int, *, show_attempt: bool) -> None:
+    """Print every failed run: what it was, and what went wrong.
+
+    Every failure is listed, however many there are. Reading them is how a person
+    tells a bot that misbehaved from one that never started, and only the failure's
+    own ``reason`` carries that — ``kind`` says which assertion gave way, not what
+    the bot did. Counting and grouping belong to the ``results.jsonl`` written
+    alongside, which is the structured record of the same failures.
+
+    Args:
+        failed: The runs that failed or errored.
+        total: How many runs there were, for the header's denominator.
+        show_attempt: Include each run's attempt number — worth the noise only
+            when a sweep repeats, since that is what says which log to open.
+    """
+    if not failed:
+        return
+
+    print()
+    print(f"  {_color(f'Failures ({len(failed)} of {total}):', '1;31')}")
+    for r in failed:
+        attempt = f" {_dim('#' + str(r.attempt))}" if show_attempt else ""
+        header = f"  {_red('✗')} {r.bot} {_color(r.scenario, '36')}{attempt}"
+        if r.error:
+            print(f"{header} {_dim('— ' + r.error)}")
+        elif r.result is not None:
+            print(header)
+            for f in r.result.failures:
+                turn = f"turn {f.turn_index}" if f.turn_index >= 0 else "run"
+                print(
+                    f"      {_red('•')} {turn} {f.event_name} {_color(f.kind, '31')} — {f.reason}"
+                )
+
+
 def _print_repeat_summary(runs: list[EvalRun], failed: list[EvalRun], *, show_rates: bool) -> None:
     """Print per-(bot, scenario) pass rates and failures grouped by kind.
 
@@ -674,28 +707,7 @@ def _print_repeat_summary(runs: list[EvalRun], failed: list[EvalRun], *, show_ra
                 f"  {bot:{bot_w}s}  {_color(scenario, '36')}  {rate}  {_dim(_mean_duration(group))}"
             )
 
-    if not failed:
-        return
-
-    # Group on the structured fields, never the reason: judge verdicts are free
-    # text and differ on every run, so grouping by reason would collapse nothing.
-    buckets: dict[tuple[int, str, str], list[EvalRun]] = {}
-    for r in failed:
-        if r.error or r.result is None:
-            buckets.setdefault((-1, "<error>", "spawn_error"), []).append(r)
-            continue
-        for f in r.result.failures:
-            buckets.setdefault((f.turn_index, f.event_name, f.kind), []).append(r)
-
-    print()
-    print(f"  {_color(f'Failures ({len(failed)} of {len(runs)}):', '1;31')}")
-    for (turn, event, kind), rs in sorted(buckets.items(), key=lambda kv: -len(kv[1])):
-        by_bot = Counter(Path(r.bot).stem for r in rs)
-        spread = ", ".join(f"{bot} {n}" for bot, n in by_bot.most_common())
-        turn_label = f"turn {turn}" if turn >= 0 else "run"
-        # Pad before colorizing: the escape codes would otherwise count as width.
-        kind_cell = _color(f"{kind:22s}", "31")
-        print(f"    {len(rs):3d}x  {turn_label:7s} {event:14s} {kind_cell}  {_dim(spread)}")
+    _print_failures(failed, len(runs), show_attempt=True)
 
 
 def _finalize_evals(
@@ -723,16 +735,7 @@ def _finalize_evals(
         # caller's policy, so failures here are data rather than a build break.
         return 0
 
-    if failed:
-        print()
-        print(f"  {_color(f'Failed ({len(failed)}):', '1;31')}")
-        for r in failed:
-            if r.error:
-                print(f"  {_red('✗')} {r.bot} {_color(r.scenario, '36')} {_dim('— ' + r.error)}")
-            elif r.result is not None:
-                print(f"  {_red('✗')} {r.bot} {_color(r.scenario, '36')}")
-                for f in r.result.failures:
-                    print(f"      {_red('•')} {f}")
+    _print_failures(failed, len(runs), show_attempt=False)
 
     print()
     # When the live dashboard ran, its last frame already shows the tally and the
