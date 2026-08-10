@@ -17,6 +17,7 @@ from enum import Enum
 
 from loguru import logger
 
+from pipecat.utils.string import longest_trailing_partial_match
 from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 
@@ -286,6 +287,10 @@ class PatternPairAggregator(SimpleTextAggregator):
 
         In TOKEN mode, pattern detection still works but non-pattern text is
         yielded as TOKEN aggregations instead of waiting for sentence boundaries.
+        Text ending in a partial start delimiter (e.g. ``<thin`` of
+        ``<think>``) is held back until a later chunk determines whether it
+        begins a pattern, so a delimiter split across chunks is still
+        recognized.
 
         Args:
             text: Text to aggregate.
@@ -356,15 +361,25 @@ class PatternPairAggregator(SimpleTextAggregator):
                     )
 
         # In TOKEN mode, yield any accumulated text after processing all chars,
-        # but only if there's no incomplete pattern being buffered.
+        # but only if there's no incomplete pattern being buffered. A trailing
+        # partial start delimiter (e.g. "<thin" of "<think>") is held back so a
+        # delimiter split across chunks isn't leaked as plain text; it's
+        # retained in the buffer to be completed by the next chunk.
         if self._aggregation_type == AggregationType.TOKEN and self._text:
             if self._match_start_of_pattern(self._text) is None:
-                yield PatternMatch(
-                    content=self._text,
-                    type=AggregationType.TOKEN,
-                    full_match=self._text,
+                held_back = longest_trailing_partial_match(
+                    self._text, [pattern["start"] for pattern in self._patterns.values()]
                 )
-                self._text = ""
+                yield_length = len(self._text) - held_back
+                if yield_length > 0:
+                    content = self._text[:yield_length]
+                    self._text = self._text[yield_length:]
+                    self._last_processed_position = len(self._text)
+                    yield PatternMatch(
+                        content=content,
+                        type=AggregationType.TOKEN,
+                        full_match=content,
+                    )
 
     async def handle_interruption(self):
         """Handle interruptions by clearing the buffer and pattern state.
