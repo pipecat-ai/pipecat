@@ -6,7 +6,6 @@
   "exclude": ["**/*_pb2.py", "**/__pycache__"],
   "ignore": [
     "tests",
-    "src/pipecat/processors/aggregators/llm_response_universal.py",
     "src/pipecat/processors/frameworks/rtvi/observer.py",
     "src/pipecat/services/aws/nova_sonic/llm.py",
     "src/pipecat/services/google/gemini_live/llm.py",
