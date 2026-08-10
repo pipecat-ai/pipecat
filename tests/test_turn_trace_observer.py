@@ -500,6 +500,51 @@ class TestTurnTraceObserver(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(conv_id)
         self.assertGreater(len(conv_id), 0)
 
+    async def test_conversation_span_accessor(self):
+        """Test that conversation_span exposes the live span for late attributes."""
+        _, _, trace_observer, _ = self._create_observers(conversation_id="test-conv")
+        processor = IdentityFilter()
+
+        # Nothing to hand out before the conversation starts.
+        self.assertIsNone(trace_observer.conversation_span)
+
+        frames_to_send = [
+            UserStartedSpeakingFrame(),
+            UserStoppedSpeakingFrame(),
+            BotStartedSpeakingFrame(),
+            BotStoppedSpeakingFrame(),
+            SleepFrame(sleep=0.4),
+        ]
+
+        expected_down_frames = [
+            UserStartedSpeakingFrame,
+            UserStoppedSpeakingFrame,
+            BotStartedSpeakingFrame,
+            BotStoppedSpeakingFrame,
+        ]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+            observers=self._all_observers(trace_observer),
+        )
+
+        # While the conversation is open, callers can set attributes that are only known
+        # late in a call. This is the reason the accessor exists.
+        span = trace_observer.conversation_span
+        self.assertIsNotNone(span)
+        span.set_attribute("langfuse.trace.output", "recording-placeholder")
+
+        trace_observer.end_conversation_tracing()
+
+        conv_spans = self._get_spans_by_name("conversation")
+        self.assertEqual(len(conv_spans), 1)
+        self.assertEqual(conv_spans[0].attributes["langfuse.trace.output"], "recording-placeholder")
+
+        # Once the conversation ends there is no span to hand out.
+        self.assertIsNone(trace_observer.conversation_span)
+
 
 if __name__ == "__main__":
     unittest.main()

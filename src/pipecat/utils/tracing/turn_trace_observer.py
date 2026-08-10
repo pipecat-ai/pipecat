@@ -232,6 +232,24 @@ class TurnTraceObserver(BaseObserver):
 
             logger.debug(f"Ended tracing for Turn {turn_number}")
 
+    @property
+    def conversation_span(self) -> Span | None:
+        """Get the open conversation span.
+
+        Exposed so integrations can set trace-level attributes that are only known late in
+        a call, after ``additional_span_attributes`` has already been applied. One example
+        is an observability vendor that uploads the call recording at the end of a call and
+        then has to reference it from the trace.
+
+        The span is created on the first ``StartFrame`` and ended during
+        ``PipelineWorker`` cleanup, so read it while the pipeline is still running. Anything
+        set after the span ends is dropped.
+
+        Returns:
+            The conversation span, or None if tracing is off or the conversation has ended.
+        """
+        return self._conversation_span
+
     def get_current_turn_context(self) -> SpanContext | None:
         """Get the span context for the current turn.
 
