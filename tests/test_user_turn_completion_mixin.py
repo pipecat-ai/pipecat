@@ -193,7 +193,106 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         )
         self.assertFalse(any(isinstance(f, LLMMessagesAppendFrame) for f in pushed_frames))
         self.assertFalse(any(isinstance(f, LLMRunFrame) for f in pushed_frames))
-        self.assertFalse(processor._bare_complete_retry_attempted)
+        self.assertFalse(processor._no_speakable_text_retry_attempted)
+
+    async def test_direct_text_frame_does_not_reprompt(self):
+        """Direct non-whitespace LLM text counts as a speakable response."""
+        processor = MockProcessor()
+        processor._filter_incomplete_user_turns = True
+        pushed_frames = []
+
+        async def capture_frame(_processor, frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor.push_frame(LLMTextFrame("Already spoken"))
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        self.assertEqual(
+            [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)],
+            ["Already spoken"],
+        )
+        self.assertFalse(any(isinstance(f, LLMMessagesAppendFrame) for f in pushed_frames))
+        self.assertFalse(any(isinstance(f, LLMRunFrame) for f in pushed_frames))
+
+    async def test_direct_whitespace_text_frame_still_reprompts(self):
+        """Direct whitespace-only LLM text is not a speakable response."""
+        processor = MockProcessor()
+        processor._filter_incomplete_user_turns = True
+        pushed_frames = []
+
+        async def capture_frame(_processor, frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor.push_frame(LLMTextFrame(" \n\t"))
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        self.assertEqual(
+            [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)],
+            [" \n\t"],
+        )
+        self.assertEqual(
+            len([f for f in pushed_frames if isinstance(f, LLMMessagesAppendFrame)]),
+            1,
+        )
+        self.assertEqual(len([f for f in pushed_frames if isinstance(f, LLMRunFrame)]), 1)
+
+    async def test_empty_response_reprompts_once(self):
+        """A response with no text or completion marker should trigger recovery."""
+        processor = MockProcessor()
+        processor._filter_incomplete_user_turns = True
+        pushed_frames = []
+
+        async def capture_frame(_processor, frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
+            await processor.push_frame(LLMFullResponseStartFrame())
+            self.assertIsNone(processor._turn_marker)
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+            # The recovery response is also empty. Do not start an unbounded
+            # retry loop when it omits both text and a completion marker again.
+            await processor.push_frame(LLMFullResponseStartFrame())
+            self.assertIsNone(processor._turn_marker)
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        append_frames = [f for f in pushed_frames if isinstance(f, LLMMessagesAppendFrame)]
+        run_frames = [f for f in pushed_frames if isinstance(f, LLMRunFrame)]
+        text_frames = [f for f in pushed_frames if isinstance(f, LLMTextFrame) and f.text.strip()]
+
+        self.assertEqual(len(append_frames), 1)
+        self.assertEqual(append_frames[0].messages[0]["role"], "developer")
+        self.assertIn(USER_TURN_COMPLETE_MARKER, append_frames[0].messages[0]["content"])
+        self.assertEqual(len(run_frames), 1)
+        self.assertEqual(text_frames, [])
+
+        end_index = next(
+            i for i, frame in enumerate(pushed_frames) if isinstance(frame, LLMFullResponseEndFrame)
+        )
+        self.assertGreater(pushed_frames.index(append_frames[0]), end_index)
+        self.assertGreater(
+            pushed_frames.index(run_frames[0]), pushed_frames.index(append_frames[0])
+        )
+
+    async def test_empty_response_does_not_reprompt_when_filter_disabled(self):
+        """An empty response outside incomplete-turn filtering is left unchanged."""
+        processor = MockProcessor()
+        processor._filter_incomplete_user_turns = False
+        pushed_frames = []
+
+        async def capture_frame(_processor, frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        self.assertFalse(any(isinstance(f, LLMMessagesAppendFrame) for f in pushed_frames))
+        self.assertFalse(any(isinstance(f, LLMRunFrame) for f in pushed_frames))
 
     async def test_complete_marker_without_text_reprompts_once(self):
         """A bare complete marker should trigger one recovery inference."""
@@ -268,12 +367,12 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
 
         with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
             await processor._push_turn_text(USER_TURN_COMPLETE_MARKER)
-            processor._bare_complete_retry_attempted = True
+            processor._no_speakable_text_retry_attempted = True
             with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
                 await processor.process_frame(
                     VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM
                 )
-            self.assertFalse(processor._bare_complete_retry_attempted)
+            self.assertFalse(processor._no_speakable_text_retry_attempted)
             await processor.push_frame(LLMFullResponseEndFrame())
 
         self.assertFalse(any(isinstance(f, LLMMessagesAppendFrame) for f in pushed_frames))
@@ -306,10 +405,10 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
 
         with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
             await processor._push_turn_text(USER_TURN_COMPLETE_MARKER)
-            processor._bare_complete_retry_attempted = True
+            processor._no_speakable_text_retry_attempted = True
             with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
                 await processor.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
-            self.assertFalse(processor._bare_complete_retry_attempted)
+            self.assertFalse(processor._no_speakable_text_retry_attempted)
             await processor.push_frame(LLMFullResponseEndFrame())
 
             self.assertFalse(any(isinstance(f, LLMMessagesAppendFrame) for f in pushed_frames))
@@ -334,9 +433,9 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
 
         with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
             await processor._push_turn_text(USER_TURN_COMPLETE_MARKER)
-            processor._bare_complete_retry_attempted = True
+            processor._no_speakable_text_retry_attempted = True
             await processor.push_frame(FunctionCallsStartedFrame(function_calls=[]))
-            self.assertFalse(processor._bare_complete_retry_attempted)
+            self.assertFalse(processor._no_speakable_text_retry_attempted)
             await processor.push_frame(LLMFullResponseEndFrame())
 
         self.assertFalse(any(isinstance(f, LLMMessagesAppendFrame) for f in pushed_frames))
@@ -352,7 +451,7 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
 
         with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
             await processor._push_turn_text(USER_TURN_COMPLETE_MARKER)
-            processor._bare_complete_retry_attempted = True
+            processor._no_speakable_text_retry_attempted = True
             with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
                 await processor.process_frame(
                     LLMMessagesAppendFrame(
@@ -361,7 +460,7 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
                     ),
                     FrameDirection.DOWNSTREAM,
                 )
-            self.assertFalse(processor._bare_complete_retry_attempted)
+            self.assertFalse(processor._no_speakable_text_retry_attempted)
             await processor.push_frame(LLMFullResponseEndFrame())
 
         self.assertFalse(any(isinstance(f, LLMMessagesAppendFrame) for f in pushed_frames))
