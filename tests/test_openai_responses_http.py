@@ -13,7 +13,11 @@ from openai.types.responses import (
     ResponseCompletedEvent,
     ResponseErrorEvent,
     ResponseFailedEvent,
+    ResponseFunctionCallArgumentsDeltaEvent,
+    ResponseFunctionCallArgumentsDoneEvent,
+    ResponseFunctionToolCall,
     ResponseIncompleteEvent,
+    ResponseOutputItemAddedEvent,
     ResponseOutputItemDoneEvent,
     ResponseReasoningItem,
     ResponseReasoningSummaryTextDeltaEvent,
@@ -26,13 +30,19 @@ from openai.types.responses.response_usage import (
 )
 
 from pipecat.frames.frames import (
+    ErrorFrame,
+    LLMContextFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
+    LLMServiceMetadataFrame,
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.openai.responses.llm import OpenAIResponsesHttpLLMService
+from pipecat.tests.utils import run_test
 
 
 def _make_service(**kwargs):
@@ -404,3 +414,110 @@ class TestHttpStreamErrorEvents:
 
         service.push_error.assert_called_once()
         service._push_llm_text.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_terminal_error_does_not_run_announced_function_call(self):
+        """A function call whose arguments never finished streaming before a
+        terminal error must not be executed with fabricated empty arguments."""
+        service = _make_service()
+        service.push_error = AsyncMock()
+        service.run_function_calls = AsyncMock()
+
+        item = MagicMock(spec=ResponseFunctionToolCall)
+        item.id = "item_1"
+        item.name = "get_weather"
+        item.call_id = "call_1"
+        added = MagicMock(spec=ResponseOutputItemAddedEvent)
+        added.item = item
+
+        delta = MagicMock(spec=ResponseFunctionCallArgumentsDeltaEvent)
+        delta.item_id = "item_1"
+        delta.delta = '{"city": "SF"'
+
+        error = MagicMock()
+        error.message = "upstream provider error"
+
+        await _run(service, added, delta, _failed_event(error))
+
+        service.push_error.assert_called_once()
+        service.run_function_calls.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_terminal_error_still_runs_completed_function_calls(self):
+        """Parallel tool calls: a call whose arguments finished streaming before
+        the terminal error (e.g. a later item truncated by max_output_tokens)
+        must still run — only the unfinished call is dropped."""
+        service = _make_service()
+        service.push_error = AsyncMock()
+        service.run_function_calls = AsyncMock()
+
+        def _tool_call_added(item_id, name, call_id):
+            item = MagicMock(spec=ResponseFunctionToolCall)
+            item.id = item_id
+            item.name = name
+            item.call_id = call_id
+            event = MagicMock(spec=ResponseOutputItemAddedEvent)
+            event.item = item
+            return event
+
+        args_done = MagicMock(spec=ResponseFunctionCallArgumentsDoneEvent)
+        args_done.item_id = "item_1"
+        args_done.arguments = '{"city": "SF"}'
+
+        done_item = MagicMock(spec=ResponseFunctionToolCall)
+        done_item.id = "item_1"
+        done_item.name = "get_weather"
+        done_item.call_id = "call_1"
+        done_item.arguments = '{"city": "SF"}'
+        item_done = MagicMock(spec=ResponseOutputItemDoneEvent)
+        item_done.item = done_item
+
+        partial_delta = MagicMock(spec=ResponseFunctionCallArgumentsDeltaEvent)
+        partial_delta.item_id = "item_2"
+        partial_delta.delta = '{"city": "NY'
+
+        details = MagicMock()
+        details.reason = "max_output_tokens"
+
+        await _run(
+            service,
+            _tool_call_added("item_1", "get_weather", "call_1"),
+            args_done,
+            item_done,
+            _tool_call_added("item_2", "get_time", "call_2"),
+            partial_delta,
+            _incomplete_event(details),
+        )
+
+        service.push_error.assert_called_once()
+        service.run_function_calls.assert_called_once()
+        fc_list = service.run_function_calls.call_args.args[0]
+        assert [fc.function_name for fc in fc_list] == ["get_weather"]
+        assert fc_list[0].arguments == {"city": "SF"}
+
+    @pytest.mark.asyncio
+    async def test_response_failed_reaches_pipeline_as_error_frame(self):
+        """Pipeline-level check: an in-stream response.failed event must surface
+        as an ErrorFrame, which is what failover strategies react to."""
+        service = _make_service()
+
+        error = MagicMock()
+        error.message = "upstream provider error"
+        service._client.responses.create = AsyncMock(
+            return_value=_FakeAsyncStream([_failed_event(error)])
+        )
+
+        context = LLMContext()
+
+        down_frames, up_frames = await run_test(
+            service,
+            frames_to_send=[LLMContextFrame(context=context)],
+            expected_down_frames=[
+                LLMServiceMetadataFrame,
+                LLMFullResponseStartFrame,
+                LLMFullResponseEndFrame,
+            ],
+        )
+
+        error_frames = [f for f in list(down_frames) + list(up_frames) if isinstance(f, ErrorFrame)]
+        assert error_frames, "Expected an ErrorFrame after an in-stream response.failed event"

@@ -1213,7 +1213,9 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
         # Track function calls across stream events
         function_calls: dict[str, dict[str, str]] = {}  # item_id -> {name, call_id, arguments}
         current_arguments: dict[str, str] = {}  # item_id -> accumulated arguments
+        completed_calls: set[str] = set()  # item_ids whose arguments finished streaming
         reasoning_summary_open = False
+        stream_errored = False
 
         # Ensure stream and its async iterator are closed on cancellation/exception
         # to prevent socket leaks and uvloop crashes. Closing the iterator first
@@ -1270,6 +1272,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                     item_id = event.item_id
                     if item_id in function_calls:
                         function_calls[item_id]["arguments"] = event.arguments
+                        completed_calls.add(item_id)
 
                 elif isinstance(event, ResponseOutputItemDoneEvent):
                     item = event.item
@@ -1279,6 +1282,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                             function_calls[item_id]["name"] = item.name
                             function_calls[item_id]["call_id"] = item.call_id
                             function_calls[item_id]["arguments"] = item.arguments
+                            completed_calls.add(item_id)
                     elif isinstance(item, ResponseReasoningItem):
                         if reasoning_summary_open:
                             await self.push_frame(LLMThoughtEndFrame())
@@ -1331,6 +1335,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                     await self.push_error(
                         error_msg=f"LLM response error: {message or 'Response failed'}"
                     )
+                    stream_errored = True
                     break
 
                 elif isinstance(event, ResponseIncompleteEvent):
@@ -1339,11 +1344,25 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                     await self.push_error(
                         error_msg=f"LLM response error: {reason or 'Response incomplete'}"
                     )
+                    stream_errored = True
                     break
 
                 elif isinstance(event, ResponseErrorEvent):
                     await self.push_error(error_msg=f"Responses API error: {event.message}")
+                    stream_errored = True
                     break
+
+        # A stream that ended in a terminal error may have announced a function
+        # call whose arguments never finished streaming — drop those rather than
+        # run them with fabricated empty arguments. Calls whose arguments did
+        # finish (e.g. parallel tool calls completed before a later item was
+        # truncated) still run.
+        if stream_errored:
+            function_calls = {
+                item_id: call
+                for item_id, call in function_calls.items()
+                if item_id in completed_calls
+            }
 
         # Process any function calls
         if function_calls:
