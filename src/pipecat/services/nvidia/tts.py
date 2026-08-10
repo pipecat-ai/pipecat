@@ -52,7 +52,12 @@ try:
     import grpc
     import riva.client
     import riva.client.proto.riva_tts_pb2 as rtts
-    from riva.client.proto.riva_audio_pb2 import AudioEncoding
+
+    # riva's generated protobuf modules build their message classes at import
+    # time, so the names below exist only at runtime.
+    from riva.client.proto.riva_audio_pb2 import (
+        AudioEncoding,  # pyright: ignore[reportAttributeAccessIssue]
+    )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use NVIDIA TTS, you need to `uv add "pipecat-ai[nvidia]"`.')
@@ -321,14 +326,14 @@ class NvidiaTTSService(TTSService):
 
         self._service = riva.client.SpeechSynthesisService(auth)
 
-    def _create_synthesis_config(self) -> rtts.RivaSynthesisConfigResponse:
+    def _create_synthesis_config(self) -> rtts.RivaSynthesisConfigResponse:  # pyright: ignore[reportAttributeAccessIssue]
         """Fetch and validate synthesis configuration from the server."""
         if not self._service:
             raise RuntimeError("TTS service not initialized")
 
         try:
             config = self._service.stub.GetRivaSynthesisConfig(
-                riva.client.proto.riva_tts_pb2.RivaSynthesisConfigRequest()
+                rtts.RivaSynthesisConfigRequest()  # pyright: ignore[reportAttributeAccessIssue]
             )
             return config
         except grpc.RpcError as e:
@@ -425,9 +430,9 @@ class NvidiaTTSService(TTSService):
             self._process_responses(state), name="nvidia-tts-response"
         )
 
-    def _build_base_request(self) -> rtts.SynthesizeSpeechRequest:
+    def _build_base_request(self) -> rtts.SynthesizeSpeechRequest:  # pyright: ignore[reportAttributeAccessIssue]
         """Build a reusable ``SynthesizeSpeechRequest`` with current settings."""
-        req = rtts.SynthesizeSpeechRequest(
+        req = rtts.SynthesizeSpeechRequest(  # pyright: ignore[reportAttributeAccessIssue]
             text="",
             language_code=str(self._settings.language or "en-US"),
             sample_rate_hz=self.sample_rate,
@@ -453,6 +458,8 @@ class NvidiaTTSService(TTSService):
         ``SynthesizeOnline`` call, enabling Magpie's cross-sentence stitching.
         Audio responses are forwarded to the async response queue.
         """
+        assert self._service is not None, "TTS service not initialized"
+
         event_loop = self.get_event_loop()
         base_req = self._build_base_request()
 
@@ -717,6 +724,8 @@ class NvidiaTTSService(TTSService):
         stop_event = threading.Event()
 
         def run_grpc():
+            assert self._service is not None, "TTS service not initialized"
+
             try:
                 for chunk in chunks:
                     if stop_event.is_set():

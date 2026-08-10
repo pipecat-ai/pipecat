@@ -271,13 +271,14 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         self._user_turn_completion_config = UserTurnCompletionConfig()
         self._incomplete_timeout_task: asyncio.Task | None = None
 
-    def set_user_turn_completion_config(self, config: UserTurnCompletionConfig):
+    def set_user_turn_completion_config(self, config: UserTurnCompletionConfig | None):
         """Set the turn completion configuration.
 
         Args:
-            config: The turn completion configuration.
+            config: The turn completion configuration, or None to restore the
+                default configuration.
         """
-        self._user_turn_completion_config = config
+        self._user_turn_completion_config = config or UserTurnCompletionConfig()
 
     async def _broadcast_turn_completion(self):
         """Broadcast ``UserTurnInferenceCompletedFrame`` at most once per turn.

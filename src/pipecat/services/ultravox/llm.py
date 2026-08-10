@@ -530,7 +530,7 @@ class UltravoxRealtimeLLMService(LLMService):
                     result = (
                         content
                         if isinstance(content, str)
-                        else "".join(t.get("text") for t in content)
+                        else "".join(t.get("text", "") for t in content or [])
                     )
                     await self._send_tool_result(tool_call_id, result)
                     self._completed_tool_calls.add(tool_call_id)
@@ -585,14 +585,16 @@ class UltravoxRealtimeLLMService(LLMService):
             return
         await self._send({"type": "user_text_message", "text": text})
 
-    async def _update_output_medium(self, output_medium: str):
-        output_medium = output_medium.lower()
-        if output_medium == "audio":
-            output_medium = "voice"
-        if output_medium.lower() not in {"voice", "text"}:
+    async def _update_output_medium(self, output_medium: str | None):
+        # Known quirk: None is the default but setting it back to None
+        # doesn't actually take effect
+        medium = (output_medium or "").lower()
+        if medium == "audio":
+            medium = "voice"
+        if medium not in {"voice", "text"}:
             logger.warning(f"Unsupported Ultravox output medium: {output_medium}")
             return
-        await self._send({"type": "set_output_medium", "medium": output_medium})
+        await self._send({"type": "set_output_medium", "medium": medium})
 
     async def _send(self, content: bytes | dict[str, Any]):
         """Send content via the WebSocket connection.
@@ -742,11 +744,12 @@ class UltravoxRealtimeLLMService(LLMService):
     async def _handle_agent_transcript(
         self, medium: str, text: str | None, delta: str | None, final: bool
     ):
+        transcript = text or delta
         if medium == "voice":
             # In voice mode, audio is handled by _handle_audio(). Here we push
             # text transcripts of the audio for downstream consumers.
-            if (text or delta) and not final:
-                frame = LLMTextFrame(text=text or delta)
+            if transcript and not final:
+                frame = LLMTextFrame(text=transcript)
                 frame.append_to_context = False
                 await self.push_frame(frame)
             if delta:
@@ -758,10 +761,10 @@ class UltravoxRealtimeLLMService(LLMService):
                 await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())
                 self._bot_responding = None
-            elif text or delta:
+            elif transcript:
                 if not self._bot_responding:
                     await self.start_processing_metrics()
                     await self.stop_ttfb_metrics()
                     await self.push_frame(LLMFullResponseStartFrame())
                     self._bot_responding = "text"
-                await self.push_frame(LLMTextFrame(text=text or delta))
+                await self.push_frame(LLMTextFrame(text=transcript))
