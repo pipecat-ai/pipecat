@@ -32,7 +32,7 @@ from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 
 def language_to_deepgram_flux_language(language: Language) -> str:
@@ -318,7 +318,7 @@ class DeepgramFluxSTTBase(STTService):
 
         # Add language_hint parameters (only valid on flux-general-multi)
         hints = self._settings.language_hints
-        if hints and not isinstance(hints, NotGiven):
+        if hints and is_given(hints):
             if self._settings.model == self._MULTILINGUAL_MODEL:
                 for code in _prepare_language_hints(hints):
                     params.append(urlencode({"language_hint": code}))
@@ -477,7 +477,7 @@ class DeepgramFluxSTTBase(STTService):
                 hints = self._settings.language_hints
                 # Empty list clears hints; NOT_GIVEN/None also treated as clear
                 # since we only reach this branch when the user set the field.
-                if hints is None or isinstance(hints, NotGiven):
+                if hints is None or not is_given(hints):
                     message["language_hints"] = []
                 else:
                     message["language_hints"] = _prepare_language_hints(hints)

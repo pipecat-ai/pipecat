@@ -14,8 +14,8 @@ from pipecat.processors.aggregators.llm_context import (
     NOT_GIVEN,
     LLMContext,
     LLMSpecificMessage,
-    NotGiven,
 )
+from pipecat.utils.types import is_given
 
 
 class LLMContextAdapter(TypeAdapter):
@@ -43,9 +43,9 @@ class LLMContextAdapter(TypeAdapter):
         result: dict[str, Any] = {
             "messages": [self._serialize_message(m, serialize_value) for m in obj.messages],
         }
-        if not isinstance(obj.tools, NotGiven):
+        if is_given(obj.tools):
             result["tools"] = self._tools_schema_adapter.serialize(obj.tools, serialize_value)
-        if not isinstance(obj.tool_choice, NotGiven):
+        if is_given(obj.tool_choice):
             result["tool_choice"] = serialize_value(obj.tool_choice)
         return result
 

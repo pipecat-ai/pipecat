@@ -244,7 +244,7 @@ class ServiceSettings:
         missing = [
             f.name
             for f in fields(self)
-            if f.name != "extra" and isinstance(getattr(self, f.name), NotGiven)
+            if f.name != "extra" and not is_given(getattr(self, f.name))
         ]
         if missing:
             names = ", ".join(missing)

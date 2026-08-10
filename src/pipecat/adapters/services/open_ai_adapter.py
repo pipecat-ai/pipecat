@@ -72,7 +72,7 @@ def openai_from_llm_context_tools(
     Returns:
         The tools unchanged, or the SDK's sentinel if there are none.
     """
-    if tools is None or isinstance(tools, NotGiven):
+    if tools is None or not is_given(tools):
         return OPENAI_NOT_GIVEN
     return tools
 
