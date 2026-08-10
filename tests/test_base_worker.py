@@ -93,7 +93,7 @@ def make_stub_pipeline_task(name, *, bridged=None, active=True):
     )
 
 
-class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
+class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bus, self.tm = await create_test_bus()
         self.registry = create_test_registry()
