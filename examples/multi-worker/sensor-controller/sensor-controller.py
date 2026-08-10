@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Voice agent + sensor-controller worker, both as plain PipelineTasks.
+"""Voice agent + sensor-controller worker, both as plain PipelineWorkers.
 
 Two ``PipelineWorker`` instances run side by side:
 
