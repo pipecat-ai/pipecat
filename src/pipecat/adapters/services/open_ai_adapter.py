@@ -29,6 +29,7 @@ from pipecat.processors.aggregators.llm_context import (
 from pipecat.utils.types import is_given
 
 _T = TypeVar("_T")
+_ToolT = TypeVar("_ToolT")
 
 
 def _openai_from_llm_context_tool_choice(
@@ -46,16 +47,27 @@ def _openai_from_llm_context_tool_choice(
     return cast("ChatCompletionToolChoiceOptionParam", tool_choice)
 
 
-def _openai_from_llm_context_tools(
-    tools: list[ChatCompletionToolParam] | NotGiven | None,
-) -> list[ChatCompletionToolParam] | OpenAINotGiven | None:
+def openai_from_llm_context_tools(
+    tools: list[_ToolT] | NotGiven | None,
+) -> list[_ToolT] | OpenAINotGiven:
     """Reinterpret converted LLMContext tools as OpenAI's type.
 
     Same boundary as :func:`_openai_from_llm_context_tool_choice`: the tool
-    entries are already in OpenAI's format by this point, so only LLMContext's
-    "not provided" sentinel has to become the SDK's.
+    entries are already in OpenAI's format by this point, so only the absence of
+    tools has to be respelled. The SDK's sentinel is the one that omits ``tools``
+    from the request body, so both of the ways absence arrives here — LLMContext's
+    sentinel and ``None`` — map onto it.
+
+    Generic over the tool entry type so that every OpenAI surface can share one
+    translation: the Chat Completions and Responses APIs each have their own.
+
+    Args:
+        tools: Converted tools, or a value meaning no tools were provided.
+
+    Returns:
+        The tools unchanged, or the SDK's sentinel if there are none.
     """
-    if isinstance(tools, NotGiven):
+    if tools is None or isinstance(tools, NotGiven):
         return OPENAI_NOT_GIVEN
     return tools
 
@@ -165,7 +177,7 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             {
                 "messages": messages,
                 # NOTE; LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
-                "tools": _openai_from_llm_context_tools(self.from_standard_tools(context.tools)),
+                "tools": openai_from_llm_context_tools(self.from_standard_tools(context.tools)),
                 "tool_choice": _openai_from_llm_context_tool_choice(context.tool_choice),
             },
         )
