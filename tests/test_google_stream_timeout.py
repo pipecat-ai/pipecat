@@ -10,6 +10,7 @@ import asyncio
 from unittest.mock import patch
 
 import pytest
+from google import genai
 from google.genai.types import (
     Candidate,
     Content,
@@ -256,6 +257,26 @@ async def test_abandoned_stream_is_closed():
     await _stream(factory, retry_on_timeout=True, retry_timeout_secs=RETRY_TIMEOUT)
 
     assert closed == ["stalled", "answered"]
+
+
+@pytest.mark.asyncio
+async def test_client_stream_can_be_closed():
+    """Closing an abandoned stream reaches the API client's own stream object.
+
+    The tests above stand in canned async generators, which support ``aclose()``
+    by construction. This one holds the real client to the same contract, since
+    a stream that can't be closed is one whose HTTP resources leak on a retry.
+    """
+    client = genai.Client(api_key="test-key")
+
+    # The request goes out when the first chunk is pulled, so the stream can be
+    # created and closed without reaching the network.
+    stream = await client.aio.models.generate_content_stream(
+        model="gemini-2.5-flash", contents="Hello"
+    )
+
+    assert callable(getattr(stream, "aclose", None))
+    await stream.aclose()
 
 
 def test_timeouts_are_enabled_by_default():

@@ -14,7 +14,7 @@ import asyncio
 import io
 import os
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional, Union, cast
@@ -544,7 +544,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         response: AsyncIterator[GenerateContentResponse],
         *,
         first_chunk_timeout: float | None,
-    ) -> AsyncIterator[GenerateContentResponse]:
+    ) -> AsyncGenerator[GenerateContentResponse, None]:
         """Yield streamed chunks, giving up if the stream stalls between them.
 
         A stream that stops producing without closing would otherwise leave the
@@ -579,8 +579,11 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         finally:
             # Release the HTTP resources held by a stream we walk away from, whether
             # that's because it stalled, was interrupted, or is being re-issued.
-            if hasattr(response, "aclose"):
-                await response.aclose()
+            # Closing is best-effort: the client's stream type only promises
+            # AsyncIterator, which has no aclose().
+            aclose = getattr(response, "aclose", None)
+            if aclose is not None:
+                await aclose()
 
     def _handle_finish_reason(self, finish_reason: FinishReason):
         """Log why Gemini stopped generating, when it stopped for a notable reason.
