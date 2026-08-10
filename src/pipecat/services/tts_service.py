@@ -531,7 +531,8 @@ class TTSService(AIService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        pass
+        raise NotImplementedError
+        yield  # pragma: no cover
 
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert a language to the service-specific language format.
@@ -1118,7 +1119,11 @@ class TTSService(AIService):
             context_id: The context these frames belong to.
         """
         for f in frames:
-            if self._is_streaming_tokens and self.audio_context_available(context_id):
+            if (
+                self._is_streaming_tokens
+                and context_id
+                and self.audio_context_available(context_id)
+            ):
                 await self.append_to_audio_context(context_id, f)
             else:
                 await self.push_frame(f)
@@ -1138,7 +1143,7 @@ class TTSService(AIService):
     async def _push_tts_frames(
         self,
         src_frame: AggregatedTextFrame,
-        includes_inter_frame_spaces: bool | None = False,
+        includes_inter_frame_spaces: bool = False,
         append_tts_text_to_context: bool = True,
         push_assistant_aggregation: bool | None = False,
     ):
@@ -1317,7 +1322,7 @@ class TTSService(AIService):
 
     async def tts_process_generator(
         self, context_id: str, generator: AsyncGenerator[Frame | None, None]
-    ) -> bool:
+    ):
         """Process frames from an async generator, routing them through the audio context.
 
         All non-None frames yielded by the generator are appended to the audio context
@@ -1455,6 +1460,8 @@ class TTSService(AIService):
                     word, pts, context_id, includes_inter_frame_spaces
                 ):
                     if isinstance(f, TTSTextFrame):
+                        # The sequencer stamps every word frame it builds.
+                        assert f.pts is not None
                         self._word_last_pts = f.pts
                     await self.push_frame(f)
 
@@ -1624,7 +1631,7 @@ class TTSService(AIService):
 
             self._serialization_queue.task_done()
 
-    async def _maybe_reset_word_timestamps(self, context_id: str | None = None):
+    async def _maybe_reset_word_timestamps(self, context_id: str):
         """Reset word-timestamp state and emit LLMFullResponseEndFrame if needed.
 
         Called at the end of an audio context (either on clean completion timeout or
@@ -1671,6 +1678,8 @@ class TTSService(AIService):
         """
         for f in self._aggregated_frame_sequencer.force_complete(context_id, self._word_last_pts):
             if isinstance(f, TTSTextFrame):
+                # The sequencer stamps every word frame it builds.
+                assert f.pts is not None
                 self._word_last_pts = f.pts
             await self.push_frame(f)
 
