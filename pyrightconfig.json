@@ -13,7 +13,6 @@
     "src/pipecat/services/google/tts.py",
     "src/pipecat/services/heygen/client.py",
     "src/pipecat/services/inworld/realtime/llm.py",
-    "src/pipecat/services/openai/realtime/llm.py",
     "src/pipecat/services/simli/video.py",
     "src/pipecat/services/speechmatics/stt.py",
     "src/pipecat/services/tavus/video.py",
