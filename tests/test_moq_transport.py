@@ -759,3 +759,61 @@ class TestIsNormalClose(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ----------------------------------------------------------------------
+# MOQDirectHost.from_env
+# ----------------------------------------------------------------------
+
+
+class TestMOQDirectHostFromEnv(unittest.TestCase):
+    """Env-var construction: per-session paths, guards, and TLS flag."""
+
+    ENV = {
+        "MOQ_RELAY_URL": "https://relay.example.com/anon",
+        "MOQ_NAMESPACE": "demo",
+    }
+
+    def _host(self, extra=None):
+        from pipecat.runner.moq import MOQDirectHost
+
+        env = dict(self.ENV, **(extra or {}))
+        with patch.dict("os.environ", env, clear=False):
+            return MOQDirectHost.from_env(lambda args: None)
+
+    def test_watches_namespaced_request_prefix(self):
+        host = self._host()
+        self.assertEqual(host._request_prefix, "demo/request/")
+
+    def test_factory_assigns_both_paths_off_the_session_id(self):
+        host = self._host()
+        args = host._runner_args_factory("abc123")
+        self.assertEqual(args.response_path, "demo/response/abc123")
+        self.assertEqual(args.request_path, "demo/request/abc123")
+        self.assertEqual(args.session_id, "abc123")
+        self.assertFalse(args.serve)
+
+    def test_empty_namespace_puts_calls_at_the_relay_root(self):
+        host = self._host({"MOQ_NAMESPACE": ""})
+        self.assertEqual(host._request_prefix, "request/")
+        args = host._runner_args_factory("abc")
+        self.assertEqual(args.response_path, "response/abc")
+
+    def test_session_guards_default_on_and_zero_disables(self):
+        args = self._host()._runner_args_factory("s")
+        self.assertEqual(args.pipeline_idle_timeout_secs, 60.0)
+        self.assertEqual(args.connection_timeout, 60.0)
+        self.assertFalse(args.handle_sigint)
+
+        disabled = self._host({"MOQ_SESSION_IDLE_SECS": "0"})._runner_args_factory("s")
+        self.assertIsNone(disabled.pipeline_idle_timeout_secs)
+
+    def test_host_idle_defaults_on_and_zero_disables(self):
+        self.assertEqual(self._host()._host_idle_secs, 60.0)
+        self.assertIsNone(self._host({"MOQ_HOST_IDLE_SECS": "0"})._host_idle_secs)
+
+    def test_tls_insecure_flag_disables_verification(self):
+        self.assertTrue(self._host()._verify_ssl)
+        self.assertFalse(self._host({"MOQ_TLS_INSECURE": "1"})._verify_ssl)
+        args = self._host({"MOQ_TLS_INSECURE": "1"})._runner_args_factory("s")
+        self.assertFalse(args.verify_ssl)
