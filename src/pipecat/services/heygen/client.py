@@ -361,11 +361,15 @@ class HeyGenClient:
                 except Exception as e:
                     logger.warning(f"HeyGenClient: Keep-alive failed: {e}")
 
-    async def interrupt(self, event_id: str) -> None:
+    async def interrupt(self, event_id: str | None) -> None:
         """Interrupt the avatar's current action.
 
         Stops the current animation/speech and returns the avatar to idle state.
         Useful for handling user interruptions during avatar speech.
+
+        Args:
+            event_id: The event to interrupt, or None when the avatar is not
+                mid-utterance.
         """
         logger.debug("HeyGenClient interrupt")
         self._reset_audio_timing()
