@@ -63,6 +63,29 @@ class TestSkipTagsAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.aggregator.text.text, "")
         self.assertEqual(self.aggregator.text.type, "sentence")
 
+    async def test_flush_unclosed_tag_sentence_mode(self):
+        """Unclosed tag: flush still returns the buffered text (pin current behavior).
+
+        Tags are pass-through markers, so an unclosed tag's content is spoken
+        the same as a closed tag's, matching test_basic_tags.
+        """
+        await self.aggregator.reset()
+
+        text = "My email is <spell>foo@pipecat.ai"
+        results = [agg async for agg in self.aggregator.aggregate(text)]
+        self.assertEqual(len(results), 0)
+
+        result = await self.aggregator.flush()
+        self.assertEqual(result.text, text)
+        self.assertEqual(result.type, "sentence")
+
+        # Tag state resets after flush, so a reused aggregator isn't stuck
+        # thinking it's still inside a tag.
+        self.assertEqual(self.aggregator.text.text, "")
+        results = [agg async for agg in self.aggregator.aggregate("Hi there. Next")]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].text, "Hi there.")
+
 
 class TestSkipTagsAggregatorTokenMode(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -92,11 +115,25 @@ class TestSkipTagsAggregatorTokenMode(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results[0].type, "token")
 
     async def test_token_flush_unclosed_tag(self):
-        """Flush with unclosed tag returns remaining text."""
+        """Flush with an unclosed tag returns the buffered text instead of dropping it."""
         async for _ in self.aggregator.aggregate("<spell>unclosed"):
             pass
         result = await self.aggregator.flush()
-        # TOKEN mode flush returns None (parent behavior)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.text, "<spell>unclosed")
+        self.assertEqual(result.type, "token")
+
+        # Buffer and tag state are reset after flush.
+        self.assertEqual(self.aggregator.text.text, "")
+        results = [agg async for agg in self.aggregator.aggregate("more text")]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].text, "more text")
+
+    async def test_token_flush_empty_buffer(self):
+        """Flush with nothing buffered returns None."""
+        async for _ in self.aggregator.aggregate("Hello!"):
+            pass
+        result = await self.aggregator.flush()
         self.assertIsNone(result)
 
     async def test_token_text_around_tags(self):

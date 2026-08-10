@@ -114,6 +114,25 @@ class SkipTagsAggregator(SimpleTextAggregator):
             if result:
                 yield result
 
+    async def flush(self) -> Aggregation | None:
+        """Flush any remaining text in the buffer.
+
+        In SENTENCE mode, returns the buffered text as-is: tags are
+        pass-through markers, so content is spoken whether or not a start
+        tag's closing tag ever arrived. In TOKEN mode, returns any text
+        still buffered behind an unclosed tag instead of discarding it.
+
+        Returns:
+            Any remaining text, or None if the buffer is empty.
+        """
+        if self._aggregation_type == AggregationType.TOKEN:
+            if self._text:
+                result = self._text
+                await self.reset()
+                return Aggregation(text=result, type=AggregationType.TOKEN)
+            return None
+        return await super().flush()
+
     async def handle_interruption(self):
         """Handle interruptions by clearing the buffer and tag state.
 
