@@ -8,6 +8,7 @@
 
 import asyncio
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from loguru import logger
@@ -139,7 +140,7 @@ class SimliVideoService(AIService):
         super().__init__(settings=default_settings, **kwargs)
 
         # Build SimliConfig from parameters
-        config_kwargs = {
+        config_kwargs: dict[str, Any] = {
             "faceId": face_id,
         }
         if max_session_length is not None:
@@ -160,12 +161,12 @@ class SimliVideoService(AIService):
             enableSFU=True,
         )
 
-        self._pipecat_resampler: AudioResampler = None
+        self._pipecat_resampler: AudioResampler | None = None
         self._pipecat_resampler_event = asyncio.Event()
         self._simli_resampler = AudioResampler("s16", "mono", 16000)
 
-        self._audio_task: asyncio.Task = None
-        self._video_task: asyncio.Task = None
+        self._audio_task: asyncio.Task | None = None
+        self._video_task: asyncio.Task | None = None
         self._is_trinity_avatar = is_trinity_avatar
         self._previously_interrupted = is_trinity_avatar
         self._audio_buffer = bytearray()
@@ -219,6 +220,9 @@ class SimliVideoService(AIService):
     async def _consume_and_process_audio(self):
         """Consume audio frames from Simli and push them downstream."""
         await self._pipecat_resampler_event.wait()
+        # The _pipecat_resampler_event waits for _pipecat_resampler to be built
+        assert self._pipecat_resampler is not None
+
         audio_iterator = self._simli_client.getAudioStreamIterator()
         async for audio_frame in audio_iterator:
             resampled_frames = self._pipecat_resampler.resample(audio_frame)
@@ -283,7 +287,7 @@ class SimliVideoService(AIService):
                                         flushFrame.to_ndarray().astype(np.int16).tobytes()
                                     )
                             finally:
-                                await self._simli_client.playImmediate(self._audio_buffer)
+                                await self._simli_client.sendImmediate(bytes(self._audio_buffer))
                                 self._previously_interrupted = False
                                 self._audio_buffer = bytearray()
                     else:
@@ -294,7 +298,7 @@ class SimliVideoService(AIService):
         elif isinstance(frame, TTSStoppedFrame):
             try:
                 if self._previously_interrupted and len(self._audio_buffer) > 0:
-                    await self._simli_client.playImmediate(self._audio_buffer)
+                    await self._simli_client.sendImmediate(bytes(self._audio_buffer))
                     self._previously_interrupted = False
                     self._audio_buffer = bytearray()
             except Exception as e:
