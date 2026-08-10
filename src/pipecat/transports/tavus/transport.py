@@ -49,6 +49,7 @@ from pipecat.transports.daily.transport import (
     DailyParams,
     DailyTransportClient,
 )
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
 class TavusApi:
@@ -216,7 +217,7 @@ class TavusTransportClient:
         self._client: DailyTransportClient | None = None
         self._callbacks = callbacks
         self._params = params
-        self._task_manager = None
+        self._task_manager: BaseTaskManager | None = None
         self._resampler = create_stream_resampler()
         self._audio_queue: asyncio.Queue | None = None
         self._send_task = None
@@ -285,12 +286,14 @@ class TavusTransportClient:
             await self._client.setup(setup)
         except Exception as e:
             logger.error(f"Failed to setup TavusTransportClient: {e}")
-            await self._api.end_conversation(self._conversation_id)
-            self._conversation_id = None
+            await self._end_conversation()
 
     async def cleanup(self):
         """Cleanup client resources."""
         await self._end_conversation()
+        if not self._client:
+            return
+
         try:
             await self._client.cleanup()
         except Exception as e:
@@ -329,11 +332,17 @@ class TavusTransportClient:
             frame: The start frame containing initialization parameters.
         """
         logger.debug("TavusTransportClient start invoked!")
+        if not self._client:
+            return
+
         await self._client.start(frame)
         await self._client.join()
 
     async def stop(self):
         """Stop the client and end the conversation."""
+        if not self._client:
+            return
+
         await self._client.leave()
         await self._end_conversation()
 
@@ -366,6 +375,9 @@ class TavusTransportClient:
             video_source: Video source to capture from.
             color_format: Color format for video frames.
         """
+        if not self._client:
+            return
+
         await self._client.capture_participant_video(
             participant_id, callback, framerate, video_source, color_format
         )
@@ -387,6 +399,9 @@ class TavusTransportClient:
             sample_rate: Desired sample rate for audio capture.
             callback_interval_ms: Interval between audio callbacks in milliseconds.
         """
+        if not self._client:
+            return
+
         await self._client.capture_participant_audio(
             participant_id, callback, audio_source, sample_rate, callback_interval_ms
         )
@@ -411,6 +426,10 @@ class TavusTransportClient:
         Returns:
             The output sample rate in Hz.
         """
+        if not self._client:
+            # No client until setup() runs; 0 is what Daily reports before starting.
+            return 0
+
         return self._client.out_sample_rate
 
     @property
@@ -420,6 +439,9 @@ class TavusTransportClient:
         Returns:
             The input sample rate in Hz.
         """
+        if not self._client:
+            return 0
+
         return self._client.in_sample_rate
 
     async def send_interrupt_message(self) -> None:
@@ -462,6 +484,9 @@ class TavusTransportClient:
 
     async def start_send_task(self) -> None:
         """Start the audio accumulation and send task."""
+        if not self._task_manager:
+            return
+
         if not self._send_task:
             self._audio_queue = asyncio.Queue()
             self._send_task = self._task_manager.create_task(
@@ -470,7 +495,7 @@ class TavusTransportClient:
 
     async def cancel_send_task(self) -> None:
         """Cancel the send task and discard any buffered audio."""
-        if self._send_task:
+        if self._send_task and self._task_manager:
             await self._task_manager.cancel_task(self._send_task)
             self._send_task = None
             self._audio_queue = None
@@ -538,6 +563,9 @@ class TavusTransportClient:
         TavusOutputTransport on BotStoppedSpeakingFrame, or by TavusVideoService on
         TTSStoppedFrame). Fallback: BOT_VAD_STOP_FALLBACK_SECS timeout.
         """
+        # start_send_task() creates the queue before launching this task.
+        assert self._audio_queue is not None
+
         sample_rate = self.out_sample_rate
         audio_chunk_bytes = int(sample_rate * 2 * 0.1)  # 100ms, 16-bit mono
         audio_buffer = bytearray()
@@ -587,7 +615,7 @@ class TavusTransportClient:
             participant_settings=participant_settings, profile_settings=profile_settings
         )
 
-    async def register_audio_destination(self, destination: str, auto_silence: bool | None = True):
+    async def register_audio_destination(self, destination: str, auto_silence: bool = True):
         """Register an audio destination for output.
 
         Args:
