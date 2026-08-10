@@ -44,7 +44,7 @@ async def get_current_weather(params: FunctionCallParams, location: str, format:
         format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
     """
     # Simulate a long-running API call, so we can test async function calls.
-    await asyncio.sleep(20)
+    await asyncio.sleep(15)
     await params.result_callback({"conditions": "nice", "temperature": "75"})
 
 

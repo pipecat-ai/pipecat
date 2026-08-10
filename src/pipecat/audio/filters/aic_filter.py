@@ -287,8 +287,8 @@ class AICFilter(BaseAudioFilter):
         self._vad_ctx = None
 
         # Pre-allocated buffers (resized in start() once frames_per_block is known)
-        self._in_f32 = None
-        self._out_i16 = None
+        self._in_f32: np.ndarray | None = None
+        self._out_i16: np.ndarray | None = None
 
     def get_vad_context(self):
         """Return the VAD context once the processor exists.
@@ -420,6 +420,8 @@ class AICFilter(BaseAudioFilter):
             logger.debug(f"ai-coustics filter is not ready.")
             return
 
+        assert self._processor is not None  # necessarily true
+
         # Get contexts for parameter control and VAD
         self._processor_ctx = self._processor.get_processor_context()
         self._vad_ctx = self._processor.get_vad_context()
@@ -498,8 +500,13 @@ class AICFilter(BaseAudioFilter):
         Returns:
             Enhanced audio data as bytes (int16 PCM).
         """
-        if not self._aic_ready or self._processor is None:
+        if not self._aic_ready:
             return audio
+
+        # _aic_ready is only set once start() has set all three
+        assert self._processor is not None
+        assert self._in_f32 is not None
+        assert self._out_i16 is not None
 
         self._audio_buffer.extend(audio)
         available_frames = len(self._audio_buffer) // self._bytes_per_sample

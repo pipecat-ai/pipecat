@@ -244,11 +244,11 @@ Text mode **bypasses STT, VAD, and TTS** (the `user:` turn is sent as text), so 
 | TTS intelligibility / pronunciation matters | needs `judge: {modality: audio}` so you judge the transcription of real speech (`response`) |
 | final pre-ship / CI confidence pass over the real round trip | text never exercises the real STT/VAD/TTS round trip |
 
-Heuristic: **text tests the brain; audio tests the ears and mouth.** The **judge is orthogonal to the mode** — `eval:` natural-language criteria work in either (a local Ollama with `gemma2:9b` by default, or `judge: {service: openai, model: gpt-4.1}`).
+Heuristic: **text tests the brain; audio tests the ears and mouth.** The **judge is orthogonal to the mode** — `eval:` natural-language criteria work in either (a local Ollama with `gemma4:12b` by default, or `judge: {service: openai, model: gpt-4.1}`).
 
 **Realtime (speech-to-speech) bots are audio-mode only.** An S2S model has no separate text LLM step to assert on, so text mode doesn't apply — eval it the same way a person would talk to it: `user: {modality: audio}` to synthesize the user's voice in, `judge: {modality: audio}` to transcribe its spoken output for the judge. Same Kokoro-in / Moonshine-out path as above, just **required** rather than an escalation; scenarios, the judge, and assertions are otherwise identical to a cascade bot.
 
-> **Gotchas:** Only `eval:` natural-language criteria need a judge — deterministic checks (`text_contains`, `function_call`) need none. For the judge, use a free local model (Ollama) if one is already available; otherwise ask the user whether to pull it (`ollama pull gemma2:9b`, ~5 GB) or reuse the bot's provider key. Audio-mode scenarios need `audio_in_enabled=True` on the eval transport (above).
+> **Gotchas:** Only `eval:` natural-language criteria need a judge — deterministic checks (`text_contains`, `function_call`) need none. For the judge, use a free local model (Ollama) if one is already available; otherwise ask the user whether to pull it (`ollama pull gemma4:12b`, ~7.6 GB) or reuse the bot's provider key. Audio-mode scenarios need `audio_in_enabled=True` on the eval transport (above).
 
 ---
 

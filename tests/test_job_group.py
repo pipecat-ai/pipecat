@@ -22,7 +22,7 @@ from pipecat.pipeline.job_context import (
 )
 from pipecat.registry import WorkerRegistry
 from pipecat.registry.types import WorkerReadyData
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.workers.base_worker import BaseWorker
 
 
@@ -110,7 +110,6 @@ class SlowWorkerTask(BaseWorker):
 async def create_test_env():
     bus = AsyncQueueBus()
     tm = TaskManager()
-    tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
     await bus.setup(tm)
     await bus.start()
     registry = WorkerRegistry(runner_name="test-runner")

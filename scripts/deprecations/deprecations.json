@@ -960,6 +960,17 @@
       "location": "pipecat/services/cartesia/stt.py"
     },
     {
+      "subject": "CartesiaHttpTTSService.cartesia_version",
+      "module": "pipecat.services.cartesia.tts",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. The API version is pinned to the one this service implements. Will be removed in 2.0.0.",
+      "location": "pipecat/services/cartesia/tts.py"
+    },
+    {
       "subject": "CartesiaHttpTTSService.model",
       "module": "pipecat.services.cartesia.tts",
       "kind": "parameter",
@@ -1001,6 +1012,17 @@
       "relation": "use_existing",
       "replacement": "text_aggregation_mode",
       "message": "Use ``text_aggregation_mode`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/cartesia/tts.py"
+    },
+    {
+      "subject": "CartesiaTTSService.cartesia_version",
+      "module": "pipecat.services.cartesia.tts",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. The API version is pinned to the one this service implements. Will be removed in 2.0.0.",
       "location": "pipecat/services/cartesia/tts.py"
     },
     {

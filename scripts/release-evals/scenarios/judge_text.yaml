@@ -1,3 +1,5 @@
 eval:
   service: ollama
-  model: gemma2:9b
+  model: gemma4:12b
+  extra:
+    reasoning_effort: none

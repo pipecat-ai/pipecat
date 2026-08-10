@@ -27,7 +27,7 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 from loguru import logger
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -37,7 +37,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given, is_given
 from pipecat.services.stt_latency import GOOGLE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -363,6 +363,69 @@ def language_to_google_stt_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
+def _model_supports_adaptation(model: str | None) -> bool:
+    """Return whether a Google STT v2 model accepts a SpeechAdaptation config.
+
+    The telephony model rejects it with ``Recognizer does not support feature:
+    speech_adaptation_boost``. Support elsewhere is a per-model, per-language
+    matrix that Google validates on its own, so every other model is passed
+    through and left to report its own errors.
+    """
+    return (model or "").lower() != "telephony"
+
+
+def _normalize_speech_adaptation(
+    adaptation: dict[str, Any] | cloud_speech.SpeechAdaptation,
+) -> cloud_speech.SpeechAdaptation:
+    """Normalize adaptation input to a SpeechAdaptation message.
+
+    A ``phrase_sets`` entry may be a resource name string, an
+    ``AdaptationPhraseSet`` object, or a bare inline phrase set; a single
+    entry may be given in place of a list.
+
+    Args:
+        adaptation: A ``SpeechAdaptation`` message, or a dict payload to convert.
+
+    Returns:
+        The equivalent ``SpeechAdaptation`` message.
+
+    Raises:
+        ValueError: If the payload has a shape Google's API can't represent.
+    """
+    if isinstance(adaptation, cloud_speech.SpeechAdaptation):
+        return adaptation
+
+    normalized = dict(adaptation)
+
+    raw_phrase_sets = normalized.get("phrase_sets", [])
+    if isinstance(raw_phrase_sets, (str, dict)):
+        raw_phrase_sets = [raw_phrase_sets]
+    phrase_sets = list(raw_phrase_sets)
+
+    converted_phrase_sets: list[dict[str, Any]] = []
+    for phrase_set in phrase_sets:
+        if isinstance(phrase_set, str):
+            converted_phrase_sets.append({"phrase_set": phrase_set})
+            continue
+
+        if not isinstance(phrase_set, dict):
+            raise ValueError(
+                "Invalid Google SpeechAdaptation phrase_set entry: expected string or object, "
+                f"got {type(phrase_set).__name__}."
+            )
+
+        if "phrase_set" in phrase_set or "inline_phrase_set" in phrase_set:
+            converted_phrase_sets.append(phrase_set)
+            continue
+
+        converted_phrase_sets.append({"inline_phrase_set": phrase_set})
+
+    if converted_phrase_sets:
+        normalized["phrase_sets"] = converted_phrase_sets
+
+    return cloud_speech.SpeechAdaptation(normalized)
+
+
 @dataclass
 class GoogleSTTSettings(STTSettings):
     """Settings for GoogleSTTService.
@@ -388,6 +451,22 @@ class GoogleSTTSettings(STTSettings):
         enable_word_confidence: Include confidence scores for each word.
         enable_interim_results: Stream partial recognition results.
         enable_voice_activity_events: Detect voice activity in audio.
+        adaptation: Phrase sets biasing recognition toward specific words, as a
+            ``SpeechAdaptation`` message or an equivalent dict. Each
+            ``phrase_sets`` entry is either the resource name of a phrase set or
+            an inline one::
+
+                adaptation={
+                    "phrase_sets": [
+                        "projects/my-project/locations/global/phraseSets/catalog",
+                        {"phrases": [{"value": "pipecat", "boost": 15.0}]},
+                    ]
+                }
+
+            Referenced phrase sets must live in the same location as the
+            service. The telephony model rejects adaptation and transcribes
+            without it; support otherwise varies by model and language — see
+            https://cloud.google.com/speech-to-text/v2/docs/speech-to-text-supported-languages
     """
 
     languages: list[Language] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -403,6 +482,9 @@ class GoogleSTTSettings(STTSettings):
     enable_word_confidence: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_interim_results: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_voice_activity_events: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    adaptation: dict[str, Any] | cloud_speech.SpeechAdaptation | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class GoogleSTTService(STTService):
@@ -453,7 +535,10 @@ class GoogleSTTService(STTService):
             enable_word_confidence: Include confidence scores for each word.
             enable_interim_results: Stream partial recognition results.
             enable_voice_activity_events: Detect voice activity in audio.
+            adaptation: Optional Google SpeechAdaptation payload.
         """
+
+        model_config = ConfigDict(arbitrary_types_allowed=True)
 
         languages: Language | list[Language] = Field(default_factory=lambda: [Language.EN_US])
         model: str | None = "latest_long"
@@ -466,6 +551,7 @@ class GoogleSTTService(STTService):
         enable_word_confidence: bool | None = False
         enable_interim_results: bool | None = True
         enable_voice_activity_events: bool | None = False
+        adaptation: dict[str, Any] | cloud_speech.SpeechAdaptation | None = None
 
         @field_validator("languages", mode="before")
         @classmethod
@@ -538,6 +624,7 @@ class GoogleSTTService(STTService):
             enable_word_confidence=False,
             enable_interim_results=True,
             enable_voice_activity_events=False,
+            adaptation=None,
         )
 
         # 2. No direct init arg overrides
@@ -559,10 +646,14 @@ class GoogleSTTService(STTService):
                 default_settings.enable_word_confidence = params.enable_word_confidence
                 default_settings.enable_interim_results = params.enable_interim_results
                 default_settings.enable_voice_activity_events = params.enable_voice_activity_events
+                default_settings.adaptation = params.adaptation
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
+
+        if is_given(default_settings.adaptation) and default_settings.adaptation is not None:
+            default_settings.adaptation = _normalize_speech_adaptation(default_settings.adaptation)
 
         super().__init__(
             sample_rate=sample_rate,
@@ -662,6 +753,14 @@ class GoogleSTTService(STTService):
             return list(language_codes)
         return ["en-US"]
 
+    def _get_speech_adaptation(self) -> cloud_speech.SpeechAdaptation | None:
+        """Build the SpeechAdaptation message from settings."""
+        adaptation = self._settings.adaptation
+        if not is_given(adaptation) or adaptation is None:
+            return None
+        # Already a message: normalizing on the way in leaves nothing to convert.
+        return _normalize_speech_adaptation(adaptation)
+
     async def _reconnect_if_needed(self):
         """Reconnect the stream if it's currently active."""
         if self._streaming_task:
@@ -700,8 +799,6 @@ class GoogleSTTService(STTService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
-        from pipecat.services.settings import is_given
-
         # If base set_language sent a Language value, convert to languages list
         if is_given(delta.language):
             delta.languages = [delta.language]
@@ -718,6 +815,9 @@ class GoogleSTTService(STTService):
                     DeprecationWarning,
                     stacklevel=2,
                 )
+
+        if is_given(delta.adaptation) and delta.adaptation is not None:
+            delta.adaptation = _normalize_speech_adaptation(delta.adaptation)
 
         changed = await super()._update_settings(delta)
 
@@ -775,6 +875,7 @@ class GoogleSTTService(STTService):
         enable_word_confidence: bool | None = None,
         enable_interim_results: bool | None = None,
         enable_voice_activity_events: bool | None = None,
+        adaptation: dict[str, Any] | cloud_speech.SpeechAdaptation | None | _NotGiven = NOT_GIVEN,
         location: str | None = None,
     ) -> None:
         """Update service options dynamically.
@@ -794,6 +895,7 @@ class GoogleSTTService(STTService):
             enable_word_confidence: Enable/disable word confidence scores.
             enable_interim_results: Enable/disable interim results.
             enable_voice_activity_events: Enable/disable voice activity detection.
+            adaptation: New Google SpeechAdaptation payload.
             location: New Google Cloud location.
 
         Note:
@@ -823,6 +925,8 @@ class GoogleSTTService(STTService):
             delta.enable_interim_results = enable_interim_results
         if enable_voice_activity_events is not None:
             delta.enable_voice_activity_events = enable_voice_activity_events
+        if is_given(adaptation):
+            delta.adaptation = adaptation
 
         if location is not None:
             logger.debug(f"Updating location to: {location}")
@@ -838,24 +942,36 @@ class GoogleSTTService(STTService):
         self._stream_start_time = int(time.time() * 1000)
         self._new_stream = True
 
-        self._config = cloud_speech.StreamingRecognitionConfig(
-            config=cloud_speech.RecognitionConfig(
-                explicit_decoding_config=cloud_speech.ExplicitDecodingConfig(
-                    encoding=cloud_speech.ExplicitDecodingConfig.AudioEncoding.LINEAR16,
-                    sample_rate_hertz=self.sample_rate,
-                    audio_channel_count=1,
-                ),
-                language_codes=self._get_language_codes(),
-                model=self._settings.model,
-                features=cloud_speech.RecognitionFeatures(
-                    enable_automatic_punctuation=self._settings.enable_automatic_punctuation,
-                    enable_spoken_punctuation=self._settings.enable_spoken_punctuation,
-                    enable_spoken_emojis=self._settings.enable_spoken_emojis,
-                    profanity_filter=self._settings.profanity_filter,
-                    enable_word_time_offsets=self._settings.enable_word_time_offsets,
-                    enable_word_confidence=self._settings.enable_word_confidence,
-                ),
+        recognition_config = cloud_speech.RecognitionConfig(
+            explicit_decoding_config=cloud_speech.ExplicitDecodingConfig(
+                encoding=cloud_speech.ExplicitDecodingConfig.AudioEncoding.LINEAR16,
+                sample_rate_hertz=self.sample_rate,
+                audio_channel_count=1,
             ),
+            language_codes=self._get_language_codes(),
+            model=self._settings.model,
+            features=cloud_speech.RecognitionFeatures(
+                enable_automatic_punctuation=self._settings.enable_automatic_punctuation,
+                enable_spoken_punctuation=self._settings.enable_spoken_punctuation,
+                enable_spoken_emojis=self._settings.enable_spoken_emojis,
+                profanity_filter=self._settings.profanity_filter,
+                enable_word_time_offsets=self._settings.enable_word_time_offsets,
+                enable_word_confidence=self._settings.enable_word_confidence,
+            ),
+        )
+
+        speech_adaptation = self._get_speech_adaptation()
+        if speech_adaptation is not None:
+            if _model_supports_adaptation(self._settings.model):
+                recognition_config.adaptation = speech_adaptation
+            else:
+                logger.warning(
+                    "Google STT model '{}' rejects adaptation; transcribing without it.",
+                    self._settings.model,
+                )
+
+        self._config = cloud_speech.StreamingRecognitionConfig(
+            config=recognition_config,
             streaming_features=cloud_speech.StreamingRecognitionFeatures(
                 enable_voice_activity_events=self._settings.enable_voice_activity_events,
                 interim_results=self._settings.enable_interim_results,

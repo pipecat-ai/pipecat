@@ -11,9 +11,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from openai.types.responses import (
     ResponseCompletedEvent,
+    ResponseErrorEvent,
+    ResponseFailedEvent,
+    ResponseIncompleteEvent,
     ResponseOutputItemDoneEvent,
     ResponseReasoningItem,
     ResponseReasoningSummaryTextDeltaEvent,
+    ResponseTextDeltaEvent,
 )
 from openai.types.responses.response_usage import (
     InputTokensDetails,
@@ -84,6 +88,38 @@ async def _run(service, *events):
     """Drive _process_context over a fake stream of the given events."""
     service._client.responses.create = AsyncMock(return_value=_FakeAsyncStream(events))
     await service._process_context(MagicMock(spec=LLMContext))
+
+
+def _failed_event(error):
+    """Build a ResponseFailedEvent whose response carries the given error object."""
+    response = MagicMock()
+    response.error = error
+    event = MagicMock(spec=ResponseFailedEvent)
+    event.response = response
+    return event
+
+
+def _incomplete_event(incomplete_details):
+    """Build a ResponseIncompleteEvent carrying the given incomplete_details."""
+    response = MagicMock()
+    response.incomplete_details = incomplete_details
+    event = MagicMock(spec=ResponseIncompleteEvent)
+    event.response = response
+    return event
+
+
+def _error_event(message):
+    """Build a top-level ResponseErrorEvent with the given message."""
+    event = MagicMock(spec=ResponseErrorEvent)
+    event.message = message
+    return event
+
+
+def _text_delta_event(text):
+    """Build a ResponseTextDeltaEvent carrying the given delta."""
+    event = MagicMock(spec=ResponseTextDeltaEvent)
+    event.delta = text
+    return event
 
 
 # ---------------------------------------------------------------------------
@@ -230,3 +266,141 @@ class TestHttpReasoningCapture:
             "summary": [{"type": "summary_text", "text": "Thinking..."}],
             "encrypted_content": "ENCRYPTED",
         }
+
+
+# ---------------------------------------------------------------------------
+# _process_context — in-stream terminal error events
+# ---------------------------------------------------------------------------
+
+
+class TestHttpStreamErrorEvents:
+    """In-stream terminal events must surface an error, not an empty turn.
+
+    Errors raised before streaming starts are handled by the caller's except
+    blocks. These events arrive on an otherwise healthy 200 stream, so without
+    an explicit branch the loop ends and the turn looks successful.
+    """
+
+    @pytest.mark.asyncio
+    async def test_response_failed_pushes_error(self):
+        service = _make_service()
+        service.push_error = AsyncMock()
+
+        error = MagicMock()
+        error.message = "Content filter triggered"
+        await _run(service, _failed_event(error))
+
+        service.push_error.assert_called_once()
+        assert "Content filter triggered" in service.push_error.call_args.kwargs["error_msg"]
+
+    @pytest.mark.asyncio
+    async def test_response_failed_without_error_details(self):
+        """A third-party server may omit the error object on a failed response.
+
+        The SDK's lenient parse leaves it as None; the handler must still push
+        an error rather than raise on attribute access.
+        """
+        service = _make_service()
+        service.push_error = AsyncMock()
+
+        await _run(service, _failed_event(None))
+
+        service.push_error.assert_called_once()
+        assert "Response failed" in service.push_error.call_args.kwargs["error_msg"]
+
+    @pytest.mark.asyncio
+    async def test_response_failed_with_empty_error_message(self):
+        """A server may send an error object whose message is empty.
+
+        The generic fallback must still apply, so the pushed error is never
+        just the bare prefix.
+        """
+        service = _make_service()
+        service.push_error = AsyncMock()
+
+        error = MagicMock()
+        error.message = None
+        await _run(service, _failed_event(error))
+
+        service.push_error.assert_called_once()
+        assert "Response failed" in service.push_error.call_args.kwargs["error_msg"]
+
+    @pytest.mark.asyncio
+    async def test_response_incomplete_pushes_error(self):
+        service = _make_service()
+        service.push_error = AsyncMock()
+
+        details = MagicMock()
+        details.reason = "max_output_tokens"
+        await _run(service, _incomplete_event(details))
+
+        service.push_error.assert_called_once()
+        assert "max_output_tokens" in service.push_error.call_args.kwargs["error_msg"]
+
+    @pytest.mark.asyncio
+    async def test_response_incomplete_without_details(self):
+        service = _make_service()
+        service.push_error = AsyncMock()
+
+        await _run(service, _incomplete_event(None))
+
+        service.push_error.assert_called_once()
+        assert "Response incomplete" in service.push_error.call_args.kwargs["error_msg"]
+
+    @pytest.mark.asyncio
+    async def test_error_event_pushes_error(self):
+        service = _make_service()
+        service.push_error = AsyncMock()
+
+        await _run(service, _error_event("Internal server error"))
+
+        service.push_error.assert_called_once()
+        assert "Internal server error" in service.push_error.call_args.kwargs["error_msg"]
+
+    @pytest.mark.asyncio
+    async def test_real_sdk_events_are_read_from_the_right_fields(self):
+        """Drive genuine SDK event objects rather than mocks.
+
+        ``failed`` and ``incomplete`` carry their detail on different fields,
+        and a mock would satisfy any attribute path, so build the events the
+        way the streaming decoder does and assert the text arrives.
+        """
+        failed = ResponseFailedEvent.construct(
+            type="response.failed",
+            sequence_number=1,
+            response={"error": {"code": "server_error", "message": "Content filter triggered"}},
+        )
+        incomplete = ResponseIncompleteEvent.construct(
+            type="response.incomplete",
+            sequence_number=1,
+            response={"incomplete_details": {"reason": "max_output_tokens"}},
+        )
+        error = ResponseErrorEvent.construct(
+            type="error", sequence_number=1, message="Internal server error", code=None, param=None
+        )
+
+        for event, expected in (
+            (failed, "Content filter triggered"),
+            (incomplete, "max_output_tokens"),
+            (error, "Internal server error"),
+        ):
+            service = _make_service()
+            service.push_error = AsyncMock()
+
+            await _run(service, event)
+
+            service.push_error.assert_called_once()
+            assert expected in service.push_error.call_args.kwargs["error_msg"]
+
+    @pytest.mark.asyncio
+    async def test_terminal_error_stops_consuming_the_stream(self):
+        """A terminal event ends the turn: later events must not be processed."""
+        service = _make_service()
+        service.push_error = AsyncMock()
+
+        error = MagicMock()
+        error.message = "Content filter triggered"
+        await _run(service, _failed_event(error), _text_delta_event("should not be spoken"))
+
+        service.push_error.assert_called_once()
+        service._push_llm_text.assert_not_called()

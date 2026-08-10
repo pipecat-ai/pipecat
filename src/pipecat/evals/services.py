@@ -213,19 +213,52 @@ def moonshine_service(config: dict) -> STTService:
     )
 
 
+DEFAULT_OLLAMA_JUDGE_MODEL = "gemma4:12b"
+
+# The default judge is thinking-capable, and only its JSON verdict is ever read,
+# so reasoning buys nothing while costing latency and eating into the token
+# budget the verdict needs.
+DEFAULT_OLLAMA_JUDGE_EXTRA = {"reasoning_effort": "none"}
+
+
 def ollama_service(config: dict) -> LLMService[Any]:
-    """Build a local Ollama LLM service from the ``judge:`` config."""
+    """Build a local Ollama LLM service from the ``judge:`` config.
+
+    An ``extra:`` mapping is forwarded verbatim as top-level request parameters,
+    which is how provider-specific options reach the model — notably
+    ``reasoning_effort: none`` for a thinking-capable judge.
+
+    A caller who names no model gets the default judge together with the extras
+    it needs; a caller who names one gets only the extras they asked for, since
+    those options are model-specific.
+    """
     from pipecat.services.ollama.llm import OLLamaLLMService
+
+    model = config.get("model")
+    extra = config.get("extra")
+    if extra is None:
+        extra = dict(DEFAULT_OLLAMA_JUDGE_EXTRA) if model is None else {}
 
     base_url = config.get("endpoint") or "http://localhost:11434/v1"
     return OLLamaLLMService(
         base_url=base_url,
-        settings=OLLamaLLMService.Settings(model=config.get("model", "gemma2:9b")),
+        settings=OLLamaLLMService.Settings(
+            model=model or DEFAULT_OLLAMA_JUDGE_MODEL,
+            extra=extra,
+        ),
     )
 
 
 def openai_service(config: dict) -> LLMService[Any]:
-    """Build an OpenAI LLM service from the ``judge:`` config."""
+    """Build an OpenAI LLM service from the ``judge:`` config.
+
+    An ``extra:`` mapping is forwarded verbatim as top-level request parameters.
+    """
     from pipecat.services.openai.llm import OpenAILLMService
 
-    return OpenAILLMService(settings=OpenAILLMService.Settings(model=config.get("model", "gpt-4o")))
+    return OpenAILLMService(
+        settings=OpenAILLMService.Settings(
+            model=config.get("model", "gpt-4o"),
+            extra=config.get("extra") or {},
+        )
+    )

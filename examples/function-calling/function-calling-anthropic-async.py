@@ -43,7 +43,7 @@ async def get_current_weather(params: FunctionCallParams, location: str):
         location: The city and state, e.g. "San Francisco, CA".
     """
     # Simulate a long-running API call, so we can test async function calls (cancel_on_interruption=False).
-    await asyncio.sleep(20)
+    await asyncio.sleep(15)
     await params.result_callback({"conditions": "nice", "temperature": "75"})
 
 

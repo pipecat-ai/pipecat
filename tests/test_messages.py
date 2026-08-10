@@ -15,7 +15,7 @@ from pipecat.bus import (
 )
 from pipecat.frames.frames import TextFrame
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 
 class TestBusMessageRouting(unittest.IsolatedAsyncioTestCase):
@@ -33,7 +33,6 @@ class TestBusMessageRouting(unittest.IsolatedAsyncioTestCase):
         """Broadcast messages (no target) reach all subscribers."""
         bus = AsyncQueueBus()
         tm = TaskManager()
-        tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
         await bus.setup(tm)
         received_a = []
         received_b = []

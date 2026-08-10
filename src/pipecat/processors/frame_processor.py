@@ -167,6 +167,10 @@ class FrameProcessorQueue(asyncio.PriorityQueue):
         return item
 
 
+# How long a processor holds frames waiting for a readiness condition before
+# giving up and resuming. See pause_processing_all_frames_until().
+PAUSE_UNTIL_READY_TIMEOUT_SECS = 5.0
+
 # Timeout in seconds for cancelling the input frame processing task.
 # This prevents hanging if a library swallows asyncio.CancelledError.
 INPUT_TASK_CANCEL_TIMEOUT_SECS = 3
@@ -258,6 +262,9 @@ class FrameProcessor(BaseObject):
         self.__input_queue = FrameProcessorQueue()
         self.__input_event: asyncio.Event | None = None
         self.__input_frame_task: asyncio.Task | None = None
+        # Watches the readiness condition passed to
+        # pause_processing_all_frames_until() and lifts the pause it took.
+        self.__pause_watcher_task: asyncio.Task | None = None
 
         # The process task processes non-system frames.  Non-system frames will
         # be processed as soon as they are received by the processing task
@@ -561,6 +568,7 @@ class FrameProcessor(BaseObject):
         by an override.
         """
         await super().cleanup()
+        await self.__cancel_pause_watcher()
         await self.__cancel_input_task()
         await self.__cancel_process_task()
         if self._metrics is not None:
@@ -644,6 +652,70 @@ class FrameProcessor(BaseObject):
         logger.trace(f"{self}: resuming system frame processing")
         if self.__input_event:
             self.__input_event.set()
+
+    async def pause_processing_all_frames_until(
+        self,
+        ready: Callable[[], Awaitable[Any]],
+        *,
+        timeout: float = PAUSE_UNTIL_READY_TIMEOUT_SECS,
+    ):
+        """Hold frames arriving at this processor until ``ready`` resolves.
+
+        Useful for a processor that cannot act on frames until some condition
+        holds, such as one that establishes a connection in the background.
+        Frames wait in the processor's queues and are delivered in order once
+        the condition resolves, so nothing is lost.
+
+        The frame being processed when this is called is unaffected: the pause
+        takes hold from the next frame onwards. A processor pausing while it
+        handles its ``StartFrame``, for instance, still passes that frame on
+        downstream, so pipeline startup is not delayed.
+
+        Both queues are held, so a processor left paused could not process the
+        frames that shut it down. The pause is therefore always lifted: when
+        ``ready`` resolves, when ``timeout`` elapses, or at teardown, whichever
+        comes first.
+
+        Args:
+            ready: Awaited to learn when frames can be acted on, e.g.
+                ``some_event.wait``.
+            timeout: Seconds to hold frames before giving up and resuming.
+        """
+        if self._enable_direct_mode:
+            logger.warning(f"{self}: cannot hold frames, this processor runs in direct mode")
+            return
+
+        await self.__cancel_pause_watcher()
+        await self.pause_processing_system_frames()
+        await self.pause_processing_frames()
+        self.__pause_watcher_task = self.create_task(
+            self.__pause_watcher_handler(ready, timeout), name=f"{self}::pause_watcher"
+        )
+
+    async def __pause_watcher_handler(self, ready: Callable[[], Awaitable[Any]], timeout: float):
+        """Lift the pause taken by pause_processing_all_frames_until()."""
+        try:
+            await asyncio.wait_for(ready(), timeout=timeout)
+        except TimeoutError:
+            logger.warning(
+                f"{self}: still not ready after {timeout}s, resuming frame processing anyway"
+            )
+        await self.__resume_processing_all_frames()
+
+    async def __cancel_pause_watcher(self):
+        """Stop watching, and lift the pause the watcher was going to lift."""
+        if not self.__pause_watcher_task:
+            return
+
+        task = self.__pause_watcher_task
+        self.__pause_watcher_task = None
+        await self.cancel_task(task)
+        await self.__resume_processing_all_frames()
+
+    async def __resume_processing_all_frames(self):
+        """Resume both queues held by pause_processing_all_frames_until()."""
+        await self.resume_processing_system_frames()
+        await self.resume_processing_frames()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process a frame.

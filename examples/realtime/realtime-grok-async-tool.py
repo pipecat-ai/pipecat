@@ -106,7 +106,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         settings=GrokRealtimeLLMService.Settings(
             system_instruction=system_instruction,
             session_properties=SessionProperties(
-                voice="Ara",
+                voice="rex",
             ),
         ),
     )

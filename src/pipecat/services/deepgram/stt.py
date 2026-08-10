@@ -515,6 +515,9 @@ class DeepgramSTTService(STTService):
         """
         await super().start(frame)
         await self._connect()
+        # _connect() only launches the handshake, so hold what follows the
+        # StartFrame until the connection can carry it.
+        await self.pause_processing_all_frames_until(self._connection_ready.wait)
 
     async def stop(self, frame: EndFrame):
         """Stop the Deepgram STT service.

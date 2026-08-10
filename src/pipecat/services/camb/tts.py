@@ -20,8 +20,8 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
 
-from camb import StreamTtsOutputConfiguration
 from camb.client import AsyncCambAI
+from camb.types import StreamTtsOutputConfiguration
 from loguru import logger
 from pydantic import BaseModel, Field
 

@@ -1,0 +1,32 @@
+name: weather_function_call_async_audio
+
+# Audio modality, end to end: an async function call
+# (cancel_on_interruption=False) whose result arrives after the conversation has
+# moved on. The bot has to finish the turn it's on, then report the weather it
+# looked up several turns earlier.
+
+user: !include user_audio.yaml
+
+judge: !include judge_audio.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "What's the weather in San Francisco? Use Fahrenheit."
+    expect:
+      - event: function_call
+        calls:
+          - name: get_current_weather
+
+  - user: "Tell me a three-sentence short story about a sea turtle."
+    expect:
+      - event: response
+        eval: "tells a short story about a sea turtle"
+
+  - user: "Tell me a joke about a sea turtle."
+    expect:
+      - event: response
+        eval: "first, tells a joke about a sea turtle, then informs that the weather in San Francisco is 75 degrees"

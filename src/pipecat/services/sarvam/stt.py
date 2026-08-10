@@ -14,7 +14,7 @@ can handle multiple audio formats for Indian language speech recognition.
 import base64
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from loguru import logger
 from pydantic import BaseModel
@@ -86,6 +86,9 @@ def language_to_sarvam_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
+SarvamMode = Literal["transcribe", "translate", "verbatim", "translit", "codemix"]
+
+
 @dataclass(frozen=True)
 class ModelConfig:
     """Immutable configuration for a Sarvam STT model.
@@ -106,7 +109,7 @@ class ModelConfig:
     supports_language: bool
     supports_vad_params: bool
     default_language: str | None
-    default_mode: str | None
+    default_mode: SarvamMode | None
     use_translate_endpoint: bool
     use_translate_method: bool
 
@@ -240,7 +243,7 @@ class SarvamSTTService(STTService):
 
         language: Language | None = None
         prompt: str | None = None
-        mode: Literal["transcribe", "translate", "verbatim", "translit", "codemix"] | None = None
+        mode: SarvamMode | None = None
         vad_signals: bool | None = None
         high_vad_sensitivity: bool | None = None
 
@@ -249,7 +252,7 @@ class SarvamSTTService(STTService):
         *,
         api_key: str,
         model: str | None = None,
-        mode: Literal["transcribe", "translate", "verbatim", "translit", "codemix"] | None = None,
+        mode: SarvamMode | None = None,
         sample_rate: int | None = None,
         input_audio_codec: str = "wav",
         params: InputParams | None = None,
@@ -417,7 +420,9 @@ class SarvamSTTService(STTService):
 
     def _get_language_string(self) -> str | None:
         """Resolve the current language setting to a Sarvam language code string."""
-        language = assert_given(self._settings.language)
+        # The stored language is a Sarvam code rather than a Language, but the
+        # mapping keys compare equal either way.
+        language = cast(Language, assert_given(self._settings.language))
         if language:
             return language_to_sarvam_language(language)
         return self._config.default_language
@@ -618,11 +623,14 @@ class SarvamSTTService(STTService):
                 "sample_rate": self.sample_rate,
             }
 
-            # Use appropriate method based on model configuration
+            # Use appropriate method based on model configuration. The endpoint
+            # and method flags are set together per model, so the client that
+            # was connected is the one carrying the method chosen here.
+            client: Any = self._socket_client
             if self._config.use_translate_method:
-                await self._socket_client.translate(**method_kwargs)
+                await client.translate(**method_kwargs)
             else:
-                await self._socket_client.transcribe(**method_kwargs)
+                await client.transcribe(**method_kwargs)
 
         except Exception as e:
             yield ErrorFrame(error=f"Error sending audio to Sarvam: {e}", exception=e)
@@ -733,7 +741,7 @@ class SarvamSTTService(STTService):
             if self._settings.prompt is not None and self._config.supports_prompt:
                 prompt_setter = getattr(self._socket_client, "set_prompt", None)
                 if callable(prompt_setter):
-                    await prompt_setter(self._settings.prompt)
+                    await cast(Any, prompt_setter)(self._settings.prompt)
 
             # Register event handler for incoming messages
             def _message_handler(message):
@@ -912,7 +920,12 @@ class SarvamSTTService(STTService):
             "encoding": encoding,
             "sample_rate": self.sample_rate,
         }
+        # We know client exists because _is_keepalive_ready(), called before
+        # _send_keepalive(), gates on it
+        assert self._socket_client is not None
+
+        client: Any = self._socket_client
         if self._config.use_translate_method:
-            await self._socket_client.translate(**method_kwargs)
+            await client.translate(**method_kwargs)
         else:
-            await self._socket_client.transcribe(**method_kwargs)
+            await client.transcribe(**method_kwargs)

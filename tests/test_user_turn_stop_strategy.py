@@ -27,7 +27,7 @@ from pipecat.turns.user_stop import (
     ExternalUserTurnStopStrategy,
     SpeechTimeoutUserTurnStopStrategy,
 )
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 AGGREGATION_TIMEOUT = 0.1
 # Use 0 STT timeout for deterministic test timing
@@ -37,7 +37,6 @@ STT_TIMEOUT = 0.0
 class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.task_manager = TaskManager()
-        self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
 
     async def _create_strategy(self, user_speech_timeout=AGGREGATION_TIMEOUT):
         """Create strategy and configure STT timeout via metadata frame."""
@@ -639,16 +638,17 @@ class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
         self.assertTrue(should_start)
 
-    async def test_reset_mid_utterance_falsely_stops_turn(self):
-        """Test that a mid-utterance reset does not falsely stop the turn.
+    async def test_turn_start_mid_utterance_falsely_stops_turn(self):
+        """Test that a mid-utterance turn start does not falsely stop the turn.
 
-        ``UserTurnController`` resets all stop strategies when a turn starts
-        (see ``_trigger_user_turn_start``), which can happen right after a
-        ``VADUserStartedSpeakingFrame`` with no matching stop yet — the user
-        is still speaking. ``reset()`` must preserve that live VAD state so a
-        finalized transcript for a mid-utterance segment (as streaming STT
-        services emit) is not treated as the no-VAD fallback and stopped by
-        ``user_speech_timeout`` while the user never stopped talking.
+        ``UserTurnController`` calls ``handle_user_turn_started`` on all stop
+        strategies when a turn starts (see ``_trigger_user_turn_start``),
+        which can happen right after a ``VADUserStartedSpeakingFrame`` with
+        no matching stop yet — the user is still speaking. The callback must
+        preserve that live VAD state so a finalized transcript for a
+        mid-utterance segment (as streaming STT services emit) is not
+        treated as the no-VAD fallback and stopped by ``user_speech_timeout``
+        while the user never stopped talking.
         """
         strategy = await self._create_strategy()
 
@@ -662,10 +662,10 @@ class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         # User starts speaking; VAD reports start.
         await strategy.process_frame(VADUserStartedSpeakingFrame())
 
-        # Turn-start reset, as UserTurnController performs when the turn
-        # begins. No VADUserStoppedSpeakingFrame has been received — the
-        # user is still speaking.
-        await strategy.reset()
+        # Turn start, as UserTurnController performs when the turn begins.
+        # No VADUserStoppedSpeakingFrame has been received — the user is
+        # still speaking.
+        await strategy.handle_user_turn_started()
 
         # Streaming STT finalizes a mid-utterance segment while the user is
         # still talking (no VAD stop event was ever emitted).
@@ -730,7 +730,6 @@ class TestSpeechTimeoutStopSecsWarnings(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self) -> None:
         self.task_manager = TaskManager()
-        self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
 
     async def _create_strategy(self, stt_timeout=0.35):
         strategy = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=AGGREGATION_TIMEOUT)
@@ -806,7 +805,6 @@ class TestSpeechTimeoutStopSecsWarnings(unittest.IsolatedAsyncioTestCase):
 class TestExternalUserTurnCompletionStopStrategy(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.task_manager = TaskManager()
-        self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
 
     async def _create_strategy(self):
         strategy = ExternalUserTurnCompletionStopStrategy()
@@ -836,7 +834,6 @@ class TestExternalUserTurnCompletionStopStrategy(unittest.IsolatedAsyncioTestCas
 class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.task_manager = TaskManager()
-        self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
 
     async def _run_turn(self, strategy, *, started, stopped):
         """Drive one turn through the strategy and return the stop params."""

@@ -142,6 +142,29 @@ suite:
     scenarios: [capital_question]
 
   #
+  # Realtime (speech-to-speech): one bot per provider, each exercising a
+  # function call end to end inside the provider's own realtime session. These
+  # are audio scenarios, audio being the modality these services consume.
+  # Ultravox runs its async-tool example because that's the one with the
+  # weather function the scenario expects.
+  #
+  - bot: realtime/realtime-aws-nova-sonic.py
+    scenarios: [weather_function_call_audio]
+  # Needs a deployed Azure realtime model for $AZURE_REALTIME_BASE_URL to resolve.
+  # - bot: realtime/realtime-azure.py
+  #   scenarios: [weather_function_call_audio]
+  - bot: realtime/realtime-gemini-live.py
+    scenarios: [weather_function_call_audio]
+  - bot: realtime/realtime-grok.py
+    scenarios: [weather_function_call_audio]
+  - bot: realtime/realtime-inworld.py
+    scenarios: [weather_function_call_audio]
+  - bot: realtime/realtime-openai.py
+    scenarios: [weather_function_call_audio]
+  - bot: realtime/realtime-ultravox-async-tool.py
+    scenarios: [weather_function_call_audio]
+
+  #
   # Function calling: exercise one or more function calls.
   #
   - bot: getting-started/07-function-calling.py
@@ -210,6 +233,21 @@ suite:
     scenarios: [weather_function_call]
   - bot: function-calling/function-calling-sarvam.py
     scenarios: [weather_function_call]
+
+  #
+  # Async function calling: the tool keeps running after the LLM's turn ends
+  # (cancel_on_interruption=False). Its result lands ~20s later, by which point
+  # the conversation has moved on — so the bot has to deliver the weather as an
+  # aside on a later turn.
+  #
+  - bot: function-calling/function-calling-anthropic-async.py
+    scenarios: [weather_function_call_async_audio]
+  - bot: function-calling/function-calling-google-async.py
+    scenarios: [weather_function_call_async_audio]
+  - bot: function-calling/function-calling-openai-async.py
+    scenarios: [weather_function_call_async_audio]
+  - bot: function-calling/function-calling-openai-responses-async.py
+    scenarios: [weather_function_call_async_audio]
 
   #
   # Function calling with video: the bot calls a vision function that requests a
