@@ -15,9 +15,9 @@ import asyncio
 import json
 import warnings
 from abc import abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from loguru import logger
 
@@ -79,6 +79,7 @@ from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
+    LLMContextToolChoice,
     LLMSpecificMessage,
     NotGiven,
     is_given,
@@ -535,7 +536,7 @@ class LLMContextAggregator(FrameProcessor):
         Args:
             tool_choice: Tool choice configuration for the context.
         """
-        self._context.set_tool_choice(tool_choice)
+        self._context.set_tool_choice(cast(LLMContextToolChoice, tool_choice))
 
     async def reset(self):
         """Reset the aggregation state."""
@@ -847,7 +848,9 @@ class LLMUserAggregator(LLMContextAggregator):
 
         aggregation = self.aggregation_string()
         await self.reset()
-        self._context.add_message({"role": self.role, "content": aggregation})
+        self._context.add_message(
+            cast(LLMContextMessage, {"role": self.role, "content": aggregation})
+        )
         await self.push_context_frame()
 
         message = UserTurnMessageAddedMessage(
@@ -914,7 +917,7 @@ class LLMUserAggregator(LLMContextAggregator):
         for s in user_turn_strategies.stop or []:
             if getattr(s, "wait_for_transcript", False):
                 try:
-                    s.wait_for_transcript = False
+                    setattr(s, "wait_for_transcript", False)
                     flipped.append(s.__class__.__name__)
                 except AttributeError:
                     # Strategy exposes the property but no setter — skip.
@@ -1778,7 +1781,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
             return
 
         in_progress_frame = self._function_calls_in_progress[frame.tool_call_id]
-        group_id = in_progress_frame.group_id if in_progress_frame else None
+        # A call's in-progress frame always arrives before its result.
+        assert in_progress_frame is not None
+        group_id = in_progress_frame.group_id
         properties = frame.properties
         is_final = frame.properties.is_final if frame.properties else True
 
@@ -1831,7 +1836,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # sure we don't block the pipeline.
         if properties and properties.on_context_updated:
             worker_name = f"{frame.function_name}:{frame.tool_call_id}:on_context_updated"
-            task = self.create_task(properties.on_context_updated(), worker_name)
+            task = self.create_task(cast(Coroutine, properties.on_context_updated()), worker_name)
             self._context_updated_tasks.add(task)
             task.add_done_callback(self._context_updated_task_finished)
 
@@ -1949,6 +1954,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 role="assistant",
             )
         else:
+            assert frame.format is not None
             await self._context.add_image_frame_message(
                 format=frame.format,
                 size=frame.size,
@@ -2052,7 +2058,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _handle_thought_start(self, frame: LLMThoughtStartFrame):
         await self._reset_thought_aggregation()
         self._thought_append_to_context = frame.append_to_context
-        self._thought_llm = frame.llm
+        # frame.llm is required when frame.append_to_context is True, which is
+        # the only case where we read this value, so we can safely default to
+        # an empty string here for typing purposes.
+        self._thought_llm = frame.llm or ""
         self._thought_start_time = time_now_iso8601()
 
     async def _handle_thought_text(self, frame: LLMThoughtTextFrame):
@@ -2094,6 +2103,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         logger.debug(f"{self} Appending UserImageRawFrame to LLM context (size: {frame.size})")
 
+        assert frame.format is not None
         await self._context.add_image_frame_message(
             format=frame.format,
             size=frame.size,

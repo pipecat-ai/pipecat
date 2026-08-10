@@ -21,7 +21,7 @@ import io
 import wave
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, TypeAlias, TypeGuard, TypeVar, cast, overload
+from typing import Any, Literal, TypeAlias, TypeGuard, TypeVar, cast, overload
 
 from loguru import logger
 from openai._types import NOT_GIVEN as OPEN_AI_NOT_GIVEN
@@ -468,10 +468,17 @@ class LLMContext:
         message = await LLMContext.create_audio_message(audio_frames=audio_frames, text=text)
         self.add_message(message)
 
+    # Unless allow_provider_tools says otherwise, a list must hold only standard
+    # tools — ``FunctionSchema`` objects and/or direct functions — which the
+    # implementation below checks and raises on. ``tools`` is typed no narrower
+    # than that check, so a caller holding a wider union (e.g.
+    # ``LLMSetToolsFrame.tools``) can defer to it rather than narrowing first.
     @overload
     @staticmethod
     def _normalize_and_validate_tools(
-        tools: ToolsSchema | list[FunctionSchema | DirectFunction] | NotGiven,
+        tools: ToolsSchema | list[Any] | NotGiven,
+        *,
+        allow_provider_tools: Literal[False] = False,
     ) -> ToolsSchema | NotGiven: ...
 
     @overload
@@ -479,7 +486,7 @@ class LLMContext:
     def _normalize_and_validate_tools(
         tools: ToolsSchema | list[Any] | NotGiven,
         *,
-        allow_provider_tools: bool,
+        allow_provider_tools: Literal[True],
     ) -> ToolsSchema | list[Any] | NotGiven: ...
 
     @staticmethod
