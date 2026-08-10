@@ -261,6 +261,18 @@ class LocalModelPool:
             if not keep:
                 await instance.aclose()
 
+    async def __aenter__(self) -> "LocalModelPool":
+        """Enter the pool's scope.
+
+        Returns:
+            The pool itself, to bind in the ``async with``.
+        """
+        return self
+
+    async def __aexit__(self, *args) -> None:
+        """Leave the pool's scope, closing every instance it holds."""
+        await self.aclose()
+
     async def aclose(self) -> None:
         """Close every instance the pool holds."""
         async with self._lock:
@@ -565,8 +577,7 @@ class EvalSuite:
         sem = asyncio.Semaphore(self.manifest.concurrency)
         # One set of local models for the whole sweep. Concurrency bounds how many
         # can be in use at once, so that is what the pool keeps.
-        pool = LocalModelPool(self.manifest.concurrency)
-        try:
+        async with LocalModelPool(self.manifest.concurrency) as pool:
             await asyncio.gather(
                 *(
                     self._run_one(
@@ -585,8 +596,6 @@ class EvalSuite:
                     for i, run in enumerate(self.runs)
                 )
             )
-        finally:
-            await pool.aclose()
 
     async def _run_one(
         self,
