@@ -15,6 +15,12 @@ Dependencies:
     tokenization. NLTK is licensed under the Apache License 2.0.
     See: https://www.nltk.org/
     Source: https://www.nltk.org/api/nltk.tokenize.punkt.html
+
+    The tokenizer and its ``punkt_tab`` data load on first use, and the data is
+    downloaded if it isn't already present. Deployments that build their own
+    image should bundle it at build time (``python -m nltk.downloader
+    punkt_tab``) or point ``NLTK_DATA`` at a directory that already has it, so
+    that a slow or unavailable network can't delay the first bot turn.
 """
 
 import re
