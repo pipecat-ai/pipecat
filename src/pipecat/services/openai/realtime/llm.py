@@ -13,7 +13,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
-from typing import Any
+from typing import Any, Self, cast, get_args
 
 from loguru import logger
 from PIL import Image
@@ -127,7 +127,7 @@ class OpenAIRealtimeLLMSettings(LLMSettings):
 
     # -- apply_update override -----------------------------------------------
 
-    def apply_update(self, delta: "OpenAIRealtimeLLMService.Settings") -> dict[str, Any]:
+    def apply_update(self, delta: Self) -> dict[str, Any]:
         """Merge a delta, keeping ``model``/``system_instruction`` in sync with SP.
 
         When the delta contains ``session_properties``, it **replaces** the
@@ -243,7 +243,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         settings: Settings | None = None,
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
-        video_frame_detail: str = "auto",
+        video_frame_detail: events.ImageDetail = "auto",
         user_audio_preroll_secs: float | None = None,
         **kwargs,
     ):
@@ -326,7 +326,9 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         if settings is not None:
             default_settings.apply_update(settings)
 
-        self._omit_unsupported_input_audio_transcription_prompt(default_settings.session_properties)
+        self._omit_unsupported_input_audio_transcription_prompt(
+            assert_given(default_settings.session_properties)
+        )
 
         # Build WebSocket URL with model query parameter
         # Source: https://platform.openai.com/docs/guides/realtime-websocket
@@ -341,11 +343,11 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         self.base_url = full_url
         self._audio_input_paused = start_audio_paused
         self._video_input_paused = start_video_paused
-        self._video_frame_detail = video_frame_detail
+        self._video_frame_detail: events.ImageDetail = video_frame_detail
         self._last_sent_time = 0
         self._websocket = None
         self._receive_task = None
-        self._context: LLMContext = None
+        self._context: LLMContext | None = None
 
         self._llm_needs_conversation_setup = True
 
@@ -431,10 +433,11 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         Args:
             detail: Detail level - "auto", "low", or "high".
         """
-        if detail not in ["auto", "low", "high"]:
-            logger.warning(f"Invalid video detail '{detail}', must be 'auto', 'low', or 'high'")
+        valid_details = get_args(events.ImageDetail)
+        if detail not in valid_details:
+            logger.warning(f"Invalid video detail '{detail}', must be one of {valid_details}")
             return
-        self._video_frame_detail = detail
+        self._video_frame_detail = cast(events.ImageDetail, detail)
 
     def _is_modality_enabled(self, modality: str) -> bool:
         """Check if a specific modality is enabled, "text" or "audio"."""
@@ -444,7 +447,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         ]
         return modality in modalities
 
-    def _get_enabled_modalities(self) -> list[str]:
+    def _get_enabled_modalities(self) -> list[events.Modality]:
         """Get the list of enabled modalities."""
         modalities = assert_given(self._settings.session_properties).output_modalities or [
             "audio",
@@ -453,8 +456,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         # API only supports single modality responses: either ["text"] or ["audio"]
         if "audio" in modalities:
             return ["audio"]
-        elif "text" in modalities:
-            return ["text"]
+        return ["text"]
 
     async def retrieve_conversation_item(self, item_id: str):
         """Retrieve a conversation item by ID from the server.
@@ -818,7 +820,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         # which remote server expects. It would only be a ToolsSchema if that's
         # how it was provided in the constructor or via LLMUpdateSettingsFrame.
         if settings.tools and isinstance(settings.tools, ToolsSchema):
-            settings.tools = adapter.from_standard_tools(settings.tools)
+            settings.tools = cast(list[Any], adapter.from_standard_tools(settings.tools))
 
         outgoing = self._strip_unsupported_reasoning(settings)
 
@@ -830,6 +832,8 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     #
 
     async def _receive_task_handler(self):
+        assert self._websocket is not None
+
         async for message in self._websocket:
             evt = events.parse_server_event(message)
             if evt.type == "session.created":
@@ -1136,6 +1140,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         - return false
         """
         if evt.error.code == "item_retrieve_invalid_item_id":
+            assert evt.error.event_id is not None
             item_id = evt.error.event_id.split("_", 1)[1]  # event_id is of the form "rci_{item_id}"
             futures = self._retrieve_conversation_item_futures.pop(item_id, None)
             if futures:
@@ -1174,6 +1179,8 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             self._run_llm_when_api_session_ready = True
             return
 
+        assert self._context is not None
+
         adapter = self.get_llm_adapter()
 
         # Configure the LLM for this session if needed
@@ -1208,6 +1215,8 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         )
 
     async def _process_completed_function_calls(self, send_new_results: bool):
+        assert self._context is not None
+
         # Check for set of completed function calls in the context
         sent_new_result = False
         for message in self._context.get_messages():
@@ -1261,7 +1270,9 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                     # Found a newly-completed function call - send the result to the service
                     if send_new_results:
                         sent_new_result = True
-                        await self._send_tool_result(tool_call_id, message.get("content"))
+                        await self._send_tool_result(
+                            tool_call_id, cast(str | None, message.get("content"))
+                        )
                     self._completed_tool_calls.add(tool_call_id)
 
         # If we reported any new tool call results to the service, trigger
@@ -1339,6 +1350,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
         # Convert video frame to JPEG format and encode as base64
         buffer = io.BytesIO()
+        assert frame.format is not None
         Image.frombytes(frame.format, frame.size, frame.image).save(buffer, format="JPEG")
         data = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
@@ -1364,7 +1376,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         except Exception as e:
             await self.push_error(error_msg=f"Send error: {e}")
 
-    async def _send_tool_result(self, tool_call_id: str, result: str):
+    async def _send_tool_result(self, tool_call_id: str, result: str | None):
         logger.debug(f"Sending tool result to OpenAI Realtime for tool_call_id={tool_call_id}")
         item = events.ConversationItem(
             type="function_call_output",
