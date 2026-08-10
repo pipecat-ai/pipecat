@@ -220,6 +220,32 @@ def parse_start_end_tags(
     return (None, current_tag_index)
 
 
+def longest_trailing_partial_match(text: str, candidates: Sequence[str]) -> int:
+    """Find the length of the longest suffix of text that is a proper prefix of a candidate.
+
+    Used to detect a delimiter (e.g., an XML-style start tag) that has been
+    split across two text chunks: the trailing partial delimiter can be held
+    back from output until the next chunk completes it, rather than being
+    flushed as plain text and losing the delimiter.
+
+    Args:
+        text: The text to check for a trailing partial match.
+        candidates: Full strings to match a proper prefix of against the end of text.
+
+    Returns:
+        The length of the longest matching suffix, or 0 if no candidate has a
+        proper prefix matching the end of text.
+    """
+    longest = 0
+    for candidate in candidates:
+        max_len = min(len(text), len(candidate) - 1)
+        for length in range(max_len, longest, -1):
+            if text[-length:] == candidate[:length]:
+                longest = length
+                break
+    return longest
+
+
 @dataclass
 class TextPartForConcatenation:
     """Class representing a part of text for concatenation with concatenate_aggregated_text.
