@@ -12,7 +12,6 @@
     "src/pipecat/services/google/tts.py",
     "src/pipecat/services/inworld/realtime/llm.py",
     "src/pipecat/services/speechmatics/stt.py",
-    "src/pipecat/transports/livekit/transport.py",
     "src/pipecat/transports/tavus/transport.py"
   ],
   "reportMissingImports": false
