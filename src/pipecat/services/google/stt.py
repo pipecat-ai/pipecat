@@ -24,7 +24,7 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -635,17 +635,23 @@ class GoogleSTTService(STTService):
             if not settings:
                 default_settings.languages = list(params.language_list)
                 default_settings.model = params.model
-                default_settings.use_separate_recognition_per_channel = (
+                # The deprecated params type their flags as optional, and Google
+                # reads an unset flag as False, so that is what None becomes.
+                default_settings.use_separate_recognition_per_channel = bool(
                     params.use_separate_recognition_per_channel
                 )
-                default_settings.enable_automatic_punctuation = params.enable_automatic_punctuation
-                default_settings.enable_spoken_punctuation = params.enable_spoken_punctuation
-                default_settings.enable_spoken_emojis = params.enable_spoken_emojis
-                default_settings.profanity_filter = params.profanity_filter
-                default_settings.enable_word_time_offsets = params.enable_word_time_offsets
-                default_settings.enable_word_confidence = params.enable_word_confidence
-                default_settings.enable_interim_results = params.enable_interim_results
-                default_settings.enable_voice_activity_events = params.enable_voice_activity_events
+                default_settings.enable_automatic_punctuation = bool(
+                    params.enable_automatic_punctuation
+                )
+                default_settings.enable_spoken_punctuation = bool(params.enable_spoken_punctuation)
+                default_settings.enable_spoken_emojis = bool(params.enable_spoken_emojis)
+                default_settings.profanity_filter = bool(params.profanity_filter)
+                default_settings.enable_word_time_offsets = bool(params.enable_word_time_offsets)
+                default_settings.enable_word_confidence = bool(params.enable_word_confidence)
+                default_settings.enable_interim_results = bool(params.enable_interim_results)
+                default_settings.enable_voice_activity_events = bool(
+                    params.enable_voice_activity_events
+                )
                 default_settings.adaptation = params.adaptation
 
         # 4. Apply settings delta (canonical API, always wins)
@@ -801,7 +807,7 @@ class GoogleSTTService(STTService):
         """
         # If base set_language sent a Language value, convert to languages list
         if is_given(delta.language):
-            delta.languages = [delta.language]
+            delta.languages = [cast(Language, delta.language)]
             # Clear language so the base class doesn't try to store it
             delta.language = NOT_GIVEN
 
@@ -962,7 +968,7 @@ class GoogleSTTService(STTService):
 
         speech_adaptation = self._get_speech_adaptation()
         if speech_adaptation is not None:
-            if _model_supports_adaptation(self._settings.model):
+            if _model_supports_adaptation(assert_given(self._settings.model)):
                 recognition_config.adaptation = speech_adaptation
             else:
                 logger.warning(
@@ -1103,7 +1109,8 @@ class GoogleSTTService(STTService):
                     if not transcript:
                         continue
 
-                    primary_language = self._get_language_codes()[0]
+                    # Google's language codes are the values Language is built from.
+                    primary_language = cast(Language, self._get_language_codes()[0])
 
                     if result.is_final:
                         self._last_transcript_was_final = True
