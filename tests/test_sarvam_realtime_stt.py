@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import base64
 import json
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
@@ -17,7 +18,6 @@ import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
     ErrorFrame,
     InterimTranscriptionFrame,
-    MetricsFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -27,12 +27,9 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 from pipecat.services.sarvam._sdk import sdk_headers
-from pipecat.services.sarvam.realtime_stt import (
-    SarvamRealtimeSTTError,
-    SarvamRealtimeSTTService,
-    SarvamRealtimeSTTUsageMetricsData,
-)
+from pipecat.services.sarvam.realtime_stt import SarvamRealtimeSTTService
 from pipecat.transcriptions.language import Language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 
 
 class _FakeWebsocket:
@@ -183,7 +180,6 @@ def test_string_language_setting_does_not_use_enum_converter(monkeypatch):
         SarvamRealtimeSTTService.Settings(language_code="fr-FR"),
         SarvamRealtimeSTTService.Settings(stream_type="slow"),
         SarvamRealtimeSTTService.Settings(endpointing="server"),
-        SarvamRealtimeSTTService.Settings(encoding="opus"),
         SarvamRealtimeSTTService.Settings(sample_rate=44100),
         SarvamRealtimeSTTService.Settings(threshold=1.1),
         SarvamRealtimeSTTService.Settings(silence_duration_ms=-1),
@@ -231,8 +227,10 @@ async def test_client_sends_50ms_chunks_regardless_of_stream_type(stream_type):
 
     await _consume(service.run_stt(b"\x02" * 800))
 
-    assert service._websocket.sent == [b"\x01" * 800 + b"\x02" * 800]
-    assert service._local_audio_bytes == 1600
+    expected_audio = b"\x01" * 800 + b"\x02" * 800
+    assert service._websocket.sent == [
+        json.dumps({"event": "audio_input", "audio": base64.b64encode(expected_audio).decode()})
+    ]
 
 
 @pytest.mark.asyncio
@@ -268,7 +266,7 @@ async def test_manual_endpointing_flushes_buffered_audio_before_speech_end():
     await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
 
     assert service._websocket.sent == [
-        b"\x01" * 400,
+        json.dumps({"event": "audio_input", "audio": base64.b64encode(b"\x01" * 400).decode()}),
         json.dumps({"event": "speech_end"}),
     ]
     assert service._audio_buffer == bytearray()
@@ -395,12 +393,7 @@ async def test_nonfatal_error_emits_raw_payload(monkeypatch):
         'Sarvam realtime STT error: {"event": "error", "code": "transient_warning", '
         '"message": "retrying", "is_fatal": false}'
     )
-    assert pushed_errors[0][1].payload == {
-        "event": "error",
-        "code": "transient_warning",
-        "message": "retrying",
-        "is_fatal": False,
-    }
+    assert pushed_errors[0][1] is None
     assert pushed_errors[0][2] is False
 
 
@@ -456,70 +449,6 @@ async def test_session_begin_logs_request_id_at_info(monkeypatch):
         f"{service} Sarvam realtime session.begin request_id=request-123"
     ]
     assert captured_logger.debug_messages == []
-
-
-@pytest.mark.asyncio
-async def test_nonfatal_error_logs_summary_and_raw_payload_separately(monkeypatch):
-    service = SarvamRealtimeSTTService(api_key="test-key")
-    service._request_id = "request-123"
-    captured_logger = _CapturingLogger()
-    monkeypatch.setattr("pipecat.services.sarvam.realtime_stt.logger", captured_logger)
-    monkeypatch.setattr(service, "push_error", _noop)
-    payload = {
-        "event": "error",
-        "code": "transient_warning",
-        "message": "retrying",
-        "is_fatal": False,
-        "diagnostic": {"attempt": 2},
-    }
-
-    await service._handle_message(payload)
-
-    assert captured_logger.warning_messages == [
-        f"{service} Sarvam realtime error code=transient_warning "
-        "is_fatal=False request_id=request-123"
-    ]
-    assert captured_logger.debug_messages == [f"{service} Sarvam realtime error payload: {payload}"]
-
-
-@pytest.mark.asyncio
-async def test_session_end_usage_is_authoritative(monkeypatch):
-    service = SarvamRealtimeSTTService(api_key="test-key")
-    service._enable_usage_metrics = True
-    pushed = []
-    monkeypatch.setattr(service, "push_frame", _capture(pushed))
-
-    await service._handle_message(
-        {
-            "event": "session.end",
-            "request_id": "raw-id",
-            "audio_duration_s": 1.0,
-            "total_duration_s": 0.22,
-        }
-    )
-
-    usage_frames = [frame for frame in pushed if isinstance(frame, MetricsFrame)]
-    assert len(usage_frames) == 1
-    assert isinstance(usage_frames[0].data[0], SarvamRealtimeSTTUsageMetricsData)
-    assert usage_frames[0].data[0].value == 1.0
-    assert service._server_usage_reported is True
-
-
-@pytest.mark.asyncio
-async def test_local_usage_is_fallback_when_session_end_missing(monkeypatch):
-    service = SarvamRealtimeSTTService(api_key="test-key")
-    service._enable_usage_metrics = True
-    service._websocket = _FakeWebsocket()
-    service._sample_rate = 16000
-    pushed = []
-    monkeypatch.setattr(service, "push_frame", _capture(pushed))
-
-    await _consume(service.run_stt(b"\x01" * 16000))
-    await _consume(service.run_stt(b"\x02" * 16000))
-    await service._disconnect()
-
-    usage_frames = [frame for frame in pushed if isinstance(frame, MetricsFrame)]
-    assert usage_frames[-1].data[0].value == 1.0
 
 
 @pytest.mark.asyncio
@@ -605,7 +534,6 @@ async def test_endpointing_is_not_pending_when_socket_is_closed():
     ("field", "value"),
     [
         ("sample_rate", 8000),
-        ("encoding", "mulaw"),
         ("return_timestamps", True),
         ("prefix_padding_ms", 200),
         ("lid_gate_seconds", 1.5),
@@ -762,6 +690,21 @@ def test_explicit_language_code_is_not_overridden_by_language():
     assert _query(service)["language_code"] == ["hi-IN"]
 
 
+def test_service_metadata_recommends_external_turn_strategies_in_vad_mode():
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    frame = service.service_metadata_frame()
+    assert isinstance(frame.user_turn_strategies, ExternalUserTurnStrategies)
+
+
+def test_service_metadata_leaves_turn_strategies_unset_in_manual_mode():
+    service = SarvamRealtimeSTTService(
+        api_key="test-key",
+        settings=SarvamRealtimeSTTService.Settings(endpointing="manual"),
+    )
+    frame = service.service_metadata_frame()
+    assert frame.user_turn_strategies is None
+
+
 def test_reconnect_on_error_cannot_be_overridden():
     with pytest.raises(TypeError, match="reconnect_on_error"):
         SarvamRealtimeSTTService(api_key="test-key", reconnect_on_error=True)
@@ -789,7 +732,7 @@ async def test_receive_errors_are_reported_without_reconnect(monkeypatch, receiv
 
 
 @pytest.mark.asyncio
-async def test_fatal_sarvam_error_is_reported_without_reconnect(monkeypatch):
+async def test_sarvam_error_is_reported_without_reconnect(monkeypatch):
     service = SarvamRealtimeSTTService(api_key="test-key")
     report_error = AsyncMock()
     try_reconnect = AsyncMock(return_value=False)
@@ -816,17 +759,16 @@ async def test_fatal_sarvam_error_is_reported_without_reconnect(monkeypatch):
     )
     monkeypatch.setattr(service, "_try_reconnect", try_reconnect)
     monkeypatch.setattr(service, "push_error", fake_push_error)
-    monkeypatch.setattr(service, "stop_all_metrics", AsyncMock())
 
     await service._receive_task_handler(report_error)
 
-    assert pushed_errors[0][2] is True
+    assert pushed_errors[0][2] is False
     try_reconnect.assert_not_awaited()
     report_error.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_fatal_error_preserves_raw_payload(monkeypatch):
+async def test_error_preserves_raw_payload(monkeypatch):
     service = SarvamRealtimeSTTService(api_key="test-key")
     pushed_errors = []
 
@@ -842,13 +784,12 @@ async def test_fatal_error_preserves_raw_payload(monkeypatch):
         "is_fatal": True,
         "status_code": 1003,
     }
-    with pytest.raises(SarvamRealtimeSTTError):
-        await service._handle_message(payload)
+    await service._handle_message(payload)
 
     assert pushed_errors
     assert "invalid_subscription_key" in pushed_errors[0][0]
-    assert pushed_errors[0][1].payload == payload
-    assert pushed_errors[0][2] is True
+    assert pushed_errors[0][1] is None
+    assert pushed_errors[0][2] is False
 
 
 async def _consume(generator):
