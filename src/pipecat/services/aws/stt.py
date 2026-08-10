@@ -222,8 +222,6 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
                 # Send the formatted event message
                 await self._websocket.send(event_message)
-                # Start metrics after first chunk sent
-                await self.start_processing_metrics()
             except Exception as e:
                 yield ErrorFrame(error=f"Error sending audio: {e}")
 
@@ -568,7 +566,6 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                                         is_final,
                                         language,
                                     )
-                                    await self.stop_processing_metrics()
                                 else:
                                     await self.push_frame(
                                         InterimTranscriptionFrame(

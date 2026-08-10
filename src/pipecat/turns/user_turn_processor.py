@@ -12,6 +12,8 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     StartFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -149,6 +151,15 @@ class UserTurnProcessor(FrameProcessor):
         elif isinstance(frame, CancelFrame):
             await self._cancel(frame)
             await self.push_frame(frame, direction)
+        elif isinstance(frame, ProposedUserStartedSpeakingFrame):
+            # A proposal is resolved once. Forwarding one our own strategies
+            # resolve would let a resolver further down the pipeline decide the
+            # same turn a second time.
+            if not self._user_turn_controller.resolves_proposed_turn_start_frames:
+                await self.push_frame(frame, direction)
+        elif isinstance(frame, ProposedUserStoppedSpeakingFrame):
+            if not self._user_turn_controller.resolves_proposed_turn_stop_frames:
+                await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 

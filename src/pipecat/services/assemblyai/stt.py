@@ -26,12 +26,11 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -357,7 +356,10 @@ class AssemblyAISTTService(WebsocketSTTService):
                 - No ForceEndpoint on VAD stop
             should_interrupt: Whether to interrupt the bot when the user starts speaking
                 in AssemblyAI turn detection mode (vad_force_turn_endpoint=False). Only applies
-                when using AssemblyAI's built-in turn detection. Defaults to True.
+                when using AssemblyAI's built-in turn detection. Passed along to the
+                user turn strategies this service recommends, which own the
+                interruption; a user-supplied ``user_turn_strategies`` overrides the
+                recommendation and this setting with it. Defaults to True.
             speaker_format: Optional format string for speaker labels when diarization is enabled.
                 Use {speaker} for speaker label and {text} for transcript text.
                 Example: "<{speaker}>{text}</{speaker}>" or "{speaker}: {text}"
@@ -655,15 +657,17 @@ class AssemblyAISTTService(WebsocketSTTService):
         """Request external turn strategies in AssemblyAI's turn-detection mode.
 
         With ``vad_force_turn_endpoint=False`` AssemblyAI's model decides turn
-        endings and emits ``UserStarted/StoppedSpeakingFrame``, so the user
-        aggregator defers to those rather than running local VAD/smart-turn. In the
-        default Pipecat mode (``vad_force_turn_endpoint=True``) the STT emits no turn
-        frames, so the defaults are left in place. Applied unless the user passed
+        endings and emits ``ProposedUserStarted/StoppedSpeakingFrame``, so the user
+        aggregator resolves those rather than running local VAD/smart-turn. In the
+        default Pipecat mode (``vad_force_turn_endpoint=True``) the STT proposes no
+        turns, so the defaults are left in place. Applied unless the user passed
         their own ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
         if not self._vad_force_turn_endpoint:
-            frame.user_turn_strategies = ExternalUserTurnStrategies()
+            frame.user_turn_strategies = ExternalUserTurnStrategies(
+                enable_interruptions=self._should_interrupt,
+            )
         return frame
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
@@ -788,16 +792,14 @@ class AssemblyAISTTService(WebsocketSTTService):
         yield None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames for VAD and metrics handling.
+        """Forward a Pipecat-detected turn end to AssemblyAI as a ForceEndpoint.
 
         Args:
             frame: Frame to process.
             direction: Direction of frame processing.
         """
         await super().process_frame(frame, direction)
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            pass
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             if (
                 self._vad_force_turn_endpoint
                 and self._websocket
@@ -805,7 +807,6 @@ class AssemblyAISTTService(WebsocketSTTService):
             ):
                 self.request_finalize()
                 await self._websocket.send(json.dumps({"type": "ForceEndpoint"}))
-            await self.start_processing_metrics()
 
     @traced_stt
     async def _trace_transcription(self, transcript: str, is_final: bool, language: Language):
@@ -1118,10 +1119,10 @@ class AssemblyAISTTService(WebsocketSTTService):
     async def _handle_speech_started(self, message: SpeechStartedMessage):
         """Handle SpeechStarted event — fast barge-in for AssemblyAI turn detection.
 
-        Broadcasts UserStartedSpeakingFrame to signal the start of user
-        speech, then pushes an interruption to cancel any bot audio.
-        SpeechStarted fires before any transcript arrives, so the turn
-        is cleanly started before any transcription frames are pushed.
+        Proposes a turn start, which the user turn strategies resolve into a
+        ``UserStartedSpeakingFrame`` and an interruption. SpeechStarted fires
+        before any transcript arrives, so the turn is cleanly started before any
+        transcription frames are pushed.
 
         Only applies when using AssemblyAI's built-in turn detection. When using
         Pipecat turn detection, VAD + smart turn analyzer handle interruptions.
@@ -1129,10 +1130,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         if self._vad_force_turn_endpoint:
             return  # Pipecat mode: handled by aggregator
 
-        await self.broadcast_frame(UserStartedSpeakingFrame)
-        if self._should_interrupt:
-            await self.broadcast_interruption()
-        await self.start_processing_metrics()
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
         self._user_speaking = True
 
     async def _handle_termination(self, message: TerminationMessage):
@@ -1212,7 +1210,6 @@ class AssemblyAISTTService(WebsocketSTTService):
                     )
                 )
                 await self._trace_transcription(transcript_text, True, language)
-                await self.stop_processing_metrics()
                 await self._call_event_handler("on_end_of_turn", transcript_text)
             else:
                 await self.push_frame(
@@ -1244,11 +1241,10 @@ class AssemblyAISTTService(WebsocketSTTService):
                     )
                 )
                 await self._trace_transcription(transcript_text, True, language)
-                await self.stop_processing_metrics()
-                # AAI is authoritative — emit UserStoppedSpeakingFrame immediately.
-                # broadcast_frame pushes downstream (same queue as TranscriptionFrame
-                # above, so ordering is preserved) and upstream.
-                await self.broadcast_frame(UserStoppedSpeakingFrame)
+                # Propose the turn stop immediately. broadcast_frame pushes
+                # downstream (same queue as TranscriptionFrame above, so ordering
+                # is preserved) and upstream.
+                await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
                 self._user_speaking = False
                 await self._call_event_handler("on_end_of_turn", transcript_text)
             else:

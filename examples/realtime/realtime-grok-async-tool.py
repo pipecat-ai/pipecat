@@ -125,8 +125,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         #     vad_analyzer=SileroVADAnalyzer(),
         #     user_turn_strategies=UserTurnStrategies(start=[VADUserTurnStartStrategy(
         #         enable_interruptions=True,
-        #         enable_user_speaking_frames=False,  # Grok already emits turn frames
-        #     )], stop=[]) # Grok already emits turn frames
+        #     )], stop=[])
         # ),
     )
 

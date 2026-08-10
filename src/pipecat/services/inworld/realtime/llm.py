@@ -41,6 +41,8 @@ from pipecat.frames.frames import (
     LLMServiceMetadataFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -198,8 +200,10 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     Supports function calling, conversation management, and real-time
     transcription.
 
-    Emits ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame`` from
-    Inworld's server-side VAD events. ``LLMContextAggregatorPair`` auto-detects
+    Proposes turn boundaries from Inworld's server-side VAD events, which the
+    recommended external user turn strategies resolve into
+    ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame``.
+    ``LLMContextAggregatorPair`` auto-detects
     this realtime service and decouples context writes from those frames. If
     you wire local VAD (``LLMUserAggregatorParams.vad_analyzer``) on top of
     this service, disable Inworld's server-side turn detection first via
@@ -986,8 +990,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             return
 
         await self._truncate_current_audio_response()
-        await self.broadcast_frame(UserStartedSpeakingFrame)
-        await self.broadcast_interruption()
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
 
     async def _handle_evt_speech_stopped(self, evt):
         """Handle speech stopped event from server-side VAD."""
@@ -1002,7 +1005,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         self._server_vad_handled_turn = True
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
-        await self.broadcast_frame(UserStoppedSpeakingFrame)
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
     async def _handle_evt_error(self, evt):
         """Handle fatal error event."""

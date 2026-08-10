@@ -28,12 +28,12 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
     TranslationFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
 )
 from pipecat.services.gladia.config import (
     GladiaInputParams,
@@ -256,7 +256,10 @@ class GladiaSTTService(WebsocketSTTService):
 
             max_buffer_size: Maximum size of audio buffer in bytes. Defaults to 20MB.
             should_interrupt: Determine whether the bot should be interrupted when
-                Gladia VAD detects user speech. Defaults to True.
+                Gladia VAD detects user speech. Passed along to the user turn
+                strategies this service recommends, which own the interruption; a
+                user-supplied ``user_turn_strategies`` overrides the recommendation
+                and this setting with it. Defaults to True.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
@@ -358,13 +361,16 @@ class GladiaSTTService(WebsocketSTTService):
         """Request external turn strategies when Gladia's VAD drives endpointing.
 
         With ``enable_vad`` set, Gladia detects end of utterance server-side and
-        emits ``UserStarted/StoppedSpeakingFrame``, so the user aggregator defers to
-        those rather than running local VAD/smart-turn. Without it the defaults are
-        left in place. Applied unless the user passed their own ``user_turn_strategies``.
+        emits ``ProposedUserStarted/StoppedSpeakingFrame``, so the user aggregator
+        resolves those rather than running local VAD/smart-turn. Without it the
+        defaults are left in place. Applied unless the user passed their own
+        ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
         if self._settings.enable_vad:
-            frame.user_turn_strategies = ExternalUserTurnStrategies()
+            frame.user_turn_strategies = ExternalUserTurnStrategies(
+                enable_interruptions=self._should_interrupt,
+            )
         return frame
 
     def language_to_service_language(self, language: Language) -> str | None:
@@ -487,8 +493,6 @@ class GladiaSTTService(WebsocketSTTService):
         Yields:
             None (processing is handled asynchronously via WebSocket).
         """
-        await self.start_processing_metrics()
-
         # Add audio to buffer
         async with self._buffer_lock:
             self._audio_buffer.extend(audio)
@@ -610,7 +614,7 @@ class GladiaSTTService(WebsocketSTTService):
     async def _handle_transcription(
         self, transcript: str, is_final: bool, language: str | None = None
     ):
-        await self.stop_processing_metrics()
+        pass
 
     async def _on_speech_started(self):
         """Handle speech start event from Gladia.
@@ -624,9 +628,7 @@ class GladiaSTTService(WebsocketSTTService):
         logger.debug(f"{self} User started speaking")
         self._is_speaking = True
 
-        await self.broadcast_frame(UserStartedSpeakingFrame)
-        if self._should_interrupt:
-            await self.broadcast_interruption()
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
 
     async def _on_speech_ended(self):
         """Handle speech end event from Gladia.
@@ -636,7 +638,7 @@ class GladiaSTTService(WebsocketSTTService):
         if not self._settings.enable_vad or not self._is_speaking:
             return
         self._is_speaking = False
-        await self.broadcast_frame(UserStoppedSpeakingFrame)
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
         logger.debug(f"{self} User stopped speaking")
 
     async def _send_audio(self, audio: bytes):

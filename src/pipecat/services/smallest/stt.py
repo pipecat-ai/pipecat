@@ -32,7 +32,6 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -244,9 +243,7 @@ class SmallestSTTService(WebsocketSTTService):
         """Process frames, handling VAD events for finalization."""
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self.start_processing_metrics()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             if self._websocket and self._websocket.state is State.OPEN:
                 try:
                     await self._websocket.send(json.dumps({"type": "finalize"}))
@@ -407,7 +404,6 @@ class SmallestSTTService(WebsocketSTTService):
             return
 
         if is_final:
-            await self.stop_processing_metrics()
             logger.debug(f"Smallest final transcript: [{text}]")
             await self._handle_transcription(text, True, data.get("language"))
             # Report usage before the transcription frame so tracing can

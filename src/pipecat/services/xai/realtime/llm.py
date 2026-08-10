@@ -43,6 +43,8 @@ from pipecat.frames.frames import (
     LLMServiceMetadataFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -196,8 +198,10 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         - Custom function calling
         - Server-side VAD (Voice Activity Detection)
 
-    Emits ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame`` from
-    Grok's server-side VAD events. ``LLMContextAggregatorPair`` auto-detects
+    Proposes turn boundaries from Grok's server-side VAD events, which the
+    recommended external user turn strategies resolve into
+    ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame``.
+    ``LLMContextAggregatorPair`` auto-detects
     this realtime service and decouples context writes from those frames. If
     you wire local VAD (``LLMUserAggregatorParams.vad_analyzer``) on top of
     this service, disable Grok's server-side turn detection first via
@@ -1043,8 +1047,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             return
 
         await self._truncate_current_audio_response()
-        await self.broadcast_frame(UserStartedSpeakingFrame)
-        await self.broadcast_interruption()
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
 
     async def _handle_evt_speech_stopped(self, evt):
         """Handle speech stopped event from VAD."""
@@ -1054,7 +1057,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
 
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
-        await self.broadcast_frame(UserStoppedSpeakingFrame)
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
     async def _handle_evt_error(self, evt):
         """Handle error event."""

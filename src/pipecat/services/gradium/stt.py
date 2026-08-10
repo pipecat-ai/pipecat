@@ -28,7 +28,6 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -301,10 +300,6 @@ class GradiumSTTService(WebsocketSTTService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def _start_metrics(self):
-        """Start performance metrics collection for transcription processing."""
-        await self.start_processing_metrics()
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and handle speech events.
 
@@ -314,9 +309,7 @@ class GradiumSTTService(WebsocketSTTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self._start_metrics()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             await self._send_flush()
 
     async def _send_flush(self):
@@ -495,7 +488,6 @@ class GradiumSTTService(WebsocketSTTService):
                 language=cast("Language | None", assert_given(self._settings.language)),
             )
         )
-        await self.stop_processing_metrics()
 
     async def _handle_flushed(self):
         """Handle flush completion by starting a transcript aggregation timer.
