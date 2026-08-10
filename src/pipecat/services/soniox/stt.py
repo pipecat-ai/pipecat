@@ -22,11 +22,11 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -315,13 +315,16 @@ class SonioxSTTService(WebsocketSTTService):
                 When True (Pipecat mode, default): Soniox endpoint detection is
                 disabled and a `VADUserStoppedSpeakingFrame` sends a finalize
                 message to Soniox. When False (Soniox turn detection mode): Soniox
-                endpoint detection is enabled and controls turn endings. Emits
-                UserStartedSpeakingFrame on the local VAD signal when a VAD analyzer
-                is configured (most responsive) or on the first transcript token
-                otherwise, and UserStoppedSpeakingFrame when the endpoint is detected.
+                endpoint detection is enabled and controls turn endings. Proposes a
+                turn start on the local VAD signal when a VAD analyzer is
+                configured (most responsive) or on the first transcript token
+                otherwise, and a turn stop when the endpoint is detected.
             should_interrupt: Whether to interrupt the bot when the user starts speaking
                 in Soniox turn detection mode (vad_force_turn_endpoint=False). Only applies
-                when using Soniox's built-in endpoint detection. Defaults to True.
+                when using Soniox's built-in endpoint detection. Passed along to the
+                user turn strategies this service recommends, which own the
+                interruption; a user-supplied ``user_turn_strategies`` overrides the
+                recommendation and this setting with it. Defaults to True.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
@@ -408,45 +411,43 @@ class SonioxSTTService(WebsocketSTTService):
         """Request external turn strategies in Soniox's turn-detection mode.
 
         With ``vad_force_turn_endpoint=False`` Soniox's endpoint detection decides
-        turn endings and this service emits ``UserStarted/StoppedSpeakingFrame``,
-        so the user aggregator defers to those rather than running local
-        VAD/smart-turn. In the default Pipecat mode
-        (``vad_force_turn_endpoint=True``) the STT emits no turn frames, so the
-        defaults are left in place. Applied unless the user passed their own
-        ``user_turn_strategies``.
+        turn endings and this service proposes turn boundaries, so the user
+        aggregator resolves those rather than running local VAD/smart-turn. In the
+        default Pipecat mode (``vad_force_turn_endpoint=True``) the STT proposes
+        no turns, so the defaults are left in place. Applied unless the user
+        passed their own ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
         if not self._vad_force_turn_endpoint:
-            frame.user_turn_strategies = ExternalUserTurnStrategies()
+            frame.user_turn_strategies = ExternalUserTurnStrategies(
+                enable_interruptions=self._should_interrupt,
+            )
         return frame
 
     async def _user_turn_started(self):
-        """Open a user turn — Soniox turn-detection mode only.
+        """Propose a turn start — Soniox turn-detection mode only.
 
         Soniox has no speech-started event, so the turn opens on the local VAD
         signal when available (fast path) or on the first transcript token
-        otherwise; whichever arrives first wins, the other is a no-op.
-        Broadcasts UserStartedSpeakingFrame before any transcription frames for
-        the turn are pushed, then pushes an interruption to cancel any bot audio.
+        otherwise; whichever arrives first wins, the other is a no-op. The
+        proposal goes out before any transcription frames for the turn are
+        pushed.
         """
         if self._vad_force_turn_endpoint or self._user_turn_open:
             return
         self._user_turn_open = True
-        await self.broadcast_frame(UserStartedSpeakingFrame)
-        if self._should_interrupt:
-            await self.broadcast_interruption()
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
 
     async def _user_turn_stopped(self):
-        """Close the user turn — Soniox turn-detection mode only.
+        """Propose a turn stop — Soniox turn-detection mode only.
 
-        Soniox is authoritative — broadcast UserStoppedSpeakingFrame right after
-        the endpoint's finalized TranscriptionFrame (same downstream queue, so
-        ordering is preserved).
+        Broadcast right after the endpoint's finalized TranscriptionFrame (same
+        downstream queue, so ordering is preserved).
         """
         if self._vad_force_turn_endpoint or not self._user_turn_open:
             return
         self._user_turn_open = False
-        await self.broadcast_frame(UserStoppedSpeakingFrame)
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
     async def start(self, frame: StartFrame):
         """Start the Soniox STT websocket connection.
@@ -681,7 +682,6 @@ class SonioxSTTService(WebsocketSTTService):
                     )
                 )
                 await self._handle_transcription(text, is_final=True, language=language)
-                await self.stop_processing_metrics()
                 self._final_transcription_buffer = []
 
         async def finalize_turn():
@@ -717,8 +717,6 @@ class SonioxSTTService(WebsocketSTTService):
                             # the rest will be sent as interim tokens (even final tokens).
                             await finalize_turn()
                         else:
-                            if not self._final_transcription_buffer:
-                                await self.start_processing_metrics()
                             self._final_transcription_buffer.append(token)
                     else:
                         non_final_transcription.append(token)

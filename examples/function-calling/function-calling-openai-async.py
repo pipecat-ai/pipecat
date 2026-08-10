@@ -48,6 +48,7 @@ async def get_current_weather(params: FunctionCallParams, location: str, format:
     """
     # Simulate a long-running API call, so we can test async function calls.
     await asyncio.sleep(15)
+    logger.debug(f"Returning get_current_weather result.")
     await params.result_callback({"conditions": "nice", "temperature": "75"})
 
 
@@ -140,6 +141,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
+
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
@@ -152,11 +157,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-        await worker.cancel()
+        await runner.cancel()
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-    await runner.add_workers(worker)
     await runner.run()
 
 

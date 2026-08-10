@@ -135,6 +135,10 @@ async def run_bot(pipecat_transport):
         ),
     )
 
+    runner = WorkerRunner(handle_sigint=False, force_gc=True)
+
+    await runner.add_workers(worker)
+
     @worker.rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):
         logger.info("Pipecat client ready.")
@@ -158,11 +162,8 @@ async def run_bot(pipecat_transport):
     @pipecat_transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info("Pipecat Client disconnected")
-        await worker.cancel()
+        await runner.cancel()
 
-    runner = WorkerRunner(handle_sigint=False, force_gc=True)
-
-    await runner.add_workers(worker)
     await runner.run()
 
 

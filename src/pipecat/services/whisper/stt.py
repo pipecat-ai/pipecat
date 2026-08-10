@@ -15,7 +15,7 @@ import platform
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from loguru import logger
@@ -411,7 +411,9 @@ class WhisperSTTService(SegmentedSTTService):
         # Divide by 32768 because we have signed 16-bit data.
         audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
 
-        language = assert_given(self._settings.language)
+        # The stored language is a Whisper code rather than a Language, but
+        # Language is a StrEnum so downstream handles either.
+        language = cast("Language | None", assert_given(self._settings.language))
         segments, _ = await asyncio.to_thread(
             self._model.transcribe, audio_float, language=language
         )
@@ -566,7 +568,7 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             if model_path is None:
                 raise ValueError("Whisper model must be specified")
             temperature = assert_given(self._settings.temperature)
-            language = assert_given(self._settings.language)
+            language = cast("Language | None", assert_given(self._settings.language))
             chunk = await asyncio.to_thread(
                 mlx_whisper.transcribe,
                 audio_float,
@@ -574,9 +576,9 @@ class WhisperSTTServiceMLX(WhisperSTTService):
                 temperature=temperature,
                 language=language,
             )
-            text: str = ""
+            text: str | None = ""
             no_speech_prob_threshold = assert_given(self._settings.no_speech_prob)
-            for segment in chunk.get("segments", []):
+            for segment in cast("list[dict[str, Any]]", chunk.get("segments", [])):
                 # Drop likely hallucinations
                 if segment.get("compression_ratio", None) == 0.5555555555555556:
                     continue

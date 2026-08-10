@@ -38,13 +38,14 @@ async def main():
 
     worker = PipelineWorker(pipeline)
 
+    runner = WorkerRunner(handle_sigint=False if sys.platform == "win32" else True)
+
+    await runner.add_workers(worker)
+
     async def say_something():
         await asyncio.sleep(1)
         await worker.queue_frames([TTSSpeakFrame("Hello there, how is it going!"), EndFrame()])
 
-    runner = WorkerRunner(handle_sigint=False if sys.platform == "win32" else True)
-
-    await runner.add_workers(worker)
     await asyncio.gather(runner.run(), say_something())
 
 

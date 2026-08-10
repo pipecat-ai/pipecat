@@ -148,12 +148,20 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             extra: Additional parameters to pass to the API.
         """
 
+        # These fields declare the caller-facing type but default to anthropic's
+        # NOT_GIVEN sentinel, which the declaration predates.
         enable_prompt_caching: bool | None = None
         max_tokens: int | None = Field(default_factory=lambda: 4096, ge=1)
-        temperature: float | None = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
-        top_k: int | None = Field(default_factory=lambda: NOT_GIVEN, ge=0)
-        top_p: float | None = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
-        thinking: Optional["AnthropicLLMService.ThinkingConfig"] = Field(
+        temperature: float | None = Field(  # pyright: ignore[reportAssignmentType]
+            default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0
+        )
+        top_k: int | None = Field(  # pyright: ignore[reportAssignmentType]
+            default_factory=lambda: NOT_GIVEN, ge=0
+        )
+        top_p: float | None = Field(  # pyright: ignore[reportAssignmentType]
+            default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0
+        )
+        thinking: Optional["AnthropicLLMService.ThinkingConfig"] = Field(  # pyright: ignore[reportAssignmentType]
             default_factory=lambda: NOT_GIVEN
         )
         extra: dict[str, Any] | None = Field(default_factory=dict)
@@ -225,7 +233,8 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                 default_settings.temperature = params.temperature
                 default_settings.top_k = params.top_k
                 default_settings.top_p = params.top_p
-                default_settings.thinking = params.thinking
+                if params.thinking is not None:
+                    default_settings.thinking = params.thinking
                 if isinstance(params.extra, dict):
                     default_settings.extra = params.extra
                 if params.enable_prompt_caching is not None:
@@ -512,14 +521,6 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                         else 0
                     )
                     logger.debug(f"Cache read input tokens: {cache_read_input_tokens}")
-                    total_input_tokens = (
-                        prompt_tokens + cache_creation_input_tokens + cache_read_input_tokens
-                    )
-                    if total_input_tokens >= 1024:
-                        if hasattr(
-                            context, "turns_above_cache_threshold"
-                        ):  # LLMContext doesn't have this attribute
-                            context.turns_above_cache_threshold += 1
 
             await self.run_function_calls(function_calls)
 

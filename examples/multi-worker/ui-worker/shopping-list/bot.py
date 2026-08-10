@@ -279,8 +279,6 @@ class ListWorker(UIWorker):
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting shopping-list bot")
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
@@ -294,8 +292,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     # The UI worker owns the list; create it up front so the voice layer's
-    # read-only ``check_list`` tool can look at its live snapshot. It's added
-    # to the runner at the end alongside the main worker.
+    # read-only ``check_list`` tool can look at its live snapshot.
     list_worker = ListWorker()
 
     @tool_options(timeout_secs=10)
@@ -339,6 +336,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(list_worker, worker)
+
     # Every user turn drives the UI: forward the transcript to the UIWorker
     # as a respond job (a bus message). Fire it from the turn-stopped event
     # so the voice LLM (which runs from the same turn) and the UIWorker act
@@ -378,8 +379,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
         await runner.cancel()
-
-    await runner.add_workers(list_worker, worker)
 
     await runner.run()
 

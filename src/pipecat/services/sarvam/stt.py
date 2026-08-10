@@ -14,7 +14,7 @@ can handle multiple audio formats for Indian language speech recognition.
 import base64
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from loguru import logger
 from pydantic import BaseModel
@@ -24,11 +24,11 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     StartFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -43,6 +43,7 @@ from pipecat.services.settings import (
 from pipecat.services.stt_latency import SARVAM_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -85,6 +86,9 @@ def language_to_sarvam_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
+SarvamMode = Literal["transcribe", "translate", "verbatim", "translit", "codemix"]
+
+
 @dataclass(frozen=True)
 class ModelConfig:
     """Immutable configuration for a Sarvam STT model.
@@ -105,7 +109,7 @@ class ModelConfig:
     supports_language: bool
     supports_vad_params: bool
     default_language: str | None
-    default_mode: str | None
+    default_mode: SarvamMode | None
     use_translate_endpoint: bool
     use_translate_method: bool
 
@@ -239,7 +243,7 @@ class SarvamSTTService(STTService):
 
         language: Language | None = None
         prompt: str | None = None
-        mode: Literal["transcribe", "translate", "verbatim", "translit", "codemix"] | None = None
+        mode: SarvamMode | None = None
         vad_signals: bool | None = None
         high_vad_sensitivity: bool | None = None
 
@@ -248,7 +252,7 @@ class SarvamSTTService(STTService):
         *,
         api_key: str,
         model: str | None = None,
-        mode: Literal["transcribe", "translate", "verbatim", "translit", "codemix"] | None = None,
+        mode: SarvamMode | None = None,
         sample_rate: int | None = None,
         input_audio_codec: str = "wav",
         params: InputParams | None = None,
@@ -416,7 +420,9 @@ class SarvamSTTService(STTService):
 
     def _get_language_string(self) -> str | None:
         """Resolve the current language setting to a Sarvam language code string."""
-        language = assert_given(self._settings.language)
+        # The stored language is a Sarvam code rather than a Language, but the
+        # mapping keys compare equal either way.
+        language = cast(Language, assert_given(self._settings.language))
         if language:
             return language_to_sarvam_language(language)
         return self._config.default_language
@@ -429,19 +435,31 @@ class SarvamSTTService(STTService):
         """
         return True
 
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Request external turn strategies when Sarvam's VAD signals drive turns.
+
+        With ``vad_signals`` enabled Sarvam detects speech boundaries server-side
+        and this service proposes turns from them, so the user aggregator resolves
+        those rather than running local VAD/smart-turn. Without it the defaults are
+        left in place. Applied unless the user passed their own
+        ``user_turn_strategies``.
+        """
+        frame = super().service_metadata_frame()
+        if self._settings.vad_signals:
+            frame.user_turn_strategies = ExternalUserTurnStrategies()
+        return frame
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames.
 
-        Handles VAD frames for TTFB tracking when using Pipecat's VAD
-        instead of Sarvam's built-in VAD.
+        Flushes on Pipecat's VAD turn end when Sarvam's built-in VAD signals
+        aren't driving the turn.
         """
         await super().process_frame(frame, direction)
 
         # Only handle VAD frames when not using Sarvam's VAD signals
         if not self._settings.vad_signals:
-            if isinstance(frame, VADUserStartedSpeakingFrame):
-                await self._start_metrics()
-            elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            if isinstance(frame, VADUserStoppedSpeakingFrame):
                 if self._socket_client:
                     await self._socket_client.flush()
 
@@ -605,11 +623,14 @@ class SarvamSTTService(STTService):
                 "sample_rate": self.sample_rate,
             }
 
-            # Use appropriate method based on model configuration
+            # Use appropriate method based on model configuration. The endpoint
+            # and method flags are set together per model, so the client that
+            # was connected is the one carrying the method chosen here.
+            client: Any = self._socket_client
             if self._config.use_translate_method:
-                await self._socket_client.translate(**method_kwargs)
+                await client.translate(**method_kwargs)
             else:
-                await self._socket_client.transcribe(**method_kwargs)
+                await client.transcribe(**method_kwargs)
 
         except Exception as e:
             yield ErrorFrame(error=f"Error sending audio to Sarvam: {e}", exception=e)
@@ -720,7 +741,7 @@ class SarvamSTTService(STTService):
             if self._settings.prompt is not None and self._config.supports_prompt:
                 prompt_setter = getattr(self._socket_client, "set_prompt", None)
                 if callable(prompt_setter):
-                    await prompt_setter(self._settings.prompt)
+                    await cast(Any, prompt_setter)(self._settings.prompt)
 
             # Register event handler for incoming messages
             def _message_handler(message):
@@ -805,16 +826,14 @@ class SarvamSTTService(STTService):
                 logger.debug(f"VAD Signal: {signal}, Occurred at: {timestamp}")
 
                 if signal == "START_SPEECH":
-                    await self._start_metrics()
                     logger.debug("User started speaking")
                     await self._call_event_handler("on_speech_started")
-                    await self.broadcast_frame(UserStartedSpeakingFrame)
-                    await self.broadcast_interruption()
+                    await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
 
                 elif signal == "END_SPEECH":
                     logger.debug("User stopped speaking")
                     await self._call_event_handler("on_speech_stopped")
-                    await self.broadcast_frame(UserStoppedSpeakingFrame)
+                    await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
             elif message.type == "data":
                 transcript = message.data.transcript
@@ -847,9 +866,6 @@ class SarvamSTTService(STTService):
                             result=(message.dict() if hasattr(message, "dict") else str(message)),
                         )
                     )
-
-                await self.stop_processing_metrics()
-
         except Exception as e:
             await self.push_error(error_msg=f"Failed to handle message: {e}", exception=e)
             await self.stop_all_metrics()
@@ -904,11 +920,12 @@ class SarvamSTTService(STTService):
             "encoding": encoding,
             "sample_rate": self.sample_rate,
         }
-        if self._config.use_translate_method:
-            await self._socket_client.translate(**method_kwargs)
-        else:
-            await self._socket_client.transcribe(**method_kwargs)
+        # We know client exists because _is_keepalive_ready(), called before
+        # _send_keepalive(), gates on it
+        assert self._socket_client is not None
 
-    async def _start_metrics(self):
-        """Start processing metrics collection."""
-        await self.start_processing_metrics()
+        client: Any = self._socket_client
+        if self._config.use_translate_method:
+            await client.translate(**method_kwargs)
+        else:
+            await client.transcribe(**method_kwargs)

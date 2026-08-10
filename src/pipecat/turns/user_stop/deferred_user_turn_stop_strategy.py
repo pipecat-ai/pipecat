@@ -46,6 +46,16 @@ class DeferredUserTurnStopStrategy(BaseUserTurnStopStrategy):
         """Return the wrapped strategy."""
         return self._inner
 
+    @property
+    def resolves_proposed_turn_stop_frames(self) -> bool:
+        """Report what the inner strategy does with proposals.
+
+        Frame processing is forwarded, so a proposal reaches the inner strategy
+        and is resolved there. Deferring finalization changes when the turn ends,
+        not who decides it.
+        """
+        return self._inner.resolves_proposed_turn_stop_frames
+
     def add_event_handler(self, event_name: str, handler):
         """Forward event subscriptions to the inner strategy.
 

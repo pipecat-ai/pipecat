@@ -622,6 +622,10 @@ async def main():
             ),
         )
 
+        runner = WorkerRunner()
+
+        await runner.add_workers(worker)
+
         # Initialize flow manager
         flow_manager = FlowManager(
             worker=worker,
@@ -665,7 +669,7 @@ async def main():
                 if v.get("info", {}).get("userId") in {"agent", "customer"}
             }
             if not human_participants:
-                await worker.cancel()
+                await runner.cancel()
 
         # Print URL for joining as customer, and store URL for joining as human agent, to be printed later
         customer_token = await get_customer_token(
@@ -703,9 +707,6 @@ async def main():
 
         atexit.register(cleanup_hold_music_process)
 
-        # Run the pipeline
-        runner = WorkerRunner()
-        await runner.add_workers(worker)
         await runner.run()
 
 

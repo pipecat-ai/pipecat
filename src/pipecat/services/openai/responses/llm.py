@@ -22,9 +22,12 @@ from openai import NOT_GIVEN, AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.responses import (
     ResponseCompletedEvent,
+    ResponseErrorEvent,
+    ResponseFailedEvent,
     ResponseFunctionCallArgumentsDeltaEvent,
     ResponseFunctionCallArgumentsDoneEvent,
     ResponseFunctionToolCall,
+    ResponseIncompleteEvent,
     ResponseOutputItemAddedEvent,
     ResponseOutputItemDoneEvent,
     ResponseReasoningItem,
@@ -1211,6 +1214,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
         function_calls: dict[str, dict[str, str]] = {}  # item_id -> {name, call_id, arguments}
         current_arguments: dict[str, str] = {}  # item_id -> accumulated arguments
         reasoning_summary_open = False
+        stream_errored = False
 
         # Ensure stream and its async iterator are closed on cancellation/exception
         # to prevent socket leaks and uvloop crashes. Closing the iterator first
@@ -1318,6 +1322,43 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                     # This field is used by @traced_llm for more detailed
                     # model name in tracing spans
                     self._full_model_name = response.model
+
+                elif isinstance(event, ResponseFailedEvent):
+                    # As with usage above, the detail objects and their fields
+                    # are only as reliable as the server; coalesce to a generic
+                    # message so a sparse payload still reports something.
+                    error = event.response.error
+                    message = error.message if error else None
+                    await self.push_error(
+                        error_msg=f"LLM response error: {message or 'Response failed'}"
+                    )
+                    stream_errored = True
+                    break
+
+                elif isinstance(event, ResponseIncompleteEvent):
+                    details = event.response.incomplete_details
+                    reason = details.reason if details else None
+                    await self.push_error(
+                        error_msg=f"LLM response error: {reason or 'Response incomplete'}"
+                    )
+                    stream_errored = True
+                    break
+
+                elif isinstance(event, ResponseErrorEvent):
+                    await self.push_error(error_msg=f"Responses API error: {event.message}")
+                    stream_errored = True
+                    break
+
+        # A stream that ended in a terminal error may have announced a function
+        # call whose arguments never finished streaming — drop those rather than
+        # run them with fabricated empty arguments. `arguments` is only written
+        # by the Done events, so a non-empty string means the call completed
+        # (e.g. parallel tool calls finished before a later item was truncated)
+        # and it still runs.
+        if stream_errored:
+            function_calls = {
+                item_id: call for item_id, call in function_calls.items() if call["arguments"]
+            }
 
         # Process any function calls
         if function_calls:

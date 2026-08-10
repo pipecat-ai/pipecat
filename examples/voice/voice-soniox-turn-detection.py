@@ -63,8 +63,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     1. Soniox Turn Detection
        - Set `vad_force_turn_endpoint=False` to enable Soniox endpoint detection
-       - Soniox decides when the user is done speaking; the service emits the
-         user turn frames, and the user aggregator automatically defers to them
+       - Soniox decides when the user is done speaking; the service proposes
+         those turn boundaries and the user aggregator resolves them into turn
+         frames and interruptions
 
     2. Responsive Barge-In via Local VAD
        - Soniox has no speech-started event, so with a VAD analyzer configured
@@ -134,6 +135,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
+
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
@@ -146,11 +151,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-        await worker.cancel()
+        await runner.cancel()
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-    await runner.add_workers(worker)
     await runner.run()
 
 

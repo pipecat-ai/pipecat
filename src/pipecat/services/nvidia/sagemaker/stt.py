@@ -183,7 +183,7 @@ class NvidiaSageMakerSTTService(STTService):
     # ── VAD integration ───────────────────────────────────────────────────────
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames with VAD-specific handling for metrics lifecycle.
+        """Log the VAD speech boundaries this service sees.
 
         Args:
             frame: The frame to process.
@@ -193,7 +193,6 @@ class NvidiaSageMakerSTTService(STTService):
 
         if isinstance(frame, VADUserStartedSpeakingFrame):
             logger.debug(f"{self}: VAD user started speaking")
-            await self.start_processing_metrics()
         if isinstance(frame, VADUserStoppedSpeakingFrame):
             logger.debug(f"{self}: VAD user stopped speaking")
 
@@ -340,7 +339,6 @@ class NvidiaSageMakerSTTService(STTService):
                             )
                         )
                         await self._handle_transcription(transcript, True)
-                        await self.stop_processing_metrics()
 
                 elif event_type in (
                     "conversation.item.input_audio_transcription.failed",

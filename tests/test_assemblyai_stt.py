@@ -14,9 +14,10 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from loguru import logger
 
-from pipecat.frames.frames import UserStartedSpeakingFrame
+from pipecat.frames.frames import ProposedUserStartedSpeakingFrame
 from pipecat.services.assemblyai.stt import AssemblyAISTTService, is_u3_pro_model
 from pipecat.transcriptions.language import Language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 
 
 def _query(service: AssemblyAISTTService) -> dict[str, list[str]]:
@@ -957,9 +958,9 @@ def test__process_assistant_turn_noop_when_carryover_disabled():
     assert sent == []
 
 
-def test_speech_started_starts_metrics_after_interruption():
-    # broadcast_interruption() stops all metrics, so processing metrics must
-    # start after it or they would be stopped immediately.
+def test_speech_started_proposes_turn_without_interrupting():
+    # The service proposes the turn; the user turn strategies decide it and own
+    # the interruption, so nothing is interrupted from here.
     service = AssemblyAISTTService(api_key="test-key", vad_force_turn_endpoint=False)
     events = []
 
@@ -969,20 +970,26 @@ def test_speech_started_starts_metrics_after_interruption():
     async def fake_broadcast_interruption():
         events.append(("interruption", None))
 
-    async def fake_start_processing_metrics():
-        events.append(("start_metrics", None))
-
     service.broadcast_frame = fake_broadcast_frame
     service.broadcast_interruption = fake_broadcast_interruption
-    service.start_processing_metrics = fake_start_processing_metrics
 
     asyncio.run(service._handle_speech_started(None))
 
-    assert events == [
-        ("broadcast", UserStartedSpeakingFrame),
-        ("interruption", None),
-        ("start_metrics", None),
-    ]
+    assert events == [("broadcast", ProposedUserStartedSpeakingFrame)]
+
+
+def test_should_interrupt_rides_on_recommended_strategies():
+    # should_interrupt no longer gates a local broadcast; it configures the
+    # strategies the service recommends via its metadata frame.
+    for should_interrupt in (True, False):
+        service = AssemblyAISTTService(
+            api_key="test-key",
+            vad_force_turn_endpoint=False,
+            should_interrupt=should_interrupt,
+        )
+        strategies = service.service_metadata_frame().user_turn_strategies
+        assert isinstance(strategies, ExternalUserTurnStrategies)
+        assert strategies.enable_interruptions is should_interrupt
 
 
 if __name__ == "__main__":

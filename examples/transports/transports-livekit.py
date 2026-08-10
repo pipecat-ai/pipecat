@@ -95,6 +95,10 @@ async def main():
         ),
     )
 
+    runner = WorkerRunner()
+
+    await runner.add_workers(worker)
+
     # Register an event handler so we can play the audio when the
     # participant joins.
     @transport.event_handler("on_first_participant_joined")
@@ -129,9 +133,6 @@ async def main():
             ],
         )
 
-    runner = WorkerRunner()
-
-    await runner.add_workers(worker)
     await runner.run()
 
 

@@ -286,11 +286,17 @@ class LemonSliceTransportClient:
         Args:
             frame: The start frame containing initialization parameters.
         """
+        if not self._daily_transport_client:
+            return
+
         await self._daily_transport_client.start(frame)
         await self._daily_transport_client.join()
 
     async def stop(self):
         """Stop the client and end the conversation."""
+        if not self._daily_transport_client:
+            return
+
         await self._daily_transport_client.leave()
         await self._end_session()
 
@@ -311,6 +317,9 @@ class LemonSliceTransportClient:
             video_source: Video source to capture from.
             color_format: Color format for video frames.
         """
+        if not self._daily_transport_client:
+            return
+
         await self._daily_transport_client.capture_participant_video(
             participant_id, callback, framerate, video_source, color_format
         )
@@ -332,6 +341,9 @@ class LemonSliceTransportClient:
             sample_rate: Desired sample rate for audio capture.
             callback_interval_ms: Interval between audio callbacks in milliseconds.
         """
+        if not self._daily_transport_client:
+            return
+
         await self._daily_transport_client.capture_participant_audio(
             participant_id, callback, audio_source, sample_rate, callback_interval_ms
         )
@@ -356,6 +368,10 @@ class LemonSliceTransportClient:
         Returns:
             The output sample rate in Hz.
         """
+        if not self._daily_transport_client:
+            # No client until setup() runs; 0 is what Daily reports before starting.
+            return 0
+
         return self._daily_transport_client.out_sample_rate
 
     @property
@@ -365,6 +381,10 @@ class LemonSliceTransportClient:
         Returns:
             The input sample rate in Hz.
         """
+        if not self._daily_transport_client:
+            # No client until setup() runs; 0 is what Daily reports before starting.
+            return 0
+
         return self._daily_transport_client.in_sample_rate
 
     async def send_interrupt_message(self) -> None:

@@ -118,17 +118,35 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             extra: Additional model-specific parameters.
         """
 
-        frequency_penalty: float | None = Field(default_factory=lambda: NOT_GIVEN, ge=-2.0, le=2.0)
-        presence_penalty: float | None = Field(default_factory=lambda: NOT_GIVEN, ge=-2.0, le=2.0)
-        seed: int | None = Field(default_factory=lambda: NOT_GIVEN, ge=0)
-        temperature: float | None = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=2.0)
+        # These fields declare the caller-facing type but default to openai's
+        # NOT_GIVEN sentinel, which the declaration predates.
+        frequency_penalty: float | None = Field(  # pyright: ignore[reportAssignmentType]
+            default_factory=lambda: NOT_GIVEN, ge=-2.0, le=2.0
+        )
+        presence_penalty: float | None = Field(  # pyright: ignore[reportAssignmentType]
+            default_factory=lambda: NOT_GIVEN, ge=-2.0, le=2.0
+        )
+        seed: int | None = Field(  # pyright: ignore[reportAssignmentType]
+            default_factory=lambda: NOT_GIVEN, ge=0
+        )
+        temperature: float | None = Field(  # pyright: ignore[reportAssignmentType]
+            default_factory=lambda: NOT_GIVEN, ge=0.0, le=2.0
+        )
         # Note: top_k is currently not supported by the OpenAI client library,
         # so top_k is ignored right now.
         top_k: int | None = Field(default=None, ge=0)
-        top_p: float | None = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
-        max_tokens: int | None = Field(default_factory=lambda: NOT_GIVEN, ge=1)
-        max_completion_tokens: int | None = Field(default_factory=lambda: NOT_GIVEN, ge=1)
-        service_tier: str | None = Field(default_factory=lambda: NOT_GIVEN)
+        top_p: float | None = Field(  # pyright: ignore[reportAssignmentType]
+            default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0
+        )
+        max_tokens: int | None = Field(  # pyright: ignore[reportAssignmentType]
+            default_factory=lambda: NOT_GIVEN, ge=1
+        )
+        max_completion_tokens: int | None = Field(  # pyright: ignore[reportAssignmentType]
+            default_factory=lambda: NOT_GIVEN, ge=1
+        )
+        service_tier: str | None = Field(  # pyright: ignore[reportAssignmentType]
+            default_factory=lambda: NOT_GIVEN
+        )
         extra: dict[str, Any] | None = Field(default_factory=dict)
 
     def __init__(
@@ -380,7 +398,9 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         Returns:
             The LLM's response as a string, or None if no response is generated.
         """
-        effective_instruction = system_instruction or self._settings.system_instruction
+        effective_instruction = system_instruction or assert_given(
+            self._settings.system_instruction
+        )
         adapter = self.get_llm_adapter()
         invocation_params = adapter.get_llm_invocation_params(
             context,

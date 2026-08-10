@@ -57,6 +57,8 @@ from pipecat.frames.frames import (
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     ServiceMetadataFrame,
     StartFrame,
     STTMetadataFrame,
@@ -101,6 +103,7 @@ from pipecat.turns.user_stop import (
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import (
+    ExternalUserTurnStrategies,
     FilterIncompleteUserTurnStrategies,
     UserTurnStrategies,
 )
@@ -821,6 +824,15 @@ class LLMUserAggregator(LLMContextAggregator):
         elif isinstance(frame, ServiceMetadataFrame):
             await self._handle_service_metadata(frame)
             await self.push_frame(frame, direction)
+        elif isinstance(frame, ProposedUserStartedSpeakingFrame):
+            # A proposal is resolved once. Forwarding one our own strategies
+            # resolve would let a resolver further down the pipeline decide the
+            # same turn a second time.
+            if not self._user_turn_controller.resolves_proposed_turn_start_frames:
+                await self.push_frame(frame, direction)
+        elif isinstance(frame, ProposedUserStoppedSpeakingFrame):
+            if not self._user_turn_controller.resolves_proposed_turn_stop_frames:
+                await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
@@ -962,10 +974,53 @@ class LLMUserAggregator(LLMContextAggregator):
                 f"{self}: ignoring user turn strategies recommended by "
                 f"`{service_name}`; using the user-provided strategies."
             )
+            self._warn_on_discarded_interruption_setting(service_name, user_turn_strategies)
             return
 
         logger.debug(f"{self}: applying user turn strategies recommended by `{service_name}`.")
         await self._user_turn_controller.update_strategies(user_turn_strategies)
+
+    def _warn_on_discarded_interruption_setting(
+        self, service_name: str, recommended: UserTurnStrategies
+    ):
+        """Warn when (maybe unintentionally) overruling a service silently turns interruptions back on.
+
+        A service recommends turn strategies by putting them on its
+        ``ServiceMetadataFrame.user_turn_strategies``, and one configured with
+        ``should_interrupt=False`` carries that setting there. User-provided
+        strategies discard the recommendation whole — so the pipeline would
+        start interrupting with no indication why.
+
+        Passing ``ExternalUserTurnStrategies`` explicitly was a safe way to opt
+        out of the recommendation until 1.8.0, because the external start
+        strategy never interrupted no matter how it was constructed. It
+        broadcasts the interruption now, so explicit strategies can contradict
+        the service, and this warning names the two ways to reconcile them.
+
+        Only that container is checked. A ``UserTurnStrategies`` assembled by
+        hand around a bare ``ExternalUserTurnStartStrategy`` contradicts the
+        service the same way and goes unwarned — not expected to come up often
+        enough to justify inspecting the individual strategies.
+        """
+        if not isinstance(recommended, ExternalUserTurnStrategies):
+            return
+        if recommended.enable_interruptions:
+            return
+
+        provided = self._params.user_turn_strategies
+        if (
+            not isinstance(provided, ExternalUserTurnStrategies)
+            or not provided.enable_interruptions
+        ):
+            return
+
+        logger.warning(
+            f"{self}: `{service_name}` asked for interruptions to stay off, but the "
+            "user-provided `ExternalUserTurnStrategies` leaves them on, so the bot will "
+            "be interrupted when the user starts speaking. Drop `user_turn_strategies` to "
+            "use the service's recommendation, or pass "
+            "`ExternalUserTurnStrategies(enable_interruptions=False)`."
+        )
 
     async def _handle_llm_service_metadata(self, frame: LLMServiceMetadataFrame):
         """Handle an ``LLMServiceMetadataFrame`` broadcast by an LLM service.
@@ -1079,6 +1134,8 @@ class LLMUserAggregator(LLMContextAggregator):
                 InterruptionFrame,
                 VADUserStartedSpeakingFrame,
                 VADUserStoppedSpeakingFrame,
+                ProposedUserStartedSpeakingFrame,
+                ProposedUserStoppedSpeakingFrame,
                 UserStartedSpeakingFrame,
                 UserStoppedSpeakingFrame,
                 InputAudioRawFrame,
@@ -1558,6 +1615,20 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 # silently dropping user messages).
                 self._require_paired_user_aggregator()
             await self.push_frame(frame, direction)
+        elif isinstance(frame, ProposedUserStartedSpeakingFrame):
+            # A broadcast sends a copy each way, so a proposal from a service
+            # sitting between the two halves — a realtime LLM — reaches the user
+            # half as the upstream copy while this copy travels on. A proposal
+            # should be resolved once, so stop it here if the user half resolves
+            # it. No standard pipeline has a resolver downstream of this half, so
+            # this guards the invariant rather than fixing an observed escape.
+            user = self._paired_user_aggregator
+            if not (user and user._user_turn_controller.resolves_proposed_turn_start_frames):
+                await self.push_frame(frame, direction)
+        elif isinstance(frame, ProposedUserStoppedSpeakingFrame):
+            user = self._paired_user_aggregator
+            if not (user and user._user_turn_controller.resolves_proposed_turn_stop_frames):
+                await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 

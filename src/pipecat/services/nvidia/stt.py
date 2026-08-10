@@ -617,7 +617,6 @@ class NvidiaSTTService(STTService):
                 # Language is a StrEnum so downstream handles either.
                 language = cast("Language | None", assert_given(self._settings.language))
                 if result.is_final:
-                    await self.stop_processing_metrics()
                     logger.debug(f"Transcription: [{transcript}]")
                     # Report usage before the transcription frame so tracing
                     # can attach it to the STT span the frame closes.
@@ -658,7 +657,6 @@ class NvidiaSTTService(STTService):
         Yields:
             None - transcription results are pushed to the pipeline via frames.
         """
-        await self.start_processing_metrics()
         iterator = self._audio_iterator
         if iterator is not None and not iterator.closed:
             await iterator.put(audio)

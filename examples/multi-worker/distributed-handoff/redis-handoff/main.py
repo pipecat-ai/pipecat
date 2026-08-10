@@ -115,6 +115,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
+    await runner.add_workers(worker)
+
     # The remote LLM workers may take a moment to register on the bus.
     # We only activate ``greeter`` once *both* the client is connected
     # and the worker has been observed via the registry.
@@ -155,7 +157,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Client disconnected")
         await runner.cancel()
 
-    await runner.add_workers(worker)
     await runner.run()
 
 

@@ -448,6 +448,120 @@ class TestPatternPairAggregatorTokenMode(unittest.IsolatedAsyncioTestCase):
 
         # State resets after flush.
         self.assertEqual(self.aggregator.text.text, "")
+        
+    async def test_token_start_delimiter_split_across_chunks(self):
+        """A start delimiter split across chunks is not leaked as plain text.
+
+        Regression test for https://github.com/pipecat-ai/pipecat/issues/5267:
+        on unmodified main, "<thin" is yielded as a token before the delimiter
+        reassembles, so the REMOVE pattern is never recognized and "secret" is
+        spoken.
+        """
+        results = []
+        for token in ["Hi ", "<thin", "k>secret</think>", " bye"]:
+            async for r in self.aggregator.aggregate(token):
+                results.append(r)
+
+        # The delimiter reassembles and the pattern is recognized: content is
+        # stripped and the handler fires exactly once with the right content.
+        self.handler.assert_called_once()
+        call_args = self.handler.call_args[0][0]
+        self.assertEqual(call_args.text, "secret")
+
+        texts = [r.text for r in results]
+        self.assertEqual(texts, ["Hi ", " bye"])
+
+    async def test_token_start_delimiter_split_across_three_chunks(self):
+        """A start delimiter split across three chunks reassembles correctly."""
+        results = []
+        for token in ["<th", "in", "k>secret</think>"]:
+            async for r in self.aggregator.aggregate(token):
+                results.append(r)
+
+        self.handler.assert_called_once()
+        call_args = self.handler.call_args[0][0]
+        self.assertEqual(call_args.text, "secret")
+
+        # Nothing should have leaked while the delimiter was reassembling.
+        self.assertEqual(results, [])
+
+    async def test_token_partial_delimiter_chunk_yields_nothing(self):
+        """A chunk that is entirely a partial delimiter yields nothing."""
+        results = [r async for r in self.aggregator.aggregate("<thin")]
+        self.assertEqual(results, [])
+        self.assertEqual(self.aggregator.text.text, "<thin")
+
+    async def test_token_trailing_prefix_char_held_then_emitted(self):
+        """A plain trailing '<' is held back and emitted with the next chunk once it no longer matches a delimiter."""
+        results = []
+        async for r in self.aggregator.aggregate("Hello <"):
+            results.append(r)
+        # "<" could be the start of "<think>", so it's held back.
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].text, "Hello ")
+
+        async for r in self.aggregator.aggregate(" world"):
+            results.append(r)
+        # Once the held-back "<" is followed by something other than "t", it
+        # no longer matches a delimiter prefix and is emitted with the rest.
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[1].text, "< world")
+
+    async def test_token_split_aggregate_delimiter_recognized(self):
+        """A split AGGREGATE delimiter still reassembles: content is yielded as
+        its own aggregation instead of the fragments leaking as plain tokens.
+        """
+        code_handler = AsyncMock()
+        self.aggregator.add_pattern(
+            type="code_pattern",
+            start_pattern="<code>",
+            end_pattern="</code>",
+            action=MatchAction.AGGREGATE,
+        )
+        self.aggregator.on_pattern_match("code_pattern", code_handler)
+
+        results = []
+        for token in ["Here is code ", "<cod", "e>pattern content</code>", " more"]:
+            async for r in self.aggregator.aggregate(token):
+                results.append(r)
+
+        code_handler.assert_called_once()
+        call_args = code_handler.call_args[0][0]
+        self.assertEqual(call_args.text, "pattern content")
+
+        self.assertEqual(
+            [(r.type, r.text) for r in results],
+            [
+                ("token", "Here is code "),
+                ("code_pattern", "pattern content"),
+                ("token", " more"),
+            ],
+        )
+
+    async def test_token_split_keep_delimiter_recognized(self):
+        """A split KEEP delimiter still reassembles and triggers its handler."""
+        keep_handler = AsyncMock()
+        self.aggregator.add_pattern(
+            type="em",
+            start_pattern="<em>",
+            end_pattern="</em>",
+            action=MatchAction.KEEP,
+        )
+        self.aggregator.on_pattern_match("em", keep_handler)
+
+        results = []
+        for token in ["very <e", "m>excited</em> today"]:
+            async for r in self.aggregator.aggregate(token):
+                results.append(r)
+
+        keep_handler.assert_called_once()
+        call_args = keep_handler.call_args[0][0]
+        self.assertEqual(call_args.text, "excited")
+
+        # KEEP delimiters stay in the text; the split start delimiter
+        # reassembles intact instead of leaking as a fragment ("<e").
+        texts = [r.text for r in results]
+        self.assertEqual(texts, ["very ", "<em>excited</em> today"])
 
 
 if __name__ == "__main__":
