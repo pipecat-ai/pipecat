@@ -152,6 +152,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
+
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport):
         logger.info("Client subscribed — starting conversation")
@@ -163,7 +167,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_disconnected")
     async def on_disconnected(transport):
         logger.info("Disconnected from MOQ relay")
-        await worker.cancel()
+        await runner.cancel()
 
     @transport.event_handler("on_error")
     async def on_error(transport, message, exception):
@@ -171,10 +175,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # MOQInputTransport.start() auto-connects to the relay when the
     # pipeline starts, so we don't dial transport.connect() here.
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
     try:
-        await runner.add_workers(worker)
         await runner.run()
     finally:
         await transport.disconnect()

@@ -122,6 +122,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         forward_messages=(BusFrameMessage,),
     )
 
+    await runner.add_workers(proxy, worker)
+
     async def on_assistant_ready(_data: WorkerReadyData) -> None:
         logger.info("Remote assistant ready, activating")
         await worker.activate_worker(
@@ -150,8 +152,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
         await runner.cancel()
-
-    await runner.add_workers(proxy, worker)
 
     await runner.run()
 

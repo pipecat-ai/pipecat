@@ -61,6 +61,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
+
     # Register an event handler so we can play the audio when the client joins
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -68,9 +72,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context.add_message({"role": "developer", "content": "Say hello to the world."})
         await worker.queue_frames([LLMContextFrame(context), EndFrame()])
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-    await runner.add_workers(worker)
     await runner.run()
 
 

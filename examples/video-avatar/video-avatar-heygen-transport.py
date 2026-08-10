@@ -94,6 +94,10 @@ async def main():
             ),
         )
 
+        runner = WorkerRunner()
+
+        await runner.add_workers(worker)
+
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, client):
             logger.info(f"Client connected")
@@ -109,11 +113,8 @@ async def main():
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, client):
             logger.info(f"Client disconnected")
-            await worker.cancel()
+            await runner.cancel()
 
-        runner = WorkerRunner()
-
-        await runner.add_workers(worker)
         await runner.run()
 
 

@@ -200,6 +200,10 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         observers=[TranscriptionLogObserver()],
     )
 
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
+
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
@@ -213,7 +217,7 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-        await worker.cancel()
+        await runner.cancel()
 
     # In realtime mode the user transcript isn't finalized at turn-stop
     # time, so on_user_turn_stopped carries no content; subscribe to
@@ -240,9 +244,6 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         line = f"{timestamp}assistant: {message.content}"
         logger.info(f"Transcript: {line}")
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-    await runner.add_workers(worker)
     await runner.run()
 
 

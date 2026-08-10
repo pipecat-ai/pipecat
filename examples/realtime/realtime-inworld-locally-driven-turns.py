@@ -182,6 +182,10 @@ Always be helpful and proactive in offering assistance.""",
         observers=[TranscriptionLogObserver()],
     )
 
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
+
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Client connected")
@@ -190,7 +194,7 @@ Always be helpful and proactive in offering assistance.""",
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
-        await worker.cancel()
+        await runner.cancel()
 
     # In realtime mode the user transcript isn't finalized at turn-stop
     # time, so on_user_turn_stopped carries no content; subscribe to
@@ -215,9 +219,6 @@ Always be helpful and proactive in offering assistance.""",
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         logger.info(f"Transcript: {timestamp}assistant: {message.content}")
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-    await runner.add_workers(worker)
     await runner.run()
 
 
