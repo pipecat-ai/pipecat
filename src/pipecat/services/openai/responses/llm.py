@@ -1213,7 +1213,6 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
         # Track function calls across stream events
         function_calls: dict[str, dict[str, str]] = {}  # item_id -> {name, call_id, arguments}
         current_arguments: dict[str, str] = {}  # item_id -> accumulated arguments
-        completed_calls: set[str] = set()  # item_ids whose arguments finished streaming
         reasoning_summary_open = False
         stream_errored = False
 
@@ -1272,7 +1271,6 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                     item_id = event.item_id
                     if item_id in function_calls:
                         function_calls[item_id]["arguments"] = event.arguments
-                        completed_calls.add(item_id)
 
                 elif isinstance(event, ResponseOutputItemDoneEvent):
                     item = event.item
@@ -1282,7 +1280,6 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                             function_calls[item_id]["name"] = item.name
                             function_calls[item_id]["call_id"] = item.call_id
                             function_calls[item_id]["arguments"] = item.arguments
-                            completed_calls.add(item_id)
                     elif isinstance(item, ResponseReasoningItem):
                         if reasoning_summary_open:
                             await self.push_frame(LLMThoughtEndFrame())
@@ -1354,14 +1351,13 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
 
         # A stream that ended in a terminal error may have announced a function
         # call whose arguments never finished streaming — drop those rather than
-        # run them with fabricated empty arguments. Calls whose arguments did
-        # finish (e.g. parallel tool calls completed before a later item was
-        # truncated) still run.
+        # run them with fabricated empty arguments. `arguments` is only written
+        # by the Done events, so a non-empty string means the call completed
+        # (e.g. parallel tool calls finished before a later item was truncated)
+        # and it still runs.
         if stream_errored:
             function_calls = {
-                item_id: call
-                for item_id, call in function_calls.items()
-                if item_id in completed_calls
+                item_id: call for item_id, call in function_calls.items() if call["arguments"]
             }
 
         # Process any function calls
