@@ -223,6 +223,10 @@ There is also a secret menu that changes daily. If the user asks about it, use t
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
+
     # Handle client connection event
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -232,7 +236,7 @@ There is also a secret menu that changes daily. If the user asks about it, use t
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-        await worker.cancel()
+        await runner.cancel()
 
     # See comment above the user_aggregator for details on why this is
     # commented out and instructions for enabling it.
@@ -256,9 +260,6 @@ There is also a secret menu that changes daily. If the user asks about it, use t
         line = f"{timestamp}assistant: {message.content}"
         logger.info(f"Transcript: {line}")
 
-    # Run the pipeline
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-    await runner.add_workers(worker)
     await runner.run()
 
 

@@ -133,7 +133,7 @@ class TestParallelPipeline(unittest.IsolatedAsyncioTestCase):
         )
 
 
-class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
+class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
     async def test_task_single(self):
         pipeline = Pipeline([IdentityFilter()])
         worker = PipelineWorker(pipeline)

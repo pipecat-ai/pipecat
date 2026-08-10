@@ -82,8 +82,6 @@ async def websocket_endpoint(websocket: WebSocket):
     """Handle a WebSocket connection from the main bot's proxy."""
     await websocket.accept()
 
-    runner = WorkerRunner(handle_sigint=False)
-
     proxy = WebSocketProxyServer(
         "gateway",
         websocket=websocket,
@@ -91,6 +89,12 @@ async def websocket_endpoint(websocket: WebSocket):
         remote_worker_name="acme",
         forward_messages=(BusFrameMessage,),
     )
+
+    assistant = AcmeAssistant()
+
+    runner = WorkerRunner(handle_sigint=False)
+
+    await runner.add_workers(proxy, assistant)
 
     @proxy.event_handler("on_client_connected")
     async def on_client_connected(proxy, client):
@@ -100,10 +104,6 @@ async def websocket_endpoint(websocket: WebSocket):
     async def on_client_disconnected(proxy, client):
         logger.info("WebSocket client disconnected")
         await runner.cancel()
-
-    assistant = AcmeAssistant()
-
-    await runner.add_workers(proxy, assistant)
 
     logger.info("Assistant server ready, waiting for activation")
     await runner.run()

@@ -42,9 +42,9 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         """Set up test fixtures before each test."""
-        self.mock_task = AsyncMock()
-        self.mock_task.event_handler = Mock()
-        self.mock_task.set_reached_downstream_filter = Mock()
+        self.mock_worker = AsyncMock()
+        self.mock_worker.event_handler = Mock()
+        self.mock_worker.set_reached_downstream_filter = Mock()
 
         # Set up mock LLM with client
         self.mock_llm = OpenAILLMService(api_key="test-key")
@@ -90,7 +90,7 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
         self.mock_llm.run_inference.return_value = mock_summary
 
         flow_manager = FlowManager(
-            worker=self.mock_task,
+            worker=self.mock_worker,
             llm=self.mock_llm,
             context_aggregator=self.mock_context_aggregator,
             context_strategy=ContextStrategyConfig(
@@ -110,7 +110,7 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
             self.assertIn("RESET_WITH_SUMMARY is deprecated", str(deprecation_warnings[0].message))
 
         # Second node should NOT trigger a second warning (once-only)
-        self.mock_task.queue_frames.reset_mock()
+        self.mock_worker.queue_frames.reset_mock()
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             await flow_manager._set_node("second", self.sample_node)
@@ -121,7 +121,7 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
     async def test_default_strategy(self):
         """Test default context strategy (APPEND)."""
         flow_manager = FlowManager(
-            worker=self.mock_task,
+            worker=self.mock_worker,
             llm=self.mock_llm,
             context_aggregator=self.mock_context_aggregator,
         )
@@ -130,24 +130,24 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
         # Under the default (APPEND) strategy the first node appends, keeping any
         # context already present.
         await flow_manager._set_node("first", self.sample_node)
-        first_call = self.mock_task.queue_frames.call_args_list[0]
+        first_call = self.mock_worker.queue_frames.call_args_list[0]
         first_frames = first_call[0][0]
         self.assertTrue(any(isinstance(f, LLMMessagesAppendFrame) for f in first_frames))
         self.assertFalse(any(isinstance(f, LLMMessagesUpdateFrame) for f in first_frames))
 
         # Reset mock
-        self.mock_task.queue_frames.reset_mock()
+        self.mock_worker.queue_frames.reset_mock()
 
         # Subsequent node should use AppendFrame with default strategy
         await flow_manager._set_node("second", self.sample_node)
-        second_call = self.mock_task.queue_frames.call_args_list[0]
+        second_call = self.mock_worker.queue_frames.call_args_list[0]
         second_frames = second_call[0][0]
         self.assertTrue(any(isinstance(f, LLMMessagesAppendFrame) for f in second_frames))
 
     async def test_reset_strategy(self):
         """Test RESET strategy behavior."""
         flow_manager = FlowManager(
-            worker=self.mock_task,
+            worker=self.mock_worker,
             llm=self.mock_llm,
             context_aggregator=self.mock_context_aggregator,
             context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),
@@ -156,14 +156,14 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
 
         # First node should use UpdateFrame under the RESET strategy
         await flow_manager._set_node("first", self.sample_node)
-        first_call = self.mock_task.queue_frames.call_args_list[0]
+        first_call = self.mock_worker.queue_frames.call_args_list[0]
         first_frames = first_call[0][0]
         self.assertTrue(any(isinstance(f, LLMMessagesUpdateFrame) for f in first_frames))
-        self.mock_task.queue_frames.reset_mock()
+        self.mock_worker.queue_frames.reset_mock()
 
         # Second node should use UpdateFrame with RESET strategy
         await flow_manager._set_node("second", self.sample_node)
-        second_call = self.mock_task.queue_frames.call_args_list[0]
+        second_call = self.mock_worker.queue_frames.call_args_list[0]
         second_frames = second_call[0][0]
         self.assertTrue(any(isinstance(f, LLMMessagesUpdateFrame) for f in second_frames))
 
@@ -174,7 +174,7 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
         self.mock_llm.run_inference.return_value = mock_summary
 
         flow_manager = FlowManager(
-            worker=self.mock_task,
+            worker=self.mock_worker,
             llm=self.mock_llm,
             context_aggregator=self.mock_context_aggregator,
             context_strategy=ContextStrategyConfig(
@@ -186,12 +186,12 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
 
         # Set nodes and verify summary inclusion
         await flow_manager._set_node("first", self.sample_node)
-        self.mock_task.queue_frames.reset_mock()
+        self.mock_worker.queue_frames.reset_mock()
 
         await flow_manager._set_node("second", self.sample_node)
 
         # Verify summary was included in context update
-        second_call = self.mock_task.queue_frames.call_args_list[0]
+        second_call = self.mock_worker.queue_frames.call_args_list[0]
         second_frames = second_call[0][0]
         update_frame = next(f for f in second_frames if isinstance(f, LLMMessagesUpdateFrame))
         self.assertTrue(any(mock_summary in str(m) for m in update_frame.messages))
@@ -199,7 +199,7 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
     async def test_reset_with_summary_timeout(self):
         """Test RESET_WITH_SUMMARY fallback to APPEND on timeout."""
         flow_manager = FlowManager(
-            worker=self.mock_task,
+            worker=self.mock_worker,
             llm=self.mock_llm,
             context_aggregator=self.mock_context_aggregator,
             context_strategy=ContextStrategyConfig(
@@ -214,12 +214,12 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
 
         # Set nodes and verify fallback to APPEND
         await flow_manager._set_node("first", self.sample_node)
-        self.mock_task.queue_frames.reset_mock()
+        self.mock_worker.queue_frames.reset_mock()
 
         await flow_manager._set_node("second", self.sample_node)
 
         # Verify UpdateFrame was used (APPEND behavior)
-        second_call = self.mock_task.queue_frames.call_args_list[0]
+        second_call = self.mock_worker.queue_frames.call_args_list[0]
         second_frames = second_call[0][0]
         self.assertTrue(any(isinstance(f, LLMMessagesAppendFrame) for f in second_frames))
 
@@ -229,7 +229,7 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
 
         # Test OpenAI format
         flow_manager = FlowManager(
-            worker=self.mock_task,
+            worker=self.mock_worker,
             llm=OpenAILLMService(api_key="test-key"),
             context_aggregator=self.mock_context_aggregator,
         )
@@ -238,7 +238,7 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
 
         # Test Anthropic format
         flow_manager = FlowManager(
-            worker=self.mock_task,
+            worker=self.mock_worker,
             llm=AnthropicLLMService(api_key="test-key"),
             context_aggregator=self.mock_context_aggregator,
         )
@@ -247,7 +247,7 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
 
         # Test Gemini format
         flow_manager = FlowManager(
-            worker=self.mock_task,
+            worker=self.mock_worker,
             llm=GoogleLLMService(api_key=" "),  # dummy key (GoogleLLMService rejects empty string)
             context_aggregator=self.mock_context_aggregator,
         )
@@ -257,7 +257,7 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
     async def test_node_level_strategy_override(self):
         """Test that node-level strategy overrides global strategy."""
         flow_manager = FlowManager(
-            worker=self.mock_task,
+            worker=self.mock_worker,
             llm=self.mock_llm,
             context_aggregator=self.mock_context_aggregator,
             context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
@@ -272,12 +272,12 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
 
         # Set nodes and verify strategy override
         await flow_manager._set_node("first", self.sample_node)
-        self.mock_task.queue_frames.reset_mock()
+        self.mock_worker.queue_frames.reset_mock()
 
         await flow_manager._set_node("second", node_with_strategy)
 
         # Verify UpdateFrame was used (RESET behavior) despite global APPEND
-        second_call = self.mock_task.queue_frames.call_args_list[0]
+        second_call = self.mock_worker.queue_frames.call_args_list[0]
         second_frames = second_call[0][0]
         self.assertTrue(any(isinstance(f, LLMMessagesUpdateFrame) for f in second_frames))
 
@@ -288,7 +288,7 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
 
         summary_prompt = "Create a detailed summary"
         flow_manager = FlowManager(
-            worker=self.mock_task,
+            worker=self.mock_worker,
             llm=self.mock_llm,
             context_aggregator=self.mock_context_aggregator,
             context_strategy=ContextStrategyConfig(
@@ -324,7 +324,7 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
         self.mock_llm.run_inference.return_value = mock_summary
 
         flow_manager = FlowManager(
-            worker=self.mock_task,
+            worker=self.mock_worker,
             llm=self.mock_llm,
             context_aggregator=self.mock_context_aggregator,
             context_strategy=ContextStrategyConfig(
@@ -335,7 +335,7 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
 
         # Set nodes to trigger summary generation
         await flow_manager._set_node("first", self.sample_node)
-        self.mock_task.queue_frames.reset_mock()
+        self.mock_worker.queue_frames.reset_mock()
 
         # Node with new task messages
         new_node = {
@@ -345,7 +345,7 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
         await flow_manager._set_node("second", new_node)
 
         # Verify context structure
-        update_call = self.mock_task.queue_frames.call_args_list[0]
+        update_call = self.mock_worker.queue_frames.call_args_list[0]
         update_frames = update_call[0][0]
         messages_frame = next(f for f in update_frames if isinstance(f, LLMMessagesUpdateFrame))
 
@@ -361,7 +361,7 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
         self.mock_llm.run_inference.return_value = mock_summary
 
         flow_manager = FlowManager(
-            worker=self.mock_task,
+            worker=self.mock_worker,
             llm=self.mock_llm,
             context_aggregator=self.mock_context_aggregator,
             context_strategy=ContextStrategyConfig(
@@ -378,7 +378,7 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
             "functions": [],
         }
         await flow_manager._set_node("first", first_node)
-        self.mock_task.queue_frames.reset_mock()
+        self.mock_worker.queue_frames.reset_mock()
 
         # Set second node with role_message — triggers summary + settings update
         second_node = {
@@ -388,7 +388,7 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
         }
         await flow_manager._set_node("second", second_node)
 
-        second_call = self.mock_task.queue_frames.call_args_list[0]
+        second_call = self.mock_worker.queue_frames.call_args_list[0]
         second_frames = second_call[0][0]
 
         # Verify LLMUpdateSettingsFrame is present with new system instruction

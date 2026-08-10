@@ -181,7 +181,7 @@ class TestLLMServiceFunctionCallReadsAppResources(unittest.IsolatedAsyncioTestCa
         self.assertIs(value, resources)
 
 
-class TestPipelineTaskAppResources(unittest.TestCase):
+class TestPipelineWorkerAppResources(unittest.TestCase):
     def test_getter_returns_constructor_value(self):
         resources = _Resources(user_name="John")
         worker = PipelineWorker(Pipeline([]), app_resources=resources)
