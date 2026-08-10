@@ -1138,11 +1138,12 @@ _server_event_types = {
 }
 
 
-def parse_server_event(data: str):
-    """Parse a server event from JSON string.
+def parse_server_event(data: str | bytes):
+    """Parse a server event from JSON.
 
     Args:
-        data: JSON string containing the server event.
+        data: JSON text containing the server event, as delivered by the
+            websocket.
 
     Returns:
         Parsed server event object of the appropriate type.
