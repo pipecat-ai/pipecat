@@ -7,6 +7,7 @@
 """Sarvam realtime Speech-to-Text service implementation."""
 
 import asyncio
+import base64
 import json
 import time
 from collections.abc import AsyncGenerator
@@ -23,26 +24,26 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
-    MetricsFrame,
     StartFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given, is_given
 from pipecat.services.stt_latency import SARVAM_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
-REALTIME_STT_URL = "wss://api.sarvam.ai/speech-to-text-realtime/ws"
-REALTIME_MODEL = "saaras:v3-realtime"
+_REALTIME_STT_URL = "wss://api.sarvam.ai/speech-to-text-realtime/ws"
+_REALTIME_MODEL = "saaras:v3-realtime"
 
 SUPPORTED_LANGUAGES = {
     "auto",
@@ -72,10 +73,8 @@ SUPPORTED_LANGUAGES = {
 }
 SUPPORTED_STREAM_TYPES = {"fast", "balanced", "simulated"}
 SUPPORTED_ENDPOINTING = {"vad", "manual"}
-SUPPORTED_ENCODINGS = {"linear16", "linear32", "mulaw", "alaw"}
 SUPPORTED_SAMPLE_RATES = {8000, 16000}
 SUPPORTED_MODES = {"transcribe", "translate", "verbatim", "translit", "codemix"}
-_BYTES_PER_SAMPLE = {"linear16": 2, "linear32": 4, "mulaw": 1, "alaw": 1}
 
 # Sarvam's `stream_type` selects the *server* flush profile; it says nothing
 # about how often the client should send. Audio goes out on a fixed cadence so
@@ -87,7 +86,6 @@ _CLIENT_CHUNK_MS = 50
 _CONNECTION_ONLY_FIELDS = frozenset(
     {
         "sample_rate",
-        "encoding",
         "return_timestamps",
         "prefix_padding_ms",
         "lid_gate_seconds",
@@ -147,35 +145,6 @@ def language_to_sarvam_realtime_language(language: Language) -> str:
     return resolve_language(language, language_map, use_base_code=False)
 
 
-class SarvamRealtimeSTTError(Exception):
-    """Error raised for Sarvam realtime STT payloads."""
-
-    def __init__(self, payload: dict[str, Any]):
-        """Initialize the error from a raw Sarvam payload.
-
-        Args:
-            payload: Raw fatal error payload received from Sarvam.
-        """
-        self.payload = payload
-        code = payload.get("code", "unknown")
-        message = payload.get("message", payload)
-        status_code = payload.get("status_code")
-        if status_code is not None:
-            super().__init__(f"{code} ({status_code}): {message}")
-        else:
-            super().__init__(f"{code}: {message}")
-
-
-class SarvamRealtimeSTTUsageMetricsData(MetricsData):
-    """Sarvam realtime STT audio usage metrics data.
-
-    Parameters:
-        value: Audio duration processed by Sarvam realtime STT, in seconds.
-    """
-
-    value: float
-
-
 @dataclass
 class SarvamRealtimeSTTSettings(STTSettings):
     """Settings for SarvamRealtimeSTTService.
@@ -184,7 +153,6 @@ class SarvamRealtimeSTTSettings(STTSettings):
         language_code: Sarvam realtime language code or ``auto``.
         stream_type: Streaming cadence: ``fast``, ``balanced``, or ``simulated``.
         endpointing: Turn endpointing mode: ``vad`` or ``manual``.
-        encoding: Raw audio encoding sent over the websocket.
         sample_rate: Declared input audio sample rate. ``None`` adopts the
             pipeline's input rate.
         mode: Realtime STT task mode.
@@ -201,7 +169,6 @@ class SarvamRealtimeSTTSettings(STTSettings):
     language_code: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     stream_type: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     endpointing: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     sample_rate: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     mode: Literal["transcribe", "translate", "verbatim", "translit", "codemix"] | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
@@ -236,10 +203,9 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         self,
         *,
         api_key: str,
-        base_url: str = REALTIME_STT_URL,
+        base_url: str = _REALTIME_STT_URL,
         settings: Settings | None = None,
         should_interrupt: bool = True,
-        session_end_timeout: float = 0.5,
         ttfs_p99_latency: float | None = SARVAM_TTFS_P99,
         **kwargs,
     ):
@@ -250,7 +216,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             base_url: Realtime STT websocket endpoint.
             settings: Runtime-updatable realtime settings.
             should_interrupt: Whether provider speech-start events should broadcast interruption.
-            session_end_timeout: Seconds to wait for ``session.end`` during clean shutdown.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
             **kwargs: Additional arguments passed to :class:`WebsocketSTTService`.
         """
@@ -268,12 +233,11 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
                 "reconnection is always disabled"
             )
         default_settings = self.Settings(
-            model=REALTIME_MODEL,
+            model=_REALTIME_MODEL,
             language=None,
             language_code="en-IN",
             stream_type="balanced",
             endpointing="vad",
-            encoding="linear16",
             sample_rate=None,
             mode="transcribe",
             prompt=None,
@@ -310,19 +274,13 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         self._api_key = api_key
         self._base_url = base_url
         self._should_interrupt = should_interrupt
-        self._session_end_timeout = session_end_timeout
         self._receive_task: asyncio.Task | None = None
         self._audio_buffer = bytearray()
         self._request_id: str | None = None
         self._provider_speech_active = False
         self._speech_end_wall_time: float | None = None
         self._speech_end_audio_position_s: float | None = None
-        # Counted in bytes, not seconds: summing per-chunk float durations drifts,
-        # and this feeds billing-adjacent usage metrics.
         self._audio_position_bytes = 0
-        self._local_audio_bytes = 0
-        self._server_usage_reported = False
-        self._session_end_event = asyncio.Event()
         # What the server is actually doing, which trails `settings.endpointing`
         # until a `config.updated` acknowledges the switch.
         self._effective_endpointing = assert_given(self._settings.endpointing)
@@ -331,6 +289,21 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing and usage metrics."""
         return True
+
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Request external turn strategies when Sarvam endpoints server-side.
+
+        With ``endpointing="vad"`` (the default) Sarvam's VAD decides turn
+        boundaries and emits ``UserStarted/StoppedSpeakingFrame``, so the user
+        aggregator defers to those rather than running local VAD/smart-turn. In
+        ``endpointing="manual"`` the pipeline supplies the boundaries, so the
+        defaults are left in place. Applied unless the user passed their own
+        ``user_turn_strategies``.
+        """
+        frame = super().service_metadata_frame()
+        if self._effective_endpointing == "vad":
+            frame.user_turn_strategies = ExternalUserTurnStrategies()
+        return frame
 
     def language_to_service_language(self, language: Language) -> str:
         """Convert a Language enum to Sarvam realtime's language code."""
@@ -366,7 +339,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             await self._send_json({"event": "speech_end"})
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
-        """Buffer and send raw audio bytes to Sarvam as binary websocket frames."""
+        """Buffer and send raw audio bytes to Sarvam as base64-encoded JSON messages."""
         if not audio:
             yield None
             return
@@ -402,18 +375,12 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
-        """Disconnect from Sarvam realtime and emit local usage fallback if needed."""
+        """Disconnect from Sarvam realtime."""
         await super()._disconnect()
         if self._websocket and self._websocket.state is State.OPEN:
             await self._flush_audio_buffer()
             try:
                 await self._send_json({"event": "end"})
-                try:
-                    await asyncio.wait_for(
-                        self._session_end_event.wait(), timeout=self._session_end_timeout
-                    )
-                except TimeoutError:
-                    logger.debug(f"{self} timed out waiting for Sarvam session.end")
             except Exception as e:
                 logger.debug(f"{self} error sending Sarvam end event: {e}")
 
@@ -422,8 +389,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             self._receive_task = None
 
         await self._disconnect_websocket()
-        if not self._server_usage_reported and self._local_audio_bytes > 0:
-            await self._emit_usage(self._duration_for_bytes(self._local_audio_bytes))
 
     async def _connect_websocket(self):
         """Open the Sarvam realtime websocket."""
@@ -433,8 +398,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
 
             url = self._build_ws_url()
             headers = {"API-SUBSCRIPTION-KEY": self._api_key}
-            self._session_end_event.clear()
-            self._server_usage_reported = False
             # A fresh socket starts in whatever mode the query string asked for.
             self._effective_endpointing = assert_given(self._settings.endpointing)
             self._pending_endpointing = None
@@ -447,7 +410,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             await self._call_event_handler("on_connected")
         except Exception as e:
             self._websocket = None
-            logger.exception(f"Failed to connect to Sarvam realtime STT: {self._build_ws_url()}")
             await self.push_error(
                 error_msg=f"Unable to connect to Sarvam realtime STT: {e}", exception=e
             )
@@ -499,8 +461,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             await self._handle_session_end(message)
         elif event == "config.updated":
             await self._handle_config_updated(message)
-        elif event == "pong":
-            logger.trace(f"{self} Sarvam realtime acknowledgement: {message}")
         elif event == "error":
             await self._handle_error(message)
         else:
@@ -629,37 +589,21 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
     async def _handle_session_end(self, message: dict[str, Any]):
         if message.get("request_id"):
             self._request_id = message.get("request_id")
-        audio_duration_s = message.get("audio_duration_s")
-        if audio_duration_s is not None:
-            await self._emit_usage(float(audio_duration_s))
-            self._server_usage_reported = True
         await self._complete_active_utterance()
-        self._session_end_event.set()
 
     async def _handle_error(self, message: dict[str, Any]):
-        code = message.get("code", "unknown")
-        is_fatal = bool(message.get("is_fatal"))
-        logger.warning(
-            f"{self} Sarvam realtime error code={code} "
-            f"is_fatal={is_fatal} request_id={self._request_id}"
-        )
-        logger.debug(f"{self} Sarvam realtime error payload: {message}")
-        error = SarvamRealtimeSTTError(message)
         await self.push_error(
             error_msg=f"Sarvam realtime STT error: {json.dumps(message, ensure_ascii=False)}",
-            exception=error,
-            fatal=is_fatal,
         )
-        if not is_fatal:
-            return
-        await self.stop_all_metrics()
-        raise error
 
     async def _send_audio_chunk(self, chunk: bytes):
         if not self._websocket:
             raise RuntimeError("WebSocket not connected")
-        await self._websocket.send(chunk)
-        self._local_audio_bytes += len(chunk)
+        sent = await self._send_json(
+            {"event": "audio_input", "audio": base64.b64encode(chunk).decode("utf-8")}
+        )
+        if not sent:
+            return
         self._audio_position_bytes += len(chunk)
 
     async def _flush_audio_buffer(self):
@@ -684,27 +628,12 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         await self._websocket.send(json.dumps(payload))
         return True
 
-    async def _emit_usage(self, audio_duration_s: float):
-        if not self.usage_metrics_enabled:
-            return
-        model = assert_given(self._settings.model)
-        data: list[MetricsData] = [
-            SarvamRealtimeSTTUsageMetricsData(
-                processor=self.name,
-                model=model,
-                value=audio_duration_s,
-            )
-        ]
-        frame = MetricsFrame(data=data)
-        logger.debug(f"{self} usage audio seconds: {audio_duration_s}")
-        await self.push_frame(frame)
-
     def _query_params(self) -> dict[str, Any]:
         params: dict[str, Any] = {
             "language_code": self._settings.language_code,
             "stream_type": self._settings.stream_type,
             "endpointing": self._settings.endpointing,
-            "encoding": self._settings.encoding,
+            "encoding": "linear16",
             "sample_rate": self.sample_rate,
             "model": self._settings.model,
             "mode": self._settings.mode,
@@ -725,7 +654,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         return params
 
     def _bytes_per_second(self) -> int:
-        return self.sample_rate * _BYTES_PER_SAMPLE[assert_given(self._settings.encoding)]
+        return self.sample_rate * 2
 
     def _chunk_size_bytes(self) -> int:
         return int(self._bytes_per_second() * (_CLIENT_CHUNK_MS / 1000))
@@ -733,7 +662,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
     def _duration_for_bytes(self, byte_count: int) -> float:
         bytes_per_second = self._bytes_per_second()
         if bytes_per_second <= 0:
-            # No StartFrame yet, so no audio can have been sent either.
             return 0.0
         return byte_count / bytes_per_second
 
@@ -803,8 +731,8 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
     @staticmethod
     def _validate_settings(settings: Settings):
         model = assert_given(settings.model)
-        if model != REALTIME_MODEL:
-            raise ValueError(f"Unsupported model '{model}'. Only '{REALTIME_MODEL}' is supported.")
+        if model != _REALTIME_MODEL:
+            raise ValueError(f"Unsupported model '{model}'. Only '{_REALTIME_MODEL}' is supported.")
 
         language_code = assert_given(settings.language_code)
         if language_code not in SUPPORTED_LANGUAGES:
@@ -822,11 +750,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         if endpointing not in SUPPORTED_ENDPOINTING:
             allowed = ", ".join(sorted(SUPPORTED_ENDPOINTING))
             raise ValueError(f"Unsupported endpointing '{endpointing}'. Allowed values: {allowed}.")
-
-        encoding = assert_given(settings.encoding)
-        if encoding not in SUPPORTED_ENCODINGS:
-            allowed = ", ".join(sorted(SUPPORTED_ENCODINGS))
-            raise ValueError(f"Unsupported encoding '{encoding}'. Allowed values: {allowed}.")
 
         sample_rate = assert_given(settings.sample_rate)
         if sample_rate is not None and sample_rate not in SUPPORTED_SAMPLE_RATES:
