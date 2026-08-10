@@ -145,6 +145,16 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
         use_translate_endpoint=False,
         use_translate_method=False,
     ),
+    "saaras:v4": ModelConfig(
+        supports_prompt=False,
+        supports_mode=True,
+        supports_language=True,
+        supports_vad_params=False,
+        default_language="unknown",
+        default_mode="transcribe",
+        use_translate_endpoint=False,
+        use_translate_method=False,
+    ),
 }
 
 
@@ -232,11 +242,11 @@ class SarvamSTTService(STTService):
             language: Target language for transcription.
                 - saarika:v2.5: Defaults to "unknown" (auto-detect supported)
                 - saaras:v2.5: Not used (auto-detects language)
-                - saaras:v3: Defaults to "unknown" (auto-detect supported)
+                - saaras:v3/v4: Defaults to "unknown" (auto-detect supported)
             prompt: Optional prompt to guide transcription/translation style/context.
                 Only applicable to saaras:v2.5. Defaults to None.
-            mode: Mode of operation for saaras:v3 models only. Options: transcribe, translate,
-                verbatim, translit, codemix. Defaults to "transcribe" for saaras:v3.
+            mode: Mode of operation for saaras:v3/v4 models only. Options: transcribe, translate,
+                verbatim, translit, codemix. Defaults to "transcribe" for saaras:v3/v4.
             vad_signals: Enable VAD signals in response. Defaults to None.
             high_vad_sensitivity: Enable high VAD sensitivity. Defaults to None.
         """
@@ -274,7 +284,7 @@ class SarvamSTTService(STTService):
 
             mode: Mode of operation. Options: transcribe, translate, verbatim,
                 translit, codemix. Only applicable to models that support it
-                (e.g., saaras:v3). Defaults to the model's default mode.
+                (e.g., saaras:v3 or saaras:v4). Defaults to the model's default mode.
             sample_rate: Audio sample rate. Defaults to 16000 if not specified.
             input_audio_codec: Audio codec/format of the input file. Defaults to "wav".
             params: Configuration parameters for Sarvam STT service.
