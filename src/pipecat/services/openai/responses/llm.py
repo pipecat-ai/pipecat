@@ -22,9 +22,12 @@ from openai import NOT_GIVEN, AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.responses import (
     ResponseCompletedEvent,
+    ResponseErrorEvent,
+    ResponseFailedEvent,
     ResponseFunctionCallArgumentsDeltaEvent,
     ResponseFunctionCallArgumentsDoneEvent,
     ResponseFunctionToolCall,
+    ResponseIncompleteEvent,
     ResponseOutputItemAddedEvent,
     ResponseOutputItemDoneEvent,
     ResponseReasoningItem,
@@ -1318,6 +1321,29 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                     # This field is used by @traced_llm for more detailed
                     # model name in tracing spans
                     self._full_model_name = response.model
+
+                elif isinstance(event, ResponseFailedEvent):
+                    # As with usage above, the detail objects and their fields
+                    # are only as reliable as the server; coalesce to a generic
+                    # message so a sparse payload still reports something.
+                    error = event.response.error
+                    message = error.message if error else None
+                    await self.push_error(
+                        error_msg=f"LLM response error: {message or 'Response failed'}"
+                    )
+                    break
+
+                elif isinstance(event, ResponseIncompleteEvent):
+                    details = event.response.incomplete_details
+                    reason = details.reason if details else None
+                    await self.push_error(
+                        error_msg=f"LLM response error: {reason or 'Response incomplete'}"
+                    )
+                    break
+
+                elif isinstance(event, ResponseErrorEvent):
+                    await self.push_error(error_msg=f"Responses API error: {event.message}")
+                    break
 
         # Process any function calls
         if function_calls:
