@@ -53,6 +53,7 @@ from pipecat.frames.frames import (
     LLMUpdateSettingsFrame,
     StartFrame,
 )
+from pipecat.processors.aggregators.async_tool_messages import ASYNC_TOOL_INSTRUCTIONS
 from pipecat.processors.aggregators.llm_context import (
     NOT_GIVEN,
     LLMContext,
@@ -547,6 +548,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             parts.append(self._user_turn_completion_config.completion_instructions)
         if self._async_tool_cancellation_enabled:
             parts.append(ASYNC_TOOL_CANCELLATION_INSTRUCTIONS)
+        if self._has_async_tools():
+            parts.append(ASYNC_TOOL_INSTRUCTIONS)
         composed = "\n\n".join(p for p in parts if p)
         self._settings.system_instruction = composed or None
         logger.debug(f"{self}: System instruction composed: {self._settings.system_instruction}")
@@ -1052,6 +1055,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             logger.debug(
                 f"{self}: auto-registered handler for advertised FunctionSchema '{schema.name}'"
             )
+
+        # The advertised set is what decides whether the async-tool guidance belongs
+        # in the system instruction, and it is not known until this point.
+        self._compose_system_instruction()
 
     def _warn_if_redundant_manual_registration(self, function_name: str) -> None:
         """Warn that a manual registration is unnecessary, once per function.
