@@ -51,20 +51,24 @@ their artifact filenames, so no attempt overwrites another's logs.
 
 import asyncio
 import contextlib
+import functools
 import json
 import os
 import shlex
 import sys
 import time
 import traceback
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 import yaml
 from loguru import logger
 
 from pipecat.evals.harness import DEFAULT_EVENT_TIMEOUT_MS, EvalResult, EvalSession
+from pipecat.evals.speech import EvalSpeech
+from pipecat.evals.transcribe import EvalTranscriber
 
 DEFAULT_BASE_PORT = 7900
 DEFAULT_CONCURRENCY = 4
@@ -190,6 +194,81 @@ def _append_result(
     with contextlib.suppress(OSError):
         with results_path.open("a") as f:
             f.write(json.dumps(record) + "\n")
+
+
+def _pool_key(kind: str, *config: Any) -> str:
+    """A key that is equal for configs that would build interchangeable instances."""
+    return f"{kind}:" + json.dumps(config, sort_keys=True, default=str)
+
+
+class LocalModelPool:
+    """Lends started voices and transcribers to the runs of a suite.
+
+    A run's voice and transcriber are local ONNX models. Building one is orders of
+    magnitude more expensive than using an existing one, in memory a finished run
+    does not hand back, so a suite that builds a pair per run grows until it
+    exhausts the machine.
+
+    Instances are keyed by the config that produced them, since scenarios differ:
+    one pulls a multilingual Whisper where the rest use Moonshine, and lending the
+    wrong one would silently transcribe with a model the scenario didn't ask for.
+
+    An instance is lent to one run at a time, so the instances themselves never
+    see concurrent use. ``capacity`` bounds how many are kept per key; the natural
+    bound is the suite's concurrency, since that is the most that can be in use at
+    once.
+    """
+
+    def __init__(self, capacity: int):
+        """Initialize the pool.
+
+        Args:
+            capacity: Instances to keep per key. Beyond this, a returned instance
+                is closed rather than kept.
+        """
+        self._capacity = max(1, capacity)
+        self._idle: dict[str, list[Any]] = {}
+        self._lock = asyncio.Lock()
+
+    @contextlib.asynccontextmanager
+    async def borrow(self, key: str, factory: Callable[[], Any]) -> AsyncIterator[Any]:
+        """Lend an instance for ``key``, building and starting one if none is idle.
+
+        Args:
+            key: Identifies interchangeable instances — the config they were built
+                from, serialized.
+            factory: Builds an instance when none is available. Its ``start()`` is
+                awaited before the instance is lent out.
+
+        Yields:
+            An instance the caller may use until the block exits, after which it
+            belongs to the pool again.
+        """
+        async with self._lock:
+            idle = self._idle.setdefault(key, [])
+            instance = idle.pop() if idle else None
+        if instance is None:
+            instance = factory()
+            await instance.start()
+        try:
+            yield instance
+        finally:
+            async with self._lock:
+                idle = self._idle.setdefault(key, [])
+                keep = len(idle) < self._capacity
+                if keep:
+                    idle.append(instance)
+            if not keep:
+                await instance.aclose()
+
+    async def aclose(self) -> None:
+        """Close every instance the pool holds."""
+        async with self._lock:
+            instances = [i for group in self._idle.values() for i in group]
+            self._idle.clear()
+        for instance in instances:
+            with contextlib.suppress(Exception):
+                await instance.aclose()
 
 
 @dataclass
@@ -484,23 +563,30 @@ class EvalSuite:
             results_path.parent.mkdir(parents=True, exist_ok=True)
 
         sem = asyncio.Semaphore(self.manifest.concurrency)
-        await asyncio.gather(
-            *(
-                self._run_one(
-                    run,
-                    self.manifest.base_port + i,
-                    logs_dir,
-                    record_dir,
-                    results_path,
-                    sem,
-                    on_update,
-                    debug,
-                    use_cache,
-                    default_timeout_ms,
+        # One set of local models for the whole sweep. Concurrency bounds how many
+        # can be in use at once, so that is what the pool keeps.
+        pool = LocalModelPool(self.manifest.concurrency)
+        try:
+            await asyncio.gather(
+                *(
+                    self._run_one(
+                        run,
+                        self.manifest.base_port + i,
+                        logs_dir,
+                        record_dir,
+                        results_path,
+                        sem,
+                        on_update,
+                        debug,
+                        use_cache,
+                        default_timeout_ms,
+                        pool,
+                    )
+                    for i, run in enumerate(self.runs)
                 )
-                for i, run in enumerate(self.runs)
             )
-        )
+        finally:
+            await pool.aclose()
 
     async def _run_one(
         self,
@@ -514,6 +600,7 @@ class EvalSuite:
         debug: bool,
         use_cache: bool,
         default_timeout_ms: int,
+        pool: LocalModelPool,
     ) -> None:
         """Spawn one bot, run its scenario against it, and record the outcome on ``run``."""
         async with sem:
@@ -566,19 +653,53 @@ class EvalSuite:
                 # / judge) into a single <safe>.debug.log, scoped by this run's id so
                 # concurrent runs don't mix. The bot's own logs are captured
                 # separately in <safe>.log above.
-                with capture_pipeline_logs(logs_dir, safe, name=run.scenario, enabled=debug):
-                    run.result = await EvalSession.from_scenario(
-                        scenario,
-                        f"ws://localhost:{port}",
-                        connect_timeout_s=BOT_CONNECT_TIMEOUT_S,
-                        default_timeout_ms=default_timeout_ms,
-                        record_path=record_path,
-                        cache_dir=self.manifest.cache_dir,
-                        use_cache=use_cache,
-                        # The suite spawns a bot per run, so cancel it on teardown to
-                        # shut it down gracefully (faster than the kill fallback).
-                        stop_bot=True,
-                    ).run()
+                # These conditions mirror the ones from_scenario builds under, so a
+                # scenario that wants neither model still gets neither.
+                async with contextlib.AsyncExitStack() as borrowed_models:
+                    speech = transcriber = None
+                    borrowed: set[str] = set()
+                    if scenario.user_audio is not None:
+                        speech = await borrowed_models.enter_async_context(
+                            pool.borrow(
+                                _pool_key("speech", scenario.user_audio, self.manifest.cache_dir),
+                                functools.partial(
+                                    EvalSpeech.from_config,
+                                    scenario.user_audio,
+                                    cache_dir=self.manifest.cache_dir,
+                                    use_cache=use_cache,
+                                ),
+                            )
+                        )
+                        borrowed.add("speech")
+                    if scenario.bot_audio and any(
+                        exp.event == "response" for turn in scenario.turns for exp in turn.expect
+                    ):
+                        transcriber = await borrowed_models.enter_async_context(
+                            pool.borrow(
+                                _pool_key("transcriber", scenario.transcriber),
+                                functools.partial(
+                                    EvalTranscriber.from_config, scenario.transcriber
+                                ),
+                            )
+                        )
+                        borrowed.add("transcriber")
+
+                    with capture_pipeline_logs(logs_dir, safe, name=run.scenario, enabled=debug):
+                        run.result = await EvalSession.from_scenario(
+                            scenario,
+                            f"ws://localhost:{port}",
+                            connect_timeout_s=BOT_CONNECT_TIMEOUT_S,
+                            default_timeout_ms=default_timeout_ms,
+                            record_path=record_path,
+                            cache_dir=self.manifest.cache_dir,
+                            use_cache=use_cache,
+                            # The suite spawns a bot per run, so cancel it on teardown to
+                            # shut it down gracefully (faster than the kill fallback).
+                            stop_bot=True,
+                            speech=speech,
+                            transcriber=transcriber,
+                            borrowed=frozenset(borrowed),
+                        ).run()
             except Exception as e:
                 # Errors raised inside EvalSession.run() are caught there and
                 # returned as a structured result; this catches the rest (scenario

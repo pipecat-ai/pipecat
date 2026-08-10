@@ -229,6 +229,7 @@ class EvalSession:
         judge: EvalJudge | None = None,
         speech: EvalSpeech | None = None,
         transcriber: EvalTranscriber | None = None,
+        borrowed: frozenset[str] = frozenset(),
     ):
         """Initialize the eval session.
 
@@ -261,10 +262,14 @@ class EvalSession:
                 assertions, or ``None`` if the scenario has none.
             speech: The :class:`~pipecat.evals.speech.EvalSpeech` for synthesizing
                 user audio, or ``None`` for text-mode scenarios. Started and
-                stopped by the session.
+                stopped by the session unless named in ``borrowed``.
             transcriber: The :class:`~pipecat.evals.transcribe.EvalTranscriber`
                 for the ``response`` event, or ``None`` when unused. Started and
-                stopped by the session.
+                stopped by the session unless named in ``borrowed``.
+            borrowed: Names of the components above (``"speech"``,
+                ``"transcriber"``) that belong to the caller. The session leaves
+                their lifecycle alone, so one already-started instance can serve
+                many sessions.
         """
         self._scenario = scenario
         self._bot_url = bot_url
@@ -322,6 +327,11 @@ class EvalSession:
         self._tts_audio: bytearray = bytearray()  # current spoken segment's audio
         self._tts_sample_rate: int = 0
 
+        # The caller owns these, so the session neither starts nor closes them:
+        # starting an already-started instance would build a second task manager
+        # under it, and closing one would take it from the next session.
+        self._borrowed: frozenset[str] = borrowed
+
     @classmethod
     def from_scenario(
         cls,
@@ -339,6 +349,7 @@ class EvalSession:
         judge: EvalJudge | None = None,
         speech: EvalSpeech | None = None,
         transcriber: EvalTranscriber | None = None,
+        borrowed: frozenset[str] = frozenset(),
     ) -> "EvalSession":
         """Build a ready-to-run session from a scenario, constructing what it needs.
 
@@ -374,6 +385,9 @@ class EvalSession:
                 ``scenario.user_audio`` in audio mode).
             transcriber: Override the bot-audio transcriber (default: built from
                 ``scenario.transcriber`` when the scenario asserts ``response``).
+            borrowed: Names of the overrides above (``"speech"``,
+                ``"transcriber"``) that the caller owns and will close itself. The
+                session neither starts nor closes those.
 
         Returns:
             A configured session, ready for :meth:`run`.
@@ -406,6 +420,7 @@ class EvalSession:
             judge=judge,
             speech=speech,
             transcriber=transcriber,
+            borrowed=borrowed,
         )
 
     async def run(self) -> EvalResult:
@@ -474,14 +489,17 @@ class EvalSession:
             # _LOG_CATEGORIES). These run under the same `try` as the turns so a
             # sub-pipeline that fails to start (e.g. a local model under load) is
             # surfaced as a failure rather than propagating out raw (see below).
-            if self._speech is not None:
+            if self._speech is not None and "speech" not in self._borrowed:
                 with logger.contextualize(eval_pipeline="speech"):
                     await self._speech.start()
 
             if self._transcriber is not None:
                 with logger.contextualize(eval_pipeline="transcription"):
+                    # Rebind every session, borrowed or not: the trace it writes to
+                    # belongs to this run.
                     self._transcriber.debug = self._debug
-                    await self._transcriber.start()
+                    if "transcriber" not in self._borrowed:
+                        await self._transcriber.start()
 
             reader_task = asyncio.create_task(self._reader_loop())
 
@@ -542,10 +560,10 @@ class EvalSession:
             # Tear each sub-pipeline down under the same eval_pipeline label as its
             # setup, so its shutdown logs (e.g. "Cancelling pipeline worker") are
             # attributed to it rather than leaking into the harness catch-all.
-            if self._speech is not None:
+            if self._speech is not None and "speech" not in self._borrowed:
                 with logger.contextualize(eval_pipeline="speech"):
                     await self._speech.aclose()
-            if self._transcriber is not None:
+            if self._transcriber is not None and "transcriber" not in self._borrowed:
                 with logger.contextualize(eval_pipeline="transcription"):
                     await self._transcriber.aclose()
             # Optionally ask the bot to tear its pipeline down gracefully (closing
