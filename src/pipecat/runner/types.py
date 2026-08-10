@@ -143,7 +143,7 @@ class RunnerArguments:
         handle_sigint: Whether the bot should install a SIGINT handler.
         handle_sigterm: Whether the bot should install a SIGTERM handler.
         pipeline_idle_timeout_secs: Seconds the pipeline may stay idle before
-            shutting down.
+            shutting down; ``None`` disables the idle timeout.
         body: Optional request body data passed from the runner entry point.
         call_data: Parsed telephony handshake as a :class:`CallData` model — typed
             attribute access (``call_data.to_number``) that's also dict-compatible
@@ -159,7 +159,7 @@ class RunnerArguments:
     # Use kw_only so subclasses don't need to worry about ordering.
     handle_sigint: bool = field(init=False, kw_only=True)
     handle_sigterm: bool = field(init=False, kw_only=True)
-    pipeline_idle_timeout_secs: int = field(init=False, kw_only=True)
+    pipeline_idle_timeout_secs: float | None = field(init=False, kw_only=True)
     body: Any | None = field(default_factory=dict, kw_only=True)
     call_data: CallData | None = field(default=None, kw_only=True)
     session_id: str | None = field(default=None, kw_only=True)

@@ -123,6 +123,8 @@ from pipecat.runner.moq import (
     DEFAULT_MOQ_CLIENT_ID,
     DEFAULT_MOQ_SERVE_BIND,
     DIRECT_MODE_PEER_WAIT_SECS,
+    DIRECT_MODE_SESSION_IDLE_SECS,
+    MOQDirectHost,
     _build_moq_client_config,
     _client_prefix,
     _direct_client_url,
@@ -1080,66 +1082,30 @@ def _setup_moq_direct(app: FastAPI, args: argparse.Namespace):
             request_path=request_path,
         )
         runner_args.cli_args = args
-        # The pipeline is idle from the moment it starts until its browser
-        # subscribes, which the idle monitor would read as an abandoned
-        # call. A session here ends when the peer leaves.
-        runner_args.pipeline_idle_timeout_secs = 0
+        # Idle means no speech in either direction — an abandoned open tab
+        # keeps publishing silent mic audio, which doesn't count — so a
+        # forgotten call ends rather than running its bot indefinitely.
+        runner_args.pipeline_idle_timeout_secs = DIRECT_MODE_SESSION_IDLE_SECS
         return runner_args
 
-    async def run_session(session: str):
-        try:
-            await bot_module.bot(build_runner_args(session))
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            logger.opt(exception=e).error(f"MoQ session {session!r} failed: {e}")
-
-    async def watch_for_clients():
-        """Give every browser that appears its own bot.
-
-        Each browser mints an id and publishes under
-        ``<namespace>/<client_id>/<id>``; we watch that prefix and start a
-        bot per id, publishing the matching ``<namespace>/<bot_id>/<id>``
-        back. That's the role ``/start`` plays for the other transports —
-        one session per caller, several at once.
-
-        Departures aren't announced, so a session is considered over when
-        its bot returns.
-
-        Surviving a dropped relay connection is the session's job, not
-        this loop's: a path that goes quiet never ends the iterator or
-        raises, so a retry wrapped around it has nothing to react to.
-        See moq-dev/moq#2609 — moq-native reconnects, but moq-ffi doesn't
-        expose it yet.
-        """
-        import moq
-
-        prefix = _client_prefix(args)
-        relay_url = f"https://{args.moq_host}:{args.moq_port}{args.moq_path}"
-        sessions: dict[str, asyncio.Task] = {}
-
-        logger.debug(f"MoQ direct: watching {prefix!r} on {relay_url}")
-        origin = moq.OriginProducer()
-        async with moq.Client(
-            relay_url, tls_verify=not args.moq_tls_insecure, publish=origin, subscribe=origin
-        ):
-            try:
-                # `path` is relative to the prefix, so it is the id itself.
-                async for announcement in origin.consume().announced(prefix):
-                    session = announcement.path
-                    for done in [s for s, t in sessions.items() if t.done()]:
-                        del sessions[done]
-                    if session in sessions:
-                        continue
-                    logger.info(f"MoQ direct: client {session!r} arrived, starting a bot")
-                    sessions[session] = asyncio.create_task(run_session(session))
-            finally:
-                for task in sessions.values():
-                    task.cancel()
+    # Surviving a dropped relay connection is a session's job, not the
+    # host's: a path that goes quiet never ends the announce iterator or
+    # raises, so a retry wrapped around it has nothing to react to.
+    # See moq-dev/moq#2609 — moq-native reconnects, but moq-ffi doesn't
+    # expose it yet. `host_idle_secs=None`: a development server runs
+    # until Ctrl-C.
+    host = MOQDirectHost(
+        lambda runner_args: bot_module.bot(runner_args),
+        relay_url=f"https://{args.moq_host}:{args.moq_port}{args.moq_path}",
+        request_prefix=_client_prefix(args),
+        runner_args_factory=build_runner_args,
+        verify_ssl=not args.moq_tls_insecure,
+        host_idle_secs=None,
+    )
 
     @asynccontextmanager
     async def moq_direct_lifespan(app: FastAPI):
-        watch_task = asyncio.create_task(watch_for_clients())
+        watch_task = asyncio.create_task(host.run())
         try:
             yield
         finally:
