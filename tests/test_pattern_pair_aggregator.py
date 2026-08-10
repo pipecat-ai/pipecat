@@ -448,7 +448,7 @@ class TestPatternPairAggregatorTokenMode(unittest.IsolatedAsyncioTestCase):
 
         # State resets after flush.
         self.assertEqual(self.aggregator.text.text, "")
-        
+
     async def test_token_start_delimiter_split_across_chunks(self):
         """A start delimiter split across chunks is not leaked as plain text.
 
