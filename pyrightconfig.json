@@ -9,7 +9,6 @@
     "src/pipecat/processors/frameworks/rtvi/observer.py",
     "src/pipecat/services/aws/nova_sonic/llm.py",
     "src/pipecat/services/google/gemini_live/llm.py",
-    "src/pipecat/services/google/stt.py",
     "src/pipecat/services/google/tts.py",
     "src/pipecat/services/heygen/client.py",
     "src/pipecat/services/inworld/realtime/llm.py",
