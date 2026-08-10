@@ -8,6 +8,7 @@
 
 from typing import Any, TypedDict, TypeGuard, TypeVar, cast
 
+from openai._types import NOT_GIVEN as OPENAI_NOT_GIVEN
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.chat import (
     ChatCompletionMessageParam,
@@ -25,43 +26,82 @@ from pipecat.processors.aggregators.llm_context import (
     LLMStandardMessage,
     NotGiven,
 )
+from pipecat.utils.types import is_given
 
 _T = TypeVar("_T")
 
 
-def _openai_from_llm_context_tool_choice(
+def openai_from_llm_context_tool_choice(
     tool_choice: LLMContextToolChoice | NotGiven,
 ) -> ChatCompletionToolChoiceOptionParam | OpenAINotGiven:
     """Reinterpret an LLMContext ``tool_choice`` as OpenAI's type.
 
-    The underlying types are currently aliased — ``LLMContextToolChoice`` is
-    ``ChatCompletionToolChoiceOptionParam`` and LLMContext's ``NotGiven`` is
-    OpenAI's — so this is a typed no-op today. It's kept as a named boundary
-    so that if the LLMContext side ever diverges from OpenAI's types, every
-    crossing is visible and easy to update.
+    The value types are aliased — ``LLMContextToolChoice`` is
+    ``ChatCompletionToolChoiceOptionParam`` — so only the "not provided"
+    sentinel needs translating: LLMContext has its own, and the SDK recognizes
+    only its own.
+
+    Args:
+        tool_choice: A context's tool choice, or its "not provided" sentinel.
+
+    Returns:
+        The tool choice unchanged, with LLMContext's sentinel replaced by the SDK's.
     """
-    return cast("ChatCompletionToolChoiceOptionParam | OpenAINotGiven", tool_choice)
+    if not is_given(tool_choice):
+        return OPENAI_NOT_GIVEN
+    return cast("ChatCompletionToolChoiceOptionParam", tool_choice)
 
 
-def _openai_from_llm_standard_message(
+def openai_from_llm_context_tools(
+    tools: list[_T] | NotGiven | None,
+) -> list[_T] | OpenAINotGiven:
+    """Reinterpret converted LLMContext tools as OpenAI's type.
+
+    Same boundary as :func:`openai_from_llm_context_tool_choice`: the tool
+    entries are already in OpenAI's format by this point, so only the absence of
+    tools has to be respelled. The SDK's sentinel is the one that omits ``tools``
+    from the request body, so both of the ways absence arrives here — LLMContext's
+    sentinel and ``None`` — map onto it.
+
+    Generic over the tool entry type so that every OpenAI surface can share one
+    translation: the Chat Completions and Responses APIs each have their own.
+
+    Args:
+        tools: Converted tools, or a value meaning no tools were provided.
+
+    Returns:
+        The tools unchanged, or the SDK's sentinel if there are none.
+    """
+    if tools is None or not is_given(tools):
+        return OPENAI_NOT_GIVEN
+    return tools
+
+
+def openai_from_llm_standard_message(
     message: LLMStandardMessage,
 ) -> ChatCompletionMessageParam:
     """Reinterpret an LLMContext standard message as OpenAI's type.
 
-    Same rationale as :func:`_openai_from_llm_context_tool_choice`: the
+    Same rationale as :func:`openai_from_llm_context_tool_choice`: the
     aliased types make this a no-op today, but the boundary is preserved
     for future divergence.
+
+    Args:
+        message: A context's standard message.
+
+    Returns:
+        The message unchanged, typed as OpenAI's.
     """
     return cast("ChatCompletionMessageParam", message)
 
 
-def is_given(value: _T | OpenAINotGiven) -> TypeGuard[_T]:
-    """Check whether a value was explicitly provided.
+def openai_is_given(value: _T | OpenAINotGiven) -> TypeGuard[_T]:
+    """Check whether a value was explicitly provided to the OpenAI SDK.
 
-    Typically used when checking whether a parameter or field typed with
-    OpenAI's ``NotGiven`` was set::
+    Asks about the SDK's sentinel, not Pipecat's — use
+    :func:`pipecat.utils.types.is_given` for values that are still Pipecat's::
 
-        if is_given(tool_choice):
+        if openai_is_given(tool_choice):
             ...
 
     Also acts as a type guard: inside a true branch, the value is narrowed
@@ -73,7 +113,7 @@ def is_given(value: _T | OpenAINotGiven) -> TypeGuard[_T]:
         value: The value to check.
 
     Returns:
-        ``True`` if *value* is anything other than ``NOT_GIVEN``.
+        ``True`` if *value* is anything other than the SDK's ``NOT_GIVEN``.
     """
     return not isinstance(value, OpenAINotGiven)
 
@@ -148,8 +188,8 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             {
                 "messages": messages,
                 # NOTE; LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
-                "tools": self.from_standard_tools(context.tools),
-                "tool_choice": _openai_from_llm_context_tool_choice(context.tool_choice),
+                "tools": openai_from_llm_context_tools(self.from_standard_tools(context.tools)),
+                "tool_choice": openai_from_llm_context_tool_choice(context.tool_choice),
             },
         )
 
@@ -208,7 +248,7 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
                 result.append(message.message)
             else:
                 # Standard message, pass through unchanged
-                result.append(_openai_from_llm_standard_message(message))
+                result.append(openai_from_llm_standard_message(message))
 
         if convert_developer_to_user:
             # Copy rather than mutate: the message dicts are shared with the
@@ -226,4 +266,4 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
     def _from_standard_tool_choice(
         self, tool_choice: LLMContextToolChoice | NotGiven
     ) -> ChatCompletionToolChoiceOptionParam | OpenAINotGiven:
-        return _openai_from_llm_context_tool_choice(tool_choice)
+        return openai_from_llm_context_tool_choice(tool_choice)

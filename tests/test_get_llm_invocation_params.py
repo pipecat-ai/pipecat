@@ -74,6 +74,7 @@ import unittest
 from unittest.mock import patch
 
 from google.genai.types import Content, FunctionCall, FunctionResponse, Part
+from openai._types import NotGiven as OpenAINotGiven
 
 from pipecat.adapters.base_llm_adapter import LLMContextConversionError
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -128,6 +129,13 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][0]["content"], "You are a helpful assistant.")
         self.assertEqual(params["messages"][1]["content"], "Hello, how are you?")
         self.assertEqual(params["messages"][2]["content"], "I'm doing well, thank you for asking!")
+
+    def test_tools_absent_yields_openai_sentinel(self):
+        """A context without tools yields the sentinel the SDK omits from the request."""
+        context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
+
+        self.assertIsInstance(params["tools"], OpenAINotGiven)
 
     def test_llm_specific_message_filtering(self):
         """Test that OpenAI-specific messages are included and others are filtered out."""
@@ -2582,6 +2590,13 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(tool["name"], "get_weather")
         self.assertEqual(tool["description"], "Get the current weather")
         self.assertIn("properties", tool["parameters"])
+
+    def test_tools_absent_yields_openai_sentinel(self):
+        """A context without tools yields the sentinel the SDK omits from the request."""
+        context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertIsInstance(params["tools"], OpenAINotGiven)
 
     def test_empty_messages(self):
         """Empty messages list produces empty input list."""

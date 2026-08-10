@@ -34,10 +34,11 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 # Soniox idle timeout is 20-30s; keepalive cadence must stay well inside it.
 KEEPALIVE_INTERVAL_SECONDS = 20
@@ -133,7 +134,7 @@ class SonioxTTSSettings(TTSSettings):
             unset and uses the Soniox server default (1.0).
     """
 
-    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SonioxTTSService(WebsocketTTSService):

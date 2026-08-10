@@ -25,11 +25,12 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 def language_to_minimax_language(language: Language) -> str:
@@ -104,13 +105,13 @@ class MiniMaxTTSSettings(TTSSettings):
         language_boost: Language boost string for multilingual support.
     """
 
-    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    volume: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    pitch: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    emotion: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    text_normalization: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    latex_read: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language_boost: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    volume: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    emotion: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    text_normalization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    latex_read: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_boost: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     @classmethod
     def from_mapping(cls, settings: Mapping[str, Any]) -> Self:

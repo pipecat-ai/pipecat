@@ -11,15 +11,13 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from loguru import logger
-from openai import NOT_GIVEN
+from openai import NOT_GIVEN as OPENAI_NOT_GIVEN
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
-from pipecat.adapters.services.open_ai_adapter import is_given as openai_is_given
+from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams, openai_is_given
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.sarvam._sdk import sdk_headers
-from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
-from pipecat.services.settings import _NotGiven, is_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 
 @dataclass
@@ -31,9 +29,9 @@ class SarvamLLMSettings(OpenAILLMSettings):
         reasoning_effort: Reasoning effort level (low, medium, high).
     """
 
-    wiki_grounding: bool | None | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
-    reasoning_effort: Literal["low", "medium", "high"] | None | _NotGiven = field(
-        default_factory=lambda: _NOT_GIVEN
+    wiki_grounding: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    reasoning_effort: Literal["low", "medium", "high"] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
     )
 
 
@@ -153,8 +151,8 @@ class SarvamLLMService(OpenAILLMService):
             raise ValueError(f"Unsupported Sarvam LLM model '{model}'. Allowed values: {allowed}.")
 
     def _validate_tool_parameters(self, params_from_context: OpenAILLMInvocationParams):
-        tools = params_from_context.get("tools", NOT_GIVEN)
-        tool_choice = params_from_context.get("tool_choice", NOT_GIVEN)
+        tools = params_from_context.get("tools", OPENAI_NOT_GIVEN)
+        tool_choice = params_from_context.get("tool_choice", OPENAI_NOT_GIVEN)
 
         has_tools = (
             openai_is_given(tools)
