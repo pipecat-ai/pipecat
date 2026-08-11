@@ -15,6 +15,7 @@ from enum import StrEnum
 from typing import (
     TYPE_CHECKING,
     Optional,
+    cast,
 )
 
 from loguru import logger
@@ -499,31 +500,33 @@ class RTVIObserver(BaseObserver):
                 report_level = self._get_function_call_report_level(function_call.function_name)
                 if report_level == RTVIFunctionCallReportLevel.DISABLED:
                     continue
-                data = RTVI.LLMFunctionCallStartMessageData()
+                msg_data = RTVI.LLMFunctionCallStartMessageData()
                 if report_level in (
                     RTVIFunctionCallReportLevel.NAME,
                     RTVIFunctionCallReportLevel.FULL,
                 ):
-                    data.function_name = function_call.function_name
-                message = RTVI.LLMFunctionCallStartMessage(data=data)
+                    msg_data.function_name = function_call.function_name
+                message = RTVI.LLMFunctionCallStartMessage(data=msg_data)
                 await self.send_rtvi_message(message)
         elif isinstance(frame, FunctionCallInProgressFrame):
             report_level = self._get_function_call_report_level(frame.function_name)
             if report_level != RTVIFunctionCallReportLevel.DISABLED:
-                data = RTVI.LLMFunctionCallInProgressMessageData(tool_call_id=frame.tool_call_id)
+                msg_data = RTVI.LLMFunctionCallInProgressMessageData(
+                    tool_call_id=frame.tool_call_id
+                )
                 if report_level in (
                     RTVIFunctionCallReportLevel.NAME,
                     RTVIFunctionCallReportLevel.FULL,
                 ):
-                    data.function_name = frame.function_name
+                    msg_data.function_name = frame.function_name
                 if report_level == RTVIFunctionCallReportLevel.FULL:
-                    data.arguments = frame.arguments
-                message = RTVI.LLMFunctionCallInProgressMessage(data=data)
+                    msg_data.arguments = frame.arguments
+                message = RTVI.LLMFunctionCallInProgressMessage(data=msg_data)
                 await self.send_rtvi_message(message)
         elif isinstance(frame, FunctionCallCancelFrame):
             report_level = self._get_function_call_report_level(frame.function_name)
             if report_level != RTVIFunctionCallReportLevel.DISABLED:
-                data = RTVI.LLMFunctionCallStoppedMessageData(
+                msg_data = RTVI.LLMFunctionCallStoppedMessageData(
                     tool_call_id=frame.tool_call_id,
                     cancelled=True,
                 )
@@ -531,13 +534,13 @@ class RTVIObserver(BaseObserver):
                     RTVIFunctionCallReportLevel.NAME,
                     RTVIFunctionCallReportLevel.FULL,
                 ):
-                    data.function_name = frame.function_name
-                message = RTVI.LLMFunctionCallStoppedMessage(data=data)
+                    msg_data.function_name = frame.function_name
+                message = RTVI.LLMFunctionCallStoppedMessage(data=msg_data)
                 await self.send_rtvi_message(message)
         elif isinstance(frame, FunctionCallResultFrame):
             report_level = self._get_function_call_report_level(frame.function_name)
             if report_level != RTVIFunctionCallReportLevel.DISABLED:
-                data = RTVI.LLMFunctionCallStoppedMessageData(
+                msg_data = RTVI.LLMFunctionCallStoppedMessageData(
                     tool_call_id=frame.tool_call_id,
                     cancelled=False,
                 )
@@ -545,10 +548,10 @@ class RTVIObserver(BaseObserver):
                     RTVIFunctionCallReportLevel.NAME,
                     RTVIFunctionCallReportLevel.FULL,
                 ):
-                    data.function_name = frame.function_name
+                    msg_data.function_name = frame.function_name
                 if report_level == RTVIFunctionCallReportLevel.FULL:
-                    data.result = frame.result if frame.result else None
-                message = RTVI.LLMFunctionCallStoppedMessage(data=data)
+                    msg_data.result = frame.result if frame.result else None
+                message = RTVI.LLMFunctionCallStoppedMessage(data=msg_data)
                 await self.send_rtvi_message(message)
         elif isinstance(frame, RTVIServerMessageFrame):
             message = RTVI.ServerMessage(data=frame.data)
@@ -678,9 +681,10 @@ class RTVIObserver(BaseObserver):
                         remaining = result.remaining_text or remaining
                         text = result.text or text
                 else:
-                    accumulated = await transform(accumulated, agg_type)
-                    remaining = await transform(remaining, agg_type)
-                    text = await transform(text, agg_type)
+                    # The deprecated 2-parameter signature returns the text itself.
+                    accumulated = cast(str, await transform(accumulated, agg_type))
+                    remaining = cast(str, await transform(remaining, agg_type))
+                    text = cast(str, await transform(text, agg_type))
 
         if self._params.bot_output_enabled:
             spoken_status: RTVI.SpokenStatus = "completed" if remaining == "" else "in-progress"
@@ -807,8 +811,9 @@ class RTVIObserver(BaseObserver):
 
             # Handle Google LLM format (protobuf objects with attributes)
             # Note: not possible if frame is a universal LLMContextFrame
-            if hasattr(message, "role") and message.role == "user" and hasattr(message, "parts"):
-                text = "".join(part.text for part in message.parts if hasattr(part, "text"))
+            if getattr(message, "role", None) == "user" and hasattr(message, "parts"):
+                parts = getattr(message, "parts", [])
+                text = "".join(part.text for part in parts if hasattr(part, "text"))
                 if text:
                     rtvi_message = RTVI.UserLLMTextMessage(data=RTVI.TextMessageData(text=text))
                     await self.send_rtvi_message(rtvi_message)
@@ -816,11 +821,14 @@ class RTVIObserver(BaseObserver):
             # Handle OpenAI format (original implementation)
             elif isinstance(message, dict):
                 if message.get("role") == "user":
-                    content = message["content"]
-                    if isinstance(content, list):
-                        text = " ".join(item["text"] for item in content if "text" in item)
-                    else:
+                    content = message.get("content")
+                    if content is None:
+                        return
+                    if isinstance(content, str):
                         text = content
+                    else:
+                        # Anything else is a sequence of content parts.
+                        text = " ".join(item["text"] for item in content if "text" in item)
                     rtvi_message = RTVI.UserLLMTextMessage(data=RTVI.TextMessageData(text=text))
                     await self.send_rtvi_message(rtvi_message)
 
@@ -869,6 +877,8 @@ class RTVIObserver(BaseObserver):
 
     async def _send_error_response(self, frame: RTVIServerResponseFrame):
         """Send a response to the client for a specific request."""
+        assert frame.error is not None
+
         message = RTVI.ErrorResponse(
             id=str(frame.client_msg.msg_id), data=RTVI.ErrorResponseData(error=frame.error)
         )
