@@ -23,7 +23,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.inworld.frames import InworldVoiceProfileFrame
+from pipecat.services.inworld.stt import InworldSTTService
 from pipecat.services.inworld.tts import InworldHttpTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_output import BaseOutputTransport
@@ -58,10 +59,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
     async with aiohttp.ClientSession() as session:
-        stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
+        inworld_api_key = os.environ["INWORLD_API_KEY"]
+
+        stt = InworldSTTService(
+            api_key=inworld_api_key,
+            aiohttp_session=session,
+            settings=InworldSTTService.Settings(
+                prompts=["Pipecat", "Inworld"],
+                enable_voice_profile=True,
+                voice_profile_top_n=3,
+            ),
+        )
 
         tts = InworldHttpTTSService(
-            api_key=os.getenv("INWORLD_API_KEY", ""),
+            api_key=inworld_api_key,
             aiohttp_session=session,
             streaming=True,
             settings=InworldHttpTTSService.Settings(
@@ -73,7 +84,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         llm = OpenAILLMService(
             api_key=os.environ["OPENAI_API_KEY"],
             settings=OpenAILLMService.Settings(
-                system_instruction="You are a helpful AI demonstrating Inworld AI's TTS. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a friendly and helpful way.",
+                system_instruction="You are a helpful AI demonstrating Inworld AI's speech services. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a friendly and helpful way.",
             ),
         )
 
@@ -104,6 +115,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             observers=[
                 DebugLogObserver(
                     frame_types={
+                        InworldVoiceProfileFrame: None,
                         TTSTextFrame: (BaseOutputTransport, FrameEndpoint.SOURCE),
                     }
                 ),
