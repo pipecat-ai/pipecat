@@ -757,11 +757,10 @@ class GoogleHttpTTSService(TTSService):
         Args:
             delta: Settings delta. Can include 'speaking_rate' (float).
         """
-        # A None rate clears the setting, so there is nothing to range-check.
         if (
             isinstance(delta, self.Settings)
             and is_given(delta.speaking_rate)
-            and delta.speaking_rate is not None
+            and delta.speaking_rate is not None  # None == "up to Google"; no check needed
         ):
             rate_value = float(delta.speaking_rate)
             if not (0.25 <= rate_value <= 2.0):
@@ -1145,11 +1144,10 @@ class GoogleTTSService(GoogleBaseTTSService):
         Args:
             delta: Settings delta. Can include 'speaking_rate' (float).
         """
-        # A None rate clears the setting, so there is nothing to range-check.
         if (
             isinstance(delta, self.Settings)
             and is_given(delta.speaking_rate)
-            and delta.speaking_rate is not None
+            and delta.speaking_rate is not None  # None == "up to Google"; no check needed
         ):
             rate_value = float(delta.speaking_rate)
             if not (0.25 <= rate_value <= 2.0):
