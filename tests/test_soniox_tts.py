@@ -160,7 +160,7 @@ class TestSonioxUpdateSettingsFinalizesOldContext(unittest.IsolatedAsyncioTestCa
         service = SonioxTTSService.__new__(SonioxTTSService)
         service._name = "SonioxTTSService#0"
         service._settings = SonioxTTSService.Settings(
-            model="tts-rt-v1",
+            model="tts-rt-v2",
             voice="Adrian",
             language=Language.EN,
             speed=None,
@@ -193,7 +193,7 @@ class TestSonioxUpdateSettingsFinalizesOldContext(unittest.IsolatedAsyncioTestCa
         old_ctx = "ctx-old"
         service, seq, pushed = await self._service_with_pending_prefix(old_ctx)
 
-        await service._update_settings(SonioxTTSService.Settings(voice="Hannah"))
+        await service._update_settings(SonioxTTSService.Settings(voice="Emma"))
 
         # The old context's pending sentence was force-promoted into a real slot.
         self.assertEqual([s.frame.text for s in seq._slots], ["Hi there"])
