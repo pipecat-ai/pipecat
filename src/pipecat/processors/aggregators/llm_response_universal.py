@@ -917,7 +917,8 @@ class LLMUserAggregator(LLMContextAggregator):
         for s in user_turn_strategies.stop or []:
             if getattr(s, "wait_for_transcript", False):
                 try:
-                    setattr(s, "wait_for_transcript", False)
+                    # The flag is a property on some stop strategies, not on the base.
+                    s.wait_for_transcript = False  # pyright: ignore[reportAttributeAccessIssue]
                     flipped.append(s.__class__.__name__)
                 except AttributeError:
                     # Strategy exposes the property but no setter — skip.
