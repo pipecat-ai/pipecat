@@ -4,9 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Inworld AI speech-to-text service implementation."""
+"""Inworld AI speech-to-text service implementations."""
 
+import asyncio
 import base64
+import json
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -15,13 +17,27 @@ from typing import Any
 import aiohttp
 from loguru import logger
 from pydantic import ValidationError
+from websockets.protocol import State
 
 from pipecat import version as pipecat_version
-from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
+from pipecat.frames.frames import (
+    ErrorFrame,
+    Frame,
+    InterimTranscriptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
+    StartFrame,
+    STTMetadataFrame,
+    TranscriptionFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.inworld.frames import InworldVoiceProfile, InworldVoiceProfileFrame
 from pipecat.services.settings import STTSettings
-from pipecat.services.stt_service import SegmentedSTTService
+from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
@@ -89,6 +105,65 @@ class InworldSTTSettings(STTSettings):
     prompts: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_voice_profile: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     voice_profile_top_n: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+@dataclass
+class InworldRealtimeSTTSettings(InworldSTTSettings):
+    """Settings for :class:`InworldRealtimeSTTService`.
+
+    Parameters:
+        vad_threshold: Inworld voice activity detection sensitivity in Inworld
+            turn mode. Pipecat turn mode overrides this to ``0``.
+        min_end_of_turn_silence_when_confident: Minimum silence in milliseconds
+            before ending a turn when Inworld is confident the turn is complete.
+        end_of_turn_confidence_threshold: Confidence threshold for Inworld's
+            semantic end-of-turn detection. Lower values end turns more eagerly.
+        inactivity_timeout_seconds: Seconds of client silence before Inworld stops
+            transcription. ``None`` uses the server default.
+    """
+
+    vad_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    min_end_of_turn_silence_when_confident: int | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    end_of_turn_confidence_threshold: float | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    inactivity_timeout_seconds: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+def _build_transcribe_config(settings: InworldSTTSettings, sample_rate: int) -> dict[str, Any]:
+    """Build the fields shared by Inworld's HTTP and WebSocket STT APIs."""
+    model = assert_given(settings.model)
+    if not model:
+        raise ValueError("Inworld STT model must be specified")
+
+    config: dict[str, Any] = {
+        "modelId": model,
+        "audioEncoding": "LINEAR16",
+        "sampleRateHertz": sample_rate,
+        "numberOfChannels": 1,
+    }
+
+    language = assert_given(settings.language)
+    if language:
+        config["language"] = str(language)
+
+    prompts = assert_given(settings.prompts)
+    if prompts:
+        config["prompts"] = prompts
+
+    enable_voice_profile = assert_given(settings.enable_voice_profile)
+    if enable_voice_profile:
+        voice_profile_config: dict[str, Any] = {"enableVoiceProfile": True}
+        top_n = assert_given(settings.voice_profile_top_n)
+        if top_n is not None:
+            if top_n < 1:
+                raise ValueError("Inworld Voice Profile top_n must be at least 1")
+            voice_profile_config["topN"] = top_n
+        config["voiceProfileConfig"] = voice_profile_config
+
+    return config
 
 
 class InworldSTTService(SegmentedSTTService):
@@ -178,37 +253,8 @@ class InworldSTTService(SegmentedSTTService):
         Raises:
             ValueError: If no model is configured.
         """
-        model = assert_given(self._settings.model)
-        if not model:
-            raise ValueError("Inworld STT model must be specified")
-
-        config: dict[str, Any] = {
-            "modelId": model,
-            "audioEncoding": "LINEAR16",
-            "sampleRateHertz": self.sample_rate,
-            "numberOfChannels": 1,
-        }
-
-        language_setting = assert_given(self._settings.language)
-        if language_setting:
-            config["language"] = str(language_setting)
-
-        prompts = assert_given(self._settings.prompts)
-        if prompts:
-            config["prompts"] = prompts
-
-        enable_voice_profile = assert_given(self._settings.enable_voice_profile)
-        if enable_voice_profile:
-            voice_profile_config: dict[str, Any] = {"enableVoiceProfile": True}
-            top_n = assert_given(self._settings.voice_profile_top_n)
-            if top_n is not None:
-                if top_n < 1:
-                    raise ValueError("Inworld Voice Profile top_n must be at least 1")
-                voice_profile_config["topN"] = top_n
-            config["voiceProfileConfig"] = voice_profile_config
-
         return {
-            "transcribeConfig": config,
+            "transcribeConfig": _build_transcribe_config(self._settings, self.sample_rate),
             "audioData": {"content": base64.b64encode(audio).decode("ascii")},
         }
 
@@ -300,3 +346,457 @@ class InworldSTTService(SegmentedSTTService):
             yield ErrorFrame(error=f"Inworld STT error: {e}", exception=e)
         finally:
             await self.stop_processing_metrics()
+
+
+class InworldRealtimeSTTService(WebsocketSTTService):
+    """Speech-to-text service using Inworld's bidirectional WebSocket API.
+
+    The service streams raw LINEAR16 audio and emits interim and final
+    transcription frames. In Pipecat turn mode, local VAD sends ``endTurn`` to
+    Inworld. In Inworld turn mode, speech events and final transcriptions propose
+    turn boundaries through :class:`ExternalUserTurnStrategies`.
+
+    Voice Profile analysis emits an :class:`InworldVoiceProfileFrame` whenever
+    Inworld includes profile data in a streaming transcription result.
+    """
+
+    Settings = InworldRealtimeSTTSettings
+    _settings: Settings
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str = "wss://api.inworld.ai",
+        sample_rate: int | None = None,
+        vad_force_turn_endpoint: bool = True,
+        should_interrupt: bool = True,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = None,
+        **kwargs,
+    ):
+        """Initialize the Inworld realtime STT service.
+
+        Args:
+            api_key: Inworld API key containing Base64 credentials.
+            base_url: Base URL for the Inworld WebSocket API.
+            sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
+            vad_force_turn_endpoint: Whether to disable Inworld server VAD and use
+                Pipecat VAD to send ``endTurn``. Set to ``False`` to use Inworld's
+                speech and end-of-turn events.
+            should_interrupt: Whether Inworld-proposed turn starts should interrupt
+                the current bot response. Only applies when ``vad_force_turn_endpoint``
+                is ``False``.
+            settings: Runtime-updatable model, language, recognition, Voice Profile,
+                VAD, and end-of-turn settings. Updates reconnect the WebSocket.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
+            **kwargs: Additional arguments passed to :class:`WebsocketSTTService`.
+        """
+        default_settings = self.Settings(
+            model="inworld/inworld-stt-1",
+            language=None,
+            prompts=[],
+            enable_voice_profile=False,
+            voice_profile_top_n=10,
+            vad_threshold=None,
+            min_end_of_turn_silence_when_confident=None,
+            end_of_turn_confidence_threshold=0.5,
+            inactivity_timeout_seconds=None,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=default_settings,
+            ttfs_p99_latency=ttfs_p99_latency,
+            **kwargs,
+        )
+
+        self._api_key = api_key
+        if "://" not in base_url:
+            base_url = f"wss://{base_url}"
+        self._base_url = (
+            base_url.rstrip("/").replace("https://", "wss://").replace("http://", "ws://")
+        )
+        self._vad_force_turn_endpoint = vad_force_turn_endpoint
+        self._should_interrupt = should_interrupt
+
+        self._connected_event = asyncio.Event()
+        self._connected_event.set()
+        self._receive_task = None
+        self._user_turn_open = False
+
+    @property
+    def supports_ttfs(self) -> bool:
+        """Check whether Pipecat supplies a distinct speech-end boundary.
+
+        Returns:
+            True in Pipecat turn mode and False in Inworld turn mode.
+        """
+        return self._vad_force_turn_endpoint
+
+    def can_generate_metrics(self) -> bool:
+        """Check whether the service can generate metrics.
+
+        Returns:
+            True, as Inworld realtime STT supports latency and usage metrics.
+        """
+        return True
+
+    def language_to_service_language(self, language: Language) -> str | None:
+        """Convert a language enum to Inworld's STT language format.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The Inworld ISO 639 language code.
+        """
+        return language_to_inworld_stt_language(language)
+
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Build metadata that selects the configured turn strategy.
+
+        Returns:
+            STT metadata with external turn strategies in Inworld turn mode.
+        """
+        frame = super().service_metadata_frame()
+        if not self._vad_force_turn_endpoint:
+            frame.user_turn_strategies = ExternalUserTurnStrategies(
+                enable_interruptions=self._should_interrupt,
+            )
+        return frame
+
+    async def start(self, frame: StartFrame):
+        """Start the service and establish the WebSocket connection.
+
+        Args:
+            frame: Frame carrying the negotiated pipeline configuration.
+        """
+        await super().start(frame)
+        await self._connect()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process audio and turn-boundary frames.
+
+        Args:
+            frame: The frame to process.
+            direction: Direction of frame flow through the pipeline.
+        """
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            await self._user_turn_started()
+        elif isinstance(frame, VADUserStoppedSpeakingFrame) and self._vad_force_turn_endpoint:
+            if self._websocket and self._websocket.state is State.OPEN:
+                await self.send_with_retry(
+                    json.dumps({"endTurn": {}}),
+                    self._report_error,
+                )
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
+        """Stream one raw LINEAR16 audio chunk to Inworld.
+
+        Args:
+            audio: Raw 16-bit mono PCM audio.
+
+        Yields:
+            An error frame when no connection is available; responses otherwise
+            arrive through the WebSocket receive task.
+        """
+        await self._connected_event.wait()
+
+        if not self._websocket or self._websocket.state is State.CLOSED:
+            await self._connect()
+
+        if self._websocket and self._websocket.state is State.OPEN:
+            message = {
+                "audioChunk": {"content": base64.b64encode(audio).decode("ascii")},
+            }
+            await self.send_with_retry(json.dumps(message), self._report_error)
+        else:
+            yield ErrorFrame("Inworld realtime STT WebSocket is not connected")
+            return
+
+        yield None
+
+    async def _connect(self):
+        """Establish the connection and start the receive task."""
+        self._connected_event.clear()
+        try:
+            await self._connect_websocket()
+            await super()._connect()
+            if self._websocket and not self._receive_task:
+                self._receive_task = self.create_task(
+                    self._receive_task_handler(self._report_error),
+                    name="inworld_stt_receive",
+                )
+        finally:
+            self._connected_event.set()
+
+    async def _disconnect(self):
+        """Stop receive processing and close the connection."""
+        await super()._disconnect()
+
+        if self._receive_task:
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
+
+        await self._disconnect_websocket()
+
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply settings and reconnect so Inworld receives a new config.
+
+        Args:
+            delta: Runtime settings to apply.
+
+        Returns:
+            Mapping of changed setting names to their previous values.
+        """
+        changed = await super()._update_settings(delta)
+        if changed:
+            await self._request_reconnect()
+        return changed
+
+    def _transcribe_config(self) -> dict[str, Any]:
+        """Build the initial WebSocket transcription configuration.
+
+        Returns:
+            Configuration sent as the first WebSocket message.
+
+        Raises:
+            ValueError: If a configured silence or Voice Profile limit is invalid.
+        """
+        config = _build_transcribe_config(self._settings, self.sample_rate)
+
+        end_of_turn_threshold = assert_given(self._settings.end_of_turn_confidence_threshold)
+        if end_of_turn_threshold is not None:
+            if not 0 <= end_of_turn_threshold <= 1:
+                raise ValueError("Inworld end-of-turn confidence threshold must be between 0 and 1")
+            config["endOfTurnConfidenceThreshold"] = end_of_turn_threshold
+
+        inactivity_timeout = assert_given(self._settings.inactivity_timeout_seconds)
+        if inactivity_timeout is not None:
+            if inactivity_timeout < 1:
+                raise ValueError("Inworld inactivity timeout must be at least 1 second")
+            config["inactivityTimeoutSeconds"] = inactivity_timeout
+
+        inworld_config: dict[str, Any] = {}
+        vad_threshold = assert_given(self._settings.vad_threshold)
+        if self._vad_force_turn_endpoint:
+            inworld_config["vadThreshold"] = 0
+        elif vad_threshold is not None:
+            if not 0 <= vad_threshold <= 1:
+                raise ValueError("Inworld VAD threshold must be between 0 and 1")
+            inworld_config["vadThreshold"] = vad_threshold
+
+        min_silence = assert_given(self._settings.min_end_of_turn_silence_when_confident)
+        if min_silence is not None:
+            if min_silence < 0:
+                raise ValueError("Inworld minimum end-of-turn silence cannot be negative")
+            inworld_config["minEndOfTurnSilenceWhenConfident"] = min_silence
+
+        if inworld_config:
+            config["inworldSttV1Config"] = inworld_config
+
+        return config
+
+    async def _connect_websocket(self):
+        """Open and configure the Inworld WebSocket."""
+        if self._websocket and self._websocket.state is State.OPEN:
+            return
+
+        websocket = None
+        try:
+            config = self._transcribe_config()
+            headers = {
+                "Authorization": f"Basic {self._api_key}",
+                "X-Request-Id": str(uuid.uuid4()),
+                "X-User-Agent": USER_AGENT,
+            }
+            ws_url = f"{self._base_url}/stt/v1/transcribe:streamBidirectional"
+
+            logger.debug("Connecting to Inworld realtime STT")
+            websocket = await self._websocket_connect(
+                ws_url,
+                additional_headers=headers,
+            )
+            self._websocket = websocket
+            await websocket.send(json.dumps({"transcribeConfig": config}))
+            await self._call_event_handler("on_connected")
+        except Exception as e:
+            if websocket is not None:
+                try:
+                    await websocket.close()
+                except Exception:
+                    pass
+            self._websocket = None
+            await self.push_error(
+                error_msg=f"Unable to connect to Inworld realtime STT: {e}",
+                exception=e,
+            )
+
+    async def _disconnect_websocket(self):
+        """Close the Inworld transcription stream and WebSocket."""
+        websocket = self._websocket
+        try:
+            if websocket and websocket.state is State.OPEN:
+                logger.debug("Disconnecting from Inworld realtime STT")
+                await websocket.send(json.dumps({"closeStream": {}}))
+        except Exception as e:
+            await self.push_error(error_msg=f"Error closing Inworld STT WebSocket: {e}")
+        finally:
+            if websocket:
+                try:
+                    await websocket.close()
+                except Exception as e:
+                    await self.push_error(error_msg=f"Error closing Inworld STT WebSocket: {e}")
+            if self._websocket is websocket:
+                self._websocket = None
+            await self._user_turn_stopped()
+            await self._call_event_handler("on_disconnected")
+
+    def _get_websocket(self):
+        """Return the active WebSocket connection."""
+        if self._websocket:
+            return self._websocket
+        raise ConnectionError("Inworld realtime STT WebSocket is not connected")
+
+    async def _receive_messages(self):
+        """Receive and process Inworld WebSocket messages."""
+        async for message in self._get_websocket():
+            try:
+                data = json.loads(message)
+                await self._process_response(data)
+            except json.JSONDecodeError:
+                logger.warning(f"Inworld realtime STT returned non-JSON data: {message}")
+            except Exception as e:
+                logger.exception(f"Error processing Inworld realtime STT message: {e}")
+
+    async def _process_response(self, data: dict[str, Any]):
+        """Process one decoded Inworld streaming response.
+
+        Args:
+            data: Inworld response envelope.
+        """
+        result = data.get("result") or data
+
+        error_code = data.get("code", result.get("code"))
+        error_message = data.get("message", result.get("message"))
+        if error_code is not None or error_message:
+            error_code_text = f" ({error_code})" if error_code is not None else ""
+            await self.push_error(
+                error_msg=f"Inworld realtime STT error{error_code_text}: {error_message}"
+            )
+            await self._user_turn_stopped()
+            return
+
+        if "speechStarted" in result:
+            await self._user_turn_started()
+        if "speechStopped" in result:
+            # This event marks audio silence, not a semantic turn boundary. The
+            # final transcription below is the authoritative end-of-turn signal.
+            logger.trace("Inworld realtime STT detected speech stop")
+
+        transcription = result.get("transcription")
+        if transcription is not None:
+            await self._on_transcription(transcription, result)
+
+    async def _user_turn_started(self):
+        """Propose an Inworld-owned turn start once."""
+        if self._vad_force_turn_endpoint or self._user_turn_open:
+            return
+        self._user_turn_open = True
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
+
+    async def _user_turn_stopped(self):
+        """Propose an Inworld-owned turn stop once."""
+        if self._vad_force_turn_endpoint or not self._user_turn_open:
+            return
+        self._user_turn_open = False
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
+
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: str | None = None
+    ):
+        """Handle a transcription result with tracing."""
+        pass
+
+    async def _on_transcription(self, transcription: dict[str, Any], result: dict[str, Any]):
+        """Emit frames for a streaming transcription result.
+
+        Args:
+            transcription: Interim or final transcription fields.
+            result: Full result envelope, including optional Voice Profile data.
+        """
+        timestamp = time_now_iso8601()
+        voice_profile_data = transcription.get(
+            "voiceProfile",
+            transcription.get(
+                "voice_profile",
+                result.get("voiceProfile", result.get("voice_profile")),
+            ),
+        )
+        transcript = transcription.get("transcript", "").strip()
+        is_final = transcription.get("isFinal", transcription.get("is_final", False))
+
+        if transcript or voice_profile_data is not None:
+            await self._user_turn_started()
+
+        if voice_profile_data is not None:
+            try:
+                voice_profile = InworldVoiceProfile.model_validate(voice_profile_data)
+                await self.push_frame(
+                    InworldVoiceProfileFrame(
+                        user_id=self._user_id,
+                        timestamp=timestamp,
+                        voice_profile=voice_profile,
+                    )
+                )
+            except ValidationError as e:
+                await self.push_error(
+                    error_msg=f"Inworld Voice Profile error: {e}",
+                    exception=e,
+                )
+
+        language_value = transcription.get("language", transcription.get("languageCode"))
+        if not language_value:
+            language_setting = assert_given(self._settings.language)
+            language_value = str(language_setting) if language_setting else None
+        try:
+            language = Language(language_value) if language_value else None
+        except ValueError:
+            language = None
+
+        if transcript:
+            if is_final:
+                logger.debug(f"Final transcription: [{transcript}]")
+                await self._handle_transcription(transcript, True, language_value)
+                await self.emit_stt_usage_metrics()
+                await self.push_frame(
+                    TranscriptionFrame(
+                        transcript,
+                        self._user_id,
+                        timestamp,
+                        language,
+                        result=result,
+                        finalized=True,
+                    )
+                )
+            else:
+                logger.trace(f"Interim transcription: [{transcript}]")
+                await self.push_frame(
+                    InterimTranscriptionFrame(
+                        transcript,
+                        self._user_id,
+                        timestamp,
+                        language,
+                        result=result,
+                    )
+                )
+
+        if is_final:
+            await self._user_turn_stopped()

@@ -48,7 +48,7 @@ class InworldVoiceProfile(BaseModel):
 
 @dataclass
 class InworldVoiceProfileFrame(DataFrame):
-    """Frame containing Inworld Voice Profile analysis for one utterance.
+    """Frame containing Inworld Voice Profile analysis for a transcription result.
 
     Parameters:
         user_id: Identifier for the speaker.

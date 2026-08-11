@@ -11,7 +11,8 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame, TTSTextFrame
+from pipecat.observers.loggers.debug_log_observer import DebugLogObserver, FrameEndpoint
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -21,9 +22,11 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.inworld.frames import InworldVoiceProfileFrame
+from pipecat.services.inworld.stt import InworldRealtimeSTTService
 from pipecat.services.inworld.tts import InworldTTSService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -55,10 +58,19 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
+    inworld_api_key = os.environ["INWORLD_API_KEY"]
+
+    stt = InworldRealtimeSTTService(
+        api_key=inworld_api_key,
+        settings=InworldRealtimeSTTService.Settings(
+            prompts=["Pipecat", "Inworld"],
+            enable_voice_profile=True,
+            voice_profile_top_n=3,
+        ),
+    )
 
     tts = InworldTTSService(
-        api_key=os.getenv("INWORLD_API_KEY", ""),
+        api_key=inworld_api_key,
         settings=InworldTTSService.Settings(
             voice="Ashley",
             temperature=1.1,
@@ -68,7 +80,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
-            system_instruction="You are a helpful AI demonstrating Inworld AI's TTS. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a friendly and helpful way.",
+            system_instruction="You are a helpful AI demonstrating Inworld AI's speech services. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a friendly and helpful way.",
         ),
     )
 
@@ -96,6 +108,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        observers=[
+            DebugLogObserver(
+                frame_types={
+                    InworldVoiceProfileFrame: None,
+                    TTSTextFrame: (BaseOutputTransport, FrameEndpoint.SOURCE),
+                }
+            ),
+        ],
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
