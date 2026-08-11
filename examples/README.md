@@ -125,6 +125,10 @@ Video processing, mirroring, GStreamer, and custom video tracks.
 
 Audio recording, background sounds, and sound effects.
 
+### [`acp/`](./acp/)
+
+Driving a coding agent (Claude Code, Gemini CLI, Goose) over the Agent Client Protocol.
+
 ### [`observability/`](./observability/)
 
 Pipeline monitoring: observers, heartbeats, and Sentry metrics.

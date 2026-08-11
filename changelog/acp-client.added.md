@@ -1,15 +1,5 @@
-- Added Agent Client Protocol (ACP) support in `pipecat.services.acp`. `ACPService`
-  runs a coding agent as a subprocess and bridges it to a pipeline: it sends user
-  turns as `session/prompt`, converts the agent's `session/update` stream into ACP
-  frames, and hands agent-initiated callbacks (permission requests, filesystem and
-  terminal methods) to any processor willing to answer them.
+- Added Agent Client Protocol (ACP) support in `pipecat.services.acp`. ACP is the JSON-RPC protocol code editors speak to coding agents (Claude Code, Gemini CLI, Goose); `ACPService` runs one as a subprocess and bridges it to a pipeline, so a bot can drive an agent the way an editor would. It sends each user turn as `session/prompt` and converts the agent's `session/update` stream into ACP frames: agent messages and reasoning, tool calls and their updates, plans, and session and turn boundaries. Event handlers are available for `on_session_started`, `on_turn_started`, `on_turn_ended`, and `on_agent_exited`.
 
-  The package also provides `ACPClient`, a Pipecat-independent JSON-RPC client for
-  the protocol; `ACPUserAggregator`, which collects transcriptions into one prompt
-  per user turn; and `ACPAutoPermission`, which auto-approves the agent's
-  permission requests. `ACPService` offers `on_session_started`, `on_turn_started`,
-  `on_turn_ended`, and `on_agent_exited` event handlers. See `examples/acp/`.
+  Everything the agent asks the client to do (permission requests, filesystem reads and writes, terminal commands) arrives as an `ACPClientRequestFrame` and is answered by pushing an `ACPClientResponseFrame` with the same `request_id`. Requests are broadcast upstream and downstream, so the processor that answers them can sit on either side of the service. `ACPAutoPermission` answers permission requests automatically, for development against a scratch repository.
 
-- Added `ACPLogObserver` (`pipecat.observers.loggers.acp_log_observer`), which logs
-  an ACP agent's full stream (turns, messages, reasoning, tool calls, plans) without
-  speaking any of it.
+  The package also provides `ACPClient`, a Pipecat-independent JSON-RPC client usable from a plain script, and `ACPUserAggregator`, which collects transcriptions into one prompt per user turn. `ACPService` emits no speakable text: turning an agent's tool calls and reasoning into something worth hearing belongs in a renderer downstream of it. `ACPLogObserver` (`pipecat.observers.loggers.acp_log_observer`) logs the agent's full stream without speaking any of it, which is the starting point for writing one. See `examples/acp/`.
