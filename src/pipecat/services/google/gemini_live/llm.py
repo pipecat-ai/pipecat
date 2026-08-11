@@ -818,12 +818,16 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         self._user_is_speaking = False
         self._user_audio_preroll_buffer = bytearray()
         await self.start_ttfb_metrics()
-        if self._vad_disabled and self._session and self._ready_for_realtime_input:
+
+        if not self._session:
+            return
+
+        if self._vad_disabled and self._ready_for_realtime_input:
             try:
                 await self._session.send_realtime_input(activity_end=ActivityEnd())
             except Exception as e:
                 await self._handle_send_error(e)
-        if self._needs_initial_turn_complete_message and self._session:
+        if self._needs_initial_turn_complete_message:
             self._needs_initial_turn_complete_message = False
             # NOTE: without this, the model ignores the context it's been
             # seeded with before the user started speaking
