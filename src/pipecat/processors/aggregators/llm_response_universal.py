@@ -538,6 +538,25 @@ class LLMContextAggregator(FrameProcessor):
         """
         self._context.set_tool_choice(cast(LLMContextToolChoice, tool_choice))
 
+    def _apply_set_tools_frame(self, frame: LLMSetToolsFrame) -> None:
+        """Apply an ``LLMSetToolsFrame``'s tools to the context.
+
+        A plain list of direct functions and/or ``FunctionSchema`` objects is
+        normalized to a ``ToolsSchema`` first, so the tool-change diff and
+        :meth:`set_tools` see a consistent type.
+
+        Provider-native tools are left out of the context entirely: it holds
+        standard tools only, and the LLM service reads them off the frame.
+        """
+        normalized_tools = LLMContext._normalize_and_validate_tools(
+            frame.tools, allow_provider_tools=True
+        )
+        if isinstance(normalized_tools, list):
+            return
+
+        self._maybe_add_tool_change_messages(normalized_tools)
+        self.set_tools(normalized_tools)
+
     async def reset(self):
         """Reset the aggregation state."""
         self._aggregation = []
@@ -808,12 +827,7 @@ class LLMUserAggregator(LLMContextAggregator):
         elif isinstance(frame, LLMMessagesTransformFrame):
             await self._handle_llm_messages_transform(frame)
         elif isinstance(frame, LLMSetToolsFrame):
-            # Normalize and validate (a plain list of direct functions / FunctionSchema
-            # objects becomes a ToolsSchema) so the tool-change diff and
-            # set_tools see a consistent type.
-            normalized_tools = LLMContext._normalize_and_validate_tools(frame.tools)
-            self._maybe_add_tool_change_messages(normalized_tools)
-            self.set_tools(normalized_tools)
+            self._apply_set_tools_frame(frame)
             # Push the LLMSetToolsFrame as well, since speech-to-speech LLM
             # services (like OpenAI Realtime) may need to know about tool
             # changes; unlike text-based LLM services they won't just "pick up
@@ -1572,12 +1586,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         elif isinstance(frame, LLMMessagesTransformFrame):
             await self._handle_llm_messages_transform(frame)
         elif isinstance(frame, LLMSetToolsFrame):
-            # Normalize and validate (a plain list of direct functions / FunctionSchema
-            # objects becomes a ToolsSchema) so the tool-change diff and
-            # set_tools see a consistent type.
-            normalized_tools = LLMContext._normalize_and_validate_tools(frame.tools)
-            self._maybe_add_tool_change_messages(normalized_tools)
-            self.set_tools(normalized_tools)
+            self._apply_set_tools_frame(frame)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
         elif isinstance(frame, FunctionCallsStartedFrame):

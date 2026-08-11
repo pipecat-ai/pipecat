@@ -2116,6 +2116,50 @@ class TestToolChangeMessages(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(pair.assistant()._add_tool_change_messages)
 
 
+class TestSetToolsProviderNativeTools(unittest.IsolatedAsyncioTestCase):
+    """``LLMSetToolsFrame`` carrying provider-native tools.
+
+    The context holds standard tools only, so provider-native tools pass
+    through the aggregators untouched — the LLM service reads them off the
+    frame.
+    """
+
+    PROVIDER_TOOLS = [{"google_search": {}}]
+
+    async def test_user_aggregator_forwards_provider_tools(self):
+        context = LLMContext(tools=_tools("a"))
+        aggregator = LLMUserAggregator(context)
+        await run_test(
+            aggregator,
+            frames_to_send=[LLMSetToolsFrame(tools=self.PROVIDER_TOOLS)],
+            expected_down_frames=[SpeechControlParamsFrame, LLMSetToolsFrame],
+        )
+        # The context keeps the standard tools it already had.
+        self.assertEqual({s.name for s in context.tools.standard_tools}, {"a"})
+
+    async def test_assistant_aggregator_accepts_provider_tools(self):
+        context = LLMContext(tools=_tools("a"))
+        aggregator = LLMAssistantAggregator(context)
+        await run_test(
+            aggregator,
+            frames_to_send=[LLMSetToolsFrame(tools=self.PROVIDER_TOOLS)],
+            expected_down_frames=[],
+        )
+        self.assertEqual({s.name for s in context.tools.standard_tools}, {"a"})
+
+    async def test_provider_tools_add_no_change_message(self):
+        context = LLMContext(tools=_tools("a"))
+        aggregator = LLMUserAggregator(
+            context, params=LLMUserAggregatorParams(add_tool_change_messages=True)
+        )
+        await run_test(
+            aggregator,
+            frames_to_send=[LLMSetToolsFrame(tools=self.PROVIDER_TOOLS)],
+            expected_down_frames=[SpeechControlParamsFrame, LLMSetToolsFrame],
+        )
+        self.assertEqual(_developer_messages(context), [])
+
+
 class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
     """End-to-end tests for the trailing-write realtime mode."""
 
