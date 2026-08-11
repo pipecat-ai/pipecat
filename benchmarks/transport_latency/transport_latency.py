@@ -222,16 +222,21 @@ async def run_floor(
     result = await run_trial(connector, duration_s=duration)
     stats = summarize(result.rtts_ms)
     rtp_rtt_stats = summarize(getattr(connector, "rtp_rtt_ms_samples", []) or [])
+    jb_hold_stats = summarize(getattr(connector, "jitter_buffer_hold_ms_samples", []) or [])
     out = {
         "kind": "floor",
         "transport": transport,
         "stats": stats,
         "rtp_rtt_stats": rtp_rtt_stats,
+        "jitter_buffer_hold_stats": jb_hold_stats,
         "jitter_ms": jitter_ms,
         "webrtc_prefetch": webrtc_prefetch if transport == "webrtc" else None,
     }
     (RESULTS / f"floor-{transport}.json").write_text(json.dumps(out, indent=2))
-    print(f"floor {transport}: {stats} rtp_rtt_p50={rtp_rtt_stats.get('p50_ms', '-')}")
+    print(
+        f"floor {transport}: {stats} rtp_rtt_p50={rtp_rtt_stats.get('p50_ms', '-')} "
+        f"jb_hold_p50={jb_hold_stats.get('p50_ms', '-')}"
+    )
     return out
 
 
@@ -243,6 +248,7 @@ async def run_scenario(scenario: Scenario, args: argparse.Namespace, env_info: d
             "BENCH_BOT_STATS": str(bot_stats_path),
             "BENCH_JITTER_MS": str(args.jitter_ms),
             "BENCH_WEBRTC_PREFETCH": str(args.webrtc_prefetch),
+            "BENCH_RTT_LOG": "1" if args.rtt_log else "0",
         }
         await _wait_for_port_free(7860)
         # New session so teardown can signal the whole group — `uv run` wraps
@@ -280,6 +286,7 @@ async def run_scenario(scenario: Scenario, args: argparse.Namespace, env_info: d
                     w.writeframes(np.asarray(data, dtype=np.int16).tobytes())
 
         rtp_rtt_stats = summarize(getattr(connector, "rtp_rtt_ms_samples", []) or [])
+        jb_hold_stats = summarize(getattr(connector, "jitter_buffer_hold_ms_samples", []) or [])
         out = {
             "scenario": scenario.slug,
             "transport": scenario.transport,
@@ -294,6 +301,7 @@ async def run_scenario(scenario: Scenario, args: argparse.Namespace, env_info: d
             else None,
             "stats": summarize(result.rtts_ms),
             "rtp_rtt_stats": rtp_rtt_stats,
+            "jitter_buffer_hold_stats": jb_hold_stats,
             "bot_stats": bot_stats,
             "ice_pair": getattr(connector, "selected_ice_pair", None),
             "moq_relay_url": getattr(connector, "moq_config", {}).get("relayUrl"),
@@ -302,8 +310,19 @@ async def run_scenario(scenario: Scenario, args: argparse.Namespace, env_info: d
         (RESULTS / f"{scenario.slug}-{trial}.json").write_text(json.dumps(out, indent=2))
         print(
             f"{scenario.slug} trial {trial}: {out['stats']} drops={result.drops} "
-            f"rtp_rtt_p50={rtp_rtt_stats.get('p50_ms', '-')}"
+            f"rtp_rtt_p50={rtp_rtt_stats.get('p50_ms', '-')} "
+            f"jb_hold_p50={jb_hold_stats.get('p50_ms', '-')}"
         )
+        if args.rtt_log and scenario.transport == "webrtc" and bot_stats:
+            bot_rtt = bot_stats.get("rtt_breakdown") or {}
+            print(
+                f"  rtt breakdown (aiortc + pipecat layers):\n"
+                f"    client rtcp rtt p50:            {rtp_rtt_stats.get('p50_ms', '-')} ms\n"
+                f"    client jitter-buffer hold p50:  {jb_hold_stats.get('p50_ms', '-')} ms\n"
+                f"    bot rtcp rtt p50:                {bot_rtt.get('rtcp_rtt_ms', {}).get('p50_ms', '-')} ms\n"
+                f"    bot jitter-buffer hold p50:      {bot_rtt.get('jitter_buffer_hold_ms', {}).get('p50_ms', '-')} ms\n"
+                f"    bot MediaSender buffer p50:      {bot_rtt.get('media_sender_buffer_ms', {}).get('p50_ms', '-')} ms"
+            )
         await asyncio.sleep(1.0)
 
 
@@ -343,6 +362,15 @@ async def main() -> None:
         "values remove aiortc's real jitter tolerance.",
     )
     parser.add_argument("--save-wav", action="store_true")
+    parser.add_argument(
+        "--rtt-log",
+        action="store_true",
+        help="webrtc scenarios only: instrument the bot's own aiortc RTCP RTT, "
+        "jitter-buffer hold, and BaseOutputTransport.MediaSender buffer occupancy "
+        "(see echo_bot.py BENCH_RTT_LOG), folded into bot_stats.rtt_breakdown. "
+        "The client's own jitter-buffer hold is summarized unconditionally as "
+        "jitter_buffer_hold_stats. Off by default (bot-side monkeypatching).",
+    )
     parser.add_argument("--relay-url", help="Deployed moq-relay URL (moq-relay-deployed scenario)")
     parser.add_argument("--turn-url", help="TURN URL for webrtc-turn-deployed")
     parser.add_argument("--turn-username")

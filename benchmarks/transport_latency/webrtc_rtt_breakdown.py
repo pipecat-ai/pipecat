@@ -39,49 +39,15 @@ Usage:
 
 import argparse
 import asyncio
-import time
 from collections import defaultdict
 
 import numpy as np
-from aiortc.jitterbuffer import JitterBuffer
 from client_core import run_trial
-from webrtc_client import LoopbackConnector, configure_audio_jitter_prefetch
-
-
-def instrument_jitter_buffer_timing():
-    """Wrap JitterBuffer.add to time packet-arrival -> frame-release.
-
-    Keyed by id(self) so the two independent buffers on the loopback path
-    (hop a->b and hop b->a) are reported separately, in creation order.
-    Prefetch itself is set via ``configure_audio_jitter_prefetch`` (the same
-    knob the rest of the benchmark uses) — this only adds timing.
-    """
-    orig_add = JitterBuffer.add
-    arrival_times: dict[int, dict[int, float]] = defaultdict(dict)
-    delays_by_buffer: dict[int, list[float]] = defaultdict(list)
-    creation_order: list[int] = []
-
-    def patched_add(self, packet):
-        buf_id = id(self)
-        if buf_id not in creation_order:
-            creation_order.append(buf_id)
-        now = time.monotonic()
-        arrivals = arrival_times[buf_id]
-        if packet.timestamp not in arrivals:
-            arrivals[packet.timestamp] = now
-        pli_flag, frame = orig_add(self, packet)
-        if frame is not None:
-            t0 = arrivals.pop(frame.timestamp, None)
-            if t0 is not None:
-                delays_by_buffer[buf_id].append((time.monotonic() - t0) * 1000.0)
-        return pli_flag, frame
-
-    JitterBuffer.add = patched_add
-
-    def restore():
-        JitterBuffer.add = orig_add
-
-    return delays_by_buffer, creation_order, restore
+from webrtc_client import (
+    LoopbackConnector,
+    configure_audio_jitter_prefetch,
+    instrument_jitter_buffer_timing,
+)
 
 
 async def poll_rtcp_rtt(

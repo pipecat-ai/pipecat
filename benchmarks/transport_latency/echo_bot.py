@@ -26,6 +26,15 @@ Env vars:
                          legs of a webrtc-* scenario measure the same
                          configuration, not an unpatched bot against a
                          patched client.
+    BENCH_RTT_LOG        Set to "1" to instrument this process's own RTT
+                         layers and fold them into BENCH_BOT_STATS as
+                         "rtt_breakdown": aiortc RTCP RTT and jitter-buffer
+                         hold time on the bot's receiver (webrtc only — a
+                         no-op on moq, which has neither), plus
+                         BaseOutputTransport.MediaSender buffer occupancy
+                         (both transports — see base_output.py). Off by
+                         default since it monkeypatches process-wide state;
+                         opt in for diagnostic runs.
     BENCH_BOT_STATS      Path to write the observer's JSON stats.
 
 Usage:
@@ -33,12 +42,14 @@ Usage:
     uv run python benchmarks/transport_latency/echo_bot.py -t moq [--moq-connect ...]
 """
 
+import asyncio
 import json
 import os
 import time
 
 import numpy as np
 from loguru import logger
+from stats import summarize
 
 from pipecat.frames.frames import InputAudioRawFrame, OutputAudioRawFrame
 from pipecat.observers.base_observer import BaseObserver, FramePushed
@@ -47,6 +58,7 @@ from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.moq.transport import MOQParams
 from pipecat.workers.runner import WorkerRunner
@@ -59,6 +71,35 @@ if _webrtc_prefetch is not None:
     from webrtc_client import configure_audio_jitter_prefetch
 
     configure_audio_jitter_prefetch(int(_webrtc_prefetch))
+
+# Opt-in RTT-layer instrumentation for this process (bot side) — see
+# BENCH_RTT_LOG in the module docstring. Applied at import time so it's
+# active before any pipeline/track construction; harmless no-op on moq for
+# the aiortc-specific pieces.
+RTT_LOG = os.getenv("BENCH_RTT_LOG") == "1"
+
+_jb_delays: dict[int, list[float]] | None = None
+_jb_creation_order: list[int] | None = None
+_media_sender_samples: list[float] | None = None
+
+if RTT_LOG:
+    from webrtc_client import instrument_jitter_buffer_timing
+
+    _jb_delays, _jb_creation_order, _ = instrument_jitter_buffer_timing()
+
+    _media_sender_samples = []
+    _orig_media_sender_handle = BaseOutputTransport.MediaSender.handle_audio_frame
+
+    async def _patched_media_sender_handle(self, frame):
+        # Buffer occupancy (ms of audio already queued) just before this
+        # frame is folded in — see base_output.py's accumulate-then-flush
+        # MediaSender, shared by every output transport (audio_out_10ms_chunks).
+        bytes_per_sample = 2 * (getattr(self._params, "audio_out_channels", 1) or 1)
+        ms_before = (len(self._audio_buffer) / bytes_per_sample) / self._sample_rate * 1000.0
+        _media_sender_samples.append(ms_before)
+        return await _orig_media_sender_handle(self, frame)
+
+    BaseOutputTransport.MediaSender.handle_audio_frame = _patched_media_sender_handle
 
 transport_params = {
     "moq": lambda: MOQParams(
@@ -123,7 +164,7 @@ class LatencyObserver(BaseObserver):
                 self._out_samples += len(frame.audio) // 2
                 self._out.append((self._out_samples, time.monotonic()))
 
-    def dump(self, path: str) -> None:
+    def dump(self, path: str, extra: dict | None = None) -> None:
         n = min(len(self._in), len(self._out))
         deltas_ms = [
             (self._out[i][1] - self._in[i][1]) * 1000.0
@@ -148,6 +189,8 @@ class LatencyObserver(BaseObserver):
             "in_raw": self._in,
             "out_raw": self._out,
         }
+        if extra:
+            stats["rtt_breakdown"] = extra
         with open(path, "w") as f:
             json.dump(stats, f, indent=2)
         logger.info(f"LatencyObserver stats -> {path}: {stats['internal_ms']}")
@@ -165,6 +208,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         idle_timeout_secs=None,  # a pure echo loop generates no "activity"
     )
 
+    rtcp_rtt_samples: list[float] = []
+    rtcp_stop = asyncio.Event()
+    rtcp_poll_task: asyncio.Task | None = None
+
+    async def poll_bot_rtcp_rtt(pc) -> None:
+        while not rtcp_stop.is_set():
+            try:
+                report = await pc.getStats()
+            except Exception:
+                report = {}
+            for stat in report.values():
+                if stat.type == "remote-inbound-rtp" and stat.roundTripTime is not None:
+                    rtcp_rtt_samples.append(stat.roundTripTime * 1000.0)
+            try:
+                await asyncio.wait_for(rtcp_stop.wait(), timeout=0.5)
+            except TimeoutError:
+                pass
+
     transport_name = transport.__class__.__name__
     if transport_name == "MOQTransport":
 
@@ -180,14 +241,39 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             logger.info("Client disconnected")
             await worker.cancel()
 
+        if RTT_LOG:
+
+            @transport.event_handler("on_client_connected")
+            async def on_client_connected(transport, connection):
+                nonlocal rtcp_poll_task
+                rtcp_poll_task = asyncio.ensure_future(poll_bot_rtcp_rtt(connection.pc))
+
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
     try:
         await runner.add_workers(worker)
         await runner.run()
     finally:
+        rtcp_stop.set()
+        if rtcp_poll_task:
+            await rtcp_poll_task
         stats_path = os.getenv("BENCH_BOT_STATS")
         if stats_path:
-            observer.dump(stats_path)
+            extra = None
+            if RTT_LOG:
+                # Bot's own receive-side jitter buffer — the first (and
+                # only, for this echo pipeline) audio buffer created in
+                # creation_order; drop fill-up samples like the floor
+                # breakdown script does.
+                jb_hold: list[float] = []
+                if _jb_creation_order:
+                    vals = (_jb_delays or {}).get(_jb_creation_order[0], [])
+                    jb_hold = vals[5:] if len(vals) > 10 else vals
+                extra = {
+                    "rtcp_rtt_ms": summarize(rtcp_rtt_samples),
+                    "jitter_buffer_hold_ms": summarize(jb_hold),
+                    "media_sender_buffer_ms": summarize(_media_sender_samples or []),
+                }
+            observer.dump(stats_path, extra=extra)
         if transport_name == "MOQTransport":
             await transport.disconnect()
 

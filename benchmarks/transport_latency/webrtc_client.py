@@ -17,6 +17,8 @@ Topology enforcement (fairness control #10):
 
 import asyncio
 import fractions
+import time
+from collections import defaultdict
 from collections.abc import AsyncIterator
 
 import aiohttp
@@ -66,6 +68,51 @@ def configure_audio_jitter_prefetch(prefetch: int) -> None:
         _ORIGINAL_JITTER_BUFFER_INIT(self, capacity, prefetch=prefetch, is_video=is_video)
 
     JitterBuffer.__init__ = patched_init
+
+
+_ORIGINAL_JITTER_BUFFER_ADD = JitterBuffer.add
+
+
+def instrument_jitter_buffer_timing():
+    """Wrap ``JitterBuffer.add`` to time packet-arrival -> frame-release.
+
+    aiortc exposes no ``jitterBufferDelay`` stat, so this measures the hold
+    directly: the gap between a packet's first arrival at a given RTP
+    timestamp and the moment ``add()`` releases the frame carrying that
+    timestamp. Idempotent like ``configure_audio_jitter_prefetch`` — always
+    re-wraps the pristine ``add``, so repeated calls don't stack patches.
+
+    Returns ``(delays_by_buffer, creation_order, restore)``:
+    ``delays_by_buffer[id(buffer)]`` is the list of hold times (ms) in
+    release order; ``creation_order`` lists buffer ids in first-seen order
+    (one per receive direction — e.g. a single entry for a connector with one
+    audio receiver).
+    """
+    arrival_times: dict[int, dict[int, float]] = defaultdict(dict)
+    delays_by_buffer: dict[int, list[float]] = defaultdict(list)
+    creation_order: list[int] = []
+
+    def patched_add(self, packet):
+        buf_id = id(self)
+        if buf_id not in creation_order:
+            creation_order.append(buf_id)
+        now = time.monotonic()
+        arrivals = arrival_times[buf_id]
+        if packet.timestamp not in arrivals:
+            arrivals[packet.timestamp] = now
+        pli_flag, frame = _ORIGINAL_JITTER_BUFFER_ADD(self, packet)
+        if frame is not None:
+            t0 = arrivals.pop(frame.timestamp, None)
+            if t0 is not None:
+                delays_by_buffer[buf_id].append((time.monotonic() - t0) * 1000.0)
+        return pli_flag, frame
+
+    JitterBuffer.add = patched_add
+
+    def restore():
+        JitterBuffer.add = _ORIGINAL_JITTER_BUFFER_ADD
+
+    return delays_by_buffer, creation_order, restore
 
 
 class _ProbeTrack(MediaStreamTrack):
@@ -135,8 +182,19 @@ class WebRTCConnector:
         self.rtp_rtt_ms_samples: list[float] = []
         self._rtcp_poll_task: asyncio.Task | None = None
         self._rtcp_stop = asyncio.Event()
+        # Client-side jitter-buffer hold (receiving the bot's echo) — see
+        # instrument_jitter_buffer_timing. Populated at stop(); this
+        # connector only has one audio receiver, so creation_order has a
+        # single entry.
+        self.jitter_buffer_hold_ms_samples: list[float] = []
+        self._jb_delays: dict[int, list[float]] | None = None
+        self._jb_creation_order: list[int] | None = None
+        self._jb_restore = None
 
     async def start(self) -> None:
+        self._jb_delays, self._jb_creation_order, self._jb_restore = (
+            instrument_jitter_buffer_timing()
+        )
         config = RTCConfiguration(iceServers=[self._turn] if self._turn else [])
         pc = RTCPeerConnection(config)
         self._pc = pc
@@ -249,6 +307,14 @@ class WebRTCConnector:
             await self._rtcp_poll_task
         if self._pc:
             await self._pc.close()
+        if self._jb_creation_order:
+            buf_id = self._jb_creation_order[0]
+            vals = self._jb_delays.get(buf_id, [])
+            # Drop the first few (buffer fill-up) samples — steady-state
+            # hold time, not the one-time prefetch ramp.
+            self.jitter_buffer_hold_ms_samples = vals[5:] if len(vals) > 10 else vals
+        if self._jb_restore:
+            self._jb_restore()
 
 
 class LoopbackConnector:
@@ -374,9 +440,14 @@ async def _main() -> None:
     result = await run_trial(connector, duration_s=args.duration, warmup_s=5.0)
     arr = np.array(result.rtts_ms)
     rtp_rtt = np.array(connector.rtp_rtt_ms_samples)
+    jb_hold = np.array(connector.jitter_buffer_hold_ms_samples)
     print(f"ice pair: {connector.selected_ice_pair}")
     if len(rtp_rtt):
         print(f"rtcp rtt: p50={np.percentile(rtp_rtt, 50):.2f} ms n={len(rtp_rtt)}")
+    if len(jb_hold):
+        print(
+            f"jitter buffer hold (client receive): p50={np.percentile(jb_hold, 50):.2f} ms n={len(jb_hold)}"
+        )
     print(
         f"webrtc/{'turn' if turn else 'direct'}: n={len(arr)} drops={result.drops} "
         f"ambiguous={result.ambiguous} p50={np.percentile(arr, 50):.2f} ms "
