@@ -67,9 +67,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             api_key=os.getenv("RIME_API_KEY", ""),
             settings=RimeHttpTTSService.Settings(
                 voice="luna",
-                model="arcana",
+                model="coda",
             ),
-            model="arcana",
             aiohttp_session=session,
         )
 
