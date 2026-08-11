@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMSetToolsFrame,
     LLMUpdateSettingsFrame,
+    StartFrame,
 )
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.frame_processor import FrameDirection
@@ -470,7 +471,7 @@ class TestAppendSystemInstruction(unittest.IsolatedAsyncioTestCase):
         await service._update_settings(LLMSettings(system_instruction="APP"))
         self.assertEqual(service._settings.system_instruction, "APP\n\nGUIDE")
 
-    async def test_appended_guide_survives_async_tool_cancellation_toggle(self):
+    async def test_appended_guide_survives_async_tool_cancellation(self):
         service = self._service("APP")
         service.append_system_instruction("GUIDE")
 
@@ -482,9 +483,45 @@ class TestAppendSystemInstruction(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(composed.count("GUIDE"), 1)
         self.assertNotEqual(composed, "APP\n\nGUIDE")  # async instructions appended
 
-        # Disabling recomposes back to base + guide.
-        service._teardown_async_tool_cancellation()
-        self.assertEqual(service._settings.system_instruction, "APP\n\nGUIDE")
+
+class TestAsyncToolCancellationSetup(unittest.IsolatedAsyncioTestCase):
+    """``enable_async_tool_cancellation`` is the whole condition.
+
+    Handlers advertised through an ``LLMContext`` register on the first context
+    frame, after ``start()``, so setup cannot depend on the registry being
+    populated.
+    """
+
+    @staticmethod
+    def _start_frame() -> StartFrame:
+        return StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=24000)
+
+    async def test_enabled_with_no_handlers_registered(self):
+        service = MockLLMService(enable_async_tool_cancellation=True)
+
+        await service.start(self._start_frame())
+
+        self.assertIn(CANCEL_ASYNC_TOOL_NAME, service._functions)
+        self.assertIn(CANCEL_ASYNC_TOOL_NAME, service.get_llm_adapter().builtin_tools)
+        self.assertIn("cancel_async_tool_call", service._settings.system_instruction)
+
+    async def test_disabled_by_default(self):
+        service = MockLLMService()
+
+        await service.start(self._start_frame())
+
+        self.assertNotIn(CANCEL_ASYNC_TOOL_NAME, service._functions)
+        self.assertNotIn(CANCEL_ASYNC_TOOL_NAME, service.get_llm_adapter().builtin_tools)
+        self.assertIsNone(service._settings.system_instruction)
+
+    async def test_survives_unregistering_the_last_async_tool(self):
+        service = MockLLMService(enable_async_tool_cancellation=True)
+        service.register_function("weather", lambda params: None, cancel_on_interruption=False)
+
+        await service.start(self._start_frame())
+        service.unregister_function("weather")
+
+        self.assertIn(CANCEL_ASYNC_TOOL_NAME, service._functions)
 
 
 class TestProcessFrameToolWiring(unittest.IsolatedAsyncioTestCase):

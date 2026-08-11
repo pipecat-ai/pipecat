@@ -290,10 +290,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 arrives. Defaults to True.
             function_call_timeout_secs: Optional timeout in seconds for deferred function
                 calls.
-            enable_async_tool_cancellation: When True and at least one async function
-                (``cancel_on_interruption=False``) is registered, automatically injects
-                the ``cancel_async_tool_call`` built-in tool and its system instructions
-                so the LLM can cancel stale in-progress calls. Defaults to False.
+            enable_async_tool_cancellation: When True, injects the
+                ``cancel_async_tool_call`` built-in tool and its system instructions
+                so the LLM can cancel in-progress async function calls
+                (``cancel_on_interruption=False``) whose results are no longer
+                wanted. Defaults to False.
             settings: The runtime-updatable settings for the LLM service.
             **kwargs: Additional arguments passed to the parent AIService.
 
@@ -452,7 +453,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         await super().start(frame)
         if not self._run_in_parallel:
             await self._create_sequential_runner_task()
-        if self._enable_async_tool_cancellation and self._has_async_tools():
+        if self._enable_async_tool_cancellation:
             self._setup_async_tool_cancellation()
 
     async def stop(self, frame: EndFrame):
@@ -1167,9 +1168,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         ]
         for name in stale:
             del self._functions[name]
-        # If the last async tool was just pruned, tear down the cancellation tool.
-        if stale and self._async_tool_cancellation_enabled and not self._has_async_tools():
-            self._teardown_async_tool_cancellation()
 
     def unregister_function(self, function_name: str | None):
         """Remove a registered function handler.
@@ -1187,8 +1185,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # Remember the explicit removal so auto-registration doesn't bring the
         # handler back on the next context frame while the tool is still advertised.
         self._explicitly_unregistered_function_names.add(function_name)
-        if self._async_tool_cancellation_enabled and not self._has_async_tools():
-            self._teardown_async_tool_cancellation()
 
     @deprecated(
         "`LLMService.unregister_direct_function` is deprecated since 1.4.0 and will be removed in "
@@ -1226,8 +1222,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # handler back on the next context frame while the tool is still advertised.
         self._explicitly_unregistered_function_names.add(wrapper.name)
         # Note: no need to remove start callback here, as direct functions don't support start callbacks.
-        if self._async_tool_cancellation_enabled and not self._has_async_tools():
-            self._teardown_async_tool_cancellation()
 
     def has_function(self, function_name: str):
         """Check if a function handler is registered.
@@ -1535,20 +1529,16 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 f"currently advertised tool set."
             )
 
-    def _has_async_tools(self) -> bool:
-        """Return True if at least one non-builtin async tool is registered."""
-        return any(
-            not item.cancel_on_interruption
-            for name, item in self._functions.items()
-            if name != CANCEL_ASYNC_TOOL_NAME
-        )
-
     def _setup_async_tool_cancellation(self):
         """Enable async tool cancellation.
 
-        Saves the base system instruction, recomposes to include cancellation
+        Recomposes the system instruction to include the cancellation
         instructions, registers the built-in ``cancel_async_tool_call`` handler,
         and injects its schema into the adapter's built-in tool dict.
+
+        Called from :meth:`start`, before any provider session is configured, so
+        a service that sends its system instruction once at session setup sends
+        the composed one.
         """
         logger.debug(f"{self}: Enabling async tool cancellation")
 
@@ -1563,19 +1553,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 handler=self._cancel_async_tool_call_handler,
                 cancel_on_interruption=True,
             )
-
-    def _teardown_async_tool_cancellation(self):
-        """Disable async tool cancellation.
-
-        Removes the built-in ``cancel_async_tool_call`` handler and its schema,
-        recomposes the system instruction without cancellation instructions.
-        """
-        logger.debug(f"{self}: Disabling async tool cancellation")
-
-        self._async_tool_cancellation_enabled = False
-        self._adapter.builtin_tools.pop(CANCEL_ASYNC_TOOL_NAME, None)
-        self._functions.pop(CANCEL_ASYNC_TOOL_NAME, None)
-        self._compose_system_instruction()
 
     async def _cancel_async_tool_call_handler(self, params: FunctionCallParams):
         """Handle a ``cancel_async_tool_call`` invocation from the LLM.
