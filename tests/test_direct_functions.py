@@ -188,19 +188,19 @@ class TestDirectFunction(unittest.TestCase):
         def my_function_non_async(params: FunctionCallParams):
             return {"status": "success"}, None
 
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(Exception, "must be async"):
             DirectFunctionWrapper(function=my_function_non_async)
 
         async def my_function_missing_params():
             return {"status": "success"}, None
 
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(Exception, "must have at least one parameter"):
             DirectFunctionWrapper(my_function_missing_params)
 
         async def my_function_misplaced_params(foo: str, params: FunctionCallParams):
             return {"status": "success"}, None
 
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(Exception, "first parameter must be named"):
             DirectFunctionWrapper(my_function_misplaced_params)
 
     def test_invoke_calls_function_with_args_and_params_object(self):
