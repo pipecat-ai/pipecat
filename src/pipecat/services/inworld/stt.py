@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
+    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -37,7 +38,8 @@ from pipecat.services.inworld.frames import InworldVoiceProfile, InworldVoicePro
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
-from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.turns.user_start import VADUserTurnStartStrategy
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
@@ -370,8 +372,8 @@ class InworldRealtimeSTTService(WebsocketSTTService):
     :class:`ExternalUserTurnStrategies`. Manual turn detection disables Inworld
     VAD and forwards Pipecat VAD stops as explicit ``endTurn`` requests.
 
-    Voice Profile analysis emits an :class:`InworldVoiceProfileFrame` whenever
-    Inworld includes profile data in a streaming transcription result.
+    Voice Profile analysis emits one :class:`InworldVoiceProfileFrame` with each
+    final streaming transcription result.
     """
 
     Settings = InworldRealtimeSTTSettings
@@ -443,6 +445,8 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         self._connected_event.set()
         self._receive_task = None
         self._user_turn_open = False
+        self._manual_turn_open = False
+        self._pending_voice_profile: InworldVoiceProfile | None = None
 
     @property
     def supports_ttfs(self) -> bool:
@@ -477,13 +481,19 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         """Recommend turn strategies for the configured endpointing mode.
 
         Returns:
-            STT metadata with external strategies in automatic mode and the
-            standard Pipecat strategy selection in manual mode.
+            STT metadata with external strategies in automatic mode and a
+            VAD-only start strategy in manual mode.
         """
         frame = super().service_metadata_frame()
         if self._turn_detection_mode is InworldTurnDetectionMode.AUTOMATIC:
             frame.user_turn_strategies = ExternalUserTurnStrategies(
                 enable_interruptions=self._should_interrupt,
+            )
+        else:
+            frame.user_turn_strategies = UserTurnStrategies(
+                start=[
+                    VADUserTurnStartStrategy(enable_interruptions=self._should_interrupt),
+                ]
             )
         return frame
 
@@ -534,6 +544,7 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         if (
             isinstance(frame, VADUserStoppedSpeakingFrame)
             and self._turn_detection_mode is InworldTurnDetectionMode.MANUAL
+            and self._manual_turn_open
         ):
             await self._send_end_turn()
 
@@ -602,6 +613,17 @@ class InworldRealtimeSTTService(WebsocketSTTService):
             self._user_speaking = False
         else:
             await super()._handle_vad_user_stopped_speaking(frame)
+
+    async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
+        """Open a locally detected turn before accepting streaming results.
+
+        Args:
+            frame: The local VAD start frame.
+        """
+        await super()._handle_vad_user_started_speaking(frame)
+        if self._turn_detection_mode is InworldTurnDetectionMode.MANUAL:
+            self._manual_turn_open = True
+            self._pending_voice_profile = None
 
     def _transcribe_config(self) -> dict[str, Any]:
         """Build the initial WebSocket transcription configuration.
@@ -714,6 +736,8 @@ class InworldRealtimeSTTService(WebsocketSTTService):
                     await self.push_error(error_msg=f"Error closing Inworld STT WebSocket: {e}")
             if self._websocket is websocket:
                 self._websocket = None
+            self._manual_turn_open = False
+            self._pending_voice_profile = None
             await self._user_turn_stopped()
             await self._call_event_handler("on_disconnected")
 
@@ -752,6 +776,8 @@ class InworldRealtimeSTTService(WebsocketSTTService):
             await self.push_error(
                 error_msg=f"Inworld realtime STT error{error_code_text}: {error_message}"
             )
+            self._manual_turn_open = False
+            self._pending_voice_profile = None
             await self._user_turn_stopped()
             return
 
@@ -782,6 +808,7 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         if not self._user_turn_open:
             return
         self._user_turn_open = False
+        self._pending_voice_profile = None
         await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
     @traced_stt
@@ -809,24 +836,33 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         transcript = transcription.get("transcript", "").strip()
         is_final = transcription.get("isFinal", transcription.get("is_final", False))
 
-        if transcript or voice_profile_data is not None:
+        if (
+            self._turn_detection_mode is InworldTurnDetectionMode.MANUAL
+            and not self._manual_turn_open
+        ):
+            logger.trace("Ignoring Inworld transcription outside a Pipecat VAD turn")
+            return
+
+        if transcript:
             await self._user_turn_started()
 
         if voice_profile_data is not None:
             try:
-                voice_profile = InworldVoiceProfile.model_validate(voice_profile_data)
-                await self.push_frame(
-                    InworldVoiceProfileFrame(
-                        user_id=self._user_id,
-                        timestamp=timestamp,
-                        voice_profile=voice_profile,
-                    )
-                )
+                self._pending_voice_profile = InworldVoiceProfile.model_validate(voice_profile_data)
             except ValidationError as e:
                 await self.push_error(
                     error_msg=f"Inworld Voice Profile error: {e}",
                     exception=e,
                 )
+
+        if is_final and self._pending_voice_profile is not None:
+            await self.push_frame(
+                InworldVoiceProfileFrame(
+                    user_id=self._user_id,
+                    timestamp=timestamp,
+                    voice_profile=self._pending_voice_profile,
+                )
+            )
 
         language_value = transcription.get("language", transcription.get("languageCode"))
         if not language_value:
@@ -865,4 +901,6 @@ class InworldRealtimeSTTService(WebsocketSTTService):
                 )
 
         if is_final:
+            self._manual_turn_open = False
+            self._pending_voice_profile = None
             await self._user_turn_stopped()

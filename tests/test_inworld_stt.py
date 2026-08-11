@@ -32,6 +32,10 @@ from pipecat.services.inworld.stt import (
     language_to_inworld_stt_language,
 )
 from pipecat.transcriptions.language import Language
+from pipecat.turns.user_start import (
+    TranscriptionUserTurnStartStrategy,
+    VADUserTurnStartStrategy,
+)
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 
 
@@ -345,7 +349,7 @@ def _instrument_realtime_service(monkeypatch, events, **kwargs):
 
 @pytest.mark.asyncio
 async def test_inworld_realtime_stt_emits_interim_final_and_voice_profile(monkeypatch):
-    """Streaming results should preserve transcript state and Voice Profile data."""
+    """Streaming results should emit the latest Voice Profile once with the final result."""
     events = []
     service = _instrument_realtime_service(monkeypatch, events)
 
@@ -355,6 +359,9 @@ async def test_inworld_realtime_stt_emits_interim_final_and_voice_profile(monkey
                 "transcription": {
                     "transcript": "Hello",
                     "isFinal": False,
+                    "voiceProfile": {
+                        "emotion": [{"label": "neutral", "confidence": 0.72}],
+                    },
                 }
             }
         }
@@ -363,10 +370,6 @@ async def test_inworld_realtime_stt_emits_interim_final_and_voice_profile(monkey
         "transcription": {
             "transcript": "Hello from Inworld.",
             "isFinal": True,
-            "voiceProfile": {
-                "emotion": [{"label": "calm", "confidence": 0.91}],
-                "vocalStyle": [{"label": "conversational", "confidence": 0.86}],
-            },
         },
     }
     await service._process_response({"result": final_result})
@@ -378,8 +381,7 @@ async def test_inworld_realtime_stt_emits_interim_final_and_voice_profile(monkey
         TranscriptionFrame,
     ]
     assert pushed[0].text == "Hello"
-    assert pushed[1].voice_profile.emotion[0].label == "calm"
-    assert pushed[1].voice_profile.vocal_style[0].label == "conversational"
+    assert pushed[1].voice_profile.emotion[0].label == "neutral"
     assert pushed[2].text == "Hello from Inworld."
     assert pushed[2].finalized is True
     assert pushed[2].result == final_result
@@ -418,7 +420,7 @@ def test_inworld_realtime_stt_recommends_external_turn_strategies():
 
 
 def test_inworld_realtime_stt_manual_mode_uses_pipecat_turn_strategies():
-    """Manual endpointing should retain Pipecat strategies and expose TTFS timing."""
+    """Manual endpointing should accept only VAD-driven turn starts."""
     service = _realtime_service(
         turn_detection_mode=InworldRealtimeSTTService.TurnDetectionMode.MANUAL,
         ttfs_p99_latency=0.4,
@@ -426,8 +428,61 @@ def test_inworld_realtime_stt_manual_mode_uses_pipecat_turn_strategies():
 
     metadata = service.service_metadata_frame()
 
-    assert metadata.user_turn_strategies is None
+    assert metadata.user_turn_strategies is not None
+    assert len(metadata.user_turn_strategies.start) == 1
+    assert isinstance(metadata.user_turn_strategies.start[0], VADUserTurnStartStrategy)
+    assert not any(
+        isinstance(strategy, TranscriptionUserTurnStartStrategy)
+        for strategy in metadata.user_turn_strategies.start
+    )
     assert metadata.ttfs_p99_latency == 0.4
+
+
+@pytest.mark.asyncio
+async def test_inworld_realtime_stt_manual_mode_ignores_results_outside_vad_turn(monkeypatch):
+    """Provider results should not create turns unless local VAD admitted the audio."""
+    events = []
+    service = _instrument_realtime_service(
+        monkeypatch,
+        events,
+        turn_detection_mode=InworldRealtimeSTTService.TurnDetectionMode.MANUAL,
+    )
+
+    response = {
+        "result": {
+            "transcription": {
+                "transcript": "assistant echo",
+                "isFinal": True,
+                "voiceProfile": {
+                    "emotion": [{"label": "neutral", "confidence": 0.8}],
+                },
+            }
+        }
+    }
+    await service._process_response(response)
+
+    assert events == []
+    service._handle_transcription.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_inworld_realtime_stt_manual_mode_ignores_unmatched_vad_stop(monkeypatch):
+    """A VAD stop without an admitted start should not finalize background audio."""
+    events = []
+    service = _instrument_realtime_service(
+        monkeypatch,
+        events,
+        turn_detection_mode=InworldRealtimeSTTService.TurnDetectionMode.MANUAL,
+    )
+    websocket = _FakeWebsocket()
+    service._websocket = websocket
+
+    await service.process_frame(
+        VADUserStoppedSpeakingFrame(),
+        FrameDirection.DOWNSTREAM,
+    )
+
+    websocket.send.assert_not_awaited()
 
 
 @pytest.mark.asyncio

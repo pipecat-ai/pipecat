@@ -6,9 +6,9 @@
 
 """Run a voice agent using Inworld realtime STT and WebSocket TTS.
 
-The example uses Pipecat's Silero VAD to delimit turns and sends Inworld's
-manual ``endTurn`` command. This avoids server endpointing reacting to bot audio
-or splitting a continuing utterance during an interactive voice test.
+The example runs Pipecat's Silero VAD before STT to delimit turns and sends
+Inworld's manual ``endTurn`` command. This avoids server endpointing reacting to
+bot audio or splitting a continuing utterance during an interactive voice test.
 
 Set ``INWORLD_STT_LANGUAGE`` to an ISO 639 code such as ``en``, ``ru``, or
 ``pt`` to disable automatic language detection during a single-language test.
@@ -26,10 +26,8 @@ from pipecat.observers.loggers.debug_log_observer import DebugLogObserver, Frame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
-)
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.inworld.frames import InworldVoiceProfileFrame
@@ -95,14 +93,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     context = LLMContext()
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-        context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
-    )
+    vad_processor = VADProcessor(vad_analyzer=SileroVADAnalyzer())
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
             transport.input(),
+            vad_processor,
             stt,
             user_aggregator,
             llm,
