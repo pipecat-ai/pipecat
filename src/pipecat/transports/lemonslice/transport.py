@@ -134,7 +134,7 @@ class LemonSliceTransportClient:
         self,
         *,
         bot_name: str,
-        params: LemonSliceParams = LemonSliceParams(),
+        params: LemonSliceParams | None = None,
         callbacks: LemonSliceCallbacks,
         api_key: str,
         session_request: LemonSliceNewSessionRequest | None = None,
@@ -150,6 +150,7 @@ class LemonSliceTransportClient:
             session_request: Session creation parameters.
             session: The aiohttp session for making async HTTP requests.
         """
+        params = params or LemonSliceParams()
         self._bot_name = bot_name
         self._api = LemonSliceApi(api_key, session)
         if session_request is None:
@@ -749,7 +750,7 @@ class LemonSliceTransport(BaseTransport):
         session: aiohttp.ClientSession,
         api_key: str,
         session_request: LemonSliceNewSessionRequest | None = None,
-        params: LemonSliceParams = LemonSliceParams(),
+        params: LemonSliceParams | None = None,
         input_name: str | None = None,
         output_name: str | None = None,
     ):
@@ -765,6 +766,7 @@ class LemonSliceTransport(BaseTransport):
             input_name: Optional name for the input transport.
             output_name: Optional name for the output transport.
         """
+        params = params or LemonSliceParams()
         super().__init__(input_name=input_name, output_name=output_name)
         self._params = params
 

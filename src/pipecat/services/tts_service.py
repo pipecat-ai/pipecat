@@ -170,7 +170,7 @@ class TTSService(AIService):
         # TTS output sample rate
         sample_rate: int | None = None,
         # Types of text aggregations that should not be spoken.
-        skip_aggregator_types: list[str] | None = [],
+        skip_aggregator_types: list[str] | None = None,
         # A list of callables to transform text before just before sending it to TTS.
         # Each callable takes the aggregated text and its type, and returns the transformed text.
         # To register, provide a list of tuples of (aggregation_type | '*', transform_function).

@@ -305,7 +305,7 @@ def scan_source(src_root: Path, *, exclude: frozenset[str] = DEFAULT_EXCLUDE) ->
         for version, body, param in iter_directives(ast.get_docstring(tree) or ""):
             scan.directives.append(Directive(relpath, "<module>", param, version, body))
 
-        def visit(node, prefix: str, parent_is_class: bool) -> None:
+        def visit(node, prefix: str, parent_is_class: bool, relpath: str = relpath) -> None:
             for child in ast.iter_child_nodes(node):
                 if isinstance(child, ast.Assign):
                     for target in child.targets:
