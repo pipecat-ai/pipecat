@@ -195,6 +195,19 @@ Import this to add custom routes from other packages before calling
         main()
 """
 
+# Bot sessions started from a request handler outlive the response, and the event
+# loop only holds a weak reference to a task, so one that nothing else references
+# can be collected while it is still running.
+_bot_sessions: set[asyncio.Task] = set()
+
+
+def _start_bot_session(coro) -> asyncio.Task:
+    """Run a bot in the background, holding a reference until it finishes."""
+    task = asyncio.create_task(coro)
+    _bot_sessions.add(task)
+    task.add_done_callback(_bot_sessions.discard)
+    return task
+
 
 def _is_module_available(module: str) -> bool:
     """Check whether a module can be imported without importing it.
@@ -773,7 +786,7 @@ def _setup_unified_start_route(
                 runner_args = RunnerArguments(body=body, session_id=session_id)
 
             runner_args.cli_args = args
-            asyncio.create_task(bot_module.bot(runner_args))
+            _start_bot_session(bot_module.bot(runner_args))
             return result
 
         elif transport in TELEPHONY_TRANSPORTS:
@@ -825,7 +838,7 @@ def _setup_unified_start_route(
             )
             runner_args.cli_args = args
 
-            asyncio.create_task(bot_module.bot(runner_args))
+            _start_bot_session(bot_module.bot(runner_args))
             try:
                 await asyncio.wait_for(ready_event.wait(), timeout=15.0)
             except TimeoutError:
@@ -1197,7 +1210,7 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
                 room_url=room_url, token=token, session_id=str(uuid.uuid4())
             )
             runner_args.cli_args = args
-            asyncio.create_task(bot_module.bot(runner_args))
+            _start_bot_session(bot_module.bot(runner_args))
             return RedirectResponse(room_url)
 
     if args.dialin:
@@ -1305,7 +1318,7 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
             )
             runner_args.cli_args = args
 
-            asyncio.create_task(bot_module.bot(runner_args))
+            _start_bot_session(bot_module.bot(runner_args))
 
             # Return response matching Pipecat Cloud format
             return {
