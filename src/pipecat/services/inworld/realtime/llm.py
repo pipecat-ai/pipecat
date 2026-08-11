@@ -616,8 +616,6 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
                     return
 
                 if last_msg.get("role") == "user":
-                    # A standard message's content is either a plain string or a
-                    # list of content parts.
                     content = cast("str | list[dict[str, Any]]", last_msg.get("content", ""))
                     if isinstance(content, list):
                         content = " ".join(
