@@ -13,6 +13,7 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    StartFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -96,6 +97,7 @@ class UserTurnController(BaseObject):
 
         self._user_turn_strategies = user_turn_strategies
         self._user_turn_stop_timeout = user_turn_stop_timeout
+        self._start_frame: StartFrame | None = None
 
         self._user_speaking = False
 
@@ -140,9 +142,14 @@ class UserTurnController(BaseObject):
             self._user_turn_stop_timeout_task = None
 
         await self._cleanup_strategies()
+        self._start_frame = None
 
     async def update_strategies(self, strategies: UserTurnStrategies):
         """Replace the current strategies with the given ones.
+
+        Strategies installed after pipeline startup receive the current
+        :class:`~pipecat.frames.frames.StartFrame` so they can initialize
+        pipeline-scoped configuration such as audio sample rates.
 
         Args:
             strategies: The new user turn strategies the controller should use.
@@ -150,6 +157,8 @@ class UserTurnController(BaseObject):
         await self._cleanup_strategies()
         self._user_turn_strategies = strategies
         await self._setup_strategies()
+        if self._start_frame:
+            await self._process_strategies_frame(self._start_frame)
 
     @property
     def resolves_proposed_turn_start_frames(self) -> bool:
@@ -185,6 +194,9 @@ class UserTurnController(BaseObject):
             frame: The frame to be processed.
 
         """
+        if isinstance(frame, StartFrame):
+            self._start_frame = frame
+
         if isinstance(frame, (UserStartedSpeakingFrame, ProposedUserStartedSpeakingFrame)):
             await self._handle_user_started_speaking(frame)
         elif isinstance(frame, (UserStoppedSpeakingFrame, ProposedUserStoppedSpeakingFrame)):
@@ -196,6 +208,10 @@ class UserTurnController(BaseObject):
         elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
             await self._handle_transcription(frame)
 
+        await self._process_strategies_frame(frame)
+
+    async def _process_strategies_frame(self, frame: Frame):
+        """Pass a frame through the active start and stop strategies."""
         for strategy in self._user_turn_strategies.start or []:
             result = await strategy.process_frame(frame)
             if result == ProcessFrameResult.STOP:
