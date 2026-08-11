@@ -1340,6 +1340,10 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
                 if stream is not self._stream:
                     return
 
+                if result is None:
+                    # The service has no more events to send.
+                    break
+
                 if not isinstance(result, InvokeModelWithBidirectionalStreamOutputChunk):
                     raise RuntimeError(f"AWS Bedrock stream reported: {result}")
 
