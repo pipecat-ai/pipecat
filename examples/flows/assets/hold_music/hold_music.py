@@ -96,7 +96,7 @@ class AsyncSendWavApp:
         await self.__start_event.wait()
 
         if self.__app_error:
-            print(f"Unable to send WAV file!")
+            print("Unable to send WAV file!")
             return
 
         try:

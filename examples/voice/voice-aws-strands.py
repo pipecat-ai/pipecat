@@ -89,7 +89,7 @@ def build_agent(model_id: str, max_tokens: int):
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     stt = AWSTranscribeSTTService()
 
@@ -148,7 +148,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected")
         # Kick off the conversation.
         await worker.queue_frames(
             [
@@ -156,7 +156,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                     messages=[
                         {
                             "role": "developer",
-                            "content": f"Greet the user and introduce yourself. Don't use emojis.",
+                            "content": "Greet the user and introduce yourself. Don't use emojis.",
                         }
                     ],
                     run_llm=True,
@@ -166,7 +166,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
+        logger.info("Client disconnected")
         await runner.cancel()
 
     await runner.run()

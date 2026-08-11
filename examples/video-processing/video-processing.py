@@ -88,7 +88,7 @@ class EdgeDetectionProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
 
 
-SYSTEM_INSTRUCTION = f"""
+SYSTEM_INSTRUCTION = """
 "You are Gemini Chatbot, a friendly, helpful robot.
 
 Your goal is to demonstrate your capabilities in a succinct way.

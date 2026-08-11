@@ -1868,7 +1868,7 @@ class DailyInputTransport(BaseInputTransport):
         if not self._params.audio_in_enabled:
             return
 
-        logger.debug(f"Start receiving audio")
+        logger.debug("Start receiving audio")
 
         if self._params.audio_in_enabled:
             if self._params.audio_in_user_tracks:
@@ -2727,7 +2727,7 @@ class DailyTransport(BaseTransport):
         Returns:
             error: An error description or None.
         """
-        logger.debug(f"Stopping transcription")
+        logger.debug("Stopping transcription")
 
         error = await self._client.stop_transcription()
         if error:

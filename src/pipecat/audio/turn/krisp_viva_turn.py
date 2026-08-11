@@ -331,7 +331,7 @@ class KrispVivaTurn(BaseTurnAnalyzer):
                             probability=prob,
                             e2e_processing_time_ms=self._e2e_processing_time_ms,
                         )
-                        logger.debug(f"Krisp turn complete")
+                        logger.debug("Krisp turn complete")
                     state = EndOfTurnState.COMPLETE
                     self.clear()
                     break

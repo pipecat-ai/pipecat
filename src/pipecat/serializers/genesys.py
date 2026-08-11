@@ -840,7 +840,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
 
         self._is_open = False
 
-        logger.info(f"Sending closed response to Genesys...")
+        logger.info("Sending closed response to Genesys...")
 
         await self._call_event_handler("on_close", message)
 
@@ -861,7 +861,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         Returns:
             OutputTransportMessageUrgentFrame with pong response.
         """
-        logger.info(f"Sending pong response to Genesys...")
+        logger.info("Sending pong response to Genesys...")
 
         await self._call_event_handler("on_ping", message)
 

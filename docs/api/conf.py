@@ -182,7 +182,7 @@ def setup(app):
         shutil.rmtree(output_dir)
         logger.info(f"Cleaned existing documentation in {output_dir}")
 
-    logger.info(f"Generating API documentation...")
+    logger.info("Generating API documentation...")
     logger.info(f"Output directory: {output_dir}")
     logger.info(f"Source directory: {source_dir}")
 

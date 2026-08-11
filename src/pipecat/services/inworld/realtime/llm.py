@@ -832,7 +832,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
 
         if self._current_audio_response and self._current_audio_response.item_id != evt.item_id:
             logger.warning(
-                f"Received a new audio delta for an already completed audio response before receiving the BotStoppedSpeakingFrame."
+                "Received a new audio delta for an already completed audio response before receiving the BotStoppedSpeakingFrame."
             )
             logger.debug("Forcing previous audio response to None")
             self._current_audio_response = None

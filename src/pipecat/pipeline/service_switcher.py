@@ -57,7 +57,7 @@ class ServiceSwitcherStrategy(BaseObject):
         super().__init__()
 
         if len(services) == 0:
-            raise Exception(f"ServiceSwitcherStrategy needs at least one service")
+            raise Exception("ServiceSwitcherStrategy needs at least one service")
 
         self._services = services
         self._active_service = services[0]

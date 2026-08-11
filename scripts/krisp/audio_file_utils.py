@@ -55,7 +55,7 @@ def read_audio_file(input_path: str, verbose: bool = False) -> tuple[np.ndarray,
             print("Read as float32 and scaled to int16")
     else:
         print(f"Error: Unsupported audio format: {info.subtype}")
-        print(f"Supported formats: PCM_16, PCM_S16, FLOAT, DOUBLE")
+        print("Supported formats: PCM_16, PCM_S16, FLOAT, DOUBLE")
         sys.exit(1)
 
     # Convert stereo to mono if needed
@@ -77,8 +77,8 @@ def read_audio_file(input_path: str, verbose: bool = False) -> tuple[np.ndarray,
         print(
             f"⚠️  WARNING: Audio values are very small (max: {audio_data.max()}, min: {audio_data.min()})"
         )
-        print(f"   Expected int16 range: -32768 to 32767")
-        print(f"   This may indicate a format conversion issue.")
+        print("   Expected int16 range: -32768 to 32767")
+        print("   This may indicate a format conversion issue.")
     elif verbose:
         print(f"Audio range: {audio_data.min()} to {audio_data.max()} ✓")
 
@@ -124,7 +124,7 @@ def write_audio_file(
     sf.write(output_path, audio_data, sample_rate)
 
     if verbose:
-        print(f"✓ Audio saved successfully")
+        print("✓ Audio saved successfully")
 
 
 def calculate_audio_stats(audio_data: np.ndarray) -> dict:

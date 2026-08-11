@@ -78,7 +78,7 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     # Specify initial system instruction.
     system_instruction = (
@@ -178,7 +178,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Handle client connection event
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected")
         # Kick off the conversation.
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}
@@ -192,7 +192,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Handle client disconnection events
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
+        logger.info("Client disconnected")
         await runner.cancel()
 
     # See comment above the user_aggregator for details on why this is

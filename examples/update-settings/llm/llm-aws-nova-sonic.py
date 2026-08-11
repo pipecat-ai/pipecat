@@ -49,7 +49,7 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     llm = AWSNovaSonicLLMService(
         secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
@@ -100,7 +100,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected")
         context.add_message({"role": "developer", "content": "Tell me a fun fact."})
         await worker.queue_frames([LLMRunFrame()])
 
@@ -112,7 +112,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
+        logger.info("Client disconnected")
         await runner.cancel()
 
     await runner.run()
