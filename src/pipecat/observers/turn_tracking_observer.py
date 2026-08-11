@@ -142,7 +142,10 @@ class TurnTrackingObserver(BaseObserver):
             await self._end_turn(data, was_interrupted=False)
             await self._start_turn(data)
         elif not self._is_turn_active:
-            # Start a new turn after previous one ended
+            # Start a new turn after previous one ended. Bot speech that played
+            # while no turn was active (e.g. an idle check-in) may have armed
+            # the end-turn timer; cancel it so it cannot end this new turn.
+            self._cancel_turn_end_timer()
             await self._start_turn(data)
         else:
             # User is speaking within the same turn (before bot has responded)

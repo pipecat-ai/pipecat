@@ -364,6 +364,83 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(turn_events, expected_events)
         self.assertEqual(turn_observer._turn_count, 1)
 
+    async def test_stale_timer_from_unowned_bot_speech_does_not_end_new_turn(self):
+        """A pending end-turn timer must not end a turn that starts afterwards.
+
+        Bot speech that plays while no turn is active (e.g. an idle check-in)
+        arms the end-turn timer on BotStoppedSpeakingFrame. If the user starts
+        speaking within the timeout window, the new turn must survive that
+        stale timer and stay open until its own bot reply completes.
+        """
+        turn_observer = TurnTrackingObserver(turn_end_timeout_secs=0.2)
+        processor = IdentityFilter()
+
+        turn_events = []
+        turn_durations = {}
+
+        @turn_observer.event_handler("on_turn_started")
+        async def on_turn_started(observer, turn_number):
+            turn_events.append(f"Turn {turn_number} started")
+
+        @turn_observer.event_handler("on_turn_ended")
+        async def on_turn_ended(observer, turn_number, duration, was_interrupted):
+            turn_events.append(f"Turn {turn_number} ended (interrupted: {was_interrupted})")
+            turn_durations[turn_number] = duration
+
+        frames_to_send = [
+            # Turn 1: normal exchange, then let it end via timeout
+            UserStartedSpeakingFrame(),
+            UserStoppedSpeakingFrame(),
+            BotStartedSpeakingFrame(),
+            BotStoppedSpeakingFrame(),
+            SleepFrame(sleep=0.4),  # > 0.2s: turn 1 ends, no turn active
+            # Un-owned bot speech (idle check-in) — arms the end-turn timer
+            BotStartedSpeakingFrame(),
+            BotStoppedSpeakingFrame(),
+            SleepFrame(sleep=0.1),  # < 0.2s: timer still pending
+            # User answers inside the timeout window — turn 2 starts
+            UserStartedSpeakingFrame(),
+            SleepFrame(sleep=0.4),  # stale timer would fire here without the fix
+            UserStoppedSpeakingFrame(),
+            # The bot reply arrives after the stale window
+            BotStartedSpeakingFrame(),
+            BotStoppedSpeakingFrame(),
+            SleepFrame(sleep=0.4),  # turn 2 ends via its own timeout
+        ]
+
+        expected_down_frames = [
+            UserStartedSpeakingFrame,
+            UserStoppedSpeakingFrame,
+            BotStartedSpeakingFrame,
+            BotStoppedSpeakingFrame,
+            BotStartedSpeakingFrame,
+            BotStoppedSpeakingFrame,
+            UserStartedSpeakingFrame,
+            UserStoppedSpeakingFrame,
+            BotStartedSpeakingFrame,
+            BotStoppedSpeakingFrame,
+        ]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+            observers=[turn_observer],
+        )
+
+        expected_events = [
+            "Turn 1 started",
+            "Turn 1 ended (interrupted: False)",
+            "Turn 2 started",
+            "Turn 2 ended (interrupted: False)",
+        ]
+        self.assertEqual(turn_events, expected_events)
+        # Without the fix the stale timer ends turn 2 before its bot reply,
+        # using the timestamp captured when the timer was armed — which
+        # precedes the turn start, producing a tiny/negative duration.
+        self.assertGreater(turn_durations[2], 0.3)
+
+
 
 if __name__ == "__main__":
     unittest.main()
