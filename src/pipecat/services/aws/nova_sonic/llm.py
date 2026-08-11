@@ -1657,7 +1657,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         if not self._user_text_buffer:
             return
 
-        logger.debug(f"User transcription ended")
+        logger.debug("User transcription ended")
 
         # Report to the upstream user context aggregator that some new user
         # transcription text is available.

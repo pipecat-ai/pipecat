@@ -401,10 +401,10 @@ class SmallWebRTCConnection(BaseObject):
         self.force_transceivers_to_send_recv()
 
         # this answer does not contain the ice candidates, which will be gathered later, after the setLocalDescription
-        logger.debug(f"Creating answer")
+        logger.debug("Creating answer")
         local_answer = await self._pc.createAnswer()
         await self._pc.setLocalDescription(local_answer)
-        logger.debug(f"Setting the answer after the local description is created")
+        logger.debug("Setting the answer after the local description is created")
         self._answer = self._pc.localDescription
 
     async def initialize(self, sdp: str, type: str):

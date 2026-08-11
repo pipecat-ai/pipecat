@@ -126,15 +126,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, participant):
         # Show how to use mixer control frames.
-        logger.info(f"Listening for background sound for a bit...")
+        logger.info("Listening for background sound for a bit...")
         await asyncio.sleep(5.0)
-        logger.info(f"Reducing volume...")
+        logger.info("Reducing volume...")
         await worker.queue_frame(MixerUpdateSettingsFrame({"volume": 0.5}))
         await asyncio.sleep(5.0)
-        logger.info(f"Disabling background sound for a bit...")
+        logger.info("Disabling background sound for a bit...")
         await worker.queue_frame(MixerEnableFrame(False))
         await asyncio.sleep(5.0)
-        logger.info(f"Re-enabling background sound and starting bot...")
+        logger.info("Re-enabling background sound and starting bot...")
         await worker.queue_frame(MixerEnableFrame(True))
         # Kick off the conversation.
         context.add_message(
@@ -144,7 +144,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
+        logger.info("Client disconnected")
         await runner.cancel()
 
     await runner.run()

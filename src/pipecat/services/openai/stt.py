@@ -429,8 +429,8 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             Dict mapping changed field names to their previous values.
         """
         changed = await super()._update_settings(delta)
-        for field, previous_value in self._omit_unsupported_prompt(self._settings).items():
-            changed.setdefault(field, previous_value)
+        for field_name, previous_value in self._omit_unsupported_prompt(self._settings).items():
+            changed.setdefault(field_name, previous_value)
 
         if changed and self._session_ready:
             await self._send_session_update()

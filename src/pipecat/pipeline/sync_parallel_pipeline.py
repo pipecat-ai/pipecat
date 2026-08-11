@@ -166,7 +166,7 @@ class SyncParallelPipeline(BasePipeline):
         self._frame_order = frame_order
 
         if len(args) == 0:
-            raise Exception(f"SyncParallelPipeline needs at least one argument")
+            raise Exception("SyncParallelPipeline needs at least one argument")
 
         self._sinks = []
         self._sources = []

@@ -417,7 +417,7 @@ class AICFilter(BaseAudioFilter):
         self._aic_ready = self._processor is not None
 
         if not self._aic_ready:
-            logger.debug(f"ai-coustics filter is not ready.")
+            logger.debug("ai-coustics filter is not ready.")
             return
 
         assert self._processor is not None  # necessarily true
@@ -431,7 +431,7 @@ class AICFilter(BaseAudioFilter):
         self._apply_enhancement_level()
 
         # Log processor information
-        logger.debug(f"ai-coustics filter started:")
+        logger.debug("ai-coustics filter started:")
         logger.debug(f"  Model ID: {self._model.get_id()}")
         logger.debug(f"  Sample rate: {self._sample_rate} Hz")
         logger.debug(f"  Frames per chunk: {self._frames_per_block}")

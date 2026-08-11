@@ -1451,8 +1451,6 @@ class DailyTransportClient(EventHandler):
         params: DailyCustomVideoTrackParams | None = None,
     ) -> DailyVideoTrack:
         """Create a video track for the given parameters."""
-        future = self._get_event_loop().create_future()
-
         width = params.width if params else self._params.video_out_width
         height = params.height if params else self._params.video_out_height
         color_format = params.color_format if params else self._params.video_out_color_format
@@ -1868,7 +1866,7 @@ class DailyInputTransport(BaseInputTransport):
         if not self._params.audio_in_enabled:
             return
 
-        logger.debug(f"Start receiving audio")
+        logger.debug("Start receiving audio")
 
         if self._params.audio_in_enabled:
             if self._params.audio_in_user_tracks:
@@ -2727,7 +2725,7 @@ class DailyTransport(BaseTransport):
         Returns:
             error: An error description or None.
         """
-        logger.debug(f"Stopping transcription")
+        logger.debug("Stopping transcription")
 
         error = await self._client.stop_transcription()
         if error:

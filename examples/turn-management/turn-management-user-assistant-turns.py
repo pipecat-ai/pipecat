@@ -84,7 +84,7 @@ class TranscriptHandler:
         Args:
             message: The new user message
         """
-        logger.debug(f"Received user transcript update")
+        logger.debug("Received user transcript update")
         await self.save_message("user", message.content, message.timestamp)
 
     async def on_assistant_transcript(self, message: AssistantTurnStoppedMessage):
@@ -93,7 +93,7 @@ class TranscriptHandler:
         Args:
             message: The new assistant message
         """
-        logger.debug(f"Received assistant transcript update")
+        logger.debug("Received assistant transcript update")
         await self.save_message("assistant", message.content, message.timestamp)
 
 
@@ -120,7 +120,7 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
@@ -175,7 +175,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected")
         # Start conversation - empty prompt to let LLM follow system instructions
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}
@@ -184,7 +184,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
+        logger.info("Client disconnected")
         await runner.cancel()
 
     @user_aggregator.event_handler("on_user_turn_stopped")

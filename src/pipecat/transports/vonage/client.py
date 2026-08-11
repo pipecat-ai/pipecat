@@ -339,18 +339,18 @@ class VonageClient:
         self._event_queue = asyncio.Queue()
         self._event_task = self._task_manager.create_task(
             self._sdk_cb_to_loop_task_handler(self._event_queue, allow_concurrent=True),
-            f"event_callback_task",
+            "event_callback_task",
         )
         # audio and video tasks should be processed one at a time
         self._audio_queue = asyncio.Queue(maxsize=AUDIO_QUEUE_MAXSIZE)
         self._audio_task = self._task_manager.create_task(
             self._sdk_cb_to_loop_task_handler(self._audio_queue, allow_concurrent=False),
-            f"audio_callback_task",
+            "audio_callback_task",
         )
         self._video_queue = asyncio.Queue(maxsize=VIDEO_QUEUE_MAXSIZE)
         self._video_task = self._task_manager.create_task(
             self._sdk_cb_to_loop_task_handler(self._video_queue, allow_concurrent=False),
-            f"video_callback_task",
+            "video_callback_task",
         )
 
     async def cleanup(self) -> None:
@@ -651,7 +651,7 @@ class VonageClient:
 
                 if not ready_to_publish_future.done():
                     ready_to_publish_future.set_exception(
-                        VonageException(f"Got disconnected while waiting for connection")
+                        VonageException("Got disconnected while waiting for connection")
                     )
 
                 if unexpected_disconnection:

@@ -285,7 +285,7 @@ class LiveAvatarApi(BaseAvatarApi):
 
         logger.debug(f"Creating LiveAvatar session token with params: {params}")
         response = await self._request("POST", "/sessions/token", params)
-        logger.debug(f"LiveAvatar session token created")
+        logger.debug("LiveAvatar session token created")
 
         return SessionTokenResponse.model_validate(response)
 
@@ -301,7 +301,7 @@ class LiveAvatarApi(BaseAvatarApi):
             Session information including room URL and session ID.
         """
         response = await self._request("POST", "/sessions/start", bearer_token=session_token)
-        logger.debug(f"LiveAvatar session started")
+        logger.debug("LiveAvatar session started")
 
         return LiveAvatarSessionResponse.model_validate(response)
 

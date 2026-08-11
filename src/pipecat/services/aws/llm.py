@@ -364,7 +364,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                     client.converse_stream(**request_params), timeout=self._retry_timeout_secs
                 )
                 return response
-            except (TimeoutError, ReadTimeoutError) as e:
+            except (TimeoutError, ReadTimeoutError):
                 # Retry, this time without a timeout so we get a response
                 logger.debug(f"{self}: Retrying converse_stream due to timeout")
                 response = await client.converse_stream(**request_params)

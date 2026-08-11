@@ -234,9 +234,7 @@ class SingleClientWebsocketServerInputTransport(BaseInputTransport):
         logger.info(f"Starting websocket server on {self._host}:{self._port}")
         # websockets types each origin as its own Origin alias over str.
         origins = cast("list[Origin] | None", self._params.allowed_origins or None)
-        async with websocket_serve(
-            self._client_handler, self._host, self._port, origins=origins
-        ) as server:
+        async with websocket_serve(self._client_handler, self._host, self._port, origins=origins):
             await self._callbacks.on_websocket_ready()
             await self._stop_server_event.wait()
 

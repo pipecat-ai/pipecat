@@ -40,7 +40,7 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],

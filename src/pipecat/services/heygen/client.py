@@ -120,14 +120,14 @@ class HeyGenClient:
                 session_request, LiveAvatarNewSessionRequest
             ):
                 logger.warning(
-                    f"Service type is LIVE_AVATAR but session_request is not SessionTokenRequest. Ignoring session_request."
+                    "Service type is LIVE_AVATAR but session_request is not SessionTokenRequest. Ignoring session_request."
                 )
                 session_request = None
             elif service_type == ServiceType.INTERACTIVE_AVATAR and not isinstance(
                 session_request, NewSessionRequest
             ):
                 logger.warning(
-                    f"Service type is INTERACTIVE_AVATAR but session_request is not NewSessionRequest. Ignoring session_request."
+                    "Service type is INTERACTIVE_AVATAR but session_request is not NewSessionRequest. Ignoring session_request."
                 )
                 session_request = None
 
@@ -251,7 +251,7 @@ class HeyGenClient:
             logger.debug("heygen client already started")
             return
 
-        logger.debug(f"HeyGenClient starting")
+        logger.debug("HeyGenClient starting")
         self._in_sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
         self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
         await self._ws_connect()
@@ -274,9 +274,9 @@ class HeyGenClient:
         """Connect to HeyGen websocket endpoint."""
         try:
             if self._websocket:
-                logger.debug(f"HeyGenClient ws already connected!")
+                logger.debug("HeyGenClient ws already connected!")
                 return
-            logger.debug(f"HeyGenClient ws connecting")
+            logger.debug("HeyGenClient ws connecting")
             self._websocket = await websocket_connect(
                 uri=self._heyGen_session.ws_url,
             )
@@ -566,7 +566,7 @@ class HeyGenClient:
         except Exception as e:
             logger.error(f"Error processing audio frames: {e}")
         finally:
-            logger.debug(f"Audio frame processing ended.")
+            logger.debug("Audio frame processing ended.")
 
     async def _process_video_frames(self, stream: rtc.VideoStream):
         """Process video frames from LiveKit stream."""
@@ -595,7 +595,7 @@ class HeyGenClient:
         except Exception as e:
             logger.error(f"Error processing video frames: {e}")
         finally:
-            logger.debug(f"Video frame processing ended.")
+            logger.debug("Video frame processing ended.")
 
     async def _livekit_connect(self):
         """Connect to LiveKit room."""

@@ -181,7 +181,7 @@ class WhatsAppClient:
         if not hmac.compare_digest(expected_signature, received_signature):
             raise Exception("Invalid webhook signature")
 
-        logger.debug(f"Webhook signature verified!")
+        logger.debug("Webhook signature verified!")
 
     async def handle_webhook_request(
         self,

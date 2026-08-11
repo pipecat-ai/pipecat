@@ -1403,7 +1403,7 @@ async def _run_daily_direct(args: argparse.Namespace):
     """Run Daily bot with direct connection (no FastAPI server)."""
     try:
         from pipecat.runner.daily import configure
-    except ImportError as e:
+    except ImportError:
         logger.error("Daily transport dependencies not installed.")
         return
 
