@@ -288,7 +288,8 @@ async def parse_telephony_websocket(websocket: "WebSocket"):
         # Only successful parses are cached; the raising paths stay retryable.
         # setattr (not attribute assignment) since WebSocket has no such declared
         # field; mirrors the getattr-based read above.
-        setattr(websocket, "_pipecat_parsed_telephony", result)
+        # setattr: the attribute is ours to stash, not part of WebSocket's type.
+        setattr(websocket, "_pipecat_parsed_telephony", result)  # noqa: B010
         return result
 
     except Exception as e:

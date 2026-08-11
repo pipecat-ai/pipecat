@@ -542,7 +542,7 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
         except TimeoutError:
             assert True
         else:
-            assert False
+            raise AssertionError("worker.run() returned instead of running until cancelled")
 
     async def test_idle_task_heartbeats(self):
         identity = IdentityFilter()

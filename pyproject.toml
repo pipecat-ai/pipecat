@@ -251,9 +251,6 @@ ignore = [
     # sweep. Every entry below is a deferral, not a rejection: drop the line and
     # fix what it reports.
     "B007", # unused loop control variable — 23 sites, cosmetic
-    "B009", # getattr with a constant attribute — cosmetic
-    "B010", # setattr with a constant attribute — cosmetic
-    "B011", # `assert False` — cosmetic
     "B904", # `raise ... from` — 48 sites, better tracebacks, no behaviour change
     "B905", # `zip(strict=)` — 18 sites, each needs its own length-invariant call
     #
