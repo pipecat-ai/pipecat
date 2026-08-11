@@ -11,7 +11,7 @@ Inworld's manual ``endTurn`` command. This avoids server endpointing reacting to
 bot audio or splitting a continuing utterance during an interactive voice test.
 
 Set ``INWORLD_STT_LANGUAGE`` to an ISO 639 code such as ``en``, ``ru``, or
-``pt`` to disable automatic language detection during a single-language test.
+``pt`` to provide Inworld with a preferred language hint.
 """
 
 import os

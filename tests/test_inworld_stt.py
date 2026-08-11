@@ -6,6 +6,7 @@
 
 """Tests for the Inworld speech-to-text service."""
 
+import asyncio
 import base64
 import json
 from unittest.mock import AsyncMock, MagicMock
@@ -31,6 +32,7 @@ from pipecat.services.inworld.stt import (
     InworldSTTService,
     language_to_inworld_stt_language,
 )
+from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_start import (
     TranscriptionUserTurnStartStrategy,
@@ -337,6 +339,50 @@ async def test_inworld_realtime_stt_restarts_completed_receive_task(monkeypatch)
     assert frames == [None]
     assert service._receive_task is replacement_task
     websocket.send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_inworld_realtime_stt_blocks_senders_during_socket_recovery(monkeypatch):
+    """Recovery should keep senders and concurrent reconnect callers on one socket."""
+    service = _realtime_service()
+    recovery_started = asyncio.Event()
+    release_recovery = asyncio.Event()
+    recovered_websocket = _FakeWebsocket()
+
+    async def fake_reconnect_websocket(self, attempt_number):
+        assert self is service
+        assert attempt_number == 1
+        recovery_started.set()
+        await release_recovery.wait()
+        service._websocket = recovered_websocket
+        return True
+
+    monkeypatch.setattr(
+        WebsocketSTTService,
+        "_reconnect_websocket",
+        fake_reconnect_websocket,
+    )
+
+    recovery = asyncio.create_task(service._try_reconnect(max_retries=1))
+    await recovery_started.wait()
+    assert service._connected_event.is_set() is False
+
+    concurrent_recovery = asyncio.create_task(service._try_reconnect(max_retries=1))
+
+    async def send_audio():
+        return [frame async for frame in service.run_stt(b"\x01\x02")]
+
+    send = asyncio.create_task(send_audio())
+    await asyncio.sleep(0)
+    assert concurrent_recovery.done() is False
+    assert send.done() is False
+
+    release_recovery.set()
+
+    assert await recovery is True
+    assert await concurrent_recovery is True
+    assert await send == [None]
+    recovered_websocket.send.assert_awaited_once()
 
 
 def test_inworld_realtime_stt_automatic_mode_requires_server_vad():
@@ -683,6 +729,82 @@ async def test_inworld_realtime_stt_manual_mode_keeps_next_vad_turn_open(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_inworld_realtime_stt_manual_mode_preserves_vad_turn_across_retry(monkeypatch):
+    """A recovered audio send should still be finalized by the next local VAD stop."""
+    events = []
+    service = _instrument_realtime_service(
+        monkeypatch,
+        events,
+        turn_detection_mode=InworldRealtimeSTTService.TurnDetectionMode.MANUAL,
+    )
+    failed_websocket = _FakeWebsocket()
+    failed_websocket.send.side_effect = [ConnectionError("socket lost"), None]
+    recovered_websocket = _FakeWebsocket()
+    service._websocket = failed_websocket
+
+    async def fake_connect_websocket():
+        service._websocket = recovered_websocket
+
+    monkeypatch.setattr(service, "_connect_websocket", fake_connect_websocket)
+    monkeypatch.setattr(service, "_verify_connection", AsyncMock(return_value=True))
+
+    await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    frames = [frame async for frame in service.run_stt(b"\x01\x02")]
+
+    assert frames == [None]
+    assert service._manual_vad_turn_open is True
+
+    await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    sent_messages = [json.loads(call.args[0]) for call in recovered_websocket.send.await_args_list]
+    assert sent_messages == [
+        {"audioChunk": {"content": base64.b64encode(b"\x01\x02").decode("ascii")}},
+        {"endTurn": {}},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_inworld_realtime_stt_manual_mode_accepts_final_after_end_turn_retry(monkeypatch):
+    """A retried endTurn should keep exactly one final response pending."""
+    events = []
+    service = _instrument_realtime_service(
+        monkeypatch,
+        events,
+        turn_detection_mode=InworldRealtimeSTTService.TurnDetectionMode.MANUAL,
+    )
+    failed_websocket = _FakeWebsocket()
+    failed_websocket.send.side_effect = [ConnectionError("socket lost"), None]
+    recovered_websocket = _FakeWebsocket()
+    service._websocket = failed_websocket
+
+    async def fake_connect_websocket():
+        service._websocket = recovered_websocket
+
+    monkeypatch.setattr(service, "_connect_websocket", fake_connect_websocket)
+    monkeypatch.setattr(service, "_verify_connection", AsyncMock(return_value=True))
+
+    await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    assert service._manual_pending_finals == 1
+    assert [json.loads(call.args[0]) for call in recovered_websocket.send.await_args_list] == [
+        {"endTurn": {}}
+    ]
+
+    await service._process_response(
+        {"result": {"transcription": {"transcript": "Recovered final.", "isFinal": True}}}
+    )
+
+    transcriptions = [
+        event[2]
+        for event in events
+        if event[0] == "push" and isinstance(event[2], TranscriptionFrame)
+    ]
+    assert [frame.text for frame in transcriptions] == ["Recovered final."]
+    assert service._manual_pending_finals == 0
+
+
+@pytest.mark.asyncio
 async def test_inworld_realtime_stt_disconnects_with_close_stream():
     """Graceful disconnect should send the required closeStream message."""
     service = _realtime_service()
@@ -694,6 +816,58 @@ async def test_inworld_realtime_stt_disconnects_with_close_stream():
     assert json.loads(websocket.send.await_args.args[0]) == {"closeStream": {}}
     websocket.close.assert_awaited_once()
     assert service._websocket is None
+
+
+@pytest.mark.asyncio
+async def test_inworld_realtime_stt_full_disconnect_resets_turn_state(monkeypatch):
+    """Intentional teardown should clear local and provider-owned turn state."""
+    events = []
+    service = _instrument_realtime_service(monkeypatch, events)
+    websocket = _FakeWebsocket()
+    service._websocket = websocket
+    service._user_turn_open = True
+    service._manual_vad_turn_open = True
+    service._manual_pending_finals = 1
+    service._need_reconnect = True
+
+    await service._disconnect()
+
+    assert service._user_turn_open is False
+    assert service._manual_vad_turn_open is False
+    assert service._manual_pending_finals == 0
+    assert service._can_reconnect is True
+    assert service._need_reconnect is False
+    assert ("broadcast", ProposedUserStoppedSpeakingFrame, None) in events
+
+
+@pytest.mark.asyncio
+async def test_inworld_realtime_stt_recovery_aborts_during_full_disconnect(monkeypatch):
+    """A queued error recovery should not reopen the socket after teardown starts."""
+    service = _realtime_service()
+    service._websocket = _FakeWebsocket()
+    connect_websocket = AsyncMock()
+    monkeypatch.setattr(service, "_connect_websocket", connect_websocket)
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.exponential_backoff_time",
+        lambda attempt: 0,
+    )
+
+    await service._connection_lock.acquire()
+    recovery = asyncio.create_task(service._try_reconnect(max_retries=1))
+    while not service._reconnect_in_progress:
+        await asyncio.sleep(0)
+
+    disconnect = asyncio.create_task(service._disconnect())
+    while not service._disconnecting:
+        await asyncio.sleep(0)
+
+    service._connection_lock.release()
+
+    assert await recovery is False
+    await disconnect
+    connect_websocket.assert_not_awaited()
+    assert service._websocket is None
+    assert service._receive_task is None
 
 
 @pytest.mark.asyncio
@@ -709,3 +883,72 @@ async def test_inworld_realtime_stt_settings_update_requests_reconnect(monkeypat
 
     assert service._settings.prompts == ["Inworld", "Pipecat"]
     reconnect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_inworld_realtime_stt_defers_settings_until_inworld_final(monkeypatch):
+    """Provider-owned turns should defer settings reconnects until their final result."""
+    events = []
+    service = _instrument_realtime_service(monkeypatch, events)
+    do_reconnect = AsyncMock()
+    monkeypatch.setattr(service, "_do_reconnect", do_reconnect)
+
+    await service._process_response({"result": {"speechStarted": {}}})
+    assert service._can_reconnect is False
+
+    await service._update_settings(InworldRealtimeSTTService.Settings(prompts=["new hint"]))
+    assert service._need_reconnect is True
+    do_reconnect.assert_not_awaited()
+
+    await service._process_response(
+        {"result": {"transcription": {"transcript": "Complete.", "isFinal": True}}}
+    )
+
+    do_reconnect.assert_awaited_once()
+    assert service._can_reconnect is True
+    assert service._need_reconnect is False
+
+
+@pytest.mark.asyncio
+async def test_inworld_realtime_stt_empty_final_releases_vad_deferred_settings(monkeypatch):
+    """An empty provider final should release reconnects deferred by local VAD."""
+    events = []
+    service = _instrument_realtime_service(monkeypatch, events)
+    do_reconnect = AsyncMock()
+    monkeypatch.setattr(service, "_do_reconnect", do_reconnect)
+
+    await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await service._update_settings(InworldRealtimeSTTService.Settings(prompts=["new hint"]))
+    await service._process_response(
+        {"result": {"transcription": {"transcript": "", "isFinal": True}}}
+    )
+
+    do_reconnect.assert_awaited_once()
+    assert service._can_reconnect is True
+    assert service._need_reconnect is False
+
+
+@pytest.mark.asyncio
+async def test_inworld_realtime_stt_receive_task_schedules_deferred_reconnect(monkeypatch):
+    """A provider final should not make the receive task disconnect itself."""
+    events = []
+    service = _instrument_realtime_service(monkeypatch, events)
+    service._receive_task = asyncio.current_task()
+    service._user_turn_open = True
+    service._can_reconnect = False
+    service._need_reconnect = True
+    scheduled = []
+
+    def fake_create_task(coroutine, *, name):
+        scheduled.append((coroutine, name))
+        return MagicMock()
+
+    monkeypatch.setattr(service, "create_task", fake_create_task)
+
+    await service._user_turn_stopped()
+
+    assert service._can_reconnect is True
+    assert service._need_reconnect is False
+    assert len(scheduled) == 1
+    assert scheduled[0][1] == "inworld_stt_settings_reconnect"
+    scheduled[0][0].close()

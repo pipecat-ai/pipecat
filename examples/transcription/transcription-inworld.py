@@ -14,7 +14,7 @@ Open the displayed URL, allow microphone access, and speak. The example prints
 interim and final transcriptions along with Inworld Voice Profile results.
 Inworld manages voice activity and semantic end-of-turn detection. Set the
 optional ``INWORLD_STT_LANGUAGE`` variable (for example, ``ru`` or ``pt``) to
-disable automatic language detection for a single-language test.
+provide a preferred language hint; Inworld may still detect another language.
 
 For a conversational pipeline driven by Pipecat VAD, pass
 ``turn_detection_mode=InworldRealtimeSTTService.TurnDetectionMode.MANUAL``;

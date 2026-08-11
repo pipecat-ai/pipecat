@@ -10,7 +10,7 @@ import asyncio
 import base64
 import json
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -443,10 +443,12 @@ class InworldRealtimeSTTService(WebsocketSTTService):
 
         self._connected_event = asyncio.Event()
         self._connected_event.set()
+        self._connection_lock = asyncio.Lock()
         self._receive_task = None
         self._user_turn_open = False
         self._manual_vad_turn_open = False
         self._manual_pending_finals = 0
+        self._manual_end_turn_requests: set[object] = set()
         self._pending_voice_profile: InworldVoiceProfile | None = None
 
     @property
@@ -561,7 +563,12 @@ class InworldRealtimeSTTService(WebsocketSTTService):
             self._start_receive_task(restart_completed_only=True)
             self._manual_vad_turn_open = False
             self._manual_pending_finals += 1
-            await self.send_with_retry(json.dumps({"endTurn": {}}), self._report_error)
+            request = object()
+            self._manual_end_turn_requests.add(request)
+            try:
+                await self.send_with_retry(json.dumps({"endTurn": {}}), self._report_error)
+            finally:
+                self._manual_end_turn_requests.discard(request)
         else:
             await self.push_error(
                 error_msg="Unable to end Inworld realtime STT turn: WebSocket is not connected"
@@ -586,11 +593,13 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         """Establish the connection and start the receive task."""
         self._connected_event.clear()
         try:
-            await self._connect_websocket()
-            await super()._connect()
-            self._start_receive_task()
+            async with self._connection_lock:
+                await self._connect_websocket()
+                await super()._connect()
+                self._start_receive_task()
         finally:
-            self._connected_event.set()
+            if not self._reconnect_in_progress:
+                self._connected_event.set()
 
     async def _disconnect(self):
         """Stop receive processing and close the connection."""
@@ -600,7 +609,55 @@ class InworldRealtimeSTTService(WebsocketSTTService):
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        await self._disconnect_websocket()
+        async with self._connection_lock:
+            await self._disconnect_websocket()
+        self._manual_vad_turn_open = False
+        self._manual_pending_finals = 0
+        self._manual_end_turn_requests.clear()
+        self._pending_voice_profile = None
+        await self._user_turn_stopped(release_reconnect=False)
+        self._can_reconnect = True
+        self._need_reconnect = False
+
+    async def _try_reconnect(
+        self,
+        max_retries: int = 3,
+        report_error: Callable[[ErrorFrame], Awaitable[None]] | None = None,
+    ) -> bool:
+        """Run one socket recovery sequence while blocking senders.
+
+        Args:
+            max_retries: Maximum number of connection attempts.
+            report_error: Optional callback for connection errors.
+
+        Returns:
+            True when a connection is ready for sending.
+        """
+        if self._disconnecting:
+            return False
+        if self._reconnect_in_progress:
+            await self._connected_event.wait()
+            return self._websocket is not None and self._websocket.state is State.OPEN
+
+        self._connected_event.clear()
+        try:
+            return await super()._try_reconnect(max_retries, report_error)
+        finally:
+            self._connected_event.set()
+
+    async def _reconnect_websocket(self, attempt_number: int) -> bool:
+        """Serialize a recovery attempt with normal connection setup.
+
+        Args:
+            attempt_number: Current retry attempt number.
+
+        Returns:
+            True when reconnection and verification succeed.
+        """
+        async with self._connection_lock:
+            if self._disconnecting:
+                return False
+            return await super()._reconnect_websocket(attempt_number)
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply settings and reconnect so Inworld receives a new config.
@@ -754,10 +811,8 @@ class InworldRealtimeSTTService(WebsocketSTTService):
                     await self.push_error(error_msg=f"Error closing Inworld STT WebSocket: {e}")
             if self._websocket is websocket:
                 self._websocket = None
-            self._manual_vad_turn_open = False
-            self._manual_pending_finals = 0
+            self._manual_pending_finals = len(self._manual_end_turn_requests)
             self._pending_voice_profile = None
-            await self._user_turn_stopped()
             await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
@@ -799,6 +854,7 @@ class InworldRealtimeSTTService(WebsocketSTTService):
             )
             self._manual_vad_turn_open = False
             self._manual_pending_finals = 0
+            self._manual_end_turn_requests.clear()
             self._pending_voice_profile = None
             await self._user_turn_stopped()
             return
@@ -818,20 +874,36 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         """Propose an Inworld-owned turn start once."""
         if self._turn_detection_mode is not InworldTurnDetectionMode.AUTOMATIC:
             return
+        self._can_reconnect = False
         if self._user_turn_open:
             return
         self._user_turn_open = True
         await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
 
-    async def _user_turn_stopped(self):
-        """Propose an Inworld-owned turn stop once."""
+    async def _user_turn_stopped(self, *, release_reconnect: bool = True):
+        """Propose an Inworld-owned turn stop and release deferred settings.
+
+        Args:
+            release_reconnect: Whether a deferred settings reconnect can run.
+        """
         if self._turn_detection_mode is not InworldTurnDetectionMode.AUTOMATIC:
             return
-        if not self._user_turn_open:
-            return
+        turn_was_open = self._user_turn_open
         self._user_turn_open = False
         self._pending_voice_profile = None
-        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
+        if turn_was_open:
+            await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
+        if release_reconnect:
+            if asyncio.current_task() is self._receive_task:
+                self._can_reconnect = True
+                if self._need_reconnect:
+                    self._need_reconnect = False
+                    self.create_task(
+                        self._reconnect(),
+                        name="inworld_stt_settings_reconnect",
+                    )
+            else:
+                await self._maybe_reconnect_on_user_stopped_speaking()
 
     @traced_stt
     async def _handle_transcription(
