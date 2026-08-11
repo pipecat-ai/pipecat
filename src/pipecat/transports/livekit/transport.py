@@ -631,8 +631,13 @@ class LiveKitTransportClient:
 
     async def _async_on_data_received(self, data: rtc.DataPacket):
         """Handle data received events."""
-        if data.participant:
-            await self._callbacks.on_data_received(data.data, data.participant.sid)
+        if not data.participant:
+            # LiveKit omits the participant on packets sent by a server SDK. The
+            # callback is keyed by participant, so there's nowhere to deliver these.
+            logger.warning("Ignoring LiveKit data packet sent without a participant")
+            return
+
+        await self._callbacks.on_data_received(data.data, data.participant.sid)
 
     async def _async_on_connected(self):
         """Handle connected events."""
