@@ -1782,8 +1782,14 @@ class LLMAssistantAggregator(LLMContextAggregator):
             return
 
         in_progress_frame = self._function_calls_in_progress[frame.tool_call_id]
-        # A call's in-progress frame always arrives before its result.
-        assert in_progress_frame is not None
+        if in_progress_frame is None:
+            # Started, but its in-progress frame hasn't arrived: there's nothing
+            # yet to attach the result to.
+            logger.warning(
+                f"FunctionCallResultFrame tool_call_id [{frame.tool_call_id}] is not in progress"
+            )
+            return
+
         group_id = in_progress_frame.group_id
         properties = frame.properties
         is_final = frame.properties.is_final if frame.properties else True
