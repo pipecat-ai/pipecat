@@ -32,6 +32,7 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
+    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -607,6 +608,17 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         self._connected_event = asyncio.Event()
         self._connected_event.set()
 
+        # ElevenLabs Scribe v2 realtime occasionally re-sends a partial_transcript
+        # that carries no new information: an identical repeat of the last partial,
+        # or an echo of text that was just committed. Track both so
+        # _on_partial_transcript can drop the repeats instead of opening a phantom
+        # user turn downstream. Scoped to the current turn: process_frame clears
+        # both markers on VADUserStartedSpeakingFrame, since a repeat utterance in
+        # a later turn is real audio, not a re-send. A repeat so soft VAD never
+        # detects it stays suppressed until a differing partial arrives.
+        self._last_partial_text: str | None = None
+        self._last_committed_text: str | None = None
+
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
 
@@ -654,7 +666,15 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            # A VAD-detected turn start is driven by real audio energy, which
+            # the server's phantom partial re-sends can't produce. Clearing
+            # the dedup markers here lets a genuine repeat utterance (e.g. a
+            # second "yes") pass through in the new turn, while stale echoes
+            # arriving during silence stay suppressed.
+            self._last_partial_text = None
+            self._last_committed_text = None
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # Send commit when user stops speaking (manual commit mode)
             if self._commit_strategy == CommitStrategy.MANUAL:
                 if self._websocket and self._websocket.state is State.OPEN:
@@ -707,6 +727,8 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
     async def _connect(self):
         """Establish WebSocket connection to ElevenLabs Realtime STT."""
         self._connected_event.clear()
+        self._last_partial_text = None
+        self._last_committed_text = None
         try:
             await self._connect_websocket()
 
@@ -902,6 +924,14 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         if not text:
             return
 
+        # Drop repeats of the last partial and echoes of text that was just
+        # committed -- both are stale re-sends with no new information, and
+        # pushing them would open a phantom user turn downstream.
+        if text == self._last_partial_text or text == self._last_committed_text:
+            return
+        self._last_committed_text = None
+        self._last_partial_text = text
+
         # Get language if provided
         language = data.get("language_code")
 
@@ -939,6 +969,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         text = data.get("text", "").strip()
         if not text:
             return
+
+        self._last_committed_text = text
+        self._last_partial_text = None
 
         # Get language if provided
         language = data.get("language_code")
@@ -986,6 +1019,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         text = data.get("text", "").strip()
         if not text:
             return
+
+        self._last_committed_text = text
+        self._last_partial_text = None
 
         # Get language if provided
         language = data.get("language_code")
