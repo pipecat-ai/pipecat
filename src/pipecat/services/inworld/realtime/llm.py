@@ -17,7 +17,7 @@ import urllib.parse
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
-from typing import Any, Literal
+from typing import Any, Literal, Self, cast
 
 from loguru import logger
 from typing_extensions import override
@@ -114,7 +114,7 @@ class InworldRealtimeLLMSettings(LLMSettings):
 
     # -- apply_update override -----------------------------------------------
 
-    def apply_update(self, delta: "InworldRealtimeLLMService.Settings") -> dict[str, Any]:
+    def apply_update(self, delta: Self) -> dict[str, Any]:
         """Merge a delta, keeping ``model``/``system_instruction`` in sync with SP.
 
         When the delta contains ``session_properties``, it **replaces** the
@@ -352,7 +352,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         self._interim_transcription_text = ""
         self._websocket = None
         self._receive_task = None
-        self._context: LLMContext = None
+        self._context: LLMContext | None = None
         self._last_context_message_count = 0
 
         self._llm_needs_conversation_setup = True
@@ -393,6 +393,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
 
         Returns:
             Configured sample rate or None if not manually configured.
+            For PCMU/PCMA formats, returns 8000 Hz (G.711 standard).
         """
         session_properties = assert_given(self._settings.session_properties)
         if not session_properties.audio:
@@ -405,8 +406,10 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         )
 
         if audio_config and audio_config.format:
-            if hasattr(audio_config.format, "rate"):
+            # PCM format has configurable rate
+            if isinstance(audio_config.format, events.PCMAudioFormat):
                 return audio_config.format.rate
+            # PCMU/PCMA formats are fixed at 8000 Hz (G.711 standard)
             elif audio_config.format.type in ("audio/pcmu", "audio/pcma"):
                 return 8000
 
@@ -494,8 +497,9 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         """Ensure session_properties.audio has input and output configs.
 
         Preserves Inworld-specific fields (turn_detection, voice, model) and
-        syncs the format sample rates with the transport's actual rates so
-        Inworld knows the correct input/output sample rates.
+        syncs the PCM format sample rates with the transport's actual rates so
+        Inworld knows the correct input/output sample rates. The G.711 formats
+        are fixed at 8000 Hz and carry no rate to sync.
 
         Args:
             input_sample_rate: Sample rate for audio input (Hz).
@@ -514,8 +518,10 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             props.audio.input.format = events.PCMAudioFormat()
         if not props.audio.output.format:
             props.audio.output.format = events.PCMAudioFormat()
-        props.audio.input.format.rate = input_sample_rate
-        props.audio.output.format.rate = output_sample_rate
+        if isinstance(props.audio.input.format, events.PCMAudioFormat):
+            props.audio.input.format.rate = cast(events.SUPPORTED_SAMPLE_RATES, input_sample_rate)
+        if isinstance(props.audio.output.format, events.PCMAudioFormat):
+            props.audio.output.format.rate = cast(events.SUPPORTED_SAMPLE_RATES, output_sample_rate)
 
     async def start(self, frame: StartFrame):
         """Start the service and establish WebSocket connection."""
@@ -604,8 +610,15 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
                     self._server_vad_handled_turn = False
                     return
 
+                # LLMSpecificMessages are opaque provider-specific payloads, not
+                # standard user messages — skip them.
+                if isinstance(last_msg, LLMSpecificMessage):
+                    return
+
                 if last_msg.get("role") == "user":
-                    content = last_msg.get("content", "")
+                    # A standard message's content is either a plain string or a
+                    # list of content parts.
+                    content = cast("str | list[dict[str, Any]]", last_msg.get("content", ""))
                     if isinstance(content, list):
                         content = " ".join(
                             c.get("text", "") for c in content if c.get("type") == "text"
@@ -729,7 +742,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
 
             # tools given in the context override the tools in the session properties
             if llm_invocation_params["tools"]:
-                settings.tools = llm_invocation_params["tools"]
+                settings.tools = cast(list[events.InworldTool], llm_invocation_params["tools"])
 
             # The adapter resolves conflicts between init-provided and
             # context-provided system instructions (preferring init-provided).
@@ -738,7 +751,9 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
 
         # Convert ToolsSchema to list of dicts if needed
         if settings.tools and isinstance(settings.tools, ToolsSchema):
-            settings.tools = adapter.from_standard_tools(settings.tools)
+            settings.tools = cast(
+                list[events.InworldTool], adapter.from_standard_tools(settings.tools)
+            )
 
         settings.provider_data = {"metadata": {"sdk": "pipecat-realtime"}}
 
@@ -750,6 +765,8 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
 
     async def _receive_task_handler(self):
         """Handle incoming WebSocket messages."""
+        assert self._websocket is not None
+
         async for message in self._websocket:
             try:
                 raw = json.loads(message)
@@ -1030,6 +1047,8 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             self._run_llm_when_api_session_ready = True
             return
 
+        assert self._context is not None
+
         adapter = self.get_llm_adapter()
 
         if self._llm_needs_conversation_setup:
@@ -1067,6 +1086,8 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
 
     async def _process_completed_function_calls(self, send_new_results: bool):
         """Process completed function calls and send results to the service."""
+        assert self._context is not None
+
         # If the user registered a function with cancel_on_interruption=False,
         # the aggregator emits async-tool-style messages into the context. As
         # of this writing, Inworld Realtime doesn't appear to handle the
@@ -1146,7 +1167,9 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
                 if tool_call_id and tool_call_id not in self._completed_tool_calls:
                     if send_new_results:
                         sent_new_result = True
-                        await self._send_tool_result(tool_call_id, message.get("content"))
+                        await self._send_tool_result(
+                            tool_call_id, cast(str | None, message.get("content"))
+                        )
                     self._completed_tool_calls.add(tool_call_id)
 
         # If we reported any new tool call results to the service, trigger
@@ -1177,7 +1200,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             payload = base64.b64encode(chunk).decode("utf-8")
             await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
 
-    async def _send_tool_result(self, tool_call_id: str, result: str):
+    async def _send_tool_result(self, tool_call_id: str, result: str | None):
         """Send a tool call result to Inworld."""
         item = events.ConversationItem(
             type="function_call_output",

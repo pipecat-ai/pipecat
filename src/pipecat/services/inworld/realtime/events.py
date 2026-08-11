@@ -12,7 +12,7 @@ https://docs.inworld.ai/api-reference/realtimeAPI/realtime/realtime-websocket
 
 import json
 import uuid
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -20,6 +20,9 @@ from pipecat.adapters.schemas.direct_function import DirectFunction
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.processors.aggregators.llm_context import LLMContext
+
+Modality: TypeAlias = Literal["text", "audio"]
+"""A modality the model can respond with."""
 
 #
 # Audio format configuration
@@ -198,7 +201,7 @@ class SessionProperties(BaseModel):
     model: str | None = None
     instructions: str | None = None
     temperature: float | None = None
-    output_modalities: list[str] | None = None
+    output_modalities: list[Modality] | None = None
     audio: AudioConfiguration | None = None
     # Tools provided by the user may be a ToolsSchema or a plain list of standard
     # tools (the validator below normalizes that to a ToolsSchema); a list of
@@ -287,7 +290,7 @@ class ResponseProperties(BaseModel):
         modalities: Output modalities for the response (text, audio, or both).
     """
 
-    modalities: list[Literal["text", "audio"]] | None = ["text", "audio"]
+    modalities: list[Modality] | None = ["text", "audio"]
 
 
 #
@@ -863,11 +866,12 @@ _server_event_types = {
 }
 
 
-def parse_server_event(data: str):
-    """Parse a server event from JSON string.
+def parse_server_event(data: str | bytes):
+    """Parse a server event from JSON.
 
     Args:
-        data: JSON string containing the server event.
+        data: JSON text containing the server event, as delivered by the
+            websocket.
 
     Returns:
         Parsed server event object of the appropriate type, or ``None`` if the
