@@ -153,6 +153,8 @@ load_dotenv(override=True)
 os.environ["ENV"] = "local"
 
 TELEPHONY_TRANSPORTS = ["twilio", "telnyx", "plivo", "exotel"]
+TELNYX_CODEC_SAMPLE_RATES = {"PCMU": 8000, "PCMA": 8000, "OPUS": 16000, "L16": 16000}
+TELNYX_DEFAULT_CODEC = "PCMU"
 TRANSPORT_ROUTE_DEPENDENCIES = {
     "daily": ("daily",),
     "webrtc": ("aiortc",),
@@ -1315,6 +1317,21 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
             }
 
 
+def _telnyx_codec_attrs(args: argparse.Namespace) -> str:
+    """Build the TeXML ``<Stream>`` codec attributes for ``--telnyx-codec``.
+
+    Returns an empty string for Telnyx's defaults (PCMU at 8kHz) or
+    explicit ``bidirectionalCodec`` / ``bidirectionalSamplingRate``.
+    These MUST agree with serializer encodings built in ``create_transport``.
+    """
+    codec = getattr(args, "telnyx_codec", None) or TELNYX_DEFAULT_CODEC
+    sample_rate = getattr(args, "telnyx_sample_rate", None) or TELNYX_CODEC_SAMPLE_RATES[codec]
+
+    if codec == TELNYX_DEFAULT_CODEC and sample_rate == 8000:
+        return ""
+    return f' bidirectionalCodec="{codec}" bidirectionalSamplingRate="{sample_rate}"'
+
+
 def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace, ws_used_tokens: set[str]):
     """Set up telephony-specific routes.
 
@@ -1347,7 +1364,7 @@ def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace, ws_used_toke
             "telnyx": f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="wss://{args.proxy}/ws" bidirectionalMode="rtp" bidirectionalCodec="OPUS" bidirectionalSamplingRate="16000"></Stream>
+    <Stream url="wss://{args.proxy}/ws" bidirectionalMode="rtp"{_telnyx_codec_attrs(args)}></Stream>
   </Connect>
 </Response>""",
             "plivo": f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -1562,6 +1579,28 @@ def main(parser: argparse.ArgumentParser | None = None):
     )
     parser.add_argument("-x", "--proxy", help="Public proxy host name")
     parser.add_argument(
+        "--telnyx-codec",
+        type=str.upper,
+        choices=list(TELNYX_CODEC_SAMPLE_RATES),
+        default=TELNYX_DEFAULT_CODEC,
+        help=(
+            "Codec to use with Telnyx. Sets the bidirectionalCodec attribute in the "
+            "generated TeXML and the encodings the serializer is built with, which must "
+            "agree. OPUS and L16 give HD audio but need the `opuslib` package (OPUS) and a "
+            "bot whose pipeline runs at the matching sample rate. Default: PCMU."
+        ),
+    )
+    parser.add_argument(
+        "--telnyx-sample-rate",
+        type=int,
+        default=None,
+        metavar="HZ",
+        help=(
+            "Sample rate to use with Telnyx. Defaults to 8000 for PCMU/PCMA and 16000 "
+            "for OPUS/L16. Telnyx allows 8000, 16000 or 24000 for bidirectional streams."
+        ),
+    )
+    parser.add_argument(
         "-d",
         "--direct",
         action="store_true",
@@ -1733,6 +1772,11 @@ def main(parser: argparse.ArgumentParser | None = None):
     # Validate and clean proxy hostname
     if args.proxy:
         args.proxy = _validate_and_clean_proxy(args.proxy)
+
+    # Derive the Telnyx sample rate from the codec unless it was given explicitly, so
+    # the generated TeXML and the serializer stay in agreement.
+    if args.telnyx_sample_rate is None:
+        args.telnyx_sample_rate = TELNYX_CODEC_SAMPLE_RATES[args.telnyx_codec]
 
     # --direct implies Daily transport
     if args.direct:

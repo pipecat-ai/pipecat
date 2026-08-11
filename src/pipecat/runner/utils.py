@@ -488,6 +488,7 @@ async def _create_telephony_transport(
     params: Any,
     transport_type: str,
     call_data: CallData,
+    cli_args: Any = None,
 ) -> BaseTransport:
     """Create a telephony transport with pre-parsed WebSocket data.
 
@@ -496,6 +497,9 @@ async def _create_telephony_transport(
         params: FastAPIWebsocketParams (required)
         transport_type: Pre-detected provider type ("twilio", "telnyx", "plivo")
         call_data: Pre-parsed :class:`CallData` with provider-specific fields
+        cli_args: Parsed dev runner CLI arguments, when launched that way. Read for
+            provider settings the runner also bakes into the XML it generates (Telnyx's
+            codec), so the two can't drift apart.
 
     Returns:
         Configured FastAPIWebsocketTransport ready for telephony use.
@@ -522,12 +526,20 @@ async def _create_telephony_transport(
     elif transport_type == "telnyx":
         from pipecat.serializers.telnyx import TelnyxFrameSerializer
 
+        # Codec and sample rate _must_ match the bidirectionalCodec and
+        # bidirectionalSamplingRate attributes in the TeXML.
+        codec = getattr(cli_args, "telnyx_codec", None) or "PCMU"
+        telnyx_sample_rate = getattr(cli_args, "telnyx_sample_rate", None) or 8000
+
         params.serializer = TelnyxFrameSerializer(
             stream_id=call_data["stream_id"],
             call_control_id=call_data["call_id"],
-            outbound_encoding=call_data["outbound_encoding"],
-            inbound_encoding="PCMU",  # Standard default
+            outbound_encoding=call_data["outbound_encoding"] or codec,
+            inbound_encoding=codec,
             api_key=os.getenv("TELNYX_API_KEY", ""),
+            params=TelnyxFrameSerializer.InputParams(
+                telnyx_sample_rate=telnyx_sample_rate,
+            ),
         )
     elif transport_type == "plivo":
         from pipecat.serializers.plivo import PlivoFrameSerializer
@@ -700,7 +712,11 @@ async def create_transport(
 
         # Create telephony transport with pre-parsed data
         return await _create_telephony_transport(
-            runner_args.websocket, params, transport_type, call_data
+            runner_args.websocket,
+            params,
+            transport_type,
+            call_data,
+            cli_args=getattr(runner_args, "cli_args", None),
         )
     elif isinstance(runner_args, LiveKitRunnerArguments):
         params = _get_transport_params("livekit", transport_params)
