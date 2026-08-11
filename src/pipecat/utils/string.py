@@ -93,8 +93,6 @@ SENTENCE_ENDING_PUNCTUATION: frozenset[str] = frozenset(
         "؛",  # Arabic semicolon
         "۔",  # Urdu full stop
         "؏",  # Arabic sign misra (classical texts)
-        # Thai
-        "।",  # Thai uses Devanagari-style punctuation in some contexts
         # Myanmar/Burmese
         "၊",  # Myanmar sign little section
         "။",  # Myanmar sign section
@@ -103,7 +101,6 @@ SENTENCE_ENDING_PUNCTUATION: frozenset[str] = frozenset(
         "៕",  # Khmer sign bariyoosan
         # Lao
         "໌",  # Lao cancellation mark (used as period)
-        "༎",  # Tibetan mark delimiter tsheg bstar (also used in Lao contexts)
         # Tibetan
         "།",  # Tibetan mark intersyllabic tsheg
         "༎",  # Tibetan mark delimiter tsheg bstar

@@ -1234,7 +1234,9 @@ class SpeechmaticsSTTService(STTService):
                     message = f"`{old}` is deprecated, use `InputParams.{new}`"
                 else:
                     message = f"`{old}` is deprecated and not used"
-                warnings.warn(message, DeprecationWarning)
+                # 3 frames out of this nested helper is the caller constructing
+                # the service, which is the code that has to change.
+                warnings.warn(message, DeprecationWarning, stacklevel=3)
 
         # List of deprecated arguments and their new location
         deprecated_args = [

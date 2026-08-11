@@ -327,7 +327,7 @@ class HeyGenTransport(BaseTransport):
         self,
         session: aiohttp.ClientSession,
         api_key: str,
-        params: HeyGenParams = HeyGenParams(),
+        params: HeyGenParams | None = None,
         input_name: str | None = None,
         output_name: str | None = None,
         session_request: LiveAvatarNewSessionRequest | NewSessionRequest | None = None,
@@ -351,6 +351,7 @@ class HeyGenTransport(BaseTransport):
             The transport will automatically join the same virtual room as the HeyGen Avatar
             and user through the HeyGenClient, which handles session initialization via HeyGenApi.
         """
+        params = params or HeyGenParams()
         super().__init__(input_name=input_name, output_name=output_name)
         self._params = params
         self._client = HeyGenClient(

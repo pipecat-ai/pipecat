@@ -734,7 +734,9 @@ class NvidiaTTSService(TTSService):
 
                     base_req = self._build_base_request()
 
-                    def request_gen():
+                    # Bound as defaults because the body runs when the stub iterates
+                    # the generator, by which point the loop may have moved on.
+                    def request_gen(base_req=base_req, chunk=chunk):
                         base_req.text = chunk
                         yield base_req
 

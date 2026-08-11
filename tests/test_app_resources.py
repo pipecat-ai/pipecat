@@ -294,7 +294,7 @@ class TestFrameProcessorPipelineTaskAccess(unittest.IsolatedAsyncioTestCase):
 
     def test_pipeline_task_raises_when_not_set_up(self):
         recorder = _RecordingProcessor()
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(Exception, "pipeline worker is still not set"):
             _ = recorder.pipeline_worker
 
 
