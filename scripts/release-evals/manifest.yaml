@@ -369,3 +369,11 @@ suite:
   - bot: flows/llm_switching.py
     scenarios: [llm_switching]
 
+  #
+  # Update settings: a runtime TTSUpdateSettingsFrame switches the bot's TTS
+  # language mid-conversation. The turn after the switch must still arrive as
+  # audio — the end-to-end check that the settings change doesn't drop speech.
+  #
+  - bot: update-settings/tts/tts-inworld.py
+    scenarios: [tts_settings_change_audio]
+
