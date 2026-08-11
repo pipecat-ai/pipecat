@@ -544,6 +544,52 @@ class TestProcessFrameToolWiring(unittest.IsolatedAsyncioTestCase):
         service._sync_registered_tool_handlers.assert_not_called()
 
 
+class TestSyncHandlersWithProviderNativeTools(unittest.IsolatedAsyncioTestCase):
+    """Handler sync against a provider-native tool list.
+
+    Realtime services pass ``LLMSetToolsFrame.tools`` straight to
+    :meth:`_sync_registered_tool_handlers`, and the frame accepts a list of
+    provider-specific tool dicts. Those carry no handlers, so they advertise
+    none — the same as an empty list.
+    """
+
+    PROVIDER_TOOLS = [{"google_search": {}}]
+
+    async def test_provider_native_tools_advertise_no_handlers(self):
+        service = MockLLMService()
+        service._sync_registered_tool_handlers(self.PROVIDER_TOOLS)
+        self.assertEqual(set(service._functions), set())
+
+    async def test_provider_native_tools_prune_auto_registered_handlers(self):
+        # A standard tool carrying a handler is auto-registered, then dropped
+        # once the advertised set no longer names it.
+        async def handler(params):
+            pass
+
+        service = MockLLMService()
+        schema = FunctionSchema(
+            name="get_weather",
+            description="d",
+            properties={},
+            required=[],
+            handler=handler,
+        )
+        service._sync_registered_tool_handlers(ToolsSchema(standard_tools=[schema]))
+        self.assertEqual(set(service._functions), {"get_weather"})
+
+        service._sync_registered_tool_handlers(self.PROVIDER_TOOLS)
+        self.assertEqual(set(service._functions), set())
+
+    async def test_explicit_registrations_survive_provider_native_tools(self):
+        async def handler(params):
+            pass
+
+        service = MockLLMService()
+        service.register_function("explicit", handler)
+        service._sync_registered_tool_handlers(self.PROVIDER_TOOLS)
+        self.assertEqual(set(service._functions), {"explicit"})
+
+
 class TestTurnCompletionSettingsDeprecation(unittest.IsolatedAsyncioTestCase):
     """The turn-completion settings belong to the user turn strategy.
 

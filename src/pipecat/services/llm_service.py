@@ -1126,10 +1126,15 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         """
         # None and an empty list both mean "no tools advertised" (the normalizer
         # collapses an empty set to NOT_GIVEN), in which case every auto-registered
-        # handler is pruned.
+        # handler is pruned. Provider-native tools carry no handlers, so they
+        # advertise nothing here and take the same path.
         normalized = (
-            LLMContext._normalize_and_validate_tools(tools) if tools is not None else NOT_GIVEN
+            LLMContext._normalize_and_validate_tools(tools, allow_provider_tools=True)
+            if tools is not None
+            else NOT_GIVEN
         )
+        if isinstance(normalized, list):
+            normalized = NOT_GIVEN
         # No context tools? Fall back to the service's own configured tools.
         # Those may be provider-native (already formatted, carrying no handlers);
         # only standard tools (gathered into a ToolsSchema) contribute handlers.
