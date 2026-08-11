@@ -1078,7 +1078,7 @@ class LiveKitTransport(BaseTransport):
       Args: (participant_id: str)
     - on_data_received: Called when data is received. The participant ID is None
       for packets sent by a server SDK, which LiveKit delivers unattributed.
-      Args: (data: bytes, participant_id: str)
+      Args: (data: bytes, participant_id: str | None)
     - on_dtmf_event: Called when a SIP DTMF tone is received from a participant.
       Args: (data: dict) with keys ``tone``/``digit``, ``code``, and
       ``participant_id``. Also pushes an ``InputDTMFFrame`` so
