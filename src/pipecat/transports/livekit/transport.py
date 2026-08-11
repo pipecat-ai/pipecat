@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     Frame,
     ImageRawFrame,
     InputDTMFFrame,
+    InputTransportMessageFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
@@ -71,6 +72,17 @@ DTMF_CODE_MAP = {
     "*": 10,
     "#": 11,
 }
+
+
+@dataclass
+class LiveKitInputTransportMessageFrame(InputTransportMessageFrame):
+    """Frame for incoming transport messages from LiveKit rooms.
+
+    Parameters:
+        participant_id: ID of the participant this message is from.
+    """
+
+    participant_id: str | None = None
 
 
 @dataclass
@@ -800,13 +812,17 @@ class LiveKitInputTransport(BaseInputTransport):
     async def push_app_message(self, message: Any, sender: str | None):
         """Push an application message as an urgent transport frame.
 
+        Broadcast both upstream and downstream so it reaches ``RTVIProcessor``
+        regardless of where it sits relative to the transport in the pipeline.
+
         Args:
             message: The message data to send.
             sender: ID of the message sender, or None if it was sent
                 unattributed by a server SDK.
         """
-        frame = LiveKitOutputTransportMessageUrgentFrame(message=message, participant_id=sender)
-        await self.push_frame(frame)
+        await self.broadcast_frame(
+            LiveKitInputTransportMessageFrame, message=message, participant_id=sender
+        )
 
     async def _audio_in_task_handler(self):
         """Handle incoming audio frames from participants."""
@@ -1068,6 +1084,10 @@ class LiveKitTransport(BaseTransport):
       Args: (participant_id: str)
     - on_participant_left: Called when a participant leaves.
       Args: (participant_id: str, reason: str)
+    - on_client_connected: Called when a participant connects (alias for
+      on_participant_connected). Args: (participant: dict)
+    - on_client_disconnected: Called when a participant disconnects (alias for
+      on_participant_disconnected). Args: (participant: dict)
     - on_audio_track_subscribed: Called when an audio track is subscribed.
       Args: (participant_id: str)
     - on_audio_track_unsubscribed: Called when an audio track is unsubscribed.
@@ -1076,6 +1096,8 @@ class LiveKitTransport(BaseTransport):
       Args: (participant_id: str)
     - on_video_track_unsubscribed: Called when a video track is unsubscribed.
       Args: (participant_id: str)
+    - on_app_message: Called when data is received from a participant. RTVI-compatible version of on_data_received.
+      Args: (message: Any, sender: str)
     - on_data_received: Called when data is received. The participant ID is None
       for packets sent by a server SDK, which LiveKit delivers unattributed.
       Args: (data: bytes, participant_id: str | None)
@@ -1142,10 +1164,13 @@ class LiveKitTransport(BaseTransport):
         self._register_event_handler("on_disconnected")
         self._register_event_handler("on_participant_connected")
         self._register_event_handler("on_participant_disconnected")
+        self._register_event_handler("on_client_connected")
+        self._register_event_handler("on_client_disconnected")
         self._register_event_handler("on_audio_track_subscribed")
         self._register_event_handler("on_audio_track_unsubscribed")
         self._register_event_handler("on_video_track_subscribed")
         self._register_event_handler("on_video_track_unsubscribed")
+        self._register_event_handler("on_app_message")
         self._register_event_handler("on_data_received")
         self._register_event_handler("on_first_participant_joined")
         self._register_event_handler("on_participant_left")
@@ -1255,6 +1280,8 @@ class LiveKitTransport(BaseTransport):
     async def _on_participant_connected(self, participant_id: str):
         """Handle participant connected events."""
         await self._call_event_handler("on_participant_connected", participant_id)
+        # Also call on_client_connected for compatibility with other transports
+        await self._call_event_handler("on_client_connected", participant_id)
         if self._input:
             await self._input.push_frame(ClientConnectedFrame())
 
@@ -1262,6 +1289,8 @@ class LiveKitTransport(BaseTransport):
         """Handle participant disconnected events."""
         await self._call_event_handler("on_participant_disconnected", participant_id)
         await self._call_event_handler("on_participant_left", participant_id, "disconnected")
+        # Also call on_client_disconnected for compatibility with other transports
+        await self._call_event_handler("on_client_disconnected", participant_id)
 
     async def _on_audio_track_subscribed(self, participant_id: str):
         """Handle audio track subscribed events."""
@@ -1295,8 +1324,17 @@ class LiveKitTransport(BaseTransport):
 
     async def _on_data_received(self, data: bytes, participant_id: str | None):
         """Handle data received events."""
-        if self._input:
-            await self._input.push_app_message(data.decode(), participant_id)
+        try:
+            message = json.loads(data.decode())
+        except (UnicodeDecodeError, json.JSONDecodeError) as e:
+            message = None
+
+        if message is not None:
+            if self._input:
+                await self._input.push_app_message(message, participant_id)
+            # RTVI compatibility:
+            await self._call_event_handler("on_app_message", message, participant_id)
+        # Backwards compatibility with older transports that used on_data_received for app messages
         await self._call_event_handler("on_data_received", data, participant_id)
 
     async def _on_dtmf_event(self, data: Any):

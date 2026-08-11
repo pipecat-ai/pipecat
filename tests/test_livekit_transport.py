@@ -11,6 +11,7 @@ but video tracks are subscribed. The fix ensures video stream processing
 only starts when there is a consumer for the frames.
 """
 
+import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -380,6 +381,70 @@ class TestLiveKitSipDtmfInput(unittest.IsolatedAsyncioTestCase):
 
         transport._call_event_handler.assert_awaited_once()
         transport._input.push_frame.assert_not_awaited()
+
+
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitAppMessageInput(unittest.IsolatedAsyncioTestCase):
+    """Inbound data messages (RTVI's wire channel) must reach the pipeline.
+
+    Regression test: ``_on_data_received`` used to hand the raw undecoded
+    string to ``push_app_message``, which wrapped it in an *output*-message
+    frame class and pushed it downstream only. ``RTVIProcessor`` only
+    recognizes ``InputTransportMessageFrame`` with an already-parsed dict, so
+    no client message (including ``client-ready``) ever reached it, and the
+    misrouted frame was instead echoed back out by the output transport.
+    """
+
+    def _make_transport(self):
+        from pipecat.transports.livekit.transport import LiveKitTransport
+
+        transport = LiveKitTransport(
+            url="wss://test.livekit.cloud",
+            token="test-token",
+            room_name="test-room",
+        )
+        input_transport = transport.input()
+        input_transport.push_frame = AsyncMock()
+        transport._call_event_handler = AsyncMock()
+        return transport, input_transport
+
+    async def test_data_received_broadcasts_parsed_input_message_frame(self):
+        """A JSON data message is parsed and broadcast as an InputTransportMessageFrame."""
+        from pipecat.frames.frames import InputTransportMessageFrame
+        from pipecat.processors.frame_processor import FrameDirection
+
+        transport, input_transport = self._make_transport()
+
+        rtvi_message = {"label": "rtvi-ai", "type": "client-ready", "id": "1", "data": {}}
+        await transport._on_data_received(json.dumps(rtvi_message).encode(), "participant-1")
+
+        self.assertEqual(input_transport.push_frame.await_count, 2)
+        directions = set()
+        for call in input_transport.push_frame.await_args_list:
+            frame = call.args[0]
+            direction = call.args[1] if len(call.args) > 1 else FrameDirection.DOWNSTREAM
+            self.assertIsInstance(frame, InputTransportMessageFrame)
+            self.assertEqual(frame.message, rtvi_message)
+            self.assertEqual(frame.participant_id, "participant-1")
+            directions.add(direction)
+        # Broadcast both ways so RTVIProcessor sees it regardless of where it
+        # sits relative to the transport in the pipeline.
+        self.assertEqual(directions, {FrameDirection.DOWNSTREAM, FrameDirection.UPSTREAM})
+
+        transport._call_event_handler.assert_any_call(
+            "on_app_message", rtvi_message, "participant-1"
+        )
+
+    async def test_non_json_data_is_not_pushed_but_reported_for_compat(self):
+        """Non-JSON data doesn't crash, isn't pushed, but still reports on_data_received."""
+        transport, input_transport = self._make_transport()
+
+        await transport._on_data_received(b"not json", "participant-1")
+
+        input_transport.push_frame.assert_not_awaited()
+        transport._call_event_handler.assert_awaited_once_with(
+            "on_data_received", b"not json", "participant-1"
+        )
 
 
 if __name__ == "__main__":
