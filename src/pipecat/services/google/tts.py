@@ -24,7 +24,7 @@ os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from loguru import logger
 from pydantic import BaseModel
@@ -892,7 +892,8 @@ class GoogleBaseTTSService(TTSService):
     _location: str | None
 
     # Subclasses build the client in __init__. Gemini can run against the GenAI API
-    # instead of GCP, so each backend's code path checks for the client it needs.
+    # instead of GCP, so each backend's code path casts to the client it holds.
+    # Not isinstance: tests patch these SDK classes, and a patched class isn't a type.
     _client: "texttospeech_v1.TextToSpeechAsyncClient | genai.Client"
 
     def _create_client(
@@ -990,8 +991,9 @@ class GoogleBaseTTSService(TTSService):
                 input=texttospeech_v1.StreamingSynthesisInput(**synthesis_input_params)
             )
 
-        assert isinstance(self._client, texttospeech_v1.TextToSpeechAsyncClient)
-        streaming_responses = await self._client.streaming_synthesize(request_generator())
+        # Streaming synthesis is the GCP path; the GenAI backend has its own.
+        client = cast("texttospeech_v1.TextToSpeechAsyncClient", self._client)
+        streaming_responses = await client.streaming_synthesize(request_generator())
         await self.start_tts_usage_metrics(text)
 
         audio_buffer = b""
@@ -1446,9 +1448,9 @@ class GeminiTTSService(GoogleBaseTTSService):
         # Only the GenAI client owns a closable async session; the GCP client
         # manages its own lifecycle.
         if self._use_genai:
-            assert isinstance(self._client, genai.Client)
+            client = cast("genai.Client", self._client)
             try:
-                await self._client.aio.aclose()
+                await client.aio.aclose()
             except Exception:
                 # Do nothing - we're shutting down anyway.
                 pass
@@ -1605,12 +1607,12 @@ class GeminiTTSService(GoogleBaseTTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            assert isinstance(self._client, genai.Client)
+            client = cast("genai.Client", self._client)
 
             model = assert_given(self._settings.model)
             assert model is not None
 
-            response = await self._client.aio.models.generate_content_stream(
+            response = await client.aio.models.generate_content_stream(
                 model=model,
                 contents=text,
                 config=config,
