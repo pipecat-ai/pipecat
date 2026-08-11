@@ -307,14 +307,25 @@ async def test_inworld_realtime_stt_streams_base64_audio():
     }
 
 
-def test_inworld_realtime_stt_requires_server_vad():
-    """Disabling server VAD should fail because Inworld owns realtime turns."""
+def test_inworld_realtime_stt_automatic_mode_requires_server_vad():
+    """Automatic mode should direct callers to manual mode instead of accepting VAD zero."""
     service = _realtime_service(
         settings=InworldRealtimeSTTService.Settings(vad_threshold=0),
     )
 
-    with pytest.raises(ValueError, match="greater than 0"):
+    with pytest.raises(ValueError, match="TurnDetectionMode.MANUAL"):
         service._transcribe_config()
+
+
+def test_inworld_realtime_stt_manual_mode_disables_server_vad():
+    """Manual mode should send the documented VAD-zero configuration."""
+    service = _realtime_service(
+        turn_detection_mode=InworldRealtimeSTTService.TurnDetectionMode.MANUAL,
+    )
+
+    config = service._transcribe_config()
+
+    assert config["inworldSttV1Config"] == {"vadThreshold": 0}
 
 
 def _instrument_realtime_service(monkeypatch, events, **kwargs):
@@ -388,6 +399,19 @@ def test_inworld_realtime_stt_recommends_external_turn_strategies():
     assert metadata.ttfs_p99_latency == 0.0
 
 
+def test_inworld_realtime_stt_manual_mode_uses_pipecat_turn_strategies():
+    """Manual endpointing should retain Pipecat strategies and expose TTFS timing."""
+    service = _realtime_service(
+        turn_detection_mode=InworldRealtimeSTTService.TurnDetectionMode.MANUAL,
+        ttfs_p99_latency=0.4,
+    )
+
+    metadata = service.service_metadata_frame()
+
+    assert metadata.user_turn_strategies is None
+    assert metadata.ttfs_p99_latency == 0.4
+
+
 @pytest.mark.asyncio
 async def test_inworld_realtime_stt_proposes_inworld_turn_boundaries(monkeypatch):
     """Inworld should place the final transcript before the turn-stop proposal."""
@@ -446,6 +470,47 @@ async def test_inworld_realtime_stt_ignores_local_vad_boundaries(monkeypatch):
         ("push", VADUserStartedSpeakingFrame),
         ("push", VADUserStoppedSpeakingFrame),
     ]
+
+
+@pytest.mark.asyncio
+async def test_inworld_realtime_stt_manual_mode_sends_end_turn(monkeypatch):
+    """A Pipecat VAD stop should request finalization without external proposals."""
+    events = []
+    service = _instrument_realtime_service(
+        monkeypatch,
+        events,
+        turn_detection_mode=InworldRealtimeSTTService.TurnDetectionMode.MANUAL,
+    )
+    websocket = _FakeWebsocket()
+    service._websocket = websocket
+
+    await service.process_frame(
+        VADUserStartedSpeakingFrame(),
+        FrameDirection.DOWNSTREAM,
+    )
+    await service.process_frame(
+        VADUserStoppedSpeakingFrame(),
+        FrameDirection.DOWNSTREAM,
+    )
+    await service._process_response({"result": {"speechStarted": {}}})
+    await service._process_response(
+        {
+            "result": {
+                "transcription": {
+                    "transcript": "One complete turn.",
+                    "isFinal": True,
+                }
+            }
+        }
+    )
+
+    assert json.loads(websocket.send.await_args.args[0]) == {"endTurn": {}}
+    assert [(event[0], event[1]) for event in events] == [
+        ("push", VADUserStartedSpeakingFrame),
+        ("push", VADUserStoppedSpeakingFrame),
+        ("push", TranscriptionFrame),
+    ]
+    assert service._user_turn_open is False
 
 
 @pytest.mark.asyncio

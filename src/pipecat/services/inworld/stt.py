@@ -12,6 +12,7 @@ import json
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
 
 import aiohttp
@@ -31,6 +32,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.inworld.frames import InworldVoiceProfile, InworldVoiceProfileFrame
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
@@ -41,6 +43,18 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 USER_AGENT = f"pipecat/{pipecat_version()}"
+
+
+class InworldTurnDetectionMode(StrEnum):
+    """Turn detection mode for Inworld realtime STT.
+
+    ``AUTOMATIC`` uses Inworld's voice activity and semantic end-of-turn
+    detection. ``MANUAL`` disables Inworld VAD so Pipecat can determine speech
+    boundaries and send an explicit ``endTurn`` request after local VAD stops.
+    """
+
+    AUTOMATIC = "automatic"
+    MANUAL = "manual"
 
 
 def language_to_inworld_stt_language(language: Language) -> str:
@@ -110,9 +124,9 @@ class InworldRealtimeSTTSettings(InworldSTTSettings):
     """Settings for :class:`InworldRealtimeSTTService`.
 
     Parameters:
-        vad_threshold: Inworld voice activity detection sensitivity. Must be
-            greater than ``0`` because the realtime service uses Inworld-owned
-            turn detection.
+        vad_threshold: Inworld voice activity detection sensitivity in automatic
+            turn detection mode. Manual mode always sends ``0`` to disable
+            Inworld VAD.
         min_end_of_turn_silence_when_confident: Minimum silence in milliseconds
             before ending a turn when Inworld is confident the turn is complete.
         end_of_turn_confidence_threshold: Confidence threshold for Inworld's
@@ -351,14 +365,17 @@ class InworldRealtimeSTTService(WebsocketSTTService):
     """Speech-to-text service using Inworld's bidirectional WebSocket API.
 
     The service streams raw LINEAR16 audio and emits interim and final
-    transcription frames. Inworld speech events and final transcriptions propose
-    server-detected turn boundaries through :class:`ExternalUserTurnStrategies`.
+    transcription frames. Automatic turn detection uses Inworld speech events
+    and final transcriptions to propose boundaries through
+    :class:`ExternalUserTurnStrategies`. Manual turn detection disables Inworld
+    VAD and forwards Pipecat VAD stops as explicit ``endTurn`` requests.
 
     Voice Profile analysis emits an :class:`InworldVoiceProfileFrame` whenever
     Inworld includes profile data in a streaming transcription result.
     """
 
     Settings = InworldRealtimeSTTSettings
+    TurnDetectionMode = InworldTurnDetectionMode
     _settings: Settings
 
     def __init__(
@@ -367,6 +384,7 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         api_key: str,
         base_url: str = "wss://api.inworld.ai",
         sample_rate: int | None = None,
+        turn_detection_mode: InworldTurnDetectionMode = InworldTurnDetectionMode.AUTOMATIC,
         should_interrupt: bool = True,
         settings: Settings | None = None,
         ttfs_p99_latency: float | None = None,
@@ -378,15 +396,20 @@ class InworldRealtimeSTTService(WebsocketSTTService):
             api_key: Inworld API key containing Base64 credentials.
             base_url: Base URL for the Inworld WebSocket API.
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
+            turn_detection_mode: Whether Inworld or Pipecat determines speech
+                boundaries. Manual mode requires Pipecat VAD events and sends
+                ``endTurn`` when local speech stops.
             should_interrupt: Whether Inworld-proposed turn starts should interrupt
                 the current bot response. Passed to the external turn strategies
-                recommended by this service.
+                recommended in automatic mode.
             settings: Runtime-updatable model, language, recognition, Voice Profile,
                 VAD, and end-of-turn settings. Updates reconnect the WebSocket.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to :class:`WebsocketSTTService`.
         """
+        self._turn_detection_mode = InworldTurnDetectionMode(turn_detection_mode)
+
         default_settings = self.Settings(
             model="inworld/inworld-stt-1",
             language=None,
@@ -426,9 +449,10 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         """Check whether Pipecat supplies a distinct speech-end boundary.
 
         Returns:
-            False because Inworld defines turn boundaries directly.
+            True in manual mode, where local VAD supplies the speech-end
+            boundary; False in automatic mode, where Inworld owns it.
         """
-        return False
+        return self._turn_detection_mode is InworldTurnDetectionMode.MANUAL
 
     def can_generate_metrics(self) -> bool:
         """Check whether the service can generate metrics.
@@ -450,15 +474,17 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         return language_to_inworld_stt_language(language)
 
     def service_metadata_frame(self) -> STTMetadataFrame:
-        """Recommend external turn strategies for Inworld-owned turns.
+        """Recommend turn strategies for the configured endpointing mode.
 
         Returns:
-            STT metadata with external turn strategies.
+            STT metadata with external strategies in automatic mode and the
+            standard Pipecat strategy selection in manual mode.
         """
         frame = super().service_metadata_frame()
-        frame.user_turn_strategies = ExternalUserTurnStrategies(
-            enable_interruptions=self._should_interrupt,
-        )
+        if self._turn_detection_mode is InworldTurnDetectionMode.AUTOMATIC:
+            frame.user_turn_strategies = ExternalUserTurnStrategies(
+                enable_interruptions=self._should_interrupt,
+            )
         return frame
 
     async def start(self, frame: StartFrame):
@@ -495,6 +521,35 @@ class InworldRealtimeSTTService(WebsocketSTTService):
             return
 
         yield None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames and forward manual speech ends to Inworld.
+
+        Args:
+            frame: Frame to process.
+            direction: Direction of frame processing.
+        """
+        await super().process_frame(frame, direction)
+
+        if (
+            isinstance(frame, VADUserStoppedSpeakingFrame)
+            and self._turn_detection_mode is InworldTurnDetectionMode.MANUAL
+        ):
+            await self._send_end_turn()
+
+    async def _send_end_turn(self):
+        """Ask Inworld to finalize the current manually delimited turn."""
+        await self._connected_event.wait()
+
+        if not self._websocket or self._websocket.state is State.CLOSED:
+            await self._connect()
+
+        if self._websocket and self._websocket.state is State.OPEN:
+            await self.send_with_retry(json.dumps({"endTurn": {}}), self._report_error)
+        else:
+            await self.push_error(
+                error_msg="Unable to end Inworld realtime STT turn: WebSocket is not connected"
+            )
 
     async def _connect(self):
         """Establish the connection and start the receive task."""
@@ -535,18 +590,18 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         return changed
 
     async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
-        """Ignore local VAD timing for an Inworld-owned turn boundary.
+        """Handle local VAD timing according to the turn detection mode.
 
-        Local VAD remains available to the transport and downstream processors,
-        but it must not start speech-end latency measurement for this service.
-        Inworld's final transcription defines both the turn boundary and the
-        transcript arrival time, so subtracting a separate local VAD delay can
-        produce invalid negative latency values.
+        Automatic mode ignores local speech-end latency because Inworld owns the
+        boundary. Manual mode uses the standard STT timing behavior.
 
         Args:
-            frame: The local VAD stop frame to ignore for endpointing metrics.
+            frame: The local VAD stop frame.
         """
-        self._user_speaking = False
+        if self._turn_detection_mode is InworldTurnDetectionMode.AUTOMATIC:
+            self._user_speaking = False
+        else:
+            await super()._handle_vad_user_stopped_speaking(frame)
 
     def _transcribe_config(self) -> dict[str, Any]:
         """Build the initial WebSocket transcription configuration.
@@ -559,10 +614,16 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         """
         config = _build_transcribe_config(self._settings, self.sample_rate)
 
+        automatic = self._turn_detection_mode is InworldTurnDetectionMode.AUTOMATIC
+
         end_of_turn_threshold = assert_given(self._settings.end_of_turn_confidence_threshold)
         if end_of_turn_threshold is not None:
             if not 0 <= end_of_turn_threshold <= 1:
                 raise ValueError("Inworld end-of-turn confidence threshold must be between 0 and 1")
+            if not automatic:
+                raise ValueError(
+                    "Inworld end-of-turn confidence threshold is only valid in automatic mode"
+                )
             config["endOfTurnConfidenceThreshold"] = end_of_turn_threshold
 
         inactivity_timeout = assert_given(self._settings.inactivity_timeout_seconds)
@@ -573,15 +634,27 @@ class InworldRealtimeSTTService(WebsocketSTTService):
 
         inworld_config: dict[str, Any] = {}
         vad_threshold = assert_given(self._settings.vad_threshold)
-        if vad_threshold is not None:
-            if not 0 < vad_threshold <= 1:
-                raise ValueError("Inworld VAD threshold must be greater than 0 and at most 1")
-            inworld_config["vadThreshold"] = vad_threshold
+        if automatic:
+            if vad_threshold is not None:
+                if not 0 < vad_threshold <= 1:
+                    raise ValueError(
+                        "Inworld VAD threshold must be greater than 0 and at most 1 in automatic "
+                        "mode; use turn_detection_mode=TurnDetectionMode.MANUAL to disable it"
+                    )
+                inworld_config["vadThreshold"] = vad_threshold
+        else:
+            if vad_threshold not in (None, 0):
+                raise ValueError("Inworld VAD threshold must be 0 or unset in manual mode")
+            inworld_config["vadThreshold"] = 0
 
         min_silence = assert_given(self._settings.min_end_of_turn_silence_when_confident)
         if min_silence is not None:
             if min_silence < 0:
                 raise ValueError("Inworld minimum end-of-turn silence cannot be negative")
+            if not automatic:
+                raise ValueError(
+                    "Inworld minimum end-of-turn silence is only valid in automatic mode"
+                )
             inworld_config["minEndOfTurnSilenceWhenConfident"] = min_silence
 
         if inworld_config:
@@ -692,6 +765,8 @@ class InworldRealtimeSTTService(WebsocketSTTService):
 
     async def _user_turn_started(self):
         """Propose an Inworld-owned turn start once."""
+        if self._turn_detection_mode is not InworldTurnDetectionMode.AUTOMATIC:
+            return
         if self._user_turn_open:
             return
         self._user_turn_open = True
@@ -699,6 +774,8 @@ class InworldRealtimeSTTService(WebsocketSTTService):
 
     async def _user_turn_stopped(self):
         """Propose an Inworld-owned turn stop once."""
+        if self._turn_detection_mode is not InworldTurnDetectionMode.AUTOMATIC:
+            return
         if not self._user_turn_open:
             return
         self._user_turn_open = False

@@ -6,6 +6,10 @@
 
 """Run a voice agent using Inworld realtime STT and WebSocket TTS.
 
+The example uses Pipecat's Silero VAD to delimit turns and sends Inworld's
+manual ``endTurn`` command. This avoids server endpointing reacting to bot audio
+or splitting a continuing utterance during an interactive voice test.
+
 Set ``INWORLD_STT_LANGUAGE`` to an ISO 639 code such as ``en``, ``ru``, or
 ``pt`` to disable automatic language detection during a single-language test.
 """
@@ -67,12 +71,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = InworldRealtimeSTTService(
         api_key=inworld_api_key,
+        turn_detection_mode=InworldRealtimeSTTService.TurnDetectionMode.MANUAL,
         settings=InworldRealtimeSTTService.Settings(
             language=os.getenv("INWORLD_STT_LANGUAGE") or None,
             enable_voice_profile=True,
             voice_profile_top_n=3,
-            end_of_turn_confidence_threshold=0.7,
-            min_end_of_turn_silence_when_confident=800,
         ),
     )
 
