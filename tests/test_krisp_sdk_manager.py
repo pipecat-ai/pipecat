@@ -7,6 +7,7 @@
 """Unit tests for Krisp SDK Manager (singleton with reference counting)."""
 
 import sys
+import unittest
 from unittest.mock import MagicMock, patch
 
 import pytest

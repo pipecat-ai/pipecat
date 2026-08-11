@@ -10,7 +10,7 @@ import asyncio
 import signal
 import wave
 
-from daily import *
+from daily import CallClient, Daily
 
 SAMPLE_RATE = 16000
 NUM_CHANNELS = 1

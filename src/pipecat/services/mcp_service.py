@@ -20,7 +20,7 @@ from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.utils.base_object import BaseObject
 
 try:
-    from mcp import ClientSession, StdioServerParameters
+    from mcp import StdioServerParameters
     from mcp.client.session import ClientSession
     from mcp.client.session_group import SseServerParameters, StreamableHttpParameters
     from mcp.client.sse import sse_client

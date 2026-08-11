@@ -1136,7 +1136,7 @@ class GoogleSTTService(STTService):
                                 result=result,
                             )
                         )
-        except Aborted as e:
+        except Aborted:
             # Handle stream abort due to inactivity (409 error).
             # This occurs when no audio is sent to the stream for 10+ seconds,
             # which can happen when InputAudioRawFrames are blocked.

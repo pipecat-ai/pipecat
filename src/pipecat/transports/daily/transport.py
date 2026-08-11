@@ -1451,8 +1451,6 @@ class DailyTransportClient(EventHandler):
         params: DailyCustomVideoTrackParams | None = None,
     ) -> DailyVideoTrack:
         """Create a video track for the given parameters."""
-        future = self._get_event_loop().create_future()
-
         width = params.width if params else self._params.video_out_width
         height = params.height if params else self._params.video_out_height
         color_format = params.color_format if params else self._params.video_out_color_format

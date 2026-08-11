@@ -442,7 +442,6 @@ def decode_event(message):
     while headers:
         name_len = headers[0]
         name = headers[1 : 1 + name_len].decode("utf-8")
-        value_type = headers[1 + name_len]
         value_len = struct.unpack(">H", headers[2 + name_len : 4 + name_len])[0]
         value = headers[4 + name_len : 4 + name_len + value_len].decode("utf-8")
         headers_dict[name] = value
