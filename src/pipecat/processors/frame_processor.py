@@ -950,6 +950,7 @@ class FrameProcessor(BaseObject):
                 # the queue; any uninterruptible ones will be kept and processed
                 # after the current frame finishes.
                 self.__reset_process_queue()
+                await self.resume_processing_frames()
             else:
                 # Cancel and re-create the process task. Previously this branch
                 # was skipped when the queue contained an uninterruptible frame,
