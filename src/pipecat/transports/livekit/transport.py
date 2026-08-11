@@ -178,6 +178,7 @@ class LiveKitTransportClient:
         # leaking both on every track republish.
         self._audio_streams: dict[str, tuple[rtc.AudioStream, asyncio.Task]] = {}
         self._video_tracks = {}
+        self._participantless_data_warned = False
         self._video_queue = asyncio.Queue()
         # Symmetric registry for video streams.
         self._video_streams: dict[str, tuple[rtc.VideoStream, asyncio.Task]] = {}
@@ -633,8 +634,15 @@ class LiveKitTransportClient:
         """Handle data received events."""
         if not data.participant:
             # LiveKit omits the participant on packets sent by a server SDK. The
-            # callback is keyed by participant, so there's nowhere to deliver these.
-            logger.warning("Ignoring LiveKit data packet sent without a participant")
+            # callback is keyed by participant, so there's nowhere to deliver
+            # these. Warn once: an app using server-side packets sends them at
+            # whatever rate it likes.
+            if not self._participantless_data_warned:
+                logger.warning(
+                    f"{self} ignoring data packet(s) sent without a participant, "
+                    "which the data-received callback has no way to attribute"
+                )
+                self._participantless_data_warned = True
             return
 
         await self._callbacks.on_data_received(data.data, data.participant.sid)
