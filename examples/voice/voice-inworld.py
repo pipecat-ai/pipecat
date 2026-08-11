@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Run a voice agent using Inworld realtime STT and WebSocket TTS.
+
+Set ``INWORLD_STT_LANGUAGE`` to an ISO 639 code such as ``en``, ``ru``, or
+``pt`` to disable automatic language detection during a single-language test.
+"""
+
 import os
 
 from dotenv import load_dotenv
@@ -11,7 +17,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.frames.frames import LLMRunFrame, TTSTextFrame
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.observers.loggers.debug_log_observer import DebugLogObserver, FrameEndpoint
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -26,7 +32,6 @@ from pipecat.services.inworld.frames import InworldVoiceProfileFrame
 from pipecat.services.inworld.stt import InworldRealtimeSTTService
 from pipecat.services.inworld.tts import InworldTTSService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -63,9 +68,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = InworldRealtimeSTTService(
         api_key=inworld_api_key,
         settings=InworldRealtimeSTTService.Settings(
-            prompts=["Pipecat", "Inworld"],
+            language=os.getenv("INWORLD_STT_LANGUAGE") or None,
             enable_voice_profile=True,
             voice_profile_top_n=3,
+            end_of_turn_confidence_threshold=0.7,
+            min_end_of_turn_silence_when_confident=800,
         ),
     )
 
@@ -111,8 +118,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         observers=[
             DebugLogObserver(
                 frame_types={
-                    InworldVoiceProfileFrame: None,
-                    TTSTextFrame: (BaseOutputTransport, FrameEndpoint.SOURCE),
+                    InworldVoiceProfileFrame: (
+                        InworldRealtimeSTTService,
+                        FrameEndpoint.SOURCE,
+                    ),
                 }
             ),
         ],

@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.services.inworld.frames import InworldVoiceProfile, InworldVoiceProfileFrame
 from pipecat.services.settings import STTSettings
@@ -532,6 +533,20 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         if changed:
             await self._request_reconnect()
         return changed
+
+    async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
+        """Ignore local VAD timing for an Inworld-owned turn boundary.
+
+        Local VAD remains available to the transport and downstream processors,
+        but it must not start speech-end latency measurement for this service.
+        Inworld's final transcription defines both the turn boundary and the
+        transcript arrival time, so subtracting a separate local VAD delay can
+        produce invalid negative latency values.
+
+        Args:
+            frame: The local VAD stop frame to ignore for endpointing metrics.
+        """
+        self._user_speaking = False
 
     def _transcribe_config(self) -> dict[str, Any]:
         """Build the initial WebSocket transcription configuration.

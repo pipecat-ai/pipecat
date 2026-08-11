@@ -12,7 +12,9 @@ Add ``INWORLD_API_KEY`` to the repository's ``.env`` file and run:
 
 Open the displayed URL, allow microphone access, and speak. The example prints
 interim and final transcriptions along with Inworld Voice Profile results.
-Inworld manages voice activity and semantic end-of-turn detection.
+Inworld manages voice activity and semantic end-of-turn detection. Set the
+optional ``INWORLD_STT_LANGUAGE`` variable (for example, ``ru`` or ``pt``) to
+disable automatic language detection for a single-language test.
 """
 
 import os
@@ -74,9 +76,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = InworldRealtimeSTTService(
         api_key=os.environ["INWORLD_API_KEY"],
         settings=InworldRealtimeSTTService.Settings(
-            prompts=["Pipecat", "Inworld"],
+            language=os.getenv("INWORLD_STT_LANGUAGE") or None,
             enable_voice_profile=True,
             voice_profile_top_n=3,
+            end_of_turn_confidence_threshold=0.7,
+            min_end_of_turn_silence_when_confident=800,
         ),
     )
 

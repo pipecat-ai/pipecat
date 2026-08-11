@@ -428,17 +428,20 @@ async def test_inworld_realtime_stt_ignores_local_vad_boundaries(monkeypatch):
     )
     websocket = _FakeWebsocket()
     service._websocket = websocket
+    start_ttfb_metrics = AsyncMock()
+    monkeypatch.setattr(service, "start_ttfb_metrics", start_ttfb_metrics)
 
     await service.process_frame(
         VADUserStartedSpeakingFrame(),
         FrameDirection.DOWNSTREAM,
     )
     await service.process_frame(
-        VADUserStoppedSpeakingFrame(),
+        VADUserStoppedSpeakingFrame(stop_secs=0.5),
         FrameDirection.DOWNSTREAM,
     )
 
     websocket.send.assert_not_awaited()
+    start_ttfb_metrics.assert_not_awaited()
     assert [(event[0], event[1]) for event in events] == [
         ("push", VADUserStartedSpeakingFrame),
         ("push", VADUserStoppedSpeakingFrame),
