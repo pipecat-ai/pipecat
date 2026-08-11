@@ -1007,6 +1007,347 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         user_messages = [m for m in context.get_messages() if m.get("role") == "user"]
         self.assertEqual([m["content"] for m in user_messages], ["I'm thinking", "about pizza"])
 
+    async def test_llm_run_while_turn_in_flight_does_not_double_generate(self):
+        """An LLMRunFrame arriving mid-turn (e.g. a flows node transition) must
+        not race the turn's own finalization into a second generation.
+        """
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+                    ],
+                ),
+            ),
+        )
+
+        pipeline = Pipeline([user_aggregator])
+
+        frames_to_send = [
+            # User turn opens and produces a transcript.
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+            SleepFrame(),
+            # While the turn is still open, something (flows' _set_node)
+            # queues an LLMRunFrame.
+            LLMRunFrame(),
+            SleepFrame(),
+            # The user's turn now finalizes on its own.
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
+        ]
+        received_down, _ = await run_test(pipeline, frames_to_send=frames_to_send)
+
+        context_frames = [f for f in received_down if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(context_frames), 1)
+
+        user_messages = [m for m in context.get_messages() if m.get("role") == "user"]
+        self.assertEqual([m["content"] for m in user_messages], ["Hello!"])
+
+    async def test_llm_run_with_no_active_turn_pushes_immediately(self):
+        """An LLMRunFrame arriving after a turn has already finalized behaves
+        exactly as it does with no turn strategies at all: an immediate push.
+        """
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+                    ],
+                ),
+            ),
+        )
+
+        pipeline = Pipeline([user_aggregator])
+
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+            SleepFrame(),
+            VADUserStoppedSpeakingFrame(),
+            # Let the turn fully finalize before the run arrives.
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
+            LLMRunFrame(),
+        ]
+        received_down, _ = await run_test(pipeline, frames_to_send=frames_to_send)
+
+        context_frames = [f for f in received_down if isinstance(f, LLMContextFrame)]
+        # One generation from the turn finalizing, one from the LLMRunFrame
+        # that arrived afterward -- both legitimate, independent runs.
+        self.assertEqual(len(context_frames), 2)
+
+    async def test_llm_run_while_turn_in_flight_resolved_by_stop_timeout_watchdog(self):
+        """A parked LLMRunFrame still fires exactly once when the turn is
+        finalized by the stop-timeout watchdog rather than a stop strategy.
+        """
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT),
+        )
+
+        pipeline = Pipeline([user_aggregator])
+
+        frames_to_send = [
+            # Default strategies need a transcript to finalize on their own,
+            # so with none, only the stop-timeout watchdog will end this turn.
+            VADUserStartedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(),
+            LLMRunFrame(),
+            SleepFrame(sleep=USER_TURN_STOP_TIMEOUT + 0.1),
+        ]
+        received_down, _ = await run_test(pipeline, frames_to_send=frames_to_send)
+
+        context_frames = [f for f in received_down if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(context_frames), 1)
+
+    async def test_llm_run_while_turn_in_flight_discarded_on_session_end(self):
+        """A parked LLMRunFrame is dropped, not fired, if the session ends
+        before the turn it was waiting on ever finalizes.
+        """
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(context)
+
+        pipeline = Pipeline([user_aggregator])
+
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            # The turn is open with no transcript when the run is queued.
+            LLMRunFrame(),
+            SleepFrame(),
+            # run_test sends an EndFrame next, ending the session while the
+            # turn -- and the parked run -- are still open.
+        ]
+        received_down, _ = await run_test(pipeline, frames_to_send=frames_to_send)
+
+        context_frames = [f for f in received_down if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(context_frames), 0)
+
+    async def test_llm_run_while_turn_in_flight_does_not_double_generate_realtime_mode(self):
+        """Realtime mode's turn-stop path never calls push_aggregation itself
+        (the local transcript is normally flushed later, on the assistant
+        response starting), so a parked run has to be resolved directly at
+        turn-stop rather than riding along with it.
+
+        A transcript still sitting in the aggregation buffer at session end
+        is flushed independently -- an unrelated, pre-existing mechanism
+        that also produces an LLMContextFrame. That's not a second firing of
+        the parked run: it must resolve exactly once, at turn-stop, before
+        the trailing transcript is committed.
+        """
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+                    ],
+                ),
+            ),
+            _realtime_service_mode=True,
+        )
+
+        pipeline = Pipeline([user_aggregator])
+
+        # LLMContextFrame wraps a reference to the live context, not a
+        # snapshot, so inspecting frames after the fact would only ever show
+        # the final state. Snapshot the messages at each push instead.
+        push_snapshots = []
+        original_push_context_frame = user_aggregator.push_context_frame
+
+        async def _tracking_push_context_frame(*args, **kwargs):
+            push_snapshots.append(list(context.get_messages()))
+            await original_push_context_frame(*args, **kwargs)
+
+        user_aggregator.push_context_frame = _tracking_push_context_frame
+
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+            SleepFrame(),
+            LLMRunFrame(),
+            SleepFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
+        ]
+        await run_test(pipeline, frames_to_send=frames_to_send)
+
+        self.assertEqual(len(push_snapshots), 2)
+
+        def has_user_message(messages):
+            return any(m.get("content") == "Hello!" for m in messages)
+
+        # The parked run resolves at turn-stop, before the trailing
+        # transcript is committed to context.
+        self.assertFalse(has_user_message(push_snapshots[0]))
+        # The session-end flush is what commits the trailing transcript --
+        # a second, independent push, not a repeat of the first.
+        self.assertTrue(has_user_message(push_snapshots[1]))
+
+    async def test_llm_run_while_turn_in_flight_realtime_mode_watchdog_no_transcript(self):
+        """A parked run still fires exactly once in realtime mode when the
+        turn ends via the stop-timeout watchdog with no local transcript --
+        the case where nothing ever calls push_aggregation for this turn.
+
+        Uses an explicit stop strategy with a speech timeout longer than the
+        watchdog, so the watchdog is guaranteed to be what finalizes the
+        turn (rather than the default strategy, which runs real turn-analysis
+        inference and isn't deterministic on timing).
+        """
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=10.0)],
+                ),
+                user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+            ),
+            _realtime_service_mode=True,
+        )
+
+        pipeline = Pipeline([user_aggregator])
+
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(),
+            LLMRunFrame(),
+            SleepFrame(sleep=USER_TURN_STOP_TIMEOUT + 0.1),
+        ]
+        received_down, _ = await run_test(pipeline, frames_to_send=frames_to_send)
+
+        context_frames = [f for f in received_down if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(context_frames), 1)
+
+    async def test_llm_messages_append_run_while_turn_in_flight_does_not_double_generate(self):
+        """LLMMessagesAppendFrame(run_llm=True) carries the same "run now"
+        semantics as LLMRunFrame, so it must defer the run the same way --
+        but the message append itself still happens immediately.
+        """
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+                    ],
+                ),
+            ),
+        )
+
+        pipeline = Pipeline([user_aggregator])
+
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+            SleepFrame(),
+            LLMMessagesAppendFrame(
+                messages=[{"role": "user", "content": "Appended!"}],
+                run_llm=True,
+            ),
+            SleepFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
+        ]
+        received_down, _ = await run_test(pipeline, frames_to_send=frames_to_send)
+
+        context_frames = [f for f in received_down if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(context_frames), 1)
+
+        # The append landed immediately -- ahead of the turn's own message,
+        # which is written only once the turn finalizes.
+        contents = [m["content"] for m in context.get_messages()]
+        self.assertEqual(contents, ["Appended!", "Hello!"])
+
+    async def test_llm_messages_update_run_while_turn_in_flight_does_not_double_generate(self):
+        """LLMMessagesUpdateFrame(run_llm=True) mid-turn defers the run but
+        still replaces the context immediately.
+        """
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+                    ],
+                ),
+            ),
+        )
+
+        pipeline = Pipeline([user_aggregator])
+
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+            SleepFrame(),
+            LLMMessagesUpdateFrame(
+                messages=[{"role": "system", "content": "Updated!"}],
+                run_llm=True,
+            ),
+            SleepFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
+        ]
+        received_down, _ = await run_test(pipeline, frames_to_send=frames_to_send)
+
+        context_frames = [f for f in received_down if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(context_frames), 1)
+
+        # The update landed immediately -- ahead of the turn's own message,
+        # which is appended only once the turn finalizes.
+        contents = [(m["role"], m["content"]) for m in context.get_messages()]
+        self.assertEqual(contents, [("system", "Updated!"), ("user", "Hello!")])
+
+    async def test_llm_messages_transform_run_while_turn_in_flight_does_not_double_generate(self):
+        """LLMMessagesTransformFrame(run_llm=True) mid-turn defers the run
+        but still transforms the context immediately.
+        """
+        context = LLMContext()
+        context.set_messages([{"role": "system", "content": "hello"}])
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+                    ],
+                ),
+            ),
+        )
+
+        pipeline = Pipeline([user_aggregator])
+
+        def uppercase_content(messages):
+            return [{"role": m["role"], "content": m["content"].upper()} for m in messages]
+
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+            SleepFrame(),
+            LLMMessagesTransformFrame(transform=uppercase_content, run_llm=True),
+            SleepFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
+        ]
+        received_down, _ = await run_test(pipeline, frames_to_send=frames_to_send)
+
+        context_frames = [f for f in received_down if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(context_frames), 1)
+
+        # The transform landed immediately -- ahead of the turn's own
+        # message, which is appended only once the turn finalizes.
+        contents = [(m["role"], m["content"]) for m in context.get_messages()]
+        self.assertEqual(contents, [("system", "HELLO"), ("user", "Hello!")])
+
 
 class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
     async def test_empty(self):

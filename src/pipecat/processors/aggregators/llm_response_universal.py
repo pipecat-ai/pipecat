@@ -716,6 +716,15 @@ class LLMUserAggregator(LLMContextAggregator):
         # surfaces the full turn transcript even when several
         # inferences fire before finalization.
         self._full_user_turn_aggregation: str | None = None
+        # Set by `_maybe_run_llm` when a "run the LLM now" frame (LLMRunFrame,
+        # or a messages append/update/transform frame with run_llm=True)
+        # arrives while a user turn is active (e.g. a flows node transition
+        # mid-turn). Pushing immediately would race the turn's own
+        # finalization against the same context, generating twice.
+        # `push_aggregation` clears this the next time the turn itself runs
+        # inference; if the turn finalizes without ever doing so,
+        # `_resolve_pending_llm_run` fires it then.
+        self._pending_llm_run = False
 
         self._user_turn_controller = UserTurnController(
             user_turn_strategies=user_turn_strategies,
@@ -849,6 +858,9 @@ class LLMUserAggregator(LLMContextAggregator):
         await self.reset()
         self._context.add_message({"role": self.role, "content": aggregation})
         await self.push_context_frame()
+        # This push already ran inference against the current context, so it
+        # satisfies any run parked mid-turn by `_maybe_run_llm`.
+        self._pending_llm_run = False
 
         message = UserTurnMessageAddedMessage(
             content=aggregation, timestamp=self._user_turn_start_timestamp
@@ -1111,6 +1123,9 @@ class LLMUserAggregator(LLMContextAggregator):
         self._realtime_handoff_flush_task = None
 
     async def _cleanup(self):
+        # Drop rather than fire: the pipeline is tearing down, so there's
+        # nothing left to run a parked LLMRunFrame against.
+        self._pending_llm_run = False
         await self._cancel_realtime_handoff_flush_task()
         if self._vad_controller:
             await self._vad_controller.cleanup()
@@ -1166,21 +1181,35 @@ class LLMUserAggregator(LLMContextAggregator):
         return should_mute_frame
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
-        await self.push_context_frame()
+        await self._maybe_run_llm()
 
     async def _handle_llm_messages_append(self, frame: LLMMessagesAppendFrame):
         self.add_messages(frame.messages)
         if frame.run_llm:
-            await self.push_context_frame()
+            await self._maybe_run_llm()
 
     async def _handle_llm_messages_update(self, frame: LLMMessagesUpdateFrame):
         self.set_messages(frame.messages)
         if frame.run_llm:
-            await self.push_context_frame()
+            await self._maybe_run_llm()
 
     async def _handle_llm_messages_transform(self, frame: LLMMessagesTransformFrame):
         self.transform_messages(frame.transform)
         if frame.run_llm:
+            await self._maybe_run_llm()
+
+    async def _maybe_run_llm(self):
+        """Push a context frame now, or park it if a user turn is in flight.
+
+        Shared by every "run the LLM now" frame handler (`LLMRunFrame` and
+        the ``run_llm=True`` variants of the messages append/update/transform
+        frames). Pushing immediately while a turn is open would race the
+        turn's own finalization against the same context, generating twice,
+        so the run is parked instead -- see `_pending_llm_run`.
+        """
+        if self._user_turn_start_timestamp:
+            self._pending_llm_run = True
+        else:
             await self.push_context_frame()
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
@@ -1321,10 +1350,15 @@ class LLMUserAggregator(LLMContextAggregator):
             # effective end-of-turn signal, and the user message is
             # written then. Content is None here; subscribers wanting
             # the finalized text use on_user_turn_message_added instead.
+            # A parked LLMRunFrame is unaffected by that deferral: nothing
+            # else in realtime mode runs inference off turn-stop, so resolve
+            # it here rather than leaving it stranded until a handoff flush
+            # that may never come (e.g. no local transcript ever arrives).
             message = UserTurnStoppedMessage(
                 content=None, timestamp=self._user_turn_start_timestamp
             )
             await self._call_event_handler("on_user_turn_stopped", strategy, message)
+            await self._resolve_pending_llm_run()
             return
 
         await self._maybe_emit_user_turn_stopped(strategy)
@@ -1374,6 +1408,23 @@ class LLMUserAggregator(LLMContextAggregator):
             )
             await self._call_event_handler("on_user_turn_stopped", strategy, message)
             self._user_turn_start_timestamp = ""
+
+        await self._resolve_pending_llm_run(on_session_end=on_session_end)
+
+    async def _resolve_pending_llm_run(self, *, on_session_end: bool = False):
+        """Fire or drop a run parked mid-turn by `_maybe_run_llm`.
+
+        Called wherever a user turn finalizes. `push_aggregation` clears
+        `_pending_llm_run` whenever the turn itself already ran inference,
+        so reaching here with it still set means nothing did -- fire it now.
+        On session end there's nothing left to run it for, so drop it
+        instead.
+        """
+        if not self._pending_llm_run:
+            return
+        self._pending_llm_run = False
+        if not on_session_end:
+            await self.push_context_frame()
 
 
 class LLMAssistantAggregator(LLMContextAggregator):
