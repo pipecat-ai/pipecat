@@ -250,7 +250,6 @@ async def test_inworld_realtime_stt_connects_with_documented_config(monkeypatch)
 
     service = _realtime_service(
         base_url="api.inworld.ai",
-        vad_force_turn_endpoint=False,
         settings=InworldRealtimeSTTService.Settings(
             language=Language.EN_US,
             prompts=["Pipecat"],
@@ -308,22 +307,14 @@ async def test_inworld_realtime_stt_streams_base64_audio():
     }
 
 
-@pytest.mark.asyncio
-async def test_inworld_realtime_stt_sends_end_turn_from_pipecat_vad(monkeypatch):
-    """Pipecat turn mode should map VAD stops to Inworld endTurn messages."""
-    service = _realtime_service()
-    websocket = _FakeWebsocket()
-    service._websocket = websocket
-    monkeypatch.setattr(service, "push_frame", AsyncMock())
-
-    assert service._transcribe_config()["inworldSttV1Config"]["vadThreshold"] == 0
-
-    await service.process_frame(
-        VADUserStoppedSpeakingFrame(),
-        FrameDirection.DOWNSTREAM,
+def test_inworld_realtime_stt_requires_server_vad():
+    """Disabling server VAD should fail because Inworld owns realtime turns."""
+    service = _realtime_service(
+        settings=InworldRealtimeSTTService.Settings(vad_threshold=0),
     )
 
-    assert json.loads(websocket.send.await_args.args[0]) == {"endTurn": {}}
+    with pytest.raises(ValueError, match="greater than 0"):
+        service._transcribe_config()
 
 
 def _instrument_realtime_service(monkeypatch, events, **kwargs):
@@ -384,10 +375,9 @@ async def test_inworld_realtime_stt_emits_interim_final_and_voice_profile(monkey
     service._handle_transcription.assert_awaited_once_with("Hello from Inworld.", True, None)
 
 
-def test_inworld_realtime_stt_recommends_turn_strategies_in_inworld_mode():
+def test_inworld_realtime_stt_recommends_external_turn_strategies():
     """Inworld-owned endpointing should select the external turn strategies."""
     service = _realtime_service(
-        vad_force_turn_endpoint=False,
         should_interrupt=False,
     )
 
@@ -400,12 +390,11 @@ def test_inworld_realtime_stt_recommends_turn_strategies_in_inworld_mode():
 
 @pytest.mark.asyncio
 async def test_inworld_realtime_stt_proposes_inworld_turn_boundaries(monkeypatch):
-    """Inworld turn mode should place the final transcript before the turn stop."""
+    """Inworld should place the final transcript before the turn-stop proposal."""
     events = []
     service = _instrument_realtime_service(
         monkeypatch,
         events,
-        vad_force_turn_endpoint=False,
     )
 
     await service._process_response({"result": {"speechStarted": {}}})
@@ -430,13 +419,12 @@ async def test_inworld_realtime_stt_proposes_inworld_turn_boundaries(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_inworld_realtime_stt_server_mode_ignores_vad_stop(monkeypatch):
-    """Local VAD pauses should not end a turn owned by Inworld."""
+async def test_inworld_realtime_stt_ignores_local_vad_boundaries(monkeypatch):
+    """Local VAD frames should not open or end a turn owned by Inworld."""
     events = []
     service = _instrument_realtime_service(
         monkeypatch,
         events,
-        vad_force_turn_endpoint=False,
     )
     websocket = _FakeWebsocket()
     service._websocket = websocket
@@ -453,7 +441,6 @@ async def test_inworld_realtime_stt_server_mode_ignores_vad_stop(monkeypatch):
     websocket.send.assert_not_awaited()
     assert [(event[0], event[1]) for event in events] == [
         ("push", VADUserStartedSpeakingFrame),
-        ("broadcast", ProposedUserStartedSpeakingFrame),
         ("push", VADUserStoppedSpeakingFrame),
     ]
 

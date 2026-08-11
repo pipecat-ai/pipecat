@@ -29,10 +29,7 @@ from pipecat.frames.frames import (
     StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
-    VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.inworld.frames import InworldVoiceProfile, InworldVoiceProfileFrame
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
@@ -112,8 +109,9 @@ class InworldRealtimeSTTSettings(InworldSTTSettings):
     """Settings for :class:`InworldRealtimeSTTService`.
 
     Parameters:
-        vad_threshold: Inworld voice activity detection sensitivity in Inworld
-            turn mode. Pipecat turn mode overrides this to ``0``.
+        vad_threshold: Inworld voice activity detection sensitivity. Must be
+            greater than ``0`` because the realtime service uses Inworld-owned
+            turn detection.
         min_end_of_turn_silence_when_confident: Minimum silence in milliseconds
             before ending a turn when Inworld is confident the turn is complete.
         end_of_turn_confidence_threshold: Confidence threshold for Inworld's
@@ -352,9 +350,8 @@ class InworldRealtimeSTTService(WebsocketSTTService):
     """Speech-to-text service using Inworld's bidirectional WebSocket API.
 
     The service streams raw LINEAR16 audio and emits interim and final
-    transcription frames. In Pipecat turn mode, local VAD sends ``endTurn`` to
-    Inworld. In Inworld turn mode, speech events and final transcriptions propose
-    turn boundaries through :class:`ExternalUserTurnStrategies`.
+    transcription frames. Inworld speech events and final transcriptions propose
+    server-detected turn boundaries through :class:`ExternalUserTurnStrategies`.
 
     Voice Profile analysis emits an :class:`InworldVoiceProfileFrame` whenever
     Inworld includes profile data in a streaming transcription result.
@@ -369,7 +366,6 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         api_key: str,
         base_url: str = "wss://api.inworld.ai",
         sample_rate: int | None = None,
-        vad_force_turn_endpoint: bool = True,
         should_interrupt: bool = True,
         settings: Settings | None = None,
         ttfs_p99_latency: float | None = None,
@@ -381,12 +377,9 @@ class InworldRealtimeSTTService(WebsocketSTTService):
             api_key: Inworld API key containing Base64 credentials.
             base_url: Base URL for the Inworld WebSocket API.
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
-            vad_force_turn_endpoint: Whether to disable Inworld server VAD and use
-                Pipecat VAD to send ``endTurn``. Set to ``False`` to use Inworld's
-                speech and end-of-turn events.
             should_interrupt: Whether Inworld-proposed turn starts should interrupt
-                the current bot response. Only applies when ``vad_force_turn_endpoint``
-                is ``False``.
+                the current bot response. Passed to the external turn strategies
+                recommended by this service.
             settings: Runtime-updatable model, language, recognition, Voice Profile,
                 VAD, and end-of-turn settings. Updates reconnect the WebSocket.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
@@ -401,7 +394,7 @@ class InworldRealtimeSTTService(WebsocketSTTService):
             voice_profile_top_n=10,
             vad_threshold=None,
             min_end_of_turn_silence_when_confident=None,
-            end_of_turn_confidence_threshold=0.5,
+            end_of_turn_confidence_threshold=None,
             inactivity_timeout_seconds=None,
         )
         if settings is not None:
@@ -420,7 +413,6 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         self._base_url = (
             base_url.rstrip("/").replace("https://", "wss://").replace("http://", "ws://")
         )
-        self._vad_force_turn_endpoint = vad_force_turn_endpoint
         self._should_interrupt = should_interrupt
 
         self._connected_event = asyncio.Event()
@@ -433,9 +425,9 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         """Check whether Pipecat supplies a distinct speech-end boundary.
 
         Returns:
-            True in Pipecat turn mode and False in Inworld turn mode.
+            False because Inworld defines turn boundaries directly.
         """
-        return self._vad_force_turn_endpoint
+        return False
 
     def can_generate_metrics(self) -> bool:
         """Check whether the service can generate metrics.
@@ -457,16 +449,15 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         return language_to_inworld_stt_language(language)
 
     def service_metadata_frame(self) -> STTMetadataFrame:
-        """Build metadata that selects the configured turn strategy.
+        """Recommend external turn strategies for Inworld-owned turns.
 
         Returns:
-            STT metadata with external turn strategies in Inworld turn mode.
+            STT metadata with external turn strategies.
         """
         frame = super().service_metadata_frame()
-        if not self._vad_force_turn_endpoint:
-            frame.user_turn_strategies = ExternalUserTurnStrategies(
-                enable_interruptions=self._should_interrupt,
-            )
+        frame.user_turn_strategies = ExternalUserTurnStrategies(
+            enable_interruptions=self._should_interrupt,
+        )
         return frame
 
     async def start(self, frame: StartFrame):
@@ -477,24 +468,6 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         """
         await super().start(frame)
         await self._connect()
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process audio and turn-boundary frames.
-
-        Args:
-            frame: The frame to process.
-            direction: Direction of frame flow through the pipeline.
-        """
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self._user_turn_started()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame) and self._vad_force_turn_endpoint:
-            if self._websocket and self._websocket.state is State.OPEN:
-                await self.send_with_retry(
-                    json.dumps({"endTurn": {}}),
-                    self._report_error,
-                )
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Stream one raw LINEAR16 audio chunk to Inworld.
@@ -585,11 +558,9 @@ class InworldRealtimeSTTService(WebsocketSTTService):
 
         inworld_config: dict[str, Any] = {}
         vad_threshold = assert_given(self._settings.vad_threshold)
-        if self._vad_force_turn_endpoint:
-            inworld_config["vadThreshold"] = 0
-        elif vad_threshold is not None:
-            if not 0 <= vad_threshold <= 1:
-                raise ValueError("Inworld VAD threshold must be between 0 and 1")
+        if vad_threshold is not None:
+            if not 0 < vad_threshold <= 1:
+                raise ValueError("Inworld VAD threshold must be greater than 0 and at most 1")
             inworld_config["vadThreshold"] = vad_threshold
 
         min_silence = assert_given(self._settings.min_end_of_turn_silence_when_confident)
@@ -706,14 +677,14 @@ class InworldRealtimeSTTService(WebsocketSTTService):
 
     async def _user_turn_started(self):
         """Propose an Inworld-owned turn start once."""
-        if self._vad_force_turn_endpoint or self._user_turn_open:
+        if self._user_turn_open:
             return
         self._user_turn_open = True
         await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
 
     async def _user_turn_stopped(self):
         """Propose an Inworld-owned turn stop once."""
-        if self._vad_force_turn_endpoint or not self._user_turn_open:
+        if not self._user_turn_open:
             return
         self._user_turn_open = False
         await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)

@@ -73,7 +73,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = InworldRealtimeSTTService(
         api_key=os.environ["INWORLD_API_KEY"],
-        vad_force_turn_endpoint=False,
         settings=InworldRealtimeSTTService.Settings(
             prompts=["Pipecat", "Inworld"],
             enable_voice_profile=True,
