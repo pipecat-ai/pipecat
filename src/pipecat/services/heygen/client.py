@@ -738,7 +738,7 @@ class HeyGenClient:
 
     def _call_event_callback(self, callback, *args):
         """Queue an event callback for async execution."""
-        if self._event_queue:
+        if self._event_queue is not None:
             self._event_queue.put_nowait((callback, *args))
 
     async def _callback_task_handler(self, queue: asyncio.Queue):
