@@ -54,6 +54,7 @@ from pipecat.services.acp.types import (
     PlanEntry,
     ReadTextFileParams,
     RequestPermissionParams,
+    RequestPermissionResult,
     StopReason,
     TerminalParams,
     ToolCall,
@@ -185,6 +186,7 @@ class ACPService(AIService):
         self._session_started_frame: ACPSessionStartedFrame | None = None
         self._tool_calls: dict[str, ToolCall] = {}
         self._pending_requests: dict[str, asyncio.Future] = {}
+        self._pending_permission_requests: dict[str, asyncio.Future] = {}
         self._prompts: asyncio.Queue[list[ContentBlock]] = asyncio.Queue()
         self._turn_task: asyncio.Task | None = None
         self._session_closed = False
@@ -324,6 +326,18 @@ class ACPService(AIService):
         if self._session_id:
             await self._client.cancel(self._session_id)
 
+        # ACP requires a cancelled result for every permission request still
+        # awaiting a user decision. Without it, an agent can remain blocked on
+        # the request after receiving session/cancel.
+        for request_id, future in list(self._pending_permission_requests.items()):
+            if not future.done():
+                future.set_result(
+                    ACPClientResponseFrame(
+                        request_id=request_id,
+                        result=RequestPermissionResult.cancelled().to_wire(),
+                    )
+                )
+
     #
     # Turns
     #
@@ -354,14 +368,15 @@ class ACPService(AIService):
     async def _on_session_update(self, params: dict[str, Any]):
         """Turn a ``session/update`` notification into a frame."""
         session_id = params.get("sessionId", self._session_id or "")
-        kind = params.get("sessionUpdate")
+        update = params.get("update", {})
+        kind = update.get("sessionUpdate")
 
         builder = SESSION_UPDATE_FRAMES.get(kind)
         if not builder:
             logger.debug(f"{self}: ignoring session update {kind}")
             return
 
-        await self.push_frame(builder(self, session_id, params))
+        await self.push_frame(builder(self, session_id, update))
 
     def _build_tool_call_frame(self, session_id: str, params: dict) -> ACPToolCallFrame:
         tool_call = ToolCall.model_validate(params)
@@ -407,6 +422,8 @@ class ACPService(AIService):
 
         future: asyncio.Future = self.get_event_loop().create_future()
         self._pending_requests[request_id] = future
+        if method == "session/request_permission":
+            self._pending_permission_requests[request_id] = future
 
         # Broadcast: an answering processor may sit on either side of this
         # service. A permission answer derived from user speech, for instance,
@@ -427,6 +444,7 @@ class ACPService(AIService):
             raise ACPError(-32000, f"No processor answered {method} in time")
         finally:
             self._pending_requests.pop(request_id, None)
+            self._pending_permission_requests.pop(request_id, None)
 
         if response.error:
             raise ACPError(response.error.code, response.error.message, response.error.data)

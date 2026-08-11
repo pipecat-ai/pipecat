@@ -23,6 +23,7 @@ from pipecat.services.acp.client import ACPClient
 from pipecat.services.acp.frames import (
     ACPAgentMessageFrame,
     ACPAgentThoughtFrame,
+    ACPCancelTurnFrame,
     ACPClientResponseFrame,
     ACPPermissionRequestFrame,
     ACPPromptFrame,
@@ -80,7 +81,7 @@ class TestACPClient(unittest.IsolatedAsyncioTestCase):
             await client.stop()
 
         self.assertEqual(stop_reason, StopReason.END_TURN)
-        kinds = [u["sessionUpdate"] for u in updates]
+        kinds = [u["update"]["sessionUpdate"] for u in updates]
         self.assertEqual(
             kinds,
             [
@@ -208,6 +209,34 @@ class TestACPService(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(received_up[0].fatal)
         self.assertIn("exited", received_down[1].reason)
+
+    async def test_cancel_turn_cancels_pending_permission(self):
+        """Cancellation must unblock an agent waiting on a permission decision."""
+        service = ACPService(
+            command=FAKE_AGENT + ["--expect-cancelled-permission"], cwd=os.getcwd()
+        )
+
+        received_down, _ = await run_test(
+            service,
+            frames_to_send=[
+                ACPPromptFrame(blocks=[text_block("hello")]),
+                SleepFrame(sleep=0.1),
+                ACPCancelTurnFrame(),
+                SleepFrame(sleep=0.3),
+            ],
+            expected_down_frames=[
+                ACPSessionStartedFrame,
+                ACPTurnStartedFrame,
+                ACPAgentThoughtFrame,
+                ACPToolCallFrame,
+                ACPPermissionRequestFrame,
+                ACPTurnEndedFrame,
+                ACPSessionEndedFrame,
+            ],
+        )
+
+        turn_ended = next(f for f in received_down if isinstance(f, ACPTurnEndedFrame))
+        self.assertEqual(turn_ended.stop_reason, StopReason.CANCELLED)
 
     async def test_failed_spawn_pushes_fatal_error(self):
         service = ACPService(command=["definitely-not-a-real-binary"], cwd=os.getcwd())

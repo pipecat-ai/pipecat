@@ -34,7 +34,7 @@ def update(session_id, **params):
         {
             "jsonrpc": "2.0",
             "method": "session/update",
-            "params": {"sessionId": session_id, **params},
+            "params": {"sessionId": session_id, "update": params},
         }
     )
 
@@ -106,6 +106,11 @@ def main():
             request_id = next_id
 
             def finish(_response, session_id=session_id, prompt_id=prompt_id):
+                if "--expect-cancelled-permission" in sys.argv:
+                    outcome = _response.get("result", {}).get("outcome", {}).get("outcome")
+                    stop_reason = "cancelled" if outcome == "cancelled" else "refusal"
+                    send({"jsonrpc": "2.0", "id": prompt_id, "result": {"stopReason": stop_reason}})
+                    return
                 update(
                     session_id,
                     sessionUpdate="tool_call_update",
