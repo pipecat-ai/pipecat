@@ -327,7 +327,7 @@ class KrispVivaFilter(BaseAudioFilter):
             # Remove processed bytes from buffer, keep the remainder
             self._audio_buffer = self._audio_buffer[bytes_to_process:]
 
-            samples = np.frombuffer(audio_to_process, dtype=np.int16)
+            samples = np.frombuffer(audio_to_process, dtype=np.int16).copy()
             frames = samples.reshape(-1, self._samples_per_frame)
 
             # TTS detection phase: pass audio through until bot speech clears
@@ -340,7 +340,7 @@ class KrispVivaFilter(BaseAudioFilter):
             processed_samples = np.empty_like(samples)
 
             for i, frame in enumerate(frames):
-                cleaned_frame = self._session.process(frame, self._noise_suppression_level)
+                cleaned_frame = self._session.process(frame, float(self._noise_suppression_level))
                 processed_samples[
                     i * self._samples_per_frame : (i + 1) * self._samples_per_frame
                 ] = cleaned_frame

@@ -45,6 +45,7 @@ dependencies = [
     # Required by LocalSmartTurnAnalyzerV3
     # Inlined here instead of using a self-referential extra for Poetry compatibility.
     "onnxruntime~=1.24.3",
+    "pipecat-ai-prebuilt>=1.0.5",
 ]
 
 [project.urls]
