@@ -186,8 +186,9 @@ async def _make_connector(scenario: Scenario, args: argparse.Namespace):
         return MoqConnector(jitter_ms=args.jitter_ms, tls_verify=tls_verify)
     if scenario.transport == "webrtc":
         from aiortc import RTCIceServer
-        from webrtc_client import WebRTCConnector
+        from webrtc_client import WebRTCConnector, configure_audio_jitter_prefetch
 
+        configure_audio_jitter_prefetch(args.webrtc_prefetch)
         if scenario.slug == "webrtc-local":
             return WebRTCConnector(turn=None)
         if scenario.slug == "webrtc-turn-local":
@@ -203,22 +204,34 @@ async def _make_connector(scenario: Scenario, args: argparse.Namespace):
     raise RuntimeError(f"no connector for transport {scenario.transport}")
 
 
-def _floor_connector(transport: str, jitter_ms: int):
+def _floor_connector(transport: str, jitter_ms: int, webrtc_prefetch: int):
     if transport == "moq":
         from moq_client import MoqLocalConnector
 
         return MoqLocalConnector(jitter_ms=jitter_ms)
-    from webrtc_client import LoopbackConnector
+    from webrtc_client import LoopbackConnector, configure_audio_jitter_prefetch
 
+    configure_audio_jitter_prefetch(webrtc_prefetch)
     return LoopbackConnector()
 
 
-async def run_floor(transport: str, jitter_ms: int, duration: float = 15.0) -> dict:
-    result = await run_trial(_floor_connector(transport, jitter_ms), duration_s=duration)
+async def run_floor(
+    transport: str, jitter_ms: int, webrtc_prefetch: int, duration: float = 15.0
+) -> dict:
+    connector = _floor_connector(transport, jitter_ms, webrtc_prefetch)
+    result = await run_trial(connector, duration_s=duration)
     stats = summarize(result.rtts_ms)
-    out = {"kind": "floor", "transport": transport, "stats": stats, "jitter_ms": jitter_ms}
+    rtp_rtt_stats = summarize(getattr(connector, "rtp_rtt_ms_samples", []) or [])
+    out = {
+        "kind": "floor",
+        "transport": transport,
+        "stats": stats,
+        "rtp_rtt_stats": rtp_rtt_stats,
+        "jitter_ms": jitter_ms,
+        "webrtc_prefetch": webrtc_prefetch if transport == "webrtc" else None,
+    }
     (RESULTS / f"floor-{transport}.json").write_text(json.dumps(out, indent=2))
-    print(f"floor {transport}: {stats}")
+    print(f"floor {transport}: {stats} rtp_rtt_p50={rtp_rtt_stats.get('p50_ms', '-')}")
     return out
 
 
@@ -229,6 +242,7 @@ async def run_scenario(scenario: Scenario, args: argparse.Namespace, env_info: d
         env = os.environ | {
             "BENCH_BOT_STATS": str(bot_stats_path),
             "BENCH_JITTER_MS": str(args.jitter_ms),
+            "BENCH_WEBRTC_PREFETCH": str(args.webrtc_prefetch),
         }
         await _wait_for_port_free(7860)
         # New session so teardown can signal the whole group — `uv run` wraps
@@ -265,6 +279,7 @@ async def run_scenario(scenario: Scenario, args: argparse.Namespace, env_info: d
                     w.setframerate(48000)
                     w.writeframes(np.asarray(data, dtype=np.int16).tobytes())
 
+        rtp_rtt_stats = summarize(getattr(connector, "rtp_rtt_ms_samples", []) or [])
         out = {
             "scenario": scenario.slug,
             "transport": scenario.transport,
@@ -274,14 +289,21 @@ async def run_scenario(scenario: Scenario, args: argparse.Namespace, env_info: d
             "ambiguous": result.ambiguous,
             "markers_sent": result.markers_sent,
             "jitter_ms_config": args.jitter_ms,
+            "webrtc_prefetch_config": args.webrtc_prefetch
+            if scenario.transport == "webrtc"
+            else None,
             "stats": summarize(result.rtts_ms),
+            "rtp_rtt_stats": rtp_rtt_stats,
             "bot_stats": bot_stats,
             "ice_pair": getattr(connector, "selected_ice_pair", None),
             "moq_relay_url": getattr(connector, "moq_config", {}).get("relayUrl"),
             "environment": env_info,
         }
         (RESULTS / f"{scenario.slug}-{trial}.json").write_text(json.dumps(out, indent=2))
-        print(f"{scenario.slug} trial {trial}: {out['stats']} drops={result.drops}")
+        print(
+            f"{scenario.slug} trial {trial}: {out['stats']} drops={result.drops} "
+            f"rtp_rtt_p50={rtp_rtt_stats.get('p50_ms', '-')}"
+        )
         await asyncio.sleep(1.0)
 
 
@@ -312,6 +334,14 @@ async def main() -> None:
     parser.add_argument("--trials", type=int, default=3)
     parser.add_argument("--duration", type=float, default=60.0)
     parser.add_argument("--jitter-ms", type=int, default=60)
+    parser.add_argument(
+        "--webrtc-prefetch",
+        type=int,
+        default=1,
+        help="aiortc audio JitterBuffer prefetch override (default 1; aiortc's own "
+        "default is 4 — see webrtc_client.configure_audio_jitter_prefetch). Lower "
+        "values remove aiortc's real jitter tolerance.",
+    )
     parser.add_argument("--save-wav", action="store_true")
     parser.add_argument("--relay-url", help="Deployed moq-relay URL (moq-relay-deployed scenario)")
     parser.add_argument("--turn-url", help="TURN URL for webrtc-turn-deployed")
@@ -326,7 +356,7 @@ async def main() -> None:
 
     if args.floors:
         for t in ("moq", "webrtc"):
-            await run_floor(t, args.jitter_ms)
+            await run_floor(t, args.jitter_ms, args.webrtc_prefetch)
         _render_outputs()
         return
 
@@ -344,7 +374,7 @@ async def main() -> None:
         if scenario.floor_key:
             floor_file = RESULTS / f"floor-{scenario.floor_key}.json"
             if not floor_file.exists():
-                await run_floor(scenario.floor_key, args.jitter_ms)
+                await run_floor(scenario.floor_key, args.jitter_ms, args.webrtc_prefetch)
         await run_scenario(scenario, args, env_info)
 
     _render_outputs()

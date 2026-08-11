@@ -28,10 +28,44 @@ from aiortc import (
     RTCPeerConnection,
     RTCSessionDescription,
 )
+from aiortc.jitterbuffer import JitterBuffer
 from aiortc.mediastreams import MediaStreamTrack
 
 SAMPLE_RATE = 48000
 CHUNK_SAMPLES = SAMPLE_RATE * 20 // 1000  # 20 ms
+
+# aiortc hardcodes prefetch=4 for its audio JitterBuffer
+# (aiortc/rtcrtpreceiver.py) with no public API to change it: the receiver
+# won't release a frame until it has counted 4 complete frames ahead of it,
+# a fixed ~80ms hold per receive hop regardless of actual network jitter
+# (confirmed by instrumenting JitterBuffer.add — see RUNBOOK "floor"
+# investigation). prefetch=1 is the architectural minimum (a frame can only
+# be confirmed complete once the next RTP timestamp arrives, ~20ms) and
+# removes that fixed tax, at the cost of removing aiortc's jitter
+# tolerance — on scenarios with real network jitter (webrtc-turn-*) this
+# will surface as reordering/drops a stock aiortc client would have
+# absorbed. Default here; override via --webrtc-prefetch.
+DEFAULT_AUDIO_JITTER_PREFETCH = 1
+
+_ORIGINAL_JITTER_BUFFER_INIT = JitterBuffer.__init__
+
+
+def configure_audio_jitter_prefetch(prefetch: int) -> None:
+    """Monkeypatch aiortc's hardcoded audio JitterBuffer prefetch.
+
+    Always re-derives from the pristine constructor, so repeated calls (e.g.
+    once per scenario) don't stack patches. Video's buffer (prefetch=0,
+    is_video=True) is untouched.
+    """
+
+    forced_prefetch = prefetch
+
+    def patched_init(self, capacity, prefetch=0, is_video=False):
+        if not is_video:
+            prefetch = forced_prefetch
+        _ORIGINAL_JITTER_BUFFER_INIT(self, capacity, prefetch=prefetch, is_video=is_video)
+
+    JitterBuffer.__init__ = patched_init
 
 
 class _ProbeTrack(MediaStreamTrack):
@@ -93,6 +127,14 @@ class WebRTCConnector:
         self._pc: RTCPeerConnection | None = None
         self._probe = _ProbeTrack()
         self._remote_track: asyncio.Future[MediaStreamTrack] = asyncio.Future()
+        # RTCP SR/RR round-trip time (remote-inbound-rtp.roundTripTime) —
+        # transport-level, upstream of the jitter buffer. aiortc exposes no
+        # ICE candidate-pair stats at all, so this is the only wire-level RTT
+        # available; RTCP only fires every 0.5-1.5s so it's polled to build a
+        # distribution rather than read once at teardown.
+        self.rtp_rtt_ms_samples: list[float] = []
+        self._rtcp_poll_task: asyncio.Task | None = None
+        self._rtcp_stop = asyncio.Event()
 
     async def start(self) -> None:
         config = RTCConfiguration(iceServers=[self._turn] if self._turn else [])
@@ -168,6 +210,22 @@ class WebRTCConnector:
             raise RuntimeError(f"TURN scenario got ICE pair {pair}, expected local relay")
         self.selected_ice_pair = pair
 
+        self._rtcp_poll_task = asyncio.ensure_future(self._poll_rtcp_rtt())
+
+    async def _poll_rtcp_rtt(self) -> None:
+        while not self._rtcp_stop.is_set():
+            try:
+                report = await self._pc.getStats()
+            except Exception:
+                report = {}
+            for stat in report.values():
+                if stat.type == "remote-inbound-rtp" and stat.roundTripTime is not None:
+                    self.rtp_rtt_ms_samples.append(stat.roundTripTime * 1000.0)
+            try:
+                await asyncio.wait_for(self._rtcp_stop.wait(), timeout=0.5)
+            except TimeoutError:
+                pass
+
     async def send_chunk(self, pcm: bytes) -> None:
         self._probe.push(pcm)
 
@@ -186,6 +244,9 @@ class WebRTCConnector:
             yield arr.astype(np.int16).tobytes()
 
     async def stop(self) -> None:
+        self._rtcp_stop.set()
+        if self._rtcp_poll_task:
+            await self._rtcp_poll_task
         if self._pc:
             await self._pc.close()
 
@@ -203,6 +264,10 @@ class LoopbackConnector:
         self._probe = _ProbeTrack()
         self._remote: asyncio.Future[MediaStreamTrack] = asyncio.Future()
         self._back: MediaStreamTrack | None = None
+        # RTCP RTT from both hops (a->b, b->a), merged — see WebRTCConnector.
+        self.rtp_rtt_ms_samples: list[float] = []
+        self._rtcp_poll_task: asyncio.Task | None = None
+        self._rtcp_stop = asyncio.Event()
 
     async def start(self) -> None:
         a, b = RTCPeerConnection(), RTCPeerConnection()
@@ -236,9 +301,25 @@ class LoopbackConnector:
         await a.setRemoteDescription(b.localDescription)
         for _ in range(100):
             if self._back is not None:
+                self._rtcp_poll_task = asyncio.ensure_future(self._poll_rtcp_rtt())
                 return
             await asyncio.sleep(0.05)
         raise RuntimeError("loopback track never arrived")
+
+    async def _poll_rtcp_rtt(self) -> None:
+        while not self._rtcp_stop.is_set():
+            for pc in self._pcs:
+                try:
+                    report = await pc.getStats()
+                except Exception:
+                    continue
+                for stat in report.values():
+                    if stat.type == "remote-inbound-rtp" and stat.roundTripTime is not None:
+                        self.rtp_rtt_ms_samples.append(stat.roundTripTime * 1000.0)
+            try:
+                await asyncio.wait_for(self._rtcp_stop.wait(), timeout=0.5)
+            except TimeoutError:
+                pass
 
     async def send_chunk(self, pcm: bytes) -> None:
         self._probe.push(pcm)
@@ -255,6 +336,9 @@ class LoopbackConnector:
             yield arr.astype(np.int16).tobytes()
 
     async def stop(self) -> None:
+        self._rtcp_stop.set()
+        if self._rtcp_poll_task:
+            await self._rtcp_poll_task
         for pc in self._pcs:
             await pc.close()
 
@@ -271,7 +355,15 @@ async def _main() -> None:
     parser.add_argument("--turn-username", default="pipecat")
     parser.add_argument("--turn-credential", default="pipecat")
     parser.add_argument("--duration", type=float, default=15.0)
+    parser.add_argument(
+        "--prefetch",
+        type=int,
+        default=DEFAULT_AUDIO_JITTER_PREFETCH,
+        help="aiortc audio JitterBuffer prefetch override (default 1; aiortc's own default is 4)",
+    )
     args = parser.parse_args()
+
+    configure_audio_jitter_prefetch(args.prefetch)
 
     turn = None
     if args.turn_url:
@@ -281,7 +373,10 @@ async def _main() -> None:
     connector = WebRTCConnector(turn=turn)
     result = await run_trial(connector, duration_s=args.duration, warmup_s=5.0)
     arr = np.array(result.rtts_ms)
+    rtp_rtt = np.array(connector.rtp_rtt_ms_samples)
     print(f"ice pair: {connector.selected_ice_pair}")
+    if len(rtp_rtt):
+        print(f"rtcp rtt: p50={np.percentile(rtp_rtt, 50):.2f} ms n={len(rtp_rtt)}")
     print(
         f"webrtc/{'turn' if turn else 'direct'}: n={len(arr)} drops={result.drops} "
         f"ambiguous={result.ambiguous} p50={np.percentile(arr, 50):.2f} ms "
