@@ -11,8 +11,7 @@
     "src/pipecat/services/google/gemini_live/llm.py",
     "src/pipecat/services/google/tts.py",
     "src/pipecat/services/inworld/realtime/llm.py",
-    "src/pipecat/services/speechmatics/stt.py",
-    "src/pipecat/transports/tavus/transport.py"
+    "src/pipecat/services/speechmatics/stt.py"
   ],
   "reportMissingImports": false
 }
