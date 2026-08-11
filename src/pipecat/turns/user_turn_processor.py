@@ -43,6 +43,8 @@ class UserTurnProcessor(FrameProcessor):
       finalization on the LLM's verdict.
     - on_user_turn_stopped: Emitted when a user turn is semantically final.
     - on_user_turn_stop_timeout: Emitted if no stop strategy triggers before timeout.
+      Runs synchronously, before the turn is force-stopped, so handlers can read
+      per-turn state; handlers must execute fast.
     - on_user_turn_idle: Emitted when the user has been idle for the configured timeout.
 
     Example::
@@ -93,7 +95,9 @@ class UserTurnProcessor(FrameProcessor):
 
         self._register_event_handler("on_user_turn_started")
         self._register_event_handler("on_user_turn_stopped")
-        self._register_event_handler("on_user_turn_stop_timeout")
+        # Synchronous so handlers read strategy state before the force-stop
+        # that follows this event resets it.
+        self._register_event_handler("on_user_turn_stop_timeout", sync=True)
         self._register_event_handler("on_user_turn_idle")
         self._register_event_handler("on_user_turn_inference_triggered")
 

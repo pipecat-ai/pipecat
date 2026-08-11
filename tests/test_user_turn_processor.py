@@ -23,7 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.tests.utils import SleepFrame, run_test
-from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+from pipecat.turns.user_stop import BaseUserTurnStopStrategy, SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_processor import UserTurnProcessor
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
 
@@ -118,6 +118,59 @@ class TestUserTurnProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
         self.assertTrue(should_stop)
         self.assertTrue(timeout)
+
+    async def test_user_turn_stop_timeout_handler_sees_strategy_state(self):
+        """The timeout handler reads per-turn strategy state before the force-stop resets it."""
+
+        class BufferingStopStrategy(BaseUserTurnStopStrategy):
+            """Buffers the last transcript and clears it when the turn ends.
+
+            Never triggers a stop itself, so only the stop-timeout watchdog
+            can end the turn.
+            """
+
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self.buffered_text = None
+
+            async def process_frame(self, frame):
+                if isinstance(frame, TranscriptionFrame):
+                    self.buffered_text = frame.text
+                return None
+
+            async def handle_user_turn_stopped(self):
+                await super().handle_user_turn_stopped()
+                self.buffered_text = None
+
+        strategy = BufferingStopStrategy()
+
+        user_turn_processor = UserTurnProcessor(
+            user_turn_strategies=UserTurnStrategies(stop=[strategy]),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+
+        seen_at_timeout = "unset"
+
+        @user_turn_processor.event_handler("on_user_turn_stop_timeout")
+        async def on_user_turn_stop_timeout(processor):
+            nonlocal seen_at_timeout
+            seen_at_timeout = strategy.buffered_text
+
+        pipeline = Pipeline([user_turn_processor])
+
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=USER_TURN_STOP_TIMEOUT + 0.1),
+        ]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+        )
+
+        self.assertEqual(seen_at_timeout, "Hello!")
+        self.assertIsNone(strategy.buffered_text)
 
     async def test_user_turn_stop_timeout_transcription(self):
         user_turn_processor = UserTurnProcessor(

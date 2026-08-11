@@ -575,7 +575,9 @@ class LLMUserAggregator(LLMContextAggregator):
 
     - on_user_turn_started: Called when the user turn starts
     - on_user_turn_stopped: Called when the user turn ends
-    - on_user_turn_stop_timeout: Called when no user turn stop strategy triggers
+    - on_user_turn_stop_timeout: Called when no user turn stop strategy triggers.
+      Runs synchronously, before the turn is force-stopped, so handlers can read
+      the aggregation; handlers must execute fast.
     - on_user_turn_idle: Called when the user has been idle for the configured timeout
     - on_user_turn_message_added: Called when a user message is written to context.
       In realtime mode (``realtime_service_mode=True``) the write is
@@ -650,7 +652,9 @@ class LLMUserAggregator(LLMContextAggregator):
 
         self._register_event_handler("on_user_turn_started")
         self._register_event_handler("on_user_turn_stopped")
-        self._register_event_handler("on_user_turn_stop_timeout")
+        # Synchronous so handlers read the aggregation before the force-stop
+        # that follows this event drains it.
+        self._register_event_handler("on_user_turn_stop_timeout", sync=True)
         self._register_event_handler("on_user_turn_idle")
         self._register_event_handler("on_user_turn_inference_triggered")
         self._register_event_handler("on_user_turn_message_added")

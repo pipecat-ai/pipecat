@@ -620,6 +620,55 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stop_message.content, "Hello!")
         self.assertFalse(timeout)
 
+    async def test_user_turn_stop_timeout_handler_sees_aggregation(self):
+        """The timeout handler reads the aggregation before the force-stop drains it."""
+        context = LLMContext()
+
+        # No stop strategies, so only the stop-timeout watchdog can end the turn.
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    start=[VADUserTurnStartStrategy()],
+                    stop=[],
+                ),
+                user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+            ),
+        )
+
+        aggregation_at_timeout = None
+        stop_strategy = "unset"
+        stop_message = None
+
+        @user_aggregator.event_handler("on_user_turn_stop_timeout")
+        async def on_user_turn_stop_timeout(aggregator):
+            nonlocal aggregation_at_timeout
+            aggregation_at_timeout = aggregator.aggregation_string()
+
+        @user_aggregator.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(aggregator, strategy, message):
+            nonlocal stop_strategy, stop_message
+            stop_strategy = strategy
+            stop_message = message
+
+        pipeline = Pipeline([user_aggregator])
+
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=USER_TURN_STOP_TIMEOUT + 0.1),
+        ]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+        )
+
+        # The watchdog force-stopped the turn (no strategy) with the real transcript.
+        self.assertIsNone(stop_strategy)
+        self.assertEqual(stop_message.content, "Hello!")
+        self.assertEqual(aggregation_at_timeout, "Hello!")
+
     async def test_user_mute_strategies(self):
         context = LLMContext()
 
