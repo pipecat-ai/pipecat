@@ -12,6 +12,8 @@ various audio formats used in Pipecat pipelines.
 """
 
 import audioop
+import io
+import wave
 
 import loudness
 import numpy as np
@@ -104,6 +106,30 @@ def interleave_stereo_audio(left_audio: bytes, right_audio: bytes) -> bytes:
     stereo = np.column_stack((left, right))
 
     return stereo.astype(np.int16).tobytes()
+
+
+def pcm_to_wav(pcm: bytes, sample_rate: int, num_channels: int = 1) -> bytes:
+    """Wrap raw PCM audio in a WAV container.
+
+    The PCM data is expected to be signed 16-bit little-endian samples, which
+    is what Pipecat pipelines carry (e.g. what ``AudioBufferProcessor`` emits
+    from its audio event handlers).
+
+    Args:
+        pcm: Raw PCM audio data (16-bit signed integers).
+        sample_rate: Sample rate of the audio in Hz.
+        num_channels: Number of interleaved channels in the PCM data.
+
+    Returns:
+        A complete in-memory WAV file as bytes.
+    """
+    with io.BytesIO() as buffer:
+        with wave.open(buffer, "wb") as wav_file:
+            wav_file.setnchannels(num_channels)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(pcm)
+        return buffer.getvalue()
 
 
 def normalize_value(value, min_value, max_value):
