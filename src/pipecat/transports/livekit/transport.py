@@ -114,7 +114,8 @@ class LiveKitCallbacks(BaseModel):
         on_participant_disconnected: Called when a participant leaves the room.
         on_audio_track_subscribed: Called when an audio track is subscribed.
         on_audio_track_unsubscribed: Called when an audio track is unsubscribed.
-        on_data_received: Called when data is received from a participant.
+        on_data_received: Called when data is received. The sender is None for
+            packets sent by a server SDK, which LiveKit delivers unattributed.
         on_first_participant_joined: Called when the first participant joins.
         on_dtmf_event: Called when a SIP DTMF tone is received.
     """
@@ -128,7 +129,7 @@ class LiveKitCallbacks(BaseModel):
     on_audio_track_unsubscribed: Callable[[str], Awaitable[None]]
     on_video_track_subscribed: Callable[[str], Awaitable[None]]
     on_video_track_unsubscribed: Callable[[str], Awaitable[None]]
-    on_data_received: Callable[[bytes, str], Awaitable[None]]
+    on_data_received: Callable[[bytes, str | None], Awaitable[None]]
     on_first_participant_joined: Callable[[str], Awaitable[None]]
     on_dtmf_event: Callable[[Any], Awaitable[None]]
 
@@ -631,8 +632,9 @@ class LiveKitTransportClient:
 
     async def _async_on_data_received(self, data: rtc.DataPacket):
         """Handle data received events."""
-        if data.participant:
-            await self._callbacks.on_data_received(data.data, data.participant.sid)
+        # LiveKit delivers packets sent by a server SDK with no participant.
+        sender = data.participant.sid if data.participant else None
+        await self._callbacks.on_data_received(data.data, sender)
 
     async def _async_on_connected(self):
         """Handle connected events."""
@@ -795,12 +797,13 @@ class LiveKitInputTransport(BaseInputTransport):
             await self.cancel_task(self._video_in_task)
             self._video_in_task = None
 
-    async def push_app_message(self, message: Any, sender: str):
+    async def push_app_message(self, message: Any, sender: str | None):
         """Push an application message as an urgent transport frame.
 
         Args:
             message: The message data to send.
-            sender: ID of the message sender.
+            sender: ID of the message sender, or None if it was sent
+                unattributed by a server SDK.
         """
         frame = LiveKitOutputTransportMessageUrgentFrame(message=message, participant_id=sender)
         await self.push_frame(frame)
@@ -1073,7 +1076,8 @@ class LiveKitTransport(BaseTransport):
       Args: (participant_id: str)
     - on_video_track_unsubscribed: Called when a video track is unsubscribed.
       Args: (participant_id: str)
-    - on_data_received: Called when data is received from a participant.
+    - on_data_received: Called when data is received. The participant ID is None
+      for packets sent by a server SDK, which LiveKit delivers unattributed.
       Args: (data: bytes, participant_id: str)
     - on_dtmf_event: Called when a SIP DTMF tone is received from a participant.
       Args: (data: dict) with keys ``tone``/``digit``, ``code``, and
@@ -1289,7 +1293,7 @@ class LiveKitTransport(BaseTransport):
         """Handle video track unsubscribed events."""
         await self._call_event_handler("on_video_track_unsubscribed", participant_id)
 
-    async def _on_data_received(self, data: bytes, participant_id: str):
+    async def _on_data_received(self, data: bytes, participant_id: str | None):
         """Handle data received events."""
         if self._input:
             await self._input.push_app_message(data.decode(), participant_id)
