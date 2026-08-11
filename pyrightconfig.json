@@ -5,8 +5,7 @@
   "include": ["scripts", "src/pipecat"],
   "exclude": ["**/*_pb2.py", "**/__pycache__"],
   "ignore": [
-    "tests",
-    "src/pipecat/services/aws/nova_sonic/llm.py"
+    "tests"
   ],
   "reportMissingImports": false
 }
