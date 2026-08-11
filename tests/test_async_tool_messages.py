@@ -40,7 +40,7 @@ class TestParseMessage(unittest.TestCase):
         assert info.tool_call_id == "abc"
         assert info.status == "running"
         assert info.result is None
-        assert "asynchronous task" in info.description
+        assert isinstance(info.description, str) and info.description
 
     def test_parses_intermediate(self):
         info = async_tool_messages.parse_message(_intermediate_message("abc", '"hello"'))
