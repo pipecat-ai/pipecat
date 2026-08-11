@@ -445,7 +445,8 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         self._connected_event.set()
         self._receive_task = None
         self._user_turn_open = False
-        self._manual_turn_open = False
+        self._manual_vad_turn_open = False
+        self._manual_pending_finals = 0
         self._pending_voice_profile: InworldVoiceProfile | None = None
 
     @property
@@ -522,6 +523,7 @@ class InworldRealtimeSTTService(WebsocketSTTService):
             await self._connect()
 
         if self._websocket and self._websocket.state is State.OPEN:
+            self._start_receive_task(restart_completed_only=True)
             message = {
                 "audioChunk": {"content": base64.b64encode(audio).decode("ascii")},
             }
@@ -544,7 +546,7 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         if (
             isinstance(frame, VADUserStoppedSpeakingFrame)
             and self._turn_detection_mode is InworldTurnDetectionMode.MANUAL
-            and self._manual_turn_open
+            and self._manual_vad_turn_open
         ):
             await self._send_end_turn()
 
@@ -556,10 +558,28 @@ class InworldRealtimeSTTService(WebsocketSTTService):
             await self._connect()
 
         if self._websocket and self._websocket.state is State.OPEN:
+            self._start_receive_task(restart_completed_only=True)
+            self._manual_vad_turn_open = False
+            self._manual_pending_finals += 1
             await self.send_with_retry(json.dumps({"endTurn": {}}), self._report_error)
         else:
             await self.push_error(
                 error_msg="Unable to end Inworld realtime STT turn: WebSocket is not connected"
+            )
+
+    def _start_receive_task(self, *, restart_completed_only: bool = False) -> None:
+        """Start the WebSocket receive task when no active receiver exists.
+
+        Args:
+            restart_completed_only: Only start a receiver when replacing a completed task.
+        """
+        completed = self._receive_task is not None and self._receive_task.done()
+        if completed:
+            self._receive_task = None
+        if self._websocket and not self._receive_task and (completed or not restart_completed_only):
+            self._receive_task = self.create_task(
+                self._receive_task_handler(self._report_error),
+                name="inworld_stt_receive",
             )
 
     async def _connect(self):
@@ -568,11 +588,7 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         try:
             await self._connect_websocket()
             await super()._connect()
-            if self._websocket and not self._receive_task:
-                self._receive_task = self.create_task(
-                    self._receive_task_handler(self._report_error),
-                    name="inworld_stt_receive",
-                )
+            self._start_receive_task()
         finally:
             self._connected_event.set()
 
@@ -622,8 +638,10 @@ class InworldRealtimeSTTService(WebsocketSTTService):
         """
         await super()._handle_vad_user_started_speaking(frame)
         if self._turn_detection_mode is InworldTurnDetectionMode.MANUAL:
-            self._manual_turn_open = True
-            self._pending_voice_profile = None
+            if not self._manual_vad_turn_open:
+                self._manual_vad_turn_open = True
+                if self._manual_pending_finals == 0:
+                    self._pending_voice_profile = None
 
     def _transcribe_config(self) -> dict[str, Any]:
         """Build the initial WebSocket transcription configuration.
@@ -736,7 +754,8 @@ class InworldRealtimeSTTService(WebsocketSTTService):
                     await self.push_error(error_msg=f"Error closing Inworld STT WebSocket: {e}")
             if self._websocket is websocket:
                 self._websocket = None
-            self._manual_turn_open = False
+            self._manual_vad_turn_open = False
+            self._manual_pending_finals = 0
             self._pending_voice_profile = None
             await self._user_turn_stopped()
             await self._call_event_handler("on_disconnected")
@@ -768,15 +787,18 @@ class InworldRealtimeSTTService(WebsocketSTTService):
             data: Inworld response envelope.
         """
         result = data.get("result") or data
+        error = data.get("error")
+        error_result = error if isinstance(error, dict) else result
 
-        error_code = data.get("code", result.get("code"))
-        error_message = data.get("message", result.get("message"))
+        error_code = error_result.get("code")
+        error_message = error_result.get("message")
         if error_code is not None or error_message:
             error_code_text = f" ({error_code})" if error_code is not None else ""
             await self.push_error(
                 error_msg=f"Inworld realtime STT error{error_code_text}: {error_message}"
             )
-            self._manual_turn_open = False
+            self._manual_vad_turn_open = False
+            self._manual_pending_finals = 0
             self._pending_voice_profile = None
             await self._user_turn_stopped()
             return
@@ -838,7 +860,8 @@ class InworldRealtimeSTTService(WebsocketSTTService):
 
         if (
             self._turn_detection_mode is InworldTurnDetectionMode.MANUAL
-            and not self._manual_turn_open
+            and not self._manual_vad_turn_open
+            and self._manual_pending_finals == 0
         ):
             logger.trace("Ignoring Inworld transcription outside a Pipecat VAD turn")
             return
@@ -901,6 +924,10 @@ class InworldRealtimeSTTService(WebsocketSTTService):
                 )
 
         if is_final:
-            self._manual_turn_open = False
+            if (
+                self._turn_detection_mode is InworldTurnDetectionMode.MANUAL
+                and self._manual_pending_finals > 0
+            ):
+                self._manual_pending_finals -= 1
             self._pending_voice_profile = None
             await self._user_turn_stopped()

@@ -8,7 +8,7 @@
 
 import base64
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
 import pytest
@@ -311,6 +311,34 @@ async def test_inworld_realtime_stt_streams_base64_audio():
     }
 
 
+@pytest.mark.asyncio
+async def test_inworld_realtime_stt_restarts_completed_receive_task(monkeypatch):
+    """A reopened or active socket should replace a completed receive task."""
+    service = _realtime_service()
+    websocket = _FakeWebsocket()
+    service._websocket = websocket
+
+    completed_task = MagicMock()
+    completed_task.done.return_value = True
+    service._receive_task = completed_task
+
+    replacement_task = MagicMock()
+    replacement_task.done.return_value = False
+
+    def fake_create_task(coroutine, *, name):
+        coroutine.close()
+        assert name == "inworld_stt_receive"
+        return replacement_task
+
+    monkeypatch.setattr(service, "create_task", fake_create_task)
+
+    frames = [frame async for frame in service.run_stt(b"\x01\x02")]
+
+    assert frames == [None]
+    assert service._receive_task is replacement_task
+    websocket.send.assert_awaited_once()
+
+
 def test_inworld_realtime_stt_automatic_mode_requires_server_vad():
     """Automatic mode should direct callers to manual mode instead of accepting VAD zero."""
     service = _realtime_service(
@@ -404,6 +432,30 @@ async def test_inworld_realtime_stt_reports_response_processing_errors(monkeypat
         error_msg="Error processing Inworld realtime STT message: invalid response",
         exception=failure,
     )
+
+
+@pytest.mark.asyncio
+async def test_inworld_realtime_stt_reports_documented_error_envelope(monkeypatch):
+    """Provider error envelopes should emit an error and reset manual turn state."""
+    service = _realtime_service(
+        turn_detection_mode=InworldRealtimeSTTService.TurnDetectionMode.MANUAL,
+    )
+    service._manual_vad_turn_open = True
+    service._manual_pending_finals = 1
+    service._pending_voice_profile = InworldVoiceProfile()
+    push_error = AsyncMock()
+    monkeypatch.setattr(service, "push_error", push_error)
+
+    await service._process_response(
+        {"error": {"code": 8, "message": "rate limit exceeded", "details": []}}
+    )
+
+    push_error.assert_awaited_once_with(
+        error_msg="Inworld realtime STT error (8): rate limit exceeded"
+    )
+    assert service._manual_vad_turn_open is False
+    assert service._manual_pending_finals == 0
+    assert service._pending_voice_profile is None
 
 
 def test_inworld_realtime_stt_recommends_external_turn_strategies():
@@ -584,6 +636,50 @@ async def test_inworld_realtime_stt_manual_mode_sends_end_turn(monkeypatch):
         ("push", TranscriptionFrame),
     ]
     assert service._user_turn_open is False
+
+
+@pytest.mark.asyncio
+async def test_inworld_realtime_stt_manual_mode_keeps_next_vad_turn_open(monkeypatch):
+    """A previous final should not close a newer local VAD turn."""
+    events = []
+    service = _instrument_realtime_service(
+        monkeypatch,
+        events,
+        turn_detection_mode=InworldRealtimeSTTService.TurnDetectionMode.MANUAL,
+    )
+    websocket = _FakeWebsocket()
+    service._websocket = websocket
+
+    await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    await service._process_response(
+        {"result": {"transcription": {"transcript": "First turn.", "isFinal": True}}}
+    )
+    await service._process_response(
+        {"result": {"transcription": {"transcript": "Second", "isFinal": False}}}
+    )
+    await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await service._process_response(
+        {"result": {"transcription": {"transcript": "Second turn.", "isFinal": True}}}
+    )
+
+    sent_messages = [json.loads(call.args[0]) for call in websocket.send.await_args_list]
+    assert sent_messages == [{"endTurn": {}}, {"endTurn": {}}]
+    transcriptions = [
+        event[2]
+        for event in events
+        if event[0] == "push"
+        and isinstance(event[2], (InterimTranscriptionFrame, TranscriptionFrame))
+    ]
+    assert [frame.text for frame in transcriptions] == [
+        "First turn.",
+        "Second",
+        "Second turn.",
+    ]
+    assert service._manual_vad_turn_open is False
+    assert service._manual_pending_finals == 0
 
 
 @pytest.mark.asyncio
