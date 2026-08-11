@@ -386,6 +386,24 @@ async def test_inworld_realtime_stt_emits_interim_final_and_voice_profile(monkey
     service._handle_transcription.assert_awaited_once_with("Hello from Inworld.", True, None)
 
 
+@pytest.mark.asyncio
+async def test_inworld_realtime_stt_reports_response_processing_errors(monkeypatch):
+    """Unexpected response failures should reach the pipeline as non-fatal errors."""
+    service = _realtime_service()
+    service._websocket = _FakeWebsocket(messages=[json.dumps({"result": {}})])
+    failure = ValueError("invalid response")
+    monkeypatch.setattr(service, "_process_response", AsyncMock(side_effect=failure))
+    push_error = AsyncMock()
+    monkeypatch.setattr(service, "push_error", push_error)
+
+    await service._receive_messages()
+
+    push_error.assert_awaited_once_with(
+        error_msg="Error processing Inworld realtime STT message: invalid response",
+        exception=failure,
+    )
+
+
 def test_inworld_realtime_stt_recommends_external_turn_strategies():
     """Inworld-owned endpointing should select the external turn strategies."""
     service = _realtime_service(

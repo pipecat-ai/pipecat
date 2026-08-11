@@ -732,7 +732,10 @@ class InworldRealtimeSTTService(WebsocketSTTService):
             except json.JSONDecodeError:
                 logger.warning(f"Inworld realtime STT returned non-JSON data: {message}")
             except Exception as e:
-                logger.exception(f"Error processing Inworld realtime STT message: {e}")
+                await self.push_error(
+                    error_msg=f"Error processing Inworld realtime STT message: {e}",
+                    exception=e,
+                )
 
     async def _process_response(self, data: dict[str, Any]):
         """Process one decoded Inworld streaming response.
