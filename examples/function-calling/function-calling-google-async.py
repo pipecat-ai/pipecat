@@ -146,7 +146,6 @@ indicate you should use the get_image tool are:
 
     llm = GoogleLLMService(
         api_key=os.environ["GOOGLE_API_KEY"],
-        enable_async_tool_cancellation=True,
         settings=GoogleLLMService.Settings(
             system_instruction=system_prompt,
         ),

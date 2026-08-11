@@ -295,7 +295,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 ``cancel_async_tool_call`` built-in tool and its system instructions
                 so the LLM can cancel in-progress async function calls
                 (``cancel_on_interruption=False``) whose results are no longer
-                wanted. Defaults to False.
+                wanted. Defaults to False. Deciding that a result is unwanted is
+                the model's judgement, and models differ in how readily they make
+                it: with this on, a user who changes the subject while a call is
+                still running may have its result cancelled rather than delivered,
+                and the result is then never mentioned. Weigh that against the work
+                a cancelled call saves — it is worth most for tools that are slow or
+                expensive, and least for ones that return quickly.
             settings: The runtime-updatable settings for the LLM service.
             **kwargs: Additional arguments passed to the parent AIService.
 
