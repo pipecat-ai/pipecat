@@ -16,21 +16,6 @@ import aiohttp
 import numpy as np
 from loguru import logger
 
-try:
-    import ctypes.util
-    # Help find libopus on macOS with Homebrew
-    if ctypes.util.find_library('opus') is None:
-        import os
-        for path in ['/opt/homebrew/lib', '/usr/local/lib']:
-            lib_path = os.path.join(path, 'libopus.dylib')
-            if os.path.exists(lib_path):
-                os.environ['DYLD_LIBRARY_PATH'] = path + ':' + os.environ.get('DYLD_LIBRARY_PATH', '')
-                break
-    import opuslib
-    OPUS_AVAILABLE = True
-except (ImportError, Exception):
-    OPUS_AVAILABLE = False
-
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import (
     alaw_to_pcm,
@@ -50,6 +35,35 @@ from pipecat.frames.frames import (
     StartFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer
+
+
+def _import_opuslib():
+    """Import opuslib, the optional dependency behind the OPUS codec.
+
+    Imported on demand rather than at module import: OPUS is one of several codecs
+    Telnyx can use, so bots on PCMU, PCMA or L16 shouldn't need the dependency at all.
+    """
+    try:
+        import opuslib
+    except ModuleNotFoundError as e:
+        logger.error(f"Exception: {e}")
+        logger.error('In order to use OPUS, you need to `uv add "pipecat-ai[opus]"`.')
+        raise ImportError(f"Missing module: {e}") from e
+    except Exception as e:
+        # opuslib raises a bare Exception, not ModuleNotFoundError, when the libopus
+        # system library isn't on the loader path.
+        logger.error(f"Exception: {e}")
+        logger.error(
+            "OPUS requires the libopus system library: `brew install opus` (macOS) or "
+            "`apt install libopus0` (Debian/Ubuntu). With Homebrew on macOS you may "
+            "also need to set DYLD_LIBRARY_PATH=/opt/homebrew/lib, which is where "
+            "ctypes won't look by default."
+        )
+        # Re-raise as ImportError so callers have one exception type to handle,
+        # whichever half of the dependency is missing.
+        raise ImportError(f"Could not load libopus: {e}") from e
+
+    return opuslib
 
 
 class TelnyxFrameSerializer(FrameSerializer):
@@ -99,10 +113,21 @@ class TelnyxFrameSerializer(FrameSerializer):
             call_control_id: The Call Control ID for the Telnyx call (optional, but required for auto hang-up).
             api_key: Your Telnyx API key (required for auto hang-up).
             params: Configuration parameters.
+
+        Raises:
+            ImportError: If either encoding is OPUS but opuslib or the libopus system
+                library is unavailable.
+            ValueError: If auto_hang_up is enabled without the credentials it needs.
         """
         params = params or TelnyxFrameSerializer.InputParams()
         super().__init__(params)
         self._params: TelnyxFrameSerializer.InputParams = params
+
+        # Resolve the OPUS dependency here rather than on the first audio frame: a
+        # failure mid-call can't be surfaced to the caller, who just gets dead air.
+        self._opuslib = (
+            _import_opuslib() if "OPUS" in (inbound_encoding, outbound_encoding) else None
+        )
 
         # Validate hangup-related parameters if auto_hang_up is enabled
         if self._params.auto_hang_up:
@@ -145,15 +170,17 @@ class TelnyxFrameSerializer(FrameSerializer):
         self._opus_encode_buffer = bytearray()
 
     def _get_opus_encoder(self):
-        if self._opus_encoder is None and OPUS_AVAILABLE:
-            self._opus_encoder = opuslib.Encoder(
-                self._telnyx_sample_rate, 1, opuslib.APPLICATION_VOIP
+        # self._opuslib is set whenever a codec is OPUS, so these are only reached
+        # after __init__ has resolved the import.
+        if self._opus_encoder is None:
+            self._opus_encoder = self._opuslib.Encoder(
+                self._telnyx_sample_rate, 1, self._opuslib.APPLICATION_VOIP
             )
         return self._opus_encoder
 
     def _get_opus_decoder(self):
-        if self._opus_decoder is None and OPUS_AVAILABLE:
-            self._opus_decoder = opuslib.Decoder(self._telnyx_sample_rate, 1)
+        if self._opus_decoder is None:
+            self._opus_decoder = self._opuslib.Decoder(self._telnyx_sample_rate, 1)
         return self._opus_decoder
 
     async def setup(self, frame: StartFrame):
@@ -188,6 +215,9 @@ class TelnyxFrameSerializer(FrameSerializer):
             await self._hang_up_call()
             return None
         elif isinstance(frame, InterruptionFrame):
+            # Drop buffered audio too, or the partial 20ms frame left over from the
+            # interrupted utterance gets prepended to the next one.
+            self._opus_encode_buffer.clear()
             answer = {"event": "clear"}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):
@@ -218,8 +248,6 @@ class TelnyxFrameSerializer(FrameSerializer):
                     audio_array = np.frombuffer(resampled_data, dtype=np.int16)
                     serialized_data = audio_array.byteswap().tobytes()
             elif self._params.inbound_encoding == "OPUS":
-                if not OPUS_AVAILABLE:
-                    raise ValueError("OPUS encoding requires opuslib: pip install opuslib")
                 # Resample to target rate first
                 resampled_data = await self._output_resampler.resample(
                     data, frame.sample_rate, self._telnyx_sample_rate
@@ -242,7 +270,9 @@ class TelnyxFrameSerializer(FrameSerializer):
                 offset = 0
 
                 while offset + self._opus_frame_bytes <= len(self._opus_encode_buffer):
-                    frame_data = bytes(self._opus_encode_buffer[offset : offset + self._opus_frame_bytes])
+                    frame_data = bytes(
+                        self._opus_encode_buffer[offset : offset + self._opus_frame_bytes]
+                    )
                     offset += self._opus_frame_bytes
 
                     opus_packet = encoder.encode(frame_data, self._opus_frame_samples)
@@ -344,7 +374,7 @@ class TelnyxFrameSerializer(FrameSerializer):
         try:
             message = json.loads(data)
         except json.JSONDecodeError:
-            logger.warning(f"Failed to parse JSON message")
+            logger.warning("Failed to parse JSON message")
             return None
 
         if not isinstance(message, dict) or "event" not in message:
@@ -392,8 +422,6 @@ class TelnyxFrameSerializer(FrameSerializer):
                     self._sample_rate,
                 )
             elif self._params.outbound_encoding == "OPUS":
-                if not OPUS_AVAILABLE:
-                    raise ValueError("OPUS decoding requires opuslib: pip install opuslib")
                 decoder = self._get_opus_decoder()
                 # Decode OPUS to PCM - frame size is samples per channel
                 # At 16kHz, 20ms = 320 samples
