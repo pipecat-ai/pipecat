@@ -231,18 +231,43 @@ line-length = 100
 
 [tool.ruff.lint]
 select = [
+    "B", # Likely bugs and design problems
     "D", # Docstring rules
     "F", # Pyflakes
     "I", # Import rules
     "UP", # Modern Python
 ]
 ignore = [
+    # Bugbear rules that do not fit this codebase.
+    #
+    # Base classes leave optional hooks empty so subclasses override only what
+    # they need. Marking them abstract, as B027 wants, would instead force every
+    # subclass to implement them, and BaseObject is a shared-behaviour base
+    # rather than an interface, so it has no abstract methods to declare.
+    "B024",
+    "B027",
+    #
+    # Bugbear rules worth adopting, each on its own once someone takes the
+    # sweep. Every entry below is a deferral, not a rejection: drop the line and
+    # fix what it reports.
+    "B007", # unused loop control variable — 23 sites, cosmetic
+    "B009", # getattr with a constant attribute — cosmetic
+    "B010", # setattr with a constant attribute — cosmetic
+    "B011", # `assert False` — cosmetic
+    "B904", # `raise ... from` — 48 sites, better tracebacks, no behaviour change
+    "B905", # `zip(strict=)` — 18 sites, each needs its own length-invariant call
+    #
     "D105",  # Missing docstring in magic methods (__str__, __repr__, etc.)
     # Unused imports are selected in .pre-commit-config.yaml instead, so they are
     # only stripped at commit time, not mid-development. A `--extend-select` on the
     # command line overrides this entry, so the hook still reports and fixes them.
     "F401",
 ]
+
+[tool.ruff.lint.flake8-bugbear]
+# Typer reads a CLI parameter's configuration from its default, so calling these
+# in a default argument is the documented idiom rather than a shared-state bug.
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
 
 [tool.ruff.lint.per-file-ignores]
 # Skip docstring checks for non-source code
