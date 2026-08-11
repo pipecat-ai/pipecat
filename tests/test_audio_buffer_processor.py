@@ -23,6 +23,8 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.observers.base_observer import FramePushed
+from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.tests.utils import run_test
@@ -37,7 +39,11 @@ class _PassthroughResampler:
 
 
 async def _make_processor(
-    *, buffer_size: int = 0, start: bool = True, auto_start: bool = False
+    *,
+    buffer_size: int = 0,
+    start: bool = True,
+    auto_start: bool = False,
+    enable_turn_audio: bool = False,
 ) -> AudioBufferProcessor:
     """Create a processor ready to record.
 
@@ -53,6 +59,7 @@ async def _make_processor(
         num_channels=2,
         buffer_size=buffer_size,
         auto_start_recording=auto_start,
+        enable_turn_audio=enable_turn_audio,
     )
     processor._input_resampler = _PassthroughResampler()
     processor._output_resampler = _PassthroughResampler()
@@ -1001,6 +1008,94 @@ class TestRecordingLifecycleEvents(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
         self.assertEqual(len(stopped), 0)
         await p.cleanup()
+
+
+class TestTurnAudioTurnNumbers(unittest.IsolatedAsyncioTestCase):
+    """Tests for turn numbers on the turn audio events.
+
+    With a turn tracker attached (set_turn_tracker), on_user_turn_audio_data and
+    on_bot_turn_audio_data report the tracker's turn number, so a clip can be
+    matched to its turn elsewhere. Without one, the turn number is always 0.
+    """
+
+    async def _drive_tracker(self, tracker, frame):
+        """Push a frame through the tracker and let its event tasks run."""
+        await tracker.on_push_frame(
+            FramePushed(
+                source=None,  # type: ignore[arg-type]
+                destination=None,  # type: ignore[arg-type]
+                frame=frame,
+                direction=FrameDirection.DOWNSTREAM,
+                timestamp=0,
+            )
+        )
+        await asyncio.sleep(0.01)
+
+    async def _speak_user(self, p):
+        await p.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+        await p.process_frame(
+            InputAudioRawFrame(
+                audio=struct.pack("<hh", 1000, -1000), sample_rate=16000, num_channels=1
+            ),
+            FrameDirection.DOWNSTREAM,
+        )
+        await p.process_frame(UserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0.01)
+
+    async def test_turn_number_is_zero_without_tracker(self):
+        p = await _make_processor(enable_turn_audio=True)
+
+        turns = []
+        p.add_event_handler(
+            "on_user_turn_audio_data",
+            lambda _, audio, sample_rate, num_channels, turn_number: turns.append(turn_number),
+        )
+
+        await self._speak_user(p)
+        self.assertEqual(turns, [0])
+        await p.cleanup()
+
+    async def test_turn_numbers_follow_tracker(self):
+        p = await _make_processor(enable_turn_audio=True)
+        tracker = TurnTrackingObserver()
+        p.set_turn_tracker(tracker)
+
+        user_turns = []
+        bot_turns = []
+        p.add_event_handler(
+            "on_user_turn_audio_data",
+            lambda _, audio, sample_rate, num_channels, turn_number: user_turns.append(turn_number),
+        )
+        p.add_event_handler(
+            "on_bot_turn_audio_data",
+            lambda _, audio, sample_rate, num_channels, turn_number: bot_turns.append(turn_number),
+        )
+
+        # Turn 1 starts when the pipeline starts.
+        await self._drive_tracker(tracker, StartFrame())
+        await self._speak_user(p)
+
+        # Bot reply, still turn 1.
+        await p.process_frame(BotStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+        await p.process_frame(
+            OutputAudioRawFrame(
+                audio=struct.pack("<hh", 500, -500), sample_rate=16000, num_channels=1
+            ),
+            FrameDirection.DOWNSTREAM,
+        )
+        await p.process_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0.01)
+
+        # The user speaking again after the bot's reply starts turn 2.
+        await self._drive_tracker(tracker, BotStartedSpeakingFrame())
+        await self._drive_tracker(tracker, BotStoppedSpeakingFrame())
+        await self._drive_tracker(tracker, UserStartedSpeakingFrame())
+        await self._speak_user(p)
+
+        self.assertEqual(user_turns, [1, 2])
+        self.assertEqual(bot_turns, [1])
+        await p.cleanup()
+        await tracker.cleanup()
 
 
 if __name__ == "__main__":

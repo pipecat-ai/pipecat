@@ -42,8 +42,10 @@ class AudioBufferProcessor(FrameProcessor):
 
     - on_audio_data: Triggered when buffer_size is reached, providing merged audio
     - on_track_audio_data: Triggered when buffer_size is reached, providing separate tracks
-    - on_user_turn_audio_data: Triggered when user turn has ended, providing that user turn's audio
-    - on_bot_turn_audio_data: Triggered when bot turn has ended, providing that bot turn's audio
+    - on_user_turn_audio_data: Triggered when user turn has ended, providing that user turn's
+      audio and its turn number (see :meth:`set_turn_tracker`)
+    - on_bot_turn_audio_data: Triggered when bot turn has ended, providing that bot turn's
+      audio and its turn number (see :meth:`set_turn_tracker`)
     - on_recording_started: Triggered when recording starts (state transitions to active)
     - on_recording_stopped: Triggered after recording stops and the final audio has been emitted
 
@@ -94,6 +96,7 @@ class AudioBufferProcessor(FrameProcessor):
         self._bot_speaking = False
         self._user_turn_audio_buffer = bytearray()
         self._bot_turn_audio_buffer = bytearray()
+        self._turn_number = 0
 
         self._recording = False
 
@@ -154,6 +157,27 @@ class AudioBufferProcessor(FrameProcessor):
             )
         else:
             return b""
+
+    def set_turn_tracker(self, turn_tracker):
+        """Number turn audio events with the tracker's turn numbers.
+
+        The pipeline is usually built before the object that owns the turn
+        tracker (e.g. the pipeline worker), so the tracker is attached after
+        construction rather than passed to it.
+
+        Args:
+            turn_tracker: A ``TurnTrackingObserver``, e.g. the pipeline
+                worker's ``turn_tracking_observer``. When set, the
+                ``on_user_turn_audio_data`` and ``on_bot_turn_audio_data``
+                events report the turn number the audio belongs to, so a clip
+                can be matched to that turn elsewhere (turn spans in tracing,
+                per-turn evals, storage keys). Without a tracker the turn
+                number is always 0.
+        """
+
+        @turn_tracker.event_handler("on_turn_started")
+        async def on_turn_started(tracker, turn_number: int):
+            self._turn_number = turn_number
 
     async def start_recording(self):
         """Start recording audio from both user and bot.
@@ -359,12 +383,20 @@ class AudioBufferProcessor(FrameProcessor):
         # _process_recording so it is always up-to-date here.
         if isinstance(frame, UserStoppedSpeakingFrame):
             await self._call_event_handler(
-                "on_user_turn_audio_data", self._user_turn_audio_buffer, self.sample_rate, 1
+                "on_user_turn_audio_data",
+                self._user_turn_audio_buffer,
+                self.sample_rate,
+                1,
+                self._turn_number,
             )
             self._user_turn_audio_buffer = bytearray()
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._call_event_handler(
-                "on_bot_turn_audio_data", self._bot_turn_audio_buffer, self.sample_rate, 1
+                "on_bot_turn_audio_data",
+                self._bot_turn_audio_buffer,
+                self.sample_rate,
+                1,
+                self._turn_number,
             )
             self._bot_turn_audio_buffer = bytearray()
 
