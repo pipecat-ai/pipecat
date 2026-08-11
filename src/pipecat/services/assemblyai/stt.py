@@ -314,7 +314,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         api_key: str,
         language: Language | None = None,
         api_endpoint_base_url: str = "wss://streaming.assemblyai.com/v3/ws",
-        sample_rate: int = 16000,
+        sample_rate: int | None = None,
         encoding: str = "pcm_s16le",
         connection_params: AssemblyAIConnectionParams | None = None,
         vad_force_turn_endpoint: bool = True,
@@ -335,7 +335,8 @@ class AssemblyAISTTService(WebsocketSTTService):
                     Will be removed in 2.0.0.
 
             api_endpoint_base_url: WebSocket endpoint URL. Defaults to AssemblyAI's streaming endpoint.
-            sample_rate: Audio sample rate in Hz. Defaults to 16000.
+            sample_rate: Audio sample rate in Hz. If None, uses the input sample
+                rate from the start frame.
             encoding: Audio encoding format. Defaults to "pcm_s16le".
             connection_params: Connection configuration parameters.
 

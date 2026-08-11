@@ -120,7 +120,7 @@ class XAISTTService(WebsocketSTTService):
         *,
         api_key: str,
         ws_url: str = "wss://api.x.ai/v1/stt",
-        sample_rate: int = 16000,
+        sample_rate: int | None = None,
         encoding: str = "pcm",
         settings: Settings | None = None,
         ttfs_p99_latency: float | None = XAI_TTFS_P99,
@@ -132,7 +132,8 @@ class XAISTTService(WebsocketSTTService):
             api_key: xAI API key (used as Bearer for the WebSocket handshake).
             ws_url: WebSocket endpoint URL. Defaults to ``wss://api.x.ai/v1/stt``.
             sample_rate: Audio sample rate in Hz. Supported values: 8000,
-                16000, 22050, 24000, 44100, 48000. Defaults to 16000.
+                16000, 22050, 24000, 44100, 48000. If None, uses the input
+                sample rate from the start frame.
             encoding: Audio encoding. One of ``"pcm"`` (signed 16-bit LE),
                 ``"mulaw"``, or ``"alaw"``. Defaults to ``"pcm"``.
             settings: Runtime-updatable settings overriding defaults.
