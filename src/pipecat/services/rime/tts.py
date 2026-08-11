@@ -75,10 +75,12 @@ class RimeTTSSettings(TTSSettings):
         noTextNormalization: Whether to disable text normalization (mistv2 only).
         saveOovs: Whether to save out-of-vocabulary words (mistv2 only).
         inlineSpeedAlpha: Inline speed control markup.
-        repetition_penalty: Token repetition penalty (coda only, 1.0-2.0).
-        temperature: Sampling temperature (coda only, 0.0-1.0).
-        top_p: Cumulative probability threshold (coda only, 0.0-1.0).
-        timeScaleFactor: Audio playback speed factor (coda only).
+        repetition_penalty: Token repetition penalty forwarded with Arcana and Coda requests
+            (1.0-2.0).
+        temperature: Sampling temperature forwarded with Arcana and Coda requests (0.0-1.0).
+        top_p: Cumulative probability threshold forwarded with Arcana and Coda requests
+            (0.0-1.0).
+        timeScaleFactor: Audio playback speed factor for Arcana and Coda requests.
             Values above 1.0 slow down the audio; values below 1.0 speed it up.
     """
 
@@ -143,9 +145,9 @@ class RimeTTSService(WebsocketTTSService):
             language: Language for synthesis. Defaults to English.
             segment: Text segmentation mode ("immediate", "bySentence", "never").
             speed_alpha: Speech speed multiplier.
-            repetition_penalty: Token repetition penalty (coda only).
-            temperature: Sampling temperature (coda only).
-            top_p: Cumulative probability threshold (coda only).
+            repetition_penalty: Token repetition penalty forwarded with Arcana and Coda requests.
+            temperature: Sampling temperature forwarded with Arcana and Coda requests.
+            top_p: Cumulative probability threshold forwarded with Arcana and Coda requests.
             reduce_latency: Whether to reduce latency at potential quality cost (mistv2 only).
             pause_between_brackets: Whether to add pauses between bracketed content (mistv2 only).
             phonemize_between_brackets: Whether to phonemize bracketed content (mistv2 only).
@@ -156,7 +158,6 @@ class RimeTTSService(WebsocketTTSService):
         language: Language | None = Language.EN
         segment: str | None = None
         speed_alpha: float | None = None
-        # Coda params
         repetition_penalty: float | None = None
         temperature: float | None = None
         top_p: float | None = None
@@ -224,7 +225,6 @@ class RimeTTSService(WebsocketTTSService):
             segment=None,
             inlineSpeedAlpha=None,
             speedAlpha=None,
-            # Coda sampling params
             repetition_penalty=None,
             temperature=None,
             top_p=None,
@@ -234,7 +234,6 @@ class RimeTTSService(WebsocketTTSService):
             phonemizeBetweenBrackets=None,
             noTextNormalization=None,
             saveOovs=None,
-            # Coda audio params
             timeScaleFactor=None,
         )
 
@@ -253,7 +252,6 @@ class RimeTTSService(WebsocketTTSService):
                 default_settings.language = params.language
                 default_settings.segment = params.segment
                 default_settings.speedAlpha = params.speed_alpha
-                # Coda sampling params
                 default_settings.repetition_penalty = params.repetition_penalty
                 default_settings.temperature = params.temperature
                 default_settings.top_p = params.top_p
@@ -343,7 +341,7 @@ class RimeTTSService(WebsocketTTSService):
         if self._settings.speedAlpha is not None:
             params["speedAlpha"] = self._settings.speedAlpha
 
-        if self._settings.model == "coda":
+        if self._settings.model in ("arcana", "coda"):
             if self._settings.repetition_penalty is not None:
                 params["repetition_penalty"] = self._settings.repetition_penalty
             if self._settings.temperature is not None:
@@ -838,7 +836,7 @@ class RimeHttpTTSService(TTSService):
         if self._settings.inlineSpeedAlpha is not None:
             payload["inlineSpeedAlpha"] = self._settings.inlineSpeedAlpha
 
-        if self._settings.model == "coda":
+        if self._settings.model in ("arcana", "coda"):
             if self._settings.repetition_penalty is not None:
                 payload["repetition_penalty"] = self._settings.repetition_penalty
             if self._settings.temperature is not None:
