@@ -56,6 +56,7 @@ Multiple transport example::
 Supported transports:
 
 - Daily - Creates rooms and tokens, runs bot as participant
+- LiveKit - Mints room tokens, runs bot as participant
 - MOQ - Media over QUIC, connects to a MOQ relay for pub/sub streaming
 - Telephony - Handles webhook and WebSocket connections for Twilio, Telnyx, Plivo, Exotel
 - WebRTC - Provides local WebRTC interface with prebuilt UI
@@ -63,8 +64,8 @@ Supported transports:
 The ``/start`` endpoint accepts::
 
     {
-        "transport": "webrtc",        // "webrtc" | "daily" | "twilio" | "telnyx" |
-                                      // "plivo" | "exotel" — default: "webrtc"
+        "transport": "webrtc",        // "webrtc" | "daily" | "livekit" | "twilio" |
+                                      // "telnyx" | "plivo" | "exotel" — default: "webrtc"
 
         // WebRTC-specific
         "enableDefaultIceServers": false,
@@ -75,6 +76,10 @@ The ``/start`` endpoint accepts::
         "dailyRoomProperties": {...},
         "dailyMeetingTokenProperties": {...},
         "body": {...}
+
+        // LiveKit-specific
+        "livekitRoomName": "my-room",
+        "body": {...}
     }
 
 To run locally:
@@ -84,6 +89,7 @@ To run locally:
 - Daily (direct, testing only): ``python bot.py -d``
 - ESP32: ``python bot.py -t webrtc --esp32 --host 192.168.1.100``
 - Exotel: ``python bot.py -t exotel`` (no proxy needed, but ngrok connection to HTTP 7860 is required)
+- LiveKit only: ``python bot.py -t livekit``
 - MOQ (bot is the server, local dev): ``python bot.py -t moq`` (serve mode and
   ``--moq-tls-generate localhost`` are the defaults)
 - MOQ (bot and browser both dial a relay): ``python bot.py -t moq --moq-connect
@@ -127,6 +133,7 @@ from pipecat.runner.moq import (
 from pipecat.runner.types import (
     DailyRunnerArguments,
     EvalRunnerArguments,
+    LiveKitRunnerArguments,
     MOQRunnerArguments,
     RunnerArguments,
     SmallWebRTCRunnerArguments,
@@ -158,6 +165,7 @@ os.environ["ENV"] = "local"
 TELEPHONY_TRANSPORTS = ["twilio", "telnyx", "plivo", "exotel"]
 TRANSPORT_ROUTE_DEPENDENCIES = {
     "daily": ("daily",),
+    "livekit": ("livekit.api",),
     "webrtc": ("aiortc",),
     "telephony": ("fastapi", "websockets"),
     "websocket": ("fastapi", "websockets"),
@@ -165,6 +173,7 @@ TRANSPORT_ROUTE_DEPENDENCIES = {
 }
 TRANSPORT_INSTALL_HINTS = {
     "daily": "install pipecat-ai[daily]",
+    "livekit": "install pipecat-ai[livekit]",
     "webrtc": "install pipecat-ai[webrtc]",
     "telephony": "install pipecat-ai[websocket]",
     "websocket": "install pipecat-ai[websocket]",
@@ -260,7 +269,7 @@ def _runner_url(args: argparse.Namespace) -> str:
 
 def _transport_status_lists() -> tuple[list[str], list[str]]:
     """Return enabled and disabled transport labels for the startup banner."""
-    transports = ["daily", "webrtc", "telephony", "websocket", "moq"]
+    transports = ["daily", "livekit", "webrtc", "telephony", "websocket", "moq"]
     enabled = []
     disabled = []
 
@@ -436,6 +445,12 @@ def _print_startup_message(args: argparse.Namespace):
                     f"http://{args.host}:{args.port}/daily-dialin-webhook"
                 )
                 print("   → Configure this URL in your Daily phone number settings")
+    elif args.transport == "livekit":
+        print("🚀 Bot ready! (LiveKit)")
+        if not _transport_routes_enabled("livekit"):
+            print(f"   → LiveKit disabled ({TRANSPORT_INSTALL_HINTS['livekit']})")
+        else:
+            print(f"   → Open: {_runner_url(args)}")
     elif args.transport in TELEPHONY_TRANSPORTS:
         print(f"🚀 Bot ready! ({args.transport.capitalize()})")
         if not _transport_routes_enabled(args.transport):
@@ -618,6 +633,7 @@ def _configure_server_app(args: argparse.Namespace):
     _setup_frontend_routes(app)
     _setup_webrtc_routes(app, args, active_sessions)
     _setup_daily_routes(app, args)
+    _setup_livekit_routes(app, args)
     _setup_telephony_routes(app, args, ws_used_tokens)
     _setup_websocket_routes(app, args, ws_used_tokens)
     _setup_unified_start_route(app, args, active_sessions)
@@ -636,7 +652,7 @@ def _setup_unified_start_route(
     When ``-t`` was passed on the command line, requests for any other transport
     are rejected with HTTP 400.
     """
-    ALL_TRANSPORTS = ["webrtc", "daily", *TELEPHONY_TRANSPORTS, "websocket", "moq"]
+    ALL_TRANSPORTS = ["webrtc", "daily", "livekit", *TELEPHONY_TRANSPORTS, "websocket", "moq"]
 
     @app.get("/status")
     async def status():
@@ -655,6 +671,9 @@ def _setup_unified_start_route(
         iceConfig: IceConfig | None
         dailyRoom: str | None
         dailyToken: str | None
+        url: str | None
+        # livekitToken: str | None
+        # livekitRoom: str | None
         wsUrl: str | None
         token: str | None
         # MoQ-specific. Carries everything the browser needs to construct
@@ -668,8 +687,8 @@ def _setup_unified_start_route(
         Accepts::
 
             {
-                "transport": "webrtc",        // "webrtc" | "daily" | "twilio" | "telnyx" |
-                                              // "plivo" | "exotel" — default: "webrtc"
+                "transport": "webrtc",        // "webrtc" | "daily" | "livekit" | "twilio" |
+                                              // "telnyx" | "plivo" | "exotel" — default: "webrtc"
 
                 // WebRTC-specific
                 "enableDefaultIceServers": false,
@@ -679,6 +698,10 @@ def _setup_unified_start_route(
                 "createDailyRoom": true,
                 "dailyRoomProperties": {...},
                 "dailyMeetingTokenProperties": {...},
+                "body": {...}
+
+                // LiveKit-specific
+                "livekitRoomName": "my-room",
                 "body": {...}
             }
         """
@@ -791,6 +814,50 @@ def _setup_unified_start_route(
             runner_args.cli_args = args
             _start_bot_session(bot_module.bot(runner_args))
             return result
+
+        elif transport == "livekit":
+            livekit_url = os.getenv("LIVEKIT_URL")
+            api_key = os.getenv("LIVEKIT_API_KEY")
+            api_secret = os.getenv("LIVEKIT_API_SECRET")
+            if not livekit_url or not api_key or not api_secret:
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        "LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET must be "
+                        "configured on the server"
+                    ),
+                )
+
+            from pipecat.runner.livekit import generate_token, generate_token_with_agent
+
+            body = request_data.get("body", {})
+            room_name = (
+                request_data.get("livekitRoomName")
+                or os.getenv("LIVEKIT_ROOM_NAME")
+                or f"pipecat-{uuid.uuid4().hex[:8]}"
+            )
+            session_id = str(uuid.uuid4())
+            # Distinct identities: the bot and the caller join as separate participants.
+            agent_token = generate_token_with_agent(room_name, "Pipecat Agent", api_key, api_secret)
+            user_token = generate_token(room_name, "User", api_key, api_secret)
+
+            bot_module = _get_bot_module()
+            runner_args = LiveKitRunnerArguments(
+                room_name=room_name,
+                url=livekit_url,
+                token=agent_token,
+                body=body,
+                session_id=session_id,
+            )
+            runner_args.cli_args = args
+            asyncio.create_task(bot_module.bot(runner_args))
+
+            return StartBotResult(
+                url=livekit_url,
+                token=user_token,
+                # room=room_name,
+                sessionId=session_id,
+            )
 
         elif transport in TELEPHONY_TRANSPORTS:
             # Telephony: the bot starts when the provider connects to /ws.
@@ -1338,6 +1405,55 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
             }
 
 
+def _setup_livekit_routes(app: FastAPI, args: argparse.Namespace):
+    """Set up LiveKit-specific routes."""
+    if not _transport_routes_enabled("livekit"):
+        return
+
+    @app.get("/livekit")
+    async def create_room_and_start_agent():
+        """Launch a LiveKit bot and redirect to a hosted LiveKit client.
+
+        Unlike Daily, LiveKit rooms are created implicitly on first join, so
+        there's no room-creation API call — just a token mint per identity.
+        """
+        logger.debug("Starting bot with LiveKit transport and redirecting to LiveKit room")
+
+        from pipecat.runner.livekit import generate_token, generate_token_with_agent
+
+        livekit_url = os.getenv("LIVEKIT_URL")
+        api_key = os.getenv("LIVEKIT_API_KEY")
+        api_secret = os.getenv("LIVEKIT_API_SECRET")
+        if not livekit_url or not api_key or not api_secret:
+            logger.error("LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET must be set")
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET must be configured "
+                    "on the server"
+                ),
+            )
+
+        room_name = os.getenv("LIVEKIT_ROOM_NAME") or f"pipecat-{uuid.uuid4().hex[:8]}"
+        # Distinct identities: the bot and the browser join as separate participants.
+        agent_token = generate_token_with_agent(room_name, "Pipecat Agent", api_key, api_secret)
+        user_token = generate_token(room_name, "User", api_key, api_secret)
+
+        bot_module = _get_bot_module()
+        runner_args = LiveKitRunnerArguments(
+            room_name=room_name,
+            url=livekit_url,
+            token=agent_token,
+            session_id=str(uuid.uuid4()),
+        )
+        runner_args.cli_args = args
+        asyncio.create_task(bot_module.bot(runner_args))
+
+        return RedirectResponse(
+            f"https://meet.livekit.io/custom?liveKitUrl={livekit_url}&token={user_token}"
+        )
+
+
 def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace, ws_used_tokens: set[str]):
     """Set up telephony-specific routes.
 
@@ -1548,7 +1664,7 @@ def main(parser: argparse.ArgumentParser | None = None):
        - --host: Server host address (default: localhost)
        - --port: Server port (default: 7860)
        - -t/--transport: Restrict to a single transport and set as default for /start
-         (daily, webrtc, websocket, twilio, telnyx, plivo, exotel). Omit to support
+         (daily, livekit, webrtc, websocket, twilio, telnyx, plivo, exotel). Omit to support
          all transports.
        - -x/--proxy: Public proxy hostname for telephony webhooks
        - -d/--direct: Connect directly to Daily room (automatically sets transport to daily)
@@ -1576,7 +1692,16 @@ def main(parser: argparse.ArgumentParser | None = None):
         "-t",
         "--transport",
         type=str,
-        choices=["daily", "eval", "moq", "vonage", "webrtc", "websocket", *TELEPHONY_TRANSPORTS],
+        choices=[
+            "daily",
+            "eval",
+            "livekit",
+            "moq",
+            "vonage",
+            "webrtc",
+            "websocket",
+            *TELEPHONY_TRANSPORTS,
+        ],
         default=None,
         help=(
             "Restrict the server to a single transport and set it as the default for /start. "

@@ -656,6 +656,9 @@ class LLMMessagesAppendFrame(DataFrame):
     messages: list[LLMContextMessage]
     run_llm: bool | None = None
 
+    def __str__(self):
+        return f"{self.name}(run_llm: {self.run_llm})"
+
 
 @dataclass
 class LLMMessagesUpdateFrame(DataFrame):
