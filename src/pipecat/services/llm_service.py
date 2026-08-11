@@ -531,6 +531,17 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self._appended_system_instructions.append(instruction)
         self._compose_system_instruction()
 
+    def _has_async_tools(self) -> bool:
+        """Whether any registered tool runs asynchronously.
+
+        Returns:
+            True when a tool is registered with ``cancel_on_interruption=False``,
+            which is what makes the async-tool guidance worth composing in. The
+            built-in cancellation tool is registered as a synchronous one, so it
+            never counts on its own.
+        """
+        return any(not item.cancel_on_interruption for item in self._functions.values())
+
     def _compose_system_instruction(self):
         """Rebuild ``system_instruction`` from the base prompt and all active addons.
 
@@ -1056,10 +1067,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 f"{self}: auto-registered handler for advertised FunctionSchema '{schema.name}'"
             )
 
-        # The advertised set is what decides whether the async-tool guidance belongs
-        # in the system instruction, and it is not known until this point.
-        self._compose_system_instruction()
-
     def _warn_if_redundant_manual_registration(self, function_name: str) -> None:
         """Warn that a manual registration is unnecessary, once per function.
 
@@ -1158,6 +1165,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # still advertised. Once it leaves the advertised set, drop the suppression
         # so re-advertising it (a later tool-set change) registers it afresh.
         self._explicitly_unregistered_function_names &= advertised
+
+        # Whether the async-tool guidance belongs in the system instruction follows
+        # from the registry, which is not settled until here: tools advertised on a
+        # context frame register during this sync. Recomposing at the end of the sync
+        # rather than alongside those registrations also covers a manual registration,
+        # and a context that advertises nothing.
+        self._compose_system_instruction()
 
     def _unregister_unadvertised_tool_handlers(self, advertised: set[str | None]) -> None:
         """Drop auto-registered handlers for tools no longer advertised.

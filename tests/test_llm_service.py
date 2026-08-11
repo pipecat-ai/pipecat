@@ -524,6 +524,46 @@ class TestAsyncToolCancellationSetup(unittest.IsolatedAsyncioTestCase):
         self.assertIn(CANCEL_ASYNC_TOOL_NAME, service._functions)
 
 
+class TestAsyncToolInstructions(unittest.IsolatedAsyncioTestCase):
+    """The async-tool guidance follows the registry, however a tool got there."""
+
+    @staticmethod
+    async def _handler(params):
+        pass
+
+    def _composed(self, service) -> str:
+        return service._settings.system_instruction or ""
+
+    def test_manual_async_registration(self):
+        service = MockLLMService(system_instruction="BASE")
+        service.register_function("weather", self._handler, cancel_on_interruption=False)
+        # A manual registration never goes through the advertised-tool path, and a
+        # context can advertise nothing at all; the sync still settles the registry.
+        service._sync_registered_tool_handlers(NOT_GIVEN)
+        self.assertIn("ASYNC TOOLS:", self._composed(service))
+
+    def test_advertised_async_tool(self):
+        service = MockLLMService(system_instruction="BASE")
+        service.register_function("weather", self._handler, cancel_on_interruption=False)
+        service._sync_registered_tool_handlers(LLMContext(tools=NOT_GIVEN).tools)
+        self.assertIn("ASYNC TOOLS:", self._composed(service))
+
+    def test_absent_without_async_tools(self):
+        service = MockLLMService(system_instruction="BASE")
+        service.register_function("weather", self._handler)
+        service._sync_registered_tool_handlers(NOT_GIVEN)
+        self.assertNotIn("ASYNC TOOLS:", self._composed(service))
+        self.assertEqual(self._composed(service), "BASE")
+
+    def test_absent_for_the_cancellation_tool_alone(self):
+        # The built-in registers as synchronous, so it never brings the guidance
+        # in on its own.
+        service = MockLLMService(system_instruction="BASE", enable_async_tool_cancellation=True)
+        service._setup_async_tool_cancellation()
+        service._sync_registered_tool_handlers(NOT_GIVEN)
+        self.assertNotIn("ASYNC TOOLS:", self._composed(service))
+
+
 class TestProcessFrameToolWiring(unittest.IsolatedAsyncioTestCase):
     """process_frame syncs handlers from the context frame's advertised tools."""
 
