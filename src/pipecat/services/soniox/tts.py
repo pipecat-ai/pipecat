@@ -11,7 +11,7 @@ Text-to-Speech API. It streams text to the server incrementally and receives
 audio back as base64-encoded chunks, multiplexed across multiple concurrent
 streams by ``stream_id``.
 
-Soniox API reference: https://soniox.com/docs/tts/api-reference/websocket-api
+Soniox API reference: https://soniox.com/docs/api-reference/tts/websocket-api
 """
 
 import asyncio
@@ -81,6 +81,7 @@ def language_to_soniox_tts_language(language: Language) -> str | None:
         Language.HR: "hr",
         Language.HU: "hu",
         Language.ID: "id",
+        Language.IS: "is",
         Language.IT: "it",
         Language.JA: "ja",
         Language.KK: "kk",
@@ -103,6 +104,7 @@ def language_to_soniox_tts_language(language: Language) -> str | None:
         Language.SL: "sl",
         Language.SQ: "sq",
         Language.SR: "sr",
+        Language.SU: "su",
         Language.SV: "sv",
         Language.SW: "sw",
         Language.TA: "ta",
@@ -112,6 +114,7 @@ def language_to_soniox_tts_language(language: Language) -> str | None:
         Language.TR: "tr",
         Language.UK: "uk",
         Language.UR: "ur",
+        Language.UZ: "uz",
         Language.VI: "vi",
         Language.ZH: "zh",
     }
@@ -147,7 +150,7 @@ class SonioxTTSService(WebsocketTTSService):
     ``stream_id``). Supports up to 5 concurrent streams per connection.
 
     For complete API documentation, see:
-    https://soniox.com/docs/tts/api-reference/websocket-api
+    https://soniox.com/docs/api-reference/tts/websocket-api
     """
 
     Settings = SonioxTTSSettings
@@ -183,8 +186,8 @@ class SonioxTTSService(WebsocketTTSService):
         """
         # Initialize default_settings
         default_settings = self.Settings(
-            model="tts-rt-v1",
-            voice="Adrian",
+            model="tts-rt-v2",
+            voice="Bryce",
             language=Language.EN,
             speed=None,
         )
