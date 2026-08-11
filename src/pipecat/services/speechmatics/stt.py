@@ -8,10 +8,10 @@
 
 import asyncio
 import os
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     ProposedUserStoppedSpeakingFrame,
     StartFrame,
     STTMetadataFrame,
+    TextFrame,
     TranscriptionFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -422,16 +423,19 @@ class SpeechmaticsSTTService(STTService):
             **kwargs: Additional arguments passed to STTService.
         """
         # Service parameters
-        self._api_key: str = api_key or os.getenv("SPEECHMATICS_API_KEY")
-        self._base_url: str = (
+        api_key = api_key or os.getenv("SPEECHMATICS_API_KEY")
+        base_url = (
             base_url or os.getenv("SPEECHMATICS_RT_URL") or "wss://eu2.rt.speechmatics.com/v2"
         )
 
         # Check we have required attributes
-        if not self._api_key:
+        if not api_key:
             raise ValueError("Missing Speechmatics API key")
-        if not self._base_url:
+        if not base_url:
             raise ValueError("Missing Speechmatics base URL")
+
+        self._api_key: str = api_key
+        self._base_url: str = base_url
 
         self._should_interrupt = should_interrupt
 
@@ -607,9 +611,13 @@ class SpeechmaticsSTTService(STTService):
             logger.debug(f"{self} applying hot settings update: {changed.keys()}")
             if self._config.enable_diarization:
                 # Only hot-updatable fields changed — push to the live session.
-                self._config.speaker_config.focus_speakers = self._settings.focus_speakers
-                self._config.speaker_config.ignore_speakers = self._settings.ignore_speakers
-                self._config.speaker_config.focus_mode = self._settings.focus_mode
+                self._config.speaker_config.focus_speakers = assert_given(
+                    self._settings.focus_speakers
+                )
+                self._config.speaker_config.ignore_speakers = assert_given(
+                    self._settings.ignore_speakers
+                )
+                self._config.speaker_config.focus_mode = assert_given(self._settings.focus_mode)
                 if self._client:
                     self._client.update_diarization_config(self._config.speaker_config)
             else:
@@ -657,7 +665,7 @@ class SpeechmaticsSTTService(STTService):
         self._config.sample_rate = self.sample_rate
 
         # STT client
-        self._client: VoiceAgentClient = VoiceAgentClient(
+        self._client = VoiceAgentClient(
             api_key=self._api_key,
             url=self._base_url,
             app=f"pipecat/{pipecat_version()}",
@@ -668,25 +676,31 @@ class SpeechmaticsSTTService(STTService):
         def add_message(message: dict[str, Any]):
             self._stt_msg_queue.put_nowait(message)
 
+        # The event emitter is inherited from the real-time SDK and types its events
+        # as `ServerMessageType`, which has no member for half of the voice agent's
+        # events. The agent registers and emits `AgentServerMessageType`, as the SDK
+        # itself does internally, and the emitter matches on the member either way.
+        on = cast(Callable[[AgentServerMessageType, Callable], Any], self._client.on)
+
         # Add listeners
-        self._client.on(AgentServerMessageType.ADD_PARTIAL_SEGMENT, add_message)
-        self._client.on(AgentServerMessageType.ADD_SEGMENT, add_message)
+        on(AgentServerMessageType.ADD_PARTIAL_SEGMENT, add_message)
+        on(AgentServerMessageType.ADD_SEGMENT, add_message)
 
         # Add listeners for VAD
         if self._enable_vad:
-            self._client.on(AgentServerMessageType.START_OF_TURN, add_message)
-            self._client.on(AgentServerMessageType.END_OF_TURN, add_message)
+            on(AgentServerMessageType.START_OF_TURN, add_message)
+            on(AgentServerMessageType.END_OF_TURN, add_message)
 
         # Speaker result listener
         if self._config.enable_diarization:
-            self._client.on(AgentServerMessageType.SPEAKERS_RESULT, add_message)
+            on(AgentServerMessageType.SPEAKERS_RESULT, add_message)
 
         # Other messages for debugging
-        self._client.on(AgentServerMessageType.ERROR, add_message)
-        self._client.on(AgentServerMessageType.WARNING, add_message)
-        self._client.on(AgentServerMessageType.INFO, add_message)
-        self._client.on(AgentServerMessageType.END_OF_TURN_PREDICTION, add_message)
-        self._client.on(AgentServerMessageType.END_OF_UTTERANCE, add_message)
+        on(AgentServerMessageType.ERROR, add_message)
+        on(AgentServerMessageType.WARNING, add_message)
+        on(AgentServerMessageType.INFO, add_message)
+        on(AgentServerMessageType.END_OF_TURN_PREDICTION, add_message)
+        on(AgentServerMessageType.END_OF_UTTERANCE, add_message)
 
         # Connect to the client
         try:
@@ -761,25 +775,23 @@ class SpeechmaticsSTTService(STTService):
         # Audio encoding (init-only, stored as instance attribute)
         config.audio_encoding = self._audio_encoding
 
-        # Language + domain
-        language = assert_given(s.language)
+        # Language + domain. The stored language may be a plain code rather than a
+        # Language, but the mapping keys compare equal either way.
+        language = cast(Language, assert_given(s.language))
         config.language = self._language_to_speechmatics_language(language)
-        config.domain = s.domain if s.domain is not None else None
+        config.domain = assert_given(s.domain)
         config.output_locale = self._locale_to_speechmatics_locale(config.language, language)
 
         # Speaker config
-        focus_speakers = assert_given(s.focus_speakers)
-        ignore_speakers = assert_given(s.ignore_speakers)
-        focus_mode = assert_given(s.focus_mode)
         config.speaker_config = SpeakerFocusConfig(
-            focus_speakers=focus_speakers if focus_speakers is not None else [],
-            ignore_speakers=ignore_speakers if ignore_speakers is not None else [],
-            focus_mode=focus_mode if focus_mode is not None else SpeakerFocusMode.RETAIN,
+            focus_speakers=assert_given(s.focus_speakers),
+            ignore_speakers=assert_given(s.ignore_speakers),
+            focus_mode=assert_given(s.focus_mode),
         )
-        config.known_speakers = s.known_speakers if s.known_speakers is not None else []
+        config.known_speakers = assert_given(s.known_speakers)
 
         # Custom dictionary
-        config.additional_vocab = s.additional_vocab if s.additional_vocab is not None else []
+        config.additional_vocab = assert_given(s.additional_vocab)
 
         # Advanced parameters — only set if not None
         for param in [
@@ -984,7 +996,7 @@ class SpeechmaticsSTTService(STTService):
             return
 
         # Frames to send
-        frames: list[Frame] = []
+        frames: list[TextFrame] = []
 
         # Create frame from segment
         def attr_from_segment(segment: dict[str, Any]) -> dict[str, Any]:
@@ -1064,6 +1076,8 @@ class SpeechmaticsSTTService(STTService):
             **kwargs: Additional arguments passed to the underlying transport.
         """
         try:
+            if not self._client:
+                raise RuntimeError("session is not running")
             payload = {"message": message}
             payload.update(kwargs)
             logger.debug(f"{self} sending message to STT: {payload}")
@@ -1203,11 +1217,14 @@ class SpeechmaticsSTTService(STTService):
             return None
 
         # Get the locale code
-        result = LOCALES.get(base_code).get(locale, None)
+        result = LOCALES[base_code].get(locale, None)
 
-        # Fail if locale is not supported
+        # Fail if locale is not supported. No `{self}` prefix here: `_build_config`
+        # runs before the base class __init__ has named this processor.
         if not result:
-            logger.warning(f"{self} Unsupported output locale: {locale}, defaulting to {base_code}")
+            logger.warning(
+                f"Unsupported Speechmatics output locale: {locale}, defaulting to {base_code}"
+            )
 
         # Return the locale code
         return result
