@@ -439,6 +439,21 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
         # which contexts are safe to target.
         self._context_init_sent: set[str] = set()
 
+        # Contexts that have received their first audio chunk. Once audio is
+        # streaming, the server orders isFinal after the last byte, so closing
+        # is safe.
+        self._contexts_with_first_audio: set[str] = set()
+
+        # Contexts whose end-of-turn close was deferred because no audio had
+        # arrived yet -- closing then would let isFinal overtake the first
+        # audio chunk and drop the whole utterance. The close is sent once the
+        # first chunk arrives (see _receive_messages), or on interruption. A
+        # context that never produces any audio gets its close sent once the
+        # local audio-context queue times out waiting for audio (see
+        # on_audio_context_completed), so the server-side context is never
+        # left open indefinitely.
+        self._contexts_pending_close: set[str] = set()
+
     def _set_voice_settings(self):
         return build_elevenlabs_voice_settings(self._settings)
 
@@ -481,6 +496,8 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
 
     def _clear_connection_state(self):
         self._context_init_sent.clear()
+        self._contexts_with_first_audio.clear()
+        self._contexts_pending_close.clear()
 
     async def _close_context(self, context_id: str):
         # ElevenLabs requires that Pipecat explicitly closes contexts to free
@@ -504,16 +521,41 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
         super()._reset_alignment_state(context_id)
         self._alignment_started_context_ids.discard(context_id)
         self._context_init_sent.discard(context_id)
+        self._contexts_with_first_audio.discard(context_id)
+        self._contexts_pending_close.discard(context_id)
+
+    async def on_audio_context_completed(self, context_id: str):
+        """Send any deferred close, then reset state after the audio has played.
+
+        The local audio context queue also reaches completion when it times
+        out waiting for audio (``stop_frame_timeout_s``, e.g. slow synthesis
+        under load) rather than via a server isFinal ack. If a close was
+        deferred for this context and never got sent (no audio ever arrived
+        to trigger it), send it now so the server-side context isn't leaked.
+        """
+        if context_id in self._contexts_pending_close:
+            await self._close_context(context_id)
+        await super().on_audio_context_completed(context_id)
 
     async def on_turn_context_completed(self):
         """Close the server-side context at end of turn.
 
-        Sends close_context so isFinal arrives immediately after the last audio byte.
+        When audio is already streaming, closing now is safe: the server
+        orders isFinal after the last audio byte. But when synthesis is still
+        buffered (no audio yet), an immediate close lets isFinal overtake the
+        first chunk and drop the whole utterance, so the close is deferred
+        until the first chunk arrives (see _receive_messages). Turns that
+        never sent any text (function-call-only turns) never opened a
+        context, so nothing is closed.
         """
         context_id = self._turn_context_id
         await super().on_turn_context_completed()
-        if context_id:
+        if not context_id or not self.audio_context_available(context_id):
+            return
+        if context_id in self._contexts_with_first_audio:
             await self._close_context(context_id)
+        else:
+            self._contexts_pending_close.add(context_id)
 
     async def _receive_messages(self):
         """Handle incoming WebSocket messages from ElevenLabs."""
@@ -537,6 +579,11 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
                 audio = base64.b64decode(msg["audio"])
                 frame = TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=received_ctx_id)
                 await self.append_to_audio_context(received_ctx_id, frame)
+                if received_ctx_id and received_ctx_id not in self._contexts_with_first_audio:
+                    self._contexts_with_first_audio.add(received_ctx_id)
+                    if received_ctx_id in self._contexts_pending_close:
+                        self._contexts_pending_close.discard(received_ctx_id)
+                        await self._close_context(received_ctx_id)
 
             raw_alignment = _select_alignment(
                 msg,
