@@ -441,6 +441,5 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(turn_durations[2], 0.3)
 
 
-
 if __name__ == "__main__":
     unittest.main()
