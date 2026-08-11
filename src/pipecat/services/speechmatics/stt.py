@@ -676,10 +676,11 @@ class SpeechmaticsSTTService(STTService):
         def add_message(message: dict[str, Any]):
             self._stt_msg_queue.put_nowait(message)
 
-        # The event emitter is inherited from the real-time SDK and types its events
-        # as `ServerMessageType`, which has no member for half of the voice agent's
-        # events. The agent registers and emits `AgentServerMessageType`, as the SDK
-        # itself does internally, and the emitter matches on the member either way.
+        # `VoiceAgentClient.on()` is inherited from the real-time SDK, which annotates
+        # its event parameter as `ServerMessageType` — an enum with no member for half
+        # the events registered below. Registering them is still correct: the emitter
+        # keys its handler dict by whatever member it is given, and the client emits
+        # these same `AgentServerMessageType` members. One cast covers them all.
         on = cast(Callable[[AgentServerMessageType, Callable], Any], self._client.on)
 
         # Add listeners
