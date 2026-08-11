@@ -50,6 +50,12 @@ class TrialResult:
     sent_wav: np.ndarray = field(repr=False, default=None)
     recv_wav: np.ndarray = field(repr=False, default=None)
     recv_chunk_stats: dict = field(default_factory=dict)
+    # Per matched marker (index-aligned), for ladder-diagram correlation
+    # against the bot's own per-frame log: the marker's sample offset in the
+    # probe signal, and its client-side send/recv monotonic timestamps.
+    matched_marker_positions: list[int] = field(default_factory=list, repr=False)
+    matched_t_send: list[float] = field(default_factory=list, repr=False)
+    matched_t_recv: list[float] = field(default_factory=list, repr=False)
 
 
 async def run_trial(
@@ -111,12 +117,17 @@ async def run_trial(
         recv_stamps[int(np.searchsorted(chunk_bounds, pos, side="right"))] for pos in onsets
     ]
 
-    # Marker send times: handoff of the chunk containing the onset.
+    # Marker send times: handoff of the chunk containing the onset. Filtered
+    # in lockstep with marker_positions so index k means the same marker in
+    # both — needed to trace a matched marker's sample offset into the bot's
+    # own per-frame log (ladder-diagram correlation).
+    in_range = [int(pos) // chunk_samples < len(send_handoffs) for pos in marker_positions]
     marker_send_times = [
         send_handoffs[int(pos) // chunk_samples]
-        for pos in marker_positions
-        if int(pos) // chunk_samples < len(send_handoffs)
+        for pos, keep in zip(marker_positions, in_range)
+        if keep
     ]
+    marker_positions_filtered = [int(pos) for pos, keep in zip(marker_positions, in_range) if keep]
 
     # Pair each received onset with the unique sent marker in the window
     # (~0, period). Ambiguity or no candidate => not measured.
@@ -124,6 +135,9 @@ async def run_trial(
     window_lo = -0.001
     warmup_end = send_handoffs[0] + warmup_s
     rtts_ms: list[float] = []
+    matched_positions: list[int] = []
+    matched_t_send: list[float] = []
+    matched_t_recv: list[float] = []
     ambiguous = 0
     used: set[int] = set()
     for t_r in onset_recv_times:
@@ -134,8 +148,12 @@ async def run_trial(
         ]
         if len(cands) == 1:
             used.add(cands[0])
-            if marker_send_times[cands[0]] >= warmup_end:
-                rtts_ms.append((t_r - marker_send_times[cands[0]]) * 1000.0)
+            k = cands[0]
+            if marker_send_times[k] >= warmup_end:
+                rtts_ms.append((t_r - marker_send_times[k]) * 1000.0)
+                matched_positions.append(marker_positions_filtered[k])
+                matched_t_send.append(marker_send_times[k])
+                matched_t_recv.append(t_r)
         elif len(cands) > 1:
             ambiguous += 1
 
@@ -155,6 +173,9 @@ async def run_trial(
             / sample_rate
             * 1000.0,
         },
+        matched_marker_positions=matched_positions,
+        matched_t_send=matched_t_send,
+        matched_t_recv=matched_t_recv,
     )
 
 

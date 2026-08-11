@@ -14,10 +14,19 @@ times are written as JSON to ``$BENCH_BOT_STATS`` at shutdown so the client's
 round-trip numbers can be decomposed into wire+codec vs pipeline overhead.
 
 Env vars:
-    BENCH_JITTER_MS   MoQ receive jitter buffer (audio_in_max_latency_ms),
-                      default 60. The benchmark client pins its own MoQ
-                      subscribe latency to the same value.
-    BENCH_BOT_STATS   Path to write the observer's JSON stats.
+    BENCH_JITTER_MS      MoQ receive jitter buffer (audio_in_max_latency_ms),
+                         default 60. The benchmark client pins its own MoQ
+                         subscribe latency to the same value.
+    BENCH_WEBRTC_PREFETCH  Overrides aiortc's hardcoded audio JitterBuffer
+                         prefetch (see webrtc_client.configure_audio_jitter_prefetch)
+                         for THIS process's receiver — i.e. the bot's own
+                         receive side. Unset by default (stock aiortc
+                         behavior, prefetch=4); the benchmark harness sets
+                         it to match the client's --webrtc-prefetch so both
+                         legs of a webrtc-* scenario measure the same
+                         configuration, not an unpatched bot against a
+                         patched client.
+    BENCH_BOT_STATS      Path to write the observer's JSON stats.
 
 Usage:
     uv run python benchmarks/transport_latency/echo_bot.py -t webrtc
@@ -44,6 +53,12 @@ from pipecat.workers.runner import WorkerRunner
 
 SAMPLE_RATE = 48000
 JITTER_MS = int(os.getenv("BENCH_JITTER_MS", "60"))
+
+_webrtc_prefetch = os.getenv("BENCH_WEBRTC_PREFETCH")
+if _webrtc_prefetch is not None:
+    from webrtc_client import configure_audio_jitter_prefetch
+
+    configure_audio_jitter_prefetch(int(_webrtc_prefetch))
 
 transport_params = {
     "moq": lambda: MOQParams(
@@ -124,6 +139,14 @@ class LatencyObserver(BaseObserver):
                 "p95": float(np.percentile(deltas_ms, 95)) if deltas_ms else None,
                 "max": float(max(deltas_ms)) if deltas_ms else None,
             },
+            # Raw per-frame (cumulative sample count, monotonic timestamp)
+            # log, keyed the same way as the aggregates above. Lets an
+            # external client — on the same machine, sharing the OS's
+            # monotonic clock — correlate a specific marker's sample offset
+            # to this bot's own receive/send stamps for ladder-diagram
+            # reconstruction.
+            "in_raw": self._in,
+            "out_raw": self._out,
         }
         with open(path, "w") as f:
             json.dump(stats, f, indent=2)
