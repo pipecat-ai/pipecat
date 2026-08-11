@@ -1341,8 +1341,11 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
                     return
 
                 if result is None:
-                    # The service has no more events to send.
-                    break
+                    # The service has no more events to send. Our own disconnect
+                    # and a session-continuation handoff are both handled above,
+                    # so reaching here means the stream ended while we still
+                    # wanted it: reconnect via the handler below.
+                    raise RuntimeError("AWS Bedrock ended the response stream")
 
                 if not isinstance(result, InvokeModelWithBidirectionalStreamOutputChunk):
                     raise RuntimeError(f"AWS Bedrock stream reported: {result}")
