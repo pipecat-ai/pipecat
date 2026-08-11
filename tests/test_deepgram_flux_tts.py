@@ -64,8 +64,8 @@ def _flux_server_handler(captured: dict, *, warning_first: bool = False):
                             json.dumps(
                                 {
                                     "type": "Warning",
-                                    "code": "NO_ACTIVE_SPEECH",
-                                    "description": "There is no active turn.",
+                                    "code": "TEXT_TRUNCATED",
+                                    "description": "Input text was truncated.",
                                 }
                             )
                         )
@@ -212,14 +212,13 @@ async def test_flux_tts_sentence_mode_appends_trailing_space():
 
 
 @pytest.mark.asyncio
-async def test_flux_tts_interruption_reconnects_and_sends_no_clear():
-    """On barge-in the service reconnects the websocket and sends no message."""
+async def test_flux_tts_interruption_sends_interrupt_and_keeps_connection():
+    """On barge-in the service sends Interrupt and keeps the session open."""
     tts_service = DeepgramFluxTTSService(api_key="test-key", sample_rate=24000)
 
     websocket = AsyncMock()
     websocket.state = State.OPEN
     tts_service._websocket = websocket
-    tts_service._bot_speaking = True
 
     with (
         patch.object(TTSService, "_handle_interruption", new=AsyncMock()),
@@ -228,10 +227,46 @@ async def test_flux_tts_interruption_reconnects_and_sends_no_clear():
     ):
         await tts_service._handle_interruption(InterruptionFrame(), FrameDirection.DOWNSTREAM)
 
-    assert disconnect_spy.called
-    assert connect_spy.called
-    # Flux has no Clear/Interrupt message; nothing must be sent on the socket.
-    assert not websocket.send.called
+    assert not disconnect_spy.called
+    assert not connect_spy.called
+    # Interrupt takes no other fields: the schema rejects unknown ones and
+    # closes the connection.
+    sent = [json.loads(call.args[0]) for call in websocket.send.call_args_list]
+    assert sent == [{"type": "Interrupt"}]
+
+
+@pytest.mark.asyncio
+async def test_flux_tts_interruption_leaves_no_active_audio_context():
+    """A barge-in sends Interrupt and leaves no context for in-flight audio.
+
+    Binary frames carry no speech_id, so audio is attributed to whichever
+    context is active. Clearing it is what keeps audio the server generated
+    before it processed the Interrupt out of the next turn.
+    """
+    captured: dict = {"messages": []}
+
+    async with serve(_flux_server_handler(captured), "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+
+        tts_service = DeepgramFluxTTSService(
+            api_key="test-key",
+            url=f"ws://{host}:{port}/v2/speak",
+            sample_rate=24000,
+        )
+
+        await run_test(
+            tts_service,
+            frames_to_send=[
+                TTSSpeakFrame(text="Hello from Flux."),
+                SleepFrame(sleep=0.2),
+                InterruptionFrame(),
+                SleepFrame(sleep=0.2),
+            ],
+        )
+
+    assert any(m.get("type") == "Interrupt" for m in captured["messages"])
+    assert tts_service.get_active_audio_context_id() is None
+    assert not tts_service.get_audio_contexts()
 
 
 @pytest.mark.asyncio

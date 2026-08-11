@@ -23,12 +23,14 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
+    InterruptionFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import TTSSettings
-from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode
+from pipecat.services.tts_service import TextAggregationMode, WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
@@ -45,13 +47,11 @@ class DeepgramFluxTTSSettings(TTSSettings):
     pass
 
 
-class DeepgramFluxTTSService(InterruptibleTTSService):
-    """Deepgram Flux WebSocket text-to-speech service (early access).
+class DeepgramFluxTTSService(WebsocketTTSService):
+    """Deepgram Flux WebSocket text-to-speech service.
 
     Provides real-time speech synthesis using Deepgram's Flux TTS API at
-    ``wss://api.deepgram.com/v2/speak``. LLM tokens are streamed to the
-    server as ``Speak`` messages and each agent response is synthesized as
-    a discrete turn ended by a ``Flush``. Flux keeps acoustic state across
+    ``wss://api.deepgram.com/v2/speak``. Flux keeps acoustic state across
     turns on a single connection, so prosody and pacing stay consistent
     throughout a conversation.
 
@@ -61,17 +61,6 @@ class DeepgramFluxTTSService(InterruptibleTTSService):
     punctuation only adds latency. Pass
     ``text_aggregation_mode=TextAggregationMode.SENTENCE`` to aggregate
     text into sentences before synthesis instead.
-
-    Flux does not yet provide a message to cancel the active turn, so
-    interruptions are handled by the :class:`InterruptibleTTSService`
-    behavior of reconnecting the websocket while the bot is speaking. A
-    reconnect (interruption or the server's one-hour session cap) resets
-    Flux's cross-turn prosody state, which is expected. Once Deepgram ships
-    the planned ``Interrupt`` message, the base class can change to
-    :class:`WebsocketTTSService` and send it instead of reconnecting.
-
-    Flux TTS is early access: the voice catalog and parts of the protocol
-    may change before general availability.
 
     Event handlers:
 
@@ -121,7 +110,7 @@ class DeepgramFluxTTSService(InterruptibleTTSService):
                 Defaults to ``TextAggregationMode.TOKEN``, streaming LLM tokens
                 straight to Flux for the lowest latency.
             settings: Runtime-updatable settings.
-            **kwargs: Additional arguments passed to parent InterruptibleTTSService class.
+            **kwargs: Additional arguments passed to parent WebsocketTTSService class.
 
         Raises:
             ValueError: If an explicit sample_rate is not supported.
@@ -202,6 +191,18 @@ class DeepgramFluxTTSService(InterruptibleTTSService):
             self._receive_task = None
 
         await self._disconnect_websocket()
+
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
+        # `Interrupt` is a no-op when no turn is active, so it is sent on every
+        # interruption: local speaking state tracks playback, which outlasts the
+        # server's synthesis of the turn.
+        if self._websocket and self._websocket.state is State.OPEN:
+            try:
+                await self._websocket.send(json.dumps({"type": "Interrupt"}))
+            except Exception as e:
+                logger.error(f"{self} error sending Interrupt message: {e}")
+
+        await super()._handle_interruption(frame, direction)
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta.
@@ -285,9 +286,9 @@ class DeepgramFluxTTSService(InterruptibleTTSService):
             if self._websocket:
                 logger.debug("Disconnecting from Deepgram Flux WebSocket")
                 # No `Close` message here: in Flux, `Close` asks the server to
-                # drain the active turn (generating all remaining audio),
-                # which is the opposite of what an interruption-driven
-                # disconnect needs. Closing the socket ends the session.
+                # drain the active turn, generating all of its remaining audio,
+                # which a teardown has no use for. Closing the socket ends the
+                # session outright.
                 await self._websocket.close()
         except Exception as e:
             logger.error(f"{self} exception: {e}")
@@ -308,8 +309,9 @@ class DeepgramFluxTTSService(InterruptibleTTSService):
             if isinstance(message, bytes):
                 # Binary audio frames carry no speech_id, so audio is
                 # attributed to the active audio context. This is safe because
-                # `pause_frame_processing=True` serializes turns and
-                # interruptions tear the connection down.
+                # `pause_frame_processing=True` serializes turns, and an
+                # interruption leaves no active context, so audio the server
+                # had already generated for the abandoned turn is discarded.
                 ctx_id = self.get_active_audio_context_id()
                 frame = TTSAudioRawFrame(message, self.sample_rate, 1, context_id=ctx_id)
                 await self.append_to_audio_context(ctx_id, frame)
@@ -342,13 +344,29 @@ class DeepgramFluxTTSService(InterruptibleTTSService):
                             ctx_id, TTSStoppedFrame(context_id=ctx_id)
                         )
                         await self.remove_audio_context(ctx_id)
+                    elif msg_type == "SpeechInterrupted":
+                        # Acknowledges an Interrupt. The reported total covers
+                        # audio the server generated, not audio the user heard,
+                        # since the request carries no playback offset.
+                        logger.trace(
+                            f"{self}: speech interrupted (speech_id: {msg.get('speech_id')}, "
+                            f"audio played: {msg.get('audio_played_ms')}ms)"
+                        )
                     elif msg_type == "SessionMetadata":
                         logger.debug(f"{self}: session totals: {msg}")
                     elif msg_type == "Warning":
-                        logger.warning(
-                            f"{self} warning {msg.get('code')}: "
-                            f"{msg.get('description', 'Unknown warning')}"
-                        )
+                        code = msg.get("code")
+                        if code == "NO_ACTIVE_SPEECH":
+                            # Routine: an Interrupt goes out on every user turn
+                            # and most find nothing to cancel, since the server
+                            # finishes synthesizing a turn well before its audio
+                            # finishes playing.
+                            logger.trace(f"{self}: no active turn to interrupt")
+                        else:
+                            logger.warning(
+                                f"{self} warning {code}: "
+                                f"{msg.get('description', 'Unknown warning')}"
+                            )
                     elif msg_type == "Error":
                         error_msg = (
                             f"{self} error {msg.get('code')}: "
