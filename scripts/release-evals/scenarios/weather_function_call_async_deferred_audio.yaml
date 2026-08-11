@@ -30,7 +30,7 @@ turns:
     expect:
       - event: llm_started
 
-  - user: "Actually, I've changed my mind. Tell me a dad joke instead."
+  - user: "Actually, I've changed my mind. Tell me a joke instead."
     send_after:
       event: llm_started
       delay_ms: 10000

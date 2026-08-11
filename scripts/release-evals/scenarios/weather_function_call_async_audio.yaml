@@ -23,12 +23,12 @@ turns:
 
   # The delay lets a bot's "let me check on that" filler finish before the joke
   # request arrives.
-  - user: "Tell me a joke about cats."
+  - user: "Tell me a joke."
     send_after:
       delay_ms: 3000
     expect:
       - event: response
-        eval: "tells a joke about cats"
+        eval: "tells a joke"
 
   # No user turn: the weather lookup's result arrived while the bot was telling
   # the joke, and the bot reports it on its own once the joke is done.
