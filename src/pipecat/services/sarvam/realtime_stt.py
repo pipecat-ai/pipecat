@@ -34,13 +34,14 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.sarvam._sdk import sdk_headers
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given, is_given
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import SARVAM_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 _REALTIME_STT_URL = "wss://api.sarvam.ai/speech-to-text-realtime/ws"
 _REALTIME_MODEL = "saaras:v3-realtime"
@@ -166,21 +167,21 @@ class SarvamRealtimeSTTSettings(STTSettings):
         lid_confidence_threshold: Optional auto-LID confidence threshold.
     """
 
-    language_code: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    stream_type: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    endpointing: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    sample_rate: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    mode: Literal["transcribe", "translate", "verbatim", "translit", "codemix"] | _NotGiven = field(
+    language_code: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    stream_type: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpointing: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    sample_rate: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    mode: Literal["transcribe", "translate", "verbatim", "translit", "codemix"] | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    return_timestamps: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    prefix_padding_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    silence_duration_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    min_speech_duration_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    lid_gate_seconds: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    lid_confidence_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    return_timestamps: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prefix_padding_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    silence_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    min_speech_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    lid_gate_seconds: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    lid_confidence_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SarvamRealtimeSTTService(WebsocketSTTService):
@@ -810,7 +811,7 @@ def _applied_keys(message: dict[str, Any]) -> set[str] | None:
 
 def _validate_optional_range(
     field_name: str,
-    value: float | int | None | _NotGiven,
+    value: float | int | None | NotGiven,
     *,
     minimum: float,
     maximum: float,
@@ -823,7 +824,7 @@ def _validate_optional_range(
 
 def _validate_optional_minimum(
     field_name: str,
-    value: float | int | None | _NotGiven,
+    value: float | int | None | NotGiven,
     *,
     minimum: float,
 ):
