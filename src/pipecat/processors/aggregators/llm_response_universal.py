@@ -1924,10 +1924,20 @@ class LLMAssistantAggregator(LLMContextAggregator):
             f"{self} FunctionCallCancelFrame: [{frame.function_name}:{frame.tool_call_id}]"
         )
         function_call = self._function_calls_in_progress.get(frame.tool_call_id)
-        if function_call and function_call.cancel_on_interruption:
-            # Update context with the function call cancellation
+        if not function_call:
+            return
+
+        # Update context with the function call cancellation. Async calls are
+        # settled with a developer message, the same channel their results
+        # arrive on.
+        if function_call.cancel_on_interruption:
             self._update_function_call_result(frame.function_name, frame.tool_call_id, "CANCELLED")
-            del self._function_calls_in_progress[frame.tool_call_id]
+        else:
+            self._context.add_message(
+                async_tool_messages.build_cancelled_message(frame.tool_call_id)
+            )
+
+        del self._function_calls_in_progress[frame.tool_call_id]
 
     async def _handle_user_image_frame(self, frame: UserImageRawFrame):
         image_appended = False
