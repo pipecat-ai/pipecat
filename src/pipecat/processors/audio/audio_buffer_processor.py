@@ -32,7 +32,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 
 # Events superseded by on_user_turn_audio and on_bot_turn_audio.
 _DEPRECATED_TURN_AUDIO_EVENTS = {
@@ -221,6 +221,16 @@ class AudioBufferProcessor(FrameProcessor):
         else:
             return b""
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the processor.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._sample_rate = self._init_sample_rate or setup.audio_out_sample_rate
+        self._audio_buffer_size_1s = self._sample_rate * 2
+
     async def start_recording(self):
         """Start recording audio from both user and bot.
 
@@ -259,7 +269,6 @@ class AudioBufferProcessor(FrameProcessor):
 
         # Update output sample rate if necessary.
         if isinstance(frame, StartFrame):
-            self._update_sample_rate(frame)
             if self._enable_turn_audio:
                 self._attach_turn_tracker()
             if self._auto_start_recording:
@@ -277,11 +286,6 @@ class AudioBufferProcessor(FrameProcessor):
             await self.stop_recording()
 
         await self.push_frame(frame, direction)
-
-    def _update_sample_rate(self, frame: StartFrame):
-        """Update the sample rate from the start frame."""
-        self._sample_rate = self._init_sample_rate or frame.audio_out_sample_rate
-        self._audio_buffer_size_1s = self._sample_rate * 2
 
     async def _process_recording(self, frame: Frame):
         """Process audio frames for recording."""
