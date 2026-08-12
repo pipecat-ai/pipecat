@@ -52,7 +52,7 @@ class BaseInputTransport(FrameProcessor):
 
         self._params = params
 
-        # Input sample rate. It will be initialized on StartFrame.
+        # Input sample rate. It will be initialized during setup.
         self._sample_rate = 0
 
         # Track bot speaking state for interruption logic

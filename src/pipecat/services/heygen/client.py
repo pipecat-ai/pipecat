@@ -172,14 +172,17 @@ class HeyGenClient:
         # (e.g. from the TTS), and since this is just a network connection we
         # would be sending it to quickly. Instead, we want to block to emulate
         # an audio device, this is what the send interval is. It will be
-        # computed on StartFrame.
+        # computed during setup.
         self._next_send_time = 0
         self._audio_seconds_sent = 0.0
         self._transport_ready = False
-        # HeyGen enforces a protection mechanism that will automatically disconnect the avatar if a user does not join within 5 minutes,
+        # HeyGen enforces a protection mechanism that will automatically
+        # disconnect the avatar if a user does not join within 5 minutes,
         # regardless of whether the Pipecat agent remains present in the room.
-        # To prevent unexpected disconnections in HeyGenVideoService, we ensure that a user connection is established using the user's token.
-        # This keeps the avatar session active and avoids forced logouts due to inactivity from the user side.
+        # To prevent unexpected disconnections in HeyGenVideoService, we ensure
+        # that a user connection is established using the user's token.  This
+        # keeps the avatar session active and avoids forced logouts due to
+        # inactivity from the user side.
         self._connect_as_user = connect_as_user
 
     async def _initialize(self):
