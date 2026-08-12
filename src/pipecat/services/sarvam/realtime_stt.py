@@ -314,7 +314,13 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
     async def start(self, frame: StartFrame):
         """Start the service and connect the websocket."""
         await super().start(frame)
-        self._validate_resolved_sample_rate()
+        # The rate can come from the pipeline, so it is only known now. Report
+        # it rather than raise: `AIService._start` swallows exceptions, which
+        # would leave the service quietly dropping every audio chunk instead.
+        error = self._resolved_sample_rate_error()
+        if error:
+            await self.push_error(error)
+            return
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -740,13 +746,12 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
     def _is_websocket_open(self) -> bool:
         return self._websocket is not None and self._websocket.state is State.OPEN
 
-    def _validate_resolved_sample_rate(self):
-        """Check the rate actually in use, which may come from the pipeline."""
-        if self.sample_rate not in SUPPORTED_SAMPLE_RATES:
-            allowed = ", ".join(str(rate) for rate in sorted(SUPPORTED_SAMPLE_RATES))
-            raise ValueError(
-                f"Unsupported sample_rate '{self.sample_rate}'. Allowed values: {allowed}."
-            )
+    def _resolved_sample_rate_error(self) -> str | None:
+        """Describe why the rate actually in use is unusable, if it is."""
+        if self.sample_rate in SUPPORTED_SAMPLE_RATES:
+            return None
+        allowed = ", ".join(str(rate) for rate in sorted(SUPPORTED_SAMPLE_RATES))
+        return f"Unsupported sample_rate '{self.sample_rate}'. Allowed values: {allowed}."
 
     def _validate_config_update(self, fields: dict[str, Any]):
         connection_only = sorted(_CONNECTION_ONLY_FIELDS.intersection(fields))

@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     InterimTranscriptionFrame,
     MetricsFrame,
+    StartFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -29,6 +30,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.sarvam.realtime_stt import SarvamRealtimeSTTService
+from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 
@@ -617,12 +619,35 @@ def test_explicit_sample_rate_setting_pins_the_rate():
     assert service._init_sample_rate == 8000
 
 
-def test_unsupported_resolved_sample_rate_raises():
+@pytest.mark.asyncio
+async def test_unsupported_resolved_sample_rate_reports_and_skips_connect(monkeypatch):
+    """An unusable pipeline rate has to surface as an error frame.
+
+    `AIService._start` swallows exceptions, so raising here would leave the
+    service silently discarding every audio chunk for the whole session.
+    """
     service = SarvamRealtimeSTTService(api_key="test-key")
+    pushed_errors = []
+    connects = []
+
+    async def fake_push_error(error_msg, exception=None, fatal=False):
+        pushed_errors.append((error_msg, fatal))
+
+    async def fake_connect():
+        connects.append(True)
+
+    monkeypatch.setattr(service, "push_error", fake_push_error)
+    monkeypatch.setattr(service, "_connect", fake_connect)
+    monkeypatch.setattr(WebsocketSTTService, "start", _noop)
     service._sample_rate = 44100
 
-    with pytest.raises(ValueError, match="sample_rate"):
-        service._validate_resolved_sample_rate()
+    await service.start(StartFrame())
+
+    assert len(pushed_errors) == 1
+    assert "sample_rate" in pushed_errors[0][0]
+    # Non-fatal, so a ServiceSwitcher can fail over to another provider.
+    assert pushed_errors[0][1] is False
+    assert connects == []
 
 
 def test_vad_params_are_omitted_for_manual_endpointing():
