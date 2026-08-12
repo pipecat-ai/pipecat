@@ -52,6 +52,7 @@ def test_sarvam_llm_constructor_rejects_unsupported_model():
     "model",
     [
         "gemma4",
+        "glm5.2",
         "sarvam-105b",
         "sarvam-105b-conversations",
     ],
@@ -76,6 +77,7 @@ def test_sarvam_llm_default_model_is_sarvam_105b():
     [
         ("sarvam-105b", "https://api.sarvam.ai/v2"),
         ("gemma4", "https://api.sarvam.ai/v2"),
+        ("glm5.2", "https://api.sarvam.ai/v2"),
         ("sarvam-105b-conversations", "https://api.sarvam.ai/v1"),
     ],
 )
@@ -489,6 +491,91 @@ def test_sarvam_llm_conversations_supports_tool_calling():
     built_params = service.build_chat_completion_params(invocation)
     assert built_params["tool_choice"] == "auto"
     assert built_params["tools"][0]["function"]["name"] == "get_weather"
+
+
+def test_sarvam_llm_glm52_supports_reasoning_effort():
+    with patch.object(SarvamLLMService, "create_client"):
+        service = SarvamLLMService(
+            api_key="test-key",
+            settings=SarvamLLMService.Settings(
+                model="glm5.2",
+                reasoning_effort="high",
+            ),
+        )
+
+    invocation = OpenAILLMInvocationParams(
+        messages=[{"role": "user", "content": "Hello"}],
+        tools=OPENAI_NOT_GIVEN,
+        tool_choice=OPENAI_NOT_GIVEN,
+    )
+    built_params = service.build_chat_completion_params(invocation)
+    assert built_params["reasoning_effort"] == "high"
+
+
+def test_sarvam_llm_glm52_strips_wiki_grounding():
+    with patch.object(SarvamLLMService, "create_client"):
+        service = SarvamLLMService(
+            api_key="test-key",
+            settings=SarvamLLMService.Settings(
+                model="glm5.2",
+                wiki_grounding=True,
+            ),
+        )
+
+    invocation = OpenAILLMInvocationParams(
+        messages=[{"role": "user", "content": "Hello"}],
+        tools=OPENAI_NOT_GIVEN,
+        tool_choice=OPENAI_NOT_GIVEN,
+    )
+    built_params = service.build_chat_completion_params(invocation)
+    assert "wiki_grounding" not in built_params
+    assert "extra_body" not in built_params
+
+
+def test_sarvam_llm_glm52_rejects_image_input():
+    with patch.object(SarvamLLMService, "create_client"):
+        service = SarvamLLMService(
+            api_key="test-key",
+            settings=SarvamLLMService.Settings(model="glm5.2"),
+        )
+
+    invocation = OpenAILLMInvocationParams(
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Describe this image."},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "data:image/png;base64,iVBORw0KGgo...",
+                            "detail": "auto",
+                        },
+                    },
+                ],
+            }
+        ],
+        tools=OPENAI_NOT_GIVEN,
+        tool_choice=OPENAI_NOT_GIVEN,
+    )
+    with pytest.raises(ValueError, match="does not support image input"):
+        service.build_chat_completion_params(invocation)
+
+
+@pytest.mark.asyncio
+async def test_sarvam_llm_update_settings_no_recreate_glm52_same_v2():
+    with patch.object(SarvamLLMService, "create_client") as create_mock:
+        service = SarvamLLMService(
+            api_key="test-key",
+            settings=SarvamLLMService.Settings(model="sarvam-105b"),
+        )
+        assert create_mock.call_count == 1
+
+        await service._update_settings(SarvamLLMService.Settings(model="glm5.2"))
+
+        # Both sarvam-105b and glm5.2 use /v2, so no client recreation needed
+        assert create_mock.call_count == 1
+    assert service._settings.model == "glm5.2"
 
 
 @pytest.mark.asyncio

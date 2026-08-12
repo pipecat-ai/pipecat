@@ -46,9 +46,9 @@ class SarvamLLMService(OpenAILLMService):
     # This value is used by BaseOpenAILLMService when calling the adapter.
     supports_developer_role = False
 
-    _SUPPORTED_MODELS = frozenset({"gemma4", "sarvam-105b", "sarvam-105b-conversations"})
+    _SUPPORTED_MODELS = frozenset({"gemma4", "glm5.2", "sarvam-105b", "sarvam-105b-conversations"})
     _VISION_MODELS = frozenset({"gemma4"})
-    _REASONING_MODELS = frozenset({"gemma4", "sarvam-105b"})
+    _REASONING_MODELS = frozenset({"gemma4", "glm5.2", "sarvam-105b"})
     _WIKI_GROUNDING_MODELS = frozenset({"gemma4", "sarvam-105b"})
     _V1_MODELS = frozenset({"sarvam-105b-conversations"})
     Settings = SarvamLLMSettings
