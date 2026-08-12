@@ -206,8 +206,7 @@ async def test_tts_started_cleared_on_new_turn():
 async def test_pause_watchdog_not_masked_by_early_tts_started_marker():
     """Regression test: TTSStartedFrame must not suppress TTSService's pause
     watchdog for InterruptibleTTSService subclasses that combine it with
-    pause_frame_processing=True (e.g. DeepgramFluxTTSService, the deprecated
-    RimeNonJsonTTSService).
+    pause_frame_processing=True (e.g. the deprecated RimeNonJsonTTSService).
 
     Before _tts_started was split out from _bot_speaking, InterruptibleTTSService's
     push_frame set _bot_speaking = True on every TTSStartedFrame — which fed
