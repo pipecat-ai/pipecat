@@ -18,6 +18,7 @@ import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
     ErrorFrame,
     InterimTranscriptionFrame,
+    MetricsFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -299,10 +300,8 @@ async def test_speech_end_emits_eos_before_delayed_final(monkeypatch):
     monkeypatch.setattr(service, "push_frame", _capture(pushed))
     monkeypatch.setattr(service, "broadcast_frame", _capture_class(broadcasted))
     monkeypatch.setattr(service, "broadcast_interruption", _noop)
-    monkeypatch.setattr(service, "start_processing_metrics", _noop)
     monkeypatch.setattr(service, "start_ttfb_metrics", _noop)
     monkeypatch.setattr(service, "stop_ttfb_metrics", _noop)
-    monkeypatch.setattr(service, "stop_processing_metrics", _noop)
 
     service._sample_rate = 16000
     service._audio_position_bytes = _seconds_to_bytes(1.25)
@@ -323,7 +322,6 @@ async def test_duplicate_speech_end_does_not_emit_duplicate_eos(monkeypatch):
     broadcasted = []
     monkeypatch.setattr(service, "broadcast_frame", _capture_class(broadcasted))
     monkeypatch.setattr(service, "broadcast_interruption", _noop)
-    monkeypatch.setattr(service, "start_processing_metrics", _noop)
     monkeypatch.setattr(service, "start_ttfb_metrics", _noop)
 
     await service._handle_message({"event": "vad.speech_start", "utterance_idx": 1})
@@ -341,10 +339,8 @@ async def test_post_eos_partial_is_interim_without_changing_eos_timing(monkeypat
     monkeypatch.setattr(service, "push_frame", _capture(pushed))
     monkeypatch.setattr(service, "broadcast_frame", _capture_class(broadcasted))
     monkeypatch.setattr(service, "broadcast_interruption", _noop)
-    monkeypatch.setattr(service, "start_processing_metrics", _noop)
     monkeypatch.setattr(service, "start_ttfb_metrics", _noop)
     monkeypatch.setattr(service, "stop_ttfb_metrics", _noop)
-    monkeypatch.setattr(service, "stop_processing_metrics", _noop)
 
     service._sample_rate = 16000
     service._audio_position_bytes = _seconds_to_bytes(2.0)
@@ -607,26 +603,33 @@ def test_vad_params_are_omitted_for_manual_endpointing():
         assert param not in query
 
 
+@pytest.mark.parametrize("final_text", ["hello", "   "])
 @pytest.mark.asyncio
-async def test_blank_final_still_stops_processing_metrics(monkeypatch):
+async def test_speech_cycle_reports_ttfb_and_no_processing_metrics(monkeypatch, final_text):
+    """Latency is reported through TTFB alone.
+
+    A processing window anchored to the speech boundary would only measure how
+    long the user talked, and the interruption raised on speech start closes it
+    immediately anyway.
+    """
     service = SarvamRealtimeSTTService(api_key="test-key")
-    stopped = []
-    monkeypatch.setattr(service, "push_frame", _noop)
+    service._enable_metrics = True
+    pushed = []
+    ttfb_starts = []
+    monkeypatch.setattr(service, "push_frame", _capture(pushed))
     monkeypatch.setattr(service, "broadcast_frame", _noop)
-    monkeypatch.setattr(service, "broadcast_interruption", _noop)
-    monkeypatch.setattr(service, "start_processing_metrics", _noop)
-    monkeypatch.setattr(service, "start_ttfb_metrics", _noop)
 
-    async def fake_stop_processing_metrics():
-        stopped.append(True)
+    async def fake_start_ttfb_metrics(*, start_time=None):
+        ttfb_starts.append(start_time)
 
-    monkeypatch.setattr(service, "stop_processing_metrics", fake_stop_processing_metrics)
+    monkeypatch.setattr(service, "start_ttfb_metrics", fake_start_ttfb_metrics)
 
     await service._handle_message({"event": "vad.speech_start"})
     await service._handle_message({"event": "vad.speech_end"})
-    await service._handle_message({"event": "transcript.final", "text": "   "})
+    await service._handle_message({"event": "transcript.final", "text": final_text})
 
-    assert stopped == [True]
+    assert not [frame for frame in pushed if isinstance(frame, MetricsFrame)]
+    assert len(ttfb_starts) == 1
 
 
 @pytest.mark.asyncio
@@ -636,9 +639,7 @@ async def test_session_end_mid_utterance_completes_the_turn(monkeypatch):
     monkeypatch.setattr(service, "push_frame", _noop)
     monkeypatch.setattr(service, "broadcast_frame", _capture_class(broadcasted))
     monkeypatch.setattr(service, "broadcast_interruption", _noop)
-    monkeypatch.setattr(service, "start_processing_metrics", _noop)
     monkeypatch.setattr(service, "start_ttfb_metrics", _noop)
-    monkeypatch.setattr(service, "stop_processing_metrics", _noop)
 
     await service._handle_message({"event": "vad.speech_start"})
     await service._handle_message({"event": "session.end", "audio_duration_s": 1.0})
@@ -669,7 +670,6 @@ async def test_confidence_defaults_to_one_when_not_numeric(monkeypatch):
     service = SarvamRealtimeSTTService(api_key="test-key")
     pushed = []
     monkeypatch.setattr(service, "push_frame", _capture(pushed))
-    monkeypatch.setattr(service, "stop_processing_metrics", _noop)
 
     await service._handle_message({"event": "transcript.partial", "text": "hi"})
     await service._handle_message({"event": "transcript.final", "text": "hi", "confidence": 0.42})

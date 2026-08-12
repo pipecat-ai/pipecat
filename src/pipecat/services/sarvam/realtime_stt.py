@@ -528,7 +528,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         self._provider_speech_active = True
         self._speech_end_wall_time = None
         self._speech_end_audio_position_s = None
-        await self.start_processing_metrics()
         await self.broadcast_frame(UserStartedSpeakingFrame)
         if self._should_interrupt:
             await self.broadcast_interruption()
@@ -584,8 +583,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
                 )
             )
             await self._trace_transcription(text, True, language)
-        # A blank final still closes the utterance, so the metric always stops.
-        await self.stop_processing_metrics()
 
     async def _handle_session_end(self, message: dict[str, Any]):
         if message.get("request_id"):
