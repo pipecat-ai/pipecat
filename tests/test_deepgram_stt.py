@@ -14,9 +14,9 @@ from deepgram.core import ApiError
 from loguru import logger
 
 from pipecat.services.deepgram.stt import DeepgramSTTService, _derive_deepgram_urls
-from pipecat.tests.utils import frame_processor_setup
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.network import QuickFailureTracker
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 def _make_bare_service() -> DeepgramSTTService:

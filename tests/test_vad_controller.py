@@ -11,8 +11,8 @@ from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
 from pipecat.audio.vad.vad_controller import VADController
 from pipecat.frames.frames import Frame, InputAudioRawFrame, SpeechControlParamsFrame, StartFrame
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.tests.utils import frame_processor_setup
 from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 class MockVADAnalyzer(VADAnalyzer):

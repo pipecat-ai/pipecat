@@ -19,12 +19,12 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
     LLMContextSummarizer,
     SummaryAppliedEvent,
 )
-from pipecat.tests.utils import frame_processor_setup
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.context.llm_context_summarization import (
     LLMAutoContextSummarizationConfig,
     LLMContextSummaryConfig,
 )
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):

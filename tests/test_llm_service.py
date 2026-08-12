@@ -36,12 +36,12 @@ from pipecat.services.llm_service import (
     LLMService,
 )
 from pipecat.services.settings import LLMSettings
-from pipecat.tests.utils import frame_processor_setup
 from pipecat.turns.user_mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.utils.async_tool_cancellation import cancel_tool_name
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.errors import ErrorCategory
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 def _expected_missing_tool_message(name: str) -> str:

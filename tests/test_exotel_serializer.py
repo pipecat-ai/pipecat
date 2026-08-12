@@ -11,7 +11,7 @@ import unittest
 
 from pipecat.frames.frames import InterruptionFrame, OutputAudioRawFrame
 from pipecat.serializers.exotel import ExotelFrameSerializer
-from pipecat.tests.utils import frame_processor_setup
+from tests.frame_processor_helpers import frame_processor_setup
 
 STREAM_SID = "stream123"
 SAMPLE_RATE = 8000

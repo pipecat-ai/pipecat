@@ -18,8 +18,8 @@ from pipecat.services.google.stt import (
     GoogleSTTService,
     _normalize_speech_adaptation,
 )
-from pipecat.tests.utils import frame_processor_setup
 from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 class AsyncResponses:

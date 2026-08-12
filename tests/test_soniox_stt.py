@@ -20,10 +20,10 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.soniox.stt import END_TOKEN, SonioxSTTService, _language_from_tokens
-from pipecat.tests.utils import frame_processor_setup
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 class _FakeWebsocket:

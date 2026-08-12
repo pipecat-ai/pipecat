@@ -17,9 +17,9 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.tests.utils import frame_processor_setup
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 USER_IDLE_TIMEOUT = 0.2
 

@@ -17,8 +17,9 @@ from pipecat.pipeline.worker import PipelineParams
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import STTService, WebsocketSTTService
-from pipecat.tests.utils import frame_processor_setup, run_test
+from pipecat.tests.utils import run_test
 from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 SAMPLE_RATE = 16000
 

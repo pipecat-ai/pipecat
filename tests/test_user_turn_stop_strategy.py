@@ -21,7 +21,6 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.tests.utils import frame_processor_setup
 from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
     ExternalUserTurnCompletionStopStrategy,
@@ -29,6 +28,7 @@ from pipecat.turns.user_stop import (
     SpeechTimeoutUserTurnStopStrategy,
 )
 from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 AGGREGATION_TIMEOUT = 0.1
 # Use 0 STT timeout for deterministic test timing

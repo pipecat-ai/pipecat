@@ -24,8 +24,8 @@ from pipecat.services.llm_service import (
     LLMService,
 )
 from pipecat.services.settings import LLMSettings
-from pipecat.tests.utils import frame_processor_setup
 from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 @dataclass

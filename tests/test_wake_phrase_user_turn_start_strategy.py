@@ -14,13 +14,13 @@ from pipecat.frames.frames import (
     UserSpeakingFrame,
     VADUserStartedSpeakingFrame,
 )
-from pipecat.tests.utils import frame_processor_setup
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_start.wake_phrase_user_turn_start_strategy import (
     WakePhraseUserTurnStartStrategy,
     _WakeState,
 )
 from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):

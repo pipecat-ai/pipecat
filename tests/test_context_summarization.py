@@ -13,13 +13,13 @@ from unittest.mock import AsyncMock
 from pipecat.frames.frames import LLMContextSummaryRequestFrame
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.services.llm_service import LLMService
-from pipecat.tests.utils import frame_processor_setup
 from pipecat.utils.context.llm_context_summarization import (
     LLMAutoContextSummarizationConfig,
     LLMContextSummarizationConfig,
     LLMContextSummarizationUtil,
     LLMContextSummaryConfig,
 )
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 class TestContextSummarizationMixin(unittest.TestCase):
