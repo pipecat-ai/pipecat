@@ -60,7 +60,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMSpecificMessage,
     is_given,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import LLMSettings
 from pipecat.services.websocket_service import WebsocketService
@@ -2074,13 +2074,13 @@ class WebsocketLLMService(LLMService[TAdapter], WebsocketService, Generic[TAdapt
         await super()._disconnect()
         await self._disconnect_websocket()
 
-    async def start(self, frame: StartFrame):
-        """Start the service and establish WebSocket connection.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame triggering service initialization.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):

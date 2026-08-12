@@ -24,13 +24,12 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
-    StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import SONIOX_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
@@ -450,15 +449,6 @@ class SonioxSTTService(WebsocketSTTService):
         self._user_turn_open = False
         await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
-    async def start(self, frame: StartFrame):
-        """Start the Soniox STT websocket connection.
-
-        Args:
-            frame: The start frame containing initialization parameters.
-        """
-        await super().start(frame)
-        await self._connect()
-
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply settings delta and reconnect if anything changed.
 
@@ -474,6 +464,15 @@ class SonioxSTTService(WebsocketSTTService):
             await self._request_reconnect()
 
         return changed
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        await self._connect()
 
     async def stop(self, frame: EndFrame):
         """Stop the Soniox STT websocket connection.

@@ -127,6 +127,7 @@ class TavusVideoService(AIService):
             ),
         )
         await self._client.setup(setup)
+        await self._client.join()
 
     async def cleanup(self):
         """Release resources at teardown."""
@@ -216,7 +217,6 @@ class TavusVideoService(AIService):
         if not self._client:
             return
 
-        await self._client.start(frame)
         await self._client.start_send_task()
 
     async def stop(self, frame: EndFrame):

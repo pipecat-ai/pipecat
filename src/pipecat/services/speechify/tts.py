@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -348,6 +348,18 @@ class SpeechifyHttpTTSService(TTSService):
         """
         return language_to_speechify_language(language)
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._output_format, self._audio_sample_rate = _output_format_from_sample_rate(
+            self.sample_rate
+        )
+        self._cumulative_time = 0.0
+
     async def start(self, frame: StartFrame):
         """Start the Speechify TTS service.
 
@@ -355,10 +367,7 @@ class SpeechifyHttpTTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._output_format, self._audio_sample_rate = _output_format_from_sample_rate(
-            self.sample_rate
-        )
-        self._cumulative_time = 0.0
+        pass
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame and handle state changes.

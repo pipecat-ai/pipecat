@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -241,15 +241,24 @@ class AsyncAITTSService(WebsocketTTSService):
         msg = {"transcript": text, "context_id": context_id, "force": force}
         return json.dumps(msg)
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._output_sample_rate = self.sample_rate
+        await self._connect()
+
     async def start(self, frame: StartFrame):
         """Start the Async TTS service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            frame: Start frame to begin processing.
         """
         await super().start(frame)
-        self._output_sample_rate = self.sample_rate
-        await self._connect()
+        pass
 
     async def _connect(self):
         await super()._connect()
@@ -601,13 +610,13 @@ class AsyncAIHttpTTSService(TTSService):
         """
         return language_to_async_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Async HTTP TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._output_sample_rate = self.sample_rate
 
     @traced_tts

@@ -20,6 +20,8 @@ from typing import Any
 
 from loguru import logger
 
+from pipecat.processors.frame_processor import FrameProcessorSetup
+
 try:
     from aws_sdk_sagemaker_runtime_http2.models import ResponseStreamEventPayloadPart
 except ModuleNotFoundError as e:
@@ -34,7 +36,6 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
 )
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
@@ -155,14 +156,19 @@ class DeepgramSageMakerTTSService(TTSService):
         """
         return False
 
-    async def start(self, frame: StartFrame):
-        """Start the Deepgram SageMaker TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
+
+    async def cleanup(self):
+        """Clean up the Deepgram SageMaker TTS service."""
+        await super().cleanup()
+        await self._disconnect()
 
     async def stop(self, frame: EndFrame):
         """Stop the Deepgram SageMaker TTS service.
@@ -180,11 +186,6 @@ class DeepgramSageMakerTTSService(TTSService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
-        await self._disconnect()
-
-    async def cleanup(self):
-        """Clean up the Deepgram SageMaker TTS service."""
-        await super().cleanup()
         await self._disconnect()
 
     async def _connect(self):

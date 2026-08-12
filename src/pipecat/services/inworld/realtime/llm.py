@@ -43,7 +43,6 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
-    StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -55,7 +54,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -523,11 +522,20 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         if isinstance(props.audio.output.format, events.PCMAudioFormat):
             props.audio.output.format.rate = cast(events.SUPPORTED_SAMPLE_RATES, output_sample_rate)
 
-    async def start(self, frame: StartFrame):
-        """Start the service and establish WebSocket connection."""
-        await super().start(frame)
-        self._ensure_audio_config(frame.audio_in_sample_rate, frame.audio_out_sample_rate)
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._ensure_audio_config(setup.audio_in_sample_rate, setup.audio_out_sample_rate)
         await self._connect()
+
+    async def cleanup(self):
+        """Release resources on teardown."""
+        await super().cleanup()
+        await self._disconnect()
 
     async def stop(self, frame: EndFrame):
         """Stop the service and close WebSocket connection."""
@@ -537,11 +545,6 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     async def cancel(self, frame: CancelFrame):
         """Cancel the service and close WebSocket connection."""
         await super().cancel(frame)
-        await self._disconnect()
-
-    async def cleanup(self):
-        """Release resources on teardown."""
-        await super().cleanup()
         await self._disconnect()
 
     #

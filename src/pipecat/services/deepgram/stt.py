@@ -20,11 +20,10 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
 from pipecat.services.stt_service import STTService
@@ -503,17 +502,14 @@ class DeepgramSTTService(STTService):
 
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Start the Deepgram STT service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
-        # _connect() only launches the handshake, so hold what follows the
-        # StartFrame until the connection can carry it.
-        await self.pause_processing_all_frames_until(self._connection_ready.wait)
 
     async def stop(self, frame: EndFrame):
         """Stop the Deepgram STT service.
@@ -618,6 +614,7 @@ class DeepgramSTTService(STTService):
         logger.debug("Connecting to Deepgram")
         self._quick_failure_tracker.reset()
         self._connection_task = self.create_task(self._connection_handler())
+        await self._connection_ready.wait()
 
     async def _disconnect(self):
         if not self._connection_task:

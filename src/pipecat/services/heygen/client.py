@@ -26,7 +26,6 @@ from pydantic import BaseModel
 from pipecat.frames.frames import (
     AudioRawFrame,
     ImageRawFrame,
-    StartFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.heygen.api_interactive_avatar import HeyGenApi, NewSessionRequest
@@ -203,8 +202,13 @@ class HeyGenClient:
             setup: The frame processor setup configuration.
         """
         if self._heyGen_session is not None:
-            logger.debug("heygen_session already initialized")
+            logger.debug("HeyGen session already initialized")
             return
+
+        if self._websocket:
+            logger.debug("HeyGen client already started")
+            return
+
         self._task_manager = setup.task_manager
         try:
             await self._initialize()
@@ -214,6 +218,18 @@ class HeyGenClient:
                 self._callback_task_handler(self._event_queue),
                 f"{self}::event_callback_task",
             )
+
+            self._in_sample_rate = self._params.audio_in_sample_rate or setup.audio_in_sample_rate
+            self._out_sample_rate = (
+                self._params.audio_out_sample_rate or setup.audio_out_sample_rate
+            )
+            await self._ws_connect()
+            await self._livekit_connect()
+
+            self._keep_alive_task = self._task_manager.create_task(
+                self._keep_alive_handler(), name="HeyGenClient_KeepAlive"
+            )
+            self._call_event_callback(self._callbacks.on_connected)
         except Exception as e:
             logger.error(f"Failed to setup HeyGenClient: {e}")
             await self.cleanup()
@@ -238,32 +254,6 @@ class HeyGenClient:
                 self._connected = False
         except Exception as e:
             logger.error(f"Exception during cleanup: {e}")
-
-    async def start(self, frame: StartFrame) -> None:
-        """Start the client and establish all necessary connections.
-
-        Initializes WebSocket and LiveKit connections using the provided configuration.
-        Sets up audio processing with the specified sample rates.
-
-        Args:
-            frame: Initial configuration frame containing audio parameters
-        """
-        if self._websocket:
-            logger.debug("heygen client already started")
-            return
-
-        logger.debug("HeyGenClient starting")
-        # setup() stores the task manager before anything can start.
-        assert self._task_manager is not None
-
-        self._in_sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
-        self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
-        await self._ws_connect()
-        await self._livekit_connect()
-        self._keep_alive_task = self._task_manager.create_task(
-            self._keep_alive_handler(), name="HeyGenClient_KeepAlive"
-        )
-        self._call_event_callback(self._callbacks.on_connected)
 
     async def stop(self) -> None:
         """Stop the client and terminate all connections.
