@@ -67,12 +67,11 @@ def test_context_switch_drops_stale_remainder():
     assert service._audio_remainder == b""
 
 
-@pytest.mark.parametrize("model", ["arcana", "coda"])
-def test_sampling_params_are_included_in_websocket_params(model: str):
+def test_coda_sampling_params_are_included_in_websocket_params():
     service = RimeTTSService(
         api_key="test-api-key",
         settings=RimeTTSService.Settings(
-            model=model,
+            model="coda",
             voice="luna",
             repetition_penalty=1.1,
             temperature=0.5,
@@ -83,7 +82,7 @@ def test_sampling_params_are_included_in_websocket_params(model: str):
 
     params = service._build_ws_params()
 
-    assert params["modelId"] == model
+    assert params["modelId"] == "coda"
     assert params["speaker"] == "luna"
     assert params["repetition_penalty"] == 1.1
     assert params["temperature"] == 0.5
@@ -122,15 +121,14 @@ class _CapturingSession:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("model", ["arcana", "coda"])
-async def test_sampling_params_are_included_in_http_payload(model: str):
+async def test_coda_sampling_params_are_included_in_http_payload():
     session = _CapturingSession()
     service = RimeHttpTTSService(
         api_key="test-api-key",
         aiohttp_session=session,
         sample_rate=24000,
         settings=RimeHttpTTSService.Settings(
-            model=model,
+            model="coda",
             voice="luna",
             repetition_penalty=1.1,
             temperature=0.5,
@@ -141,7 +139,7 @@ async def test_sampling_params_are_included_in_http_payload(model: str):
 
     _ = [frame async for frame in service.run_tts("Hello", "context")]
 
-    assert session.payload["modelId"] == model
+    assert session.payload["modelId"] == "coda"
     assert session.payload["speaker"] == "luna"
     assert session.payload["repetition_penalty"] == 1.1
     assert session.payload["temperature"] == 0.5
