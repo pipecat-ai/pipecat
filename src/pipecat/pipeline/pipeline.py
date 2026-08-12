@@ -11,6 +11,7 @@ in sequence and manages frame flow between them, along with helper classes
 for pipeline source and sink operations.
 """
 
+import asyncio
 from collections.abc import Callable, Coroutine, Sequence
 
 from pipecat.frames.frames import Frame
@@ -173,12 +174,12 @@ class Pipeline(BasePipeline):
             setup: Configuration for frame processor setup.
         """
         await super().setup(setup)
-        await self._setup_processors(setup)
+        await asyncio.gather(*[p.setup(setup) for p in self._processors])
 
     async def cleanup(self):
         """Clean up the pipeline and all contained processors."""
         await super().cleanup()
-        await self._cleanup_processors()
+        await asyncio.gather(*[p.cleanup() for p in self._processors])
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames by routing them through the pipeline.
@@ -193,16 +194,6 @@ class Pipeline(BasePipeline):
             await self._source.queue_frame(frame, FrameDirection.DOWNSTREAM)
         elif direction == FrameDirection.UPSTREAM:
             await self._sink.queue_frame(frame, FrameDirection.UPSTREAM)
-
-    async def _setup_processors(self, setup: FrameProcessorSetup):
-        """Set up all processors in the pipeline."""
-        for p in self._processors:
-            await p.setup(setup)
-
-    async def _cleanup_processors(self):
-        """Clean up all processors in the pipeline."""
-        for p in self._processors:
-            await p.cleanup()
 
     def _link_processors(self):
         """Link all processors in sequence and set their parent."""
