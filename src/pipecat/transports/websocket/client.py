@@ -178,8 +178,7 @@ class WebsocketClientSession:
                 result = True
         except Exception as e:
             logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
-        finally:
-            return result
+        return result
 
     @property
     def is_connected(self) -> bool:

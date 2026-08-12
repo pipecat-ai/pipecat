@@ -27,12 +27,13 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import AZURE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     from azure.cognitiveservices.speech import (
@@ -86,7 +87,7 @@ class AzureSTTSettings(STTSettings):
             <https://learn.microsoft.com/en-us/python/api/azure-cognitiveservices-speech/azure.cognitiveservices.speech.speechconfig#azure-cognitiveservices-speech-speechconfig-set-profanity>`_.
     """
 
-    profanity: AzureProfanity | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    profanity: AzureProfanity | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AzureSTTService(STTService):
@@ -257,7 +258,6 @@ class AzureSTTService(STTService):
             Frame: Either None for successful processing or ErrorFrame on failure.
         """
         try:
-            await self.start_processing_metrics()
             if self._audio_stream:
                 self._audio_stream.write(audio)
             yield None
@@ -334,7 +334,7 @@ class AzureSTTService(STTService):
         self, transcript: str, is_final: bool, language: Language | None = None
     ):
         """Handle a transcription result with tracing."""
-        await self.stop_processing_metrics()
+        pass
 
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:

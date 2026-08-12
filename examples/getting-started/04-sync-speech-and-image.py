@@ -109,7 +109,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         webrtc_connection: The WebRTC connection to use
         room_name: Optional room name for display purposes
     """
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     # Create an HTTP session for API calls
     async with aiohttp.ClientSession() as session:
@@ -196,21 +196,22 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         )
 
+        runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+        await runner.add_workers(worker)
+
         # Set up transport event handlers
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, client):
-            logger.info(f"Client connected")
+            logger.info("Client connected")
             # Start the month narration once connected
             await worker.queue_frames(frames)
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, client):
-            logger.info(f"Client disconnected")
-            await worker.cancel()
+            logger.info("Client disconnected")
+            await runner.cancel()
 
-        # Run the pipeline
-        runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-        await runner.add_workers(worker)
         await runner.run()
 
 

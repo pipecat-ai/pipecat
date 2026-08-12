@@ -20,8 +20,8 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
 
-from camb import StreamTtsOutputConfiguration
 from camb.client import AsyncCambAI
+from camb.types import StreamTtsOutputConfiguration
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -31,11 +31,12 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 # Model-specific sample rates
 MODEL_SAMPLE_RATES: dict[str, int] = {
@@ -149,8 +150,8 @@ class CambTTSSettings(TTSSettings):
             Ignored for other models. Max 1000 characters.
     """
 
-    voice: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    user_instructions: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    voice: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    user_instructions: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class CambTTSService(TTSService):

@@ -134,7 +134,7 @@ class LemonSliceTransportClient:
         self,
         *,
         bot_name: str,
-        params: LemonSliceParams = LemonSliceParams(),
+        params: LemonSliceParams | None = None,
         callbacks: LemonSliceCallbacks,
         api_key: str,
         session_request: LemonSliceNewSessionRequest | None = None,
@@ -150,6 +150,7 @@ class LemonSliceTransportClient:
             session_request: Session creation parameters.
             session: The aiohttp session for making async HTTP requests.
         """
+        params = params or LemonSliceParams()
         self._bot_name = bot_name
         self._api = LemonSliceApi(api_key, session)
         if session_request is None:
@@ -286,11 +287,17 @@ class LemonSliceTransportClient:
         Args:
             frame: The start frame containing initialization parameters.
         """
+        if not self._daily_transport_client:
+            return
+
         await self._daily_transport_client.start(frame)
         await self._daily_transport_client.join()
 
     async def stop(self):
         """Stop the client and end the conversation."""
+        if not self._daily_transport_client:
+            return
+
         await self._daily_transport_client.leave()
         await self._end_session()
 
@@ -311,6 +318,9 @@ class LemonSliceTransportClient:
             video_source: Video source to capture from.
             color_format: Color format for video frames.
         """
+        if not self._daily_transport_client:
+            return
+
         await self._daily_transport_client.capture_participant_video(
             participant_id, callback, framerate, video_source, color_format
         )
@@ -332,6 +342,9 @@ class LemonSliceTransportClient:
             sample_rate: Desired sample rate for audio capture.
             callback_interval_ms: Interval between audio callbacks in milliseconds.
         """
+        if not self._daily_transport_client:
+            return
+
         await self._daily_transport_client.capture_participant_audio(
             participant_id, callback, audio_source, sample_rate, callback_interval_ms
         )
@@ -356,6 +369,10 @@ class LemonSliceTransportClient:
         Returns:
             The output sample rate in Hz.
         """
+        if not self._daily_transport_client:
+            # No client until setup() runs; 0 is what Daily reports before starting.
+            return 0
+
         return self._daily_transport_client.out_sample_rate
 
     @property
@@ -365,6 +382,10 @@ class LemonSliceTransportClient:
         Returns:
             The input sample rate in Hz.
         """
+        if not self._daily_transport_client:
+            # No client until setup() runs; 0 is what Daily reports before starting.
+            return 0
+
         return self._daily_transport_client.in_sample_rate
 
     async def send_interrupt_message(self) -> None:
@@ -729,7 +750,7 @@ class LemonSliceTransport(BaseTransport):
         session: aiohttp.ClientSession,
         api_key: str,
         session_request: LemonSliceNewSessionRequest | None = None,
-        params: LemonSliceParams = LemonSliceParams(),
+        params: LemonSliceParams | None = None,
         input_name: str | None = None,
         output_name: str | None = None,
     ):
@@ -745,6 +766,7 @@ class LemonSliceTransport(BaseTransport):
             input_name: Optional name for the input transport.
             output_name: Optional name for the output transport.
         """
+        params = params or LemonSliceParams()
         super().__init__(input_name=input_name, output_name=output_name)
         self._params = params
 

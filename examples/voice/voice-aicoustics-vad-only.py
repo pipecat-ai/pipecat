@@ -175,6 +175,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     pipeline = Pipeline([transport.input(), vad_processor, VADEventLogger()])
     worker = PipelineWorker(pipeline, params=PipelineParams(enable_metrics=False))
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
     await runner.add_workers(worker)
     await runner.run()
 

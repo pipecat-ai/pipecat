@@ -22,16 +22,10 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import (
-    NOT_GIVEN,
-    STTSettings,
-    _NotGiven,
-    is_given,
-)
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -39,6 +33,7 @@ from pipecat.utils.deprecation import deprecated
 from pipecat.utils.network import QuickFailureTracker, exponential_backoff_time
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 try:
     from deepgram import AsyncDeepgramClient
@@ -207,21 +202,21 @@ class DeepgramSTTSettings(STTSettings):
         utterance_end_ms: Silence duration in ms before an utterance-end event.
     """
 
-    detect_entities: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    diarize: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    dictation: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    endpointing: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    interim_results: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    keyterm: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    keywords: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    numerals: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    profanity_filter: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    punctuate: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    redact: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    replace: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    search: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    smart_format: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    utterance_end_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    detect_entities: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    diarize: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    dictation: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpointing: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterm: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keywords: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    numerals: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    profanity_filter: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    punctuate: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    redact: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    replace: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    search: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    smart_format: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    utterance_end_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     def _sync_extra_to_fields(self) -> None:
         """Sync values from extra dict to declared fields.
@@ -516,6 +511,9 @@ class DeepgramSTTService(STTService):
         """
         await super().start(frame)
         await self._connect()
+        # _connect() only launches the handshake, so hold what follows the
+        # StartFrame until the connection can carry it.
+        await self.pause_processing_all_frames_until(self._connection_ready.wait)
 
     async def stop(self, frame: EndFrame):
         """Stop the Deepgram STT service.
@@ -712,10 +710,6 @@ class DeepgramSTTService(STTService):
                 except Exception as e:
                     logger.warning(f"{self}: Keepalive failed: {e}")
 
-    async def _start_metrics(self):
-        """Start processing metrics collection for this utterance."""
-        await self.start_processing_metrics()
-
     async def _on_error(self, error):
         logger.warning(f"{self} connection error, will retry: {error}")
         await self.push_error(error_msg=f"{error}")
@@ -760,7 +754,6 @@ class DeepgramSTTService(STTService):
                         )
                     )
                     await self._handle_transcription(transcript, is_final, language)
-                    await self.stop_processing_metrics()
                 elif from_finalize:
                     # Deepgram already sent the transcript via a regular is_final
                     # before the finalize response arrived (empty). Report STT TTFB
@@ -788,9 +781,7 @@ class DeepgramSTTService(STTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self._start_metrics()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             # https://developers.deepgram.com/docs/finalize
             # Mark that we're awaiting a from_finalize response
             if self._connection:

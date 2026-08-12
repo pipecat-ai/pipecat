@@ -25,13 +25,13 @@ dependencies = [
     "audioop-lts~=0.2.1; python_version>='3.13'",
     "docstring_parser>=0.16,<1",
     "loguru~=0.7.3",
+    "loudness>=0.2.0,<1",
     "Markdown>=3.7,<4",
     "nltk>=3.10.0,<4",
     "numpy>=1.26.4,<3",
     "Pillow>=11.1.0,<13",
     "protobuf>=5.29.6,<7",
     "pydantic>=2.10.6,<3",
-    "pyloudnorm~=0.2.0",
     "resampy~=0.4.3",
     "soxr~=1.0.0",
     "openai>=1.74.0,<3",
@@ -133,6 +133,7 @@ simli = [ "simli-ai~=2.0.1"]
 smallest = []
 soniox = []
 soundfile = [ "soundfile~=0.13.1" ]
+speechify = []
 speechmatics = [ "speechmatics-voice[smart]~=0.2.8" ]
 strands = [ "strands-agents>=1.9.1,<2" ]
 tavus = [ "pipecat-ai[daily]" ]
@@ -231,19 +232,64 @@ line-length = 100
 
 [tool.ruff.lint]
 select = [
+    "ASYNC", # Blocking calls and other misuse inside async functions
+    "B", # Likely bugs and design problems
     "D", # Docstring rules
+    "F", # Pyflakes
     "I", # Import rules
+    "RUF006", # asyncio tasks nothing holds a reference to
     "UP", # Modern Python
 ]
 ignore = [
+    # Async rules that do not fit this codebase.
+    #
+    # ASYNC109 objects to a `timeout` parameter on an async function, which is
+    # how cancellation is spelled throughout pipecat's own API, and ASYNC240
+    # prescribes trio.Path or anyio.path for filesystem work; pipecat runs on
+    # asyncio, and the calls it flags are in CLI and startup paths.
+    "ASYNC109",
+    "ASYNC240",
+    #
+    # ASYNC110 is a deferral: its one site polls a queue in the audio output
+    # path, and swapping it for an Event means restructuring a real-time loop.
+    "ASYNC110",
+    #
+    # Bugbear rules that do not fit this codebase.
+    #
+    # Base classes leave optional hooks empty so subclasses override only what
+    # they need. Marking them abstract, as B027 wants, would instead force every
+    # subclass to implement them, and BaseObject is a shared-behaviour base
+    # rather than an interface, so it has no abstract methods to declare.
+    "B024",
+    "B027",
+    #
+    # Bugbear rules worth adopting, each on its own once someone takes the
+    # sweep. Every entry below is a deferral, not a rejection: drop the line and
+    # fix what it reports.
+    "B007", # unused loop control variable — 23 sites, cosmetic
+    "B904", # `raise ... from` — 48 sites, better tracebacks, no behaviour change
+    "B905", # `zip(strict=)` — 18 sites, each needs its own length-invariant call
+    #
     "D105",  # Missing docstring in magic methods (__str__, __repr__, etc.)
+    # Unused imports are selected in .pre-commit-config.yaml instead, so they are
+    # only stripped at commit time, not mid-development. A `--extend-select` on the
+    # command line overrides this entry, so the hook still reports and fixes them.
+    "F401",
 ]
 
+[tool.ruff.lint.flake8-bugbear]
+# Typer reads a CLI parameter's configuration from its default, so calling these
+# in a default argument is the documented idiom rather than a shared-state bug.
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
+
 [tool.ruff.lint.per-file-ignores]
-# Skip docstring checks for non-source code
-"examples/**/*.py" = ["D"]
-"tests/**/*.py" = ["D"]
-"scripts/**/*.py" = ["D"]
+# Skip docstring checks for non-source code. ASYNC230 and RUF006 are enforced in
+# the framework, where a blocked event loop stalls a live session and a collected
+# task drops one, and left off the demo and test code around it: both findings
+# there want a per-site rewrite that would bury what the file is teaching.
+"examples/**/*.py" = ["D", "ASYNC230", "RUF006"]
+"tests/**/*.py" = ["D", "ASYNC230", "RUF006"]
+"scripts/**/*.py" = ["D", "ASYNC230", "RUF006"]
 "docs/**/*.py" = ["D"]
 # Skip D104 (missing docstring in public package) for __init__.py files
 "**/__init__.py" = ["D104"]

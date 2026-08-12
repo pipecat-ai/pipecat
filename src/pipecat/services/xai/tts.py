@@ -34,10 +34,11 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 
 def language_to_xai_language(language: Language) -> str:
@@ -141,9 +142,9 @@ class XAITTSSettings(TTSSettings):
         text_normalization: Whether to normalize text before synthesis.
     """
 
-    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    optimize_streaming_latency: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    text_normalization: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    optimize_streaming_latency: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    text_normalization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class XAIHttpTTSService(TTSService):
@@ -313,10 +314,10 @@ class XAIWebsocketTTSSettings(TTSSettings):
             service converts them into per-word ``TTSTextFrame`` objects.
     """
 
-    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    optimize_streaming_latency: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    text_normalization: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    with_timestamps: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    optimize_streaming_latency: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    text_normalization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    with_timestamps: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class XAITTSService(WebsocketTTSService):

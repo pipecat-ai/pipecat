@@ -220,10 +220,9 @@ class EvalSpeech:
         from pipecat.clocks.system_clock import SystemClock
         from pipecat.frames.frames import StartFrame
         from pipecat.processors.frame_processor import FrameProcessorSetup
-        from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+        from pipecat.utils.asyncio.task_manager import TaskManager
 
         task_manager = TaskManager()
-        task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
         clock = SystemClock()
         clock.start()
         # There deliberately is no PipelineWorker: the service runs out-of-pipeline,

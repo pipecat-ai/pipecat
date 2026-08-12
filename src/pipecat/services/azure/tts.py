@@ -25,11 +25,12 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     from azure.cognitiveservices.speech import (
@@ -90,14 +91,14 @@ class AzureTTSSettings(TTSSettings):
         volume: Volume level (e.g., "+20%", "loud", "x-soft").
     """
 
-    emphasis: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    force_locale: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    pitch: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    rate: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    role: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    style: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    style_degree: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    volume: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    emphasis: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    force_locale: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    rate: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    role: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    style: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    style_degree: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    volume: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AzureBaseTTSService:

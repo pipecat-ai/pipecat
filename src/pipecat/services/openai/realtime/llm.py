@@ -41,6 +41,8 @@ from pipecat.frames.frames import (
     LLMServiceMetadataFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     SpeechControlParamsFrame,
     StartFrame,
     TranscriptionFrame,
@@ -57,17 +59,12 @@ from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMe
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai._constants import OPENAI_REALTIME_WHISPER_MODEL, OPENAI_SAMPLE_RATE
-from pipecat.services.settings import (
-    NOT_GIVEN,
-    LLMSettings,
-    _NotGiven,
-    assert_given,
-    is_given,
-)
+from pipecat.services.settings import LLMSettings
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from . import events
 
@@ -111,7 +108,7 @@ class OpenAIRealtimeLLMSettings(LLMSettings):
             ``system_instruction`` fields.
     """
 
-    session_properties: events.SessionProperties | _NotGiven = field(
+    session_properties: events.SessionProperties | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -212,11 +209,13 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     bidirectional audio and text interactions. Supports function calling, conversation
     management, and real-time transcription.
 
-    Emits ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame`` from
-    OpenAI's server-side VAD events, so pipeline processors that depend on
-    those frames (RTVI client speech events, ``TurnTrackingObserver``,
-    ``AudioBufferProcessor`` turn recording, ``UserIdleController``, user
-    mute strategies, voicemail detector) work out of the box.
+    Proposes turn boundaries from OpenAI's server-side VAD events, which the
+    recommended external user turn strategies resolve into
+    ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame``, so pipeline
+    processors that depend on those frames (RTVI client speech events,
+    ``TurnTrackingObserver``, ``AudioBufferProcessor`` turn recording,
+    ``UserIdleController``, user mute strategies, voicemail detector) work out
+    of the box.
     ``LLMContextAggregatorPair`` auto-detects this realtime service and
     decouples context writes from those frames; see the
     ``examples/realtime/realtime-openai.py`` example.
@@ -1116,8 +1115,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         # which is good: in that case, local turn detection is responsible for
         # this work.
         await self._truncate_current_audio_response()
-        await self.broadcast_frame(UserStartedSpeakingFrame)
-        await self.broadcast_interruption()
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
 
     async def _handle_evt_speech_stopped(self, evt):
         # Note: this event is not received when turn detection is disabled,
@@ -1125,7 +1123,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         # this work.
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
-        await self.broadcast_frame(UserStoppedSpeakingFrame)
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
     async def _maybe_handle_evt_retrieve_conversation_item_error(self, evt: events.ErrorEvent):
         """Maybe handle an error event related to retrieving a conversation item.

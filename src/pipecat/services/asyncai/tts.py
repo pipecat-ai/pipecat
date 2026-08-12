@@ -130,7 +130,7 @@ class AsyncAITTSService(WebsocketTTSService):
 
             version: Async API version.
             url: WebSocket URL for Async TTS API.
-            model: TTS model to use (e.g., "async_flash_v1.0").
+            model: TTS model to use (e.g., "async_flash_v1.5").
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AsyncAITTSService.Settings(model=...)`` instead.
@@ -158,7 +158,7 @@ class AsyncAITTSService(WebsocketTTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="async_flash_v1.0",
+            model="async_flash_v1.5",
             voice=None,
             language=None,
         )
@@ -517,7 +517,7 @@ class AsyncAIHttpTTSService(TTSService):
                     Will be removed in 2.0.0.
 
             aiohttp_session: An aiohttp session for making HTTP requests.
-            model: TTS model to use (e.g., "async_flash_v1.0").
+            model: TTS model to use (e.g., "async_flash_v1.5").
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AsyncAIHttpTTSService.Settings(model=...)`` instead.
@@ -540,7 +540,7 @@ class AsyncAIHttpTTSService(TTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="async_flash_v1.0",
+            model="async_flash_v1.5",
             voice=None,
             language=None,
         )

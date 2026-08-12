@@ -927,6 +927,17 @@
       "location": "pipecat/services/cartesia/stt.py"
     },
     {
+      "subject": "CartesiaHttpTTSService.cartesia_version",
+      "module": "pipecat.services.cartesia.tts",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. The API version is pinned to the one this service implements. Will be removed in 2.0.0.",
+      "location": "pipecat/services/cartesia/tts.py"
+    },
+    {
       "subject": "CartesiaHttpTTSService.model",
       "module": "pipecat.services.cartesia.tts",
       "kind": "parameter",
@@ -968,6 +979,17 @@
       "relation": "use_existing",
       "replacement": "text_aggregation_mode",
       "message": "Use ``text_aggregation_mode`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/cartesia/tts.py"
+    },
+    {
+      "subject": "CartesiaTTSService.cartesia_version",
+      "module": "pipecat.services.cartesia.tts",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. The API version is pinned to the one this service implements. Will be removed in 2.0.0.",
       "location": "pipecat/services/cartesia/tts.py"
     },
     {
@@ -3721,6 +3743,17 @@
       "location": "pipecat/transports/whatsapp/client.py"
     },
     {
+      "subject": "BaseUserTurnStartStrategy.enable_user_speaking_frames",
+      "module": "pipecat.turns.user_start.base_user_turn_start_strategy",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "trigger_user_turn_started",
+      "message": "Use :meth:`trigger_user_turn_started`'s ``enable_user_speaking_frames`` argument instead. Will be removed in 2.0.0.",
+      "location": "pipecat/turns/user_start/base_user_turn_start_strategy.py"
+    },
+    {
       "subject": "BaseUserTurnStartStrategy.reset",
       "module": "pipecat.turns.user_start.base_user_turn_start_strategy",
       "kind": "method",
@@ -3730,6 +3763,17 @@
       "replacement": "handle_user_turn_started",
       "message": "Use :meth:`handle_user_turn_started` instead. Will be removed in 2.0.0.",
       "location": "pipecat/turns/user_start/base_user_turn_start_strategy.py"
+    },
+    {
+      "subject": "BaseUserTurnStopStrategy.enable_user_speaking_frames",
+      "module": "pipecat.turns.user_stop.base_user_turn_stop_strategy",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "trigger_user_turn_stopped",
+      "message": "Use :meth:`trigger_user_turn_stopped`'s ``enable_user_speaking_frames`` argument instead. Will be removed in 2.0.0.",
+      "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
     },
     {
       "subject": "BaseUserTurnStopStrategy.reset",

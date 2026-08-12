@@ -14,10 +14,11 @@ from typing import Any
 from loguru import logger
 
 from pipecat.frames.frames import ErrorFrame, Frame
-from pipecat.services.settings import TTSSettings, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import assert_given
 
 try:
     import torch

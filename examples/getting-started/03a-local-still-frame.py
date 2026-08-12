@@ -51,13 +51,14 @@ async def main():
 
         runner = WorkerRunner()
 
+        await runner.add_workers(worker)
+
         async def run_tk():
             while not worker.has_finished():
                 tk_root.update()
                 tk_root.update_idletasks()
                 await asyncio.sleep(0.1)
 
-        await runner.add_workers(worker)
         await asyncio.gather(runner.run(), run_tk())
 
 

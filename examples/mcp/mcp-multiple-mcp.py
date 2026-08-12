@@ -56,7 +56,7 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
@@ -67,7 +67,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    system_prompt = f"""
+    system_prompt = """
     You are a helpful LLM in a voice call.
     Your goal is to demonstrate your capabilities in a succinct way.
     You have access to memory tools that let you store and recall information,
@@ -144,6 +144,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         )
 
+        runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+        await runner.add_workers(worker)
+
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, client):
             logger.info(f"Client connected: {client}")
@@ -152,12 +156,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, client):
-            logger.info(f"Client disconnected")
-            await worker.cancel()
+            logger.info("Client disconnected")
+            await runner.cancel()
 
-        runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-        await runner.add_workers(worker)
         await runner.run()
 
 
@@ -169,7 +170,7 @@ async def bot(runner_args: RunnerArguments):
 
 if __name__ == "__main__":
     if not os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN"):
-        logger.error(f"Please set `GITHUB_PERSONAL_ACCESS_TOKEN` environment variable.")
+        logger.error("Please set `GITHUB_PERSONAL_ACCESS_TOKEN` environment variable.")
         import sys
 
         sys.exit(1)

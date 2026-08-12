@@ -19,7 +19,7 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
     LLMContextSummarizer,
     SummaryAppliedEvent,
 )
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.context.llm_context_summarization import (
     LLMAutoContextSummarizationConfig,
     LLMContextSummaryConfig,
@@ -29,7 +29,6 @@ from pipecat.utils.context.llm_context_summarization import (
 class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.task_manager = TaskManager()
-        self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
 
         self.context = LLMContext(
             messages=[

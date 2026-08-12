@@ -15,6 +15,7 @@ the release evals are just a manifest plus that command.
 Manifest format (YAML)::
 
     concurrency: 4
+    repeat: 1                     # run each (bot, scenario) N times
     runs_dir: test-runs           # logs + recordings go to <runs_dir>/<timestamp>/
     record: false                 # record conversation audio
     cache_dir: null               # optional
@@ -40,17 +41,24 @@ relative paths inside the body (like an image) resolve next to the file.
 Manifest-relative paths (``bot``/``bots_dir``, ``scenarios_dir``,
 ``runs_dir``) resolve relative to the manifest file, so a manifest is portable;
 the same values passed as CLI overrides resolve against the working directory.
+
+``repeat`` (or ``--repeat``) runs every (bot, scenario) pair N times, which is how
+a flaky behavior gets measured rather than sampled: a bot that passes a scenario
+half the time looks identical to a reliable one in a single pass. Attempts are
+interleaved across bots and carry an :attr:`EvalRun.attempt` number that joins
+their artifact filenames, so no attempt overwrites another's logs.
 """
 
 import asyncio
 import contextlib
+import json
 import os
 import shlex
 import sys
 import time
 import traceback
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import yaml
@@ -131,6 +139,59 @@ def capture_pipeline_logs(
             (logs_dir / f"{prefix}.debug.log").write_text("\n".join(sections))
 
 
+def _append_result(
+    results_path: Path,
+    run: "EvalRun",
+    stem: str,
+    logs_dir: Path,
+    record_dir: Path | None,
+) -> None:
+    """Append one JSON line describing a finished run, flushed immediately.
+
+    The line is the machine-readable counterpart to the printed tally: enough to
+    compute pass rates and group failures by :attr:`EvalAssertionFailure.kind`
+    without parsing logs, plus paths to the artifacts for anything deeper.
+    ``events_seen`` is carried only for runs that did not pass — it is the record
+    of what the bot actually did, which is what a failure gets diagnosed from, and
+    attaching it to passes would dwarf the file for no benefit.
+    """
+    result = run.result
+    artifacts = {"log": str(logs_dir / f"{stem}.log")}
+    for suffix, key in ((".eval.log", "eval_log"), (".debug.log", "debug_log")):
+        path = logs_dir / f"{stem}{suffix}"
+        if path.exists():
+            artifacts[key] = str(path)
+    if record_dir is not None and (record_dir / f"{stem}.wav").exists():
+        artifacts["recording"] = str(record_dir / f"{stem}.wav")
+
+    record = {
+        "bot": run.bot,
+        "scenario": run.scenario,
+        "attempt": run.attempt,
+        "passed": bool(result and result.passed and not result.skipped),
+        "skipped": result.skipped if result else None,
+        "error": run.error,
+        "duration_ms": run.duration_ms,
+        "failures": [
+            {
+                "turn_index": f.turn_index,
+                "expectation_index": f.expectation_index,
+                "event_name": f.event_name,
+                "kind": f.kind,
+                "reason": f.reason,
+            }
+            for f in (result.failures if result else [])
+        ],
+        "artifacts": artifacts,
+    }
+    if result is not None and not record["passed"]:
+        record["events_seen"] = result.events_seen
+
+    with contextlib.suppress(OSError):
+        with results_path.open("a") as f:
+            f.write(json.dumps(record) + "\n")
+
+
 @dataclass
 class EvalRun:
     """Mutable per-(bot, scenario) state, updated in place so a live display can read it.
@@ -142,6 +203,8 @@ class EvalRun:
         bot_path: The bot to spawn (suite); ``None`` when connecting to ``bot_url``.
         bot_url: Connect here instead of spawning (used by ``pipecat eval run``).
         runner_body_path: Optional ``--runner-body`` JSON for the bot's runner args.
+        attempt: 1-based attempt number when the suite repeats (see
+            :attr:`EvalManifest.repeat`); always 1 for a single pass.
         status: ``pending``, ``running``, or ``done``.
         result: The outcome, once the run is done.
         error: Spawn/connection error message, if the run failed before producing a result.
@@ -155,6 +218,7 @@ class EvalRun:
     bot_path: Path | None = None
     bot_url: str | None = None
     runner_body_path: Path | None = None
+    attempt: int = 1
     status: str = "pending"
     result: EvalResult | None = None
     error: str | None = None
@@ -171,7 +235,14 @@ class EvalManifest:
         spawn: Spawn command template (``{python}``/``{bot}``/``{port}`` substituted).
         python: Interpreter used to spawn each bot.
         concurrency: How many runs to execute at once.
-        base_port: First port to assign; each run gets ``base_port + index``.
+        repeat: How many times to run each (bot, scenario) pair. Attempts are
+            interleaved rather than grouped per bot, so every bot meets the same
+            machine conditions in the same stretch of the sweep and a transient
+            slowdown shows up as a band across all of them instead of a regression
+            in whichever bot happened to be running.
+        base_port: First port to assign; each run gets ``base_port + index``, so
+            the reserved range widens with ``repeat`` (bots x scenarios x repeat
+            ports from ``base_port`` up).
         runs_dir: Base for run output (a ``<name>/`` subdir is added), or ``None``.
         record: Whether to record conversation audio.
         cache_dir: Directory for cached synthesized user audio, or ``None``.
@@ -181,6 +252,7 @@ class EvalManifest:
     spawn: str
     python: str
     concurrency: int
+    repeat: int
     base_port: int
     runs_dir: Path | None
     record: bool
@@ -197,6 +269,7 @@ class EvalManifest:
         spawn: str | None = None,
         python: str | None = None,
         concurrency: int | None = None,
+        repeat: int | None = None,
         base_port: int | None = None,
         record: bool | None = None,
         cache_dir: str | None = None,
@@ -217,6 +290,7 @@ class EvalManifest:
             spawn: Override for the spawn command template.
             python: Override for the interpreter used to spawn bots.
             concurrency: Override for how many runs execute at once.
+            repeat: Override for how many times each (bot, scenario) pair runs.
             base_port: Override for the first port assigned.
             record: Override for whether to record conversation audio.
             cache_dir: Override for the synthesized-audio cache directory.
@@ -252,6 +326,9 @@ class EvalManifest:
             if concurrency is not None
             else int(data.get("concurrency", DEFAULT_CONCURRENCY))
         )
+        repeat = repeat if repeat is not None else int(data.get("repeat", 1))
+        if repeat < 1:
+            raise ValueError(f"{path}: 'repeat' must be at least 1")
         base_port = (
             base_port if base_port is not None else int(data.get("base_port", DEFAULT_BASE_PORT))
         )
@@ -287,11 +364,19 @@ class EvalManifest:
                     )
                 )
 
+        # Attempt-major, so the queue reads bot A #1, bot B #1, ..., bot A #2, ...
+        # EvalSuite.run pulls from it under a single semaphore with no per-attempt
+        # barrier, so this ordering spreads each attempt across the sweep without
+        # making fast bots wait on slow ones.
+        if repeat > 1:
+            runs = [replace(run, attempt=n) for n in range(1, repeat + 1) for run in runs]
+
         return cls(
             runs=runs,
             spawn=spawn,
             python=python,
             concurrency=concurrency,
+            repeat=repeat,
             base_port=base_port,
             runs_dir=runs_dir_p,
             record=record,
@@ -351,6 +436,7 @@ class EvalSuite:
         logs_dir: Path,
         *,
         record_dir: Path | None = None,
+        results_path: Path | None = None,
         on_update: Callable[[EvalRun], None] | None = None,
         debug: bool = False,
         use_cache: bool = True,
@@ -358,11 +444,16 @@ class EvalSuite:
     ) -> None:
         """Run all of the suite's runs with the manifest's concurrency, in place.
 
-        Each run is spawned on its own port (``base_port + index``).
+        Each run is spawned on its own port (``base_port + index``). Runs execute
+        from one queue bounded by the manifest's concurrency, with no barrier
+        between attempts, so a slow bot never holds up the rest of the sweep.
 
         Args:
             logs_dir: Directory for per-run logs.
             record_dir: Directory for per-run conversation recordings, or ``None``.
+            results_path: JSONL file to append one record per finished run, or
+                ``None`` to write none. Each line is flushed as its run completes,
+                so an interrupted sweep keeps everything already finished.
             on_update: Called whenever a run changes status, for live display.
             debug: When True, save each run's combined ``<run>.debug.log``.
             use_cache: When False, ignore cached user audio and force fresh synthesis.
@@ -389,6 +480,9 @@ class EvalSuite:
             "OMP_NUM_THREADS", str(max(1, cores // max(1, self.manifest.concurrency)))
         )
 
+        if results_path is not None:
+            results_path.parent.mkdir(parents=True, exist_ok=True)
+
         sem = asyncio.Semaphore(self.manifest.concurrency)
         await asyncio.gather(
             *(
@@ -397,6 +491,7 @@ class EvalSuite:
                     self.manifest.base_port + i,
                     logs_dir,
                     record_dir,
+                    results_path,
                     sem,
                     on_update,
                     debug,
@@ -413,6 +508,7 @@ class EvalSuite:
         port: int,
         logs_dir: Path,
         record_dir: Path | None,
+        results_path: Path | None,
         sem: asyncio.Semaphore,
         on_update: Callable[[EvalRun], None] | None,
         debug: bool,
@@ -422,8 +518,13 @@ class EvalSuite:
         """Spawn one bot, run its scenario against it, and record the outcome on ``run``."""
         async with sem:
             # Include the bot in the filename: one bot can run several scenarios
-            # concurrently, and they must not share a log/recording file.
+            # concurrently, and they must not share a log/recording file. When the
+            # suite repeats, the attempt number joins them for the same reason —
+            # without it every attempt would write over the last one's artifacts.
+            # The suffix is omitted for a single pass so filenames stay stable.
             safe = f"{run.bot.replace('/', '_')}__{run.scenario}"
+            if self.manifest.repeat > 1:
+                safe += f"__{run.attempt:03d}"
             log_path = logs_dir / f"{safe}.log"
 
             run.status = "running"
@@ -507,6 +608,8 @@ class EvalSuite:
                     (logs_dir / f"{safe}.eval.log").write_text(
                         "\n".join(run.result.debug_log) + "\n"
                     )
+                if results_path is not None:
+                    _append_result(results_path, run, safe, logs_dir, record_dir)
 
     def _spawn_argv(
         self, bot_path: Path, port: int, runner_body_path: Path | None = None

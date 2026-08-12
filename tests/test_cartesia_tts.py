@@ -4,8 +4,18 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import unittest
+
+from pipecat.frames.frames import (
+    AggregatedTextFrame,
+    AggregatedTextProgressFrame,
+    AggregationType,
+    TTSTextFrame,
+)
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.settings import TTSSettings
+from pipecat.transcriptions.language import Language
+from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 
 
@@ -109,3 +119,85 @@ def test_cartesia_korean_timestamp_groups_reassemble_with_spaces():
         )
         == "저는 여러분의 AI 어시스턴트입니다."
     )
+
+
+class TestCartesiaUpdateSettingsFinalizesOldContext(unittest.IsolatedAsyncioTestCase):
+    """A mid-reply voice/model/language change re-mints the turn context. The old
+    context's still-pending sentence must be finalized first, or the already-heard
+    prefix's word-timestamps land on no slot and drop out of the transcript.
+    """
+
+    async def _service_with_pending_prefix(self, old_ctx: str):
+        service = CartesiaTTSService.__new__(CartesiaTTSService)
+        service._name = "CartesiaTTSService#0"
+        service._settings = CartesiaTTSService.Settings(
+            model="sonic-3.5",
+            voice="voiceA",
+            language=Language.EN,
+            generation_config=None,
+            pronunciation_dict_id=None,
+        )
+        # Real streaming sequencer with a mid-sentence prefix pending on the turn ctx.
+        seq = AggregatedFrameSequencer(name=service._name, streaming=True)
+        service._aggregated_frame_sequencer = seq
+        service._turn_context_id = old_ctx
+        for token in ("Hi", " there"):
+            frame = AggregatedTextFrame(token, AggregationType.SENTENCE, raw_text=token)
+            await seq.register_spoken(frame, old_ctx, token, append_to_context=True)
+        assert seq._slots == []  # nothing promoted — sentence has no boundary yet
+
+        # Stub I/O so _update_settings exercises the finalize/flush/re-mint logic
+        # without a websocket. Capture frames the finalize pushes.
+        pushed: list = []
+
+        async def fake_push(frames, context_id):
+            pushed.extend(frames)
+
+        async def fake_flush(context_id=None):
+            service._flushed = context_id
+
+        service._flushed = None
+        service._push_sequencer_frames = fake_push
+        service.flush_audio = fake_flush
+        service.audio_context_available = lambda context_id: True
+        service.create_context_id = lambda: "ctx-new"
+        return service, seq, pushed
+
+    async def test_voice_change_finalizes_and_rescues_prefix(self):
+        old_ctx = "ctx-old"
+        service, seq, pushed = await self._service_with_pending_prefix(old_ctx)
+
+        await service._update_settings(CartesiaTTSService.Settings(voice="voiceB"))
+
+        # The old context's pending sentence was force-promoted into a real slot.
+        self.assertEqual([s.frame.text for s in seq._slots], ["Hi there"])
+        self.assertEqual(seq._slots[0].context_id, old_ctx)
+        # The finalize pushed the promoted sentence anchor downstream.
+        self.assertTrue(
+            any(isinstance(f, AggregatedTextFrame) and f.text == "Hi there" for f in pushed)
+        )
+        # The context was flushed and the turn context re-minted afterwards.
+        self.assertEqual(service._flushed, old_ctx)
+        self.assertEqual(service._turn_context_id, "ctx-new")
+
+        # A word-timestamp for the flushed prefix (arriving on the OLD context during
+        # playout) still finds the promoted slot and emits a progress frame.
+        result = seq.process_word("Hi", pts=10, context_id=old_ctx)
+        self.assertTrue(any(isinstance(f, TTSTextFrame) and f.text == "Hi" for f in result))
+        progress = [f for f in result if isinstance(f, AggregatedTextProgressFrame)]
+        self.assertEqual(len(progress), 1)
+        self.assertEqual(progress[0].accumulated_text, "Hi")
+
+    async def test_non_remint_change_does_not_finalize(self):
+        # A change that does not re-mint the context (e.g. pronunciation_dict_id)
+        # must NOT finalize — that would prematurely promote and mis-segment the
+        # ongoing reply.
+        old_ctx = "ctx-old"
+        service, seq, pushed = await self._service_with_pending_prefix(old_ctx)
+
+        await service._update_settings(CartesiaTTSService.Settings(pronunciation_dict_id="dict-1"))
+
+        self.assertEqual(seq._slots, [])  # still pending, not promoted
+        self.assertEqual(pushed, [])
+        self.assertIsNone(service._flushed)
+        self.assertEqual(service._turn_context_id, old_ctx)

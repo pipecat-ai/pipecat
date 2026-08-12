@@ -90,7 +90,7 @@ async def create_sample_file():
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting File API bot")
+    logger.info("Starting File API bot")
 
     # Create a sample file to upload
     sample_file_path = await create_sample_file()
@@ -200,22 +200,23 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
+
     # Handle client connection event
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected")
         # Kick off the conversation using standard context frame
         await worker.queue_frames([LLMRunFrame()])
 
     # Handle client disconnection events
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
-        await worker.cancel()
+        logger.info("Client disconnected")
+        await runner.cancel()
 
-    # Run the pipeline
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-    await runner.add_workers(worker)
     await runner.run()
 
     # Clean up: delete the uploaded file and temporary file
@@ -255,6 +256,6 @@ if __name__ == "__main__":
         print(f"Uploading file: {upload_example_file}")
         sample_file_path = upload_example_file.strip()
     else:
-        print(f"Using default file")
+        print("Using default file")
 
     main()

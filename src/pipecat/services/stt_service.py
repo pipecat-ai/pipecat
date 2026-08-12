@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     STTMuteFrame,
     STTUpdateSettingsFrame,
     TranscriptionFrame,
+    UserAudioRawFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -38,11 +39,12 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import STTUsage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
-from pipecat.services.settings import STTSettings, is_given
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.types import is_given
 
 # Duration in seconds of silent audio sent for WebSocket keepalive (100ms).
 _KEEPALIVE_SILENCE_DURATION = 0.1
@@ -60,6 +62,14 @@ class STTService(AIService):
     idle connections (e.g. when behind a ServiceSwitcher). Subclasses that enable
     keepalive must override ``_send_keepalive()`` to deliver the silence in the
     appropriate service-specific protocol.
+
+    A streaming STT reports latency through TTFB — speech end to final transcript —
+    and not through processing metrics. Audio arrives continuously, so there is no
+    discrete request whose duration a
+    :meth:`~pipecat.processors.frame_processor.FrameProcessor.start_processing_metrics`
+    window could measure; anchoring one to a speech or turn boundary measures how
+    long the user talked. :class:`SegmentedSTTService` does issue a discrete
+    request per utterance, so its subclasses time that call and report both.
 
     Event handlers:
         on_connected: Called when connected to the STT service.
@@ -336,7 +346,8 @@ class STTService(AIService):
         Yields:
             Frame: Frames containing transcription results (typically TextFrame).
         """
-        pass
+        raise NotImplementedError
+        yield  # pragma: no cover
 
     async def start(self, frame: StartFrame):
         """Start the STT service.
@@ -431,7 +442,7 @@ class STTService(AIService):
         self._last_audio_time = time.monotonic()
 
         # UserAudioRawFrame contains a user_id (e.g. Daily, Livekit)
-        if hasattr(frame, "user_id"):
+        if isinstance(frame, UserAudioRawFrame):
             self._user_id = frame.user_id
         # AudioRawFrame does not have a user_id (e.g. SmallWebRTCTransport, websockets)
         else:
@@ -728,6 +739,9 @@ class STTService(AIService):
         If so, it generates silent 16-bit mono PCM audio and passes it to
         _send_keepalive() for service-specific formatting and sending.
         """
+        # This task is only started when a keepalive timeout is configured.
+        assert self._keepalive_timeout is not None
+
         while True:
             await asyncio.sleep(self._keepalive_interval)
             try:
@@ -887,7 +901,7 @@ class SegmentedSTTService(STTService):
             direction: The direction of frame processing.
         """
         # UserAudioRawFrame contains a user_id (e.g. Daily, Livekit)
-        if hasattr(frame, "user_id"):
+        if isinstance(frame, UserAudioRawFrame):
             self._user_id = frame.user_id
         # AudioRawFrame does not have a user_id (e.g. SmallWebRTCTransport, websockets)
         else:

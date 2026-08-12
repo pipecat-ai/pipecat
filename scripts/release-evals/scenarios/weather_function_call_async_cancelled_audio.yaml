@@ -1,0 +1,45 @@
+name: weather_function_call_async_cancelled_audio
+
+# Audio modality, end to end: an async function call
+# (cancel_on_interruption=False) the user abandons while it's still running. An
+# interruption alone doesn't stop an async call, so the bot has to recognize the
+# result is no longer wanted and cancel it with the built-in
+# cancel_async_tool_call tool. Needs a bot whose LLM service was constructed with
+# enable_async_tool_cancellation=True.
+
+user: !include user_audio.yaml
+
+judge: !include judge_audio.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "What's the weather in San Francisco?"
+    expect:
+      - event: function_call
+        calls:
+          - name: get_current_weather
+
+  # The delay lets a bot's "let me check on that" filler finish before the change
+  # of mind arrives, while leaving the lookup mid-flight so there is something
+  # left to cancel.
+  - user: "Actually, never mind the weather. Tell me a joke instead."
+    send_after:
+      delay_ms: 3000
+    expect:
+      - event: function_call
+        calls:
+          - name: cancel_async_tool_call
+      - event: response
+        eval: "tells a joke"
+
+  # A cancelled lookup never delivers a result, so the bot has nothing to add.
+  # The window outlasts the tool's own sleep, so an uncancelled call would land
+  # inside it and announce the weather.
+  - expect:
+      - event: response
+        absent: true
+        within_ms: 20000

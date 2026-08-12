@@ -133,7 +133,7 @@ class TestParallelPipeline(unittest.IsolatedAsyncioTestCase):
         )
 
 
-class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
+class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
     async def test_task_single(self):
         pipeline = Pipeline([IdentityFilter()])
         worker = PipelineWorker(pipeline)
@@ -542,7 +542,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         except TimeoutError:
             assert True
         else:
-            assert False
+            raise AssertionError("worker.run() returned instead of running until cancelled")
 
     async def test_idle_task_heartbeats(self):
         identity = IdentityFilter()

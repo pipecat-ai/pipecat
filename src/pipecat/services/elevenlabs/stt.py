@@ -32,17 +32,17 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import ELEVENLABS_REALTIME_TTFS_P99, ELEVENLABS_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 
 def language_to_elevenlabs_language(language: Language) -> str:
@@ -181,8 +181,8 @@ class ElevenLabsSTTSettings(STTSettings):
         keyterms: List of key terms or phrases to bias transcription towards.
     """
 
-    tag_audio_events: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    keyterms: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    tag_audio_events: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterms: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -200,12 +200,12 @@ class ElevenLabsRealtimeSTTSettings(STTSettings):
         filter_background_audio: Whether ElevenLabs filters out background audio before transcription.
     """
 
-    keyterms: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    vad_silence_threshold_secs: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    vad_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    min_speech_duration_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    min_silence_duration_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    filter_background_audio: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterms: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad_silence_threshold_secs: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    min_speech_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    min_silence_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    filter_background_audio: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class ElevenLabsSTTService(SegmentedSTTService):
@@ -645,10 +645,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         self._audio_format = audio_format_from_sample_rate(self.sample_rate)
         await self._connect()
 
-    async def _start_metrics(self):
-        """Start performance metrics collection for transcription processing."""
-        await self.start_processing_metrics()
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and handle speech events.
 
@@ -658,10 +654,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            # Start metrics when user starts speaking
-            await self._start_metrics()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             # Send commit when user stops speaking (manual commit mode)
             if self._commit_strategy == CommitStrategy.MANUAL:
                 if self._websocket and self._websocket.state is State.OPEN:
@@ -947,8 +940,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         if not text:
             return
 
-        await self.stop_processing_metrics()
-
         # Get language if provided
         language = data.get("language_code")
 
@@ -995,8 +986,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         text = data.get("text", "").strip()
         if not text:
             return
-
-        await self.stop_processing_metrics()
 
         # Get language if provided
         language = data.get("language_code")

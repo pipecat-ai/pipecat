@@ -62,9 +62,10 @@ from pipecat.services.aws.nova_sonic.session_continuation import (
     SessionContinuationParams,
 )
 from pipecat.services.llm_service import LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
+from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     from aws_sdk_bedrock_runtime.client import (
@@ -241,8 +242,8 @@ class AWSNovaSonicLLMSettings(LLMSettings):
             user has stopped speaking. Can be "LOW", "MEDIUM", or "HIGH".
     """
 
-    voice: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    endpointing_sensitivity: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    voice: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpointing_sensitivity: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
@@ -1656,7 +1657,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         if not self._user_text_buffer:
             return
 
-        logger.debug(f"User transcription ended")
+        logger.debug("User transcription ended")
 
         # Report to the upstream user context aggregator that some new user
         # transcription text is available.

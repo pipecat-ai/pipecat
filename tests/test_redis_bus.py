@@ -19,7 +19,7 @@ from pipecat.bus import (
 from pipecat.bus.serializers import JSONMessageSerializer
 from pipecat.frames.frames import TextFrame
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.workers.base_worker import BaseWorker
 
 try:
@@ -103,7 +103,6 @@ async def create_test_redis_bus():
     serializer = JSONMessageSerializer()
     bus = RedisBus(redis=redis, serializer=serializer, channel="test:bus")
     tm = TaskManager()
-    tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
     await bus.setup(tm)
     return bus, redis, serializer
 

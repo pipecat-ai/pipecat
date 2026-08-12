@@ -581,7 +581,7 @@ class LLMContextSummarizationUtil:
         )
 
     @staticmethod
-    def format_messages_for_summary(messages: list[dict]) -> str:
+    def format_messages_for_summary(messages: list[LLMContextMessage]) -> str:
         """Format messages as a transcript for summarization.
 
         Args:

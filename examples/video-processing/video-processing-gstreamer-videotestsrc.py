@@ -43,7 +43,7 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot with video test source")
+    logger.info("Starting bot with video test source")
 
     gst = GStreamerPipelineSource(
         pipeline='videotestsrc ! capsfilter caps="video/x-raw,width=1280,height=720,framerate=30/1"',

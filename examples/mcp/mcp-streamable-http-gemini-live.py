@@ -53,9 +53,9 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
-    system = f"""
+    system = """
     You are a helpful LLM in a voice call.
     Your goal is to answer questions about the user's GitHub repositories and account.
     You have access to a number of tools provided by Github. Use any and all tools to help users.
@@ -119,6 +119,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         )
 
+        runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+        await runner.add_workers(worker)
+
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, client):
             logger.info(f"Client connected: {client}")
@@ -127,12 +131,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, client):
-            logger.info(f"Client disconnected")
-            await worker.cancel()
+            logger.info("Client disconnected")
+            await runner.cancel()
 
-        runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-        await runner.add_workers(worker)
         await runner.run()
 
 
@@ -145,7 +146,7 @@ async def bot(runner_args: RunnerArguments):
 if __name__ == "__main__":
     if not os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN"):
         logger.error(
-            f"Please set GITHUB_PERSONAL_ACCESS_TOKEN environment variable for this example."
+            "Please set GITHUB_PERSONAL_ACCESS_TOKEN environment variable for this example."
         )
         import sys
 

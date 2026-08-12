@@ -20,9 +20,10 @@ from pipecat.frames.frames import (
     Frame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import TTSSettings, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import assert_given
 
 try:
     from piper import PiperVoice

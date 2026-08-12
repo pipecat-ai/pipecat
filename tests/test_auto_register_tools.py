@@ -630,7 +630,7 @@ class TestClassicRegisterFunction(unittest.TestCase):
 class TestAsyncToolCancellationPruning(unittest.TestCase):
     """Pruning interacts correctly with the built-in async-tool-cancellation tool."""
 
-    def test_pruning_last_async_tool_tears_down_cancellation(self):
+    def test_builtin_cancel_tool_survives_pruning_the_last_async_tool(self):
         service = LLMService()
         service._sync_registered_tool_handlers(LLMContext(tools=[async_task]).tools)
         service._setup_async_tool_cancellation()
@@ -638,8 +638,9 @@ class TestAsyncToolCancellationPruning(unittest.TestCase):
         # Drop the only async tool from the advertised set.
         service._sync_registered_tool_handlers([])
         self.assertNotIn("async_task", service._functions)
-        # No async tools remain, so the built-in cancel tool is torn down.
-        self.assertNotIn(CANCEL_ASYNC_TOOL_NAME, service._functions)
+        # Cancellation follows the service's flag, not what is registered, so an
+        # advertised set that stops carrying async tools leaves it in place.
+        self.assertIn(CANCEL_ASYNC_TOOL_NAME, service._functions)
 
     def test_builtin_cancel_tool_survives_while_async_tools_remain(self):
         service = LLMService()
@@ -650,7 +651,7 @@ class TestAsyncToolCancellationPruning(unittest.TestCase):
         self.assertTrue(service.has_function("async_task"))
         self.assertNotIn("async_task_2", service._functions)
         # The built-in cancel tool isn't auto_registered, so the prune loop
-        # leaves it alone (and async tools still remain).
+        # leaves it alone.
         self.assertIn(CANCEL_ASYNC_TOOL_NAME, service._functions)
 
 

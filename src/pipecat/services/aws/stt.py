@@ -36,12 +36,13 @@ from pipecat.services.aws.utils import (
     get_presigned_url,
     resolve_credentials,
 )
-from pipecat.services.settings import STTSettings, assert_given
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import AWS_TRANSCRIBE_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import assert_given
 
 
 @dataclass
@@ -222,8 +223,6 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
                 # Send the formatted event message
                 await self._websocket.send(event_message)
-                # Start metrics after first chunk sent
-                await self.start_processing_metrics()
             except Exception as e:
                 yield ErrorFrame(error=f"Error sending audio: {e}")
 
@@ -568,7 +567,6 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                                         is_final,
                                         language,
                                     )
-                                    await self.stop_processing_metrics()
                                 else:
                                     await self.push_frame(
                                         InterimTranscriptionFrame(

@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.tests.utils import run_test
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 
 class _PassthroughResampler:
@@ -57,9 +57,7 @@ async def _make_processor(
     processor._input_resampler = _PassthroughResampler()
     processor._output_resampler = _PassthroughResampler()
 
-    loop = asyncio.get_event_loop()
     task_manager = TaskManager()
-    task_manager.setup(TaskManagerParams(loop=loop))
     await processor.setup(
         FrameProcessorSetup(
             clock=SystemClock(),

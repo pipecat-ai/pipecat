@@ -11,6 +11,8 @@ import asyncio
 from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -23,7 +25,10 @@ from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
     UserTurnStartedParams,
 )
-from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
+from pipecat.turns.user_stop import (
+    BaseUserTurnStopStrategy,
+    UserTurnStoppedParams,
+)
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
@@ -146,6 +151,29 @@ class UserTurnController(BaseObject):
         self._user_turn_strategies = strategies
         await self._setup_strategies()
 
+    @property
+    def resolves_proposed_turn_start_frames(self) -> bool:
+        """Whether any active start strategy resolves proposed turn starts.
+
+        A proposal is resolved once, so a caller holding this controller should stop
+        forwarding :class:`~pipecat.frames.frames.ProposedUserStartedSpeakingFrame`
+        when this is True — passing it along would let a resolver further down
+        the pipeline decide the same turn a second time.
+        """
+        return any(
+            s.resolves_proposed_turn_start_frames for s in self._user_turn_strategies.start or []
+        )
+
+    @property
+    def resolves_proposed_turn_stop_frames(self) -> bool:
+        """Whether any active stop strategy resolves proposed turn stops.
+
+        The end-of-turn counterpart to :attr:`resolves_proposed_turn_start_frames`.
+        """
+        return any(
+            s.resolves_proposed_turn_stop_frames for s in self._user_turn_strategies.stop or []
+        )
+
     async def process_frame(self, frame: Frame):
         """Process an incoming frame to detect user turn start or stop.
 
@@ -157,9 +185,9 @@ class UserTurnController(BaseObject):
             frame: The frame to be processed.
 
         """
-        if isinstance(frame, UserStartedSpeakingFrame):
+        if isinstance(frame, (UserStartedSpeakingFrame, ProposedUserStartedSpeakingFrame)):
             await self._handle_user_started_speaking(frame)
-        elif isinstance(frame, UserStoppedSpeakingFrame):
+        elif isinstance(frame, (UserStoppedSpeakingFrame, ProposedUserStoppedSpeakingFrame)):
             await self._handle_user_stopped_speaking(frame)
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             await self._handle_vad_user_started_speaking(frame)
@@ -215,13 +243,17 @@ class UserTurnController(BaseObject):
             )
             s.remove_event_handler("on_user_turn_stopped", self._on_user_turn_stopped)
 
-    async def _handle_user_started_speaking(self, frame: UserStartedSpeakingFrame):
+    async def _handle_user_started_speaking(
+        self, frame: UserStartedSpeakingFrame | ProposedUserStartedSpeakingFrame
+    ):
         self._user_speaking = True
 
         # The user started talking, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
 
-    async def _handle_user_stopped_speaking(self, frame: UserStoppedSpeakingFrame):
+    async def _handle_user_stopped_speaking(
+        self, frame: UserStoppedSpeakingFrame | ProposedUserStoppedSpeakingFrame
+    ):
         self._user_speaking = False
 
         # The user stopped talking, let's reset the user turn timeout.

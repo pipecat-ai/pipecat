@@ -50,7 +50,7 @@ class DeepSeekLLMService(OpenAILLMService):
         Args:
             api_key: The API key for accessing DeepSeek's API.
             base_url: The base URL for DeepSeek API. Defaults to "https://api.deepseek.com/v1".
-            model: The model identifier to use. Defaults to "deepseek-chat".
+            model: The model identifier to use. Defaults to "deepseek-v4-flash".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=DeepSeekLLMService.Settings(model=...)`` instead.
@@ -61,7 +61,7 @@ class DeepSeekLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model="deepseek-chat")
+        default_settings = self.Settings(model="deepseek-v4-flash")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:

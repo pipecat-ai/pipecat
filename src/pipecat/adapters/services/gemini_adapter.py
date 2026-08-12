@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from typing import Any, TypedDict, cast
 
 from loguru import logger
-from openai import NotGiven
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
@@ -21,6 +20,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMContextMessage,
     LLMSpecificMessage,
     LLMStandardMessage,
+    NotGiven,
 )
 
 try:
@@ -638,7 +638,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 log_display_text = f"{text[:50]}..." if len(text) > 50 else text
                 logger.trace(f" - To text: {log_display_text}")
             elif bookmark.get("inline_data"):
-                logger.trace(f" - To inline data")
+                logger.trace(" - To inline data")
 
         # Get all assistant messages
         assistant_messages = [
@@ -739,7 +739,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             # strict message order. Comparing actual data is expensive.
             and len(part.inline_data.data) == len(bookmark_inline_data.data)
         ):
-            logger.trace(f"Thought signature inline data match")
+            logger.trace("Thought signature inline data match")
             return True
 
         return False

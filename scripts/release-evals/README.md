@@ -25,11 +25,23 @@ The harness runs the judge, the user's voice, and the bot-speech transcriber
 
 - **A judge LLM.** Scenarios judge with [Ollama](https://ollama.com) by default
   (`http://localhost:11434`). Install Ollama, start it, and pull the model the
-  scenarios use: `ollama pull gemma2:9b`. We use `gemma2:9b` because smaller
-  judges (e.g. `llama3:latest`, `qwen2.5:7b`) too often reject a correct spoken
-  answer the transcriber mangled into a homophone — "four" heard as "for" — and
-  it still fits a 16GB GPU alongside the audio models. (A scenario's `judge:`
-  block can point at OpenAI instead — set `service: openai` and `$OPENAI_API_KEY`.)
+  scenarios use: `ollama pull gemma4:12b`. The judge is called once per `eval:`
+  expectation and every concurrent run shares one resident copy of it, so judge
+  latency sets the pace of the whole suite — a judge has to be accurate *and*
+  fast, and has to return the same verdict on the same input. `gemma4:12b`
+  answers in under a second and is stable across repeats. Smaller judges keep up
+  on speed but misread short interim replies: a bot that has so far only said
+  "Let me check on that." should score `continue` (wait for the rest), and
+  scoring it `yes` passes a turn in which the bot said nothing. Older judges also
+  reject correct spoken answers the transcriber mangled into a homophone — "four"
+  heard as "for".
+
+  The judge config passes `reasoning_effort: none` through its `extra:` block.
+  `gemma4` is thinking-capable, and only the JSON verdict is ever read, so
+  reasoning costs several times the latency per call — enough to stall a `-c 4`
+  run — while eating into the token budget the verdict itself needs. Leaving it
+  on is both slower and less accurate. (A scenario's `judge:` block can point at
+  OpenAI instead — set `service: openai` and `$OPENAI_API_KEY`.)
 - **Local audio models** (audio-mode scenarios only). The user's voice is
   synthesized with Kokoro TTS and the bot's speech is transcribed with
   [Moonshine](https://github.com/moonshine-ai/moonshine) (Whisper is available
@@ -65,7 +77,7 @@ the full per-pipeline debug logs are saved (see below), and forwards any extra
 flags:
 
 ```sh
-uv run python -m pipecat.evals suite -d manifest.yaml [-p PATTERN] [-s SCENARIO] [-c N] [-n NAME] [-t SECS] [-a] [--no-cache]
+uv run python -m pipecat.evals suite -d manifest.yaml [-p PATTERN] [-s SCENARIO] [-c N] [-n NAME] [-t SECS] [-a] [--no-cache] [--repeat N]
 ```
 
 Each run writes to `test-runs/<name>/` (a timestamp when `-n` is omitted):
@@ -88,16 +100,57 @@ on the command line (the command line wins) — `--bots-dir`, `--scenarios-dir`,
 `--runs-dir`, `--base-port`, `--cache-dir`, `--spawn`, `--python` — so a manifest
 can be just a `suite:` list with the rest supplied as flags.
 
+### Measuring flakiness
+
+A single pass answers "did this bot pass?"; `--repeat N` answers "how often does
+it?" — the question that matters for behaviors with a race in them (interruptions,
+async function results, turn detection), where a bot can pass a scenario half the
+time and look reliable in any one run.
+
+```sh
+./run.sh -p function-calling -s weather_function_call_async_audio --repeat 50 -c 3
+```
+
+Attempts interleave across bots (`A#1, B#1, C#1, A#2, ...`) and run from one queue
+with no barrier between them, so every bot meets the same machine conditions in the
+same stretch — a transient slowdown shows up as a band across all of them rather
+than as a regression in whichever bot happened to be running. Each attempt appends
+its number to its artifact filenames (`..._001.log`, `..._002.log`), so nothing
+overwrites anything.
+
+The tally becomes a pass rate per (bot, scenario), and failures are grouped by
+*kind* — `timeout`, `judge_no`, `missing_function_call`, ... (see `FAILURE_KINDS`
+in `pipecat.evals.harness`) — rather than listed one line per failing run:
+
+```
+  Failures (35 of 150):
+     10x  turn 3  response       timeout                 google 4, openai-async 4, anthropic 2
+      7x  turn 3  response       judge_no                google 4, openai-responses 3
+      3x  turn 1  function_call  missing_function_call   anthropic 2, openai-async 1
+```
+
+A repeated sweep always exits 0: it reports a rate, and what rate is acceptable is
+your policy, not the harness's.
+
+Every run (repeated or not) also writes `results.jsonl`, one JSON line per run with
+its outcome, its failures (each with a `kind`), and paths to its artifacts —
+appended as each run finishes, so an interrupted sweep keeps everything already
+done. It's the machine-readable counterpart to the printed tally; group and count
+it however your question needs. Runs that didn't pass also carry `events_seen`, the
+record of what the bot actually did, which is usually where a root cause is found.
+
 ### Concurrency and GPU
 
 Only the judge LLM runs on the GPU. Ollama keeps one copy of the judge model
-resident (`gemma2:9b` is ~7.4GB), so GPU use is roughly constant (~8.5GB peak)
-regardless of `-c/--concurrency`. The user's voice (Kokoro) and the bot-speech
-transcriber (Moonshine by default) both run on the CPU via ONNX Runtime, so they
-cost no GPU memory; concurrency is bounded by CPU and RAM rather than GPU. A
-16GB GPU (e.g. an RTX A4000) runs the default setup comfortably; swapping in a
-much larger judge is what would pressure GPU memory, and an out-of-memory run
-surfaces as a harness error in that run's `.eval.log`.
+resident (`gemma4:12b` is ~8.9GB, much of it the large context window it loads),
+so GPU use is roughly constant (~9GB peak) regardless of `-c/--concurrency`. The
+user's voice (Kokoro) and the bot-speech transcriber (Moonshine by default) both
+run on the CPU via ONNX Runtime, so they cost no GPU memory; concurrency is
+bounded by CPU and RAM rather than GPU. A 16GB GPU (e.g. an RTX A4000) runs the
+default setup with room to spare; swapping in a much larger judge is what would
+pressure GPU memory, and an out-of-memory run surfaces as a harness error in
+that run's `.eval.log`. On a tighter card, `num_ctx` in the judge's `extra:`
+block trims the context — the judge never needs more than a few thousand tokens.
 
 Whisper is available as an alternative transcriber (`transcription: {service:
 whisper}`); it also defaults to the CPU (`device: cpu`, see `whisper_service`),

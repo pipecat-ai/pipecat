@@ -14,6 +14,7 @@ from openai.types.responses import FunctionToolParam, ResponseInputItemParam, To
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
+from pipecat.adapters.services.open_ai_adapter import openai_from_llm_context_tools
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
@@ -81,9 +82,7 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
         params: OpenAIResponsesLLMInvocationParams = {
             "input": input_items,
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
-            "tools": cast(
-                "list[ToolParam] | OpenAINotGiven", self.from_standard_tools(context.tools)
-            ),
+            "tools": openai_from_llm_context_tools(self.from_standard_tools(context.tools)),
         }
 
         if system_instruction:

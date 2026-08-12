@@ -22,12 +22,14 @@ from pipecat.frames.frames import (
     Frame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import TTSSettings, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import assert_given
 
 try:
     from mistralai.client import Mistral
+    from mistralai.client.models import SpeechStreamAudioDelta, SpeechStreamDone
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Mistral TTS, you need to `uv add "pipecat-ai[mistral]"`.')
@@ -142,7 +144,7 @@ class MistralTTSService(TTSService):
                 stream=True,
             ) as event_stream:
                 async for event in event_stream:
-                    if event.event == "speech.audio.delta":
+                    if isinstance(event.data, SpeechStreamAudioDelta):
                         audio_bytes = base64.b64decode(event.data.audio_data)
                         audio_int16 = self._float32_to_int16(audio_bytes)
                         audio_data = await self._resampler.resample(
@@ -152,9 +154,8 @@ class MistralTTSService(TTSService):
                         yield TTSAudioRawFrame(
                             audio_data, self.sample_rate, 1, context_id=context_id
                         )
-                    elif event.event == "speech.audio.done":
-                        if hasattr(event.data, "usage") and event.data.usage:
-                            logger.debug(f"{self}: Usage info: {event.data.usage}")
+                    elif isinstance(event.data, SpeechStreamDone):
+                        logger.debug(f"{self}: Usage info: {event.data.usage}")
         except Exception as e:
             logger.error(f"{self} error generating TTS: {e}")
             yield ErrorFrame(error=f"Error generating TTS: {e}")

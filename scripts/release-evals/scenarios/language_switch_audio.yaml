@@ -17,7 +17,9 @@ judge:
   modality: audio
   eval:
     service: ollama
-    model: gemma2:9b
+    model: gemma4:12b
+    extra:
+      reasoning_effort: none
   transcription:
     # Whisper rather than the default Moonshine: Moonshine's Spanish model
     # returns nothing on the bot's synthesized Spanish. `tiny` because Whisper's

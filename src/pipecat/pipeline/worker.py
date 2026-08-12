@@ -80,6 +80,7 @@ from pipecat.processors.frameworks.rtvi.models import (
 )
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.prewarm import warm_deferred_imports
 from pipecat.utils.startup import run_setup_hook
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.tracing_context import TracingContext
@@ -1078,6 +1079,12 @@ class PipelineWorker(BaseWorker):
         self._clock.start()
 
         self._maybe_start_idle_task()
+
+        # Services spend most of the start sequence waiting on the network, which
+        # leaves room to load the imports deferred out of pipeline construction.
+        self.create_task(
+            asyncio.to_thread(warm_deferred_imports), name=f"{self}::warm_deferred_imports"
+        )
 
         start_frame = StartFrame(
             audio_in_sample_rate=self._params.audio_in_sample_rate,

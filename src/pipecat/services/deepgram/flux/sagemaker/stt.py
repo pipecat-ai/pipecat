@@ -116,7 +116,10 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             mip_opt_out: Opt out of Deepgram model improvement program.
             tag: Tags to label requests for identification during usage reporting.
             should_interrupt: Whether to interrupt the bot when Flux detects that
-                the user is speaking. Defaults to True.
+                the user is speaking. Passed along to the user turn strategies
+                this service recommends, which own the interruption; a
+                user-supplied ``user_turn_strategies`` overrides the
+                recommendation and this setting with it. Defaults to True.
             watchdog_min_timeout: Minimum silence duration in seconds before the watchdog
                 sends silence to prevent dangling turns. Defaults to 0.5.
             settings: Runtime-updatable settings.

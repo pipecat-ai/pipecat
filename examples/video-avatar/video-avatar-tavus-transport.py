@@ -92,6 +92,10 @@ async def main():
             ),
         )
 
+        runner = WorkerRunner()
+
+        await runner.add_workers(worker)
+
         @transport.event_handler("on_connected")
         async def on_connected(transport, data):
             # Extract the room name to build the conversation URL. Share this
@@ -102,7 +106,7 @@ async def main():
 
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, participant):
-            logger.info(f"Client connected")
+            logger.info("Client connected")
             # Kick off the conversation.
             context.add_message(
                 {
@@ -114,12 +118,9 @@ async def main():
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, participant):
-            logger.info(f"Client disconnected")
-            await worker.cancel()
+            logger.info("Client disconnected")
+            await runner.cancel()
 
-        runner = WorkerRunner()
-
-        await runner.add_workers(worker)
         await runner.run()
 
 

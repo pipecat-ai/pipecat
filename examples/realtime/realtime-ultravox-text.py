@@ -83,7 +83,7 @@ async def get_secret_menu(params: FunctionCallParams):
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     system_prompt = f"""
 You are a drive-thru order taker for a donut shop called "Dr. Donut". Local time is currently: {datetime.datetime.now().isoformat()}
@@ -222,16 +222,20 @@ There is also a secret menu that changes daily. If the user asks about it, use t
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
+
     # Handle client connection event
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected")
 
     # Handle client disconnection events
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
-        await worker.cancel()
+        logger.info("Client disconnected")
+        await runner.cancel()
 
     # Ultravox doesn't emit user-turn frames; subscribe to the
     # *_message_added events for the finalized message text.
@@ -247,9 +251,6 @@ There is also a secret menu that changes daily. If the user asks about it, use t
         line = f"{timestamp}assistant: {message.content}"
         logger.info(f"Transcript: {line}")
 
-    # Run the pipeline
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-    await runner.add_workers(worker)
     await runner.run()
 
 

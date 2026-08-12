@@ -31,7 +31,7 @@ from pipecat.bus.ui.messages import (
 from pipecat.frames.frames import LLMMessagesAppendFrame
 from pipecat.pipeline.job_context import JobGroup, JobStatus
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.workers.ui import UIWorker
 
 
@@ -44,7 +44,6 @@ async def _make_solo_worker(**kwargs) -> UIWorker:
     """
     worker = UIWorker("ui", llm=MagicMock(), **kwargs)
     tm = TaskManager()
-    tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
     worker._task_manager = tm
 
     recorded: list = []

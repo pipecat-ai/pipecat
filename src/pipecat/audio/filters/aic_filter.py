@@ -28,7 +28,8 @@ from aic_sdk import (
     ProcessorParameter,
     VadAsync,
     VadContext,
-    set_sdk_id,
+    # Exported at runtime but absent from aic-sdk 3.0.0's type stub.
+    set_sdk_id,  # type: ignore[attr-defined]
 )
 from loguru import logger
 
@@ -307,8 +308,8 @@ class AICFilter(BaseAudioFilter):
         self._vad_ctx = None
 
         # Pre-allocated buffers (resized in start() once frames_per_block is known)
-        self._in_f32 = None
-        self._out_i16 = None
+        self._in_f32: np.ndarray | None = None
+        self._out_i16: np.ndarray | None = None
 
     @property
     def has_vad_model(self) -> bool:
@@ -434,8 +435,10 @@ class AICFilter(BaseAudioFilter):
         self._aic_ready = self._processor is not None
 
         if not self._aic_ready:
-            logger.debug(f"ai-coustics filter is not ready.")
+            logger.debug("ai-coustics filter is not ready.")
             return
+
+        assert self._processor is not None  # necessarily true
 
         # Get context for parameter control
         self._processor_ctx = self._processor.get_context()
@@ -445,7 +448,7 @@ class AICFilter(BaseAudioFilter):
         self._apply_enhancement_level()
 
         # Log processor information
-        logger.debug(f"ai-coustics filter started:")
+        logger.debug("ai-coustics filter started:")
         logger.debug(f"  Model ID: {self._model.get_id()}")
         logger.debug(f"  Sample rate: {self._sample_rate} Hz")
         logger.debug(f"  Frames per chunk: {self._frames_per_block}")
@@ -530,8 +533,13 @@ class AICFilter(BaseAudioFilter):
         Returns:
             Enhanced audio data as bytes (int16 PCM).
         """
-        if not self._aic_ready or self._processor is None:
+        if not self._aic_ready:
             return audio
+
+        # _aic_ready is only set once start() has set all three
+        assert self._processor is not None
+        assert self._in_f32 is not None
+        assert self._out_i16 is not None
 
         self._audio_buffer.extend(audio)
         available_frames = len(self._audio_buffer) // self._bytes_per_sample

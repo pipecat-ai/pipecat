@@ -97,22 +97,16 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
     def wait_for_transcript(self, value: bool) -> None:
         self._wait_for_transcript = value
 
-    async def reset(self):
-        """Reset the strategy to its initial state.
-
-        Note that ``_vad_user_speaking`` is intentionally left untouched: it
-        reflects the live physical VAD state, not turn-scoped bookkeeping.
-        VAD only re-emits a start after a stop, so if the user is still
-        speaking when a turn boundary resets this strategy, clearing the
-        flag would make the strategy believe there's no active VAD reference
-        and fall back to treating any transcript as a standalone utterance.
-        """
-        await super().reset()
-        await self._reset(clear_vad_user_speaking=False)
-
     async def handle_user_turn_started(self):
-        """Ready the strategy to detect the end of the turn now starting."""
-        await self.reset()
+        """Ready the strategy to detect the end of the turn now starting.
+
+        ``_vad_user_speaking`` is deliberately preserved: it reflects the live
+        physical VAD state, not turn-scoped bookkeeping. VAD only re-emits a
+        start after a stop, so clearing the flag for a turn that begins while
+        the user is still speaking would leave the strategy with no active VAD
+        reference, treating any transcript as a standalone utterance.
+        """
+        await self._reset(clear_vad_user_speaking=False)
 
     async def handle_user_turn_stopped(self):
         """Clear per-turn state once the turn has ended."""

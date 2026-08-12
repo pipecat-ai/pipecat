@@ -10,7 +10,7 @@ import asyncio
 import inspect
 import unittest
 
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 
 class TestTaskManagerCreateTask(unittest.IsolatedAsyncioTestCase):
@@ -18,7 +18,6 @@ class TestTaskManagerCreateTask(unittest.IsolatedAsyncioTestCase):
 
     def _create_task_manager(self) -> TaskManager:
         task_manager = TaskManager()
-        task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
         return task_manager
 
     async def test_cancel_before_run_closes_coroutine(self):

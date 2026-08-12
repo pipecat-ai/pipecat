@@ -118,6 +118,10 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         observers=[TranscriptionLogObserver()],
     )
 
+    runner = WorkerRunner()
+
+    await runner.add_workers(worker)
+
     event_handler: Callable[[str], Callable[[Any], Any]] = transport.event_handler
 
     @event_handler("on_client_connected")
@@ -125,9 +129,6 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         logger.info("Client connected")
         await worker.queue_frames([LLMRunFrame()])
 
-    runner = WorkerRunner()
-
-    await runner.add_workers(worker)
     await runner.run()
 
 

@@ -24,6 +24,9 @@ exact ID of that call (e.g. {"type": "async_tool", "status": "running", "tool_ca
 
 If the user changes topic, explicitly says they no longer need the result, or the pending \
 result would clearly be stale, call cancel_async_tool_call. \
+Only the call stops the pending work: saying you cancelled it, or that you'll skip it, \
+leaves it running and its result will still arrive and contradict you. \
+So when the same turn also asks for something else, make the call and answer — not just answer. \
 To find the correct tool_call_id: locate the most recent tool response in the conversation \
 whose content has "status": "running" and whose call has NOT already been cancelled, \
 then copy the "tool_call_id" value from that content exactly as-is. \

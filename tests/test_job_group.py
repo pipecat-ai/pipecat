@@ -22,7 +22,7 @@ from pipecat.pipeline.job_context import (
 )
 from pipecat.registry import WorkerRegistry
 from pipecat.registry.types import WorkerReadyData
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.workers.base_worker import BaseWorker
 
 
@@ -110,7 +110,6 @@ class SlowWorkerTask(BaseWorker):
 async def create_test_env():
     bus = AsyncQueueBus()
     tm = TaskManager()
-    tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
     await bus.setup(tm)
     await bus.start()
     registry = WorkerRegistry(runner_name="test-runner")
@@ -169,7 +168,7 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
         w1 = JobWorkerTask("w1", response={"ok": True})
         await setup_task(self.bus, self.registry, w1)
 
-        async with parent.job_group("w1", payload={"data": 1}) as tg:
+        async with parent.job_group("w1", payload={"data": 1}):
             pass
 
         request_msgs = [m for m in sent if isinstance(m, BusJobRequestMessage)]
@@ -203,7 +202,7 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
         await setup_task(self.bus, self.registry, worker)
 
         with self.assertRaises(JobGroupError) as ctx:
-            async with parent.job_group("worker", timeout=0.05) as tg:
+            async with parent.job_group("worker", timeout=0.05):
                 pass
 
         self.assertIn("timeout", str(ctx.exception))
@@ -215,7 +214,7 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
 
         # "ghost" is never registered, so the ready-wait times out
         with self.assertRaises(JobGroupError) as ctx:
-            async with parent.job_group("ghost", timeout=0.05) as tg:
+            async with parent.job_group("ghost", timeout=0.05):
                 pass
 
         self.assertIn("not ready", str(ctx.exception))
@@ -231,7 +230,7 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
         await setup_task(self.bus, self.registry, worker)
 
         with self.assertRaises(ValueError):
-            async with parent.job_group("worker") as tg:
+            async with parent.job_group("worker"):
                 raise ValueError("something went wrong")
 
         cancel_msgs = [m for m in sent if isinstance(m, BusJobCancelMessage)]
@@ -268,7 +267,7 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
             errors.append(message)
 
         with self.assertRaises(JobGroupError):
-            async with parent.job_group("worker") as tg:
+            async with parent.job_group("worker"):
                 pass
 
         self.assertEqual(len(errors), 1)
@@ -326,7 +325,7 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
         async def on_completed(task, result):
             completed.append(result)
 
-        async with parent.job_group("w1") as tg:
+        async with parent.job_group("w1"):
             pass
 
         self.assertEqual(len(completed), 1)
@@ -451,7 +450,7 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
             errors.append(message)
 
         with self.assertRaises(JobGroupError):
-            async with parent.job_group("worker") as tg:
+            async with parent.job_group("worker"):
                 pass
 
         self.assertEqual(len(errors), 1)
@@ -523,7 +522,7 @@ class TestJobContext(unittest.IsolatedAsyncioTestCase):
         worker = JobWorkerTask("worker", response={"ok": True})
         await setup_task(self.bus, self.registry, worker)
 
-        async with parent.job("worker") as t:
+        async with parent.job("worker"):
             pass
 
         request_msgs = [m for m in sent if isinstance(m, BusJobRequestMessage)]
@@ -589,7 +588,7 @@ class TestJobContext(unittest.IsolatedAsyncioTestCase):
         await setup_task(self.bus, self.registry, worker)
 
         with self.assertRaises(ValueError):
-            async with parent.job("worker") as t:
+            async with parent.job("worker"):
                 raise ValueError("something went wrong")
 
         cancel_msgs = [m for m in sent if isinstance(m, BusJobCancelMessage)]
@@ -605,7 +604,7 @@ class TestJobContext(unittest.IsolatedAsyncioTestCase):
         await setup_task(self.bus, self.registry, worker)
 
         with self.assertRaises(JobError):
-            async with parent.job("worker") as t:
+            async with parent.job("worker"):
                 pass
 
     async def test_job_exposes_job_id(self):
@@ -631,7 +630,7 @@ class TestJobContext(unittest.IsolatedAsyncioTestCase):
         await setup_task(self.bus, self.registry, worker)
 
         async def run_job_group():
-            async with parent.job_group("worker") as tg:
+            async with parent.job_group("worker"):
                 # Simulate tool cancellation while waiting
                 raise asyncio.CancelledError()
 
@@ -656,7 +655,7 @@ class TestJobContext(unittest.IsolatedAsyncioTestCase):
         await setup_task(self.bus, self.registry, worker)
 
         async def run_job():
-            async with parent.job("worker") as t:
+            async with parent.job("worker"):
                 raise asyncio.CancelledError()
 
         task = asyncio.create_task(run_job())

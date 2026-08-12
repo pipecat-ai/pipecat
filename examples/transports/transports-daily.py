@@ -87,6 +87,10 @@ async def main():
             ),
         )
 
+        runner = WorkerRunner()
+
+        await runner.add_workers(worker)
+
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             await transport.capture_participant_transcription(participant["id"])
@@ -98,11 +102,8 @@ async def main():
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
-            await worker.cancel()
+            await runner.cancel()
 
-        runner = WorkerRunner()
-
-        await runner.add_workers(worker)
         await runner.run()
 
 

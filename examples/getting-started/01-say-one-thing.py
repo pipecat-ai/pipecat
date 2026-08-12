@@ -38,7 +38,7 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
@@ -52,14 +52,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
-    # Register an event handler so we can play the audio when the client joins
-    @transport.event_handler("on_client_connected")
-    async def on_client_connected(transport, client):
-        await worker.queue_frames([TTSSpeakFrame(f"Hello there!"), EndFrame()])
-
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.add_workers(worker)
+
+    # Register an event handler so we can play the audio when the client joins
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        await worker.queue_frames([TTSSpeakFrame("Hello there!"), EndFrame()])
+
     await runner.run()
 
 

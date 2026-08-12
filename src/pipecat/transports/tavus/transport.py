@@ -187,7 +187,7 @@ class TavusTransportClient:
         self,
         *,
         bot_name: str,
-        params: TavusParams = TavusParams(),
+        params: TavusParams | None = None,
         callbacks: TavusCallbacks,
         api_key: str,
         replica_id: str,
@@ -208,6 +208,7 @@ class TavusTransportClient:
                 `conversation.echo` app message API.
             session: The aiohttp session for making async HTTP requests.
         """
+        params = params or TavusParams()
         self._bot_name = bot_name
         self._api = TavusApi(api_key, session)
         self._replica_id = replica_id
@@ -891,7 +892,7 @@ class TavusTransport(BaseTransport):
         api_key: str,
         replica_id: str,
         persona_id: str = "pipecat0",
-        params: TavusParams = TavusParams(),
+        params: TavusParams | None = None,
         input_name: str | None = None,
         output_name: str | None = None,
     ):
@@ -910,6 +911,7 @@ class TavusTransport(BaseTransport):
             input_name: Optional name for the input transport.
             output_name: Optional name for the output transport.
         """
+        params = params or TavusParams()
         super().__init__(input_name=input_name, output_name=output_name)
         self._params = params
 

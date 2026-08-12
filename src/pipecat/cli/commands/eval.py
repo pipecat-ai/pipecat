@@ -18,6 +18,7 @@ import sys
 import time
 import traceback
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 
 import typer
@@ -411,14 +412,62 @@ def _eval_status_cell(r: EvalRun):
     return Text(glyph, style=style)
 
 
-class _EvalDashboard:
-    """Live table rendered every frame from the shared list of runs."""
+def _pass_rate(passed: int, done: int) -> str:
+    """``23/50 (46%)`` over the attempts that finished, or a placeholder if none have."""
+    if not done:
+        return "—"
+    return f"{passed}/{done} ({100 * passed // done}%)"
 
-    def __init__(self, runs: list[EvalRun], started_at: float):
+
+# Rate colors, as a rich style and the matching ANSI code for the non-TTY path.
+_RATE_ANSI = {"green": "32", "yellow": "33", "red": "31", "dim": "2"}
+
+
+def _rate_level(passed: int, done: int) -> str:
+    """Color for a pass rate: green when perfect, red below half, yellow between."""
+    if not done:
+        return "dim"
+    if passed == done:
+        return "green"
+    return "red" if (100 * passed // done) < 50 else "yellow"
+
+
+def _mean_duration(runs: list[EvalRun]) -> str:
+    """Mean wall-clock of the finished runs, e.g. ``~53.2s each``."""
+    times = [r.duration_ms for r in runs if r.duration_ms is not None]
+    if not times:
+        return ""
+    return f"~{_fmt_duration(sum(times) / len(times) / 1000)} each"
+
+
+def _group_key(r: EvalRun) -> tuple[str, str]:
+    return (r.bot, r.scenario)
+
+
+def _grouped_runs(runs: list[EvalRun]) -> dict[tuple[str, str], list[EvalRun]]:
+    """Runs bucketed by (bot, scenario), in first-seen order."""
+    groups: dict[tuple[str, str], list[EvalRun]] = {}
+    for r in runs:
+        groups.setdefault(_group_key(r), []).append(r)
+    return groups
+
+
+class _EvalDashboard:
+    """Live table rendered every frame from the shared list of runs.
+
+    With ``grouped``, attempts of the same (bot, scenario) collapse into a single
+    row carrying a pass counter — a repeated sweep is hundreds of runs, which as
+    one row apiece would scroll the table faster than it could be read.
+    """
+
+    def __init__(self, runs: list[EvalRun], started_at: float, *, grouped: bool = False):
         self.runs = runs
         self.started_at = started_at
+        self.grouped = grouped
 
     def __rich__(self) -> Group:
+        if self.grouped:
+            return self._render_grouped()
         rows = self.runs
         n = len(rows)
 
@@ -489,14 +538,94 @@ class _EvalDashboard:
             parts.append(Text(f"   ↓ {n - end} more", style="dim"))
         return Group(*parts, Text(""), summary)
 
+    def _render_grouped(self) -> Group:
+        """One row per (bot, scenario), showing that pair's pass rate and pace."""
+        table = Table.grid(padding=(0, 2))
+        table.add_column()  # status
+        table.add_column()  # bot
+        table.add_column()  # scenario
+        table.add_column(justify="right")  # pass rate
+        table.add_column(justify="right")  # remaining
+        table.add_column(justify="right")  # mean run time
 
-def _print_eval_line(r: EvalRun) -> None:
+        for (bot, scenario), group in _grouped_runs(self.runs).items():
+            done = [r for r in group if r.status == "done"]
+            passed = sum(1 for r in group if _eval_verdict(r) == "passed")
+            # Three states, and only the last is a verdict: spinning while a slot is
+            # held, a still dot while waiting for one, and ✓/✗ once every attempt is
+            # in. Motion is reserved for the runs actually in flight — most rows of a
+            # long sweep are waiting, and animating those too would leave nothing for
+            # movement to mean.
+            if len(done) == len(group):
+                glyph, style, _ = _EVAL_GLYPH["passed" if passed == len(group) else "failed"]
+                status = Text(glyph, style=style)
+            elif any(r.status == "running" for r in group):
+                status = Spinner("dots", style="cyan")
+            else:
+                status = Text("·", style="dim")
+            # The rate is over attempts that finished, so it reads as a real rate
+            # while the sweep is still going; what's left is its own column rather
+            # than a second denominator competing with it.
+            remaining = len(group) - len(done)
+            table.add_row(
+                status,
+                Text(bot),
+                Text(scenario, style="cyan"),
+                Text(_pass_rate(passed, len(done)), style=_rate_level(passed, len(done))),
+                Text(f"{remaining} left" if remaining else "", style="dim"),
+                Text(_mean_duration(done), style="dim"),
+            )
+
+        total = len(self.runs)
+        done = sum(1 for r in self.runs if r.status == "done")
+        passed = sum(1 for r in self.runs if _eval_verdict(r) == "passed")
+        elapsed = _fmt_duration(time.monotonic() - self.started_at)
+        summary = Table.grid(padding=(0, 1))
+        summary.add_column()
+        summary.add_column()
+        summary.add_row(
+            Text(" "),
+            Text(f"{passed}/{total} passed  ·  {done}/{total} done  ·  {elapsed}", "bold"),
+        )
+        return Group(table, Text(""), summary)
+
+
+def _print_eval_line(r: EvalRun, *, show_attempt: bool = False) -> None:
     """Print a single result line (non-TTY fallback, streamed as each finishes)."""
     if r.status != "done":
         return
     glyph, _, code = _EVAL_GLYPH[_eval_verdict(r)]
     extra = f"({r.duration_ms}ms)" if r.duration_ms is not None and not r.error else (r.error or "")
-    print(f"  {_color(glyph, code)} {r.bot} {_color(r.scenario, '36')} {_dim(extra)}", flush=True)
+    scenario = f"{r.scenario} #{r.attempt}" if show_attempt else r.scenario
+    print(f"  {_color(glyph, code)} {r.bot} {_color(scenario, '36')} {_dim(extra)}", flush=True)
+
+
+def _plural(count: int, noun: str) -> str:
+    """``1 eval`` / ``2 evals`` — count plus its noun, pluralized with a trailing -s."""
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+def _print_run_settings(total: int, repeat: int, concurrency: int, record: bool) -> None:
+    """Print how the suite will execute, in the shape of the scenario configs above it.
+
+    Only what the terminal doesn't otherwise show while the run is going, and that
+    a manifest can turn on without it appearing on the command line: the run count
+    (arithmetic, and the difference between 8 runs and several thousand), the
+    concurrency, and whether audio is being recorded — a few MB per run, so it
+    grows with the sweep. What the caller just typed stays out; it's already in
+    their scrollback.
+    """
+    counts = str(total)
+    if repeat > 1:
+        counts = f"{total} ({_plural(total // repeat, 'eval')} x {_plural(repeat, 'attempt')})"
+    print("Settings:")
+    for label, value in (
+        ("runs", counts),
+        ("concurrency", str(concurrency)),
+        ("recording", "on" if record else "off"),
+    ):
+        print(f"  {_color(f'{label:11s}', '1')} -> {value}")
+    print()
 
 
 def _print_scenario_configs(runs: list[EvalRun]) -> None:
@@ -521,24 +650,92 @@ def _print_scenario_configs(runs: list[EvalRun]) -> None:
     print()
 
 
+def _print_failures(failed: list[EvalRun], total: int, *, show_attempt: bool) -> None:
+    """Print every failed run: what it was, and what went wrong.
+
+    Every failure is listed, however many there are. Reading them is how a person
+    tells a bot that misbehaved from one that never started, and only the failure's
+    own ``reason`` carries that — ``kind`` says which assertion gave way, not what
+    the bot did. Counting and grouping belong to the ``results.jsonl`` written
+    alongside, which is the structured record of the same failures.
+
+    Args:
+        failed: The runs that failed or errored.
+        total: How many runs there were, for the header's denominator.
+        show_attempt: Include each run's attempt number — worth the noise only
+            when a sweep repeats, since that is what says which log to open.
+    """
+    if not failed:
+        return
+
+    print()
+    print(f"  {_color(f'Failures ({len(failed)} of {total}):', '1;31')}")
+    for r in failed:
+        attempt = f" {_dim('#' + str(r.attempt))}" if show_attempt else ""
+        header = f"  {_red('✗')} {r.bot} {_color(r.scenario, '36')}{attempt}"
+        if r.error:
+            print(f"{header} {_dim('— ' + r.error)}")
+        elif r.result is not None:
+            print(header)
+            for f in r.result.failures:
+                turn = f"turn {f.turn_index}" if f.turn_index >= 0 else "run"
+                print(
+                    f"      {_red('•')} {turn} {f.event_name} {_color(f.kind, '31')} — {f.reason}"
+                )
+
+
+def _print_repeat_summary(runs: list[EvalRun], failed: list[EvalRun], *, show_rates: bool) -> None:
+    """Print per-(bot, scenario) pass rates and failures grouped by kind.
+
+    A repeated sweep is measuring a rate, not a verdict, so the useful output is
+    how often each pair passed and which failure kinds account for the rest —
+    listing every failing run individually would run to hundreds of lines.
+
+    ``show_rates`` is False when the live dashboard ran: its final frame is already
+    a per-(bot, scenario) rate table, so repeating it here would just duplicate it.
+    """
+    if show_rates:
+        print()
+        print(f"  {_color('Pass rate:', '1')}")
+        groups = _grouped_runs(runs)
+        bot_w = max(len(bot) for bot, _ in groups)
+        for (bot, scenario), group in groups.items():
+            passed = sum(1 for r in group if _eval_verdict(r) == "passed")
+            rate_text = f"{_pass_rate(passed, len(group)):>14s}"
+            rate = _color(rate_text, _RATE_ANSI[_rate_level(passed, len(group))])
+            print(
+                f"  {bot:{bot_w}s}  {_color(scenario, '36')}  {rate}  {_dim(_mean_duration(group))}"
+            )
+
+    _print_failures(failed, len(runs), show_attempt=True)
+
+
 def _finalize_evals(
-    runs: list[EvalRun], runs_dir: Path, elapsed_s: float, dashboard_shown: bool
+    runs: list[EvalRun],
+    runs_dir: Path,
+    elapsed_s: float,
+    dashboard_shown: bool,
+    repeat: int = 1,
 ) -> int:
     """Print the failed set + final tally; return the process exit code."""
     failed = [r for r in runs if _eval_verdict(r) in ("failed", "error")]
     passed = sum(1 for r in runs if _eval_verdict(r) == "passed")
     skipped = sum(1 for r in runs if _eval_verdict(r) == "skipped")
 
-    if failed:
+    if repeat > 1:
+        _print_repeat_summary(runs, failed, show_rates=not dashboard_shown)
         print()
-        print(f"  {_color(f'Failed ({len(failed)}):', '1;31')}")
-        for r in failed:
-            if r.error:
-                print(f"  {_red('✗')} {r.bot} {_color(r.scenario, '36')} {_dim('— ' + r.error)}")
-            elif r.result is not None:
-                print(f"  {_red('✗')} {r.bot} {_color(r.scenario, '36')}")
-                for f in r.result.failures:
-                    print(f"      {_red('•')} {f}")
+        if not dashboard_shown:
+            summary = f"{passed}/{len(runs)} passed  ·  {_fmt_duration(elapsed_s)}"
+            print(f"  {_color(summary, '31' if failed else '32')}")
+        print(f"  logs: {runs_dir}")
+        print(f"  results: {runs_dir / 'results.jsonl'}")
+        print()
+        # A repeated sweep measures a pass rate; what counts as acceptable is the
+        # caller's policy, so failures here are data rather than a build break.
+        return 0
+
+    _print_failures(failed, len(runs), show_attempt=False)
 
     print()
     # When the live dashboard ran, its last frame already shows the tally and the
@@ -561,27 +758,31 @@ async def _run_suite_all(
     suite: EvalSuite,
     logs_dir: Path,
     record_dir: Path | None,
+    results_path: Path | None,
     started: float,
     debug: bool,
     use_cache: bool,
     default_timeout_ms: int,
 ) -> None:
     """Run the suite with a live dashboard (TTY) or streamed lines (piped)."""
+    repeat = suite.manifest.repeat
     if _console.is_terminal:
-        with Live(_EvalDashboard(suite.runs, started), console=_console, refresh_per_second=12.5):
+        dashboard = _EvalDashboard(suite.runs, started, grouped=repeat > 1)
+        with Live(dashboard, console=_console, refresh_per_second=12.5):
             await suite.run(
                 logs_dir,
                 record_dir=record_dir,
+                results_path=results_path,
                 debug=debug,
                 use_cache=use_cache,
                 default_timeout_ms=default_timeout_ms,
             )
     else:
-        print(f"Running {len(suite.runs)} eval(s), {suite.manifest.concurrency} at a time...")
         await suite.run(
             logs_dir,
             record_dir=record_dir,
-            on_update=_print_eval_line,
+            results_path=results_path,
+            on_update=partial(_print_eval_line, show_attempt=repeat > 1),
             debug=debug,
             use_cache=use_cache,
             default_timeout_ms=default_timeout_ms,
@@ -610,6 +811,13 @@ def suite(
     ),
     concurrency: int = typer.Option(
         None, "-c", "--concurrency", help="Override manifest concurrency."
+    ),
+    repeat: int = typer.Option(
+        None,
+        "-r",
+        "--repeat",
+        help="Run each (bot, scenario) this many times, to measure flakiness. "
+        "Attempts interleave across bots and each writes its own logs.",
     ),
     base_port: int = typer.Option(None, "--base-port", help="Override manifest base_port."),
     cache_dir: str = typer.Option(None, "--cache-dir", help="Override manifest cache_dir."),
@@ -648,6 +856,7 @@ def suite(
         spawn=spawn,
         python=python,
         concurrency=concurrency,
+        repeat=repeat,
         base_port=base_port,
         record=audio or None,
         cache_dir=cache_dir,
@@ -667,12 +876,26 @@ def suite(
     record_dir = (run_dir / "recordings") if manifest.record else None
 
     _print_scenario_configs(runs)
+    _print_run_settings(len(runs), manifest.repeat, manifest.concurrency, manifest.record)
 
     started = time.monotonic()
     asyncio.run(
-        _run_suite_all(suite, logs_dir, record_dir, started, debug, not no_cache, timeout * 1000)
+        _run_suite_all(
+            suite,
+            logs_dir,
+            record_dir,
+            run_dir / "results.jsonl",
+            started,
+            debug,
+            not no_cache,
+            timeout * 1000,
+        )
     )
     exit_code = _finalize_evals(
-        runs, run_dir, time.monotonic() - started, dashboard_shown=_console.is_terminal
+        runs,
+        run_dir,
+        time.monotonic() - started,
+        dashboard_shown=_console.is_terminal,
+        repeat=manifest.repeat,
     )
     raise typer.Exit(code=exit_code)

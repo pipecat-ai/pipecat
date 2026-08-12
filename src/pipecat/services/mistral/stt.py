@@ -27,12 +27,13 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import STTSettings, assert_given
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import MISTRAL_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import assert_given
 
 try:
     from mistralai.client import Mistral
@@ -186,7 +187,6 @@ class MistralSTTService(STTService):
 
         if isinstance(frame, VADUserStartedSpeakingFrame):
             self._accumulated_text = ""
-            await self._start_metrics()
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             if self._connection and not self._connection.is_closed:
                 await self._connection.flush_audio()
@@ -212,10 +212,6 @@ class MistralSTTService(STTService):
 
         await self._connection.send_audio(audio)
         yield None
-
-    async def _start_metrics(self):
-        """Start performance metrics collection for transcription processing."""
-        await self.start_processing_metrics()
 
     async def _connect(self):
         """Establish a connection to the Mistral Realtime API."""
@@ -296,7 +292,6 @@ class MistralSTTService(STTService):
                             )
                         )
                         await self._handle_transcription(event.text, True, self._detected_language)
-                    await self.stop_processing_metrics()
                     self._accumulated_text = ""
 
                 elif isinstance(event, TranscriptionStreamLanguage):

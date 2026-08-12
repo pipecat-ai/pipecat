@@ -82,12 +82,13 @@ async def main():
         ),
     )
 
-    context.add_message({"role": "developer", "content": "Please introduce yourself to the user."})
-    await worker.queue_frames([LLMRunFrame()])
-
     runner = WorkerRunner()
 
     await runner.add_workers(worker)
+
+    context.add_message({"role": "developer", "content": "Please introduce yourself to the user."})
+    await worker.queue_frames([LLMRunFrame()])
+
     await runner.run()
 
 

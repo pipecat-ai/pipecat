@@ -59,31 +59,51 @@ _STATUS_RUNNING = "running"
 # Status value for the final message (task complete).
 _STATUS_FINISHED = "finished"
 
-# Description shipped on the started message. The text is intentionally
-# self-explanatory so a model reading the context can tell what's about to
-# happen even without out-of-band knowledge of the protocol.
+# Description shipped on the started message. It says only what the model has to
+# act on — wait, and don't answer from nothing — and deliberately does not
+# describe the message the result will arrive in. A model told the shape of a
+# message it should expect will try to produce one, and a function call is the
+# only structured channel it has, so it calls the tool again with the protocol
+# payload as the arguments. The payload's own fields are read by parse_message,
+# never by the model, so describing them buys nothing either.
 _STARTED_DESCRIPTION = (
-    "An asynchronous task associated with this tool_call_id has started "
-    "running. Expect results to arrive later as developer messages that look "
-    "roughly like this one (with 'type=async_tool' and a matching tool_call_id) "
-    "but with a 'result' field. Note that there *may* be more than one result "
-    "(i.e., a stream of results), but there doesn't have to be (there may be "
-    "only one). The last result will come in a message with 'status=finished'."
+    "This tool is still running. You will be given its result later. Do not call it "
+    "again and do not invent a result in the meantime."
 )
 
-# Description shipped on each intermediate-result message.
+# Description shipped on each intermediate-result message. Names no message shape
+# either, for the same reason as the started message above.
 _INTERMEDIATE_DESCRIPTION = (
-    "This is an intermediate result for the asynchronous task associated with "
-    "this tool_call_id. The task is still running. More intermediate results "
-    "may follow, or the next result may be the final one with "
-    "'status=finished'."
+    "This is a partial result and the task is still running. More may follow. Do not "
+    "call this tool again and do not treat this as the final answer."
 )
+
+# Standing guidance composed into the system instruction whenever an async tool is
+# registered. The per-result message says the same thing, but it arrives buried in a
+# context whose most recent turn is the user asking for something else; a model
+# weighing the two follows the nearer, louder request. This states the policy before
+# any result exists, so it is in force when one arrives.
+ASYNC_TOOL_INSTRUCTIONS = """ASYNC TOOLS:
+Some of your tools keep running after you have replied. Their results arrive later as \
+messages in the conversation, on whatever turn happens to be in progress by then.
+
+A result that has arrived is owed to the user, whatever the conversation has moved on to. \
+Answer what the user just said first, then add the result at the end of that same reply — \
+never before your answer, and never as a reply of its own. State a short result outright; \
+for a long one, say what came back and offer the details. Say it once, and do not repeat \
+it in later replies."""
 
 # Description shipped on the final-result message.
 _FINAL_DESCRIPTION = (
     "This is the final result for the asynchronous task associated with this "
     "tool_call_id. The task has completed. No further results will arrive for "
-    "this tool_call_id."
+    "this tool_call_id. You must convey this result to the user, even if the "
+    "conversation has moved on. Never leave it unsaid. First finish responding "
+    "to whatever the user is talking about now, then deliver the result at the "
+    "end of your response. How you deliver it depends on its size: if the "
+    "result is short, simply state it; if it is long or complex, name what has "
+    "come back and offer the details. Convey it once; do not repeat it in "
+    "later responses."
 )
 
 

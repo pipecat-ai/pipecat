@@ -47,7 +47,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
-from pipecat.services.settings import TTSSettings, is_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
@@ -58,6 +58,7 @@ from pipecat.utils.text.pattern_pair_aggregator import PatternMatch
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 from pipecat.utils.text.word_timestamp_utils import merge_punct_tokens
 from pipecat.utils.time import seconds_to_nanoseconds
+from pipecat.utils.types import is_given
 
 
 @dataclass
@@ -169,7 +170,7 @@ class TTSService(AIService):
         # TTS output sample rate
         sample_rate: int | None = None,
         # Types of text aggregations that should not be spoken.
-        skip_aggregator_types: list[str] | None = [],
+        skip_aggregator_types: list[str] | None = None,
         # A list of callables to transform text before just before sending it to TTS.
         # Each callable takes the aggregated text and its type, and returns the transformed text.
         # To register, provide a list of tuples of (aggregation_type | '*', transform_function).

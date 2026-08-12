@@ -16,14 +16,13 @@ from pipecat.bus import (
     BusJobCancelMessage,
     BusSubscriber,
 )
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 
 async def create_test_bus():
     """Create an AsyncQueueBus with a TaskManager for testing."""
     bus = AsyncQueueBus()
     tm = TaskManager()
-    tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
     await bus.setup(tm)
     return bus, tm
 

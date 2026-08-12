@@ -67,12 +67,13 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame, LLMSearchResult
 from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
+from pipecat.services.settings import LLMSettings
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 from .file_api import GeminiFileAPI
 
@@ -385,17 +386,17 @@ class GeminiLiveLLMSettings(LLMSettings):
         proactivity: Proactivity configuration.
     """
 
-    voice: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    modalities: GeminiModalities | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language: Language | str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    media_resolution: GeminiMediaResolution | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    vad: GeminiVADParams | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    context_window_compression: ContextWindowCompressionParams | dict | _NotGiven = field(
+    voice: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    modalities: GeminiModalities | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language: Language | str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    media_resolution: GeminiMediaResolution | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad: GeminiVADParams | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    context_window_compression: ContextWindowCompressionParams | dict | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    thinking: ThinkingConfig | dict | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enable_affective_dialog: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    proactivity: ProactivityConfig | dict | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    thinking: ThinkingConfig | dict | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_affective_dialog: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    proactivity: ProactivityConfig | dict | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):

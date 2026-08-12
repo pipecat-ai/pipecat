@@ -26,21 +26,22 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given, is_given
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import SPEECHMATICS_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 try:
     from speechmatics.voice import (
@@ -114,33 +115,33 @@ class SpeechmaticsSTTSettings(STTSettings):
         extra_params: Extra parameters for the STT engine.
     """
 
-    domain: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    turn_detection_mode: TurnDetectionMode | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaker_active_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaker_passive_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    focus_speakers: list[str] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    ignore_speakers: list[str] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    focus_mode: SpeakerFocusMode | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    known_speakers: list[SpeakerIdentifier] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    additional_vocab: list[AdditionalVocabEntry] | _NotGiven = field(
+    domain: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    turn_detection_mode: TurnDetectionMode | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_active_format: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_passive_format: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    focus_speakers: list[str] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    ignore_speakers: list[str] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    focus_mode: SpeakerFocusMode | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    known_speakers: list[SpeakerIdentifier] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    additional_vocab: list[AdditionalVocabEntry] | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    operating_point: OperatingPoint | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    max_delay: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    end_of_utterance_silence_trigger: float | None | _NotGiven = field(
+    operating_point: OperatingPoint | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_delay: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    end_of_utterance_silence_trigger: float | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    end_of_utterance_max_delay: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    punctuation_overrides: dict[str, Any] | None | _NotGiven = field(
+    end_of_utterance_max_delay: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    punctuation_overrides: dict[str, Any] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    include_partials: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    split_sentences: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enable_diarization: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaker_sensitivity: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    max_speakers: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    prefer_current_speaker: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    extra_params: dict[str, Any] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    include_partials: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    split_sentences: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_diarization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_sensitivity: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_speakers: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prefer_current_speaker: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    extra_params: dict[str, Any] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     #: Fields that can be updated on a live connection via the Speechmatics
     #: diarization-config API — no reconnect needed.
@@ -409,7 +410,11 @@ class SpeechmaticsSTTService(STTService):
                     Use ``settings=SpeechmaticsSTTService.Settings(...)`` instead.
                     Will be removed in 2.0.0.
 
-            should_interrupt: Determine whether the bot should be interrupted when Speechmatics turn_detection_mode is configured to detect user speech.
+            should_interrupt: Determine whether the bot should be interrupted when
+                Speechmatics turn_detection_mode is configured to detect user speech.
+                Passed along to the user turn strategies this service recommends,
+                which own the interruption; a user-supplied ``user_turn_strategies``
+                overrides the recommendation and this setting with it.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 ``params``, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
@@ -543,14 +548,16 @@ class SpeechmaticsSTTService(STTService):
         """Request external turn strategies when Speechmatics endpoints server-side.
 
         Every mode other than the default ``EXTERNAL`` (which uses Pipecat's own
-        endpointing) has Speechmatics detect turns and emit the turn frames, so the
-        user aggregator defers to those. Applied unless the user passed their own
-        ``user_turn_strategies``.
+        endpointing) has Speechmatics detect turns and propose the boundaries, so
+        the user aggregator resolves those. Applied unless the user passed their
+        own ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
         mode = self._settings.turn_detection_mode
         if is_given(mode) and mode != TurnDetectionMode.EXTERNAL:
-            frame.user_turn_strategies = ExternalUserTurnStrategies()
+            frame.user_turn_strategies = ExternalUserTurnStrategies(
+                enable_interruptions=self._should_interrupt,
+            )
         return frame
 
     # ============================================================================
@@ -899,22 +906,14 @@ class SpeechmaticsSTTService(STTService):
         """Handle StartOfTurn events.
 
         When Speechmatics STT detects the start of a new speaking turn, a StartOfTurn
-        event is triggered. This triggers bot interruption to stop any ongoing speech
-        synthesis and signals the start of user speech detection.
-
-        The service will:
-        - Send a BotInterruptionFrame upstream to stop bot speech
-        - Send a UserStartedSpeakingFrame downstream to notify other components
-        - Start metrics collection for measuring response times
+        event is triggered. The service proposes a turn start, which the user turn
+        strategies resolve into a UserStartedSpeakingFrame and an interruption.
 
         Args:
             message: the message payload.
         """
         logger.debug(f"{self} StartOfTurn received")
-        # await self.start_processing_metrics()
-        await self.broadcast_frame(UserStartedSpeakingFrame)
-        if self._should_interrupt:
-            await self.broadcast_interruption()
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
 
     async def _handle_end_of_turn(self, message: dict[str, Any]) -> None:
         """Handle EndOfTurn events.
@@ -922,18 +921,14 @@ class SpeechmaticsSTTService(STTService):
         EndOfTurn events are triggered by Speechmatics STT when it concludes a
         speaking turn. This occurs either due to silence or reaching the
         end-of-turn confidence thresholds. These events provide the final
-        transcript for the completed turn.
-
-        The service will:
-        - Stop processing metrics collection
-        - Send a UserStoppedSpeakingFrame to signal turn completion
+        transcript for the completed turn. The service proposes a turn stop, which
+        the user turn strategies resolve into a UserStoppedSpeakingFrame.
 
         Args:
             message: the message payload.
         """
         logger.debug(f"{self} EndOfTurn received")
-        # await self.stop_processing_metrics()
-        await self.broadcast_frame(UserStoppedSpeakingFrame)
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
     async def _handle_speakers_result(self, message: dict[str, Any]) -> None:
         """Handle SpeakersResult events.
@@ -1239,7 +1234,9 @@ class SpeechmaticsSTTService(STTService):
                     message = f"`{old}` is deprecated, use `InputParams.{new}`"
                 else:
                     message = f"`{old}` is deprecated and not used"
-                warnings.warn(message, DeprecationWarning)
+                # 3 frames out of this nested helper is the caller constructing
+                # the service, which is the code that has to change.
+                warnings.warn(message, DeprecationWarning, stacklevel=3)
 
         # List of deprecated arguments and their new location
         deprecated_args = [

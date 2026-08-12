@@ -26,10 +26,11 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     from hume import AsyncHumeClient
@@ -60,9 +61,9 @@ class HumeTTSSettings(TTSSettings):
         trailing_silence: Seconds of silence to append at the end (0-5).
     """
 
-    description: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    trailing_silence: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    description: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    trailing_silence: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class HumeTTSService(TTSService):

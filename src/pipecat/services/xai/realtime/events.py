@@ -83,9 +83,18 @@ class TurnDetection(BaseModel):
 
     Parameters:
         type: Detection type, must be "server_vad" or None for manual.
+        threshold: VAD activation threshold (0.1–0.9). Higher requires louder audio.
+        silence_duration_ms: Silence before the server ends the user turn.
+        prefix_padding_ms: Audio (ms) included before detected speech start.
+        idle_timeout_ms: When set, the server re-engages after this many ms of
+            silence following an assistant response (``timeout_triggered``).
     """
 
     type: Literal["server_vad"] | None = "server_vad"
+    threshold: float | None = None
+    silence_duration_ms: int | None = None
+    prefix_padding_ms: int | None = None
+    idle_timeout_ms: int | None = None
 
 
 #
@@ -93,14 +102,33 @@ class TurnDetection(BaseModel):
 #
 
 
+class InputAudioTranscription(BaseModel):
+    """Input audio transcription settings for the voice agent.
+
+    Parameters:
+        model: Transcription model. Use ``grok-transcribe`` for streaming
+            ``conversation.item.input_audio_transcription.updated`` events.
+        language_hint: BCP-47 language code to bias ASR.
+        keyterms: Domain terms to bias transcription (max 100, ≤50 chars each).
+    """
+
+    model: str | None = None
+    language_hint: str | None = None
+    keyterms: list[str] | None = None
+
+
 class AudioInput(BaseModel):
     """Audio input configuration.
 
     Parameters:
         format: The format configuration for input audio.
+        transcription: Optional input transcription settings.
+        transport: Wire path for input audio (``json`` or ``binary``).
     """
 
     format: PCMAudioFormat | PCMUAudioFormat | PCMAAudioFormat | None = None
+    transcription: InputAudioTranscription | None = None
+    transport: Literal["json", "binary"] | None = None
 
 
 class AudioOutput(BaseModel):
@@ -108,9 +136,13 @@ class AudioOutput(BaseModel):
 
     Parameters:
         format: The format configuration for output audio.
+        speed: Playback speed multiplier (0.7–1.5).
+        transport: Wire path for assistant audio (``json`` or ``binary``).
     """
 
     format: PCMAudioFormat | PCMUAudioFormat | PCMAAudioFormat | None = None
+    speed: float | None = None
+    transport: Literal["json", "binary"] | None = None
 
 
 class AudioConfiguration(BaseModel):
@@ -123,6 +155,26 @@ class AudioConfiguration(BaseModel):
 
     input: AudioInput | None = None
     output: AudioOutput | None = None
+
+
+class Reasoning(BaseModel):
+    """Reasoning controls for voice-agent models.
+
+    Parameters:
+        effort: ``high`` enables reasoning; ``none`` disables it.
+    """
+
+    effort: Literal["high", "none"] | None = None
+
+
+class SessionResumption(BaseModel):
+    """Session resumption opt-in for reconnecting with conversation history.
+
+    Parameters:
+        enabled: When true, the server caches turns for ``conversation_id`` replay.
+    """
+
+    enabled: bool | None = None
 
 
 #
@@ -185,8 +237,20 @@ class FunctionTool(BaseModel):
     parameters: dict[str, Any]
 
 
+class McpTool(BaseModel):
+    """Remote MCP tool configuration managed by xAI.
+
+    Parameters:
+        type: Tool type, always "mcp".
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    type: Literal["mcp"] = "mcp"
+
+
 # Union type for all Grok tools
-GrokTool = WebSearchTool | XSearchTool | FileSearchTool | FunctionTool | dict[str, Any]
+GrokTool = WebSearchTool | XSearchTool | FileSearchTool | FunctionTool | McpTool | dict[str, Any]
 
 
 #
@@ -216,11 +280,19 @@ class SessionProperties(BaseModel):
         turn_detection: Configuration for turn detection. Defaults to server-side VAD.
             Set to None for manual turn detection.
         audio: Configuration for input and output audio.
-        tools: Available tools for the assistant (web_search, x_search, file_search, function).
+        tools: Available tools for the assistant (web_search, x_search, file_search,
+            function, mcp).
+        reasoning: Optional reasoning effort controls.
+        resumption: Optional session-resumption opt-in.
+        replace: Optional pronunciation replacement map applied before TTS.
+        id: Session id when present on server snapshots (``session.created``).
+        object: Object type from server snapshots.
+        model: Model id echoed on server snapshots.
     """
 
-    # Needed to support ToolSchema in tools field.
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    # Needed to support ToolSchema in tools field. Ignore unknown server fields
+    # so session.created / session.updated snapshots remain parseable.
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="ignore")
 
     instructions: str | None = None
     voice: str | None = "eve"
@@ -232,6 +304,12 @@ class SessionProperties(BaseModel):
     # tools (the validator below normalizes that to a ToolsSchema); a list of
     # provider-native GrokTool objects passes through.
     tools: ToolsSchema | list[FunctionSchema | DirectFunction] | list[GrokTool] | None = None
+    reasoning: Reasoning | None = None
+    resumption: SessionResumption | None = None
+    replace: dict[str, str] | None = None
+    id: str | None = None
+    object: str | None = None
+    model: str | None = None
 
     @field_validator("tools", mode="before")
     @classmethod
@@ -273,7 +351,7 @@ class ConversationItem(BaseModel):
     Parameters:
         id: Unique identifier for the item, auto-generated if not provided.
         object: Object type identifier for the realtime API.
-        type: Item type (message, function_call, or function_call_output).
+        type: Item type (message, function_call, function_call_output, or force_message).
         status: Current status of the item.
         role: Speaker role for message items (user, assistant, or system).
         content: Content list for message items.
@@ -283,9 +361,11 @@ class ConversationItem(BaseModel):
         output: Function output as JSON string for function_call_output items.
     """
 
+    model_config = ConfigDict(extra="ignore")
+
     id: str = Field(default_factory=lambda: str(uuid.uuid4().hex))
     object: Literal["realtime.item"] | None = None
-    type: Literal["message", "function_call", "function_call_output"]
+    type: Literal["message", "function_call", "function_call_output", "force_message"]
     status: Literal["completed", "in_progress", "incomplete"] | None = None
     role: Literal["user", "assistant", "system", "tool"] | None = None
     content: list[ItemContent] | None = None
@@ -312,9 +392,12 @@ class ResponseProperties(BaseModel):
 
     Parameters:
         modalities: Output modalities for the response (text, audio, or both).
+        instructions: Per-response system prompt override (session instructions
+            resume on the next response).
     """
 
     modalities: list[Literal["text", "audio"]] | None = ["text", "audio"]
+    instructions: str | None = None
 
 
 #
@@ -437,6 +520,34 @@ class ResponseCancelEvent(ClientEvent):
     type: Literal["response.cancel"] = "response.cancel"
 
 
+class ConversationItemTruncateEvent(ClientEvent):
+    """Event to truncate a previous assistant audio item.
+
+    Parameters:
+        type: Event type, always "conversation.item.truncate".
+        item_id: ID of the item to truncate.
+        content_index: Index of the content to truncate within the item.
+        audio_end_ms: End time in milliseconds for the truncated audio.
+    """
+
+    type: Literal["conversation.item.truncate"] = "conversation.item.truncate"
+    item_id: str
+    content_index: int
+    audio_end_ms: int
+
+
+class ConversationItemDeleteEvent(ClientEvent):
+    """Event to delete a conversation item by ID.
+
+    Parameters:
+        type: Event type, always "conversation.item.delete".
+        item_id: ID of the item to delete.
+    """
+
+    type: Literal["conversation.item.delete"] = "conversation.item.delete"
+    item_id: str
+
+
 #
 # Server Events (received from Grok)
 #
@@ -456,6 +567,18 @@ class ServerEvent(BaseModel):
     type: str
 
 
+class SessionCreatedEvent(ServerEvent):
+    """Event indicating a session has been created on connect.
+
+    Parameters:
+        type: Event type, always "session.created".
+        session: The created session properties.
+    """
+
+    type: Literal["session.created"]
+    session: SessionProperties
+
+
 class SessionUpdatedEvent(ServerEvent):
     """Event indicating a session has been updated.
 
@@ -471,7 +594,7 @@ class SessionUpdatedEvent(ServerEvent):
 class ConversationCreated(ServerEvent):
     """Event indicating a conversation has been created.
 
-    This is the first message received after connecting.
+    Sent after connect; Pipecat uses this to send the initial session update.
 
     Parameters:
         type: Event type, always "conversation.created".
@@ -496,17 +619,67 @@ class ConversationItemAdded(ServerEvent):
     item: ConversationItem
 
 
+class ConversationItemDeleted(ServerEvent):
+    """Event confirming a conversation item was deleted.
+
+    Parameters:
+        type: Event type, always "conversation.item.deleted".
+        item_id: ID of the deleted conversation item.
+    """
+
+    type: Literal["conversation.item.deleted"]
+    item_id: str
+
+
+class ConversationItemTruncated(ServerEvent):
+    """Event confirming a conversation item was truncated.
+
+    Parameters:
+        type: Event type, always "conversation.item.truncated".
+        item_id: ID of the truncated conversation item.
+        content_index: Index of the content within the item.
+        audio_end_ms: End time in milliseconds for the truncated audio.
+    """
+
+    type: Literal["conversation.item.truncated"]
+    item_id: str
+    content_index: int | None = None
+    audio_end_ms: int | None = None
+
+
+class ConversationItemInputAudioTranscriptionUpdated(ServerEvent):
+    """Cumulative streaming update for user input audio transcription.
+
+    Emitted when ``audio.input.transcription.model`` is ``grok-transcribe``.
+    Unlike a delta, ``transcript`` is the full cumulative text so far and may
+    correct earlier updates.
+
+    Parameters:
+        type: Event type, always "conversation.item.input_audio_transcription.updated".
+        item_id: ID of the conversation item being transcribed.
+        content_index: Index of the content within the item, if provided.
+        transcript: Cumulative transcription text so far.
+    """
+
+    type: Literal["conversation.item.input_audio_transcription.updated"]
+    item_id: str
+    content_index: int | None = None
+    transcript: str
+
+
 class ConversationItemInputAudioTranscriptionCompleted(ServerEvent):
     """Event indicating input audio transcription is complete.
 
     Parameters:
         type: Event type, always "conversation.item.input_audio_transcription.completed".
         item_id: ID of the conversation item that was transcribed.
+        content_index: Index of the content within the item, if provided.
         transcript: Complete transcription text.
     """
 
     type: Literal["conversation.item.input_audio_transcription.completed"]
     item_id: str
+    content_index: int | None = None
     transcript: str
 
 
@@ -560,6 +733,35 @@ class InputAudioBufferCleared(ServerEvent):
     """
 
     type: Literal["input_audio_buffer.cleared"]
+
+
+class InputAudioBufferTimeoutTriggered(ServerEvent):
+    """Event indicating the idle timeout fired with no user speech.
+
+    When ``turn_detection.idle_timeout_ms`` is set, the server commits a silent
+    user turn and generates a proactive check-in.
+
+    Parameters:
+        type: Event type, always "input_audio_buffer.timeout_triggered".
+        item_id: ID of the associated conversation item, if provided.
+    """
+
+    type: Literal["input_audio_buffer.timeout_triggered"]
+    item_id: str | None = None
+
+
+class InputAudioBufferDtmfEventReceived(ServerEvent):
+    """DTMF tone detected on a SIP session.
+
+    Parameters:
+        type: Event type, always "input_audio_buffer.dtmf_event_received".
+        digit: The DTMF digit received.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
+
+    type: Literal["input_audio_buffer.dtmf_event_received"]
+    digit: str | None = None
 
 
 class ResponseOutputItemAdded(ServerEvent):
@@ -805,6 +1007,63 @@ class ResponseContentPartDone(ServerEvent):
     output_index: int
 
 
+class ResponseTextDelta(ServerEvent):
+    """Event containing incremental text-mode output from a response.
+
+    xAI emits both ``response.text.delta`` and ``response.output_text.delta``
+    with the same payload; clients should accept either name.
+
+    Parameters:
+        type: ``response.output_text.delta`` or ``response.text.delta``.
+        response_id: ID of the response.
+        item_id: ID of the conversation item.
+        output_index: Index of the output item.
+        content_index: Index of the content part.
+        delta: Incremental text content.
+    """
+
+    type: Literal["response.output_text.delta", "response.text.delta"]
+    response_id: str | None = None
+    item_id: str | None = None
+    output_index: int | None = None
+    content_index: int | None = None
+    delta: str
+
+
+class McpListToolsEvent(ServerEvent):
+    """MCP tool discovery lifecycle event.
+
+    Parameters:
+        type: One of ``mcp_list_tools.in_progress``, ``.completed``, or ``.failed``.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
+
+    type: Literal[
+        "mcp_list_tools.in_progress",
+        "mcp_list_tools.completed",
+        "mcp_list_tools.failed",
+    ]
+
+
+class ResponseMcpCallEvent(ServerEvent):
+    """MCP tool call lifecycle or argument streaming event.
+
+    Parameters:
+        type: An MCP call event name under ``response.mcp_call*``.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
+
+    type: Literal[
+        "response.mcp_call_arguments.delta",
+        "response.mcp_call_arguments.done",
+        "response.mcp_call.in_progress",
+        "response.mcp_call.completed",
+        "response.mcp_call.failed",
+    ]
+
+
 class PingEvent(ServerEvent):
     """Keep-alive ping event from the server.
 
@@ -836,14 +1095,24 @@ class ErrorEvent(ServerEvent):
 _server_event_types = {
     "error": ErrorEvent,
     "ping": PingEvent,
+    "session.created": SessionCreatedEvent,
     "session.updated": SessionUpdatedEvent,
     "conversation.created": ConversationCreated,
     "conversation.item.added": ConversationItemAdded,
-    "conversation.item.input_audio_transcription.completed": ConversationItemInputAudioTranscriptionCompleted,
+    "conversation.item.deleted": ConversationItemDeleted,
+    "conversation.item.truncated": ConversationItemTruncated,
+    "conversation.item.input_audio_transcription.updated": (
+        ConversationItemInputAudioTranscriptionUpdated
+    ),
+    "conversation.item.input_audio_transcription.completed": (
+        ConversationItemInputAudioTranscriptionCompleted
+    ),
     "input_audio_buffer.speech_started": InputAudioBufferSpeechStarted,
     "input_audio_buffer.speech_stopped": InputAudioBufferSpeechStopped,
     "input_audio_buffer.committed": InputAudioBufferCommitted,
     "input_audio_buffer.cleared": InputAudioBufferCleared,
+    "input_audio_buffer.timeout_triggered": InputAudioBufferTimeoutTriggered,
+    "input_audio_buffer.dtmf_event_received": InputAudioBufferDtmfEventReceived,
     "response.created": ResponseCreated,
     "response.output_item.added": ResponseOutputItemAdded,
     "response.output_item.done": ResponseOutputItemDone,
@@ -853,8 +1122,18 @@ _server_event_types = {
     "response.output_audio_transcript.done": ResponseAudioTranscriptDone,
     "response.output_audio.delta": ResponseAudioDelta,
     "response.output_audio.done": ResponseAudioDone,
+    "response.output_text.delta": ResponseTextDelta,
+    "response.text.delta": ResponseTextDelta,
     "response.function_call_arguments.delta": ResponseFunctionCallArgumentsDelta,
     "response.function_call_arguments.done": ResponseFunctionCallArgumentsDone,
+    "mcp_list_tools.in_progress": McpListToolsEvent,
+    "mcp_list_tools.completed": McpListToolsEvent,
+    "mcp_list_tools.failed": McpListToolsEvent,
+    "response.mcp_call_arguments.delta": ResponseMcpCallEvent,
+    "response.mcp_call_arguments.done": ResponseMcpCallEvent,
+    "response.mcp_call.in_progress": ResponseMcpCallEvent,
+    "response.mcp_call.completed": ResponseMcpCallEvent,
+    "response.mcp_call.failed": ResponseMcpCallEvent,
     "response.done": ResponseDone,
 }
 

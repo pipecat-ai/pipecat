@@ -43,7 +43,8 @@ async def get_current_weather(params: FunctionCallParams, location: str):
         location: The city and state, e.g. "San Francisco, CA".
     """
     # Simulate a long-running API call, so we can test async function calls (cancel_on_interruption=False).
-    await asyncio.sleep(20)
+    await asyncio.sleep(15)
+    logger.debug("Returning get_current_weather result.")
     await params.result_callback({"conditions": "nice", "temperature": "75"})
 
 
@@ -79,7 +80,7 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
@@ -92,7 +93,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = AnthropicLLMService(
         api_key=os.environ["ANTHROPIC_API_KEY"],
-        enable_async_tool_cancellation=True,
         settings=AnthropicLLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
@@ -132,9 +132,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
+
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected")
         # Kick off the conversation.
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}
@@ -143,12 +147,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
-        await worker.cancel()
+        logger.info("Client disconnected")
+        await runner.cancel()
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-    await runner.add_workers(worker)
     await runner.run()
 
 
