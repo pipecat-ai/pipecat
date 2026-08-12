@@ -55,25 +55,28 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    """Sarvam realtime Speech-to-Text with Sarvam endpointing the turns.
+    """Sarvam realtime Speech-to-Text with the pipeline endpointing the turns.
 
-    This example uses Sarvam's realtime endpoint, which streams interim
-    transcripts and decides turn boundaries server-side. See
-    `voice-sarvam-vad.py` for the same idea on the transcription endpoint, and
-    `voice-sarvam.py` for Pipecat-side turn detection.
+    This example uses Sarvam's realtime endpoint with `endpointing="manual"`,
+    so Pipecat decides the turn boundaries and tells Sarvam about them. See
+    `voice-sarvam-vad.py` for server-side endpointing on the transcription
+    endpoint.
 
     Key features:
 
-    1. Sarvam Turn Detection
-       - `endpointing="vad"` (the default) has Sarvam report speech boundaries
-       - Sarvam decides when the user starts and stops speaking, and the
-         service announces those turns directly to the pipeline
+    1. Pipeline Turn Detection
+       - `endpointing="manual"` has the service forward the pipeline's VAD
+         boundaries to Sarvam as `speech_start` and `speech_end`
+       - Sarvam finalizes on the boundary it is handed, and its own VAD events
+         are ignored
+       - The user aggregator keeps its local turn detection, since the service
+         recommends no turn strategies in this mode
 
-    2. Local VAD Alongside It
-       - Sarvam decides the turns, but the service still needs a `vad_analyzer`
-       - TTFB is measured from the VAD stop frame, which carries the stop delay
-         needed to place the real end of speech; Sarvam's own boundary event
-         arrives only after the server's silence window
+    2. VAD Is Required
+       - Without a `vad_analyzer` Sarvam receives no boundary and emits no
+         final transcript
+       - It also anchors TTFB: the VAD stop frame carries the stop delay needed
+         to place the real end of speech
 
     3. Streaming Profile
        - `stream_type="balanced"` (the default) favors accuracy; `"fast"` emits
@@ -88,6 +91,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = SarvamRealtimeSTTService(
         api_key=os.environ["SARVAM_API_KEY"],
         settings=SarvamRealtimeSTTService.Settings(
+            endpointing="manual",
             language_code="en-IN",
             stream_type="balanced",
         ),
@@ -109,9 +113,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     context = LLMContext()
-    # Sarvam endpoints the turns and the service recommends the external turn
-    # strategies that defer to them; the VAD analyzer is what times transcript
-    # latency.
+    # The VAD analyzer carries the whole turn cycle here: it endpoints locally,
+    # supplies the boundaries the service forwards to Sarvam, and times
+    # transcript latency.
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
