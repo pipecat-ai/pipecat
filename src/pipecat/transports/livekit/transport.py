@@ -233,6 +233,8 @@ class LiveKitTransportClient:
         self._task_manager = setup.task_manager
         self._room = rtc.Room(loop=self._task_manager.get_event_loop())
 
+        self._out_sample_rate = self._params.audio_out_sample_rate or setup.audio_out_sample_rate
+
         # Set up room event handlers
         self.room.on("participant_connected")(self._on_participant_connected_wrapper)
         self.room.on("participant_disconnected")(self._on_participant_disconnected_wrapper)
@@ -246,14 +248,6 @@ class LiveKitTransportClient:
     async def cleanup(self):
         """Cleanup client resources."""
         await self.disconnect()
-
-    async def start(self, frame: StartFrame):
-        """Start the client and initialize audio components.
-
-        Args:
-            frame: The start frame containing initialization parameters.
-        """
-        self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     async def connect(self):
@@ -744,27 +738,45 @@ class LiveKitInputTransport(BaseInputTransport):
         # Whether we have seen a StartFrame already.
         self._initialized = False
 
-    async def start(self, frame: StartFrame):
-        """Start the input transport and connect to LiveKit room.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Setup the input transport with shared client setup.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: The frame processor setup configuration.
         """
-        await super().start(frame)
+        await super().setup(setup)
 
         if self._initialized:
             return
 
         self._initialized = True
 
-        await self._client.start(frame)
+        await self._client.setup(setup)
+
         await self._client.connect()
+
+        logger.info("LiveKitInputTransport connected")
+
+    async def cleanup(self):
+        """Release input transport resources at teardown."""
+        await super().cleanup()
+        await self._teardown()
+        await self._transport.cleanup()
+
+    async def start(self, frame: StartFrame):
+        """Start receiving media from the LiveKit room.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
+        await super().start(frame)
+
         if not self._audio_in_task and self._params.audio_in_enabled:
             self._audio_in_task = self.create_task(self._audio_in_task_handler())
         if not self._video_in_task and self._params.video_in_enabled:
             self._video_in_task = self.create_task(self._video_in_task_handler())
+
         await self.set_transport_ready(frame)
-        logger.info("LiveKitInputTransport started")
 
     async def stop(self, frame: EndFrame):
         """Stop the input transport and disconnect from LiveKit room.
@@ -784,21 +796,6 @@ class LiveKitInputTransport(BaseInputTransport):
         """
         await super().cancel(frame)
         await self._teardown()
-
-    async def setup(self, setup: FrameProcessorSetup):
-        """Setup the input transport with shared client setup.
-
-        Args:
-            setup: The frame processor setup configuration.
-        """
-        await super().setup(setup)
-        await self._client.setup(setup)
-
-    async def cleanup(self):
-        """Release input transport resources at teardown."""
-        await super().cleanup()
-        await self._teardown()
-        await self._transport.cleanup()
 
     async def _teardown(self):
         """Disconnect the client and cancel the media input tasks.
@@ -934,23 +931,40 @@ class LiveKitOutputTransport(BaseOutputTransport):
         # Whether we have seen a StartFrame already.
         self._initialized = False
 
-    async def start(self, frame: StartFrame):
-        """Start the output transport and connect to LiveKit room.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Setup the output transport with shared client setup.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: The frame processor setup configuration.
         """
-        await super().start(frame)
+        await super().setup(setup)
 
         if self._initialized:
             return
 
         self._initialized = True
 
-        await self._client.start(frame)
+        await self._client.setup(setup)
+
         await self._client.connect()
+
+        logger.info("LiveKitOutputTransport connected")
+
+    async def cleanup(self):
+        """Release output transport resources at teardown."""
+        await super().cleanup()
+        await self._client.disconnect()
+        await self._transport.cleanup()
+
+    async def start(self, frame: StartFrame):
+        """Start the output transport.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
+        await super().start(frame)
+
         await self.set_transport_ready(frame)
-        logger.info("LiveKitOutputTransport started")
 
     async def stop(self, frame: EndFrame):
         """Stop the output transport and disconnect from LiveKit room.
@@ -985,21 +999,6 @@ class LiveKitOutputTransport(BaseOutputTransport):
         await super().process_frame(frame, direction)
         if isinstance(frame, InterruptionFrame) and self._client._audio_source is not None:
             self._client._audio_source.clear_queue()
-
-    async def setup(self, setup: FrameProcessorSetup):
-        """Setup the output transport with shared client setup.
-
-        Args:
-            setup: The frame processor setup configuration.
-        """
-        await super().setup(setup)
-        await self._client.setup(setup)
-
-    async def cleanup(self):
-        """Release output transport resources at teardown."""
-        await super().cleanup()
-        await self._client.disconnect()
-        await self._transport.cleanup()
 
     async def send_message(
         self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
