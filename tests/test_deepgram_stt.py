@@ -14,6 +14,8 @@ from deepgram.core import ApiError
 from loguru import logger
 
 from pipecat.services.deepgram.stt import DeepgramSTTService, _derive_deepgram_urls
+from pipecat.tests.utils import frame_processor_setup
+from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.network import QuickFailureTracker
 
 
@@ -286,7 +288,7 @@ async def test_final_transcript_emits_usage_before_transcription_frame(monkeypat
     from pipecat.metrics.metrics import STTUsageMetricsData
 
     service = DeepgramSTTService(api_key="test-key")
-    service._enable_usage_metrics = True
+    service._setup = frame_processor_setup(TaskManager(), enable_usage_metrics=True)
     pushed_frames = []
 
     async def fake_push_frame(frame, direction=None):

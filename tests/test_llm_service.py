@@ -36,6 +36,7 @@ from pipecat.services.llm_service import (
     LLMService,
 )
 from pipecat.services.settings import LLMSettings
+from pipecat.tests.utils import frame_processor_setup
 from pipecat.turns.user_mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.utils.async_tool_cancellation import cancel_tool_name
@@ -65,8 +66,8 @@ class MockLLMService(LLMService):
             user_turn_completion_config=kwargs.pop("user_turn_completion_config", None),
         )
         super().__init__(settings=settings, **kwargs)
-        # Stub the pipeline task so FunctionCallParams can be constructed.
-        self._pipeline_worker = SimpleNamespace(app_resources=None)
+        # Stub the pipeline worker so FunctionCallParams can be constructed.
+        self._setup = frame_processor_setup(pipeline_worker=SimpleNamespace(app_resources=None))
 
 
 class TestUnparameterizedSubclass(unittest.TestCase):

@@ -18,6 +18,8 @@ from pipecat.services.google.stt import (
     GoogleSTTService,
     _normalize_speech_adaptation,
 )
+from pipecat.tests.utils import frame_processor_setup
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 
 class AsyncResponses:
@@ -51,7 +53,7 @@ async def test_google_final_result_emits_finalized_transcription_frame():
     service._last_transcript_was_final = False
     service._get_language_codes = lambda: ["en-US"]
     service._stt_usage_pending_seconds = 0.0
-    service._enable_usage_metrics = False
+    service._setup = frame_processor_setup(TaskManager(), enable_usage_metrics=False)
 
     frames = []
     transcriptions = []

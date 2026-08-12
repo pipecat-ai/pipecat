@@ -20,8 +20,10 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.soniox.stt import END_TOKEN, SonioxSTTService, _language_from_tokens
+from pipecat.tests.utils import frame_processor_setup
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 
 class _FakeWebsocket:
@@ -442,7 +444,7 @@ async def test_endpoint_transcript_emits_usage_before_transcription_frame(monkey
     from pipecat.metrics.metrics import STTUsageMetricsData
 
     service = SonioxSTTService(api_key="test-key")
-    service._enable_usage_metrics = True
+    service._setup = frame_processor_setup(TaskManager(), enable_usage_metrics=True)
     pushed_frames = []
 
     async def fake_push_frame(frame, direction=None):

@@ -1041,11 +1041,26 @@ class PipelineWorker(BaseWorker):
         """Set up the pipeline worker and all processors."""
         await super().setup(self._task_manager or params.task_manager)
 
+        # Do any additional pipeline worker setup externally.
+        await self._load_setup_files()
+
+        # Start worker observer.
+        await self._observer.setup(self.task_manager)
+        await self._observer.start()
+
+        # Setup processors
         setup = FrameProcessorSetup(
+            audio_in_sample_rate=self._params.audio_in_sample_rate,
+            audio_out_sample_rate=self._params.audio_out_sample_rate,
             clock=self._clock,
-            task_manager=self.task_manager,
+            enable_metrics=self._params.enable_metrics,
+            enable_tracing=self._enable_tracing,
+            enable_usage_metrics=self._params.enable_usage_metrics,
             observer=self._observer,
             pipeline_worker=self,
+            report_only_initial_ttfb=self._params.report_only_initial_ttfb,
+            task_manager=self.task_manager,
+            tracing_context=self._tracing_context,
             # Populate the deprecated `tool_resources` field for backwards
             # compatibility with custom FrameProcessor subclasses whose
             # ``setup()`` overrides still read it. Reading the field emits a
@@ -1053,14 +1068,7 @@ class PipelineWorker(BaseWorker):
             # ``setup.pipeline_worker.app_resources`` instead.
             tool_resources=self._app_resources,
         )
-        await self._pipeline.setup(setup)
-
-        # Do any additional pipeline worker setup externally.
-        await self._load_setup_files()
-
-        # Start worker observer.
-        await self._observer.setup(self.task_manager)
-        await self._observer.start()
+        await self.create_task(self._pipeline.setup(setup))
 
     async def _cleanup(self, cleanup_pipeline: bool):
         """Clean up the pipeline worker and processors."""

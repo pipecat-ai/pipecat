@@ -24,6 +24,7 @@ from pipecat.services.llm_service import (
     LLMService,
 )
 from pipecat.services.settings import LLMSettings
+from pipecat.tests.utils import frame_processor_setup
 from pipecat.utils.asyncio.task_manager import TaskManager
 
 
@@ -105,7 +106,9 @@ class TestLLMServiceFunctionCallReadsAppResources(unittest.IsolatedAsyncioTestCa
         service = _MockLLMService()
         resources = _Resources(user_name="John")
         # Stub the pipeline worker with just the bit LLMService reads.
-        service._pipeline_worker = SimpleNamespace(app_resources=resources)  # type: ignore[assignment]
+        service._setup = frame_processor_setup(
+            TaskManager(), pipeline_worker=SimpleNamespace(app_resources=resources)
+        )
 
         captured: dict[str, Any] = {}
 
@@ -136,7 +139,9 @@ class TestLLMServiceFunctionCallReadsAppResources(unittest.IsolatedAsyncioTestCa
     async def test_direct_function_params_receives_app_resources(self):
         service = _MockLLMService()
         resources = _Resources(user_name="John")
-        service._pipeline_worker = SimpleNamespace(app_resources=resources)  # type: ignore[assignment]
+        service._setup = frame_processor_setup(
+            TaskManager(), pipeline_worker=SimpleNamespace(app_resources=resources)
+        )
         captured: dict[str, Any] = {}
 
         async def lookup(params: FunctionCallParams):
