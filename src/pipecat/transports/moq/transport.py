@@ -1121,7 +1121,19 @@ class MOQInputTransport(BaseInputTransport):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         await self._client.setup(setup)
+        self._client.connect()
+
+    async def cleanup(self):
+        """Cleanup resources."""
+        await super().cleanup()
+        await self._client.cleanup()
 
     async def start(self, frame: StartFrame):
         """Auto-connect to the MOQ relay when the pipeline starts.
@@ -1130,11 +1142,7 @@ class MOQInputTransport(BaseInputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        if self._initialized:
-            return
-        self._initialized = True
 
-        self._client.connect()
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
@@ -1166,11 +1174,6 @@ class MOQInputTransport(BaseInputTransport):
         """
         await super().cancel(frame)
         await self._client.cancel()
-
-    async def cleanup(self):
-        """Cleanup resources."""
-        await super().cleanup()
-        await self._client.cleanup()
 
     async def push_received_audio(self, audio: bytes, sample_rate: int):
         """Push a received audio frame downstream.

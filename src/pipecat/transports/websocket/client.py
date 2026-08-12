@@ -243,7 +243,7 @@ class WebsocketClientInputTransport(BaseInputTransport):
         self._session = session
         self._params = params
 
-        # Whether we have seen a StartFrame already.
+        # Whether setup() has already run.
         self._initialized = False
 
     async def setup(self, setup: FrameProcessorSetup):
@@ -253,7 +253,24 @@ class WebsocketClientInputTransport(BaseInputTransport):
             setup: The frame processor setup configuration.
         """
         await super().setup(setup)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         await self._session.setup(setup.task_manager)
+
+        if self._params.serializer:
+            await self._params.serializer.setup(setup)
+
+        await self._session.connect()
+
+    async def cleanup(self):
+        """Clean up the input transport resources."""
+        await super().cleanup()
+        await self._session.disconnect()
+        await self._transport.cleanup()
 
     async def start(self, frame: StartFrame):
         """Start the input transport and initialize the WebSocket connection.
@@ -263,14 +280,6 @@ class WebsocketClientInputTransport(BaseInputTransport):
         """
         await super().start(frame)
 
-        if self._initialized:
-            return
-
-        self._initialized = True
-
-        if self._params.serializer:
-            await self._params.serializer.setup(self.processor_setup)
-        await self._session.connect()
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
@@ -290,12 +299,6 @@ class WebsocketClientInputTransport(BaseInputTransport):
         """
         await super().cancel(frame)
         await self._session.disconnect()
-
-    async def cleanup(self):
-        """Clean up the input transport resources."""
-        await super().cleanup()
-        await self._session.disconnect()
-        await self._transport.cleanup()
 
     async def on_message(self, websocket, message):
         """Handle incoming WebSocket messages.
@@ -347,11 +350,11 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         # (e.g. from the TTS), and since this is just a network connection we
         # would be sending it to quickly. Instead, we want to block to emulate
         # an audio device, this is what the send interval is. It will be
-        # computed on StartFrame.
+        # computed during setup.
         self._send_interval = 0
         self._next_send_time = 0
 
-        # Whether we have seen a StartFrame already.
+        # Whether setup() has already run.
         self._initialized = False
 
     async def setup(self, setup: FrameProcessorSetup):
@@ -361,7 +364,20 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
             setup: The frame processor setup configuration.
         """
         await super().setup(setup)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
+        self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
+
         await self._session.setup(setup.task_manager)
+
+        if self._params.serializer:
+            await self._params.serializer.setup(setup)
+
+        await self._session.connect()
 
     async def start(self, frame: StartFrame):
         """Start the output transport and initialize the WebSocket connection.
@@ -371,15 +387,6 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         """
         await super().start(frame)
 
-        if self._initialized:
-            return
-
-        self._initialized = True
-
-        self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
-        if self._params.serializer:
-            await self._params.serializer.setup(self.processor_setup)
-        await self._session.connect()
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):

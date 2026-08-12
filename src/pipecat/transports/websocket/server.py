@@ -37,7 +37,7 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
     StartFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
@@ -140,8 +140,24 @@ class SingleClientWebsocketServerInputTransport(BaseInputTransport):
         # cut off. Mirrors the leave-counter used by the FastAPI/Daily transports.
         self._server_refs = 0
 
-        # Whether we have seen a StartFrame already.
+        # Whether setup() has already run.
         self._initialized = False
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the input transport with the frame processor setup.
+
+        Args:
+            setup: The frame processor setup configuration.
+        """
+        await super().setup(setup)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
+        if self._params.serializer:
+            await self._params.serializer.setup(setup)
 
     async def start(self, frame: StartFrame):
         """Start the WebSocket server and initialize components.
@@ -151,18 +167,13 @@ class SingleClientWebsocketServerInputTransport(BaseInputTransport):
         """
         await super().start(frame)
 
-        if self._initialized:
-            return
-
-        self._initialized = True
-
-        if self._params.serializer:
-            await self._params.serializer.setup(self.processor_setup)
         if not self._server_task:
             self._server_task = self.create_task(self._server_task_handler())
+
         # The input side now holds the server; the output side registers its own
         # hold in its start().
         self._server_refs += 1
+
         await self.set_transport_ready(frame)
 
     def acquire_server(self):
@@ -345,11 +356,11 @@ class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
         # (e.g. from the TTS), and since this is just a network connection we
         # would be sending it to quickly. Instead, we want to block to emulate
         # an audio device, this is what the send interval is. It will be
-        # computed on StartFrame.
+        # computed during setup.
         self._send_interval = 0
         self._next_send_time = 0
 
-        # Whether we have seen a StartFrame already.
+        # Whether setup() has already run.
         self._initialized = False
 
     async def set_client_connection(
@@ -368,6 +379,24 @@ class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
             await self._websocket.close()
         self._websocket = websocket
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the output transport with the frame processor setup.
+
+        Args:
+            setup: The frame processor setup configuration.
+        """
+        await super().setup(setup)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
+        self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
+
+        if self._params.serializer:
+            await self._params.serializer.setup(setup)
+
     async def start(self, frame: StartFrame):
         """Start the output transport and initialize components.
 
@@ -376,17 +405,10 @@ class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
         """
         await super().start(frame)
 
-        if self._initialized:
-            return
-
-        self._initialized = True
-
-        if self._params.serializer:
-            await self._params.serializer.setup(self.processor_setup)
-        self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
         # Register the output side's hold on the shared server (owned by the
         # input transport), so it stays up until this side has flushed.
         self._transport.input().acquire_server()
+
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
