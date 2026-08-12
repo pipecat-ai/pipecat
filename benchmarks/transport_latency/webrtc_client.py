@@ -115,6 +115,106 @@ def instrument_jitter_buffer_timing():
     return delays_by_buffer, creation_order, restore
 
 
+def instrument_opus_codec_timing():
+    """Wrap aiortc's ``OpusEncoder.encode``/``OpusDecoder.decode`` to time
+    each call's wall-clock cost.
+
+    Encode runs in ``RTCRtpSender``'s thread-pool executor (before a packet
+    is sent); decode runs in ``RTCRtpReceiver``'s dedicated decoder thread,
+    *after* the jitter buffer releases a frame — so decode time is additive
+    to the measured jitter-buffer hold, not overlapping with it. Idempotent
+    like the other instrument_* helpers here.
+
+    Returns ``(encode_ms_samples, decode_ms_samples, restore)``.
+    """
+    from aiortc.codecs.opus import OpusDecoder, OpusEncoder
+
+    orig_encode = OpusEncoder.encode
+    orig_decode = OpusDecoder.decode
+    encode_ms: list[float] = []
+    decode_ms: list[float] = []
+
+    def patched_encode(self, frame, force_keyframe=False):
+        t0 = time.perf_counter()
+        result = orig_encode(self, frame, force_keyframe)
+        encode_ms.append((time.perf_counter() - t0) * 1000.0)
+        return result
+
+    def patched_decode(self, encoded_frame):
+        t0 = time.perf_counter()
+        result = orig_decode(self, encoded_frame)
+        decode_ms.append((time.perf_counter() - t0) * 1000.0)
+        return result
+
+    OpusEncoder.encode = patched_encode
+    OpusDecoder.decode = patched_decode
+
+    def restore():
+        OpusEncoder.encode = orig_encode
+        OpusDecoder.decode = orig_decode
+
+    return encode_ms, decode_ms, restore
+
+
+def instrument_decoder_handoff():
+    """Time the hop opus-decode timing doesn't cover: aiortc decodes audio
+    on a dedicated background thread (``decoder_worker`` in
+    ``rtcrtpreceiver.py``) and hands each decoded frame back to the asyncio
+    event loop via ``asyncio.run_coroutine_threadsafe(output_q.put(frame),
+    loop)`` — a cross-thread scheduling handoff, separate from decode
+    duration itself, before ``RemoteStreamTrack.recv()`` can return it.
+
+    Reimplements ``decoder_worker``'s body (copied from aiortc's source,
+    which this depends on structurally — a version bump could drift) so a
+    timestamp can be recorded right at the scheduling call, matched against
+    ``RemoteStreamTrack.recv()``'s return by the decoded frame's ``pts``.
+
+    Returns ``(handoff_ms_samples, restore)``.
+    """
+    import aiortc.rtcrtpreceiver as rtcrtpreceiver_module
+    from aiortc.codecs import get_decoder
+    from aiortc.rtcrtpreceiver import RemoteStreamTrack
+
+    orig_decoder_worker = rtcrtpreceiver_module.decoder_worker
+    orig_track_recv = RemoteStreamTrack.recv
+    scheduled_times: dict[int, float] = {}
+    handoff_ms: list[float] = []
+
+    def patched_decoder_worker(loop, input_q, output_q):
+        codec_name = None
+        decoder = None
+        while True:
+            task = input_q.get()
+            if task is None:
+                asyncio.run_coroutine_threadsafe(output_q.put(None), loop)
+                break
+            codec, encoded_frame = task
+            if codec.name != codec_name:
+                decoder = get_decoder(codec)
+                codec_name = codec.name
+            for frame in decoder.decode(encoded_frame):
+                scheduled_times[frame.pts] = time.monotonic()
+                asyncio.run_coroutine_threadsafe(output_q.put(frame), loop)
+        if decoder is not None:
+            del decoder
+
+    async def patched_track_recv(self):
+        frame = await orig_track_recv(self)
+        t0 = scheduled_times.pop(getattr(frame, "pts", None), None)
+        if t0 is not None:
+            handoff_ms.append((time.monotonic() - t0) * 1000.0)
+        return frame
+
+    rtcrtpreceiver_module.decoder_worker = patched_decoder_worker
+    RemoteStreamTrack.recv = patched_track_recv
+
+    def restore():
+        rtcrtpreceiver_module.decoder_worker = orig_decoder_worker
+        RemoteStreamTrack.recv = orig_track_recv
+
+    return handoff_ms, restore
+
+
 class _ProbeTrack(MediaStreamTrack):
     kind = "audio"
 
