@@ -15,6 +15,7 @@ from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    FunctionCallCancelFrame,
     FunctionCallFromLLM,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
@@ -55,6 +56,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantThoughtMessage,
@@ -1370,6 +1372,53 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_down_frames,
         )
         assert json.loads(context.messages[-1]["content"]) == {"conditions": "Sunny"}
+
+    async def test_function_call_cancel(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                cancel_on_interruption=True,
+            ),
+            SleepFrame(),
+            FunctionCallCancelFrame(function_name="get_weather", tool_call_id="1"),
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[],
+        )
+        assert context.messages[-1]["content"] == "CANCELLED"
+        assert not aggregator.has_function_calls_in_progress
+
+    async def test_async_function_call_cancel(self):
+        """A cancelled async call settles on the same channel its results use."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            FunctionCallCancelFrame(function_name="get_weather", tool_call_id="1"),
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[],
+        )
+        payload = async_tool_messages.parse_message(context.messages[-1])
+        assert payload is not None
+        assert payload.kind == "final"
+        assert payload.tool_call_id == "1"
+        assert payload.result.startswith("CANCELLED")
+        assert not aggregator.has_function_calls_in_progress
 
     async def test_function_call_on_context_updated(self):
         context_updated = False

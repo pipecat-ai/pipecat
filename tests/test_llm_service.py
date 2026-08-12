@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import unittest
 import warnings
 from types import SimpleNamespace
@@ -16,11 +17,13 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.frames.frames import (
+    FunctionCallCancelFrame,
     FunctionCallFromLLM,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
     FunctionCallsStartedFrame,
+    InterruptionFrame,
     LLMContextFrame,
     LLMSetToolsFrame,
     LLMUpdateSettingsFrame,
@@ -28,11 +31,16 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallParams, LLMService
+from pipecat.services.llm_service import (
+    FunctionCallParams,
+    FunctionCallRunnerItem,
+    LLMService,
+)
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.utils.async_tool_cancellation import CANCEL_ASYNC_TOOL_NAME
+from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.errors import ErrorCategory
 
 
@@ -415,6 +423,295 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
             muted = await strategy.process_frame(frame)
 
         self.assertFalse(muted)
+
+
+class TestFunctionCallTimeout(unittest.IsolatedAsyncioTestCase):
+    """A function call that runs past its deadline is cancelled, not abandoned."""
+
+    # Deadlines and handler durations are kept small so the suite stays quick;
+    # the gap between them is what each test actually depends on.
+    TIMEOUT = 0.1
+    HANDLER_DURATION = 0.4
+    SETTLE = 0.6
+
+    def _service(self, **kwargs) -> tuple[MockLLMService, list]:
+        service = MockLLMService(**kwargs)
+        # These tests exercise real function call tasks, so the service needs
+        # the task manager a pipeline would otherwise hand it.
+        service._task_manager = TaskManager()
+
+        broadcast_frames = []
+
+        async def mock_broadcast_frame(frame_cls, **frame_kwargs):
+            broadcast_frames.append(frame_cls(**frame_kwargs))
+
+        service.broadcast_frame = mock_broadcast_frame
+        return service, broadcast_frames
+
+    async def _run_call(self, service: MockLLMService, function_name: str, tool_call_id="call_1"):
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name=function_name,
+                    tool_call_id=tool_call_id,
+                    arguments={},
+                    context=LLMContext(),
+                )
+            ]
+        )
+
+    async def _assert_timeout_cancels_handler(self, run_in_parallel: bool):
+        service, frames = self._service(
+            function_call_timeout_secs=self.TIMEOUT, run_in_parallel=run_in_parallel
+        )
+        if not run_in_parallel:
+            await service._create_sequential_runner_task()
+
+        side_effects = []
+        rolled_back = []
+
+        async def slow(params: FunctionCallParams):
+            try:
+                await asyncio.sleep(self.HANDLER_DURATION)
+                side_effects.append(params.tool_call_id)
+                await params.result_callback({"ok": True})
+            except asyncio.CancelledError:
+                rolled_back.append(params.tool_call_id)
+                raise
+
+        service.register_function("slow", slow)
+        await self._run_call(service, "slow")
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertEqual(side_effects, [])
+        self.assertEqual(rolled_back, ["call_1"])
+        self.assertEqual(
+            [type(frame) for frame in frames],
+            [
+                FunctionCallsStartedFrame,
+                FunctionCallInProgressFrame,
+                FunctionCallCancelFrame,
+            ],
+        )
+
+        if not run_in_parallel:
+            await service._cancel_sequential_runner_task()
+
+    async def test_timeout_cancels_handler_before_its_side_effect(self):
+        await self._assert_timeout_cancels_handler(run_in_parallel=True)
+
+    async def test_timeout_cancels_handler_before_its_side_effect_sequentially(self):
+        await self._assert_timeout_cancels_handler(run_in_parallel=False)
+
+    async def test_timeout_notifies_application_code(self):
+        service, _ = self._service(function_call_timeout_secs=self.TIMEOUT)
+        cancelled = []
+
+        @service.event_handler("on_function_calls_cancelled")
+        async def on_cancelled(service, function_calls):
+            cancelled.extend(f.tool_call_id for f in function_calls)
+
+        async def slow(params: FunctionCallParams):
+            await asyncio.sleep(self.HANDLER_DURATION)
+
+        service.register_function("slow", slow)
+        await self._run_call(service, "slow")
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertEqual(cancelled, ["call_1"])
+
+    async def test_sequential_runner_survives_a_timeout(self):
+        """A cancelled call must not take the sequential runner down with it."""
+        service, frames = self._service(
+            function_call_timeout_secs=self.TIMEOUT, run_in_parallel=False
+        )
+        await service._create_sequential_runner_task()
+
+        completed = []
+
+        async def slow(params: FunctionCallParams):
+            await asyncio.sleep(self.HANDLER_DURATION)
+
+        async def quick(params: FunctionCallParams):
+            completed.append(params.tool_call_id)
+            await params.result_callback({"ok": True})
+
+        service.register_function("slow", slow)
+        service.register_function("quick", quick)
+
+        await self._run_call(service, "slow", tool_call_id="call_1")
+        await asyncio.sleep(self.SETTLE)
+        await self._run_call(service, "quick", tool_call_id="call_2")
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertEqual(completed, ["call_2"])
+        self.assertFalse(service._sequential_runner_task.done())
+
+        await service._cancel_sequential_runner_task()
+
+    async def test_result_delivered_after_a_timeout_is_rejected(self):
+        """A handler that outlives its deadline can't settle the call late."""
+        service, frames = self._service(function_call_timeout_secs=self.TIMEOUT)
+
+        async def stubborn(params: FunctionCallParams):
+            try:
+                await asyncio.sleep(self.HANDLER_DURATION)
+            except asyncio.CancelledError:
+                # The call is already settled, so this result must not reach
+                # the pipeline.
+                await params.result_callback({"too": "late"})
+                raise
+
+        service.register_function("stubborn", stubborn)
+        await self._run_call(service, "stubborn")
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertFalse(any(isinstance(frame, FunctionCallResultFrame) for frame in frames))
+
+    async def test_result_delivered_after_an_interruption_is_rejected(self):
+        """Cancellation settles a call whatever triggered it, not just a timeout."""
+        service, frames = self._service()
+
+        async def stubborn(params: FunctionCallParams):
+            try:
+                await asyncio.sleep(self.HANDLER_DURATION)
+            except asyncio.CancelledError:
+                await params.result_callback({"too": "late"})
+                raise
+
+        service.register_function("stubborn", stubborn)
+        await self._run_call(service, "stubborn")
+        await asyncio.sleep(self.TIMEOUT)
+        await service._handle_interruptions(InterruptionFrame())
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertFalse(any(isinstance(frame, FunctionCallResultFrame) for frame in frames))
+        self.assertIsInstance(frames[-1], FunctionCallCancelFrame)
+
+    async def test_handler_finishing_within_the_deadline_is_untouched(self):
+        service, frames = self._service(function_call_timeout_secs=self.HANDLER_DURATION)
+
+        async def quick(params: FunctionCallParams):
+            await asyncio.sleep(self.TIMEOUT)
+            await params.result_callback({"ok": True})
+
+        service.register_function("quick", quick)
+        await self._run_call(service, "quick")
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertEqual(
+            [type(frame) for frame in frames],
+            [FunctionCallsStartedFrame, FunctionCallInProgressFrame, FunctionCallResultFrame],
+        )
+        self.assertEqual(frames[-1].result, {"ok": True})
+
+    async def test_deferred_result_after_the_handler_returns_is_delivered(self):
+        """The deadline covers the handler; a call it deferred still settles."""
+        service, frames = self._service(function_call_timeout_secs=self.TIMEOUT)
+        deferred = {}
+
+        async def defer(params: FunctionCallParams):
+            deferred["result_callback"] = params.result_callback
+
+        service.register_function("defer", defer, cancel_on_interruption=False)
+        await self._run_call(service, "defer")
+        await asyncio.sleep(self.SETTLE)
+
+        await deferred["result_callback"]({"ok": True})
+
+        self.assertEqual(
+            [type(frame) for frame in frames],
+            [FunctionCallsStartedFrame, FunctionCallInProgressFrame, FunctionCallResultFrame],
+        )
+        self.assertEqual(frames[-1].result, {"ok": True})
+
+    async def test_timeout_settles_a_call_with_no_task_left_to_cancel(self):
+        """The handler can finish while the deadline is being processed.
+
+        Its task is gone by the time the cancellation lands, but the deadline
+        has already settled the call and rejected its result, so the pipeline
+        still has to be told the call is over.
+        """
+        service, frames = self._service(function_call_timeout_secs=self.TIMEOUT)
+        cancelled = []
+
+        @service.event_handler("on_function_calls_cancelled")
+        async def on_cancelled(service, function_calls):
+            cancelled.extend(f.tool_call_id for f in function_calls)
+
+        async def quick(params: FunctionCallParams):
+            pass
+
+        service.register_function("quick", quick)
+        runner_item = FunctionCallRunnerItem(
+            registry_item=service._functions["quick"],
+            function_name="quick",
+            tool_call_id="call_1",
+            arguments={},
+            context=LLMContext(),
+        )
+
+        # No task is tracked for this call, exactly as when the handler beat
+        # the timeout to the finish.
+        self.assertEqual(service._function_call_tasks, {})
+        await service._timeout_function_call(runner_item)
+        # Event handlers run in their own task.
+        await asyncio.sleep(self.TIMEOUT)
+
+        self.assertEqual([type(frame) for frame in frames], [FunctionCallCancelFrame])
+        self.assertEqual(cancelled, ["call_1"])
+
+    async def test_cancelling_the_sequential_runner_cancels_its_call(self):
+        """A runner going away takes the call it was running with it."""
+        service, frames = self._service(run_in_parallel=False)
+        await service._create_sequential_runner_task()
+
+        rolled_back = []
+
+        async def slow(params: FunctionCallParams):
+            try:
+                await asyncio.sleep(self.HANDLER_DURATION)
+                await params.result_callback({"ok": True})
+            except asyncio.CancelledError:
+                rolled_back.append(params.tool_call_id)
+                raise
+
+        service.register_function("slow", slow)
+        await self._run_call(service, "slow")
+        await asyncio.sleep(self.TIMEOUT)
+
+        await service._cancel_sequential_runner_task()
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertEqual(rolled_back, ["call_1"])
+        self.assertFalse(any(isinstance(frame, FunctionCallResultFrame) for frame in frames))
+
+    async def test_per_tool_timeout_overrides_the_global_one(self):
+        service, frames = self._service(function_call_timeout_secs=10.0)
+
+        async def slow(params: FunctionCallParams):
+            await asyncio.sleep(self.HANDLER_DURATION)
+            await params.result_callback({"ok": True})
+
+        service.register_function("slow", slow, timeout_secs=self.TIMEOUT)
+        await self._run_call(service, "slow")
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertIsInstance(frames[-1], FunctionCallCancelFrame)
+
+    async def test_no_timeout_configured_leaves_the_call_running(self):
+        service, frames = self._service()
+
+        async def slow(params: FunctionCallParams):
+            await asyncio.sleep(self.HANDLER_DURATION)
+            await params.result_callback({"ok": True})
+
+        service.register_function("slow", slow)
+        await self._run_call(service, "slow")
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertIsInstance(frames[-1], FunctionCallResultFrame)
+        self.assertEqual(frames[-1].result, {"ok": True})
 
 
 class TestAppendSystemInstruction(unittest.IsolatedAsyncioTestCase):
