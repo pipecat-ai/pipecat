@@ -22,7 +22,6 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterruptionFrame,
-    StartFrame,
     TTSAudioRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
@@ -309,13 +308,13 @@ class NvidiaSageMakerTTSService(InterruptibleTTSService):
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    async def start(self, frame: StartFrame):
-        """Start the TTS service and connect to the SageMaker endpoint.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     # Teardown is handled by the base WebsocketTTSService, whose stop/cancel/

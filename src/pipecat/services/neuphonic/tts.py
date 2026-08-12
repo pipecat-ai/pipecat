@@ -25,10 +25,10 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -222,13 +222,13 @@ class NeuphonicTTSService(InterruptibleTTSService):
             logger.info(f"Switching TTS to settings: [{self._settings}]")
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Start the Neuphonic TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def flush_audio(self, context_id: str | None = None):
@@ -507,14 +507,6 @@ class NeuphonicHttpTTSService(TTSService):
             The Neuphonic-specific language code, or None if not supported.
         """
         return language_to_neuphonic_lang_code(language)
-
-    async def start(self, frame: StartFrame):
-        """Start the Neuphonic HTTP TTS service.
-
-        Args:
-            frame: The start frame containing initialization parameters.
-        """
-        await super().start(frame)
 
     async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio synthesis.
