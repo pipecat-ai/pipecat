@@ -37,8 +37,6 @@ from pipecat.frames.frames import (
     StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -1116,7 +1114,11 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             api_key: Sarvam API key.
             base_url: Realtime STT websocket endpoint.
             settings: Runtime-updatable realtime settings.
-            should_interrupt: Whether provider speech-start events should broadcast interruption.
+            should_interrupt: Determine whether the bot should be interrupted when
+                Sarvam detects user speech. Passed along to the user turn
+                strategies this service recommends, which own the interruption; a
+                user-supplied ``user_turn_strategies`` overrides the recommendation
+                and this setting with it. Defaults to True.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
             **kwargs: Additional arguments passed to :class:`WebsocketSTTService`.
         """
@@ -1194,15 +1196,18 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         """Request external turn strategies when Sarvam endpoints server-side.
 
         With ``endpointing="vad"`` (the default) Sarvam's VAD decides turn
-        boundaries and emits ``UserStarted/StoppedSpeakingFrame``, so the user
-        aggregator defers to those rather than running local VAD/smart-turn. In
+        boundaries and this service proposes them via
+        ``ProposedUserStarted/StoppedSpeakingFrame``, so the user aggregator
+        resolves those rather than running local VAD/smart-turn. In
         ``endpointing="manual"`` the pipeline supplies the boundaries, so the
         defaults are left in place. Applied unless the user passed their own
         ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
         if self._effective_endpointing == "vad":
-            frame.user_turn_strategies = ExternalUserTurnStrategies()
+            frame.user_turn_strategies = ExternalUserTurnStrategies(
+                enable_interruptions=self._should_interrupt,
+            )
         return frame
 
     def language_to_service_language(self, language: Language) -> str:
@@ -1486,9 +1491,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             return
         self._provider_speech_active = True
         self._speech_end_audio_position_s = None
-        await self.broadcast_frame(UserStartedSpeakingFrame)
-        if self._should_interrupt:
-            await self.broadcast_interruption()
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
 
     async def _handle_speech_end(self, message: dict[str, Any]):
         await self._complete_active_utterance()
@@ -1504,7 +1507,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             return
         self._provider_speech_active = False
         self._speech_end_audio_position_s = self._duration_for_bytes(self._audio_position_bytes)
-        await self.broadcast_frame(UserStoppedSpeakingFrame)
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
     async def _handle_partial_transcript(self, message: dict[str, Any]):
         text = (message.get("text") or "").strip()

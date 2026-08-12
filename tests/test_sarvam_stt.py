@@ -21,10 +21,10 @@ from pipecat.frames.frames import (
     ErrorFrame,
     InterimTranscriptionFrame,
     MetricsFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     StartFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -318,7 +318,6 @@ async def test_speech_end_emits_eos_before_delayed_final(monkeypatch):
     broadcasted = []
     monkeypatch.setattr(service, "push_frame", _capture(pushed))
     monkeypatch.setattr(service, "broadcast_frame", _capture_class(broadcasted))
-    monkeypatch.setattr(service, "broadcast_interruption", _noop)
     monkeypatch.setattr(service, "start_ttfb_metrics", _noop)
     monkeypatch.setattr(service, "stop_ttfb_metrics", _noop)
 
@@ -328,7 +327,7 @@ async def test_speech_end_emits_eos_before_delayed_final(monkeypatch):
     await service._handle_message({"event": "vad.speech_end", "utterance_idx": 3})
     await service._handle_message({"event": "transcript.final", "utterance_idx": 3, "text": "हेलो।"})
 
-    assert broadcasted == [UserStartedSpeakingFrame, UserStoppedSpeakingFrame]
+    assert broadcasted == [ProposedUserStartedSpeakingFrame, ProposedUserStoppedSpeakingFrame]
     assert len(pushed) == 1
     assert isinstance(pushed[0], TranscriptionFrame)
     assert pushed[0].text == "हेलो।"
@@ -340,14 +339,13 @@ async def test_duplicate_speech_end_does_not_emit_duplicate_eos(monkeypatch):
     service = SarvamRealtimeSTTService(api_key="test-key")
     broadcasted = []
     monkeypatch.setattr(service, "broadcast_frame", _capture_class(broadcasted))
-    monkeypatch.setattr(service, "broadcast_interruption", _noop)
     monkeypatch.setattr(service, "start_ttfb_metrics", _noop)
 
     await service._handle_message({"event": "vad.speech_start", "utterance_idx": 1})
     await service._handle_message({"event": "vad.speech_end", "utterance_idx": 1})
     await service._handle_message({"event": "vad.speech_end", "utterance_idx": 1})
 
-    assert broadcasted == [UserStartedSpeakingFrame, UserStoppedSpeakingFrame]
+    assert broadcasted == [ProposedUserStartedSpeakingFrame, ProposedUserStoppedSpeakingFrame]
 
 
 @pytest.mark.asyncio
@@ -357,7 +355,6 @@ async def test_post_eos_partial_is_interim_without_changing_eos_timing(monkeypat
     broadcasted = []
     monkeypatch.setattr(service, "push_frame", _capture(pushed))
     monkeypatch.setattr(service, "broadcast_frame", _capture_class(broadcasted))
-    monkeypatch.setattr(service, "broadcast_interruption", _noop)
     monkeypatch.setattr(service, "start_ttfb_metrics", _noop)
     monkeypatch.setattr(service, "stop_ttfb_metrics", _noop)
 
@@ -368,7 +365,7 @@ async def test_post_eos_partial_is_interim_without_changing_eos_timing(monkeypat
     await service._handle_message({"event": "transcript.partial", "utterance_idx": 2, "text": "हेल"})
     await service._handle_message({"event": "transcript.final", "utterance_idx": 2, "text": "हेलो।"})
 
-    assert broadcasted == [UserStartedSpeakingFrame, UserStoppedSpeakingFrame]
+    assert broadcasted == [ProposedUserStartedSpeakingFrame, ProposedUserStoppedSpeakingFrame]
     assert [type(frame) for frame in pushed] == [InterimTranscriptionFrame, TranscriptionFrame]
     assert pushed[-1].result["speech_end_audio_position_s"] == 2.0
 
@@ -749,21 +746,14 @@ async def test_provider_vad_events_are_ignored_under_manual_endpointing(monkeypa
         settings=SarvamRealtimeSTTService.Settings(endpointing="manual"),
     )
     broadcasted = []
-    interruptions = []
     monkeypatch.setattr(service, "push_frame", _noop)
     monkeypatch.setattr(service, "broadcast_frame", _capture_class(broadcasted))
     monkeypatch.setattr(service, "start_ttfb_metrics", _noop)
-
-    async def fake_broadcast_interruption():
-        interruptions.append(True)
-
-    monkeypatch.setattr(service, "broadcast_interruption", fake_broadcast_interruption)
 
     await service._handle_message({"event": "vad.speech_start"})
     await service._handle_message({"event": "vad.speech_end"})
 
     assert broadcasted == []
-    assert interruptions == []
 
 
 def test_vad_params_are_omitted_for_manual_endpointing():
@@ -851,13 +841,12 @@ async def test_session_end_mid_utterance_completes_the_turn(monkeypatch):
     broadcasted = []
     monkeypatch.setattr(service, "push_frame", _noop)
     monkeypatch.setattr(service, "broadcast_frame", _capture_class(broadcasted))
-    monkeypatch.setattr(service, "broadcast_interruption", _noop)
     monkeypatch.setattr(service, "start_ttfb_metrics", _noop)
 
     await service._handle_message({"event": "vad.speech_start"})
     await service._handle_message({"event": "session.end", "audio_duration_s": 1.0})
 
-    assert broadcasted == [UserStartedSpeakingFrame, UserStoppedSpeakingFrame]
+    assert broadcasted == [ProposedUserStartedSpeakingFrame, ProposedUserStoppedSpeakingFrame]
 
 
 @pytest.mark.asyncio
@@ -871,7 +860,6 @@ async def test_socket_drop_mid_utterance_completes_the_turn(monkeypatch):
     broadcasted = []
     monkeypatch.setattr(service, "push_frame", _noop)
     monkeypatch.setattr(service, "broadcast_frame", _capture_class(broadcasted))
-    monkeypatch.setattr(service, "broadcast_interruption", _noop)
     monkeypatch.setattr(service, "start_ttfb_metrics", _noop)
     monkeypatch.setattr(service, "push_error", _noop)
     # The socket dies after speech starts, with no matching `vad.speech_end`.
@@ -881,7 +869,7 @@ async def test_socket_drop_mid_utterance_completes_the_turn(monkeypatch):
 
     await service._receive_task_handler(AsyncMock())
 
-    assert broadcasted == [UserStartedSpeakingFrame, UserStoppedSpeakingFrame]
+    assert broadcasted == [ProposedUserStartedSpeakingFrame, ProposedUserStoppedSpeakingFrame]
 
 
 @pytest.mark.asyncio
@@ -931,6 +919,18 @@ def test_service_metadata_recommends_external_turn_strategies_in_vad_mode():
     service = SarvamRealtimeSTTService(api_key="test-key")
     frame = service.service_metadata_frame()
     assert isinstance(frame.user_turn_strategies, ExternalUserTurnStrategies)
+
+
+@pytest.mark.parametrize("should_interrupt", [True, False])
+def test_should_interrupt_reaches_the_turn_strategies(should_interrupt):
+    """The strategies own the interruption, so the setting has to travel to them.
+
+    Keeping it in the service would leave a pipeline that pins its own
+    `ExternalUserTurnStrategies` interrupting regardless.
+    """
+    service = SarvamRealtimeSTTService(api_key="test-key", should_interrupt=should_interrupt)
+    strategies = service.service_metadata_frame().user_turn_strategies
+    assert strategies.enable_interruptions is should_interrupt
 
 
 def test_service_metadata_leaves_turn_strategies_unset_in_manual_mode():
