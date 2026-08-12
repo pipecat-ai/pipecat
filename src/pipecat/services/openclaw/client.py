@@ -15,7 +15,7 @@ talks to an agent inside one.
 This module deals in runs and events. Turning those into frames is
 :class:`~pipecat.services.openclaw.processor.OpenClawGatewayProcessor`'s job.
 
-The client targets the Gateway as OpenClaw v2026.5.22 speaks it. Where the
+The client targets the Gateway as OpenClaw v2026.6.1 speaks it. Where the
 Gateway does something surprising, the surprise is written down at the method
 that has to cope with it rather than summarized here.
 """
@@ -40,11 +40,28 @@ from pipecat.utils.base_object import BaseObject
 PROTOCOL_VERSION = 4
 """The Gateway protocol version this client negotiates."""
 
-DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18790"
-"""Where a NemoClaw sandbox republishes the Gateway.
+DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789"
+"""Where OpenClaw's Gateway listens.
 
-Not OpenClaw's own 18789. A client reaching an agent inside a sandbox goes
-through the sandbox's published port.
+A NemoClaw sandbox republishes it on the host at 18790, so a client reaching an
+agent inside a sandbox goes through that published port instead.
+"""
+
+GATEWAY_CLIENT_ID = "gateway-client"
+"""What the Gateway calls a program driving an agent from outside.
+
+The id comes from a closed set the Gateway validates the handshake against, so
+it names a kind of client rather than this one; ``pipecat`` rides along as the
+display name.
+
+Paired with the ``backend`` mode, this is also what earns a token-only client
+its operator scopes: only a backend client may skip device pairing on a
+loopback connection. Any other identity connects and is then refused
+``chat.send`` for want of ``operator.write``.
+
+The Gateway puts this identity in the message envelope it shows the agent, and
+marks it untrusted. An agent will remark on that in its answer unless the
+caller's own framing tells it not to describe how the message arrived.
 """
 
 DEFAULT_SESSION_KEY = "agent:main:main"
@@ -115,13 +132,17 @@ class OpenClawRun:
     :meth:`OpenClawGatewayClient.steer`.
     """
 
-    def __init__(self, run_id: str):
+    def __init__(self, run_id: str, session_key: str):
         """Initialize the run.
 
         Args:
             run_id: The id the run is addressed by.
+            session_key: The session it runs in. Steering and aborting address
+                the session, so a run started somewhere other than the client's
+                default has to carry where that was.
         """
         self.run_id = run_id
+        self.session_key = session_key
         self.ids: set[str] = {run_id}
         self.queue: asyncio.Queue[OpenClawEvent] = asyncio.Queue()
         self.done = False
@@ -202,11 +223,15 @@ class OpenClawGatewayClient(BaseObject, WebsocketService):
         """Initialize the client.
 
         Args:
-            url: The Gateway websocket, usually the port a NemoClaw sandbox
-                publishes.
-            token: Gateway token. A sandbox prints one with
-                ``nemoclaw <sandbox> gateway-token --quiet``. Without it the
-                Gateway accepts only loopback CLI and webchat clients.
+            url: The Gateway websocket, or the port a NemoClaw sandbox
+                republishes it on.
+            token: The Gateway's shared token, from ``gateway.auth.token`` in
+                ``~/.openclaw/openclaw.json``; a NemoClaw sandbox prints its
+                own with ``nemoclaw <sandbox> gateway-token --quiet``. Required
+                even on loopback: without a shared secret the Gateway asks a
+                backend client for a paired device identity instead, which this
+                client does not carry, and refuses the handshake with
+                ``NOT_PAIRED``.
             password: Gateway password, if the deployment uses one instead.
             session_key: Which OpenClaw session to run in. Runs against the
                 same key share conversation history.
@@ -215,9 +240,10 @@ class OpenClawGatewayClient(BaseObject, WebsocketService):
                 Does not apply to a run, which streams for as long as it takes.
             run_timeout: Seconds the agent is given to finish a run, sent to
                 the Gateway as ``timeoutMs``. Enforced by the agent, not here.
-            scopes: Handshake scopes. The default is what a chat client is
-                known to work with; the Gateway may accept narrower, which is
-                worth tightening once a deployment confirms which.
+            scopes: Handshake scopes. ``operator.write`` covers everything this
+                client does — starting a run, steering it, and aborting it. The
+                Gateway offers wider ones (``operator.admin``) and narrower
+                (``operator.read``, which cannot start a run).
             role: Handshake role.
             max_message_size: Largest websocket frame to accept. Agent output
                 can be large.
@@ -234,8 +260,11 @@ class OpenClawGatewayClient(BaseObject, WebsocketService):
         self._connect_timeout = connect_timeout
         self._request_timeout = request_timeout
         self._run_timeout = run_timeout
-        self._scopes = scopes if scopes is not None else ["operator.admin"]
+        self._scopes = scopes if scopes is not None else ["operator.write"]
         self._role = role
+        self._client_id = GATEWAY_CLIENT_ID
+        self._client_mode = "backend"
+        self._client_display_name = "pipecat"
         self._max_message_size = max_message_size
 
         self._receive_task: asyncio.Task | None = None
@@ -297,14 +326,14 @@ class OpenClawGatewayClient(BaseObject, WebsocketService):
 
         # Registered before the request is sent, so frames that arrive while it
         # is still in flight have somewhere to go.
-        run = OpenClawRun(uuid.uuid4().hex)
+        run = OpenClawRun(uuid.uuid4().hex, session_key or self._session_key)
         self._runs[run.run_id] = run
 
         try:
             payload = await self._request(
                 "chat.send",
                 {
-                    "sessionKey": session_key or self._session_key,
+                    "sessionKey": run.session_key,
                     "message": message,
                     "timeoutMs": int(self._run_timeout * 1000),
                     "idempotencyKey": run.run_id,
@@ -365,7 +394,7 @@ class OpenClawGatewayClient(BaseObject, WebsocketService):
         payload = await self._request(
             "sessions.steer",
             {
-                "key": self._session_key,
+                "key": run.session_key,
                 "message": message,
                 "idempotencyKey": run.run_id,
             },
@@ -398,7 +427,7 @@ class OpenClawGatewayClient(BaseObject, WebsocketService):
         logger.debug(f"{self} aborting run {run.run_id}: {reason}")
         payload = await self._request(
             "chat.abort",
-            {"sessionKey": self._session_key, "runId": run.run_id},
+            {"sessionKey": run.session_key, "runId": run.run_id},
         )
         if not isinstance(payload, dict):
             raise OpenClawError(f"Unexpected chat.abort response: {payload!r}")
@@ -546,6 +575,20 @@ class OpenClawGatewayClient(BaseObject, WebsocketService):
                 future.set_exception(error)
         self._pending.clear()
 
+    def _client_info(self) -> dict[str, Any]:
+        """Describe this client to the Gateway.
+
+        The identity decides how the agent is told about the message. Override
+        to present a different one.
+        """
+        return {
+            "id": self._client_id,
+            "displayName": self._client_display_name,
+            "version": "0.1.0",
+            "platform": sys.platform,
+            "mode": self._client_mode,
+        }
+
     async def _send_connect(self):
         """Answer the connect challenge and settle the handshake."""
         auth: dict[str, str] = {}
@@ -557,13 +600,7 @@ class OpenClawGatewayClient(BaseObject, WebsocketService):
         params: dict[str, Any] = {
             "minProtocol": PROTOCOL_VERSION,
             "maxProtocol": PROTOCOL_VERSION,
-            "client": {
-                "id": "pipecat",
-                "displayName": "pipecat",
-                "version": "0.1.0",
-                "platform": sys.platform,
-                "mode": "backend",
-            },
+            "client": self._client_info(),
             "caps": [],
             "role": self._role,
             "scopes": self._scopes,

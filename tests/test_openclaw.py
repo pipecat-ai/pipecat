@@ -63,6 +63,15 @@ class TestOpenClawGatewayClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(params["maxProtocol"], 4)
         self.assertEqual(params["auth"], {"token": "test-token"})
 
+    async def test_the_client_identifies_as_one_the_gateway_knows(self):
+        """The Gateway validates the client id against a closed set."""
+        await self.client.connect()
+
+        client = self.gateway.params("connect")["client"]
+        self.assertEqual(client["id"], "gateway-client")
+        self.assertEqual(client["mode"], "backend")
+        self.assertEqual(client["displayName"], "pipecat")
+
     async def test_a_rejected_token_fails_the_connection(self):
         self.gateway.errors["connect"] = {"code": "unauthorized", "message": "bad token"}
 
