@@ -398,12 +398,14 @@ class DeepgramFluxTTSService(WebsocketTTSService):
                         logger.debug(f"{self}: configuration applied: {msg.get('applied')}")
                     elif msg_type == "ConfigureFailure":
                         # Non-fatal: synthesis continues with the previous
-                        # configuration.
-                        logger.warning(
+                        # configuration, so application code decides what a
+                        # rejected settings update means for the conversation.
+                        error_msg = (
                             f"{self} configuration rejected {msg.get('code')} "
                             f"({msg.get('field')}={msg.get('value')}): "
                             f"{msg.get('description', 'Unknown failure')}"
                         )
+                        await self.push_error(error_msg=error_msg)
                     elif msg_type == "Warning":
                         code = msg.get("code")
                         if code == "NO_ACTIVE_SPEECH":

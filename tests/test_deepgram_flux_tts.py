@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSUpdateSettingsFrame,
 )
 from pipecat.services.deepgram.flux.tts import DeepgramFluxTTSService
 from pipecat.services.tts_service import TextAggregationMode, TTSService
@@ -37,11 +38,18 @@ AUDIO_CHUNK_1 = b"\x00\x01" * 512
 AUDIO_CHUNK_2 = b"\x02\x03" * 512
 
 
-def _flux_server_handler(captured: dict, *, warning_first: bool = False, end_turn: bool = True):
+def _flux_server_handler(
+    captured: dict,
+    *,
+    warning_first: bool = False,
+    end_turn: bool = True,
+    reject_configure: bool = False,
+):
     """Build a fake Flux TTS server handler following the documented turn flow.
 
     With ``end_turn=False`` the handler withholds SpeechMetadata, leaving the
-    turn open the way it is while Flux is still synthesizing audio.
+    turn open the way it is while Flux is still synthesizing audio. With
+    ``reject_configure=True`` it answers a Configure with ConfigureFailure.
     """
 
     async def handler(ws):
@@ -74,6 +82,18 @@ def _flux_server_handler(captured: dict, *, warning_first: bool = False, end_tur
                             )
                         )
                     await ws.send(json.dumps({"type": "SpeechStarted", "speech_id": "dg_sp_test"}))
+                elif msg.get("type") == "Configure" and reject_configure:
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "ConfigureFailure",
+                                "code": "SPEED_OUT_OF_RANGE",
+                                "field": "speed",
+                                "value": msg.get("speed"),
+                                "description": "Speed must be between 0.85 and 1.15.",
+                            }
+                        )
+                    )
                 elif msg.get("type") == "Flush":
                     # Flux sends the flush ack before the turn's remaining
                     # audio; SpeechMetadata arrives only after all audio.
@@ -330,6 +350,40 @@ async def test_flux_tts_warning_is_not_fatal():
 
     assert not any(isinstance(frame, ErrorFrame) for frame in down_frames + up_frames)
     assert any(isinstance(frame, TTSAudioRawFrame) for frame in down_frames)
+
+
+@pytest.mark.asyncio
+async def test_flux_tts_configure_failure_pushes_error():
+    """A rejected settings update reaches application code as a non-fatal error."""
+    captured: dict = {"messages": []}
+
+    async with serve(
+        _flux_server_handler(captured, reject_configure=True), "127.0.0.1", 0
+    ) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+
+        tts_service = DeepgramFluxTTSService(
+            api_key="test-key",
+            url=f"ws://{host}:{port}/v2/speak",
+            sample_rate=24000,
+        )
+
+        down_frames, up_frames = await run_test(
+            tts_service,
+            frames_to_send=[
+                TTSSpeakFrame(text="Hello from Flux."),
+                SleepFrame(sleep=0.3),
+                BotStoppedSpeakingFrame(),
+                TTSUpdateSettingsFrame(delta=DeepgramFluxTTSService.Settings(speed=1.1)),
+                SleepFrame(sleep=0.3),
+            ],
+        )
+
+    assert any(m.get("type") == "Configure" for m in captured["messages"])
+    errors = [frame for frame in down_frames + up_frames if isinstance(frame, ErrorFrame)]
+    assert errors, "ConfigureFailure should surface as an ErrorFrame"
+    assert "SPEED_OUT_OF_RANGE" in errors[0].error
+    assert not errors[0].fatal
 
 
 @pytest.mark.asyncio
