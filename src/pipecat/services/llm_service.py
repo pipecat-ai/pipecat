@@ -1620,80 +1620,50 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             properties=FunctionCallResultProperties(run_llm=True),
         )
 
-    async def _cancel_function_calls_by_tool_call_id(self, tool_call_id: str):
-        """Cancel in-progress function call tasks by their tool_call_id.
+    async def _cancel_function_call_tasks(
+        self,
+        predicate: Callable[[FunctionCallRunnerItem], bool],
+        *,
+        reason: str,
+    ) -> list[FunctionCallFromLLM]:
+        """Cancel the in-flight function calls selected by a predicate.
+
+        Cancelling a call delivers ``asyncio.CancelledError`` to its handler so
+        cancel-aware handlers run their cleanup, broadcasts a
+        ``FunctionCallCancelFrame`` so the rest of the pipeline can settle the
+        call, and notifies application code via ``on_function_calls_cancelled``.
 
         Args:
-            tool_call_id: tool_call_id to cancel.
+            predicate: Selects which in-flight calls to cancel.
+            reason: Short description of what triggered the cancellation,
+                included in the log messages.
+
+        Returns:
+            The function calls that were cancelled.
         """
         cancelled_tasks = set()
         cancelled_items = []
-        for task, runner_item in self._function_call_tasks.items():
-            if runner_item.tool_call_id == tool_call_id:
-                name = runner_item.function_name
-                tool_call_id = runner_item.tool_call_id
+        # Snapshot first: cancel_task awaits, during which done callbacks may
+        # mutate _function_call_tasks.
+        for task, runner_item in list(self._function_call_tasks.items()):
+            if not predicate(runner_item):
+                continue
 
-                logger.debug(
-                    f"{self} Cancelling async function call [{name}:{tool_call_id}] "
-                    "by LLM request..."
-                )
+            name = runner_item.function_name
+            tool_call_id = runner_item.tool_call_id
 
-                if task:
-                    task.remove_done_callback(self._function_call_task_finished)
-                    await self.cancel_task(task)
-                    cancelled_tasks.add(task)
+            logger.debug(f"{self} Cancelling function call [{name}:{tool_call_id}] ({reason})...")
 
-                await self.broadcast_frame(
-                    FunctionCallCancelFrame, function_name=name, tool_call_id=tool_call_id
-                )
+            if task:
+                # We remove the callback because we are going to cancel the
+                # task next, otherwise we will be removing it from the set
+                # while we are iterating.
+                task.remove_done_callback(self._function_call_task_finished)
+                await self.cancel_task(task)
+                cancelled_tasks.add(task)
 
-                cancelled_items.append(
-                    FunctionCallFromLLM(
-                        function_name=runner_item.function_name,
-                        tool_call_id=runner_item.tool_call_id,
-                        arguments=runner_item.arguments,
-                        context=runner_item.context,
-                    )
-                )
-                logger.debug(f"{self} Async function call [{name}:{tool_call_id}] cancelled")
-
-        for task in cancelled_tasks:
-            self._function_call_task_finished(task)
-
-        if cancelled_items:
-            await self._call_event_handler("on_function_calls_cancelled", cancelled_items)
-
-    async def _cancel_function_call(self, function_name: str | None):
-        cancelled_tasks = set()
-        cancelled_items = []
-        for task, runner_item in self._function_call_tasks.items():
-            if runner_item.registry_item.function_name == function_name:
-                name = runner_item.function_name
-                tool_call_id = runner_item.tool_call_id
-
-                logger.debug(f"{self} Cancelling function call [{name}:{tool_call_id}]...")
-
-                if task:
-                    # We remove the callback because we are going to cancel the
-                    # task next, otherwise we will be removing it from the set
-                    # while we are iterating.
-                    task.remove_done_callback(self._function_call_task_finished)
-                    await self.cancel_task(task)
-                    cancelled_tasks.add(task)
-
-                await self.broadcast_frame(
-                    FunctionCallCancelFrame, function_name=name, tool_call_id=tool_call_id
-                )
-
-                cancelled_items.append(
-                    FunctionCallFromLLM(
-                        function_name=runner_item.function_name,
-                        tool_call_id=runner_item.tool_call_id,
-                        arguments=runner_item.arguments,
-                        context=runner_item.context,
-                    )
-                )
-                logger.debug(f"{self} Function call [{name}:{tool_call_id}] has been cancelled")
+            cancelled_items.append(await self._broadcast_function_call_cancelled(runner_item))
+            logger.debug(f"{self} Function call [{name}:{tool_call_id}] has been cancelled")
 
         # Remove all cancelled tasks from our set.
         for task in cancelled_tasks:
@@ -1701,6 +1671,47 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
         if cancelled_items:
             await self._call_event_handler("on_function_calls_cancelled", cancelled_items)
+
+        return cancelled_items
+
+    async def _broadcast_function_call_cancelled(
+        self, runner_item: FunctionCallRunnerItem
+    ) -> FunctionCallFromLLM:
+        """Settle a cancelled function call downstream.
+
+        Args:
+            runner_item: The function call that was cancelled.
+
+        Returns:
+            The cancelled call, described for ``on_function_calls_cancelled``.
+        """
+        await self.broadcast_frame(
+            FunctionCallCancelFrame,
+            function_name=runner_item.function_name,
+            tool_call_id=runner_item.tool_call_id,
+        )
+        return FunctionCallFromLLM(
+            function_name=runner_item.function_name,
+            tool_call_id=runner_item.tool_call_id,
+            arguments=runner_item.arguments,
+            context=runner_item.context,
+        )
+
+    async def _cancel_function_calls_by_tool_call_id(self, tool_call_id: str):
+        """Cancel in-progress function call tasks by their tool_call_id.
+
+        Args:
+            tool_call_id: tool_call_id to cancel.
+        """
+        await self._cancel_function_call_tasks(
+            lambda item: item.tool_call_id == tool_call_id, reason="User request"
+        )
+
+    async def _cancel_function_call(self, function_name: str | None):
+        await self._cancel_function_call_tasks(
+            lambda item: item.registry_item.function_name == function_name,
+            reason="interruption",
+        )
 
     def _function_call_task_finished(self, task: asyncio.Task):
         if task in self._function_call_tasks:
