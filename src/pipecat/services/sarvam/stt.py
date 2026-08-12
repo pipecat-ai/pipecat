@@ -964,9 +964,7 @@ SUPPORTED_LANGUAGES = {
     "mai-IN",
     "doi-IN",
 }
-SUPPORTED_STREAM_TYPES = Literal["fast", "balanced", "simulated"]
 SUPPORTED_ENDPOINTING = Literal["vad", "manual"]
-SUPPORTED_MODES = Literal["transcribe", "translate", "verbatim", "translit", "codemix"]
 # A plain set: the rate in force can come from the pipeline rather than the
 # caller, so it is checked once resolved rather than annotated.
 SUPPORTED_SAMPLE_RATES = {8000, 16000}
@@ -1058,9 +1056,11 @@ class SarvamRealtimeSTTSettings(STTSettings):
     """
 
     language_code: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    stream_type: SUPPORTED_STREAM_TYPES | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    stream_type: Literal["fast", "balanced", "simulated"] | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
     sample_rate: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    mode: SUPPORTED_MODES | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    mode: SarvamMode | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     return_timestamps: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -1666,44 +1666,25 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             requested = fields["stream_type"]
             if current == "simulated" or requested == "simulated":
                 raise ValueError("Changing to or from stream_type='simulated' is not supported.")
-        proposed = self._settings.copy()
-        proposed.apply_update(self.Settings(**fields))
-        self._validate_settings(proposed)
 
     @staticmethod
     def _validate_settings(settings: Settings):
+        """Check the settings this integration itself depends on.
+
+        Sarvam's own vocabulary — languages, modes, stream types, VAD tuning
+        ranges — is left to the server, which rejects a bad value on the wire
+        and reaches the app as an error frame. Repeating those lists here would
+        block values Sarvam adds later.
+        """
         model = assert_given(settings.model)
         if model != _REALTIME_MODEL:
             raise ValueError(f"Unsupported model '{model}'. Only '{_REALTIME_MODEL}' is supported.")
 
-        language_code = assert_given(settings.language_code)
-        if language_code not in SUPPORTED_LANGUAGES:
-            allowed = ", ".join(sorted(SUPPORTED_LANGUAGES))
-            raise ValueError(
-                f"Unsupported language_code '{language_code}'. Allowed values: {allowed}."
-            )
-
-        stream_type = assert_given(settings.stream_type)
-        if stream_type not in get_args(SUPPORTED_STREAM_TYPES):
-            allowed = ", ".join(sorted(get_args(SUPPORTED_STREAM_TYPES)))
-            raise ValueError(f"Unsupported stream_type '{stream_type}'. Allowed values: {allowed}.")
-
+        # The audio path has to produce this rate, so it can't wait for the wire.
         sample_rate = assert_given(settings.sample_rate)
         if sample_rate is not None and sample_rate not in SUPPORTED_SAMPLE_RATES:
             allowed = ", ".join(str(rate) for rate in sorted(SUPPORTED_SAMPLE_RATES))
             raise ValueError(f"Unsupported sample_rate '{sample_rate}'. Allowed values: {allowed}.")
-
-        mode = assert_given(settings.mode)
-        if mode not in get_args(SUPPORTED_MODES):
-            allowed = ", ".join(sorted(get_args(SUPPORTED_MODES)))
-            raise ValueError(f"Unsupported mode '{mode}'. Allowed values: {allowed}.")
-
-        _validate_optional_range("threshold", settings.threshold, minimum=0.0, maximum=1.0)
-        _validate_optional_minimum("prefix_padding_ms", settings.prefix_padding_ms, minimum=0)
-        _validate_optional_minimum("silence_duration_ms", settings.silence_duration_ms, minimum=0)
-        _validate_optional_minimum(
-            "min_speech_duration_ms", settings.min_speech_duration_ms, minimum=0
-        )
 
     @traced_stt
     async def _trace_transcription(
@@ -1723,28 +1704,3 @@ def _as_language(value: Any) -> Language | None:
         return Language(value)
     except ValueError:
         return None
-
-
-def _validate_optional_range(
-    field_name: str,
-    value: float | int | None | NotGiven,
-    *,
-    minimum: float,
-    maximum: float,
-):
-    if not is_given(value) or value is None:
-        return
-    if value < minimum or value > maximum:
-        raise ValueError(f"{field_name} must be between {minimum} and {maximum}.")
-
-
-def _validate_optional_minimum(
-    field_name: str,
-    value: float | int | None | NotGiven,
-    *,
-    minimum: float,
-):
-    if not is_given(value) or value is None:
-        return
-    if value < minimum:
-        raise ValueError(f"{field_name} must be greater than or equal to {minimum}.")

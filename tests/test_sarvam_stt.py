@@ -199,16 +199,31 @@ def test_string_language_setting_does_not_use_enum_converter(monkeypatch):
     "settings",
     [
         SarvamRealtimeSTTService.Settings(model="saarika:v2.5"),
-        SarvamRealtimeSTTService.Settings(language_code="fr-FR"),
-        SarvamRealtimeSTTService.Settings(stream_type="slow"),
         SarvamRealtimeSTTService.Settings(sample_rate=44100),
-        SarvamRealtimeSTTService.Settings(threshold=1.1),
-        SarvamRealtimeSTTService.Settings(silence_duration_ms=-1),
     ],
 )
 def test_invalid_realtime_settings_raise(settings):
+    """Only the settings this integration itself depends on are checked here."""
     with pytest.raises(ValueError):
         SarvamRealtimeSTTService(api_key="test-key", settings=settings)
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        SarvamRealtimeSTTService.Settings(language_code="fr-FR"),
+        SarvamRealtimeSTTService.Settings(stream_type="slow"),
+        SarvamRealtimeSTTService.Settings(mode="sing"),
+        SarvamRealtimeSTTService.Settings(threshold=1.1),
+    ],
+)
+def test_sarvam_vocabulary_is_left_to_the_server(settings):
+    """Sarvam rejects these on the wire, and the rejection reaches the app.
+
+    Repeating its vocabulary here would block values Sarvam adds later, so
+    construction has to accept anything it does not itself depend on.
+    """
+    SarvamRealtimeSTTService(api_key="test-key", settings=settings)
 
 
 def test_invalid_endpointing_raises():
