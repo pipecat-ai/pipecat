@@ -1983,7 +1983,6 @@ class TestVonageVideoConnectorTransport:
         transport = self.VonageVideoConnectorInputTransport(client, transport_params)
 
         assert transport._client == client
-        assert transport._initialized is False
 
     @pytest.mark.asyncio
     async def test_vonage_input_transport_start(self) -> None:
@@ -2000,7 +1999,6 @@ class TestVonageVideoConnectorTransport:
             # The transport connects during setup(), before any StartFrame.
             await transport.setup(self._get_frame_processor_setup())
 
-            assert transport._initialized is True
             assert transport._connected is True
             client_connect_mock.assert_called_once()
             set_transport_ready_mock.assert_not_called()
@@ -2062,7 +2060,6 @@ class TestVonageVideoConnectorTransport:
         transport = self.VonageVideoConnectorOutputTransport(client, transport_params)
 
         assert transport._client == client
-        assert transport._initialized is False
 
     @pytest.mark.asyncio
     async def test_vonage_output_transport_start(self) -> None:
@@ -2080,7 +2077,6 @@ class TestVonageVideoConnectorTransport:
             # The transport connects during setup(), before any StartFrame.
             await transport.setup(self._get_frame_processor_setup())
 
-            assert transport._initialized is True
             client_connect_mock.assert_called_once()
             set_transport_ready_mock.assert_not_called()
 

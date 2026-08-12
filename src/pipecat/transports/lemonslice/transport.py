@@ -484,8 +484,6 @@ class LemonSliceInputTransport(BaseInputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the input transport.
@@ -508,11 +506,6 @@ class LemonSliceInputTransport(BaseInputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self._client.start(frame)
         await self.set_transport_ready(frame)
@@ -594,8 +587,6 @@ class LemonSliceOutputTransport(BaseOutputTransport):
         self._client = client
         self._params = params
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
         # This is the custom track destination expected by LemonSlice
         self._transport_destination: str | None = "stream"
 
@@ -620,11 +611,6 @@ class LemonSliceOutputTransport(BaseOutputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self._client.start(frame)
 

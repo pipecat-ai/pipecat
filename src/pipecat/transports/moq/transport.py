@@ -1112,7 +1112,6 @@ class MOQInputTransport(BaseInputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
-        self._initialized = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Forward setup to the shared MOQTransportClient so it can create tasks.
@@ -1121,11 +1120,6 @@ class MOQInputTransport(BaseInputTransport):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self._client.setup(setup)
         self._client.connect()
@@ -1222,7 +1216,6 @@ class MOQOutputTransport(BaseOutputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
-        self._initialized = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Forward setup to the shared MOQTransportClient so it can create tasks.
@@ -1240,9 +1233,6 @@ class MOQOutputTransport(BaseOutputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        if self._initialized:
-            return
-        self._initialized = True
         self._client.connect()
         # Open the publish_audio track now that we know the pipeline's
         # output sample rate. The producer side of the broadcast was

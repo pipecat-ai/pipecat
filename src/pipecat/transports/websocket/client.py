@@ -243,9 +243,6 @@ class WebsocketClientInputTransport(BaseInputTransport):
         self._session = session
         self._params = params
 
-        # Whether setup() has already run.
-        self._initialized = False
-
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the input transport with the frame processor setup.
 
@@ -253,11 +250,6 @@ class WebsocketClientInputTransport(BaseInputTransport):
             setup: The frame processor setup configuration.
         """
         await super().setup(setup)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self._session.setup(setup.task_manager)
 
@@ -354,9 +346,6 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         self._send_interval = 0
         self._next_send_time = 0
 
-        # Whether setup() has already run.
-        self._initialized = False
-
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the output transport with the frame processor setup.
 
@@ -364,11 +353,6 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
             setup: The frame processor setup configuration.
         """
         await super().setup(setup)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
 

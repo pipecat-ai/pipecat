@@ -292,9 +292,6 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
         self._receive_task = None
         self._monitor_websocket_task = None
 
-        # Whether setup() has already run.
-        self._initialized = False
-
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the input transport with the frame processor setup.
 
@@ -302,11 +299,6 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
             setup: The frame processor setup configuration.
         """
         await super().setup(setup)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self._client.setup(setup)
 
@@ -453,9 +445,6 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         # emitted, preserving any remainder for subsequent sends.
         self._audio_send_buffer = bytearray()
 
-        # Whether setup() has already run.
-        self._initialized = False
-
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the output transport with the frame processor setup.
 
@@ -463,11 +452,6 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
             setup: The frame processor setup configuration.
         """
         await super().setup(setup)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
 

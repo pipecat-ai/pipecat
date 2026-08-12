@@ -62,7 +62,6 @@ class VonageVideoConnectorInputTransport(BaseInputTransport):
             params: Transport parameters for input configuration.
         """
         super().__init__(params)
-        self._initialized: bool = False
         self._client: VonageClient = client
         self._listener_id: int = -1
         self._connected: bool = False
@@ -74,10 +73,6 @@ class VonageVideoConnectorInputTransport(BaseInputTransport):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self._client.setup(setup)
 
@@ -209,7 +204,6 @@ class VonageVideoConnectorOutputTransport(BaseOutputTransport):
             params: Transport parameters for output configuration.
         """
         super().__init__(params)
-        self._initialized: bool = False
         self._client = client
         self._connected: bool = False
         self._listener_id: int = -1
@@ -221,11 +215,6 @@ class VonageVideoConnectorOutputTransport(BaseOutputTransport):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self._client.setup(setup)
 

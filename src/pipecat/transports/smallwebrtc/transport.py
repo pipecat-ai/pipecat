@@ -631,9 +631,6 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         self._receive_screen_video_task = None
         self._image_requests: list[UserImageRequestFrame] = []
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
-
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the transport and establish the WebRTC connection.
 
@@ -641,11 +638,6 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self._client.setup(self._params, setup)
         await self._client.connect()
@@ -874,9 +866,6 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
         self._client = client
         self._params = params
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
-
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the transport and establish the WebRTC connection.
 
@@ -884,11 +873,6 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self._client.setup(self._params, setup)
         await self._client.connect()

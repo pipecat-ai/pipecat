@@ -647,8 +647,6 @@ class TavusInputTransport(BaseInputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the input transport.
@@ -657,11 +655,6 @@ class TavusInputTransport(BaseInputTransport):
             setup: The frame processor setup configuration.
         """
         await super().setup(setup)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self._client.setup(setup)
         await self._client.join()
@@ -751,9 +744,6 @@ class TavusOutputTransport(BaseOutputTransport):
         self._client = client
         self._params = params
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
-
         # Pacing state used when audio isn't sent faster than realtime (see
         # write_audio_frame/_write_audio_sleep).
         self._send_interval: float = 0
@@ -766,11 +756,6 @@ class TavusOutputTransport(BaseOutputTransport):
             setup: The frame processor setup configuration.
         """
         await super().setup(setup)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self._client.setup(setup)
 

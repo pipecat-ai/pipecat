@@ -1842,9 +1842,6 @@ class DailyInputTransport(BaseInputTransport):
 
         self._video_renderers = {}
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
-
         # Whether we have started audio streaming.
         self._streaming_started = False
 
@@ -1862,11 +1859,6 @@ class DailyInputTransport(BaseInputTransport):
             setup: The frame processor setup configuration.
         """
         await super().setup(setup)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self._client.setup(setup)
 
@@ -2145,9 +2137,6 @@ class DailyOutputTransport(BaseOutputTransport):
         self._transport = transport
         self._client = client
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
-
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the output transport with shared client setup.
 
@@ -2155,11 +2144,6 @@ class DailyOutputTransport(BaseOutputTransport):
             setup: The frame processor setup configuration.
         """
         await super().setup(setup)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self._client.setup(setup)
 

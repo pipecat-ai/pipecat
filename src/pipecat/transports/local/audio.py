@@ -73,9 +73,6 @@ class LocalAudioInputTransport(BaseInputTransport):
         """
         await super().setup(setup)
 
-        if self._in_stream:
-            return
-
         num_frames = int(self.sample_rate / 100) * 2  # 20ms of audio
 
         self._in_stream = self._py_audio.open(
@@ -154,9 +151,6 @@ class LocalAudioOutputTransport(BaseOutputTransport):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
-
-        if self._out_stream:
-            return
 
         self._out_stream = self._py_audio.open(
             format=self._py_audio.get_format_from_width(2),
