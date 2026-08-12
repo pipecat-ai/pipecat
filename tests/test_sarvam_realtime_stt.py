@@ -491,6 +491,35 @@ async def test_endpointing_change_is_not_effective_until_acked():
 
 
 @pytest.mark.asyncio
+async def test_promotion_to_vad_endpointing_rebroadcasts_turn_strategies(monkeypatch):
+    """The aggregator has to be told when Sarvam takes over endpointing.
+
+    It applied the session's starting mode once, at start, so without a second
+    broadcast it keeps running its own detection alongside the turn frames this
+    service begins emitting.
+    """
+    service = SarvamRealtimeSTTService(
+        api_key="test-key",
+        settings=SarvamRealtimeSTTService.Settings(endpointing="manual"),
+    )
+    service._websocket = _FakeWebsocket()
+    broadcast = []
+
+    async def capture_frame_instance(frame):
+        broadcast.append(frame)
+
+    monkeypatch.setattr(service, "broadcast_frame_instance", capture_frame_instance)
+
+    await service.update_config(endpointing="vad")
+    assert broadcast == []
+
+    await service._handle_message({"event": "config.updated", "applied": ["endpointing=vad"]})
+
+    assert len(broadcast) == 1
+    assert isinstance(broadcast[0].user_turn_strategies, ExternalUserTurnStrategies)
+
+
+@pytest.mark.asyncio
 async def test_unrelated_config_updated_does_not_promote_endpointing():
     service = SarvamRealtimeSTTService(api_key="test-key")
     service._websocket = _FakeWebsocket()

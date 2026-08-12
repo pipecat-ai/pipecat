@@ -530,6 +530,11 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             return
         self._effective_endpointing = self._pending_endpointing
         self._pending_endpointing = None
+        if self._effective_endpointing == "vad":
+            # Sarvam endpoints from here on, so the aggregator has to defer to
+            # the turn frames this service emits rather than keep running the
+            # detection it started the session with.
+            await self.broadcast_service_metadata()
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply runtime settings and send supported fields via ``config.update``."""
