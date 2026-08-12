@@ -26,6 +26,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.metrics.metrics import STTUsageMetricsData
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 from pipecat.services.sarvam._sdk import sdk_headers
@@ -648,6 +649,33 @@ async def test_unsupported_resolved_sample_rate_reports_and_skips_connect(monkey
     # Non-fatal, so a ServiceSwitcher can fail over to another provider.
     assert pushed_errors[0][1] is False
     assert connects == []
+
+
+@pytest.mark.parametrize("final_text", ["hello", "   "])
+@pytest.mark.asyncio
+async def test_final_transcript_reports_usage(monkeypatch, final_text):
+    """Usage is a per-utterance billing event.
+
+    Leaving it to the teardown flush reports one lump sum, and a cancelled
+    session reports nothing at all.
+    """
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    service._enable_usage_metrics = True
+    service._stt_usage_pending_seconds = 2.5
+    pushed = []
+    monkeypatch.setattr(service, "push_frame", _capture(pushed))
+
+    await service._handle_message({"event": "transcript.final", "text": final_text})
+
+    usage = [
+        data
+        for frame in pushed
+        if isinstance(frame, MetricsFrame)
+        for data in frame.data
+        if isinstance(data, STTUsageMetricsData)
+    ]
+    assert [data.value.audio_seconds for data in usage] == [2.5]
+    assert service._stt_usage_pending_seconds == 0.0
 
 
 @pytest.mark.asyncio

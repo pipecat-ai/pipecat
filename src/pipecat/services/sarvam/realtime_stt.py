@@ -620,6 +620,9 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         )
 
     async def _handle_final_transcript(self, message: dict[str, Any]):
+        # Report usage before the transcription frame so tracing can attach it
+        # to the STT span the frame closes. A blank final still consumed audio.
+        await self.emit_stt_usage_metrics()
         text = (message.get("text") or "").strip()
         if text:
             language = self._language_for_frame(message.get("language"))
