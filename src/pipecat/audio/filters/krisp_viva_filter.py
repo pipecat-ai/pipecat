@@ -49,7 +49,7 @@ class KrispVivaFilter(BaseAudioFilter):
         self,
         model_path: str | None = None,
         frame_duration: int = 10,
-        noise_suppression_level: int = 100,
+        noise_suppression_level: float = 100.0,
         api_key: str = "",
         tts_model_path: str | None = None,
         tts_threshold: float = 0.5,
@@ -340,7 +340,7 @@ class KrispVivaFilter(BaseAudioFilter):
             processed_samples = np.empty_like(samples)
 
             for i, frame in enumerate(frames):
-                cleaned_frame = self._session.process(frame, float(self._noise_suppression_level))
+                cleaned_frame = self._session.process(frame, self._noise_suppression_level)
                 processed_samples[
                     i * self._samples_per_frame : (i + 1) * self._samples_per_frame
                 ] = cleaned_frame
