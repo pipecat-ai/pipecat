@@ -201,7 +201,6 @@ def test_string_language_setting_does_not_use_enum_converter(monkeypatch):
         SarvamRealtimeSTTService.Settings(model="saarika:v2.5"),
         SarvamRealtimeSTTService.Settings(language_code="fr-FR"),
         SarvamRealtimeSTTService.Settings(stream_type="slow"),
-        SarvamRealtimeSTTService.Settings(endpointing="server"),
         SarvamRealtimeSTTService.Settings(sample_rate=44100),
         SarvamRealtimeSTTService.Settings(threshold=1.1),
         SarvamRealtimeSTTService.Settings(silence_duration_ms=-1),
@@ -210,6 +209,21 @@ def test_string_language_setting_does_not_use_enum_converter(monkeypatch):
 def test_invalid_realtime_settings_raise(settings):
     with pytest.raises(ValueError):
         SarvamRealtimeSTTService(api_key="test-key", settings=settings)
+
+
+def test_invalid_endpointing_raises():
+    with pytest.raises(ValueError, match="endpointing"):
+        SarvamRealtimeSTTService(api_key="test-key", endpointing="server")
+
+
+def test_endpointing_is_not_a_setting():
+    """The mode picks the turn strategies, which are announced once at startup.
+
+    Leaving it out of `Settings` is what makes a mid-session switch — which the
+    user aggregator would never see — impossible to express.
+    """
+    with pytest.raises(TypeError):
+        SarvamRealtimeSTTService.Settings(endpointing="manual")
 
 
 @pytest.mark.asyncio
@@ -257,7 +271,7 @@ async def test_client_sends_50ms_chunks_regardless_of_stream_type(stream_type):
 async def test_manual_endpointing_sends_speech_boundaries():
     service = SarvamRealtimeSTTService(
         api_key="test-key",
-        settings=SarvamRealtimeSTTService.Settings(endpointing="manual"),
+        endpointing="manual",
     )
     service._websocket = _FakeWebsocket()
 
@@ -274,7 +288,7 @@ async def test_manual_endpointing_sends_speech_boundaries():
 async def test_manual_endpointing_flushes_buffered_audio_before_speech_end():
     service = SarvamRealtimeSTTService(
         api_key="test-key",
-        settings=SarvamRealtimeSTTService.Settings(endpointing="manual"),
+        endpointing="manual",
     )
     service._websocket = _FakeWebsocket()
     service._sample_rate = 16000
@@ -486,99 +500,13 @@ async def test_config_update_sends_without_reconnect_and_rejects_simulated_chang
 
 
 @pytest.mark.asyncio
-async def test_endpointing_change_is_not_effective_until_acked():
-    service = SarvamRealtimeSTTService(api_key="test-key")
-    service._websocket = _FakeWebsocket()
-
-    await service.update_config(endpointing="manual")
-    service._websocket.sent.clear()
-
-    # Server is still in vad mode until it acknowledges, so no manual boundaries.
-    await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
-    assert service._websocket.sent == []
-
-    await service._handle_message({"event": "config.updated", "applied": ["endpointing=manual"]})
-    await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
-
-    assert service._websocket.sent == [json.dumps({"event": "speech_start"})]
-
-
-@pytest.mark.asyncio
-async def test_promotion_to_vad_endpointing_rebroadcasts_turn_strategies(monkeypatch):
-    """The aggregator has to be told when Sarvam takes over endpointing.
-
-    It applied the session's starting mode once, at start, so without a second
-    broadcast it keeps running its own detection alongside the turn frames this
-    service begins emitting.
-    """
-    service = SarvamRealtimeSTTService(
-        api_key="test-key",
-        settings=SarvamRealtimeSTTService.Settings(endpointing="manual"),
-    )
-    service._websocket = _FakeWebsocket()
-    broadcast = []
-
-    async def capture_frame_instance(frame):
-        broadcast.append(frame)
-
-    monkeypatch.setattr(service, "broadcast_frame_instance", capture_frame_instance)
-
-    await service.update_config(endpointing="vad")
-    assert broadcast == []
-
-    await service._handle_message({"event": "config.updated", "applied": ["endpointing=vad"]})
-
-    assert len(broadcast) == 1
-    assert isinstance(broadcast[0].user_turn_strategies, ExternalUserTurnStrategies)
-
-
-@pytest.mark.asyncio
-async def test_unrelated_config_updated_does_not_promote_endpointing():
-    service = SarvamRealtimeSTTService(api_key="test-key")
-    service._websocket = _FakeWebsocket()
-
-    await service.update_config(endpointing="manual")
-    await service._handle_message({"event": "config.updated", "applied": ["prompt=hello"]})
-    service._websocket.sent.clear()
-
-    await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
-
-    assert service._websocket.sent == []
-
-
-@pytest.mark.asyncio
-async def test_unusable_applied_payload_falls_back_to_promoting_endpointing():
-    service = SarvamRealtimeSTTService(api_key="test-key")
-    service._websocket = _FakeWebsocket()
-
-    await service.update_config(endpointing="manual")
-    await service._handle_message({"event": "config.updated"})
-    service._websocket.sent.clear()
-
-    await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
-
-    assert service._websocket.sent == [json.dumps({"event": "speech_start"})]
-
-
-@pytest.mark.asyncio
-async def test_endpointing_is_not_pending_when_socket_is_closed():
-    service = SarvamRealtimeSTTService(api_key="test-key")
-
-    await service.update_config(endpointing="manual")
-    await service._handle_message({"event": "config.updated", "applied": ["endpointing=manual"]})
-
-    assert service._effective_endpointing == "vad"
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("field", "value"),
     [
         ("sample_rate", 8000),
         ("return_timestamps", True),
         ("prefix_padding_ms", 200),
-        ("lid_gate_seconds", 1.5),
-        ("lid_confidence_threshold", 0.5),
+        ("endpointing", "manual"),
     ],
 )
 async def test_connection_only_fields_rejected_by_update_config(field, value):
@@ -596,7 +524,7 @@ async def test_connection_only_setting_change_is_not_sent_as_config_update():
     service = SarvamRealtimeSTTService(api_key="test-key")
     service._websocket = _FakeWebsocket()
 
-    await service._update_settings(SarvamRealtimeSTTService.Settings(lid_gate_seconds=2.0))
+    await service._update_settings(SarvamRealtimeSTTService.Settings(return_timestamps=True))
 
     assert service._websocket.sent == []
 
@@ -743,7 +671,7 @@ async def test_provider_vad_events_are_ignored_under_manual_endpointing(monkeypa
     """
     service = SarvamRealtimeSTTService(
         api_key="test-key",
-        settings=SarvamRealtimeSTTService.Settings(endpointing="manual"),
+        endpointing="manual",
     )
     broadcasted = []
     monkeypatch.setattr(service, "push_frame", _noop)
@@ -759,8 +687,8 @@ async def test_provider_vad_events_are_ignored_under_manual_endpointing(monkeypa
 def test_vad_params_are_omitted_for_manual_endpointing():
     service = SarvamRealtimeSTTService(
         api_key="test-key",
+        endpointing="manual",
         settings=SarvamRealtimeSTTService.Settings(
-            endpointing="manual",
             threshold=0.4,
             silence_duration_ms=700,
             min_speech_duration_ms=120,
@@ -936,7 +864,7 @@ def test_should_interrupt_reaches_the_turn_strategies(should_interrupt):
 def test_service_metadata_leaves_turn_strategies_unset_in_manual_mode():
     service = SarvamRealtimeSTTService(
         api_key="test-key",
-        settings=SarvamRealtimeSTTService.Settings(endpointing="manual"),
+        endpointing="manual",
     )
     frame = service.service_metadata_frame()
     assert frame.user_turn_strategies is None

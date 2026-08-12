@@ -90,8 +90,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = SarvamRealtimeSTTService(
         api_key=os.environ["SARVAM_API_KEY"],
+        endpointing="manual",
         settings=SarvamRealtimeSTTService.Settings(
-            endpointing="manual",
             language_code="en-IN",
             stream_type="balanced",
         ),

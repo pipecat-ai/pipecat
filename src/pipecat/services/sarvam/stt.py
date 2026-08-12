@@ -18,7 +18,7 @@ import base64
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field, fields
-from typing import Any, Literal, cast
+from typing import Any, Literal, cast, get_args
 from urllib.parse import urlencode
 
 from loguru import logger
@@ -964,36 +964,37 @@ SUPPORTED_LANGUAGES = {
     "mai-IN",
     "doi-IN",
 }
-SUPPORTED_STREAM_TYPES = {"fast", "balanced", "simulated"}
-SUPPORTED_ENDPOINTING = {"vad", "manual"}
+SUPPORTED_STREAM_TYPES = Literal["fast", "balanced", "simulated"]
+SUPPORTED_ENDPOINTING = Literal["vad", "manual"]
+SUPPORTED_MODES = Literal["transcribe", "translate", "verbatim", "translit", "codemix"]
+# A plain set: the rate in force can come from the pipeline rather than the
+# caller, so it is checked once resolved rather than annotated.
 SUPPORTED_SAMPLE_RATES = {8000, 16000}
-SUPPORTED_MODES = {"transcribe", "translate", "verbatim", "translit", "codemix"}
 
 # Sarvam's `stream_type` selects the *server* flush profile; it says nothing
 # about how often the client should send. Audio goes out on a fixed cadence so
 # transcript latency doesn't scale with the chosen profile.
 _CLIENT_CHUNK_MS = 50
 
-# Fixed for the life of the socket — Sarvam only reads these from the connection
-# query string, so a change needs a new stream.
+# Rejected in a `config.update`. Sarvam reads these only from the connection
+# query string, so changing one needs a new stream; `endpointing` is a
+# constructor argument and belongs to the same stream-lifetime contract.
 _CONNECTION_ONLY_FIELDS = frozenset(
     {
         "sample_rate",
         "return_timestamps",
         "prefix_padding_ms",
-        "lid_gate_seconds",
-        "lid_confidence_threshold",
+        "endpointing",
     }
 )
 
 # Accepted in a `config.update` message. Of these, `language_code`,
-# `stream_type`, `mode`, `prompt`, and `endpointing` are boundary-gated: the
-# server defers them to the next utterance boundary.
+# `stream_type`, `mode`, and `prompt` are boundary-gated: the server defers
+# them to the next utterance boundary.
 _RUNTIME_CONFIG_FIELDS = frozenset(
     {
         "language_code",
         "stream_type",
-        "endpointing",
         "mode",
         "prompt",
         "threshold",
@@ -1045,7 +1046,6 @@ class SarvamRealtimeSTTSettings(STTSettings):
     Parameters:
         language_code: Sarvam realtime language code or ``auto``.
         stream_type: Streaming cadence: ``fast``, ``balanced``, or ``simulated``.
-        endpointing: Turn endpointing mode: ``vad`` or ``manual``.
         sample_rate: Declared input audio sample rate. ``None`` adopts the
             pipeline's input rate.
         mode: Realtime STT task mode.
@@ -1055,25 +1055,18 @@ class SarvamRealtimeSTTSettings(STTSettings):
         prefix_padding_ms: Optional VAD prefix padding.
         silence_duration_ms: Optional silence duration for end-of-speech.
         min_speech_duration_ms: Optional minimum speech duration.
-        lid_gate_seconds: Optional auto-LID gate duration.
-        lid_confidence_threshold: Optional auto-LID confidence threshold.
     """
 
     language_code: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    stream_type: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    endpointing: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    stream_type: SUPPORTED_STREAM_TYPES | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     sample_rate: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    mode: Literal["transcribe", "translate", "verbatim", "translit", "codemix"] | NotGiven = field(
-        default_factory=lambda: NOT_GIVEN
-    )
+    mode: SUPPORTED_MODES | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     return_timestamps: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     prefix_padding_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     silence_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_speech_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    lid_gate_seconds: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    lid_confidence_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SarvamRealtimeSTTService(WebsocketSTTService):
@@ -1086,7 +1079,9 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
     ``endpointing="manual"`` the pipeline drives them instead, so the pipeline
     needs a turn strategy that emits ``VADUserStartedSpeakingFrame`` and
     ``VADUserStoppedSpeakingFrame``; without one, Sarvam never receives a boundary
-    and never emits a final transcript.
+    and never emits a final transcript. The mode is a constructor argument rather
+    than a setting, since it decides which turn strategies the user aggregator
+    runs and those are announced once, at startup.
 
     A VAD analyzer is required in either mode. TTFB is measured from those same
     ``VADUserStoppedSpeakingFrame`` frames, which carry the stop delay needed to
@@ -1103,6 +1098,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         *,
         api_key: str,
         base_url: str = _REALTIME_STT_URL,
+        endpointing: SUPPORTED_ENDPOINTING = "vad",
         settings: Settings | None = None,
         should_interrupt: bool = True,
         ttfs_p99_latency: float | None = SARVAM_REALTIME_TTFS_P99,
@@ -1113,6 +1109,10 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         Args:
             api_key: Sarvam API key.
             base_url: Realtime STT websocket endpoint.
+            endpointing: Which side detects turn boundaries: ``vad`` for Sarvam's
+                own detection, or ``manual`` for the pipeline's. Decides the turn
+                strategies this service asks the user aggregator to run, so it is
+                fixed for the life of the service. Defaults to ``vad``.
             settings: Runtime-updatable realtime settings.
             should_interrupt: Determine whether the bot should be interrupted when
                 Sarvam detects user speech. Passed along to the user turn
@@ -1140,7 +1140,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             language=None,
             language_code="en-IN",
             stream_type="balanced",
-            endpointing="vad",
             sample_rate=None,
             mode="transcribe",
             prompt=None,
@@ -1149,8 +1148,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             prefix_padding_ms=None,
             silence_duration_ms=None,
             min_speech_duration_ms=None,
-            lid_gate_seconds=None,
-            lid_confidence_threshold=None,
         )
         language_code_given = settings is not None and is_given(settings.language_code)
         if settings is not None:
@@ -1163,6 +1160,10 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             language = _as_language(default_settings.language)
             if language is not None:
                 default_settings.language_code = language_to_sarvam_realtime_language(language)
+
+        if endpointing not in get_args(SUPPORTED_ENDPOINTING):
+            allowed = ", ".join(sorted(get_args(SUPPORTED_ENDPOINTING)))
+            raise ValueError(f"Unsupported endpointing '{endpointing}'. Allowed values: {allowed}.")
 
         self._validate_settings(default_settings)
 
@@ -1183,10 +1184,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         self._provider_speech_active = False
         self._speech_end_audio_position_s: float | None = None
         self._audio_position_bytes = 0
-        # What the server is actually doing, which trails `settings.endpointing`
-        # until a `config.updated` acknowledges the switch.
-        self._effective_endpointing = assert_given(self._settings.endpointing)
-        self._pending_endpointing: str | None = None
+        self._endpointing = endpointing
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing and usage metrics."""
@@ -1204,7 +1202,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
-        if self._effective_endpointing == "vad":
+        if self._endpointing == "vad":
             frame.user_turn_strategies = ExternalUserTurnStrategies(
                 enable_interruptions=self._should_interrupt,
             )
@@ -1239,13 +1237,16 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames and send manual endpointing boundaries when configured."""
         await super().process_frame(frame, direction)
-        if self._effective_endpointing != "manual":
+        if self._endpointing != "manual":
             return
         if isinstance(frame, VADUserStartedSpeakingFrame):
             await self._send_json({"event": "speech_start"})
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # The tail of the turn must reach Sarvam before the boundary, or the
-            # final transcript is cut short.
+            # final transcript is cut short. `speech_end` finalizes the utterance
+            # on its own; Sarvam's separate `flush` event force-finalizes
+            # buffered audio mid-utterance and has no part in a turn that ends
+            # on a boundary.
             await self._flush_audio_buffer()
             await self._send_json({"event": "speech_end"})
 
@@ -1309,9 +1310,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
 
             url = self._build_ws_url()
             headers = {"API-SUBSCRIPTION-KEY": self._api_key}
-            # A fresh socket starts in whatever mode the query string asked for.
-            self._effective_endpointing = assert_given(self._settings.endpointing)
-            self._pending_endpointing = None
             logger.debug(f"Connecting to Sarvam realtime STT WebSocket: {url}")
             self._websocket = await websocket_connect(
                 url,
@@ -1375,9 +1373,9 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         # Only the endpointer in charge gets to set turn boundaries. Under
         # manual endpointing the pipeline owns them, so server VAD telemetry
         # would compete with the boundaries it is already producing.
-        elif event == "vad.speech_start" and self._effective_endpointing == "vad":
+        elif event == "vad.speech_start" and self._endpointing == "vad":
             await self._handle_speech_start(message)
-        elif event == "vad.speech_end" and self._effective_endpointing == "vad":
+        elif event == "vad.speech_end" and self._endpointing == "vad":
             await self._handle_speech_end(message)
         elif event == "transcript.partial":
             await self._handle_partial_transcript(message)
@@ -1386,7 +1384,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         elif event == "session.end":
             await self._handle_session_end(message)
         elif event == "config.updated":
-            await self._handle_config_updated(message)
+            logger.trace(f"{self} Sarvam realtime acknowledgement: {message}")
         elif event == "error":
             await self._handle_error(message)
         elif event == "pong":
@@ -1400,8 +1398,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
 
         Args:
             fields: Runtime-updatable Sarvam config values. Connection-only
-                values are rejected, since Sarvam only reads them from the
-                connection query string.
+                values are rejected; they are fixed for the life of the stream.
 
         Raises:
             ValueError: If a connection-only or invalid value is supplied.
@@ -1418,26 +1415,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         # The store has to follow what the server was told, or a later delta
         # diffs against a stale value and skips an update the server needs.
         self._settings.apply_update(self.Settings(**fields))
-        if "endpointing" in fields:
-            # Boundary-gated: stay in the current mode until Sarvam acks.
-            self._pending_endpointing = fields["endpointing"]
-
-    async def _handle_config_updated(self, message: dict[str, Any]):
-        """Promote a pending endpointing switch once Sarvam acknowledges it."""
-        logger.trace(f"{self} Sarvam realtime acknowledgement: {message}")
-        if self._pending_endpointing is None:
-            return
-        applied = _applied_keys(message)
-        if applied is not None and "endpointing" not in applied:
-            # Someone else's acknowledgement; keep waiting for ours.
-            return
-        self._effective_endpointing = self._pending_endpointing
-        self._pending_endpointing = None
-        if self._effective_endpointing == "vad":
-            # Sarvam endpoints from here on, so the aggregator has to defer to
-            # the turn frames this service emits rather than keep running the
-            # detection it started the session with.
-            await self.broadcast_service_metadata()
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply runtime settings and send supported fields via ``config.update``."""
@@ -1602,19 +1579,15 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         params: dict[str, Any] = {
             "language_code": self._settings.language_code,
             "stream_type": self._settings.stream_type,
-            "endpointing": self._settings.endpointing,
+            "endpointing": self._endpointing,
             "encoding": "linear16",
             "sample_rate": self.sample_rate,
             "model": self._settings.model,
             "mode": self._settings.mode,
             "return_timestamps": str(self._settings.return_timestamps).lower(),
         }
-        optional: dict[str, Any] = {
-            "prompt": self._settings.prompt,
-            "lid_gate_seconds": self._settings.lid_gate_seconds,
-            "lid_confidence_threshold": self._settings.lid_confidence_threshold,
-        }
-        if self._settings.endpointing == "vad":
+        optional: dict[str, Any] = {"prompt": self._settings.prompt}
+        if self._endpointing == "vad":
             optional.update(
                 {name: getattr(self._settings, name) for name in _VAD_TUNING_FIELDS},
             )
@@ -1711,14 +1684,9 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             )
 
         stream_type = assert_given(settings.stream_type)
-        if stream_type not in SUPPORTED_STREAM_TYPES:
-            allowed = ", ".join(sorted(SUPPORTED_STREAM_TYPES))
+        if stream_type not in get_args(SUPPORTED_STREAM_TYPES):
+            allowed = ", ".join(sorted(get_args(SUPPORTED_STREAM_TYPES)))
             raise ValueError(f"Unsupported stream_type '{stream_type}'. Allowed values: {allowed}.")
-
-        endpointing = assert_given(settings.endpointing)
-        if endpointing not in SUPPORTED_ENDPOINTING:
-            allowed = ", ".join(sorted(SUPPORTED_ENDPOINTING))
-            raise ValueError(f"Unsupported endpointing '{endpointing}'. Allowed values: {allowed}.")
 
         sample_rate = assert_given(settings.sample_rate)
         if sample_rate is not None and sample_rate not in SUPPORTED_SAMPLE_RATES:
@@ -1726,8 +1694,8 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             raise ValueError(f"Unsupported sample_rate '{sample_rate}'. Allowed values: {allowed}.")
 
         mode = assert_given(settings.mode)
-        if mode not in SUPPORTED_MODES:
-            allowed = ", ".join(sorted(SUPPORTED_MODES))
+        if mode not in get_args(SUPPORTED_MODES):
+            allowed = ", ".join(sorted(get_args(SUPPORTED_MODES)))
             raise ValueError(f"Unsupported mode '{mode}'. Allowed values: {allowed}.")
 
         _validate_optional_range("threshold", settings.threshold, minimum=0.0, maximum=1.0)
@@ -1735,13 +1703,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         _validate_optional_minimum("silence_duration_ms", settings.silence_duration_ms, minimum=0)
         _validate_optional_minimum(
             "min_speech_duration_ms", settings.min_speech_duration_ms, minimum=0
-        )
-        _validate_optional_minimum("lid_gate_seconds", settings.lid_gate_seconds, minimum=0.0)
-        _validate_optional_range(
-            "lid_confidence_threshold",
-            settings.lid_confidence_threshold,
-            minimum=0.0,
-            maximum=1.0,
         )
 
     @traced_stt
@@ -1762,19 +1723,6 @@ def _as_language(value: Any) -> Language | None:
         return Language(value)
     except ValueError:
         return None
-
-
-def _applied_keys(message: dict[str, Any]) -> set[str] | None:
-    """Extract the field names from a ``config.updated`` payload.
-
-    Sarvam reports entries as ``"key=value"``. Returns ``None`` when the payload
-    carries no usable list, which callers treat as "assume it was mine".
-    """
-    applied = message.get("applied")
-    if not isinstance(applied, list):
-        return None
-    keys = {str(item).split("=", maxsplit=1)[0].strip() for item in applied}
-    return keys or None
 
 
 def _validate_optional_range(
