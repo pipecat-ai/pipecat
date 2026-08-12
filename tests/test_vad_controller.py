@@ -11,6 +11,7 @@ from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
 from pipecat.audio.vad.vad_controller import VADController
 from pipecat.frames.frames import Frame, InputAudioRawFrame, SpeechControlParamsFrame, StartFrame
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.tests.utils import frame_processor_setup
 from pipecat.utils.asyncio.task_manager import TaskManager
 
 
@@ -228,7 +229,7 @@ class TestVADControllerAudioIdle(unittest.IsolatedAsyncioTestCase):
 
         start_frame = StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=16000)
         await controller.process_frame(start_frame)
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
 
         # Enter SPEAKING state
         audio_frame = InputAudioRawFrame(audio=b"\x00" * 1024, sample_rate=16000, num_channels=1)
@@ -256,7 +257,7 @@ class TestVADControllerAudioIdle(unittest.IsolatedAsyncioTestCase):
 
         start_frame = StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=16000)
         await controller.process_frame(start_frame)
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
 
         # Stay in QUIET state, wait past idle timeout
         await asyncio.sleep(AUDIO_IDLE_TIMEOUT + 0.1)

@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     StartFrame,
     VADParamsUpdateFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
 
@@ -109,19 +109,17 @@ class VADController(BaseObject):
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
 
-    async def setup(self, task_manager: BaseTaskManager):
-        """Initialize the controller with the given task manager.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the controller.
 
         Args:
-            task_manager: The task manager to be associated with this instance.
+            setup: Configuration object containing setup parameters.
         """
-        self._task_manager = task_manager
+        await super().setup(setup.task_manager)
         self._last_audio_time = time.monotonic()
+        self._vad_analyzer.set_sample_rate(setup.audio_in_sample_rate)
         if self._audio_idle_timeout > 0 and not self._audio_idle_task:
-            self._audio_idle_task = self._task_manager.create_task(
-                self._audio_idle_handler(),
-                f"{self}::_audio_idle_handler",
-            )
+            self._audio_idle_task = self.create_task(self._audio_idle_handler())
 
     async def process_frame(self, frame: Frame):
         """Process a frame and handle VAD-related events.
@@ -141,7 +139,6 @@ class VADController(BaseObject):
             await self.broadcast_frame(SpeechControlParamsFrame, vad_params=frame.params)
 
     async def _start(self, frame: StartFrame):
-        self._vad_analyzer.set_sample_rate(frame.audio_in_sample_rate)
         # Broadcast initial VAD params so other services (e.g. STT) can use them
         await self.broadcast_frame(SpeechControlParamsFrame, vad_params=self._vad_analyzer.params)
 

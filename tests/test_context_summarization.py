@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock
 from pipecat.frames.frames import LLMContextSummaryRequestFrame
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.services.llm_service import LLMService
+from pipecat.tests.utils import frame_processor_setup
 from pipecat.utils.context.llm_context_summarization import (
     LLMAutoContextSummarizationConfig,
     LLMContextSummarizationConfig,
@@ -845,7 +846,7 @@ class TestDedicatedLLMSummarization(unittest.IsolatedAsyncioTestCase):
         context, config = self._create_context_and_config(dedicated_llm)
         original_message_count = len(context.messages)
         summarizer = LLMContextSummarizer(context=context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         # Track whether on_request_summarization event fires (it should NOT)
         event_fired = False
@@ -896,7 +897,7 @@ class TestDedicatedLLMSummarization(unittest.IsolatedAsyncioTestCase):
         context, config = self._create_context_and_config(dedicated_llm)
         config.summary_config.summarization_timeout = 0.1  # Very short timeout
         summarizer = LLMContextSummarizer(context=context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         original_message_count = len(context.messages)
 
@@ -927,7 +928,7 @@ class TestDedicatedLLMSummarization(unittest.IsolatedAsyncioTestCase):
 
         context, config = self._create_context_and_config(dedicated_llm)
         summarizer = LLMContextSummarizer(context=context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         original_message_count = len(context.messages)
 
@@ -956,7 +957,7 @@ class TestDedicatedLLMSummarization(unittest.IsolatedAsyncioTestCase):
 
         context, config = self._create_context_and_config(dedicated_llm)
         summarizer = LLMContextSummarizer(context=context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         event_fired = False
 
@@ -986,7 +987,7 @@ class TestDedicatedLLMSummarization(unittest.IsolatedAsyncioTestCase):
 
         config = LLMAutoContextSummarizationConfig(max_context_tokens=50)
         summarizer = LLMContextSummarizer(context=context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         request_frame = None
 

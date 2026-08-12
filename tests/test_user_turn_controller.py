@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.tests.utils import frame_processor_setup
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
     ExternalUserTurnStartStrategy,
@@ -64,7 +65,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             ),
             user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
         )
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
 
         stopped = False
 
@@ -94,7 +95,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
 
         should_start = None
         should_stop = None
@@ -135,7 +136,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         controller = UserTurnController(
             user_turn_strategies=UserTurnStrategies(start=[start], stop=[stop])
         )
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
 
         # Re-apply the same strategy instances several times.
         for _ in range(3):
@@ -155,7 +156,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
 
         events: list[str] = []
 
@@ -183,7 +184,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         )
         controller = UserTurnController(user_turn_strategies=UserTurnStrategies(stop=[wrapped]))
 
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
 
         events: list[str] = []
 
@@ -215,7 +216,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
         )
 
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
 
         should_start = 0
 
@@ -251,7 +252,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
         )
 
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
 
         should_start = None
         should_stop = None
@@ -293,7 +294,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
         )
 
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
 
         should_start = None
         should_stop = None
@@ -342,7 +343,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             user_turn_strategies=ExternalUserTurnStrategies(),
             user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
         )
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
 
         started_params = None
         stopped_params = None
@@ -375,7 +376,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             user_turn_strategies=ExternalUserTurnStrategies(),
             user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
         )
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
 
         started_params = None
         stopped_params = None
@@ -408,7 +409,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             user_turn_strategies=ExternalUserTurnStrategies(),
             user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
         )
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
 
         stopped = False
 
@@ -501,7 +502,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
         )
 
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
 
         start_count = 0
         stop_count = 0
@@ -569,7 +570,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             ),
             user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
         )
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
 
         self.assertEqual(started, [])
         await controller.process_frame(VADUserStartedSpeakingFrame())
@@ -594,7 +595,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             ),
             user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
         )
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
 
         await controller.process_frame(VADUserStartedSpeakingFrame())
         self.assertEqual(finalized, 0)
@@ -625,7 +626,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             ),
             user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
         )
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
 
         await controller.process_frame(VADUserStartedSpeakingFrame())
         await controller.process_frame(VADUserStoppedSpeakingFrame())
@@ -722,7 +723,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
     async def test_migrated_strategy_does_not_warn_at_runtime(self):
         """A strategy overriding the callbacks never warns on the per-turn callbacks."""
         strategy = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
         with warnings.catch_warnings():
             warnings.simplefilter("error", DeprecationWarning)
             await strategy.handle_user_turn_started()
@@ -792,7 +793,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         stt_p99 = 0.6  # deadline: 0.4s after the VAD stop frame is created
 
         strategy, released = self._make_turn_analyzer_strategy(inference_secs=inference_secs)
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
         await strategy.process_frame(STTMetadataFrame(service_name="stt", ttfs_p99_latency=stt_p99))
         await strategy.process_frame(VADUserStartedSpeakingFrame(start_secs=stop_secs))
 
@@ -828,7 +829,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         stt_p99 = 5.0  # timer far out, so an immediate release is unambiguous
 
         strategy, released = self._make_turn_analyzer_strategy(inference_secs=inference_secs)
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
         await strategy.process_frame(STTMetadataFrame(service_name="stt", ttfs_p99_latency=stt_p99))
         await strategy.process_frame(VADUserStartedSpeakingFrame(start_secs=0.2))
 
@@ -856,7 +857,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         strategy, released = self._make_turn_analyzer_strategy(
             inference_secs=0.1, wait_for_transcript=False
         )
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
         await strategy.process_frame(STTMetadataFrame(service_name="stt", ttfs_p99_latency=stt_p99))
         await strategy.process_frame(VADUserStartedSpeakingFrame(start_secs=0.2))
         await strategy.process_frame(VADUserStoppedSpeakingFrame(stop_secs=0.2))

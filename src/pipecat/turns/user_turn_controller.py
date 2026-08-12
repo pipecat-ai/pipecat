@@ -19,7 +19,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
@@ -30,7 +30,6 @@ from pipecat.turns.user_stop import (
     UserTurnStoppedParams,
 )
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
-from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
 
 
@@ -96,6 +95,7 @@ class UserTurnController(BaseObject):
 
         self._user_turn_strategies = user_turn_strategies
         self._user_turn_stop_timeout = user_turn_stop_timeout
+        self._setup: FrameProcessorSetup | None = None
 
         self._user_speaking = False
 
@@ -116,13 +116,14 @@ class UserTurnController(BaseObject):
         """The currently active user turn strategies."""
         return self._user_turn_strategies
 
-    async def setup(self, task_manager: BaseTaskManager):
-        """Initialize the controller with the given task manager.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the controller.
 
         Args:
-            task_manager: The task manager to be associated with this instance.
+            setup: Configuration object containing setup parameters.
         """
-        await super().setup(task_manager)
+        await super().setup(setup.task_manager)
+        self._setup = setup
 
         if not self._user_turn_stop_timeout_task:
             self._user_turn_stop_timeout_task = self.create_task(
@@ -207,15 +208,18 @@ class UserTurnController(BaseObject):
                 break
 
     async def _setup_strategies(self):
+        if not self._setup:
+            raise RuntimeError(f"{self} was not properly set up")
+
         for s in self._user_turn_strategies.start or []:
-            await s.setup(self.task_manager)
+            await s.setup(self._setup)
             s.add_event_handler("on_push_frame", self._on_push_frame)
             s.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
             s.add_event_handler("on_user_turn_started", self._on_user_turn_started)
             s.add_event_handler("on_reset_aggregation", self._on_reset_aggregation)
 
         for s in self._user_turn_strategies.stop or []:
-            await s.setup(self.task_manager)
+            await s.setup(self._setup)
             s.add_event_handler("on_push_frame", self._on_push_frame)
             s.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
             s.add_event_handler(

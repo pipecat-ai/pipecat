@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.tests.utils import frame_processor_setup
 from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
     ExternalUserTurnCompletionStopStrategy,
@@ -41,7 +42,7 @@ class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
     async def _create_strategy(self, user_speech_timeout=AGGREGATION_TIMEOUT):
         """Create strategy and configure STT timeout via metadata frame."""
         strategy = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=user_speech_timeout)
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
         # Set STT timeout via metadata frame (as would happen in real pipeline)
         await strategy.process_frame(
             STTMetadataFrame(service_name="test", ttfs_p99_latency=STT_TIMEOUT)
@@ -546,7 +547,7 @@ class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         """
         stt_timeout = AGGREGATION_TIMEOUT * 4
         strategy = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=AGGREGATION_TIMEOUT)
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
         await strategy.process_frame(
             STTMetadataFrame(service_name="test", ttfs_p99_latency=stt_timeout)
         )
@@ -583,7 +584,7 @@ class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         """
         stt_timeout = AGGREGATION_TIMEOUT * 4
         strategy = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=AGGREGATION_TIMEOUT)
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
         await strategy.process_frame(
             STTMetadataFrame(service_name="test", ttfs_p99_latency=stt_timeout)
         )
@@ -619,7 +620,7 @@ class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         """
         stt_timeout = AGGREGATION_TIMEOUT * 4
         strategy = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=AGGREGATION_TIMEOUT)
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
         await strategy.process_frame(
             STTMetadataFrame(service_name="test", ttfs_p99_latency=stt_timeout)
         )
@@ -733,7 +734,7 @@ class TestSpeechTimeoutStopSecsWarnings(unittest.IsolatedAsyncioTestCase):
 
     async def _create_strategy(self, stt_timeout=0.35):
         strategy = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=AGGREGATION_TIMEOUT)
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
         await strategy.process_frame(
             STTMetadataFrame(service_name="test", ttfs_p99_latency=stt_timeout)
         )
@@ -808,7 +809,7 @@ class TestExternalUserTurnCompletionStopStrategy(unittest.IsolatedAsyncioTestCas
 
     async def _create_strategy(self):
         strategy = ExternalUserTurnCompletionStopStrategy()
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
         return strategy
 
     async def test_finalizes_on_completion(self):
@@ -881,7 +882,7 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
 
     async def test_proposal_finalizes_with_emission_enabled(self):
         strategy = ExternalUserTurnStopStrategy()
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
         params = await self._run_turn(
             strategy,
             started=ProposedUserStartedSpeakingFrame(),
@@ -893,7 +894,7 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
 
     async def test_real_turn_frame_finalizes_with_emission_suppressed(self):
         strategy = ExternalUserTurnStopStrategy()
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
         params = await self._run_turn(
             strategy,
             started=UserStartedSpeakingFrame(),
@@ -910,7 +911,7 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         strategy) the timer path would otherwise fire on every tick forever.
         """
         strategy = ExternalUserTurnStopStrategy(timeout=0.05, wait_for_transcript=False)
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
 
         fired = 0
 
@@ -943,7 +944,7 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         whether emission is suppressed.
         """
         strategy = ExternalUserTurnStopStrategy(timeout=0.05)
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
 
         params = None
 
@@ -999,7 +1000,7 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
                 )
 
         strategy = DelayedStopStrategy()
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
 
         stop_params = None
 

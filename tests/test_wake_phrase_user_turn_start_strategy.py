@@ -14,6 +14,7 @@ from pipecat.frames.frames import (
     UserSpeakingFrame,
     VADUserStartedSpeakingFrame,
 )
+from pipecat.tests.utils import frame_processor_setup
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_start.wake_phrase_user_turn_start_strategy import (
     WakePhraseUserTurnStartStrategy,
@@ -30,7 +31,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
     async def _setup_strategy(self, strategy: WakePhraseUserTurnStartStrategy):
         task_manager = TaskManager()
-        await strategy.setup(task_manager)
+        await strategy.setup(frame_processor_setup(task_manager))
         # The tests are quick, so make sure the schedule starts all tasks.
         await asyncio.sleep(0)
         return task_manager

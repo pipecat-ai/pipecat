@@ -7,9 +7,9 @@
 """Wrapper that defers a stop strategy's finalization to another strategy."""
 
 from pipecat.frames.frames import Frame
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
-from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
 class DeferredUserTurnStopStrategy(BaseUserTurnStopStrategy):
@@ -68,10 +68,10 @@ class DeferredUserTurnStopStrategy(BaseUserTurnStopStrategy):
             return
         self._inner.add_event_handler(event_name, handler)
 
-    async def setup(self, task_manager: BaseTaskManager):
+    async def setup(self, setup: FrameProcessorSetup):
         """Set up the inner strategy."""
-        await super().setup(task_manager)
-        await self._inner.setup(task_manager)
+        await super().setup(setup)
+        await self._inner.setup(setup)
 
     async def cleanup(self):
         """Clean up the inner strategy."""

@@ -19,9 +19,9 @@ from pipecat.frames.frames import (
     UserSpeakingFrame,
     VADUserStartedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
-from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
 class _WakeState(enum.Enum):
@@ -127,13 +127,13 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """Returns the current wake state."""
         return self._state
 
-    async def setup(self, task_manager: BaseTaskManager):
-        """Initialize the strategy with the given task manager.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the strategy.
 
         Args:
-            task_manager: The task manager to be associated with this instance.
+            setup: Configuration object containing setup parameters.
         """
-        await super().setup(task_manager)
+        await super().setup(setup)
         if not self._timeout_task:
             self._timeout_task = self.task_manager.create_task(
                 self._timeout_task_handler(),
