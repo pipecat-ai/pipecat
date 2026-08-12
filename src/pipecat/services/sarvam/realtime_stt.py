@@ -494,9 +494,15 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         if not fields:
             return
         self._validate_config_update(fields)
-        payload = {"event": "config.update", **fields}
-        if not await self._send_json(payload):
+        await self._send_config_update(fields)
+
+    async def _send_config_update(self, fields: dict[str, Any]):
+        """Send an already-validated ``config.update`` and record what was sent."""
+        if not await self._send_json({"event": "config.update", **fields}):
             return
+        # The store has to follow what the server was told, or a later delta
+        # diffs against a stale value and skips an update the server needs.
+        self._settings.apply_update(self.Settings(**fields))
         if "endpointing" in fields:
             # Boundary-gated: stay in the current mode until Sarvam acks.
             self._pending_endpointing = fields["endpointing"]
@@ -515,25 +521,50 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply runtime settings and send supported fields via ``config.update``."""
+        delta = self._with_derived_language_code(delta)
         proposed = self._settings.copy()
         proposed.apply_update(delta)
         self._validate_settings(proposed)
+
+        payload = {
+            name: getattr(proposed, name)
+            for name in _RUNTIME_CONFIG_FIELDS
+            if is_given(getattr(proposed, name))
+            and getattr(proposed, name) != getattr(self._settings, name)
+        }
+        # The wire guards compare a requested value against the live one, so
+        # they have to run while the store still holds it.
+        if payload:
+            self._validate_config_update(payload)
+
         changed = await super()._update_settings(delta)
         if not changed:
             return changed
 
-        unsupported = set(changed) - _RUNTIME_CONFIG_FIELDS
+        # `language` reaches Sarvam as `language_code`, so it is never unhandled.
+        unsupported = set(changed) - _RUNTIME_CONFIG_FIELDS - {"language"}
         if unsupported:
             self._warn_unhandled_updated_settings({key: changed[key] for key in unsupported})
 
-        payload = {
-            key: getattr(self._settings, key)
-            for key in changed
-            if key in _RUNTIME_CONFIG_FIELDS and is_given(getattr(self._settings, key))
-        }
         if payload:
-            await self.update_config(**payload)
+            await self._send_config_update(payload)
         return changed
+
+    @staticmethod
+    def _with_derived_language_code(delta: Settings) -> Settings:
+        """Fill in ``language_code`` from a ``language`` delta.
+
+        Mirrors the constructor: an explicit ``language_code`` wins, since it
+        also expresses ``auto``, which has no :class:`Language` equivalent.
+        """
+        if is_given(delta.language_code):
+            return delta
+        language = _as_language(delta.language)
+        if language is None:
+            return delta
+        derived = delta.copy()
+        derived.language_code = language_to_sarvam_realtime_language(language)
+        return derived
 
     async def _handle_speech_start(self, message: dict[str, Any]):
         if self._provider_speech_active:

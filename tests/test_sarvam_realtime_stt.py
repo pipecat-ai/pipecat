@@ -556,6 +556,51 @@ async def test_connection_only_setting_change_is_not_sent_as_config_update():
     assert service._websocket.sent == []
 
 
+@pytest.mark.asyncio
+async def test_update_config_keeps_the_settings_store_in_step():
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    service._websocket = _FakeWebsocket()
+
+    await service.update_config(mode="translate")
+    assert service._settings.mode == "translate"
+
+    # Without the write-back this diffs against a stale "transcribe" and sends
+    # nothing, stranding the server in translate mode.
+    service._websocket.sent.clear()
+    await service._update_settings(SarvamRealtimeSTTService.Settings(mode="transcribe"))
+
+    assert service._websocket.sent == [json.dumps({"event": "config.update", "mode": "transcribe"})]
+    assert service._settings.mode == "transcribe"
+
+
+@pytest.mark.asyncio
+async def test_stream_type_guard_compares_against_the_live_value():
+    service = SarvamRealtimeSTTService(
+        api_key="test-key",
+        settings=SarvamRealtimeSTTService.Settings(stream_type="simulated"),
+    )
+    service._websocket = _FakeWebsocket()
+
+    with pytest.raises(ValueError, match="simulated"):
+        await service._update_settings(SarvamRealtimeSTTService.Settings(stream_type="fast"))
+
+    assert service._websocket.sent == []
+    assert service._settings.stream_type == "simulated"
+
+
+@pytest.mark.asyncio
+async def test_language_delta_is_sent_as_language_code():
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    service._websocket = _FakeWebsocket()
+
+    await service._update_settings(SarvamRealtimeSTTService.Settings(language=Language.HI_IN))
+
+    assert service._websocket.sent == [
+        json.dumps({"event": "config.update", "language_code": "hi-IN"})
+    ]
+    assert service._settings.language_code == "hi-IN"
+
+
 def test_sample_rate_defaults_to_the_pipeline_rate():
     service = SarvamRealtimeSTTService(api_key="test-key")
 
