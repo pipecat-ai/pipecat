@@ -123,6 +123,9 @@ class UserTurnController(BaseObject):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup.task_manager)
+
+        # Kept so update_strategies() can set up new strategies without the
+        # caller having to hand us the setup again.
         self._setup = setup
 
         if not self._user_turn_stop_timeout_task:
