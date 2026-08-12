@@ -1720,30 +1720,51 @@ class TestProvidedUserFacingTextCarryingMarkup(unittest.TestCase):
     own text carries the tag and callers pass tts_text == user_facing_text. Left
     raw, every segment would report is_transformed (the check is syntactic: the
     TTS side contains markup), pinning the user-facing cursor for the whole frame.
+
+    Both spellings of the tag are covered. FLUSH is the one that matters: the
+    padded form worked as soon as the tag was stripped at all, while the flush
+    form additionally needs the tag isolated on the TTS cursor and the space it
+    stood in for preserved on the caption side. A fix validated only against the
+    padded form looks complete and still breaks flush-tagged sentences.
     """
 
-    SENTENCE = 'Nice work. <break time="300ms"/> Take a breath.'
-    STRIPPED = "Nice work.  Take a breath."
+    PADDED = 'Nice work. <break time="300ms"/> Take a breath.'
+    FLUSH = 'Nice work.<break time="300ms"/>Take a breath.'
+    STRIPPED = "Nice work. Take a breath."
     WORDS = ["Nice", "work.", "Take", "a", "breath."]
 
-    def _tracker(self) -> WordCompletionTracker:
-        return WordCompletionTracker(
-            self.SENTENCE, llm_text=self.SENTENCE, user_facing_text=self.SENTENCE
-        )
+    def _tracker(self, sentence: str) -> WordCompletionTracker:
+        return WordCompletionTracker(sentence, llm_text=sentence, user_facing_text=sentence)
 
     def test_accumulates_word_by_word(self):
         """Each word advances the user-facing cursor; the tag never reaches the user."""
-        tracker = self._tracker()
         expected = [
             "Nice",
             "Nice work.",
-            "Nice work.  Take",
-            "Nice work.  Take a",
-            "Nice work.  Take a breath.",
+            "Nice work. Take",
+            "Nice work. Take a",
+            "Nice work. Take a breath.",
         ]
-        for word, accumulated in zip(self.WORDS, expected):
+        for sentence in (self.PADDED, self.FLUSH):
+            with self.subTest(sentence=sentence):
+                tracker = self._tracker(sentence)
+                for word, accumulated in zip(self.WORDS, expected):
+                    tracker.add_word_and_check_complete(word)
+                    self.assertEqual(tracker.get_accumulated_user_facing_text(), accumulated)
+
+    def test_flush_tag_keeps_the_word_boundary_it_stood_in_for(self):
+        """A flush tag leaves a space behind, not a run-on word.
+
+        Removing it outright yields "Marcus.Tell" -- one token where the TTS
+        speaks two -- which both reads wrong and costs the sentence a word of
+        caption progress.
+        """
+        tracker = self._tracker(self.FLUSH)
+        for word in self.WORDS:
             tracker.add_word_and_check_complete(word)
-            self.assertEqual(tracker.get_accumulated_user_facing_text(), accumulated)
+        accumulated = tracker.get_accumulated_user_facing_text()
+        self.assertEqual(accumulated, self.STRIPPED)
+        self.assertNotIn("work.Take", accumulated)
 
     def test_does_not_complete_before_the_last_word(self):
         """The frame stays open until the final word.
@@ -1751,33 +1772,56 @@ class TestProvidedUserFacingTextCarryingMarkup(unittest.TestCase):
         Held raw, the whole sentence is one transformed segment, so completing it
         reported the frame complete on the word after the tag -- three of five here.
         """
-        tracker = self._tracker()
-        for word in self.WORDS[:-1]:
-            self.assertFalse(tracker.add_word_and_check_complete(word))
-            self.assertFalse(tracker.is_complete)
-        self.assertTrue(tracker.add_word_and_check_complete(self.WORDS[-1]))
+        for sentence in (self.PADDED, self.FLUSH):
+            with self.subTest(sentence=sentence):
+                tracker = self._tracker(sentence)
+                for word in self.WORDS[:-1]:
+                    self.assertFalse(tracker.add_word_and_check_complete(word))
+                    self.assertFalse(tracker.is_complete)
+                self.assertTrue(tracker.add_word_and_check_complete(self.WORDS[-1]))
 
     def test_accumulated_plus_remaining_reconstructs_stripped_text(self):
-        tracker = self._tracker()
-        for word in self.WORDS:
-            tracker.add_word_and_check_complete(word)
-            accumulated = tracker.get_accumulated_user_facing_text()
-            remaining = tracker.get_remaining_user_facing_text(strip=False)
-            self.assertEqual(accumulated + remaining, self.STRIPPED)
+        for sentence in (self.PADDED, self.FLUSH):
+            with self.subTest(sentence=sentence):
+                tracker = self._tracker(sentence)
+                for word in self.WORDS:
+                    tracker.add_word_and_check_complete(word)
+                    accumulated = tracker.get_accumulated_user_facing_text()
+                    remaining = tracker.get_remaining_user_facing_text(strip=False)
+                    self.assertEqual(accumulated + remaining, self.STRIPPED)
 
     def test_matches_the_same_sentence_without_the_tag(self):
-        """Markup in the frame text changes nothing the user sees."""
-        tagged = self._tracker()
+        """Neither spelling of the tag changes anything the user sees."""
         plain = WordCompletionTracker(
             self.STRIPPED, llm_text=self.STRIPPED, user_facing_text=self.STRIPPED
         )
+        tagged = [self._tracker(self.PADDED), self._tracker(self.FLUSH)]
         for word in self.WORDS:
-            tagged.add_word_and_check_complete(word)
             plain.add_word_and_check_complete(word)
-            self.assertEqual(
-                tagged.get_accumulated_user_facing_text(),
-                plain.get_accumulated_user_facing_text(),
-            )
+            for tracker in tagged:
+                tracker.add_word_and_check_complete(word)
+                self.assertEqual(
+                    tracker.get_accumulated_user_facing_text(),
+                    plain.get_accumulated_user_facing_text(),
+                )
+
+    def test_default_derivation_has_the_same_boundary_behaviour(self):
+        """Omitting user_facing_text derives it the same way, flush tag included."""
+        tracker = WordCompletionTracker(self.FLUSH)
+        for word in self.WORDS:
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), self.STRIPPED)
+
+    def test_paired_tag_stays_flush_against_the_word_it_wraps(self):
+        """Only self-closing tags are isolated.
+
+        A paired tag wraps a word rather than separating two, and providers report
+        the closing fragment together with that word, so spacing it apart would
+        stop the token matching.
+        """
+        text = 'My name is <phoneme alphabet="ipa" ph="a">Siobhan</phoneme>.'
+        tracker = WordCompletionTracker(text)
+        self.assertNotIn("> Siobhan", tracker.get_remaining_tts_text())
 
     def test_stray_angle_bracket_is_kept_when_provided(self):
         """A lone '<' in provided text is content, not a truncated tag."""

@@ -76,6 +76,49 @@ def strip_complete_markup(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text)
 
 
+# A SELF-CLOSING tag sitting flush between two non-space characters, together with
+# any spaces already around it -- "Marcus.<break time='300ms'/>Tell" or its padded
+# spelling. Self-closing is the load-bearing part of the pattern: such a tag has no
+# content, so it can only ever stand *between* two words. A paired tag is the
+# opposite -- "<phoneme ...>Siobhan</phoneme>" wraps a word and has to stay flush
+# against it, or a provider reporting "ph='...'>Siobhan</phoneme>" as one
+# word-timestamp token no longer matches the text. Markup at a string edge is not
+# matched either: it stands between no two words.
+_INFIX_VOID_MARKUP = re.compile(r"(?<=\S)[ \t]*(<[^>]*/>)[ \t]*(?=\S)")
+
+
+def isolate_complete_markup(text: str) -> str:
+    """Space-isolate markup that sits flush between two words.
+
+    ``"Marcus.<break time='300ms'/>Tell"`` becomes
+    ``"Marcus. <break time='300ms'/> Tell"``. A self-closing tag written flush
+    cannot be separated from its neighbours by the segment differ, so the
+    transformed segment it produces swallows the words on either side of it
+    along with the tag. Given its own whitespace the tag lands in a segment
+    carrying no spoken content, which costs nothing to hold the cursor across.
+
+    Only self-closing tags are isolated -- see :data:`_INFIX_VOID_MARKUP`.
+    Idempotent, and a no-op for text whose markup is already space-separated or
+    sits at a string edge.
+    """
+    return _INFIX_VOID_MARKUP.sub(r" \1 ", text)
+
+
+def strip_complete_markup_preserving_boundaries(text: str) -> str:
+    """Strip markup, leaving one space where a tag separated two words.
+
+    Like :func:`strip_complete_markup`, but a tag written flush between two
+    words leaves the space it was standing in for: ``"Marcus.<break/>Tell"``
+    becomes ``"Marcus. Tell"`` rather than ``"Marcus.Tell"``. Markup that is
+    already space-separated collapses to a single space rather than doubling
+    one, and markup at a string edge is removed outright.
+
+    This is the form the user actually reads, so the word boundary the tag
+    carried has to survive its removal.
+    """
+    return re.sub(r"<[^>]+>", "", _INFIX_VOID_MARKUP.sub(" ", text))
+
+
 def _raw_len_for_clean_chars(text: str, n: int) -> int:
     """Return the raw offset into *text* just past its *n*-th markup-stripped char.
 
