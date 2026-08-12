@@ -27,9 +27,10 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 # Rates Bland renders directly; asking for one of these avoids a resample.
 _SAMPLE_RATES = (8000, 16000, 24000, 44100, 48000)
@@ -52,8 +53,8 @@ class BlandTTSSettings(TTSSettings):
         stability: 0.0-1.0. Higher values produce more consistent delivery.
     """
 
-    expressiveness: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    stability: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    expressiveness: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    stability: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 def _default_settings(settings: BlandTTSSettings | None) -> BlandTTSSettings:
