@@ -226,11 +226,6 @@ def test_sarvam_vocabulary_is_left_to_the_server(settings):
     SarvamRealtimeSTTService(api_key="test-key", settings=settings)
 
 
-def test_invalid_endpointing_raises():
-    with pytest.raises(ValueError, match="endpointing"):
-        SarvamRealtimeSTTService(api_key="test-key", endpointing="server")
-
-
 def test_endpointing_is_not_a_setting():
     """The mode picks the turn strategies, which are announced once at startup.
 

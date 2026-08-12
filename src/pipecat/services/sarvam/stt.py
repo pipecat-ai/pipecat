@@ -18,7 +18,7 @@ import base64
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field, fields
-from typing import Any, Literal, cast, get_args
+from typing import Any, Literal, cast
 from urllib.parse import urlencode
 
 from loguru import logger
@@ -935,7 +935,6 @@ class SarvamSTTService(STTService):
             await client.transcribe(**method_kwargs)
 
 
-_REALTIME_STT_URL = "wss://api.sarvam.ai/speech-to-text-realtime/ws"
 _REALTIME_MODEL = "saaras:v3-realtime"
 
 SUPPORTED_LANGUAGES = {
@@ -964,7 +963,6 @@ SUPPORTED_LANGUAGES = {
     "mai-IN",
     "doi-IN",
 }
-SUPPORTED_ENDPOINTING = Literal["vad", "manual"]
 # A plain set: the rate in force can come from the pipeline rather than the
 # caller, so it is checked once resolved rather than annotated.
 SUPPORTED_SAMPLE_RATES = {8000, 16000}
@@ -1097,8 +1095,8 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         self,
         *,
         api_key: str,
-        base_url: str = _REALTIME_STT_URL,
-        endpointing: SUPPORTED_ENDPOINTING = "vad",
+        base_url: str = "wss://api.sarvam.ai/speech-to-text-realtime/ws",
+        endpointing: Literal["vad", "manual"] = "vad",
         settings: Settings | None = None,
         should_interrupt: bool = True,
         ttfs_p99_latency: float | None = SARVAM_REALTIME_TTFS_P99,
@@ -1160,10 +1158,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             language = _as_language(default_settings.language)
             if language is not None:
                 default_settings.language_code = language_to_sarvam_realtime_language(language)
-
-        if endpointing not in get_args(SUPPORTED_ENDPOINTING):
-            allowed = ", ".join(sorted(get_args(SUPPORTED_ENDPOINTING)))
-            raise ValueError(f"Unsupported endpointing '{endpointing}'. Allowed values: {allowed}.")
 
         self._validate_settings(default_settings)
 
