@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-
+import asyncio
 import os
 
 from dotenv import load_dotenv
@@ -12,11 +12,11 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame, TTSUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContext,
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
@@ -32,9 +32,6 @@ from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
-
-# We use lambdas to defer transport parameter creation until the transport
-# type is selected at runtime.
 transport_params = {
     "eval": lambda: EvalTransportParams(
         audio_in_enabled=True,
@@ -58,19 +55,9 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
-    stt = DeepgramFluxSTTService(
-        api_key=os.environ["DEEPGRAM_API_KEY"],
-        settings=DeepgramFluxSTTService.Settings(
-            min_confidence=0.3,
-        ),
-    )
+    stt = DeepgramFluxSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
-    tts = DeepgramFluxTTSService(
-        api_key=os.environ["DEEPGRAM_API_KEY"],
-        settings=DeepgramFluxTTSService.Settings(
-            voice="flux-cole-en",
-        ),
-    )
+    tts = DeepgramFluxTTSService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
@@ -87,13 +74,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     pipeline = Pipeline(
         [
-            transport.input(),  # Transport user input
-            stt,  # STT
-            user_aggregator,  # User responses
-            llm,  # LLM
-            tts,  # TTS
-            transport.output(),  # Transport bot output
-            assistant_aggregator,  # Assistant spoken responses
+            transport.input(),
+            stt,
+            user_aggregator,
+            llm,
+            tts,
+            transport.output(),
+            assistant_aggregator,
         ]
     )
 
@@ -113,20 +100,43 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Client connected")
-        # Kick off the conversation.
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}
         )
         await worker.queue_frames([LLMRunFrame()])
 
+        # Speed is the one setting Flux can change on the open connection, so
+        # these updates keep the acoustic state that makes the voice consistent.
+        await asyncio.sleep(10)
+        logger.info("Updating Deepgram Flux TTS settings: speed=0.85")
+        await worker.queue_frame(
+            TTSUpdateSettingsFrame(delta=DeepgramFluxTTSService.Settings(speed=0.85))
+        )
+
+        await asyncio.sleep(10)
+        logger.info("Updating Deepgram Flux TTS settings: speed=1.15")
+        await worker.queue_frame(
+            TTSUpdateSettingsFrame(delta=DeepgramFluxTTSService.Settings(speed=1.15))
+        )
+
+        # Voice and expressivity are fixed for the life of a connection, so
+        # these reconnect.
+        await asyncio.sleep(10)
+        logger.info("Updating Deepgram Flux TTS settings: expressivity=2")
+        await worker.queue_frame(
+            TTSUpdateSettingsFrame(delta=DeepgramFluxTTSService.Settings(expressivity=2))
+        )
+
+        await asyncio.sleep(10)
+        logger.info('Updating Deepgram Flux TTS settings: voice="flux-cole-en"')
+        await worker.queue_frame(
+            TTSUpdateSettingsFrame(delta=DeepgramFluxTTSService.Settings(voice="flux-cole-en"))
+        )
+
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
         await runner.cancel()
-
-    @stt.event_handler("on_update")
-    async def on_deepgram_flux_update(stt, transcript):
-        logger.debug(f"On deeggram flux update: {transcript}")
 
     await runner.run()
 

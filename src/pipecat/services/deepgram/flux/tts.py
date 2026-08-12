@@ -13,8 +13,8 @@ voice agents.
 
 import json
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Literal
 from urllib.parse import urlencode
 
 from loguru import logger
@@ -23,15 +23,14 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    InterruptionFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 @dataclass
@@ -42,9 +41,20 @@ class DeepgramFluxTTSSettings(TTSSettings):
     ``flux-alexis-en``), carried by ``voice``. Deepgram's API passes it as
     its ``model`` query parameter, so ``model`` is kept in sync with
     ``voice`` and is not directly settable.
+
+    Parameters:
+        speed: Speech-rate multiplier, from 0.85 to 1.15 in steps of 0.05.
+            ``None`` leaves Flux at its default rate. Applied to the open
+            connection, so a speed change keeps the cross-turn acoustic state.
+        expressivity: Expressive range on a calm-to-animated axis. ``None``
+            leaves Flux at its default range. Flux fixes expressivity when the
+            connection opens, so a change reconnects.
     """
 
-    pass
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    expressivity: Literal[-2, -1, 0, 1, 2] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class DeepgramFluxTTSService(WebsocketTTSService):
@@ -72,7 +82,11 @@ class DeepgramFluxTTSService(WebsocketTTSService):
 
         tts = DeepgramFluxTTSService(
             api_key=os.getenv("DEEPGRAM_API_KEY"),
-            settings=DeepgramFluxTTSService.Settings(voice="flux-alexis-en"),
+            settings=DeepgramFluxTTSService.Settings(
+                voice="flux-alexis-en",
+                speed=1.05,
+                expressivity=1,
+            ),
         )
     """
 
@@ -82,6 +96,10 @@ class DeepgramFluxTTSService(WebsocketTTSService):
     # Audio is always requested as linear16 (raw PCM), the format Pipecat
     # pipelines use internally.
     SUPPORTED_SAMPLE_RATES = (8000, 16000, 24000, 32000, 44100, 48000)
+
+    # Settings Flux can change on an open connection, via `Configure`. Every
+    # other setting is a query parameter, fixed for the life of the connection.
+    _CONFIGURE_FIELDS = frozenset({"speed"})
 
     def __init__(
         self,
@@ -102,7 +120,7 @@ class DeepgramFluxTTSService(WebsocketTTSService):
             url: WebSocket URL for the Flux TTS API. Defaults to
                 "wss://api.deepgram.com/v2/speak".
             sample_rate: Audio sample rate in Hz. If None, uses the pipeline
-                default. Must be one of SUPPORTED_SAMPLE_RATES.
+                default. Must be one of :attr:`SUPPORTED_SAMPLE_RATES`.
             mip_opt_out: Opt out of the Deepgram Model Improvement Program. See
                 https://dpgr.am/deepgram-mip for pricing impacts before setting to True.
             tag: Tags to label requests for identification during usage reporting.
@@ -111,20 +129,13 @@ class DeepgramFluxTTSService(WebsocketTTSService):
                 straight to Flux for the lowest latency.
             settings: Runtime-updatable settings.
             **kwargs: Additional arguments passed to parent WebsocketTTSService class.
-
-        Raises:
-            ValueError: If an explicit sample_rate is not supported.
         """
-        if sample_rate is not None and sample_rate not in self.SUPPORTED_SAMPLE_RATES:
-            raise ValueError(
-                f"Unsupported sample rate {sample_rate}. "
-                f"Must be one of {self.SUPPORTED_SAMPLE_RATES}."
-            )
-
         default_settings = self.Settings(
             model=None,
-            voice="flux-alexis-en",
+            voice="flux-heather-en",
             language=None,
+            speed=None,
+            expressivity=None,
         )
 
         if settings is not None:
@@ -192,20 +203,28 @@ class DeepgramFluxTTSService(WebsocketTTSService):
 
         await self._disconnect_websocket()
 
-    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
-        # `Interrupt` is a no-op when no turn is active, so it is sent on every
-        # interruption: local speaking state tracks playback, which outlasts the
-        # server's synthesis of the turn.
+    async def on_audio_context_interrupted(self, context_id: str):
+        """Cancel the turn on the Flux connection when the user barges in.
+
+        Flux's ``Interrupt`` message ends the active turn without closing the
+        connection, so the cross-turn acoustic state survives a barge-in.
+
+        Args:
+            context_id: The ID of the audio context that was interrupted.
+        """
         if self._websocket and self._websocket.state is State.OPEN:
             try:
                 await self._websocket.send(json.dumps({"type": "Interrupt"}))
             except Exception as e:
                 logger.error(f"{self} error sending Interrupt message: {e}")
 
-        await super()._handle_interruption(frame, direction)
+        await super().on_audio_context_interrupted(context_id)
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta.
+
+        A speed change is sent to Flux with a ``Configure`` message. Every other
+        setting is a query parameter, so a change reconnects.
 
         Args:
             delta: A :class:`TTSSettings` (or ``DeepgramFluxTTSService.Settings``) delta.
@@ -220,12 +239,27 @@ class DeepgramFluxTTSService(WebsocketTTSService):
             self._settings.model = self._settings.voice
             self._sync_model_name_to_metrics()
 
-        # Settings are query parameters, so a change requires a new connection.
-        if changed:
+        if changed.keys() - self._CONFIGURE_FIELDS:
             await self._disconnect()
             await self._connect()
+        elif changed:
+            await self._send_configure()
 
         return changed
+
+    async def _send_configure(self):
+        """Apply the current speed to the open connection with a Configure message."""
+        if not self._websocket or self._websocket.state is not State.OPEN:
+            return
+
+        # Flux's own default is 1.0, so clearing the setting restores that rate
+        # explicitly — there is no way to ask Flux to forget a configured speed.
+        speed = self._settings.speed if self._settings.speed is not None else 1.0
+
+        try:
+            await self._websocket.send(json.dumps({"type": "Configure", "speed": speed}))
+        except Exception as e:
+            logger.error(f"{self} error sending Configure message: {e}")
 
     def _build_query_string(self) -> str:
         """Build query string from current settings and init-only connection config."""
@@ -234,6 +268,12 @@ class DeepgramFluxTTSService(WebsocketTTSService):
             "encoding=linear16",
             f"sample_rate={self.sample_rate}",
         ]
+
+        if self._settings.speed is not None:
+            params.append(f"speed={self._settings.speed}")
+
+        if self._settings.expressivity is not None:
+            params.append(f"expressivity={self._settings.expressivity}")
 
         if self._mip_opt_out is not None:
             params.append(f"mip_opt_out={str(self._mip_opt_out).lower()}")
@@ -354,13 +394,22 @@ class DeepgramFluxTTSService(WebsocketTTSService):
                         )
                     elif msg_type == "SessionMetadata":
                         logger.debug(f"{self}: session totals: {msg}")
+                    elif msg_type == "ConfigureSuccess":
+                        logger.debug(f"{self}: configuration applied: {msg.get('applied')}")
+                    elif msg_type == "ConfigureFailure":
+                        # Non-fatal: synthesis continues with the previous
+                        # configuration.
+                        logger.warning(
+                            f"{self} configuration rejected {msg.get('code')} "
+                            f"({msg.get('field')}={msg.get('value')}): "
+                            f"{msg.get('description', 'Unknown failure')}"
+                        )
                     elif msg_type == "Warning":
                         code = msg.get("code")
                         if code == "NO_ACTIVE_SPEECH":
-                            # Routine: an Interrupt goes out on every user turn
-                            # and most find nothing to cancel, since the server
-                            # finishes synthesizing a turn well before its audio
-                            # finishes playing.
+                            # Routine: an audio context outlives the turn that
+                            # filled it, so a barge-in late in playback sends an
+                            # Interrupt the server has nothing left to cancel.
                             logger.trace(f"{self}: no active turn to interrupt")
                         else:
                             logger.warning(
