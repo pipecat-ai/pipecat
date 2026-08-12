@@ -9,10 +9,12 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import Frame, InterimTranscriptionFrame, TranscriptionFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker
+from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -60,9 +62,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     `stream_type="fast"` emits interim transcripts as the utterance develops,
     so the logger prints partial text before each final. `endpointing="vad"`
-    (the default) has Sarvam decide the utterance boundaries, so the pipeline
-    needs no VAD of its own. `language_code="auto"` detects the language per
-    utterance instead of pinning one.
+    (the default) has Sarvam decide the utterance boundaries.
+    `language_code="auto"` detects the language per utterance instead of
+    pinning one.
+
+    The `VADProcessor` is what lets the service time transcript latency: TTFB
+    runs from the VAD stop frame, which carries the delay needed to place the
+    real end of speech.
     """
     logger.info("Starting bot")
 
@@ -76,7 +82,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tl = TranscriptionLogger()
 
-    pipeline = Pipeline([transport.input(), stt, tl, transport.output()])
+    vad_processor = VADProcessor(vad_analyzer=SileroVADAnalyzer())
+
+    pipeline = Pipeline([transport.input(), vad_processor, stt, tl, transport.output()])
 
     worker = PipelineWorker(
         pipeline,

@@ -9,12 +9,16 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.sarvam.llm import SarvamLLMService
@@ -65,9 +69,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
        - Sarvam decides when the user starts and stops speaking, and the
          service announces those turns directly to the pipeline
 
-    2. No Local VAD
-       - Sarvam drives the turns, so there's no `vad_analyzer` on the user
-         aggregator
+    2. Local VAD Alongside It
+       - Sarvam decides the turns, but the service still needs a `vad_analyzer`
+       - TTFB is measured from the VAD stop frame, which carries the stop delay
+         needed to place the real end of speech; Sarvam's own boundary event
+         arrives only after the server's silence window
 
     3. Streaming Profile
        - `stream_type="balanced"` (the default) favors accuracy; `"fast"` emits
@@ -103,9 +109,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     context = LLMContext()
-    # No vad_analyzer: Sarvam endpoints the turns, and the service recommends
-    # the external turn strategies that defer to them.
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
+    # Sarvam endpoints the turns and the service recommends the external turn
+    # strategies that defer to them; the VAD analyzer is what times transcript
+    # latency.
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
 
     pipeline = Pipeline(
         [

@@ -791,31 +791,58 @@ def test_vad_params_are_omitted_for_manual_endpointing():
 
 @pytest.mark.parametrize("final_text", ["hello", "   "])
 @pytest.mark.asyncio
-async def test_speech_cycle_reports_ttfb_and_no_processing_metrics(monkeypatch, final_text):
-    """Latency is reported through TTFB alone.
+async def test_speech_cycle_emits_no_processing_metrics(monkeypatch, final_text):
+    """A processing window anchored to the speech boundary measures nothing useful.
 
-    A processing window anchored to the speech boundary would only measure how
-    long the user talked, and the interruption raised on speech start closes it
-    immediately anyway.
+    It would time how long the user talked, and the interruption raised on
+    speech start closes it immediately anyway.
     """
     service = SarvamRealtimeSTTService(api_key="test-key")
     service._enable_metrics = True
     pushed = []
-    ttfb_starts = []
     monkeypatch.setattr(service, "push_frame", _capture(pushed))
     monkeypatch.setattr(service, "broadcast_frame", _noop)
-
-    async def fake_start_ttfb_metrics(*, start_time=None):
-        ttfb_starts.append(start_time)
-
-    monkeypatch.setattr(service, "start_ttfb_metrics", fake_start_ttfb_metrics)
 
     await service._handle_message({"event": "vad.speech_start"})
     await service._handle_message({"event": "vad.speech_end"})
     await service._handle_message({"event": "transcript.final", "text": final_text})
 
     assert not [frame for frame in pushed if isinstance(frame, MetricsFrame)]
-    assert len(ttfb_starts) == 1
+
+
+@pytest.mark.asyncio
+async def test_ttfb_is_anchored_to_the_vad_stop_frame(monkeypatch):
+    """TTFB has to run from the real end of speech, like every other STT service.
+
+    Sarvam's own `vad.speech_end` only arrives once the server's silence window
+    has elapsed, so timing from it would report a shorter interval than the
+    rest of the services do. The VAD frame carries the stop delay needed to
+    place the actual boundary.
+    """
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    ttfb_starts = []
+    monkeypatch.setattr(service, "push_frame", _noop)
+    monkeypatch.setattr(service, "broadcast_frame", _noop)
+
+    async def fake_start_ttfb_metrics(*, start_time=None):
+        ttfb_starts.append(start_time)
+
+    def fake_create_task(coro, name=None):
+        # The base class arms a timeout task; this service has no task manager.
+        coro.close()
+
+    monkeypatch.setattr(service, "start_ttfb_metrics", fake_start_ttfb_metrics)
+    monkeypatch.setattr(service, "create_task", fake_create_task)
+
+    # The provider boundary alone must not start the measurement.
+    await service._handle_message({"event": "vad.speech_start"})
+    await service._handle_message({"event": "vad.speech_end"})
+    assert ttfb_starts == []
+
+    frame = VADUserStoppedSpeakingFrame(stop_secs=0.2, timestamp=1000.0)
+    await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+    assert ttfb_starts == [1000.0 - 0.2]
 
 
 @pytest.mark.asyncio

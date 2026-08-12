@@ -16,7 +16,6 @@ server-side endpointing and in-band configuration updates.
 import asyncio
 import base64
 import json
-import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field, fields
 from typing import Any, Literal, cast
@@ -46,7 +45,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.settings import STTSettings
-from pipecat.services.stt_latency import SARVAM_TTFS_P99
+from pipecat.services.stt_latency import SARVAM_REALTIME_TTFS_P99, SARVAM_TTFS_P99
 from pipecat.services.stt_service import STTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -1090,6 +1089,12 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
     needs a turn strategy that emits ``VADUserStartedSpeakingFrame`` and
     ``VADUserStoppedSpeakingFrame``; without one, Sarvam never receives a boundary
     and never emits a final transcript.
+
+    A VAD analyzer is required in either mode. TTFB is measured from those same
+    ``VADUserStoppedSpeakingFrame`` frames, which carry the stop delay needed to
+    place the real end of speech; Sarvam's own ``vad.speech_end`` arrives only
+    after the server's silence window and would time a shorter interval than
+    every other STT service reports.
     """
 
     Settings = SarvamRealtimeSTTSettings
@@ -1102,7 +1107,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         base_url: str = _REALTIME_STT_URL,
         settings: Settings | None = None,
         should_interrupt: bool = True,
-        ttfs_p99_latency: float | None = SARVAM_TTFS_P99,
+        ttfs_p99_latency: float | None = SARVAM_REALTIME_TTFS_P99,
         **kwargs,
     ):
         """Initialize Sarvam realtime STT.
@@ -1174,7 +1179,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         self._audio_buffer = bytearray()
         self._request_id: str | None = None
         self._provider_speech_active = False
-        self._speech_end_wall_time: float | None = None
         self._speech_end_audio_position_s: float | None = None
         self._audio_position_bytes = 0
         # What the server is actually doing, which trails `settings.endpointing`
@@ -1481,7 +1485,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         if self._provider_speech_active:
             return
         self._provider_speech_active = True
-        self._speech_end_wall_time = None
         self._speech_end_audio_position_s = None
         await self.broadcast_frame(UserStartedSpeakingFrame)
         if self._should_interrupt:
@@ -1500,10 +1503,8 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         if not self._provider_speech_active:
             return
         self._provider_speech_active = False
-        self._speech_end_wall_time = time.time()
         self._speech_end_audio_position_s = self._duration_for_bytes(self._audio_position_bytes)
         await self.broadcast_frame(UserStoppedSpeakingFrame)
-        await self.start_ttfb_metrics(start_time=self._speech_end_wall_time)
 
     async def _handle_partial_transcript(self, message: dict[str, Any]):
         text = (message.get("text") or "").strip()
