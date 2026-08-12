@@ -21,7 +21,7 @@ import io
 import wave
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeAlias, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias, cast, overload
 
 from loguru import logger
 from PIL import Image
@@ -460,6 +460,8 @@ class LLMContext:
     @staticmethod
     def _normalize_and_validate_tools(
         tools: ToolsSchema | list[FunctionSchema | DirectFunction] | NotGiven,
+        *,
+        allow_provider_tools: Literal[False] = False,
     ) -> ToolsSchema | NotGiven: ...
 
     @overload
@@ -467,7 +469,7 @@ class LLMContext:
     def _normalize_and_validate_tools(
         tools: ToolsSchema | list[Any] | NotGiven,
         *,
-        allow_provider_tools: bool,
+        allow_provider_tools: Literal[True],
     ) -> ToolsSchema | list[Any] | NotGiven: ...
 
     @staticmethod

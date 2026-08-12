@@ -5,24 +5,7 @@
   "include": ["scripts", "src/pipecat"],
   "exclude": ["**/*_pb2.py", "**/__pycache__"],
   "ignore": [
-    "tests",
-    "src/pipecat/processors/aggregators/llm_response_universal.py",
-    "src/pipecat/processors/frameworks/rtvi/observer.py",
-    "src/pipecat/services/aws/nova_sonic/llm.py",
-    "src/pipecat/services/google/gemini_live/llm.py",
-    "src/pipecat/services/google/stt.py",
-    "src/pipecat/services/google/tts.py",
-    "src/pipecat/services/heygen/client.py",
-    "src/pipecat/services/heygen/video.py",
-    "src/pipecat/services/inworld/realtime/llm.py",
-    "src/pipecat/services/openai/realtime/llm.py",
-    "src/pipecat/services/simli/video.py",
-    "src/pipecat/services/speechmatics/stt.py",
-    "src/pipecat/services/tavus/video.py",
-    "src/pipecat/services/tts_service.py",
-    "src/pipecat/services/xai/realtime/llm.py",
-    "src/pipecat/transports/livekit/transport.py",
-    "src/pipecat/transports/tavus/transport.py"
+    "tests"
   ],
   "reportMissingImports": false
 }

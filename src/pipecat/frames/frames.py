@@ -698,11 +698,12 @@ class LLMSetToolsFrame(DataFrame):
     Parameters:
         tools: The tools to advertise. May be a ``ToolsSchema``, a plain list of
             direct functions and/or ``FunctionSchema`` objects (normalized to a
-            ``ToolsSchema``, with direct-function handlers auto-registered), a
-            list of provider-specific tool dicts, or ``NOT_GIVEN`` to clear tools.
+            ``ToolsSchema``, with direct-function handlers auto-registered), or
+            ``NOT_GIVEN`` to clear tools. Provider-native tools travel in a
+            ``ToolsSchema``'s ``custom_tools``, keyed by adapter type.
     """
 
-    tools: list[dict] | list[FunctionSchema | DirectFunction] | ToolsSchema | NotGiven
+    tools: list[FunctionSchema | DirectFunction] | ToolsSchema | NotGiven
 
 
 @dataclass
