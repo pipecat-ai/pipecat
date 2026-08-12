@@ -272,12 +272,12 @@ class LangfuseRecordingUploader:
         )
 
     def _resolve_trace_id(self, trace_observer) -> str | None:
-        """Find the trace id, preferring public observer API.
+        """Find the trace id.
 
         Tries, in order: any recorded turn's context (retained for the life of the
         observer, so this works long after the spans close), the live turn context, and
-        finally the conversation span (public as ``conversation_span`` from
-        pipecat-ai/pipecat#5272 onward, private before that).
+        finally the observer's conversation span. Turn 1 starts with the conversation,
+        so the last resort only matters when tracing is on but no turn ever started.
         """
         if trace_observer is None:
             return None
@@ -291,9 +291,7 @@ class LangfuseRecordingUploader:
         if context is not None:
             return format(context.trace_id, "032x")
 
-        span = getattr(trace_observer, "conversation_span", None) or getattr(
-            trace_observer, "_conversation_span", None
-        )
+        span = getattr(trace_observer, "_conversation_span", None)
         if span is not None:
             return format(span.get_span_context().trace_id, "032x")
         return None
