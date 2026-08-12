@@ -1126,15 +1126,7 @@ class PipelineWorker(BaseWorker):
             asyncio.to_thread(warm_deferred_imports), name=f"{self}::warm_deferred_imports"
         )
 
-        start_frame = StartFrame(
-            audio_in_sample_rate=self._params.audio_in_sample_rate,
-            audio_out_sample_rate=self._params.audio_out_sample_rate,
-            enable_metrics=self._params.enable_metrics,
-            enable_tracing=self._enable_tracing,
-            enable_usage_metrics=self._params.enable_usage_metrics,
-            report_only_initial_ttfb=self._params.report_only_initial_ttfb,
-            tracing_context=self._tracing_context,
-        )
+        start_frame = StartFrame()
         start_frame.metadata = self._create_start_metadata()
         await self._pipeline.queue_frame(start_frame)
 

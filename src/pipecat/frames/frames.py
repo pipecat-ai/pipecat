@@ -917,12 +917,33 @@ class StartFrame(SystemFrame):
 
     Parameters:
         audio_in_sample_rate: Input audio sample rate in Hz.
+            .. deprecated:: 1.8.0
+                Use ``FrameProcessorSetup.setup()`` instead. Will be removed
+                in 2.0.0.
         audio_out_sample_rate: Output audio sample rate in Hz.
+            .. deprecated:: 1.8.0
+                Use ``FrameProcessorSetup.setup()`` instead. Will be removed
+                in 2.0.0.
         enable_metrics: Whether to enable performance metrics collection.
+            .. deprecated:: 1.8.0
+                Use ``FrameProcessorSetup.setup()`` instead. Will be removed
+                in 2.0.0.
         enable_tracing: Whether to enable OpenTelemetry tracing.
+            .. deprecated:: 1.8.0
+                Use ``FrameProcessorSetup.setup()`` instead. Will be removed
+                in 2.0.0.
         enable_usage_metrics: Whether to enable usage metrics collection.
+            .. deprecated:: 1.8.0
+                Use ``FrameProcessorSetup.setup()`` instead. Will be removed
+                in 2.0.0.
         report_only_initial_ttfb: Whether to report only initial time-to-first-byte.
+            .. deprecated:: 1.8.0
+                Use ``FrameProcessorSetup.setup()`` instead. Will be removed
+                in 2.0.0.
         tracing_context: Pipeline-scoped tracing context for span hierarchy.
+            .. deprecated:: 1.8.0
+                Use ``FrameProcessorSetup.setup()`` instead. Will be removed
+                in 2.0.0.
     """
 
     audio_in_sample_rate: int = 16000
@@ -932,6 +953,32 @@ class StartFrame(SystemFrame):
     enable_usage_metrics: bool = False
     report_only_initial_ttfb: bool = False
     tracing_context: TracingContext | None = None
+
+    def __getattribute__(self, name: str) -> Any:
+        # Reads warn, writes don't: assignment goes through ``__setattr__``. The None
+        # guard is for ``tracing_context``, the only field whose default is None and
+        # so can't be told apart from unset.
+        if name in (
+            "audio_in_sample_rate",
+            "audio_out_sample_rate",
+            "enable_metrics",
+            "enable_tracing",
+            "enable_usage_metrics",
+            "report_only_initial_ttfb",
+            "tracing_context",
+        ):
+            value = object.__getattribute__(self, name)
+            if value is not None:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("always")
+                    warnings.warn(
+                        f"`StartFrame.{name}` is deprecated since 1.8.0; "
+                        "use `FrameProcessorSetup.setup()` instead.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
+            return value
+        return object.__getattribute__(self, name)
 
 
 @dataclass
