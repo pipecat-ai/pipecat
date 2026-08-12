@@ -78,6 +78,21 @@ _INTERMEDIATE_DESCRIPTION = (
     "call this tool again and do not treat this as the final answer."
 )
 
+# Standing guidance composed into the system instruction whenever an async tool is
+# registered. The per-result message says the same thing, but it arrives buried in a
+# context whose most recent turn is the user asking for something else; a model
+# weighing the two follows the nearer, louder request. This states the policy before
+# any result exists, so it is in force when one arrives.
+ASYNC_TOOL_INSTRUCTIONS = """ASYNC TOOLS:
+Some of your tools keep running after you have replied. Their results arrive later as \
+messages in the conversation, on whatever turn happens to be in progress by then.
+
+A result that has arrived is owed to the user, whatever the conversation has moved on to. \
+Answer what the user just said first, then add the result at the end of that same reply — \
+never before your answer, and never as a reply of its own. State a short result outright; \
+for a long one, say what came back and offer the details. Say it once, and do not repeat \
+it in later replies."""
+
 # Description shipped on the final-result message.
 _FINAL_DESCRIPTION = (
     "This is the final result for the asynchronous task associated with this "

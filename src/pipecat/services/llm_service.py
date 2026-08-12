@@ -53,6 +53,7 @@ from pipecat.frames.frames import (
     LLMUpdateSettingsFrame,
     StartFrame,
 )
+from pipecat.processors.aggregators.async_tool_messages import ASYNC_TOOL_INSTRUCTIONS
 from pipecat.processors.aggregators.llm_context import (
     NOT_GIVEN,
     LLMContext,
@@ -294,7 +295,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 ``cancel_async_tool_call`` built-in tool and its system instructions
                 so the LLM can cancel in-progress async function calls
                 (``cancel_on_interruption=False``) whose results are no longer
-                wanted. Defaults to False.
+                wanted. Defaults to False. Deciding that a result is unwanted is
+                the model's judgement, and models differ in how readily they make
+                it: with this on, a user who changes the subject while a call is
+                still running may have its result cancelled rather than delivered,
+                and the result is then never mentioned. Weigh that against the work
+                a cancelled call saves — it is worth most for tools that are slow or
+                expensive, and least for ones that return quickly.
             settings: The runtime-updatable settings for the LLM service.
             **kwargs: Additional arguments passed to the parent AIService.
 
@@ -530,6 +537,17 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self._appended_system_instructions.append(instruction)
         self._compose_system_instruction()
 
+    def _has_async_tools(self) -> bool:
+        """Whether any registered tool runs asynchronously.
+
+        Returns:
+            True when a tool is registered with ``cancel_on_interruption=False``,
+            which is what makes the async-tool guidance worth composing in. The
+            built-in cancellation tool is registered as a synchronous one, so it
+            never counts on its own.
+        """
+        return any(not item.cancel_on_interruption for item in self._functions.values())
+
     def _compose_system_instruction(self):
         """Rebuild ``system_instruction`` from the base prompt and all active addons.
 
@@ -547,6 +565,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             parts.append(self._user_turn_completion_config.completion_instructions)
         if self._async_tool_cancellation_enabled:
             parts.append(ASYNC_TOOL_CANCELLATION_INSTRUCTIONS)
+        if self._has_async_tools():
+            parts.append(ASYNC_TOOL_INSTRUCTIONS)
         composed = "\n\n".join(p for p in parts if p)
         self._settings.system_instruction = composed or None
         logger.debug(f"{self}: System instruction composed: {self._settings.system_instruction}")
@@ -1151,6 +1171,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # still advertised. Once it leaves the advertised set, drop the suppression
         # so re-advertising it (a later tool-set change) registers it afresh.
         self._explicitly_unregistered_function_names &= advertised
+
+        # Whether the async-tool guidance belongs in the system instruction follows
+        # from the registry, which is not settled until here: tools advertised on a
+        # context frame register during this sync. Recomposing at the end of the sync
+        # rather than alongside those registrations also covers a manual registration,
+        # and a context that advertises nothing.
+        self._compose_system_instruction()
 
     def _unregister_unadvertised_tool_handlers(self, advertised: set[str | None]) -> None:
         """Drop auto-registered handlers for tools no longer advertised.
