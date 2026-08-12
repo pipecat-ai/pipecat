@@ -1713,6 +1713,79 @@ class TestUserFacingTextStrayAngleBracket(unittest.TestCase):
         self.assertEqual(tracker.get_accumulated_user_facing_text(), text)
 
 
+class TestProvidedUserFacingTextCarryingMarkup(unittest.TestCase):
+    """A caller-provided user_facing_text carrying synthesis tags is stripped too.
+
+    When SSML originates in the LLM text rather than a TTS transform, the frame's
+    own text carries the tag and callers pass tts_text == user_facing_text. Left
+    raw, every segment would report is_transformed (the check is syntactic: the
+    TTS side contains markup), pinning the user-facing cursor for the whole frame.
+    """
+
+    SENTENCE = 'Nice work. <break time="300ms"/> Take a breath.'
+    STRIPPED = "Nice work.  Take a breath."
+    WORDS = ["Nice", "work.", "Take", "a", "breath."]
+
+    def _tracker(self) -> WordCompletionTracker:
+        return WordCompletionTracker(
+            self.SENTENCE, llm_text=self.SENTENCE, user_facing_text=self.SENTENCE
+        )
+
+    def test_accumulates_word_by_word(self):
+        """Each word advances the user-facing cursor; the tag never reaches the user."""
+        tracker = self._tracker()
+        expected = [
+            "Nice",
+            "Nice work.",
+            "Nice work.  Take",
+            "Nice work.  Take a",
+            "Nice work.  Take a breath.",
+        ]
+        for word, accumulated in zip(self.WORDS, expected):
+            tracker.add_word_and_check_complete(word)
+            self.assertEqual(tracker.get_accumulated_user_facing_text(), accumulated)
+
+    def test_does_not_complete_before_the_last_word(self):
+        """The frame stays open until the final word.
+
+        Held raw, the whole sentence is one transformed segment, so completing it
+        reported the frame complete on the word after the tag -- three of five here.
+        """
+        tracker = self._tracker()
+        for word in self.WORDS[:-1]:
+            self.assertFalse(tracker.add_word_and_check_complete(word))
+            self.assertFalse(tracker.is_complete)
+        self.assertTrue(tracker.add_word_and_check_complete(self.WORDS[-1]))
+
+    def test_accumulated_plus_remaining_reconstructs_stripped_text(self):
+        tracker = self._tracker()
+        for word in self.WORDS:
+            tracker.add_word_and_check_complete(word)
+            accumulated = tracker.get_accumulated_user_facing_text()
+            remaining = tracker.get_remaining_user_facing_text(strip=False)
+            self.assertEqual(accumulated + remaining, self.STRIPPED)
+
+    def test_matches_the_same_sentence_without_the_tag(self):
+        """Markup in the frame text changes nothing the user sees."""
+        tagged = self._tracker()
+        plain = WordCompletionTracker(
+            self.STRIPPED, llm_text=self.STRIPPED, user_facing_text=self.STRIPPED
+        )
+        for word in self.WORDS:
+            tagged.add_word_and_check_complete(word)
+            plain.add_word_and_check_complete(word)
+            self.assertEqual(
+                tagged.get_accumulated_user_facing_text(),
+                plain.get_accumulated_user_facing_text(),
+            )
+
+    def test_stray_angle_bracket_is_kept_when_provided(self):
+        """A lone '<' in provided text is content, not a truncated tag."""
+        text = "I love you <3 always"
+        tracker = WordCompletionTracker(text, user_facing_text=text)
+        self.assertEqual(tracker.get_remaining_user_facing_text(), text)
+
+
 class TestWordBelongsHereLiteralAngleBracketWord(unittest.TestCase):
     """End-to-end companion to
     TestClassifyHopLiteralMatchHandlesStrayAngleBracket (test_text_segment_map.py):

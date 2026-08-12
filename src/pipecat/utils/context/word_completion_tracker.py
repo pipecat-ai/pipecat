@@ -82,23 +82,28 @@ class WordCompletionTracker:
                 into it so callers can retrieve the spoken and unspoken portions in
                 terms of user-visible text via ``get_accumulated_user_facing_text()``
                 and ``get_remaining_user_facing_text()``. Defaults to ``tts_text``
-                with markup stripped when not provided -- user-facing text should
-                never carry synthesis tags.
+                when not provided. Markup is stripped either way -- user-facing text
+                should never carry synthesis tags.
         """
         # _tts_text is the raw text sent to TTS (may carry SSML tags). The segment
         # map's raw_pos indexes into it; the get_*_tts_text accessors slice it.
         self._tts_text = tts_text
 
         # _user_facing_text is the original text returned to the user (e.g. via RTVI).
-        # Falls back to tts_text (markup stripped) when not provided so this cursor
-        # is always valid, and so the segment map still splits out a non-tagged
-        # prefix/suffix around any markup instead of treating the whole identical
-        # string as one big segment.
+        # Falls back to tts_text when not provided so this cursor is always valid.
+        # Markup is stripped whether the text was passed in or defaulted: a caller
+        # whose frame text carries its own synthesis tags (SSML the LLM emitted, so
+        # tts_text == frame.text) would otherwise make every segment report
+        # is_transformed, pinning this cursor for the whole frame -- no progress is
+        # reported, the frame completes as soon as the first segment does, and the
+        # tags reach the user. Stripping also lets the segment map split out a
+        # non-tagged prefix/suffix around any markup instead of treating the whole
+        # identical string as one big segment.
         # _user_facing_pos is a cursor into it, kept in sync with the segment map
         # except when a slot is force-completed (which the segment map never
         # observes, since it manually jumps this cursor to the end).
-        self._user_facing_text: str = (
-            user_facing_text if user_facing_text is not None else strip_complete_markup(tts_text)
+        self._user_facing_text: str = strip_complete_markup(
+            user_facing_text if user_facing_text is not None else tts_text
         )
         self._user_facing_pos = 0
 

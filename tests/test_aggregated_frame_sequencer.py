@@ -1022,6 +1022,34 @@ class TestAggregatedTextProgressFrame(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(p.accumulated_text, "4111")
         self.assertEqual(p.remaining_text, " 1111 1111 1111")
 
+    async def test_sentence_carrying_ssml_still_reports_progress(self):
+        """A frame whose own text carries SSML reports progress like any other.
+
+        When the SSML comes from the LLM text rather than a TTS transform, the
+        sequencer registers the slot with tts_text == frame.text, so the tag sits
+        in the user-facing channel as well. Held raw, the sentence read as one
+        transformed segment and RTVI clients got no progress at all for it.
+        """
+        sentence = 'Nice work. <break time="300ms"/> Take a breath.'
+        seq = _seq()
+        frame = _spoken_frame(sentence)
+        await seq.register_spoken(frame, "ctx1", sentence, append_to_context=True)
+
+        steps = [
+            ("Nice", "Nice", " work.  Take a breath."),
+            ("work.", "Nice work.", "  Take a breath."),
+            ("Take", "Nice work.  Take", " a breath."),
+            ("a", "Nice work.  Take a", " breath."),
+            ("breath.", "Nice work.  Take a breath.", ""),
+        ]
+        for word, exp_acc, exp_rem in steps:
+            result = seq.process_word(word, pts=10, context_id="ctx1")
+            progress = [f for f in result if isinstance(f, AggregatedTextProgressFrame)]
+            self.assertEqual(len(progress), 1, f"expected 1 progress frame after '{word}'")
+            self.assertEqual(progress[0].accumulated_text, exp_acc)
+            self.assertEqual(progress[0].remaining_text, exp_rem)
+            self.assertNotIn("<break", progress[0].accumulated_text)
+
     async def test_french_space_before_question_mark_word_by_word(self):
         """Trailing space-separated punctuation ("Comment ça va ?") completes the slot.
 
