@@ -326,17 +326,11 @@ class TavusTransportClient:
         """
         return await self._api.get_persona_name(self._persona_id)
 
-    async def start(self, frame: StartFrame):
-        """Start the client and join the room.
-
-        Args:
-            frame: The start frame containing initialization parameters.
-        """
-        logger.debug("TavusTransportClient start invoked!")
+    async def join(self):
+        """Join the room hosting the conversation."""
         if not self._client:
             return
 
-        await self._client.start(frame)
         await self._client.join()
 
     async def stop(self):
@@ -663,7 +657,14 @@ class TavusInputTransport(BaseInputTransport):
             setup: The frame processor setup configuration.
         """
         await super().setup(setup)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         await self._client.setup(setup)
+        await self._client.join()
 
     async def cleanup(self):
         """Cleanup input transport resources."""
@@ -677,13 +678,6 @@ class TavusInputTransport(BaseInputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
-
-        await self._client.start(frame)
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
@@ -772,6 +766,12 @@ class TavusOutputTransport(BaseOutputTransport):
             setup: The frame processor setup configuration.
         """
         await super().setup(setup)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         await self._client.setup(setup)
 
     async def cleanup(self):
@@ -799,17 +799,12 @@ class TavusOutputTransport(BaseOutputTransport):
         """
         await super().start(frame)
 
-        if self._initialized:
-            return
-
-        self._initialized = True
-
-        await self._client.start(frame)
         if self._params.audio_out_faster_than_realtime:
             await self._client.start_send_task()
         else:
             self._send_interval = (self.audio_chunk_size / self._client.out_sample_rate) / 2
             self._next_send_time = 0
+
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):

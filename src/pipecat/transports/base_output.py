@@ -47,7 +47,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.frame_queue import FrameQueue
 from pipecat.utils.time import nanoseconds_to_seconds
@@ -120,14 +120,27 @@ class BaseOutputTransport(FrameProcessor):
         """
         return self._audio_chunk_size
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the transport.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._sample_rate = self._params.audio_out_sample_rate or setup.audio_out_sample_rate
+
+    async def cleanup(self):
+        """Release output transport resources at teardown."""
+        await super().cleanup()
+        for _, sender in self._media_senders.items():
+            await sender.cleanup()
+
     async def start(self, frame: StartFrame):
         """Start the output transport and initialize components.
 
         Args:
             frame: The start frame containing initialization parameters.
         """
-        self._sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
-
         # We will write 10ms*CHUNKS of audio at a time (where CHUNKS is the
         # `audio_out_10ms_chunks` parameter). If we receive long audio frames we
         # will chunk them. This will help with interruption handling.
@@ -151,12 +164,6 @@ class BaseOutputTransport(FrameProcessor):
         """
         for _, sender in self._media_senders.items():
             await sender.cancel(frame)
-
-    async def cleanup(self):
-        """Release output transport resources at teardown."""
-        await super().cleanup()
-        for _, sender in self._media_senders.items():
-            await sender.cleanup()
 
     async def set_transport_ready(self, frame: StartFrame):
         """Called when the transport is ready to stream.

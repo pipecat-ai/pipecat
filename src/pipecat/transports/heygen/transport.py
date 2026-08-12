@@ -183,6 +183,12 @@ class HeyGenOutputTransport(BaseOutputTransport):
             setup: The frame processor setup configuration.
         """
         await super().setup(setup)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         await self._client.setup(setup)
 
     async def cleanup(self):
@@ -197,12 +203,6 @@ class HeyGenOutputTransport(BaseOutputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
-        await self._client.start(frame)
         await self.set_transport_ready(frame)
         self._client.transport_ready()
 
