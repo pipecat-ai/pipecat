@@ -55,14 +55,15 @@ class AICQuailVADAnalyzer(VADAnalyzer):
     so the SDK's own VAD post-processing (sensitivity thresholding, speech-hold)
     is bypassed — Pipecat owns the thresholding.
 
-    This analyzer reads whatever audio the pipeline feeds it. When
+    The analyzer reads whatever audio the pipeline feeds it. When
     :class:`pipecat.audio.filters.aic_filter.AICFilter` is installed as the
-    transport's ``audio_in_filter``, that audio is already enhanced, and the AIC
-    SDK expects a VAD to see the original signal instead. For enhancement plus
-    detection, give the filter a VAD model and use
-    :class:`pipecat.audio.vad.aic_filter_vad.AICFilterVADAnalyzer`, which reads
-    the filter's pre-enhancement predictions. This analyzer is the right choice
-    when no AIC enhancement is in the path.
+    transport's ``audio_in_filter``, that audio has already been enhanced,
+    while the AIC SDK expects a VAD to run on the original signal. Detection
+    still works, but the model is judging audio it was not trained on and the
+    filter's own delay is added to the VAD's prediction delay. Pipecat offers no
+    hook for tapping pre-enhancement audio further down the pipeline, so this is
+    a limitation of pairing the two rather than something the analyzer can
+    correct.
 
     Example::
 
