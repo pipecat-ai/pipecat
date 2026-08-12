@@ -1361,8 +1361,19 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             self._function_call_tasks[task] = runner_item
             # Since we run tasks sequentially we don't need to call
             # task.add_done_callback(self._function_call_task_finished).
-            await task
-            del self._function_call_tasks[task]
+            try:
+                # Wait on the task rather than awaiting it directly: a function
+                # call cancelled from elsewhere (interruption, timeout) must not
+                # tear down the runner along with it.
+                await asyncio.wait({task})
+            finally:
+                # Waiting doesn't hand cancellation down the way awaiting the
+                # task would, so a runner going away has to cancel the call it
+                # was running itself.
+                if not task.done():
+                    await self.cancel_task(task)
+                # The canceller may already have dropped the entry.
+                self._function_call_tasks.pop(task, None)
 
     async def _run_parallel_function_calls(self, runner_items: Sequence[FunctionCallRunnerItem]):
         tasks = []
