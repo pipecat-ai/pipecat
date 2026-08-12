@@ -469,9 +469,12 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         if event == "session.begin":
             self._request_id = message.get("request_id")
             logger.info(f"{self} Sarvam realtime session.begin request_id={self._request_id}")
-        elif event == "vad.speech_start":
+        # Only the endpointer in charge gets to set turn boundaries. Under
+        # manual endpointing the pipeline owns them, so server VAD telemetry
+        # would compete with the boundaries it is already producing.
+        elif event == "vad.speech_start" and self._effective_endpointing == "vad":
             await self._handle_speech_start(message)
-        elif event == "vad.speech_end":
+        elif event == "vad.speech_end" and self._effective_endpointing == "vad":
             await self._handle_speech_end(message)
         elif event == "transcript.partial":
             await self._handle_partial_transcript(message)

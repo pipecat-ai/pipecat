@@ -650,6 +650,35 @@ async def test_unsupported_resolved_sample_rate_reports_and_skips_connect(monkey
     assert connects == []
 
 
+@pytest.mark.asyncio
+async def test_provider_vad_events_are_ignored_under_manual_endpointing(monkeypatch):
+    """The pipeline owns turn boundaries in manual mode.
+
+    Acting on server VAD telemetry too would give the aggregator two competing
+    sets of boundaries for the same utterance.
+    """
+    service = SarvamRealtimeSTTService(
+        api_key="test-key",
+        settings=SarvamRealtimeSTTService.Settings(endpointing="manual"),
+    )
+    broadcasted = []
+    interruptions = []
+    monkeypatch.setattr(service, "push_frame", _noop)
+    monkeypatch.setattr(service, "broadcast_frame", _capture_class(broadcasted))
+    monkeypatch.setattr(service, "start_ttfb_metrics", _noop)
+
+    async def fake_broadcast_interruption():
+        interruptions.append(True)
+
+    monkeypatch.setattr(service, "broadcast_interruption", fake_broadcast_interruption)
+
+    await service._handle_message({"event": "vad.speech_start"})
+    await service._handle_message({"event": "vad.speech_end"})
+
+    assert broadcasted == []
+    assert interruptions == []
+
+
 def test_vad_params_are_omitted_for_manual_endpointing():
     service = SarvamRealtimeSTTService(
         api_key="test-key",
