@@ -286,6 +286,29 @@ def test_sarvam_llm_build_params_forward_core_and_extra_fields():
     assert built_params["n"] == 2
 
 
+def test_sarvam_llm_extra_body_merges_with_user_extra():
+    with patch.object(SarvamLLMService, "create_client"):
+        settings = SarvamLLMService.Settings(
+            model="sarvam-105b",
+            wiki_grounding=True,
+            extra={"extra_body": {"user_field": 1}},
+        )
+        service = SarvamLLMService(
+            api_key="test-key",
+            settings=settings,
+        )
+
+    invocation = OpenAILLMInvocationParams(
+        messages=[{"role": "user", "content": "Hello"}],
+        tools=OPENAI_NOT_GIVEN,
+        tool_choice=OPENAI_NOT_GIVEN,
+    )
+    built_params = service.build_chat_completion_params(invocation)
+
+    assert built_params["extra_body"]["user_field"] == 1
+    assert built_params["extra_body"]["wiki_grounding"] is True
+
+
 def test_sarvam_llm_tool_choice_requires_non_empty_tools():
     with patch.object(SarvamLLMService, "create_client"):
         service = SarvamLLMService(
@@ -395,7 +418,7 @@ def test_sarvam_llm_accepts_image_input_on_gemma4():
     assert built_params["model"] == "gemma4"
 
 
-def test_sarvam_llm_conversations_strips_reasoning_effort():
+def test_sarvam_llm_conversations_rejects_reasoning_effort():
     with patch.object(SarvamLLMService, "create_client"):
         service = SarvamLLMService(
             api_key="test-key",
@@ -410,11 +433,11 @@ def test_sarvam_llm_conversations_strips_reasoning_effort():
         tools=OPENAI_NOT_GIVEN,
         tool_choice=OPENAI_NOT_GIVEN,
     )
-    built_params = service.build_chat_completion_params(invocation)
-    assert "reasoning_effort" not in built_params
+    with pytest.raises(ValueError, match="does not support reasoning_effort"):
+        service.build_chat_completion_params(invocation)
 
 
-def test_sarvam_llm_conversations_strips_wiki_grounding():
+def test_sarvam_llm_conversations_rejects_wiki_grounding():
     with patch.object(SarvamLLMService, "create_client"):
         service = SarvamLLMService(
             api_key="test-key",
@@ -429,8 +452,8 @@ def test_sarvam_llm_conversations_strips_wiki_grounding():
         tools=OPENAI_NOT_GIVEN,
         tool_choice=OPENAI_NOT_GIVEN,
     )
-    built_params = service.build_chat_completion_params(invocation)
-    assert "wiki_grounding" not in built_params
+    with pytest.raises(ValueError, match="does not support wiki_grounding"):
+        service.build_chat_completion_params(invocation)
 
 
 def test_sarvam_llm_conversations_rejects_image_input():
@@ -512,7 +535,7 @@ def test_sarvam_llm_glm52_supports_reasoning_effort():
     assert built_params["reasoning_effort"] == "high"
 
 
-def test_sarvam_llm_glm52_strips_wiki_grounding():
+def test_sarvam_llm_glm52_rejects_wiki_grounding():
     with patch.object(SarvamLLMService, "create_client"):
         service = SarvamLLMService(
             api_key="test-key",
@@ -527,9 +550,8 @@ def test_sarvam_llm_glm52_strips_wiki_grounding():
         tools=OPENAI_NOT_GIVEN,
         tool_choice=OPENAI_NOT_GIVEN,
     )
-    built_params = service.build_chat_completion_params(invocation)
-    assert "wiki_grounding" not in built_params
-    assert "extra_body" not in built_params
+    with pytest.raises(ValueError, match="does not support wiki_grounding"):
+        service.build_chat_completion_params(invocation)
 
 
 def test_sarvam_llm_glm52_rejects_image_input():
@@ -563,22 +585,6 @@ def test_sarvam_llm_glm52_rejects_image_input():
 
 
 @pytest.mark.asyncio
-async def test_sarvam_llm_update_settings_no_recreate_glm52_same_v2():
-    with patch.object(SarvamLLMService, "create_client") as create_mock:
-        service = SarvamLLMService(
-            api_key="test-key",
-            settings=SarvamLLMService.Settings(model="sarvam-105b"),
-        )
-        assert create_mock.call_count == 1
-
-        await service._update_settings(SarvamLLMService.Settings(model="glm5.2"))
-
-        # Both sarvam-105b and glm5.2 use /v2, so no client recreation needed
-        assert create_mock.call_count == 1
-    assert service._settings.model == "glm5.2"
-
-
-@pytest.mark.asyncio
 async def test_sarvam_llm_update_settings_applies_runtime_sarvam_fields():
     with patch.object(SarvamLLMService, "create_client"):
         service = SarvamLLMService(
@@ -601,66 +607,6 @@ async def test_sarvam_llm_update_settings_applies_runtime_sarvam_fields():
     assert "reasoning_effort" in changed
     assert built_params["extra_body"]["wiki_grounding"] is True
     assert built_params["reasoning_effort"] == "low"
-
-
-@pytest.mark.asyncio
-async def test_sarvam_llm_update_settings_validates_model_on_switch():
-    with patch.object(SarvamLLMService, "create_client"):
-        service = SarvamLLMService(
-            api_key="test-key",
-            settings=SarvamLLMService.Settings(model="sarvam-105b"),
-        )
-
-    with pytest.raises(ValueError, match="Unsupported Sarvam LLM model"):
-        await service._update_settings(SarvamLLMService.Settings(model="gpt-4"))
-
-
-@pytest.mark.asyncio
-async def test_sarvam_llm_update_settings_recreates_client_on_version_change():
-    with patch.object(SarvamLLMService, "create_client") as create_mock:
-        service = SarvamLLMService(
-            api_key="test-key",
-            settings=SarvamLLMService.Settings(model="sarvam-105b"),
-        )
-        assert create_mock.call_count == 1
-        assert create_mock.call_args.kwargs["base_url"] == "https://api.sarvam.ai/v2"
-
-        await service._update_settings(SarvamLLMService.Settings(model="sarvam-105b-conversations"))
-
-        assert create_mock.call_count == 2
-        assert create_mock.call_args.kwargs["base_url"] == "https://api.sarvam.ai/v1"
-    assert service._base_url == "https://api.sarvam.ai/v1"
-
-
-@pytest.mark.asyncio
-async def test_sarvam_llm_update_settings_no_client_recreate_on_same_version():
-    with patch.object(SarvamLLMService, "create_client") as create_mock:
-        service = SarvamLLMService(
-            api_key="test-key",
-            settings=SarvamLLMService.Settings(model="sarvam-105b"),
-        )
-        assert create_mock.call_count == 1
-
-        await service._update_settings(SarvamLLMService.Settings(model="gemma4"))
-
-        # Both sarvam-105b and gemma4 use /v2, so no client recreation needed
-        assert create_mock.call_count == 1
-    assert service._settings.model == "gemma4"
-
-
-@pytest.mark.asyncio
-async def test_sarvam_llm_update_settings_recreates_back_to_v2():
-    with patch.object(SarvamLLMService, "create_client") as create_mock:
-        service = SarvamLLMService(
-            api_key="test-key",
-            settings=SarvamLLMService.Settings(model="sarvam-105b-conversations"),
-        )
-        assert create_mock.call_args.kwargs["base_url"] == "https://api.sarvam.ai/v1"
-
-        await service._update_settings(SarvamLLMService.Settings(model="sarvam-105b"))
-
-        assert create_mock.call_args.kwargs["base_url"] == "https://api.sarvam.ai/v2"
-    assert service._base_url == "https://api.sarvam.ai/v2"
 
 
 def test_sarvam_llm_vision_validation_skips_non_dict_messages():

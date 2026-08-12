@@ -8,7 +8,7 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Literal
 
 from loguru import logger
 from openai import NOT_GIVEN as OPENAI_NOT_GIVEN
@@ -97,11 +97,6 @@ class SarvamLLMService(OpenAILLMService):
             api_version = "v1" if model in self._V1_MODELS else "v2"
             base_url = f"{self._DEFAULT_BASE_URL}/{api_version}"
 
-        self._api_key = api_key
-        self._base_url = base_url
-        self._default_headers = default_headers
-        self._client_kwargs = kwargs
-
         super().__init__(
             api_key=api_key,
             base_url=base_url,
@@ -139,39 +134,6 @@ class SarvamLLMService(OpenAILLMService):
             **kwargs,
         )
 
-    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
-        """Apply a settings delta, validating the model and reconnecting if needed.
-
-        When the model changes, the API endpoint version (``/v1`` vs ``/v2``)
-        may need to change, requiring a new client. The model is also validated
-        against the supported set.
-        """
-        if is_given(delta.model) and delta.model is not None:
-            if isinstance(delta.model, str):
-                self._validate_model(delta.model)
-
-        changed = await super()._update_settings(delta)
-
-        if "model" in changed:
-            new_model = self._settings.model
-            if isinstance(new_model, str):
-                new_api_version = "v1" if new_model in self._V1_MODELS else "v2"
-                new_base_url = f"{self._DEFAULT_BASE_URL}/{new_api_version}"
-                if new_base_url != self._base_url:
-                    self._base_url = new_base_url
-                    self._client = self.create_client(
-                        api_key=self._api_key,
-                        base_url=self._base_url,
-                        default_headers=self._default_headers,
-                        **self._client_kwargs,
-                    )
-                    logger.info(
-                        f"{self.name}: model changed to '{new_model}', "
-                        f"recreated client with base_url {self._base_url}"
-                    )
-
-        return changed
-
     def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
         """Build parameters for Sarvam chat completion request.
 
@@ -180,6 +142,7 @@ class SarvamLLMService(OpenAILLMService):
         """
         self._validate_tool_parameters(params_from_context)
         self._validate_vision_support(params_from_context)
+        self._validate_capability_support()
 
         params = super().build_chat_completion_params(params_from_context)
         params.pop("stream_options", None)
@@ -199,7 +162,7 @@ class SarvamLLMService(OpenAILLMService):
             extra_body["wiki_grounding"] = self._settings.wiki_grounding
 
         if extra_body:
-            params["extra_body"] = extra_body
+            params.setdefault("extra_body", {}).update(extra_body)
 
         if (
             model in self._REASONING_MODELS
@@ -246,3 +209,32 @@ class SarvamLLMService(OpenAILLMService):
                             f"Model '{model}' does not support image input. "
                             f"Use a vision-capable model instead."
                         )
+
+    def _validate_capability_support(self):
+        """Reject capabilities the current model does not support.
+
+        Raises ``ValueError`` when ``reasoning_effort`` or ``wiki_grounding``
+        is configured for a model that doesn't support it, so the user gets a
+        clear error instead of the setting being silently dropped.
+        """
+        model = self._settings.model
+
+        if (
+            is_given(self._settings.reasoning_effort)
+            and self._settings.reasoning_effort is not None
+            and model not in self._REASONING_MODELS
+        ):
+            raise ValueError(
+                f"Model '{model}' does not support reasoning_effort. "
+                f"Use a reasoning-capable model instead."
+            )
+
+        if (
+            is_given(self._settings.wiki_grounding)
+            and self._settings.wiki_grounding is not None
+            and model not in self._WIKI_GROUNDING_MODELS
+        ):
+            raise ValueError(
+                f"Model '{model}' does not support wiki_grounding. "
+                f"Use a model that supports it instead."
+            )
