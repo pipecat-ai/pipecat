@@ -651,6 +651,20 @@ async def test_unsupported_resolved_sample_rate_reports_and_skips_connect(monkey
     assert connects == []
 
 
+@pytest.mark.asyncio
+async def test_keepalive_uses_the_ping_event():
+    """Sarvam's socket only accepts JSON events.
+
+    The inherited keepalive writes raw PCM, which this endpoint rejects.
+    """
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    service._websocket = _FakeWebsocket()
+
+    await service._send_keepalive(b"\x00" * 640)
+
+    assert service._websocket.sent == [json.dumps({"event": "ping"})]
+
+
 @pytest.mark.parametrize("final_text", ["hello", "   "])
 @pytest.mark.asyncio
 async def test_final_transcript_reports_usage(monkeypatch, final_text):

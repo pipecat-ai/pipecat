@@ -486,6 +486,9 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             await self._handle_config_updated(message)
         elif event == "error":
             await self._handle_error(message)
+        elif event == "pong":
+            # Answers our keepalive ping; the reply itself is the liveness proof.
+            logger.trace(f"{self} Sarvam realtime pong")
         else:
             logger.trace(f"{self} unhandled Sarvam realtime event: {message}")
 
@@ -673,6 +676,16 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             # Late audio on a socket the server already dropped must not break
             # the turn boundary or teardown.
             await self.push_error(error_msg=f"Sarvam realtime STT flush failed: {e}", exception=e)
+
+    async def _send_keepalive(self, silence: bytes):
+        """Hold the connection open with Sarvam's ping event.
+
+        Args:
+            silence: Silent PCM audio bytes, unused. The socket only accepts
+                JSON events, and Sarvam answers a ping with a pong rather than
+                reading padding audio.
+        """
+        await self._send_json({"event": "ping"})
 
     async def _send_json(self, payload: dict[str, Any]) -> bool:
         """Send a JSON event, reporting whether it reached the socket."""
