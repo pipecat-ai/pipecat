@@ -244,18 +244,21 @@ class TestVonageVideoConnectorTransport:
         self._connect_callbacks: ConnectCallbacks | None = None
         self._subscriber_callbacks: dict[str, SubscriberCallbacks] = {}
 
-    def _get_frame_processor_setup(self) -> FrameProcessorSetup:
-        if self._frame_processor_setup is not None:
+    def _get_frame_processor_setup(self, **kwargs: Any) -> FrameProcessorSetup:
+        if not kwargs and self._frame_processor_setup is not None:
             return self._frame_processor_setup
 
         clock: SystemClock = SystemClock()  # type: ignore[no-untyped-call]
         task_manager = TaskManager()
-        self._frame_processor_setup = FrameProcessorSetup(
+        setup = FrameProcessorSetup(
             clock=clock,
             task_manager=task_manager,
             pipeline_worker=SimpleNamespace(app_resources=None),  # type: ignore[arg-type]
+            **kwargs,
         )
-        return self._frame_processor_setup
+        if not kwargs:
+            self._frame_processor_setup = setup
+        return setup
 
     async def _wait_for_condition(
         self,
@@ -448,7 +451,9 @@ class TestVonageVideoConnectorTransport:
         await drain_event.wait()
 
     async def _create_output_transport(
-        self, params: VonageVideoConnectorTransportParams
+        self,
+        params: VonageVideoConnectorTransportParams,
+        **setup_kwargs: Any,
     ) -> VonageVideoConnectorOutputTransport:
         client = self.VonageClient(
             self.application_id,
@@ -457,12 +462,16 @@ class TestVonageVideoConnectorTransport:
             params,
         )
         transport = self.VonageVideoConnectorOutputTransport(client, params)
-        await transport.setup(self._get_frame_processor_setup())
+        # Transports connect during setup(), so keep the SDK out of it.
+        with patch.object(client, "_sdk_connect", AsyncMock()):
+            await transport.setup(self._get_frame_processor_setup(**setup_kwargs))
 
         return transport
 
     async def _create_input_transport(
-        self, params: VonageVideoConnectorTransportParams
+        self,
+        params: VonageVideoConnectorTransportParams,
+        **setup_kwargs: Any,
     ) -> VonageVideoConnectorInputTransport:
         client = self.VonageClient(
             self.application_id,
@@ -471,7 +480,9 @@ class TestVonageVideoConnectorTransport:
             params,
         )
         transport = self.VonageVideoConnectorInputTransport(client, params)
-        await transport.setup(self._get_frame_processor_setup())
+        # Transports connect during setup(), so keep the SDK out of it.
+        with patch.object(client, "_sdk_connect", AsyncMock()):
+            await transport.setup(self._get_frame_processor_setup(**setup_kwargs))
 
         return transport
 
@@ -484,8 +495,10 @@ class TestVonageVideoConnectorTransport:
             self.token,
             params,
         )
-        await transport.input().setup(self._get_frame_processor_setup())
-        await transport.output().setup(self._get_frame_processor_setup())
+        # Transports connect during setup(), so keep the SDK out of it.
+        with patch.object(transport.input()._client, "_sdk_connect", AsyncMock()):
+            await transport.input().setup(self._get_frame_processor_setup())
+            await transport.output().setup(self._get_frame_processor_setup())
 
         return transport
 
@@ -1984,12 +1997,17 @@ class TestVonageVideoConnectorTransport:
             patch.object(client, "connect", AsyncMock(return_value=1)) as client_connect_mock,
             patch.object(transport, "set_transport_ready", AsyncMock()) as set_transport_ready_mock,
         ):
-            start_frame = StartFrame()
-            await transport.start(start_frame)
+            # The transport connects during setup(), before any StartFrame.
+            await transport.setup(self._get_frame_processor_setup())
 
             assert transport._initialized is True
             assert transport._connected is True
             client_connect_mock.assert_called_once()
+            set_transport_ready_mock.assert_not_called()
+
+            start_frame = StartFrame()
+            await transport.start(start_frame)
+
             set_transport_ready_mock.assert_called_once_with(start_frame)
 
     @pytest.mark.asyncio
@@ -2059,11 +2077,16 @@ class TestVonageVideoConnectorTransport:
             patch.object(client, "connect", AsyncMock(return_value=1)) as client_connect_mock,
             patch.object(transport, "set_transport_ready", AsyncMock()) as set_transport_ready_mock,
         ):
-            start_frame = StartFrame()
-            await transport.start(start_frame)
+            # The transport connects during setup(), before any StartFrame.
+            await transport.setup(self._get_frame_processor_setup())
 
             assert transport._initialized is True
             client_connect_mock.assert_called_once()
+            set_transport_ready_mock.assert_not_called()
+
+            start_frame = StartFrame()
+            await transport.start(start_frame)
+
             set_transport_ready_mock.assert_called_once_with(start_frame)
 
     @pytest.mark.asyncio
@@ -2297,10 +2320,10 @@ class TestVonageVideoConnectorTransport:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("transport_type", ["input", "output"])
-    async def test_vonage_transport_sets_audio_sample_rates_from_start_frame(
+    async def test_vonage_transport_sets_audio_sample_rates_from_setup(
         self, transport_type: str
     ) -> None:
-        """Test transport sets audio sample rates from StartFrame when params are None."""
+        """Test transport sets audio sample rates from the setup when params are None."""
         # Create params with None sample rates
         params = self.VonageVideoConnectorTransportParams(
             audio_in_enabled=(transport_type == "input"),
@@ -2309,21 +2332,18 @@ class TestVonageVideoConnectorTransport:
             audio_out_sample_rate=None,
         )
         transport: VonageVideoConnectorInputTransport | VonageVideoConnectorOutputTransport
-        if transport_type == "input":
-            transport = await self._create_input_transport(params=params)
-        else:
-            transport = await self._create_output_transport(params=params)
-        client = transport._client
+        create = (
+            self._create_input_transport
+            if transport_type == "input"
+            else self._create_output_transport
+        )
+        transport = await create(
+            params=params, audio_in_sample_rate=22050, audio_out_sample_rate=44100
+        )
 
-        # Create a StartFrame with specific sample rates
-        start_frame = StartFrame(audio_in_sample_rate=22050, audio_out_sample_rate=44100)
-
-        with patch.object(client, "_sdk_connect", AsyncMock()):
-            await transport.start(start_frame)
-
-            # Verify both sample rates were set from the StartFrame
-            assert client._audio_in_sample_rate == 22050
-            assert client._audio_out_sample_rate == 44100
+        # Verify both sample rates were set from the setup
+        assert transport._client._audio_in_sample_rate == 22050
+        assert transport._client._audio_out_sample_rate == 44100
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("transport_type", ["input", "output"])
@@ -2339,21 +2359,19 @@ class TestVonageVideoConnectorTransport:
             audio_out_sample_rate=16000,
         )
         transport: VonageVideoConnectorInputTransport | VonageVideoConnectorOutputTransport
-        if transport_type == "input":
-            transport = await self._create_input_transport(params=params)
-        else:
-            transport = await self._create_output_transport(params=params)
-        client = transport._client
+        create = (
+            self._create_input_transport
+            if transport_type == "input"
+            else self._create_output_transport
+        )
+        # Set the transport up with sample rates that differ from the params.
+        transport = await create(
+            params=params, audio_in_sample_rate=22050, audio_out_sample_rate=44100
+        )
 
-        # Create a StartFrame with different sample rates
-        start_frame = StartFrame(audio_in_sample_rate=22050, audio_out_sample_rate=44100)
-
-        with patch.object(client, "_sdk_connect", AsyncMock()):
-            await transport.start(start_frame)
-
-            # Verify sample rates remain as originally set in params
-            assert client._audio_in_sample_rate == 48000
-            assert client._audio_out_sample_rate == 16000
+        # Verify sample rates remain as originally set in params
+        assert transport._client._audio_in_sample_rate == 48000
+        assert transport._client._audio_out_sample_rate == 16000
 
     @pytest.mark.asyncio
     async def test_vonage_transport_initialization(self) -> None:
