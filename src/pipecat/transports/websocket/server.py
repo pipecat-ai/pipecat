@@ -157,7 +157,7 @@ class SingleClientWebsocketServerInputTransport(BaseInputTransport):
         self._initialized = True
 
         if self._params.serializer:
-            await self._params.serializer.setup(frame)
+            await self._params.serializer.setup(self.processor_setup)
         if not self._server_task:
             self._server_task = self.create_task(self._server_task_handler())
         # The input side now holds the server; the output side registers its own
@@ -382,7 +382,7 @@ class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
         self._initialized = True
 
         if self._params.serializer:
-            await self._params.serializer.setup(frame)
+            await self._params.serializer.setup(self.processor_setup)
         self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
         # Register the output side's hold on the shared server (owned by the
         # input transport), so it stays up until this side has flushed.

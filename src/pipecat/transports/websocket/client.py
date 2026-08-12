@@ -269,7 +269,7 @@ class WebsocketClientInputTransport(BaseInputTransport):
         self._initialized = True
 
         if self._params.serializer:
-            await self._params.serializer.setup(frame)
+            await self._params.serializer.setup(self.processor_setup)
         await self._session.connect()
         await self.set_transport_ready(frame)
 
@@ -378,7 +378,7 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
 
         self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
         if self._params.serializer:
-            await self._params.serializer.setup(frame)
+            await self._params.serializer.setup(self.processor_setup)
         await self._session.connect()
         await self.set_transport_ready(frame)
 

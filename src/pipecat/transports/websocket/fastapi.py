@@ -310,7 +310,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
 
         await self._client.setup(frame)
         if self._params.serializer:
-            await self._params.serializer.setup(frame)
+            await self._params.serializer.setup(self.processor_setup)
         if not self._monitor_websocket_task and self._params.session_timeout:
             self._monitor_websocket_task = self.create_task(
                 self._monitor_websocket(self._params.session_timeout)
@@ -458,7 +458,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
 
         await self._client.setup(frame)
         if self._params.serializer:
-            await self._params.serializer.setup(frame)
+            await self._params.serializer.setup(self.processor_setup)
         self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
         await self.set_transport_ready(frame)
 
