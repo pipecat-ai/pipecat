@@ -250,6 +250,8 @@ async def run_scenario(scenario: Scenario, args: argparse.Namespace, env_info: d
             "BENCH_WEBRTC_PREFETCH": str(args.webrtc_prefetch),
             "BENCH_RTT_LOG": "1" if args.rtt_log else "0",
         }
+        if args.audio_out_10ms_chunks is not None:
+            env["BENCH_AUDIO_OUT_10MS_CHUNKS"] = str(args.audio_out_10ms_chunks)
         await _wait_for_port_free(7860)
         # New session so teardown can signal the whole group — `uv run` wraps
         # the python bot, and signalling only the wrapper leaks the bot.
@@ -360,6 +362,16 @@ async def main() -> None:
         help="aiortc audio JitterBuffer prefetch override (default 1; aiortc's own "
         "default is 4 — see webrtc_client.configure_audio_jitter_prefetch). Lower "
         "values remove aiortc's real jitter tolerance.",
+    )
+    parser.add_argument(
+        "--audio-out-10ms-chunks",
+        type=int,
+        default=None,
+        help="Override TransportParams.audio_out_10ms_chunks (MediaSender's "
+        "accumulate-then-flush size, shared by both transports — default 4 = 40ms). "
+        "Measured via the send-path breakdown: dropping to 1 removes MediaSender's "
+        "batching wait almost entirely (~9ms/hop) on both transports. Unset uses the "
+        "framework default.",
     )
     parser.add_argument("--save-wav", action="store_true")
     parser.add_argument(

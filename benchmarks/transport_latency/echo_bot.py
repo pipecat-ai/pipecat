@@ -14,6 +14,10 @@ times are written as JSON to ``$BENCH_BOT_STATS`` at shutdown so the client's
 round-trip numbers can be decomposed into wire+codec vs pipeline overhead.
 
 Env vars:
+    BENCH_AUDIO_OUT_10MS_CHUNKS  Overrides TransportParams.audio_out_10ms_chunks
+                         (MediaSender's accumulate-then-flush size, shared
+                         by both transports — base_transport.py). Unset
+                         uses the framework default (4 = 40ms).
     BENCH_JITTER_MS      MoQ receive jitter buffer (audio_in_max_latency_ms),
                          default 60. The benchmark client pins its own MoQ
                          subscribe latency to the same value.
@@ -28,13 +32,22 @@ Env vars:
                          patched client.
     BENCH_RTT_LOG        Set to "1" to instrument this process's own RTT
                          layers and fold them into BENCH_BOT_STATS as
-                         "rtt_breakdown": aiortc RTCP RTT and jitter-buffer
-                         hold time on the bot's receiver (webrtc only — a
-                         no-op on moq, which has neither), plus
+                         "rtt_breakdown": aiortc RTCP RTT, jitter-buffer
+                         hold time, and opus encode/decode cost on the
+                         bot's receiver/sender (webrtc only — a no-op on
+                         moq, which has none of these), plus
                          BaseOutputTransport.MediaSender buffer occupancy
-                         (both transports — see base_output.py). Off by
-                         default since it monkeypatches process-wide state;
-                         opt in for diagnostic runs.
+                         and flush events (both transports — MediaSender
+                         is shared code), and pipecat's send-side adapter
+                         (RawAudioTrack on webrtc, MOQOutputTransport.
+                         write_audio_frame on moq) queue depth/send
+                         events. The flush/sent events are position-keyed
+                         (cum_samples, t_mono) using the same numbering as
+                         LatencyObserver's out_raw, so a specific marker's
+                         wait at each pipeline stage can be measured
+                         directly instead of inferred from occupancy
+                         snapshots. Off by default since it monkeypatches
+                         process-wide state; opt in for diagnostic runs.
     BENCH_BOT_STATS      Path to write the observer's JSON stats.
 
 Usage:
@@ -46,6 +59,7 @@ import asyncio
 import json
 import os
 import time
+from collections import deque
 
 import numpy as np
 from loguru import logger
@@ -82,12 +96,27 @@ _jb_delays: dict[int, list[float]] | None = None
 _jb_creation_order: list[int] | None = None
 _media_sender_samples: list[float] | None = None
 
+_opus_encode_ms: list[float] | None = None
+_opus_decode_ms: list[float] | None = None
+
 if RTT_LOG:
-    from webrtc_client import instrument_jitter_buffer_timing
+    from webrtc_client import instrument_jitter_buffer_timing, instrument_opus_codec_timing
 
     _jb_delays, _jb_creation_order, _ = instrument_jitter_buffer_timing()
+    _opus_encode_ms, _opus_decode_ms, _ = instrument_opus_codec_timing()
 
     _media_sender_samples = []
+    # (cum_samples, t_mono) at the moment each flushed chunk is actually
+    # queued for send — common to both transports (base_output.py's
+    # MediaSender). Position-keyed like LatencyObserver's out_raw, so a
+    # given marker's exact wait *inside* this accumulate-then-flush buffer
+    # can be measured directly (t_flush - t_bot_out for the same cum_samples)
+    # instead of inferred from occupancy snapshots, which measure the wrong
+    # thing: a chunk arriving at LOW occupancy is the one that waits LONGEST
+    # for its block to fill, not the one that gets through fastest.
+    _media_sender_flush_events: list[tuple[float, int]] = []
+    _media_sender_cum_samples = [0]
+    _instrumented_media_queues: set[int] = set()
     _orig_media_sender_handle = BaseOutputTransport.MediaSender.handle_audio_frame
 
     async def _patched_media_sender_handle(self, frame):
@@ -97,9 +126,113 @@ if RTT_LOG:
         bytes_per_sample = 2 * (getattr(self._params, "audio_out_channels", 1) or 1)
         ms_before = (len(self._audio_buffer) / bytes_per_sample) / self._sample_rate * 1000.0
         _media_sender_samples.append(ms_before)
+
+        qid = id(self._audio_queue)
+        if qid not in _instrumented_media_queues:
+            _instrumented_media_queues.add(qid)
+            orig_put = self._audio_queue.put
+
+            async def _patched_put(chunk, _orig_put=orig_put):
+                # //2 (not channel-aware) to match LatencyObserver's own
+                # cum_samples convention exactly — it always counts raw
+                # int16 words regardless of channel layout, and marker
+                # positions are keyed against that same convention.
+                _media_sender_cum_samples[0] += len(chunk.audio) // 2
+                _media_sender_flush_events.append((_media_sender_cum_samples[0], time.monotonic()))
+                return await _orig_put(chunk)
+
+            self._audio_queue.put = _patched_put
+
         return await _orig_media_sender_handle(self, frame)
 
     BaseOutputTransport.MediaSender.handle_audio_frame = _patched_media_sender_handle
+
+    # RawAudioTrack (webrtc only) — pipecat's own send-side adapter feeding
+    # aiortc's RTCRtpSender (src/pipecat/transports/smallwebrtc/transport.py),
+    # not part of aiortc itself. Tracks queue depth (in 10ms chunks) at every
+    # fill (add_audio_bytes, driven by MediaSender's 40ms flush) and drain
+    # (recv, driven by aiortc's RTCRtpSender pulling one 10ms frame at a
+    # time) to see whether the queue grows over a run rather than staying
+    # steady-state, plus (cum_samples, t_mono) for every REAL (non-silence)
+    # chunk actually handed to aiortc, position-keyed like the MediaSender
+    # flush events above.
+    _raw_audio_track_events: list[tuple[float, int, str]] = []
+    _raw_audio_track_sent_events: list[tuple[float, int]] = []
+    _raw_audio_track_cum_samples = [0]
+    try:
+        from pipecat.transports.smallwebrtc.transport import RawAudioTrack
+
+        # recv() awaits a wall-clock pacing sleep BEFORE checking whether
+        # self._chunk_queue is empty, so a pre-call bool(self._chunk_queue)
+        # check races with add_audio_bytes filling the queue during that
+        # sleep — a "was_real" guess taken beforehand can miss real chunks.
+        # Swap in a deque subclass so popleft() itself (the actual
+        # consumption point, unaffected by that race) does the recording.
+        class _InstrumentedChunkQueue(deque):
+            def popleft(self):
+                chunk, fut = super().popleft()
+                _raw_audio_track_cum_samples[0] += len(chunk) // 2
+                _raw_audio_track_sent_events.append(
+                    (_raw_audio_track_cum_samples[0], time.monotonic())
+                )
+                return chunk, fut
+
+        _orig_add_audio_bytes = RawAudioTrack.add_audio_bytes
+        _orig_track_recv = RawAudioTrack.recv
+
+        def _patched_add_audio_bytes(self, audio_bytes):
+            if not isinstance(self._chunk_queue, _InstrumentedChunkQueue):
+                self._chunk_queue = _InstrumentedChunkQueue(self._chunk_queue)
+            result = _orig_add_audio_bytes(self, audio_bytes)
+            _raw_audio_track_events.append((time.monotonic(), len(self._chunk_queue), "add"))
+            return result
+
+        async def _patched_track_recv(self):
+            frame = await _orig_track_recv(self)
+            _raw_audio_track_events.append((time.monotonic(), len(self._chunk_queue), "recv"))
+            return frame
+
+        RawAudioTrack.add_audio_bytes = _patched_add_audio_bytes
+        RawAudioTrack.recv = _patched_track_recv
+    except ImportError:
+        pass  # moq bot process never imports smallwebrtc — nothing to instrument
+
+    # MOQOutputTransport (moq only) — the shared-code counterpart to
+    # RawAudioTrack: where a flushed MediaSender chunk actually leaves the
+    # bot process, via moq.AudioProducer.write() (see publish_audio in
+    # transport.py). Confirmed by reading that method: it only blocks if the
+    # pacing clock gets audio_out_max_buffer_ms (25s) ahead of wall-clock —
+    # never in a real-time echo stream — so unlike RawAudioTrack it has no
+    # per-chunk real-time throttle of its own.
+    _moq_send_events: list[tuple[float, int]] = []
+    _moq_send_cum_samples = [0]
+    try:
+        from pipecat.transports.moq.transport import MOQOutputTransport
+
+        _orig_moq_write_audio_frame = MOQOutputTransport.write_audio_frame
+
+        async def _patched_moq_write_audio_frame(self, frame):
+            result = await _orig_moq_write_audio_frame(self, frame)
+            _moq_send_cum_samples[0] += len(frame.audio) // 2  # s16 mono
+            _moq_send_events.append((_moq_send_cum_samples[0], time.monotonic()))
+            return result
+
+        MOQOutputTransport.write_audio_frame = _patched_moq_write_audio_frame
+    except ImportError:
+        pass
+
+# base_transport.py's MediaSender only flushes once it has accumulated a
+# full audio_out_10ms_chunks-sized block (default 4 = 40ms), batching
+# audio before either transport's send-adapter ever sees it — see the
+# rtt_breakdown leg2b/leg2c analysis in RUNBOOK for why this drives most
+# of webrtc's non-jitter-buffer send-side latency. Override for diagnostic
+# runs; unset uses base_transport.py's own default (4).
+_audio_out_10ms_chunks_env = os.getenv("BENCH_AUDIO_OUT_10MS_CHUNKS")
+_audio_out_10ms_chunks_kwargs = (
+    {"audio_out_10ms_chunks": int(_audio_out_10ms_chunks_env)}
+    if _audio_out_10ms_chunks_env is not None
+    else {}
+)
 
 transport_params = {
     "moq": lambda: MOQParams(
@@ -110,6 +243,7 @@ transport_params = {
         audio_out_sample_rate=SAMPLE_RATE,
         audio_in_max_latency_ms=JITTER_MS,
         audio_out_frame_ms=20,
+        **_audio_out_10ms_chunks_kwargs,
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
@@ -117,6 +251,7 @@ transport_params = {
         audio_in_passthrough=True,
         audio_in_sample_rate=SAMPLE_RATE,
         audio_out_sample_rate=SAMPLE_RATE,
+        **_audio_out_10ms_chunks_kwargs,
     ),
 }
 
@@ -272,6 +407,22 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                     "rtcp_rtt_ms": summarize(rtcp_rtt_samples),
                     "jitter_buffer_hold_ms": summarize(jb_hold),
                     "media_sender_buffer_ms": summarize(_media_sender_samples or []),
+                    "raw_audio_track_depth_10ms_chunks": summarize(
+                        [depth for _, depth, _ in _raw_audio_track_events]
+                    ),
+                    # Raw (t_mono, depth, "add"|"recv") events — lets an
+                    # external analysis correlate queue depth against wall
+                    # clock over the run, not just an aggregate distribution.
+                    "raw_audio_track_events": _raw_audio_track_events,
+                    "opus_encode_ms": summarize(_opus_encode_ms or []),
+                    "opus_decode_ms": summarize(_opus_decode_ms or []),
+                    # Position-keyed (cum_samples, t_mono) checkpoints — same
+                    # cum_samples numbering as LatencyObserver's out_raw, so
+                    # a marker's exact wait at each stage of the send path
+                    # can be measured directly rather than inferred.
+                    "media_sender_flush_events": _media_sender_flush_events,
+                    "raw_audio_track_sent_events": _raw_audio_track_sent_events,
+                    "moq_send_events": _moq_send_events,
                 }
             observer.dump(stats_path, extra=extra)
         if transport_name == "MOQTransport":
