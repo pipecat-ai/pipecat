@@ -43,3 +43,11 @@ turns:
       - event: response
         absent: true
         within_ms: 20000
+
+  # Cancelling settles the call in the context, so the bot can say what became
+  # of it. Left unsettled it would read as still running, and the bot would say
+  # the weather is on its way.
+  - user: "What happened with that weather lookup?"
+    expect:
+      - event: response
+        eval: "indicates the weather lookup was cancelled, dropped, or never completed; does not say it is still running or still waiting on it, and does not state a temperature"
