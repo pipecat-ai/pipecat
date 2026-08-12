@@ -10,7 +10,7 @@ import asyncio
 import base64
 import json
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field, fields
 from typing import Any, Literal
 from urllib.parse import urlencode
@@ -22,6 +22,7 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
@@ -428,6 +429,18 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         finally:
             self._websocket = None
             await self._call_event_handler("on_disconnected")
+
+    async def _receive_task_handler(self, report_error: Callable[[ErrorFrame], Awaitable[None]]):
+        """Close out the active utterance once the receive loop is done.
+
+        Reconnection is disabled, so the loop exiting means no further server
+        event can arrive. An utterance still open at that point would leave
+        downstream turn aggregation waiting on a boundary that is never coming.
+        Cancellation is left alone: that only happens during an intentional
+        disconnect, where teardown is already under way.
+        """
+        await super()._receive_task_handler(report_error)
+        await self._complete_active_utterance()
 
     async def _receive_messages(self):
         """Receive Sarvam realtime server events."""

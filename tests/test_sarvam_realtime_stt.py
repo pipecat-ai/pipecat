@@ -648,6 +648,30 @@ async def test_session_end_mid_utterance_completes_the_turn(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_socket_drop_mid_utterance_completes_the_turn(monkeypatch):
+    """A dropped socket must still close the turn.
+
+    Reconnection is disabled, so the boundary can never arrive on its own and
+    external turn aggregation would wait on it forever.
+    """
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    broadcasted = []
+    monkeypatch.setattr(service, "push_frame", _noop)
+    monkeypatch.setattr(service, "broadcast_frame", _capture_class(broadcasted))
+    monkeypatch.setattr(service, "broadcast_interruption", _noop)
+    monkeypatch.setattr(service, "start_ttfb_metrics", _noop)
+    monkeypatch.setattr(service, "push_error", _noop)
+    # The socket dies after speech starts, with no matching `vad.speech_end`.
+    monkeypatch.setattr(
+        service, "_websocket", _FakeWebsocket([json.dumps({"event": "vad.speech_start"})])
+    )
+
+    await service._receive_task_handler(AsyncMock())
+
+    assert broadcasted == [UserStartedSpeakingFrame, UserStoppedSpeakingFrame]
+
+
+@pytest.mark.asyncio
 async def test_disconnect_tolerates_socket_closing_during_flush(monkeypatch):
     service = SarvamRealtimeSTTService(api_key="test-key")
     service._sample_rate = 16000
