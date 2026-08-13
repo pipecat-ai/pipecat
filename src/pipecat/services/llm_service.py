@@ -1549,7 +1549,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             raise
         except Exception as e:
             error_message = f"Error executing function call [{runner_item.function_name}]: {e}"
-            logger.error(f"{self} {error_message}")
             # Pushing the error with category "APPLICATION" since the failure came
             # from the application's function handler code.
             await self.push_error(
