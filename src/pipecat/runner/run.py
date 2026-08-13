@@ -633,7 +633,6 @@ def _configure_server_app(args: argparse.Namespace):
     _setup_frontend_routes(app)
     _setup_webrtc_routes(app, args, active_sessions)
     _setup_daily_routes(app, args)
-    _setup_livekit_routes(app, args)
     _setup_telephony_routes(app, args, ws_used_tokens)
     _setup_websocket_routes(app, args, ws_used_tokens)
     _setup_unified_start_route(app, args, active_sessions)
@@ -1432,46 +1431,6 @@ def _mint_livekit_tokens(
     )
     user_token = generate_token(room_name, f"User-{suffix}", api_key, api_secret)
     return agent_token, user_token
-
-
-def _setup_livekit_routes(app: FastAPI, args: argparse.Namespace):
-    """Set up LiveKit-specific routes."""
-    if not _transport_routes_enabled("livekit"):
-        return
-
-    @app.get("/livekit")
-    async def create_room_and_start_agent():
-        """Launch a LiveKit bot and redirect to a hosted LiveKit client.
-
-        Unlike Daily, LiveKit rooms are created implicitly on first join, so
-        there's no room-creation API call — just a token mint per identity.
-
-        The join token is passed to the hosted client as a URL query
-        parameter, so it will land in browser history and any referrer
-        headers. Fine for this dev-only convenience route; don't reuse this
-        pattern for anything production-facing.
-        """
-        logger.debug("Starting bot with LiveKit transport and redirecting to LiveKit room")
-
-        livekit_url, api_key, api_secret = _livekit_credentials()
-
-        room_name = os.getenv("LIVEKIT_ROOM_NAME") or f"pipecat-{uuid.uuid4().hex[:8]}"
-        session_id = str(uuid.uuid4())
-        agent_token, user_token = _mint_livekit_tokens(room_name, session_id, api_key, api_secret)
-
-        bot_module = _get_bot_module()
-        runner_args = LiveKitRunnerArguments(
-            room_name=room_name,
-            url=livekit_url,
-            token=agent_token,
-            session_id=session_id,
-        )
-        runner_args.cli_args = args
-        _start_bot_session(bot_module.bot(runner_args))
-
-        return RedirectResponse(
-            f"https://meet.livekit.io/custom?liveKitUrl={livekit_url}&token={user_token}"
-        )
 
 
 def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace, ws_used_tokens: set[str]):
