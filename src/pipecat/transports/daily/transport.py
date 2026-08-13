@@ -57,6 +57,7 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.shared import acquires, releases
 
 try:
     from daily import (
@@ -522,11 +523,8 @@ class DailyTransportClient(EventHandler):
         self._dial_out_session_id: str = ""
         self._dial_in_session_id: str = ""
 
-        self._joining = False
         self._joined = False
         self._joined_event = asyncio.Event()
-        self._leave_counter = 0
-        self._cleanup_counter = 0
 
         self._task_manager: BaseTaskManager | None = None
 
@@ -735,16 +733,13 @@ class DailyTransportClient(EventHandler):
             logger.warning(f"{self} unable to write video frames to destination [{destination}]")
             return False
 
+    @acquires("client")
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the client with task manager and event queues.
 
         Args:
             setup: The frame processor setup configuration.
         """
-        self._cleanup_counter += 1
-        if self._task_manager:
-            return
-
         self._task_manager = setup.task_manager
 
         self._in_sample_rate = self._params.audio_in_sample_rate or setup.audio_in_sample_rate
@@ -807,14 +802,9 @@ class DailyTransportClient(EventHandler):
             audio_track = CustomAudioTrack(audio_source)
             self._microphone_track = DailyAudioTrack(source=audio_source, track=audio_track)
 
+    @releases("client")
     async def cleanup(self):
         """Cleanup client resources and cancel tasks."""
-        # Decrement cleanup counter. DailyInputTransport and DailyOutputTransport
-        # share this client and both call cleanup(), so only run on the last call.
-        self._cleanup_counter -= 1
-        if self._cleanup_counter > 0:
-            return
-
         if self._event_task and self._task_manager:
             await self._task_manager.cancel_task(self._event_task)
             self._event_task = None
@@ -828,16 +818,10 @@ class DailyTransportClient(EventHandler):
         # takes extra time.
         await self._get_event_loop().run_in_executor(self._executor, self._cleanup)
 
+    @acquires("room")
     async def join(self):
         """Join the Daily room with configured settings."""
-        # Transport already joined or joining, ignore.
-        if self._joined or self._joining:
-            # Increment leave counter if we already joined.
-            self._leave_counter += 1
-            return
-
         logger.info(f"Joining {self._room_url}")
-        self._joining = True
 
         # For performance reasons, never subscribe to video streams (unless a
         # video renderer is registered).
@@ -849,28 +833,25 @@ class DailyTransportClient(EventHandler):
 
         (data, error) = await self._join()
 
-        if not error:
-            self._joined = True
-            self._joining = False
-            # Increment leave counter if we successfully joined.
-            self._leave_counter += 1
-
-            participant_id = data.get("participants", {}).get("local", {}).get("id")
-            meeting_id = data.get("meetingSession", {}).get("id")
-            logger.info(
-                f"Joined {self._room_url}. Participant ID: {participant_id}, Meeting ID: {meeting_id}"
-            )
-
-            await self._callbacks.on_joined(data)
-
-            self._joined_event.set()
-
-            await self._flush_join_messages()
-        else:
+        if error:
             error_msg = f"Error joining {self._room_url}: {error}"
             logger.error(error_msg)
             await self._callbacks.on_error(error_msg)
-            self._joining = False
+            return
+
+        self._joined = True
+
+        participant_id = data.get("participants", {}).get("local", {}).get("id")
+        meeting_id = data.get("meetingSession", {}).get("id")
+        logger.info(
+            f"Joined {self._room_url}. Participant ID: {participant_id}, Meeting ID: {meeting_id}"
+        )
+
+        await self._callbacks.on_joined(data)
+
+        self._joined_event.set()
+
+        await self._flush_join_messages()
 
     async def _join(self) -> tuple[Any, Any]:
         """Execute the actual room join operation.
@@ -936,13 +917,11 @@ class DailyTransportClient(EventHandler):
 
         return await future
 
+    @releases("room")
     async def leave(self):
         """Leave the Daily room and cleanup resources."""
-        # Decrement leave counter when leaving.
-        self._leave_counter -= 1
-
         # Transport not joined, ignore.
-        if not self._joined or self._leave_counter > 0:
+        if not self._joined:
             return
 
         self._joined = False
