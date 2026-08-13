@@ -76,10 +76,6 @@ The ``/start`` endpoint accepts::
         "dailyRoomProperties": {...},
         "dailyMeetingTokenProperties": {...},
         "body": {...}
-
-        // LiveKit-specific
-        "livekitRoomName": "my-room",
-        "body": {...}
     }
 
 To run locally:
@@ -696,10 +692,6 @@ def _setup_unified_start_route(
                 "dailyRoomProperties": {...},
                 "dailyMeetingTokenProperties": {...},
                 "body": {...}
-
-                // LiveKit-specific
-                "livekitRoomName": "my-room",
-                "body": {...}
             }
         """
         try:
@@ -816,11 +808,7 @@ def _setup_unified_start_route(
             livekit_url, api_key, api_secret = _livekit_credentials()
 
             body = request_data.get("body", {})
-            room_name = (
-                request_data.get("livekitRoomName")
-                or os.getenv("LIVEKIT_ROOM_NAME")
-                or f"pipecat-{uuid.uuid4().hex[:8]}"
-            )
+            room_name = os.getenv("LIVEKIT_ROOM_NAME") or f"pipecat-{uuid.uuid4().hex[:8]}"
             session_id = str(uuid.uuid4())
             agent_token, user_token = _mint_livekit_tokens(
                 room_name, session_id, api_key, api_secret
