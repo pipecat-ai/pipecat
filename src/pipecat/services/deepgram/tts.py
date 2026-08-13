@@ -216,7 +216,7 @@ class DeepgramTTSService(WebsocketTTSService):
             await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error_frame(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error_frame(ErrorFrame(error=f"{self} error: {e}", exception=e))
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
