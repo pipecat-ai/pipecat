@@ -385,14 +385,11 @@ class TestLiveKitSipDtmfInput(unittest.IsolatedAsyncioTestCase):
 
 @unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
 class TestLiveKitAppMessageInput(unittest.IsolatedAsyncioTestCase):
-    """Inbound data messages (RTVI's wire channel) must reach the pipeline.
-
-    Regression test: ``_on_data_received`` used to hand the raw undecoded
-    string to ``push_app_message``, which wrapped it in an *output*-message
-    frame class and pushed it downstream only. ``RTVIProcessor`` only
-    recognizes ``InputTransportMessageFrame`` with an already-parsed dict, so
-    no client message (including ``client-ready``) ever reached it, and the
-    misrouted frame was instead echoed back out by the output transport.
+    """Inbound JSON data messages (RTVI's wire channel) are parsed and
+    broadcast both directions as an ``InputTransportMessageFrame`` so
+    ``RTVIProcessor`` sees them wherever it sits in the pipeline. Non-object
+    JSON and non-JSON data are not pushed into the pipeline, but still fire
+    ``on_data_received`` for backwards compatibility.
     """
 
     def _make_transport(self):
@@ -444,6 +441,61 @@ class TestLiveKitAppMessageInput(unittest.IsolatedAsyncioTestCase):
         input_transport.push_frame.assert_not_awaited()
         transport._call_event_handler.assert_awaited_once_with(
             "on_data_received", b"not json", "participant-1"
+        )
+
+    async def test_non_object_json_is_not_pushed_but_reported_for_compat(self):
+        """A JSON value that isn't an object (str/number/bool/list) is ignored.
+
+        ``RTVIProcessor`` calls ``.get("label")`` on the parsed message, so
+        pushing a non-dict would raise ``AttributeError`` deep in the pipeline.
+        """
+        transport, input_transport = self._make_transport()
+
+        await transport._on_data_received(json.dumps("hi").encode(), "participant-1")
+
+        input_transport.push_frame.assert_not_awaited()
+        transport._call_event_handler.assert_awaited_once_with(
+            "on_data_received", json.dumps("hi").encode(), "participant-1"
+        )
+
+
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitClientConnectedAlias(unittest.IsolatedAsyncioTestCase):
+    """on_client_connected/on_client_disconnected match Daily's dict shape.
+
+    Drop-in bot templates read ``client["id"]`` off these aliases, so the
+    payload needs to be a mapping, not a bare participant id string.
+    """
+
+    def _make_transport(self):
+        from pipecat.transports.livekit.transport import LiveKitTransport
+
+        transport = LiveKitTransport(
+            url="wss://test.livekit.cloud",
+            token="test-token",
+            room_name="test-room",
+        )
+        transport._input = MagicMock()
+        transport._input.push_frame = AsyncMock()
+        transport._call_event_handler = AsyncMock()
+        return transport
+
+    async def test_on_client_connected_receives_dict(self):
+        transport = self._make_transport()
+
+        await transport._on_participant_connected("participant-1")
+
+        transport._call_event_handler.assert_any_call(
+            "on_client_connected", {"id": "participant-1"}
+        )
+
+    async def test_on_client_disconnected_receives_dict(self):
+        transport = self._make_transport()
+
+        await transport._on_participant_disconnected("participant-1")
+
+        transport._call_event_handler.assert_any_call(
+            "on_client_disconnected", {"id": "participant-1"}
         )
 
 

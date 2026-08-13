@@ -672,8 +672,6 @@ def _setup_unified_start_route(
         dailyRoom: str | None
         dailyToken: str | None
         url: str | None
-        # livekitToken: str | None
-        # livekitRoom: str | None
         wsUrl: str | None
         token: str | None
         # MoQ-specific. Carries everything the browser needs to construct
@@ -816,19 +814,7 @@ def _setup_unified_start_route(
             return result
 
         elif transport == "livekit":
-            livekit_url = os.getenv("LIVEKIT_URL")
-            api_key = os.getenv("LIVEKIT_API_KEY")
-            api_secret = os.getenv("LIVEKIT_API_SECRET")
-            if not livekit_url or not api_key or not api_secret:
-                raise HTTPException(
-                    status_code=500,
-                    detail=(
-                        "LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET must be "
-                        "configured on the server"
-                    ),
-                )
-
-            from pipecat.runner.livekit import generate_token, generate_token_with_agent
+            livekit_url, api_key, api_secret = _livekit_credentials()
 
             body = request_data.get("body", {})
             room_name = (
@@ -837,9 +823,9 @@ def _setup_unified_start_route(
                 or f"pipecat-{uuid.uuid4().hex[:8]}"
             )
             session_id = str(uuid.uuid4())
-            # Distinct identities: the bot and the caller join as separate participants.
-            agent_token = generate_token_with_agent(room_name, "Pipecat Agent", api_key, api_secret)
-            user_token = generate_token(room_name, "User", api_key, api_secret)
+            agent_token, user_token = _mint_livekit_tokens(
+                room_name, session_id, api_key, api_secret
+            )
 
             bot_module = _get_bot_module()
             runner_args = LiveKitRunnerArguments(
@@ -850,12 +836,11 @@ def _setup_unified_start_route(
                 session_id=session_id,
             )
             runner_args.cli_args = args
-            asyncio.create_task(bot_module.bot(runner_args))
+            _start_bot_session(bot_module.bot(runner_args))
 
             return StartBotResult(
                 url=livekit_url,
                 token=user_token,
-                # room=room_name,
                 sessionId=session_id,
             )
 
@@ -1405,6 +1390,50 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
             }
 
 
+def _livekit_credentials() -> tuple[str, str, str]:
+    """Return ``(url, api_key, api_secret)`` from the environment.
+
+    Raises:
+        HTTPException: 500, if any of ``LIVEKIT_URL``, ``LIVEKIT_API_KEY``, or
+            ``LIVEKIT_API_SECRET`` is not configured on the server.
+    """
+    url = os.getenv("LIVEKIT_URL")
+    api_key = os.getenv("LIVEKIT_API_KEY")
+    api_secret = os.getenv("LIVEKIT_API_SECRET")
+    if not url or not api_key or not api_secret:
+        logger.error("LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET must be set")
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET must be configured "
+                "on the server"
+            ),
+        )
+    return url, api_key, api_secret
+
+
+def _mint_livekit_tokens(
+    room_name: str, session_id: str, api_key: str, api_secret: str
+) -> tuple[str, str]:
+    """Mint distinct agent/user tokens for a session.
+
+    Identities are suffixed with the session id so concurrent sessions sharing
+    a room (e.g. a fixed ``LIVEKIT_ROOM_NAME``) don't collide — LiveKit evicts
+    the earlier connection when a new one joins with the same identity.
+
+    Returns:
+        ``(agent_token, user_token)``, for the bot and the caller respectively.
+    """
+    from pipecat.runner.livekit import generate_token, generate_token_with_agent
+
+    suffix = session_id[:8]
+    agent_token = generate_token_with_agent(
+        room_name, f"Pipecat Agent-{suffix}", api_key, api_secret
+    )
+    user_token = generate_token(room_name, f"User-{suffix}", api_key, api_secret)
+    return agent_token, user_token
+
+
 def _setup_livekit_routes(app: FastAPI, args: argparse.Namespace):
     """Set up LiveKit-specific routes."""
     if not _transport_routes_enabled("livekit"):
@@ -1416,38 +1445,29 @@ def _setup_livekit_routes(app: FastAPI, args: argparse.Namespace):
 
         Unlike Daily, LiveKit rooms are created implicitly on first join, so
         there's no room-creation API call — just a token mint per identity.
+
+        The join token is passed to the hosted client as a URL query
+        parameter, so it will land in browser history and any referrer
+        headers. Fine for this dev-only convenience route; don't reuse this
+        pattern for anything production-facing.
         """
         logger.debug("Starting bot with LiveKit transport and redirecting to LiveKit room")
 
-        from pipecat.runner.livekit import generate_token, generate_token_with_agent
-
-        livekit_url = os.getenv("LIVEKIT_URL")
-        api_key = os.getenv("LIVEKIT_API_KEY")
-        api_secret = os.getenv("LIVEKIT_API_SECRET")
-        if not livekit_url or not api_key or not api_secret:
-            logger.error("LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET must be set")
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    "LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET must be configured "
-                    "on the server"
-                ),
-            )
+        livekit_url, api_key, api_secret = _livekit_credentials()
 
         room_name = os.getenv("LIVEKIT_ROOM_NAME") or f"pipecat-{uuid.uuid4().hex[:8]}"
-        # Distinct identities: the bot and the browser join as separate participants.
-        agent_token = generate_token_with_agent(room_name, "Pipecat Agent", api_key, api_secret)
-        user_token = generate_token(room_name, "User", api_key, api_secret)
+        session_id = str(uuid.uuid4())
+        agent_token, user_token = _mint_livekit_tokens(room_name, session_id, api_key, api_secret)
 
         bot_module = _get_bot_module()
         runner_args = LiveKitRunnerArguments(
             room_name=room_name,
             url=livekit_url,
             token=agent_token,
-            session_id=str(uuid.uuid4()),
+            session_id=session_id,
         )
         runner_args.cli_args = args
-        asyncio.create_task(bot_module.bot(runner_args))
+        _start_bot_session(bot_module.bot(runner_args))
 
         return RedirectResponse(
             f"https://meet.livekit.io/custom?liveKitUrl={livekit_url}&token={user_token}"
