@@ -476,6 +476,17 @@
       "location": "pipecat/processors/frameworks/rtvi/processor.py"
     },
     {
+      "subject": "MOQRunnerArguments.serve_bind",
+      "module": "pipecat.runner.types",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "bind",
+      "message": "Use ``bind`` instead, which also covers client mode. Will be removed in 2.0.0.",
+      "location": "pipecat/runner/types.py"
+    },
+    {
       "subject": "AnthropicLLMService.InputParams",
       "module": "pipecat.services.anthropic.llm",
       "kind": "class",
@@ -3708,6 +3719,17 @@
       "replacement": "DailyParams.camera_out_send_settings",
       "message": "Use provider-specific settings instead (e.g., ``DailyParams.camera_out_send_settings``). Will be removed in 2.0.0.",
       "location": "pipecat/transports/base_transport.py"
+    },
+    {
+      "subject": "MOQParams.serve_bind",
+      "module": "pipecat.transports.moq.transport",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "bind",
+      "message": "Use ``bind`` instead, which also covers client mode. Will be removed in 2.0.0.",
+      "location": "pipecat/transports/moq/transport.py"
     },
     {
       "subject": "WebsocketServerCallbacks",

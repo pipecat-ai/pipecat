@@ -568,6 +568,19 @@ class TestMOQTransportInit(unittest.TestCase):
         relay — it isn't ignored."""
         self.assertEqual(self._bind_for(serve=False, bind="[::]:9000"), "[::]:9000")
 
+    def test_deprecated_serve_bind_still_sets_the_bind(self):
+        """Pydantic drops unknown fields, so without the alias a bot that
+        pinned the pre-1.8.0 ``serve_bind`` would silently listen on the
+        default address instead."""
+        with self.assertWarns(DeprecationWarning):
+            bind = self._bind_for(serve=True, serve_bind="[::]:9000")
+        self.assertEqual(bind, "[::]:9000")
+
+    def test_bind_wins_over_deprecated_serve_bind(self):
+        with self.assertWarns(DeprecationWarning):
+            bind = self._bind_for(serve=True, bind="[::]:1", serve_bind="[::]:2")
+        self.assertEqual(bind, "[::]:1")
+
     def test_explicit_paths_override_the_namespace_layer(self):
         """``response_path``/``request_path`` win over ``<namespace>/<id>``.
 
