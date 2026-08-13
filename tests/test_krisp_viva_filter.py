@@ -27,6 +27,9 @@ mock_krisp_audio.FrameDuration.Fd15ms = "15ms"
 mock_krisp_audio.FrameDuration.Fd20ms = "20ms"
 mock_krisp_audio.FrameDuration.Fd30ms = "30ms"
 mock_krisp_audio.FrameDuration.Fd32ms = "32ms"
+mock_krisp_audio.getVersion.return_value.major = 1
+mock_krisp_audio.getVersion.return_value.minor = 12
+mock_krisp_audio.getVersion.return_value.patch = 0
 
 # Install the mock in sys.modules before importing
 sys.modules["krisp_audio"] = mock_krisp_audio

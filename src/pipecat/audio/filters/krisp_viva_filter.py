@@ -19,6 +19,7 @@ from pipecat.audio.krisp_instance import (
     KrispVivaSDKManager,
     int_to_krisp_frame_duration,
     int_to_krisp_sample_rate,
+    krisp_sdk_uses_nanobind_bindings,
 )
 from pipecat.frames.frames import FilterControlFrame, FilterEnableFrame
 
@@ -125,7 +126,12 @@ class KrispVivaFilter(BaseAudioFilter):
             self._tts_detector = None
             self._sdk_acquired = False
             self._samples_per_frame = None
-            self._noise_suppression_level = noise_suppression_level
+            self._uses_nanobind_bindings = krisp_sdk_uses_nanobind_bindings()
+            self._noise_suppression_level = (
+                float(noise_suppression_level)
+                if self._uses_nanobind_bindings
+                else int(noise_suppression_level)
+            )
             self._frame_duration_ms = frame_duration
             self._audio_buffer = bytearray()
             self._filtering = True
@@ -327,7 +333,10 @@ class KrispVivaFilter(BaseAudioFilter):
             # Remove processed bytes from buffer, keep the remainder
             self._audio_buffer = self._audio_buffer[bytes_to_process:]
 
-            samples = np.frombuffer(audio_to_process, dtype=np.int16).copy()
+            samples = np.frombuffer(audio_to_process, dtype=np.int16)
+            if self._uses_nanobind_bindings:
+                # nanobind's ndarray caster requires writable input, unlike pybind11's.
+                samples = samples.copy()
             frames = samples.reshape(-1, self._samples_per_frame)
 
             # TTS detection phase: pass audio through until bot speech clears
