@@ -95,6 +95,8 @@ IDLE_TIMEOUT_SECS = 300
 
 CANCEL_TIMEOUT_SECS = 20.0
 
+START_TIMEOUT_SECS = 20.0
+
 
 T = TypeVar("T")
 
@@ -272,6 +274,7 @@ class PipelineWorker(BaseWorker):
         params: PipelineParams | None = None,
         rtvi_processor: RTVIProcessor | None = None,
         rtvi_observer_params: RTVIObserverParams | None = None,
+        start_timeout_secs: float = START_TIMEOUT_SECS,
         task_manager: BaseTaskManager | None = None,
         tool_resources: Any = None,
     ):
@@ -341,6 +344,10 @@ class PipelineWorker(BaseWorker):
             params: Configuration parameters for the pipeline.
             rtvi_observer_params: The RTVI observer parameter to use if RTVI is enabled.
             rtvi_processor: The RTVI processor to add if RTVI is enabled.
+            start_timeout_secs: Timeout (in seconds) to wait for the ``StartFrame``
+                to reach the end of the pipeline. A processor that blocks while
+                handling it never lets the pipeline start, so the worker is torn
+                down instead of waiting forever.
             task_manager: Optional task manager for handling asyncio tasks.
             tool_resources: Deprecated alias for ``app_resources``.
 
@@ -371,6 +378,7 @@ class PipelineWorker(BaseWorker):
         self._cancel_on_idle_timeout = cancel_on_idle_timeout
         self._cancel_runner_on_idle_timeout = cancel_runner_on_idle_timeout
         self._cancel_timeout_secs = cancel_timeout_secs
+        self._start_timeout_secs = start_timeout_secs
         self._clock = clock or SystemClock()
         self._conversation_id = conversation_id
         self._enable_tracing = enable_tracing and is_tracing_available()
@@ -993,12 +1001,28 @@ class PipelineWorker(BaseWorker):
             data.append(ProcessingMetricsData(processor=p.name, value=0.0))
         return MetricsFrame(data=data)
 
-    async def _wait_for_pipeline_start(self, frame: Frame):
-        """Wait for the specified start frame to reach the end of the pipeline."""
+    async def _wait_for_pipeline_start(self, frame: Frame) -> bool:
+        """Wait for the specified start frame to reach the end of the pipeline.
+
+        Returns:
+            Whether the pipeline started. A pipeline that doesn't start within
+            ``start_timeout_secs`` is torn down, since nothing pushed into it
+            afterwards would be processed.
+        """
         logger.debug(f"{self}: Starting. Waiting for {frame} to reach the end of the pipeline...")
-        await self._pipeline_start_event.wait()
+        try:
+            await asyncio.wait_for(
+                self._pipeline_start_event.wait(), timeout=self._start_timeout_secs
+            )
+        except TimeoutError:
+            logger.error(
+                f"{self}: timeout waiting for {frame} to reach the end of the pipeline "
+                "(being blocked somewhere?), stopping the pipeline."
+            )
+            return False
         self._pipeline_start_event.clear()
         logger.debug(f"{self}: {frame} reached the end of the pipeline, pipeline is now ready.")
+        return True
 
     async def _wait_for_pipeline_end(self, frame: Frame):
         """Wait for the specified frame to reach the end of the pipeline."""
@@ -1131,12 +1155,13 @@ class PipelineWorker(BaseWorker):
         await self._pipeline.queue_frame(start_frame)
 
         # Wait for the pipeline to be started before pushing any other frame.
-        await self._wait_for_pipeline_start(start_frame)
+        running = await self._wait_for_pipeline_start(start_frame)
 
-        if self._params.enable_metrics and self._params.send_initial_empty_metrics:
+        if running and self._params.enable_metrics and self._params.send_initial_empty_metrics:
             await self._pipeline.queue_frame(self._initial_metrics_frame())
 
-        running = True
+        # A pipeline that never started can't process anything we push into it,
+        # so skip straight to cleanup.
         cleanup_pipeline = True
         while running:
             frame = await self._push_queue.get()

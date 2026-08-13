@@ -798,6 +798,27 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
 
         assert worker.has_finished()
 
+    async def test_task_start_frame_never_reaches_sink(self):
+        class StartBlocker(FrameProcessor):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self._block = asyncio.Event()
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+
+                if isinstance(frame, StartFrame):
+                    await self._block.wait()
+
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([StartBlocker()])
+        worker = PipelineWorker(pipeline, start_timeout_secs=0.1, cancel_timeout_secs=0.1)
+
+        await asyncio.wait_for(worker.run(WorkerParams(task_manager=TaskManager())), timeout=2.0)
+
+        assert worker.has_finished()
+
     async def test_task_end_frame_blocked_by_paused_tts_service(self):
         """TTSService pauses its process queue while audio is in flight
         (pause_frame_processing=True) and is normally unpaused by a
