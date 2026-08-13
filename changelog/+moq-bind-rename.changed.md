@@ -1,0 +1,1 @@
+- Renamed `MOQParams.serve_bind` to `MOQParams.bind`, which now also sets the local source address a client-mode bot dials from. `MOQRunnerArguments.serve_bind` is renamed to match. The old name still works and warns; it will be removed in 2.0.0.

@@ -60,14 +60,15 @@ Two modes:
 import asyncio
 import re
 import time
+import warnings
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 from loguru import logger
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -290,6 +291,11 @@ class MOQParams(TransportParams):
             ``"[::]:<port>"`` from the constructor's port. In client mode
             it's the source address to dial from; unset binds an
             ephemeral port.
+        serve_bind: Serve-mode listen address.
+
+            .. deprecated:: 1.8.0
+                Use ``bind`` instead, which also covers client mode. Will be
+                removed in 2.0.0.
         serve_tls_host: Hostname to use in the generated self-signed
             certificate when ``serve_tls_cert``/``serve_tls_key`` aren't
             provided. The browser pins this cert via its SHA-256
@@ -341,6 +347,7 @@ class MOQParams(TransportParams):
     connection_timeout: float = 30.0
     serve: bool = False
     bind: str | None = None
+    serve_bind: str | None = None
     serve_tls_host: str = "localhost"
     serve_tls_cert: str | None = None
     serve_tls_key: str | None = None
@@ -349,6 +356,26 @@ class MOQParams(TransportParams):
     audio_in_max_latency_ms: int = 500
     audio_out_frame_ms: int = 20
     audio_out_max_buffer_ms: int = 25000
+
+    @model_validator(mode="before")
+    @classmethod
+    def _carry_serve_bind(cls, data: Any) -> Any:
+        """Accept the pre-1.8.0 ``serve_bind`` spelling of ``bind``.
+
+        Pydantic ignores unknown fields by default, so without this a bot
+        that pinned ``serve_bind`` would silently fall back to the default
+        listen address rather than fail.
+        """
+        if isinstance(data, dict) and data.get("serve_bind") is not None:
+            warnings.warn(
+                "`MOQParams.serve_bind` is deprecated since 1.8.0 and will be removed in "
+                "2.0.0. Use `MOQParams.bind` instead.",
+                DeprecationWarning,
+                stacklevel=4,
+            )
+            if data.get("bind") is None:
+                data["bind"] = data["serve_bind"]
+        return data
 
 
 class MOQCallbacks(BaseModel):
