@@ -611,8 +611,6 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
 
             function_calls = []
             async for chunk in self._stream_response(context):
-                # Stop TTFB metrics after the first chunk
-                await self.stop_ttfb_metrics()
                 # Gemini may send usage_metadata in multiple chunks with varying behavior:
                 # - Sometimes a single chunk, sometimes multiple chunks
                 # - Token counts may be cumulative (growing) or may change between chunks
@@ -628,6 +626,10 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
 
                 if not chunk.candidates:
                     continue
+
+                # A leading chunk can carry usage metadata and no candidates, so
+                # TTFB ends at the first chunk that holds model output.
+                await self.stop_ttfb_metrics()
 
                 for candidate in chunk.candidates:
                     if candidate.content and candidate.content.parts:

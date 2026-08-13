@@ -117,6 +117,16 @@ class FrameProcessorMetrics(BaseObject):
     async def stop_ttfb_metrics(self, *, end_time: float | None = None):
         """Stop TTFB measurement and generate metrics frame.
 
+        TTFB ends at the first output the service produces, of any kind —
+        including content a caller never sees, such as an LLM's reasoning. Events
+        that merely acknowledge the request (an HTTP response head, a stream-open
+        or keepalive event) carry no output and must not stop it, or TTFB
+        measures connection setup rather than the service's response.
+
+        Only the first call per measurement takes effect, so services can call
+        this from every branch that handles output rather than tracking which
+        arrived first.
+
         Args:
             end_time: Optional timestamp to use as the end time. If None, uses
                 the current time.
