@@ -112,6 +112,18 @@ Top-level optional fields:
     context: LLM messages the bot's context should start from. When given, the
             harness sends them before driving turns (replacing the bot's
             context); omit to leave the bot's own context untouched.
+    stop_on_failure:
+            whether the first failed turn ends the scenario (default true).
+            A failure leaves the conversation in an unknown state, so the
+            remaining turns usually just burn a timeout each. Set it false for a
+            scenario that scores every turn independently — a benchmark that
+            reports a per-turn pass rate needs all of its turns driven, not just
+            the ones before the first miss::
+
+                stop_on_failure: false
+
+            Give those turns an explicit ``within_ms``: with the 60s default, a
+            silent bot costs one full budget per remaining turn.
     user:   how user turns are delivered::
 
                 user:
@@ -389,6 +401,14 @@ class EvalScenario:
             default to avoid that between scenarios; set True to exercise the
             bot's disconnect path. Independent of ``--stop-bot``, which tears the
             bot down via ``eval-cancel`` regardless of the handler.
+        stop_on_failure: Whether the first failed turn ends the scenario
+            (default True). A failed turn leaves the conversation in an unknown
+            state, so continuing usually costs one timeout per remaining turn.
+            Set False for a scenario whose turns are scored independently, where
+            the turns after a failure are still worth driving. This governs
+            turn-to-turn progression only: within a turn, an expectation that
+            times out still ends that turn's matching, because a turn's
+            expectations share one deadline anchored at the send.
         source_path: Path the scenario was loaded from, for error messages.
     """
 
@@ -400,6 +420,7 @@ class EvalScenario:
     transcriber: dict | None = None
     user_audio: dict | None = None
     trigger_disconnect: bool = False
+    stop_on_failure: bool = True
     source_path: Path | None = None
 
     @classmethod
@@ -475,6 +496,7 @@ class EvalScenario:
             transcriber=transcriber,
             user_audio=user_audio,
             trigger_disconnect=bool(data.get("trigger_disconnect", False)),
+            stop_on_failure=bool(data.get("stop_on_failure", True)),
             source_path=path,
         )
 

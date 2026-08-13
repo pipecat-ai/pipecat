@@ -45,6 +45,10 @@ enumerate every event the bot emits). The ``within_ms`` budget for each
 expectation is measured from the most recent ``send-text`` / ``raw-audio`` / ``dtmf`` send
 (default 60s when omitted).
 
+A turn with a failed assertion ends the scenario, since the conversation is in
+an unknown state from there on. A scenario that scores each turn independently
+sets ``stop_on_failure: false`` to have every turn driven and reported.
+
 An ``llm_response`` with a content check (``text_contains`` / ``eval:``)
 aggregates: the harness accumulates the text of successive response segments
 within the turn and re-checks on each one, so an interim filler ("Let me check
@@ -512,12 +516,18 @@ class EvalSession:
                     turn_failures = await self._run_turn(turn, turn_idx)
                     failures.extend(turn_failures)
                     if turn_failures:
-                        # Fail fast: a failed turn leaves the conversation in an
-                        # unknown state, so running the rest just burns another
-                        # timeout per turn (e.g. a broken greeting turn shouldn't
-                        # cost the full budget here and again on the question).
-                        self._debug(f"turn {turn_idx} failed; stopping scenario (fail-fast)")
-                        break
+                        # By default a failed turn ends the scenario: it leaves the
+                        # conversation in an unknown state, so running the rest just
+                        # burns another timeout per turn (e.g. a broken greeting turn
+                        # shouldn't cost the full budget here and again on the
+                        # question). A scenario whose turns are scored independently
+                        # sets stop_on_failure: false and drives all of them.
+                        if self._scenario.stop_on_failure:
+                            self._debug(
+                                f"turn {turn_idx} failed; stopping scenario (stop_on_failure)"
+                            )
+                            break
+                        self._debug(f"turn {turn_idx} failed; continuing (stop_on_failure: false)")
         except Exception as e:
             # An unexpected harness-side error (a sub-pipeline failing to start
             # under load, a judge/transcriber raising mid-turn, ...) would

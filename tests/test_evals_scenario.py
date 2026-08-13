@@ -573,6 +573,22 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertEqual(s.judge, {"service": "ollama", "model": "llama3:latest"})
         self.assertEqual(s.user_audio, {"service": "kokoro", "voice": "af_heart"})
 
+    def test_stop_on_failure_defaults_true(self):
+        s = EvalScenario.load(
+            _write("name: a\nturns: [{user: hi, expect: [{event: llm_response}]}]\n")
+        )
+        self.assertTrue(s.stop_on_failure)
+
+    def test_stop_on_failure_false(self):
+        s = EvalScenario.load(
+            _write(
+                "name: a\n"
+                "stop_on_failure: false\n"
+                "turns: [{user: hi, expect: [{event: llm_response}]}]\n"
+            )
+        )
+        self.assertFalse(s.stop_on_failure)
+
 
 if __name__ == "__main__":
     unittest.main()
