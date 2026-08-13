@@ -88,8 +88,6 @@ To run locally:
   ``--moq-tls-generate localhost`` are the defaults)
 - MOQ (bot and browser both dial a relay): ``python bot.py -t moq --moq-connect
   https://cdn.moq.dev/anon``
-- MOQ (no ``/start`` — bot dials the relay at boot and waits there): ``python
-  bot.py -t moq --moq-connect https://cdn.moq.dev/anon --moq-direct``
 - Telephony: ``python bot.py -t twilio -x your_username.ngrok.io``
 - WebRTC only: ``python bot.py -t webrtc``
 - WhatsApp: ``python bot.py --whatsapp``
@@ -122,14 +120,8 @@ from pipecat.runner.moq import (
     DEFAULT_MOQ_BOT_ID,
     DEFAULT_MOQ_CLIENT_ID,
     DEFAULT_MOQ_SERVE_BIND,
-    DIRECT_MODE_PEER_WAIT_SECS,
-    DIRECT_MODE_SESSION_IDLE_SECS,
-    MOQDirectHost,
     _build_moq_client_config,
-    _client_prefix,
-    _direct_client_url,
     _new_session_namespace,
-    _session_paths,
     _validate_moq_args,
 )
 from pipecat.runner.types import (
@@ -471,19 +463,12 @@ def _print_startup_message(args: argparse.Namespace):
         if not _transport_routes_enabled("moq"):
             print(f"   → MoQ disabled ({TRANSPORT_INSTALL_HINTS['moq']})")
         else:
-            if args.moq_direct:
-                # The namespace is the whole rendezvous in direct mode, so it
-                # travels in the URL rather than a /start response.
-                print(f"   → Open: {_direct_client_url(args, _runner_url(args))}")
-            else:
-                print(f"   → Open: {_runner_url(args)}")
+            print(f"   → Open: {_runner_url(args)}")
             if args.moq_serve:
                 print(f"   → MoQ server: bot serving on {args.moq_bind} (no separate relay needed)")
             else:
                 print(f"   → Relay: {args.moq_host}:{args.moq_port}{args.moq_path}")
             print(f"   → Namespace: {args.moq_namespace or 'random per session'}")
-            if args.moq_direct:
-                print("   → Bot is dialing the relay now; it waits there for the browser")
     print()
 
 
@@ -636,7 +621,6 @@ def _configure_server_app(args: argparse.Namespace):
     _setup_telephony_routes(app, args, ws_used_tokens)
     _setup_websocket_routes(app, args, ws_used_tokens)
     _setup_unified_start_route(app, args, active_sessions)
-    _setup_moq_direct(app, args)
 
     if args.whatsapp:
         _setup_whatsapp_routes(app, args)
@@ -1037,82 +1021,6 @@ def _setup_webrtc_routes(
 
     # Add the SmallWebRTC lifespan to the app
     _add_lifespan_to_app(app, smallwebrtc_lifespan)
-
-
-def _setup_moq_direct(app: FastAPI, args: argparse.Namespace):
-    """Start MoQ bots from relay announcements rather than a client's ``/start``.
-
-    The runner watches the relay for browsers appearing under the request
-    prefix and gives each one its own bot, so a session begins whenever
-    someone opens the page and several callers can be served at once —
-    nothing has to reach the runner over HTTP to bring a bot up.
-
-    The namespace is fixed for the process (:func:`_validate_moq_args`
-    resolves it) because it has to be known in advance: it reaches the
-    browser through the URL instead of a ``/start`` response. Within it,
-    the browser mints the per-session id that separates one caller from
-    the next.
-    """
-    if args.transport != "moq" or not args.moq_direct:
-        return
-    if not _transport_routes_enabled("moq"):
-        return
-
-    def build_runner_args(session: str) -> MOQRunnerArguments:
-        response_path, request_path = _session_paths(args, session)
-        runner_args = MOQRunnerArguments(
-            host=args.moq_host,
-            port=args.moq_port,
-            path=args.moq_path,
-            namespace=args.moq_namespace,
-            participant_id=args.moq_bot_id,
-            peer_id=args.moq_client_id,
-            verify_ssl=not args.moq_tls_insecure,
-            serve=args.moq_serve,
-            bind=args.moq_bind,
-            serve_tls_host=args.moq_tls_host,
-            serve_tls_cert=args.moq_tls_cert,
-            serve_tls_key=args.moq_tls_key,
-            body={},
-            session_id=session,
-            connection_timeout=DIRECT_MODE_PEER_WAIT_SECS,
-            # The browser picked this id, so the paths are assigned rather
-            # than derived from the namespace convention.
-            response_path=response_path,
-            request_path=request_path,
-        )
-        runner_args.cli_args = args
-        # Idle means no speech in either direction — an abandoned open tab
-        # keeps publishing silent mic audio, which doesn't count — so a
-        # forgotten call ends rather than running its bot indefinitely.
-        runner_args.pipeline_idle_timeout_secs = DIRECT_MODE_SESSION_IDLE_SECS
-        return runner_args
-
-    # Surviving a dropped relay connection is a session's job, not the
-    # host's: a path that goes quiet never ends the announce iterator or
-    # raises, so a retry wrapped around it has nothing to react to.
-    # See moq-dev/moq#2609 — moq-native reconnects, but moq-ffi doesn't
-    # expose it yet. `host_idle_secs=None`: a development server runs
-    # until Ctrl-C.
-    host = MOQDirectHost(
-        lambda runner_args: bot_module.bot(runner_args),
-        relay_url=f"https://{args.moq_host}:{args.moq_port}{args.moq_path}",
-        request_prefix=_client_prefix(args),
-        runner_args_factory=build_runner_args,
-        verify_ssl=not args.moq_tls_insecure,
-        host_idle_secs=None,
-    )
-
-    @asynccontextmanager
-    async def moq_direct_lifespan(app: FastAPI):
-        watch_task = asyncio.create_task(host.run())
-        try:
-            yield
-        finally:
-            watch_task.cancel()
-
-    bot_module = _get_bot_module()
-    _add_lifespan_to_app(app, moq_direct_lifespan)
 
 
 def _add_lifespan_to_app(app: FastAPI, new_lifespan):
@@ -1792,20 +1700,7 @@ def main(parser: argparse.ArgumentParser | None = None):
         help=(
             "MOQ namespace/room. Defaults to 'pipecat' in server mode. In client "
             "mode each session gets its own random namespace instead, since the "
-            "relay is shared — set this only to pin a well-known room. Direct "
-            "mode defaults to no namespace, putting calls at the relay root; "
-            "name one to scope the bot to a room and ignore other traffic."
-        ),
-    )
-    parser.add_argument(
-        "--moq-direct",
-        action="store_true",
-        help=(
-            "Dial the relay as soon as the runner starts instead of waiting for a "
-            "client to POST /start, and pin one namespace for the whole process. "
-            "The browser is handed the relay and namespace in its URL rather than "
-            "fetching them, so nothing has to reach the runner over HTTP first. "
-            "Requires --moq-connect."
+            "relay is shared — set this only to pin a well-known room."
         ),
     )
     parser.add_argument(
