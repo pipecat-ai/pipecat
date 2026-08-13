@@ -36,7 +36,6 @@ Four areas covered:
 import argparse
 import unittest
 from unittest.mock import MagicMock, patch
-from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -222,11 +221,8 @@ fastapi = pytest.importorskip("fastapi")
 from pipecat.runner.moq import (  # noqa: E402
     _build_moq_client_config,
     _cert_hash_from_pem,
-    _client_prefix,
-    _direct_client_url,
     _hex_to_b64,
     _new_session_namespace,
-    _session_paths,
     _validate_moq_args,
 )
 
@@ -375,7 +371,6 @@ def _moq_args(**overrides) -> argparse.Namespace:
         moq_tls_insecure=False,
         moq_bot_id="response",
         moq_client_id="request",
-        moq_direct=False,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -447,82 +442,6 @@ class TestMoqNamespaceResolution(unittest.TestCase):
         for ns in minted:
             self.assertTrue(ns.startswith("pipecat-"))
             self.assertEqual(len(ns.removeprefix("pipecat-")), 16)
-
-
-class TestMoqDirectMode(unittest.TestCase):
-    """Direct mode drops the ``/start`` rendezvous, so whatever the browser
-    can't derive travels to it in a URL rather than a response body. The
-    per-call isolation comes from the session id the browser mints, which
-    leaves the namespace free to be a plain room name — or absent."""
-
-    def test_namespace_defaults_to_none(self):
-        """Unscoped calls sit at the relay root, so the client URL is just
-        the relay. The session id is what separates callers."""
-        args = _moq_args(moq_connect="https://cdn.moq.dev/anon", moq_direct=True)
-        self.assertTrue(_validate_moq_args(args))
-        self.assertEqual(args.moq_namespace, "")
-        self.assertEqual(_client_prefix(args), "request/")
-        self.assertEqual(_session_paths(args, "abc123"), ("response/abc123", "request/abc123"))
-
-    def test_explicit_namespace_still_wins(self):
-        args = _moq_args(
-            moq_connect="https://cdn.moq.dev/anon", moq_direct=True, moq_namespace="my-room"
-        )
-        self.assertTrue(_validate_moq_args(args))
-        self.assertEqual(args.moq_namespace, "my-room")
-
-    def test_serve_mode_is_rejected(self):
-        """Serve mode's browser needs the self-signed cert fingerprint, which
-        only the /start response carries."""
-        args = _moq_args(moq_direct=True)
-        self.assertFalse(_validate_moq_args(args))
-
-    def test_per_session_paths_hang_off_the_browsers_id(self):
-        args = _moq_args(
-            moq_connect="https://cdn.moq.dev/anon", moq_direct=True, moq_namespace="room"
-        )
-        self.assertTrue(_validate_moq_args(args))
-
-        response, request = _session_paths(args, "abc123")
-        self.assertEqual(response, "room/response/abc123")
-        self.assertEqual(request, "room/request/abc123")
-
-        # The request path must sit under the prefix the runner watches,
-        # or the bot would never see the client that announced it.
-        self.assertTrue(request.startswith(_client_prefix(args)))
-
-    def test_sessions_do_not_collide(self):
-        """Two browsers sharing a URL get disjoint path pairs."""
-        args = _moq_args(moq_connect="https://cdn.moq.dev/anon", moq_direct=True)
-        self.assertTrue(_validate_moq_args(args))
-        first = _session_paths(args, "alice")
-        second = _session_paths(args, "bob")
-        self.assertEqual(len(set(first) | set(second)), 4)
-
-    def test_client_url_omits_what_the_client_already_defaults_to(self):
-        """An unscoped run reduces to the relay alone."""
-        args = _moq_args(moq_connect="https://cdn.moq.dev/anon", moq_direct=True)
-        self.assertTrue(_validate_moq_args(args))
-        query = parse_qs(urlparse(_direct_client_url(args, "http://localhost:7860")).query)
-        self.assertEqual(query, {"relay": ["https://cdn.moq.dev:443/anon"]})
-
-    def test_client_url_carries_what_the_browser_cant_guess(self):
-        args = _moq_args(
-            moq_connect="https://cdn.moq.dev/anon",
-            moq_direct=True,
-            moq_namespace="room",
-            moq_bot_id="agent",
-        )
-        self.assertTrue(_validate_moq_args(args))
-        parsed = urlparse(_direct_client_url(args, "http://localhost:7860"))
-        query = parse_qs(parsed.query)
-        # Points at the UI directly: the root redirect drops the query.
-        self.assertEqual(parsed.path, "/client/")
-        self.assertEqual(query["relay"], ["https://cdn.moq.dev:443/anon"])
-        self.assertEqual(query["ns"], ["room"])
-        self.assertEqual(query["botId"], ["agent"])
-        # Left at its default, so the client supplies it.
-        self.assertNotIn("clientId", query)
 
     def test_minted_namespace_is_a_single_path_segment(self):
         """The namespace is joined into ``<namespace>/<id>``; a stray
@@ -759,61 +678,3 @@ class TestIsNormalClose(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-# ----------------------------------------------------------------------
-# MOQDirectHost.from_env
-# ----------------------------------------------------------------------
-
-
-class TestMOQDirectHostFromEnv(unittest.TestCase):
-    """Env-var construction: per-session paths, guards, and TLS flag."""
-
-    ENV = {
-        "MOQ_RELAY_URL": "https://relay.example.com/anon",
-        "MOQ_NAMESPACE": "demo",
-    }
-
-    def _host(self, extra=None):
-        from pipecat.runner.moq import MOQDirectHost
-
-        env = dict(self.ENV, **(extra or {}))
-        with patch.dict("os.environ", env, clear=False):
-            return MOQDirectHost.from_env(lambda args: None)
-
-    def test_watches_namespaced_request_prefix(self):
-        host = self._host()
-        self.assertEqual(host._request_prefix, "demo/request/")
-
-    def test_factory_assigns_both_paths_off_the_session_id(self):
-        host = self._host()
-        args = host._runner_args_factory("abc123")
-        self.assertEqual(args.response_path, "demo/response/abc123")
-        self.assertEqual(args.request_path, "demo/request/abc123")
-        self.assertEqual(args.session_id, "abc123")
-        self.assertFalse(args.serve)
-
-    def test_empty_namespace_puts_calls_at_the_relay_root(self):
-        host = self._host({"MOQ_NAMESPACE": ""})
-        self.assertEqual(host._request_prefix, "request/")
-        args = host._runner_args_factory("abc")
-        self.assertEqual(args.response_path, "response/abc")
-
-    def test_session_guards_default_on_and_zero_disables(self):
-        args = self._host()._runner_args_factory("s")
-        self.assertEqual(args.pipeline_idle_timeout_secs, 60.0)
-        self.assertEqual(args.connection_timeout, 60.0)
-        self.assertFalse(args.handle_sigint)
-
-        disabled = self._host({"MOQ_SESSION_IDLE_SECS": "0"})._runner_args_factory("s")
-        self.assertIsNone(disabled.pipeline_idle_timeout_secs)
-
-    def test_host_idle_defaults_on_and_zero_disables(self):
-        self.assertEqual(self._host()._host_idle_secs, 60.0)
-        self.assertIsNone(self._host({"MOQ_HOST_IDLE_SECS": "0"})._host_idle_secs)
-
-    def test_tls_insecure_flag_disables_verification(self):
-        self.assertTrue(self._host()._verify_ssl)
-        self.assertFalse(self._host({"MOQ_TLS_INSECURE": "1"})._verify_ssl)
-        args = self._host({"MOQ_TLS_INSECURE": "1"})._runner_args_factory("s")
-        self.assertFalse(args.verify_ssl)
