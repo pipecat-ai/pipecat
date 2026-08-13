@@ -531,9 +531,9 @@ class MOQTransportClient:
     def open_audio_track(self, sample_rate: int):
         """Open the bot's audio track via ``publish_audio``.
 
-        Called by :class:`MOQOutputTransport.start` once it knows the
-        pipeline's output sample rate. No-op if the track is already
-        open or audio output is disabled.
+        Called by :meth:`MOQOutputTransport.setup` with the pipeline's
+        output sample rate. No-op if the track is already open or audio
+        output is disabled.
         """
         if self._audio_out is not None or not self._params.audio_out_enabled:
             return
@@ -1225,6 +1225,12 @@ class MOQOutputTransport(BaseOutputTransport):
         """
         await super().setup(setup)
         await self._client.setup(setup)
+        # Open the publish_audio track before connecting, so the broadcast
+        # carries its audio track by the time _run() publishes it to the origin.
+        self._client.open_audio_track(self.sample_rate)
+        logger.debug(
+            f"MOQ output: sample_rate={self.sample_rate}, chunk_size={self.audio_chunk_size}"
+        )
         self._client.connect()
 
     async def start(self, frame: StartFrame):
@@ -1234,15 +1240,6 @@ class MOQOutputTransport(BaseOutputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        # Open the publish_audio track now that we know the pipeline's
-        # output sample rate. The producer side of the broadcast was
-        # created in MOQTransportClient.__init__, so this call is
-        # synchronous — no race with _run()'s async bring-up to lose
-        # initial audio frames.
-        self._client.open_audio_track(self.sample_rate)
-        logger.debug(
-            f"MOQ output: sample_rate={self.sample_rate}, chunk_size={self.audio_chunk_size}"
-        )
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
