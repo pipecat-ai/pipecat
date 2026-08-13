@@ -217,6 +217,16 @@ class PipelineWorker(BaseWorker):
           Use this event for cleanup, logging, or post-processing tasks. Users can inspect
           the frame if they need to handle specific cases.
 
+    - on_pipeline_timeout: Called when a frame the worker was waiting on never
+          reached the end of the pipeline, meaning a processor is blocked. Inspect
+          the frame to tell the cases apart:
+
+              - StartFrame: the pipeline never started and is being torn down
+              - CancelFrame: the pipeline was cancelled but did not drain
+
+          There is no EndFrame case: ending flushes whatever is queued, so the
+          worker waits for it however long that takes.
+
     - on_pipeline_error: Called when an error occurs with ErrorFrame. Handler can read
           ``frame.processor.is_usable`` to distinguish between errors that end a
           processor's usability from those that don't.
@@ -228,7 +238,7 @@ class PipelineWorker(BaseWorker):
             ...
 
         @worker.event_handler("on_heartbeat_timeout")
-        async def on_heartbeat_timeout(worker):
+        async def on_pipeline_heartbeat_timeout(worker):
             ...
 
         @worker.event_handler("on_idle_timeout")
@@ -241,6 +251,10 @@ class PipelineWorker(BaseWorker):
 
         @worker.event_handler("on_pipeline_finished")
         async def on_pipeline_finished(worker, frame):
+            ...
+
+        @worker.event_handler("on_pipeline_timeout")
+        async def on_pipeline_timeout(worker, frame):
             ...
 
         @worker.event_handler("on_pipeline_error")
@@ -539,6 +553,7 @@ class PipelineWorker(BaseWorker):
         self._register_event_handler("on_idle_timeout")
         self._register_event_handler("on_pipeline_started")
         self._register_event_handler("on_pipeline_finished")
+        self._register_event_handler("on_pipeline_timeout")
         self._register_event_handler("on_pipeline_error")
 
         # Bridge pipeline lifecycle to the BaseWorker lifecycle so the bus
@@ -1019,6 +1034,7 @@ class PipelineWorker(BaseWorker):
                 f"{self}: timeout waiting for {frame} to reach the end of the pipeline "
                 "(being blocked somewhere?), stopping the pipeline."
             )
+            await self._call_event_handler("on_pipeline_timeout", frame)
             return False
         self._pipeline_start_event.clear()
         logger.debug(f"{self}: {frame} reached the end of the pipeline, pipeline is now ready.")
@@ -1037,6 +1053,7 @@ class PipelineWorker(BaseWorker):
                 logger.warning(
                     f"{self}: timeout waiting for {frame} to reach the end of the pipeline (being blocked somewhere?)."
                 )
+                await self._call_event_handler("on_pipeline_timeout", frame)
             finally:
                 await self._call_event_handler("on_pipeline_finished", frame)
 
@@ -1045,6 +1062,9 @@ class PipelineWorker(BaseWorker):
         if isinstance(frame, CancelFrame):
             await wait_for_cancel()
         else:
+            # Ending flushes what is queued, so cutting the wait short would
+            # drop the audio the EndFrame exists to play out. A processor that
+            # could hold it up watches for that itself.
             await self._pipeline_end_event.wait()
             logger.debug(f"{self}: {frame} reached the end of the pipeline, pipeline is closing.")
 

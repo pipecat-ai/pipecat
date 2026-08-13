@@ -791,12 +791,23 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
         pipeline = Pipeline([StartBlocker(start_received=start_received)])
         worker = PipelineWorker(pipeline, cancel_timeout_secs=0.1)
 
+        timed_out = []
+
+        @worker.event_handler("on_pipeline_timeout")
+        async def on_pipeline_timeout(_worker, frame):
+            timed_out.append(frame)
+
         run_task = asyncio.create_task(worker.run(WorkerParams(task_manager=TaskManager())))
         await start_received.wait()
         await worker.cancel()
         await asyncio.wait_for(run_task, timeout=1.0)
 
         assert worker.has_finished()
+
+        # The blocked processor never lets the CancelFrame drain, so the worker
+        # gives up waiting for it and reports the timeout.
+        assert len(timed_out) == 1
+        assert isinstance(timed_out[0], CancelFrame)
 
     async def test_task_start_frame_never_reaches_sink(self):
         class StartBlocker(FrameProcessor):
@@ -815,9 +826,19 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
         pipeline = Pipeline([StartBlocker()])
         worker = PipelineWorker(pipeline, start_timeout_secs=0.1, cancel_timeout_secs=0.1)
 
+        timed_out = []
+
+        @worker.event_handler("on_pipeline_timeout")
+        async def on_pipeline_timeout(_worker, frame):
+            timed_out.append(frame)
+
         await asyncio.wait_for(worker.run(WorkerParams(task_manager=TaskManager())), timeout=2.0)
 
         assert worker.has_finished()
+
+        # Nothing else tells the application its pipeline never came up.
+        assert len(timed_out) == 1
+        assert isinstance(timed_out[0], StartFrame)
 
     async def test_task_end_frame_blocked_by_paused_tts_service(self):
         """TTSService pauses its process queue while audio is in flight
