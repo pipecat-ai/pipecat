@@ -18,7 +18,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.sarvam._sdk import sdk_headers
-from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 
 @dataclass
@@ -146,7 +146,7 @@ class SarvamLLMService(OpenAILLMService):
         adapter = self.get_llm_adapter()
         params_from_context = adapter.get_llm_invocation_params(
             context,
-            system_instruction=self._settings.system_instruction,
+            system_instruction=assert_given(self._settings.system_instruction),
             convert_developer_to_user=not self.supports_developer_role,
         )
 
@@ -171,7 +171,9 @@ class SarvamLLMService(OpenAILLMService):
         another service at runtime.
         """
         adapter = self.get_llm_adapter()
-        effective_instruction = system_instruction or self._settings.system_instruction
+        effective_instruction = system_instruction or assert_given(
+            self._settings.system_instruction
+        )
         params_from_context = adapter.get_llm_invocation_params(
             context,
             system_instruction=effective_instruction,
