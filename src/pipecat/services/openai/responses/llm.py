@@ -1099,6 +1099,10 @@ class OpenAIResponsesLLMService(
                 await self.stop_ttfb_metrics()
                 item = event.get("item", {})
                 if item.get("type") == "function_call":
+                    # A turn that only calls tools produces no answer text, so the
+                    # call itself is what the caller gets and TTFAT ends here
+                    # rather than going unmeasured.
+                    await self.stop_ttfat_metrics()
                     item_id = item.get("id", "")
                     function_calls[item_id] = {
                         "name": item.get("name", ""),
@@ -1330,6 +1334,10 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                     await self.stop_ttfb_metrics()
                     item = event.item
                     if isinstance(item, ResponseFunctionToolCall):
+                        # A turn that only calls tools produces no answer text, so
+                        # the call itself is what the caller gets and TTFAT ends
+                        # here rather than going unmeasured.
+                        await self.stop_ttfat_metrics()
                         item_id = item.id or ""
                         function_calls[item_id] = {
                             "name": item.name,

@@ -507,6 +507,11 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                         continue
 
                     if chunk.choices[0].delta.tool_calls:
+                        # A turn that only calls tools produces no answer text, so
+                        # the call itself is what the caller gets and TTFAT ends
+                        # here rather than going unmeasured.
+                        await self.stop_ttfat_metrics()
+
                         # We're streaming the LLM response to enable the fastest response times.
                         # For text, we just yield each chunk as we receive it and count on consumers
                         # to do whatever coalescing they need (eg. to pass full sentences to TTS)
