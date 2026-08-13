@@ -43,6 +43,7 @@ from pipecat.transports.daily.transport import (
     DailyTransportClient,
 )
 from pipecat.transports.lemonslice.api import LemonSliceApi
+from pipecat.utils.shared import acquires, releases
 
 
 class LemonSliceNewSessionRequest(BaseModel):
@@ -185,15 +186,13 @@ class LemonSliceTransportClient:
         self._control_url = response["control_url"]
         return response["room_url"]
 
+    @acquires("client")
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the client and initialize the conversation.
 
         Args:
             setup: The frame processor setup configuration.
         """
-        if self._session_id is not None:
-            logger.debug(f"Session ID already defined: {self._session_id}")
-            return
         try:
             room_url = await self._initialize()
             daily_callbacks = DailyCallbacks(
@@ -242,6 +241,7 @@ class LemonSliceTransportClient:
             await self._end_session()
             raise
 
+    @releases("client")
     async def cleanup(self):
         """Cleanup client resources."""
         try:
@@ -290,7 +290,6 @@ class LemonSliceTransportClient:
         if not self._daily_transport_client:
             return
 
-        await self._daily_transport_client.start(frame)
         await self._daily_transport_client.join()
 
     async def stop(self):
