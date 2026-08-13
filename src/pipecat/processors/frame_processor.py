@@ -610,6 +610,13 @@ class FrameProcessor(BaseObject):
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the processor with required components.
 
+        This is where a processor connects and does its other slow start-up
+        work, so that the pipeline pays for the slowest processor rather than
+        all of them: a pipeline sets its processors up concurrently, so this
+        runs alongside every other processor's. A resource shared with another
+        processor therefore needs guarding, which
+        :func:`~pipecat.utils.shared.acquires` does.
+
         Args:
             setup: Configuration object containing setup parameters.
         """
@@ -624,7 +631,9 @@ class FrameProcessor(BaseObject):
 
         This base implementation cancels only the processor's internal
         input/process tasks; tasks created via :meth:`create_task` are released
-        by an override.
+        by an override. Like :meth:`setup`, this runs concurrently with every
+        other processor's, so a resource shared with another processor is
+        released with :func:`~pipecat.utils.shared.releases`.
         """
         await super().cleanup()
         await self.__cancel_pause_watcher()
