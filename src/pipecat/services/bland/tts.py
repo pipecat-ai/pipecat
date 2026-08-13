@@ -18,6 +18,7 @@ from typing import Any
 
 import aiohttp
 from loguru import logger
+from websockets.exceptions import ConnectionClosed
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -274,12 +275,20 @@ class BlandTTSService(WebsocketTTSService):
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
-    async def _disconnect_websocket(self):
+    async def _close_socket(self):
+        """Settle and close the socket, leaving pipeline state untouched.
+
+        Split from ``_disconnect_websocket`` so a mid-turn reconnect can replace
+        the transport without destroying the audio context of the turn it is about
+        to resume.
+        """
         websocket = self._websocket
         try:
-            await self.stop_all_metrics()
-
-            if websocket:
+            # Only a live socket can be settled. Bland reaps an idle session after
+            # 60s and closes it itself, and teardown runs after that — sending
+            # `close` down a corpse raises, and reporting that as a pipeline error
+            # turns routine housekeeping into an ErrorFrame the app has to explain.
+            if websocket and websocket.state is State.OPEN:
                 logger.debug("Disconnecting from Bland")
                 # `done` is sent only after the server settles outstanding usage.
                 # The receive task has already stopped, so consume it here before
@@ -291,6 +300,10 @@ class BlandTTSService(WebsocketTTSService):
                             message = json.loads(raw)
                             if message.get("type") == "done":
                                 break
+        except (TimeoutError, ConnectionClosed) as e:
+            # A settle that does not complete costs nothing here: the server bills
+            # on disconnect regardless. Worth a log, not an error frame.
+            logger.debug(f"{self}: close handshake did not complete ({type(e).__name__}: {e})")
         except Exception as e:
             logger.error(f"{self} exception: {e}")
             await self.push_error_frame(ErrorFrame(error=f"{self} error: {e}"))
@@ -300,11 +313,15 @@ class BlandTTSService(WebsocketTTSService):
                     await websocket.close()
                 except Exception as e:
                     logger.debug(f"{self} failed to close Bland websocket: {e}")
-            await self.remove_active_audio_context()
             self._utterance_context_id = None
             self._sent_context_id = None
             self._websocket = None
-            await self._call_event_handler("on_disconnected")
+
+    async def _disconnect_websocket(self):
+        await self.stop_all_metrics()
+        await self._close_socket()
+        await self.remove_active_audio_context()
+        await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
         if self._websocket:
@@ -406,13 +423,24 @@ class BlandTTSService(WebsocketTTSService):
                     )
                     await self.remove_audio_context(context_id)
                 elif reason == "failed":
-                    await self.push_error(error_msg=f"{self} turn {context_id} failed")
+                    # The server sends the detail as an `error` frame just before
+                    # this terminal, and that branch abandons the turn — so an
+                    # already-abandoned context has been reported and does not need
+                    # a second, vaguer frame. Report only if nothing did.
+                    if self._abandoned_context_id != context_id:
+                        await self.push_error(error_msg=f"{self} turn {context_id} failed")
+                    self._abandon_turn(context_id)
                     await self.append_to_audio_context(
                         context_id, TTSStoppedFrame(context_id=context_id)
                     )
                     await self.remove_audio_context(context_id)
                 else:
                     logger.trace(f"{self}: turn {context_id} ended as {reason}")
+                    # Preempted or cancelled: over for good either way. Without
+                    # this the turn's remaining deltas keep being sent, and the
+                    # server admits and BILLS a fresh turn under the same
+                    # context_id, speaking a sentence tail nobody asked for.
+                    self._abandon_turn(context_id)
                     # An explicit Pipecat interruption normally removed this
                     # context already. A server-side preemption can also arrive
                     # first, so retain the guard and close whichever side still
@@ -426,10 +454,14 @@ class BlandTTSService(WebsocketTTSService):
                 await self.push_error(
                     error_msg=f"{self} error {msg.get('code')}: {msg.get('message', msg)}"
                 )
-                # Turn admission happens on the first `speak`. If it is refused,
-                # Bland sends an error but never creates the turn, so there is no
-                # `utterance_end` to release Pipecat's pre-created audio context.
-                if msg.get("code") in {"insufficient_credits", "rate_limited"} and context_id:
+                # Every error carrying a context_id ends that turn, in one of two
+                # shapes. An admission refusal — turn admission happens on the
+                # first `speak` — never creates the turn, so no `utterance_end`
+                # arrives to release Pipecat's pre-created audio context; that is
+                # released here. A mid-turn rejection such as an oversized pause
+                # marker is followed by `utterance_end(failed)`. Abandoning covers
+                # both: either way the remaining deltas must stop.
+                if context_id:
                     self._abandon_turn(context_id)
                     if self.audio_context_available(context_id):
                         await self.append_to_audio_context(
@@ -461,15 +493,20 @@ class BlandTTSService(WebsocketTTSService):
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
                 # Bland ends a session after 60s without a client message, which a
-                # conversational gap reaches easily. Cycle rather than reconnect:
-                # after a server close the receive task has finished but is still
-                # set, so a plain _connect() would not restart it.
+                # conversational gap reaches easily. Cycle the socket rather than
+                # calling `_disconnect()`: that removes the active audio context —
+                # the context of the very turn this call is about to send. The
+                # receive task has finished but is still set after a server close,
+                # so it has to be cleared or `_connect()` will not restart it.
                 #
                 # A turn the socket died under is abandoned by the receive loop
                 # rather than here: the base class reconnects the moment that loop
                 # exits, so by the time the next delta arrives the socket is healthy
                 # again and this branch cannot see the failure.
-                await self._disconnect()
+                if self._receive_task:
+                    await self.cancel_task(self._receive_task)
+                    self._receive_task = None
+                await self._close_socket()
                 await self._connect()
 
             await self._get_websocket().send(

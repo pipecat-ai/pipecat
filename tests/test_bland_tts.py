@@ -733,10 +733,6 @@ async def test_bland_http_tts_non_json_error_response(aiohttp_client):
     assert "502" in errors[0].error
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 # --- turns that cannot finish --------------------------------------------------------
 
 
@@ -868,3 +864,182 @@ async def test_bland_tts_drops_a_turn_whose_socket_died_midway():
     assert later_speaks == []
     errors = [f for f in down + up if isinstance(f, ErrorFrame)]
     assert any("mid-turn" in f.error for f in errors)
+
+
+# --- a turn the server has ended ------------------------------------------------------
+
+
+def _failing_turn_server(captured: dict, *, send_error_first: bool = True):
+    """Ends the first turn as `failed`, the way an oversized pause marker does."""
+
+    async def handler(ws):
+        try:
+            async for raw in ws:
+                msg = json.loads(raw)
+                captured["messages"].append(msg)
+                if msg["type"] == "init":
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "ready",
+                                "session_id": "s1",
+                                "encoding": "pcm_s16le",
+                                "sample_rate": msg.get("audio", {}).get("sample_rate", 48000),
+                            }
+                        )
+                    )
+                elif msg["type"] == "speak":
+                    context_id = msg["context_id"]
+                    if context_id in captured.setdefault("failed", set()):
+                        continue
+                    captured["failed"].add(context_id)
+                    await ws.send(json.dumps({"type": "utterance_start", "context_id": context_id}))
+                    if send_error_first:
+                        await ws.send(
+                            json.dumps(
+                                {
+                                    "type": "error",
+                                    "context_id": context_id,
+                                    "code": "invalid_request",
+                                    "message": "Pause marker `<|30|>` exceeds the maximum.",
+                                }
+                            )
+                        )
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "utterance_end",
+                                "context_id": context_id,
+                                "reason": "failed",
+                                "frames": 0,
+                                "duration_ms": 1,
+                            }
+                        )
+                    )
+                elif msg["type"] == "close":
+                    await ws.send(json.dumps({"type": "done", "session_id": "s1"}))
+                    return
+        except websockets.ConnectionClosed:
+            pass
+
+    return handler
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_stops_feeding_a_failed_turn():
+    """A failed turn must not be fed its remaining deltas.
+
+    The server admits a turn on its first `speak`, so a delta arriving after the
+    terminal opens — and bills — a second turn under the same context_id, which
+    then speaks the tail of a sentence on its own. The later deltas are driven
+    directly here: the test pipeline stops feeding a turn once its audio context
+    is gone, so it cannot reach the guard that matters in a live session.
+    """
+    captured: dict = {"messages": []}
+
+    async with serve(_failing_turn_server(captured), "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+        tts = BlandTTSService(
+            api_key="test-key", url=f"ws://{host}:{port}/v2/tts/ws", sample_rate=24000
+        )
+        await run_test(
+            tts, frames_to_send=[TTSSpeakFrame(text="Hold on <|30|>"), SleepFrame(sleep=0.3)]
+        )
+
+        spoken = _of_type(captured, "speak")
+        assert len(spoken) == 1, spoken
+        async for _ in tts.run_tts(" there.", spoken[0]["context_id"]):
+            pass
+
+    assert _of_type(captured, "speak") == spoken
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_reports_a_failed_turn_once():
+    """The `error` frame carries the detail; the terminal must not add a vaguer one."""
+    captured: dict = {"messages": []}
+
+    async with serve(_failing_turn_server(captured), "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+        tts = BlandTTSService(
+            api_key="test-key", url=f"ws://{host}:{port}/v2/tts/ws", sample_rate=24000
+        )
+        down, up = await run_test(
+            tts,
+            frames_to_send=[TTSSpeakFrame(text="Hold on <|30|> there."), SleepFrame(sleep=0.3)],
+        )
+
+    errors = [f for f in down + up if isinstance(f, ErrorFrame)]
+    assert len(errors) == 1, [f.error for f in errors]
+    assert "invalid_request" in errors[0].error
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_reports_a_failed_turn_with_no_error_frame():
+    """A bare `failed` terminal still has to surface something."""
+    captured: dict = {"messages": []}
+
+    async with serve(
+        _failing_turn_server(captured, send_error_first=False), "127.0.0.1", 0
+    ) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+        tts = BlandTTSService(
+            api_key="test-key", url=f"ws://{host}:{port}/v2/tts/ws", sample_rate=24000
+        )
+        down, up = await run_test(
+            tts, frames_to_send=[TTSSpeakFrame(text="Hi."), SleepFrame(sleep=0.3)]
+        )
+
+    errors = [f for f in down + up if isinstance(f, ErrorFrame)]
+    assert len(errors) == 1
+    assert "failed" in errors[0].error
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_idle_close_is_not_a_pipeline_error():
+    """Bland reaps an idle session itself; tearing down after that is routine."""
+    captured: dict = {"messages": []}
+
+    async def handler(ws):
+        async for raw in ws:
+            captured["messages"].append(json.loads(raw))
+            message = json.loads(raw)
+            if message["type"] == "init":
+                await ws.send(
+                    json.dumps(
+                        {
+                            "type": "ready",
+                            "session_id": "s1",
+                            "encoding": "pcm_s16le",
+                            "sample_rate": message.get("audio", {}).get("sample_rate", 48000),
+                        }
+                    )
+                )
+                # Reap it the way the 60s idle timeout does.
+                await ws.send(
+                    json.dumps(
+                        {
+                            "type": "error",
+                            "code": "idle_timeout",
+                            "message": "Session idle for 60s.",
+                        }
+                    )
+                )
+                await ws.close(code=1011, reason="idle")
+                return
+
+    async with serve(handler, "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+        tts = BlandTTSService(
+            api_key="test-key", url=f"ws://{host}:{port}/v2/tts/ws", sample_rate=24000
+        )
+        down, up = await run_test(tts, frames_to_send=[SleepFrame(sleep=0.4)])
+
+    # The server's own idle_timeout error is legitimate; teardown must not add a
+    # second frame complaining that it could not send `close` down a dead socket.
+    errors = [f.error for f in down + up if isinstance(f, ErrorFrame)]
+    assert not [e for e in errors if "error:" in e and "idle_timeout" not in e], errors
+
+
+if __name__ == "__main__":
+    unittest.main()
