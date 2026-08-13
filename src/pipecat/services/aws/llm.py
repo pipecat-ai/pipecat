@@ -539,8 +539,6 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                 # Call AWS Bedrock with streaming
                 response = await self._create_converse_stream(client, request_params)
 
-                await self.stop_ttfb_metrics()
-
                 # Process the streaming response. Bedrock emits each tool call as
                 # its own content block, identified by contentBlockIndex, so we key
                 # accumulators by index to capture parallel tool calls instead of
@@ -551,6 +549,11 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                 function_calls = []
 
                 async for event in response["stream"]:
+                    # The events that open the stream (messageStart) carry no
+                    # model output, so TTFB ends at the first content block.
+                    if "contentBlockStart" in event or "contentBlockDelta" in event:
+                        await self.stop_ttfb_metrics()
+
                     # Handle text content
                     if "contentBlockDelta" in event:
                         block = event["contentBlockDelta"]
