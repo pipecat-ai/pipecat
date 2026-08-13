@@ -129,6 +129,12 @@ class BaseOutputTransport(FrameProcessor):
         await super().setup(setup)
         self._sample_rate = self._params.audio_out_sample_rate or setup.audio_out_sample_rate
 
+        # We will write 10ms*CHUNKS of audio at a time (where CHUNKS is the
+        # `audio_out_10ms_chunks` parameter). If we receive long audio frames we
+        # will chunk them. This will help with interruption handling.
+        audio_bytes_10ms = int(self._sample_rate / 100) * self._params.audio_out_channels * 2
+        self._audio_chunk_size = audio_bytes_10ms * self._params.audio_out_10ms_chunks
+
     async def cleanup(self):
         """Release output transport resources at teardown."""
         await super().cleanup()
@@ -136,16 +142,15 @@ class BaseOutputTransport(FrameProcessor):
             await sender.cleanup()
 
     async def start(self, frame: StartFrame):
-        """Start the output transport and initialize components.
+        """Start the output transport.
+
+        Base hook for subclasses, which reach it through ``super()``. The
+        transport's own audio configuration is resolved in :meth:`setup`.
 
         Args:
             frame: The start frame containing initialization parameters.
         """
-        # We will write 10ms*CHUNKS of audio at a time (where CHUNKS is the
-        # `audio_out_10ms_chunks` parameter). If we receive long audio frames we
-        # will chunk them. This will help with interruption handling.
-        audio_bytes_10ms = int(self._sample_rate / 100) * self._params.audio_out_channels * 2
-        self._audio_chunk_size = audio_bytes_10ms * self._params.audio_out_10ms_chunks
+        pass
 
     async def stop(self, frame: EndFrame):
         """Stop the output transport and cleanup resources.
