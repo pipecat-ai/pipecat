@@ -43,6 +43,7 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection, SmallWebRTCTrack
+from pipecat.utils.shared import acquires, releases
 
 try:
     from aiortc import VideoStreamTrack
@@ -236,7 +237,6 @@ class SmallWebRTCClient:
         self._audio_in_channels = 0
         self._in_sample_rate = 0
         self._out_sample_rate = 0
-        self._leave_counter = 0
 
         # Audio resampler - will be configured during setup with target sample rate/layout
         self._audio_in_resampler = None
@@ -482,12 +482,12 @@ class SmallWebRTCClient:
         self._in_sample_rate = _params.audio_in_sample_rate or setup.audio_in_sample_rate
         self._out_sample_rate = _params.audio_out_sample_rate or setup.audio_out_sample_rate
         self._params = _params
-        self._leave_counter += 1
         self._audio_in_layout = "stereo" if self._audio_in_channels == 2 else "mono"
         self._audio_in_resampler = AudioResampler(
             "s16", self._audio_in_layout, self._in_sample_rate
         )
 
+    @acquires("connection")
     async def connect(self):
         """Establish the WebRTC connection."""
         if self._webrtc_connection.is_connected():
@@ -497,12 +497,9 @@ class SmallWebRTCClient:
         logger.info("Connecting to Small WebRTC")
         await self._webrtc_connection.connect()
 
+    @releases("connection")
     async def disconnect(self):
         """Disconnect from the WebRTC peer."""
-        self._leave_counter -= 1
-        if self._leave_counter > 0:
-            return
-
         if self.is_connected and not self.is_closing:
             logger.info("Disconnecting to Small WebRTC")
             self._closing = True
