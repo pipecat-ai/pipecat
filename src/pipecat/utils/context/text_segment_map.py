@@ -488,10 +488,16 @@ class TextSegmentMap:
         if hop is not None:
             return hop
 
-        # Strategy 3: markup-stripped match.
+        # Strategy 3: markup-stripped match. Whitespace left behind by a stripped tag is
+        # skipped: an unspoken directive (e.g. `<break time="80ms"/> thank`) leaves the
+        # cleaned text starting with the space that followed the tag, which no provider
+        # repeats in its word token. The skipped whitespace is counted back in so the raw
+        # offset still lands just past the matched word.
         clean_word = strip_markup(remaining_word)
-        if clean_word and strip_markup(stripped).startswith(clean_word):
-            raw_len = _raw_len_for_clean_chars(stripped, len(clean_word))
+        clean_segment = strip_markup(stripped)
+        clean_lead_ws = len(clean_segment) - len(clean_segment.lstrip())
+        if clean_word and clean_segment[clean_lead_ws:].startswith(clean_word):
+            raw_len = _raw_len_for_clean_chars(stripped, clean_lead_ws + len(clean_word))
             return _Hop(_HopKind.PLACED, seg_chars=lead_ws + raw_len)
 
         # Nothing spoken left here: drain so the word can try the next segment.

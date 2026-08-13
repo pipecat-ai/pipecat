@@ -491,3 +491,50 @@ class TestClassifyHopCaseFoldRequiresWordBoundary(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTextSegmentMapUnspokenControlTag(unittest.TestCase):
+    """A control tag the provider consumes without speaking (e.g. Cartesia's
+    <break time="..."/>, <speed ratio="..."/>, <emotion value="..."/>) emits no
+    word-timestamp of its own, so nothing ever consumes its characters. The word
+    that follows arrives without the whitespace that trailed the tag, so the
+    markup-stripped match has to skip that whitespace or the segment stalls on the
+    tag and every word of it is lost.
+    """
+
+    def _consume(self, text: str, words: list[str]) -> tuple[str | None, str]:
+        """Feed words in order; return the first word that did not match and the text covered."""
+        smap = TextSegmentMap(text, text)
+        for word in words:
+            if not smap.word_belongs_current_segment(word):
+                return word, text[: smap.user_facing_pos]
+            smap.advance_word(word)
+        return None, text[: smap.user_facing_pos]
+
+    def test_mid_sentence_break_tag_does_not_stall(self):
+        text = 'Hi,<break time="80ms"/> thank you for calling.'
+        stalled, covered = self._consume(text, ["Hi,", "thank", "you", "for", "calling."])
+        self.assertIsNone(stalled)
+        self.assertEqual(covered, text)
+
+    def test_leading_speed_tag_does_not_stall(self):
+        text = '<speed ratio="0.9"/> That is really kind of you.'
+        stalled, covered = self._consume(text, ["That", "is", "really", "kind", "of", "you."])
+        self.assertIsNone(stalled)
+        self.assertEqual(covered, text)
+
+    def test_inter_sentence_emotion_tag_does_not_stall(self):
+        text = 'That is kind. <emotion value="happy"/> Who is it for?'
+        stalled, covered = self._consume(text, ["That", "is", "kind.", "Who", "is", "it", "for?"])
+        self.assertIsNone(stalled)
+        self.assertEqual(covered, text)
+
+    def test_spoken_tagged_span_still_matches_verbatim(self):
+        # The provider returns a spell span as one token carrying its tags; that path must
+        # keep working alongside the unspoken-tag skip.
+        text = "Your code is <spell>0364</spell>, got it?"
+        stalled, covered = self._consume(
+            text, ["Your", "code", "is", "<spell>0364</spell>,", "got", "it?"]
+        )
+        self.assertIsNone(stalled)
+        self.assertEqual(covered, text)
