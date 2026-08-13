@@ -133,50 +133,53 @@ class FrameProcessorSetup:
 
 
 class FrameProcessorQueue(asyncio.PriorityQueue):
-    """A priority queue for systems frames and other frames.
+    """A priority queue for the frames arriving at a frame processor.
 
-    This is a specialized queue for frame processors that separates and
-    prioritizes system frames over other frames. It ensures that `SystemFrame`
-    objects are processed before any other frames by using a priority queue.
+    Frames are dequeued in three tiers: the `StartFrame` first, then
+    `SystemFrame`, then data and control frames. Frames of the same tier keep
+    their arrival order.
 
     """
 
-    HIGH_PRIORITY = 1
-    LOW_PRIORITY = 2
+    START_PRIORITY = 1
+    SYSTEM_PRIORITY = 10
+    DEFAULT_PRIORITY = 20
 
     def __init__(self):
         """Initialize the FrameProcessorQueue."""
         super().__init__()
-        self.__high_counter = 0
-        self.__low_counter = 0
+        # Counts every frame enqueued, which keeps frames of the same tier in
+        # arrival order and stops the queue from ever having to compare frames.
+        self.__counter = 0
 
     async def put(self, item: tuple[Frame, FrameDirection, FrameCallback | None]):
         """Put an item into the priority queue.
 
-        System frames (`SystemFrame`) have higher priority than any other
-        frames. If a non-frame item (e.g. a watchdog cancellation sentinel) is
-        provided it will have the highest priority.
+        The `StartFrame` outranks every other frame and `SystemFrame` frames
+        outrank data and control frames.
 
         Args:
-            item (Any): The item to enqueue.
+            item: The frame to enqueue, with its direction and callback.
 
         """
         frame, _, _ = item
-        if isinstance(frame, SystemFrame):
-            self.__high_counter += 1
-            await super().put((self.HIGH_PRIORITY, self.__high_counter, item))
+        if isinstance(frame, StartFrame):
+            priority = self.START_PRIORITY
+        elif isinstance(frame, SystemFrame):
+            priority = self.SYSTEM_PRIORITY
         else:
-            self.__low_counter += 1
-            await super().put((self.LOW_PRIORITY, self.__low_counter, item))
+            priority = self.DEFAULT_PRIORITY
+
+        self.__counter += 1
+        await super().put((priority, self.__counter, item))
 
     async def get(self) -> Any:
         """Retrieve the next item from the queue.
 
-        System frames are prioritized. If both queues are empty, this method
-        waits until an item is available.
+        Waits until an item is available.
 
         Returns:
-            Any: The next item from the system or main queue.
+            Any: The highest priority item in the queue.
 
         """
         _, _, item = await super().get()
@@ -613,9 +616,6 @@ class FrameProcessor(BaseObject):
         await super().setup(setup.task_manager)
         self._setup = setup
 
-        # Create processing tasks.
-        self.__create_input_task()
-
         if self._metrics is not None:
             await self._metrics.setup(self.task_manager)
 
@@ -681,8 +681,16 @@ class FrameProcessor(BaseObject):
 
         if self._enable_direct_mode:
             await self.__process_frame(frame, direction, callback)
-        else:
-            await self.__input_queue.put((frame, direction, callback))
+            return
+
+        await self.__input_queue.put((frame, direction, callback))
+
+        # Nothing drains the queue until the StartFrame arrives, so a processor
+        # never acts on a frame before it has been started. Frames pushed
+        # between setup and the StartFrame simply wait, and the StartFrame is
+        # dequeued ahead of them.
+        if isinstance(frame, StartFrame):
+            self.__create_input_task()
 
     async def pause_processing_frames(self):
         """Pause processing of queued frames."""

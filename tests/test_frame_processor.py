@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     SystemFrame,
     TextFrame,
     UninterruptibleFrame,
+    UserStartedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.filters.identity_filter import IdentityFilter
@@ -30,6 +31,8 @@ from pipecat.processors.frame_processor import (
     FrameProcessor,
 )
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 @dataclass
@@ -561,6 +564,37 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
             self.assertIn("direct mode", sink.getvalue())
         finally:
             logger.remove(handler_id)
+
+    async def test_start_frame_is_processed_first(self):
+        """A processor holds every frame it receives until its StartFrame.
+
+        Processors are set up concurrently, so one that connects during setup
+        can push frames at a processor that has not started yet. Those frames
+        wait, and the StartFrame is processed ahead of them even when what is
+        waiting is itself a system frame.
+        """
+        processed: list[str] = []
+
+        class RecordingProcessor(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                processed.append(type(frame).__name__)
+
+        processor = RecordingProcessor()
+        await processor.setup(frame_processor_setup(TaskManager()))
+        try:
+            await processor.queue_frame(TextFrame(text="early"))
+            await processor.queue_frame(UserStartedSpeakingFrame())
+
+            await asyncio.sleep(0.1)
+            self.assertEqual(processed, [], "no frame should be processed before the StartFrame")
+
+            await processor.queue_frame(StartFrame())
+            await asyncio.sleep(0.1)
+
+            self.assertEqual(processed, ["StartFrame", "UserStartedSpeakingFrame", "TextFrame"])
+        finally:
+            await processor.cleanup()
 
 
 if __name__ == "__main__":
