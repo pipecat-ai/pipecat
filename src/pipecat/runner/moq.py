@@ -7,18 +7,47 @@
 """MoQ runner helpers.
 
 Configuration helpers used by the development runner to construct the
-MoQ relay config sent to the browser at ``/start``.
+MoQ relay config the browser needs, whether it arrives in a ``/start``
+response or, in direct mode, in the client URL.
 """
 
 import argparse
+import secrets
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 from loguru import logger
 
-DEFAULT_MOQ_CONNECT = "https://localhost:4080/moq"
 DEFAULT_MOQ_SERVE_BIND = "[::]:4080"
 DEFAULT_MOQ_PATH = "/moq"
+DEFAULT_MOQ_NAMESPACE = "pipecat"
+# Participant ids name the direction each side carries: the bot publishes
+# its responses, the browser publishes its requests.
+DEFAULT_MOQ_BOT_ID = "response"
+DEFAULT_MOQ_CLIENT_ID = "request"
+
+# How long a direct-mode bot holds the relay open waiting for a browser.
+# The stock timeouts assume ``/start`` spawned the bot with a client already
+# connecting; here the bot arrives first, so the wait is however long it
+# takes someone to open the page.
+DIRECT_MODE_PEER_WAIT_SECS = 3600.0
+
+
+def _new_session_namespace() -> str:
+    """Mint an unguessable namespace for a single client-mode session.
+
+    Client mode dials a shared relay, so the namespace is all that keeps
+    one session's broadcasts (``<namespace>/response``) from colliding with
+    another's. On an anonymous relay (e.g. ``cdn.moq.dev/anon``) there is
+    no authentication either, so the namespace doubles as the session's
+    only access control: it must be unguessable, not merely unique.
+    Serve mode gets a fixed default instead, since a socket bound to
+    localhost isn't reachable to begin with. That's an accident of local
+    dev, not isolation: anything that can reach the socket can publish
+    the request path. Exposing it needs real access control — a
+    path-scoped moq-token — rather than an unguessable name.
+    """
+    return f"{DEFAULT_MOQ_NAMESPACE}-{secrets.token_hex(8)}"
 
 
 def _parse_bind_port(bind: str) -> int:
@@ -37,28 +66,16 @@ def _validate_moq_args(args: argparse.Namespace) -> bool:
 
     Returns ``True`` if the args are usable, ``False`` if validation failed.
 
-    Populates: ``args.moq_host``, ``args.moq_port``, ``args.moq_path``,
-    ``args.moq_bind`` (defaulted in serve mode), ``args.moq_tls_host`` (the
-    hostname presented to the browser).
+    Populates: ``args.moq_serve`` (resolved from ``--moq-connect`` when
+    left unspecified), ``args.moq_host``, ``args.moq_port``,
+    ``args.moq_path``, ``args.moq_bind`` (defaulted in serve mode),
+    ``args.moq_tls_host`` (the hostname presented to the browser).
     """
-    # ------------------------------------------------------------------
-    # TODO: MoQ client mode is not yet supported. The wiring exists but
-    # hasn't been shaken out — the cert-fingerprint plumbing to the
-    # browser is the missing piece for self-signed local relays, and we
-    # haven't validated the flow against a public relay. Fail loudly at
-    # arg-parse time so users get a clear message instead of a downstream
-    # DNS or TLS error. Every --moq-connect / --moq-tls-insecure /
-    # client-mode branch below is preserved so the switchover is a
-    # one-line delete of this guard once client mode is ready.
-    if not args.moq_serve:
-        logger.error(
-            "MoQ client mode is not yet supported. "
-            "Pass --moq-serve to run the bot as its own MoQ server "
-            "(with --moq-tls-generate <hostname> for a self-signed dev cert, or "
-            "--moq-tls-cert/--moq-tls-key for a CA-signed one)."
-        )
-        return False
-    # ------------------------------------------------------------------
+    # Naming a relay with --moq-connect is what selects client mode;
+    # there is no default relay to fall back on. Absent that, the bot
+    # serves locally, so the common `-t moq` case needs no relay at all.
+    if args.moq_serve is None:
+        args.moq_serve = args.moq_connect is None
 
     has_cert = bool(args.moq_tls_cert)
     has_key = bool(args.moq_tls_key)
@@ -109,8 +126,8 @@ def _validate_moq_args(args: argparse.Namespace) -> bool:
         args.moq_path = DEFAULT_MOQ_PATH
         args.moq_tls_host = tls_host
     else:
-        # Client mode.
-        connect = args.moq_connect or DEFAULT_MOQ_CONNECT
+        # Client mode, which only --moq-connect can select.
+        connect = args.moq_connect
         parsed = urlparse(connect)
         if not parsed.hostname:
             logger.error(
@@ -148,7 +165,82 @@ def _validate_moq_args(args: argparse.Namespace) -> bool:
         args.moq_path = client_path
         args.moq_tls_host = client_host
 
+    # An explicit --moq-namespace always wins. Otherwise serve mode gets
+    # the fixed default (the bot owns its socket, so a stable, readable
+    # path is free) while client mode is left unresolved so every /start
+    # can mint its own — see :func:`_new_session_namespace`.
+    if args.moq_namespace is None and args.moq_serve:
+        args.moq_namespace = DEFAULT_MOQ_NAMESPACE
+
+    if getattr(args, "moq_direct", False):
+        if args.moq_serve:
+            logger.error(
+                "--moq-direct needs a relay to meet the browser on: pass "
+                "--moq-connect <url>. Serve mode hands the browser its cert "
+                "fingerprint through /start, which direct mode doesn't have."
+            )
+            return False
+        # Every call already carries the browser's unguessable session id,
+        # so a namespace isn't needed to keep callers apart. Default to
+        # none and let the paths sit at the relay root, which keeps the
+        # client URL down to the relay. Naming one scopes the bot to that
+        # room instead, so it ignores traffic anywhere else on the relay.
+        if args.moq_namespace is None:
+            args.moq_namespace = ""
+
     return True
+
+
+def _join_path(*parts: str) -> str:
+    """Join broadcast path components, dropping empty ones.
+
+    An unset namespace has to vanish rather than leave a leading slash,
+    since moq paths are relative and trim their boundaries.
+    """
+    return "/".join(p for p in parts if p)
+
+
+def _client_prefix(args: argparse.Namespace) -> str:
+    """Return the broadcast prefix browsers announce themselves under.
+
+    Direct mode watches this rather than one fixed path, because the id
+    that separates one caller from the next is minted by the browser.
+    """
+    return f"{_join_path(args.moq_namespace, args.moq_client_id)}/"
+
+
+def _session_paths(args: argparse.Namespace, session: str) -> tuple[str, str]:
+    """Return the ``(response, request)`` broadcast paths for one session.
+
+    Both sides of a call hang off the id the browser chose, so a bot
+    serves exactly the caller that announced it and nobody else.
+    """
+    return (
+        _join_path(args.moq_namespace, args.moq_bot_id, session),
+        f"{_client_prefix(args)}{session}",
+    )
+
+
+def _direct_client_url(args: argparse.Namespace, runner_url: str) -> str:
+    """Build the browser URL carrying the relay config as query params.
+
+    Direct mode has no ``/start`` response to deliver that config, so
+    everything the browser can't derive on its own — where to dial, which
+    namespace to meet on, and which end of the path pair each side owns —
+    rides in the URL instead. Points at the prebuilt UI directly because
+    the root redirect drops the query.
+
+    Values the client already defaults to are left out, so an unscoped
+    run reduces to just the relay.
+    """
+    params = {"relay": f"https://{args.moq_host}:{args.moq_port}{args.moq_path}"}
+    if args.moq_namespace:
+        params["ns"] = args.moq_namespace
+    if args.moq_bot_id != DEFAULT_MOQ_BOT_ID:
+        params["botId"] = args.moq_bot_id
+    if args.moq_client_id != DEFAULT_MOQ_CLIENT_ID:
+        params["clientId"] = args.moq_client_id
+    return f"{runner_url}/client/?{urlencode(params)}"
 
 
 def _cert_hash_from_pem(path: str) -> str | None:
@@ -202,7 +294,9 @@ def _build_moq_client_config(
 
     In serve mode the bot just minted (or loaded) its own cert; we use
     the fingerprint it reported (passed via ``cert_fingerprints``).
-    Otherwise we fall back to the PEM file at ``--moq-tls-cert``.
+    Otherwise we fall back to the PEM file at ``--moq-tls-cert``, which
+    in client mode is only meaningful for a self-signed relay — a public
+    one like ``cdn.moq.dev/anon`` is CA-signed and needs no pinning.
 
     Track names aren't pinned here — the bot publishes a catalog at
     runtime and the browser reads whatever it advertises (codec, sample
