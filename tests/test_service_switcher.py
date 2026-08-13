@@ -852,28 +852,43 @@ class TestServiceSwitcherStrategyFailover(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(strategy.active_service, self.service1)
 
     async def test_error_switches_to_next_service(self):
-        """Test that an error on the active service switches to the next one."""
+        """Test that an error costing us the active service switches to the next one."""
         strategy = ServiceSwitcherStrategyFailover(self.services)
 
+        await self.service1.set_usable(False)
         error = ErrorFrame(error="connection lost")
         result = await strategy.handle_error(error)
 
         self.assertEqual(result, self.service2)
         self.assertEqual(strategy.active_service, self.service2)
 
+    async def test_recoverable_error_does_not_switch(self):
+        """Test that an error the active service can carry on from is ignored."""
+        strategy = ServiceSwitcherStrategyFailover(self.services)
+
+        result = await strategy.handle_error(ErrorFrame(error="transient failure"))
+
+        self.assertIsNone(result)
+        self.assertEqual(strategy.active_service, self.service1)
+
     async def test_consecutive_errors_cycle_through_services(self):
         """Test that repeated errors cycle through all services."""
         strategy = ServiceSwitcherStrategyFailover(self.services)
 
         # First error: service1 -> service2
+        await self.service1.set_usable(False)
         await strategy.handle_error(ErrorFrame(error="error 1"))
         self.assertEqual(strategy.active_service, self.service2)
 
         # Second error: service2 -> service3
+        await self.service2.set_usable(False)
         await strategy.handle_error(ErrorFrame(error="error 2"))
         self.assertEqual(strategy.active_service, self.service3)
 
-        # Third error: service3 -> service1 (wraps around)
+        # Third error: service3 -> service1 (wraps around), service1 having
+        # been brought back in the meantime.
+        await self.service1.set_usable(True)
+        await self.service3.set_usable(False)
         await strategy.handle_error(ErrorFrame(error="error 3"))
         self.assertEqual(strategy.active_service, self.service1)
 
@@ -881,6 +896,7 @@ class TestServiceSwitcherStrategyFailover(unittest.IsolatedAsyncioTestCase):
         """Test that handle_error returns None with only one service."""
         strategy = ServiceSwitcherStrategyFailover([self.service1])
 
+        await self.service1.set_usable(False)
         result = await strategy.handle_error(ErrorFrame(error="error"))
         self.assertIsNone(result)
 
@@ -1050,6 +1066,37 @@ class TestServiceSwitcherStrategyFailover(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(switcher.strategy.active_service, error_service)
+
+    async def test_strategy_sees_every_error_from_the_active_service(self):
+        """Test that the strategy is given errors the active service can carry on from.
+
+        Which errors are worth switching away from is the strategy's decision,
+        so it hears about them all, not only the ones that end a service.
+        """
+        seen: list[ErrorFrame] = []
+
+        class RecordingStrategy(ServiceSwitcherStrategyManual):
+            async def handle_error(self, error: ErrorFrame) -> FrameProcessor | None:
+                seen.append(error)
+                return None
+
+        error_service = ErrorOnTextService("error_service", becomes_unusable=False)
+        backup_service = MockFrameProcessor("backup_service")
+        switcher = ServiceSwitcher(
+            [error_service, backup_service],
+            strategy_type=RecordingStrategy,
+        )
+
+        await run_test(
+            switcher,
+            frames_to_send=[TextFrame(text="test")],
+            expected_down_frames=[TextFrame],
+            expected_up_frames=[ErrorFrame],
+        )
+
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0].processor, error_service)
+        self.assertTrue(error_service.is_usable)
 
     async def test_error_with_no_service_left_is_reported(self):
         """Test that running out of services is reported as the switcher's own error."""

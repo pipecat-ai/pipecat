@@ -100,10 +100,12 @@ class ServiceSwitcherStrategy(BaseObject):
     async def handle_error(self, error: ErrorFrame) -> FrameProcessor | None:
         """Handle an error from the active service.
 
-        Called by ``ServiceSwitcher`` when the active service pushes a
-        non-fatal ``ErrorFrame`` upstream that leaves it unable to do its job
-        (`is_usable=False`). Subclasses can override this to implement
-        automatic failover.
+        Called by ``ServiceSwitcher`` for every non-fatal ``ErrorFrame`` the
+        active service pushes upstream, whether or not the service can carry on
+        from it. Subclasses override this to decide which errors are worth
+        switching away from: `error.processor.is_usable` tells a service that
+        is finished apart from one having a bad moment, and a subclass is free
+        to switch on either.
 
         Args:
             error: The error frame pushed by the active service.
@@ -178,11 +180,12 @@ class ServiceSwitcherStrategyManual(ServiceSwitcherStrategy):
 class ServiceSwitcherStrategyFailover(ServiceSwitcherStrategyManual):
     """A strategy that automatically switches to a backup service on failure.
 
-    When the active service reports an error that leaves it unable to do its
-    job (`is_usable=False`), this strategy switches to the next service in the list that can still
-    do its own. Errors a service can carry on from are left alone, so a
-    provider hiccup doesn't cost a failover. Recovery and fallback policies are
-    left to application code via the ``on_service_switched`` event.
+    This strategy switches when the active service reports an error that leaves
+    it unable to do its job (`is_usable=False`), moving to the next service in
+    the list that can still do its own. Errors the service can carry on from
+    are left alone, so a provider hiccup doesn't cost a failover. Recovery and
+    fallback policies are left to application code via the
+    ``on_service_switched`` event.
 
     Event handlers available:
 
@@ -204,7 +207,9 @@ class ServiceSwitcherStrategyFailover(ServiceSwitcherStrategyManual):
     async def handle_error(self, error: ErrorFrame) -> FrameProcessor | None:
         """Handle an error from the active service by failing over.
 
-        Switches to the next service in the list that can still do its job,
+        Only an error that leaves the service unable to do its job is worth a
+        failover; anything it can carry on from is ignored. When one does,
+        switches to the next service in the list that can still do its job,
         wrapping around from the end. The failed service stays in the list and
         can be switched back to once it has been brought back with
         :meth:`~pipecat.processors.frame_processor.FrameProcessor.set_usable`.
@@ -213,11 +218,16 @@ class ServiceSwitcherStrategyFailover(ServiceSwitcherStrategyManual):
             error: The error frame pushed by the active service.
 
         Returns:
-            The newly active service if a switch occurred, or None if no other
-            service can be given work.
+            The newly active service if a switch occurred, or None if the error
+            didn't warrant one or no other service can be given work.
         """
-        service_name = error.processor.name if error.processor else self._active_service.name
-        logger.warning(f"Service {service_name} reported an error: {error.error}")
+        failed_service = error.processor or self._active_service
+
+        # The service is still working, so there is nothing to fail over from.
+        if failed_service.is_usable:
+            return None
+
+        logger.warning(f"Service {failed_service.name} reported an error: {error.error}")
 
         # Walk the list from the one after the active service so failover
         # follows the order the services were given in.
@@ -274,9 +284,9 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         # update crosses its service long before the ring wraps.
         self._inactive_service_updates: deque[int] = deque(maxlen=64)
 
-        # What this switcher reports is a reading of its services rather than a
-        # flag of its own, so the last reading announced is kept here to tell
-        # movement worth announcing from a service change that doesn't show.
+        # `is_usable` is read from the services, so keep the last value
+        # announced: a service changing its own doesn't always change the
+        # switcher's.
         self._announced_usable = self.is_usable
         for service in services:
             service.add_event_handler("on_usable_changed", self._on_service_usable_changed)
@@ -292,8 +302,8 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         Args:
             is_usable: Whether the switcher can be given work. Ignored.
         """
-        # Deliberately not calling super(), which would leave the flag it keeps
-        # disagreeing with what this switcher reports and announce that flag.
+        # Not calling super(): it would set a flag this switcher never reads,
+        # and announce a change that didn't happen.
         logger.debug(
             f"{self}: ignoring set_usable({is_usable}); a switcher reports whether any of "
             "its services can be given work"
@@ -403,14 +413,15 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         Non-fatal ``ErrorFrame`` instances from the services being switched
         between are answered for here rather than travelling on, since the rest
         of the pipeline deals with the switcher and not with what it holds.
-        Errors from a service the switcher isn't using stop here outright. An
-        error that leaves the active service unable to do its job is forwarded
-        to the strategy via ``handle_error``, so strategies like
-        ``ServiceSwitcherStrategyFailover`` can perform failover; a successful
-        failover absorbs it, the switcher having gone on doing its job. Failing
-        that, it is reported against the switcher, so that the rest of the
-        pipeline judges it by what the switcher has left rather than by the one
-        service that failed. Every other error travels upstream as usual.
+        Errors from a service the switcher isn't using stop here outright.
+        Every error from the active service is forwarded to the strategy via
+        ``handle_error``, which decides whether it warrants a switch; a
+        successful switch absorbs it, the switcher having gone on doing its
+        job. An error that leaves the active service unable to do its job with
+        no switch to be made is reported against the switcher, so that the rest
+        of the pipeline judges it by what the switcher has left rather than by
+        the one service that failed. Every other error travels upstream as
+        usual.
         """
         # Consume ServiceSwitcherRequestMetadataFrame once the targeted service
         # has handled it (i.e. the active service).
@@ -429,9 +440,8 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
             if frame.id in self._inactive_service_updates:
                 return
 
-        # Let the strategy react to errors that cost us the active service,
-        # ignoring errors it can carry on from and errors just propagating
-        # upstream from other processors.
+        # Errors from the switched services are the switcher's to answer for.
+        # Errors from anywhere else are just passing through, and travel on.
         if isinstance(frame, ErrorFrame) and not frame.fatal and frame.processor is not None:
             failed_service = frame.processor
             active_service = self.strategy.active_service
@@ -440,14 +450,18 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
             # ``on_usable_changed`` to hear about the ones held in reserve.
             if failed_service in self._services and failed_service is not active_service:
                 return
-            # An error that costs us the active service is the switcher's to
-            # answer for: it either moves the work elsewhere or reports the
-            # failure as its own. The ones the service can carry on from
-            # travel upstream as they are.
-            if failed_service is active_service and not failed_service.is_usable:
-                if not await self.strategy.handle_error(frame):
+            if failed_service is active_service:
+                # The strategy decides which errors are worth switching away
+                # from. A switch means the switcher recovered on its own, so
+                # the error goes no further.
+                if await self.strategy.handle_error(frame):
+                    return
+                # No switch was made. If the service can no longer work, the
+                # switcher has nowhere left to send the work, so it reports the
+                # failure as its own. Any other error travels upstream.
+                if not failed_service.is_usable:
                     await self._report_service_failure(failed_service, frame)
-                return
+                    return
 
         await super().push_frame(frame, direction)
 

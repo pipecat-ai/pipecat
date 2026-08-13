@@ -867,8 +867,8 @@ class FrameProcessor(BaseObject):
             processor=self,
             category=category,
         )
-        # Only passed on when there is something to say, so that reporting an
-        # ordinary error stays a one-argument call.
+        # Subclasses may override `push_error_frame` with its original
+        # one-argument signature, so only pass the flag when it is set.
         if treat_as_permanent:
             await self.push_error_frame(error=error_frame, treat_as_permanent=True)
         else:
