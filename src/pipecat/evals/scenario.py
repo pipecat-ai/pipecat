@@ -24,7 +24,8 @@ the bot emits, and asserts on them in order.
 Event names are the friendly names the harness maps RTVI server messages onto:
 ``user_started_speaking``, ``user_stopped_speaking``, ``vad_user_started_speaking``,
 ``vad_user_stopped_speaking``, ``user_transcription``, ``llm_started``, ``response``,
-``llm_response``, ``tts_response``, ``function_call``. The ``vad_*`` events are the raw
+``llm_response``, ``tts_response``, ``function_call``, ``function_call_stopped``. The
+``vad_*`` events are the raw
 VAD signal, useful as a timing anchor when a turn-detection strategy gates or defers the
 turn-level ``user_stopped_speaking`` (e.g. filtering incomplete turns).
 
@@ -52,6 +53,16 @@ Supported expectation fields (per event):
                                        - name: get_current_weather
                                          args: { location: San Francisco }
                                        - name: get_restaurant_recommendation
+
+                               ``function_call_stopped`` takes the same ``calls:``
+                               shape, and its ``args`` say how the call ended —
+                               which is how a scenario tells work that was stopped
+                               from work that finished on its own::
+
+                                   - event: function_call_stopped
+                                     calls:
+                                       - name: write_report
+                                         args: { cancelled: true }
 
     eval: <str>                natural-language criterion the event's text content
                                must satisfy, evaluated by a judge LLM (see
@@ -209,6 +220,11 @@ def _add_include_constructor(loader_class: type[yaml.SafeLoader], base_dir: Path
 # ``response`` is the modality-agnostic alias, resolved to one of the others
 # after parsing (see _resolve_response_events).
 JUDGEABLE_EVENTS = frozenset({"response", "llm_response", "tts_response"})
+
+# Events carrying a function call, matched by name and arguments rather than by
+# text: ``function_call`` when one starts, ``function_call_stopped`` when it ends
+# (its ``args`` say whether it was cancelled or ran to completion).
+FUNCTION_CALL_EVENTS = ("function_call", "function_call_stopped")
 
 
 @dataclass
@@ -744,7 +760,7 @@ def _parse_function_calls(
     A bare ``function_call`` (neither) becomes one ``EvalFunctionCall(name=None)``
     that matches any single call. Returns None for non-function_call events.
     """
-    if event != "function_call":
+    if event not in FUNCTION_CALL_EVENTS:
         return None
 
     where = f"{path}: turn #{turn_idx} expectation #{exp_idx}"

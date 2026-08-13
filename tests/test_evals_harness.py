@@ -620,6 +620,160 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         result = await EvalSession.from_scenario(scenario, self.server.url).run()
         self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
 
+    def _cancel_scenario(self, expected_id: str) -> EvalScenario:
+        """One turn asserting a cancel call named a particular id."""
+        return EvalScenario(
+            name="cancel",
+            turns=[
+                EvalTurn(
+                    user="never mind that one",
+                    expect=[
+                        EvalExpectation(
+                            event="function_call",
+                            within_ms=2000,
+                            calls=[
+                                EvalFunctionCall(
+                                    name="cancel_write_report",
+                                    args={"tool_call_id": expected_id},
+                                )
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+        )
+
+    async def test_corrected_call_satisfies_the_turn(self):
+        # A model that mistypes an id, is refused, and repeats the call with the
+        # right one has made the call the turn asks for.
+        self.server.on_text(
+            "never mind that one",
+            _rtvi(
+                "llm-function-call-in-progress",
+                {
+                    "function_name": "cancel_write_report",
+                    "arguments": {"tool_call_id": "cull_turtles"},
+                    "tool_call_id": "call_cancel_1",
+                },
+            ),
+            _rtvi(
+                "llm-function-call-in-progress",
+                {
+                    "function_name": "cancel_write_report",
+                    "arguments": {"tool_call_id": "call_turtles"},
+                    "tool_call_id": "call_cancel_2",
+                },
+            ),
+        )
+        result = await EvalSession.from_scenario(
+            self._cancel_scenario("call_turtles"), self.server.url
+        ).run()
+        self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
+
+    async def test_wrong_args_reports_what_the_bot_sent(self):
+        # No call carried the expected id, so the failure names the ones that did
+        # arrive rather than claiming the call was never made.
+        self.server.on_text(
+            "never mind that one",
+            _rtvi(
+                "llm-function-call-in-progress",
+                {
+                    "function_name": "cancel_write_report",
+                    "arguments": {"tool_call_id": "call_volcanoes"},
+                    "tool_call_id": "call_cancel",
+                },
+            ),
+        )
+        result = await EvalSession.from_scenario(
+            self._cancel_scenario("call_turtles"), self.server.url
+        ).run()
+        self.assertFalse(result.passed)
+        self.assertEqual(result.failures[0].kind, "function_args_mismatch")
+        self.assertIn("call_volcanoes", str(result.failures[0]))
+
+    def _stopped_scenario(self, cancelled: bool) -> EvalScenario:
+        """One turn asserting a call stopped, and how it ended."""
+        return EvalScenario(
+            name="stopped",
+            turns=[
+                EvalTurn(
+                    user="never mind that one",
+                    expect=[
+                        EvalExpectation(
+                            event="function_call_stopped",
+                            within_ms=2000,
+                            calls=[
+                                EvalFunctionCall(
+                                    name="write_report",
+                                    args={"tool_call_id": "call_turtles", "cancelled": cancelled},
+                                )
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+        )
+
+    async def _run_stopped(self, reported_cancelled: bool, expect_cancelled: bool):
+        self.server.on_text(
+            "never mind that one",
+            _rtvi(
+                "llm-function-call-stopped",
+                {
+                    "function_name": "write_report",
+                    "tool_call_id": "call_turtles",
+                    "cancelled": reported_cancelled,
+                },
+            ),
+        )
+        return await EvalSession.from_scenario(
+            self._stopped_scenario(expect_cancelled), self.server.url
+        ).run()
+
+    async def test_cancelled_call_matches(self):
+        result = await self._run_stopped(reported_cancelled=True, expect_cancelled=True)
+        self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
+
+    async def test_call_that_ran_to_completion_is_not_a_cancellation(self):
+        # The distinction the event exists for: work that finished on its own
+        # stops too, and a scenario asserting cancellation must not accept it.
+        result = await self._run_stopped(reported_cancelled=False, expect_cancelled=True)
+        self.assertFalse(result.passed)
+        self.assertEqual(result.failures[0].kind, "function_args_mismatch")
+
+    async def test_started_and_stopped_events_do_not_claim_each_other(self):
+        # Both carry a name and a tool_call_id, so an expectation for one must
+        # not be satisfied by the other.
+        self.server.on_text(
+            "report on sea turtles",
+            _rtvi(
+                "llm-function-call-in-progress",
+                {
+                    "function_name": "write_report",
+                    "arguments": {"topic": "sea turtles"},
+                    "tool_call_id": "call_turtles",
+                },
+            ),
+        )
+        scenario = EvalScenario(
+            name="no_crosstalk",
+            turns=[
+                EvalTurn(
+                    user="report on sea turtles",
+                    expect=[
+                        EvalExpectation(
+                            event="function_call_stopped",
+                            within_ms=1500,
+                            calls=[EvalFunctionCall(name="write_report")],
+                        ),
+                    ],
+                )
+            ],
+        )
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
+        self.assertFalse(result.passed)
+        self.assertEqual(result.failures[0].kind, "missing_function_call")
+
     async def test_text_mismatch_fails_clearly(self):
         self.server.on_text(
             "hi",
