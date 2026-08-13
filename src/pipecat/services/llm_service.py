@@ -298,7 +298,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 arrives. Defaults to True.
             function_call_timeout_secs: Optional timeout in seconds for function calls.
                 A call that runs past it is cancelled: its handler is thrown an
-                ``asyncio.CancelledError`` and the call is settled as cancelled.
+                ``asyncio.CancelledError``, the call is settled as cancelled, and
+                inference runs so the LLM can report that it didn't complete.
             enable_async_tool_cancellation: When True, injects the
                 ``cancel_async_tool_call`` built-in tool and its system instructions
                 so the LLM can cancel in-progress async function calls
@@ -847,8 +848,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 service if your tool needs to stream intermediate results.
             timeout_secs: Optional per-tool timeout in seconds, overriding the
                 global ``function_call_timeout_secs``. A call that runs past it is
-                cancelled: the handler is thrown an ``asyncio.CancelledError`` and
-                the call is settled as cancelled. Defaults to ``None`` (fall back to
+                cancelled: the handler is thrown an ``asyncio.CancelledError``, the
+                call is settled as cancelled, and inference runs so the LLM can
+                report that it didn't complete. Defaults to ``None`` (fall back to
                 the ``@tool_options`` decorator value, then to the global timeout).
         """
         if function_name == CANCEL_ASYNC_TOOL_NAME:
@@ -919,8 +921,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 service if your tool needs to stream intermediate results.
             timeout_secs: Optional per-tool timeout in seconds, overriding the
                 global ``function_call_timeout_secs``. A call that runs past it is
-                cancelled: the handler is thrown an ``asyncio.CancelledError`` and
-                the call is settled as cancelled. Defaults to ``None`` (fall back to
+                cancelled: the handler is thrown an ``asyncio.CancelledError``, the
+                call is settled as cancelled, and inference runs so the LLM can
+                report that it didn't complete. Defaults to ``None`` (fall back to
                 the ``@tool_options`` decorator value, then to the global timeout).
         """
         self._register_direct_function(
@@ -1655,6 +1658,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         predicate: Callable[[FunctionCallRunnerItem], bool],
         *,
         reason: str,
+        run_llm: bool = False,
     ) -> list[FunctionCallFromLLM]:
         """Cancel the in-flight function calls selected by a predicate.
 
@@ -1667,6 +1671,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             predicate: Selects which in-flight calls to cancel.
             reason: Short description of what triggered the cancellation,
                 included in the log messages.
+            run_llm: Whether inference should run once the cancelled calls are
+                settled in the context.
 
         Returns:
             The function calls that were cancelled.
@@ -1697,7 +1703,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 await self.cancel_task(task)
                 cancelled_tasks.add(task)
 
-            cancelled_items.append(await self._broadcast_function_call_cancelled(runner_item))
+            cancelled_items.append(
+                await self._broadcast_function_call_cancelled(runner_item, run_llm=run_llm)
+            )
             logger.debug(f"{self} Function call [{name}:{tool_call_id}] has been cancelled")
 
         # Remove all cancelled tasks from our set.
@@ -1710,12 +1718,14 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         return cancelled_items
 
     async def _broadcast_function_call_cancelled(
-        self, runner_item: FunctionCallRunnerItem
+        self, runner_item: FunctionCallRunnerItem, *, run_llm: bool = False
     ) -> FunctionCallFromLLM:
         """Settle a cancelled function call downstream.
 
         Args:
             runner_item: The function call that was cancelled.
+            run_llm: Whether inference should run once the call is settled in
+                the context.
 
         Returns:
             The cancelled call, described for ``on_function_calls_cancelled``.
@@ -1724,6 +1734,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             FunctionCallCancelFrame,
             function_name=runner_item.function_name,
             tool_call_id=runner_item.tool_call_id,
+            run_llm=run_llm,
         )
         return FunctionCallFromLLM(
             function_name=runner_item.function_name,
@@ -1741,16 +1752,22 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         settled the call, so its result is rejected — the pipeline is told the
         call is over regardless, or it waits on a result that can never arrive.
 
+        A deadline is the one cancellation nothing else follows up on, so it
+        asks for inference: without it the LLM never learns the call is over and
+        the user is left waiting on an answer that never comes.
+
         Args:
             runner_item: The function call that timed out.
         """
         cancelled = await self._cancel_function_call_tasks(
-            lambda item: item.tool_call_id == runner_item.tool_call_id, reason="timeout"
+            lambda item: item.tool_call_id == runner_item.tool_call_id,
+            reason="timeout",
+            run_llm=True,
         )
         if cancelled:
             return
 
-        item = await self._broadcast_function_call_cancelled(runner_item)
+        item = await self._broadcast_function_call_cancelled(runner_item, run_llm=True)
         await self._call_event_handler("on_function_calls_cancelled", [item])
 
     async def _cancel_function_calls_by_tool_call_id(self, tool_call_id: str):

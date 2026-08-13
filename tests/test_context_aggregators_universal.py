@@ -1420,6 +1420,88 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         assert payload.result.startswith("CANCELLED")
         assert not aggregator.has_function_calls_in_progress
 
+    async def test_function_call_cancel_run_llm(self):
+        """A cancellation asking for inference pushes the context upstream."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            FunctionCallCancelFrame(function_name="get_weather", tool_call_id="1", run_llm=True),
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[],
+            expected_up_frames=[LLMContextFrame],
+        )
+
+    async def test_function_call_cancel_run_llm_while_user_speaking(self):
+        """Inference waits for the user to finish rather than talking over them."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                cancel_on_interruption=False,
+            ),
+            UserStartedSpeakingFrame(),
+            SleepFrame(),
+            FunctionCallCancelFrame(function_name="get_weather", tool_call_id="1", run_llm=True),
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[UserStartedSpeakingFrame],
+            expected_up_frames=[],
+        )
+
+    async def test_function_call_cancel_run_llm_waits_for_group(self):
+        """Inference runs once, on whichever call in the group settles last."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                cancel_on_interruption=False,
+                group_id="group-1",
+            ),
+            FunctionCallInProgressFrame(
+                function_name="get_restaurant",
+                tool_call_id="2",
+                arguments={"location": "Los Angeles"},
+                cancel_on_interruption=True,
+                group_id="group-1",
+            ),
+            SleepFrame(),
+            # The first call times out while its sibling is still running, so
+            # it settles in the context without triggering inference.
+            FunctionCallCancelFrame(function_name="get_weather", tool_call_id="1", run_llm=True),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="get_restaurant",
+                tool_call_id="2",
+                arguments={"location": "Los Angeles"},
+                result={"name": "Pasta Place"},
+            ),
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[],
+            expected_up_frames=[LLMContextFrame],
+        )
+        assert not aggregator.has_function_calls_in_progress
+
     async def test_function_call_on_context_updated(self):
         context_updated = False
 

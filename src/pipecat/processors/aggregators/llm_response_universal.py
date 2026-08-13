@@ -1848,7 +1848,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             task.add_done_callback(self._context_updated_task_finished)
 
     async def _maybe_push_context_after_function_result(self) -> None:
-        """Decide whether to push a context frame after a function-call result.
+        """Decide whether to push a context frame after a function call settles.
 
         Push an ``LLMContextFrame`` upstream (with care to avoid duplicate
         pushes while results are queued or the bot is still speaking).
@@ -1937,7 +1937,22 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 async_tool_messages.build_cancelled_message(frame.tool_call_id)
             )
 
+        group_id = function_call.group_id
         del self._function_calls_in_progress[frame.tool_call_id]
+
+        if not frame.run_llm or self._user_speaking:
+            return
+
+        # Hold off while siblings from the same LLM response are still running:
+        # whichever of them settles last runs inference, with this cancellation
+        # already in the context.
+        if group_id and any(
+            f is not None and f.group_id == group_id
+            for f in self._function_calls_in_progress.values()
+        ):
+            return
+
+        await self._maybe_push_context_after_function_result()
 
     async def _handle_user_image_frame(self, frame: UserImageRawFrame):
         image_appended = False

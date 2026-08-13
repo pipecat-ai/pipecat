@@ -520,6 +520,52 @@ class TestFunctionCallTimeout(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(cancelled, ["call_1"])
 
+    async def test_timeout_asks_for_inference(self):
+        """Nothing else follows up on a deadline, so it has to run the LLM."""
+        service, frames = self._service(function_call_timeout_secs=self.TIMEOUT)
+
+        async def slow(params: FunctionCallParams):
+            await asyncio.sleep(self.HANDLER_DURATION)
+
+        service.register_function("slow", slow)
+        await self._run_call(service, "slow")
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertIsInstance(frames[-1], FunctionCallCancelFrame)
+        self.assertTrue(frames[-1].run_llm)
+
+    async def test_interruption_does_not_ask_for_inference(self):
+        """The user is talking; a cancelled call must not answer over them."""
+        service, frames = self._service()
+
+        async def slow(params: FunctionCallParams):
+            await asyncio.sleep(self.HANDLER_DURATION)
+
+        service.register_function("slow", slow)
+        await self._run_call(service, "slow")
+        await asyncio.sleep(self.TIMEOUT)
+        await service._handle_interruptions(InterruptionFrame())
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertIsInstance(frames[-1], FunctionCallCancelFrame)
+        self.assertFalse(frames[-1].run_llm)
+
+    async def test_llm_requested_cancellation_does_not_ask_for_inference(self):
+        """The cancelling tool's own result runs the LLM; a second run would double up."""
+        service, frames = self._service()
+
+        async def slow(params: FunctionCallParams):
+            await asyncio.sleep(self.HANDLER_DURATION)
+
+        service.register_function("slow", slow, cancel_on_interruption=False)
+        await self._run_call(service, "slow")
+        await asyncio.sleep(self.TIMEOUT)
+        await service._cancel_function_calls_by_tool_call_id("call_1")
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertIsInstance(frames[-1], FunctionCallCancelFrame)
+        self.assertFalse(frames[-1].run_llm)
+
     async def test_sequential_runner_survives_a_timeout(self):
         """A cancelled call must not take the sequential runner down with it."""
         service, frames = self._service(
@@ -659,6 +705,7 @@ class TestFunctionCallTimeout(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(self.TIMEOUT)
 
         self.assertEqual([type(frame) for frame in frames], [FunctionCallCancelFrame])
+        self.assertTrue(frames[-1].run_llm)
         self.assertEqual(cancelled, ["call_1"])
 
     async def test_cancelling_the_sequential_runner_cancels_its_call(self):
