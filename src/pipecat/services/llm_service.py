@@ -278,6 +278,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         "The function `{function_name}` is not currently available."
     )
 
+    # Returned to the LLM as the tool result when a handler raises. It names the
+    # function as the thing that failed. The exception itself is deliberately
+    # left out.
+    FUNCTION_CALL_ERROR_MESSAGE_TEMPLATE = (
+        "The function `{function_name}` failed and returned no result."
+    )
+
     def __init__(
         self,
         run_in_parallel: bool = True,
@@ -1464,7 +1471,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 logger.warning(
                     f"{self} Ignoring result for function call"
                     f" [{runner_item.function_name}:{runner_item.tool_call_id}]: the call has"
-                    " already finished (it timed out or was cancelled)."
+                    " already finished (it reported a result, timed out, or was cancelled)."
                 )
                 return
 
@@ -1550,6 +1557,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 exception=e,
                 fatal=False,
                 category=ErrorCategory.APPLICATION,
+            )
+            # A handler that raised will never report, so settle the call on its
+            # behalf.
+            await function_call_result_callback(
+                self.FUNCTION_CALL_ERROR_MESSAGE_TEMPLATE.format(
+                    function_name=runner_item.function_name
+                )
             )
         finally:
             if timeout_task and not timeout_task.done():

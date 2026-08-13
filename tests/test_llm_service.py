@@ -761,6 +761,137 @@ class TestFunctionCallTimeout(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(frames[-1].result, {"ok": True})
 
 
+class TestFunctionCallError(unittest.IsolatedAsyncioTestCase):
+    """A handler that raises settles its call instead of holding it open."""
+
+    TIMEOUT = 0.1
+    SETTLE = 0.6
+
+    def _service(self, **kwargs) -> tuple[MockLLMService, list, list]:
+        service = MockLLMService(**kwargs)
+        service._task_manager = TaskManager()
+
+        broadcast_frames = []
+        errors = []
+
+        async def mock_broadcast_frame(frame_cls, **frame_kwargs):
+            broadcast_frames.append(frame_cls(**frame_kwargs))
+
+        async def mock_push_error(**kwargs):
+            errors.append(kwargs)
+
+        service.broadcast_frame = mock_broadcast_frame
+        service.push_error = mock_push_error
+        return service, broadcast_frames, errors
+
+    async def _run_call(self, service: MockLLMService, function_name: str, tool_call_id="call_1"):
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name=function_name,
+                    tool_call_id=tool_call_id,
+                    arguments={},
+                    context=LLMContext(),
+                )
+            ]
+        )
+
+    async def test_a_raising_handler_settles_its_call(self):
+        service, frames, errors = self._service()
+
+        async def boom(params: FunctionCallParams):
+            raise RuntimeError("kaboom")
+
+        service.register_function("boom", boom)
+        await self._run_call(service, "boom")
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertEqual(
+            [type(frame) for frame in frames],
+            [FunctionCallsStartedFrame, FunctionCallInProgressFrame, FunctionCallResultFrame],
+        )
+        self.assertEqual(frames[-1].result, "The function `boom` failed and returned no result.")
+
+    async def test_a_raising_handler_still_reports_the_error_upstream(self):
+        service, _, errors = self._service()
+
+        async def boom(params: FunctionCallParams):
+            raise RuntimeError("kaboom")
+
+        service.register_function("boom", boom)
+        await self._run_call(service, "boom")
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("kaboom", errors[0]["error_msg"])
+        self.assertIsInstance(errors[0]["exception"], RuntimeError)
+        self.assertFalse(errors[0]["fatal"])
+
+    async def test_the_exception_is_kept_out_of_the_llm_context(self):
+        """Exception text reaches the user through the LLM; the ErrorFrame carries it instead."""
+        service, frames, _ = self._service()
+
+        async def boom(params: FunctionCallParams):
+            raise RuntimeError("connection refused: token=sk-secret")
+
+        service.register_function("boom", boom)
+        await self._run_call(service, "boom")
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertNotIn("sk-secret", frames[-1].result)
+        self.assertNotIn("connection refused", frames[-1].result)
+
+    async def test_a_handler_that_reports_then_raises_keeps_its_result(self):
+        service, frames, _ = self._service()
+
+        async def report_then_boom(params: FunctionCallParams):
+            await params.result_callback({"ok": True})
+            raise RuntimeError("kaboom")
+
+        service.register_function("report_then_boom", report_then_boom)
+        await self._run_call(service, "report_then_boom")
+        await asyncio.sleep(self.SETTLE)
+
+        results = [f for f in frames if isinstance(f, FunctionCallResultFrame)]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].result, {"ok": True})
+
+    async def test_a_raising_handler_does_not_also_time_out(self):
+        """The deadline is cancelled on the way out, so the call settles once."""
+        service, frames, _ = self._service(function_call_timeout_secs=self.TIMEOUT)
+
+        async def boom(params: FunctionCallParams):
+            raise RuntimeError("kaboom")
+
+        service.register_function("boom", boom)
+        await self._run_call(service, "boom")
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertFalse(any(isinstance(f, FunctionCallCancelFrame) for f in frames))
+
+    async def test_the_sequential_runner_survives_a_raising_handler(self):
+        service, frames, _ = self._service(run_in_parallel=False)
+        await service._create_sequential_runner_task()
+
+        async def boom(params: FunctionCallParams):
+            raise RuntimeError("kaboom")
+
+        async def fine(params: FunctionCallParams):
+            await params.result_callback({"ok": True})
+
+        service.register_function("boom", boom)
+        service.register_function("fine", fine)
+        await self._run_call(service, "boom")
+        await self._run_call(service, "fine", tool_call_id="call_2")
+        await asyncio.sleep(self.SETTLE)
+
+        results = [f for f in frames if isinstance(f, FunctionCallResultFrame)]
+        self.assertEqual([f.tool_call_id for f in results], ["call_1", "call_2"])
+        self.assertEqual(results[-1].result, {"ok": True})
+
+        await service._cancel_sequential_runner_task()
+
+
 class TestAppendSystemInstruction(unittest.IsolatedAsyncioTestCase):
     """Coverage for `LLMService.append_system_instruction`."""
 
