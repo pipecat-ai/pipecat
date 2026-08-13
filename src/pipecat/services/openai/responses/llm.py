@@ -1018,6 +1018,10 @@ class OpenAIResponsesLLMService(
         function_calls: dict[str, dict[str, str]] = {}
         current_arguments: dict[str, str] = {}
         reasoning_summary_open = False
+        text_chars = 0
+        # Content parts whose text arrived as deltas, so the terminal event for
+        # the same part isn't pushed a second time.
+        streamed_parts: set[tuple[str, int]] = set()
 
         while True:
             event = await self._ws_recv()
@@ -1030,7 +1034,22 @@ class OpenAIResponsesLLMService(
 
             if event_type == "response.output_text.delta":
                 await self.stop_ttfb_metrics()
-                await self._push_llm_text(event.get("delta", ""))
+                delta = event.get("delta", "")
+                text_chars += len(delta)
+                streamed_parts.add((event.get("item_id", ""), event.get("content_index", 0)))
+                await self._push_llm_text(delta)
+
+            elif event_type == "response.output_text.done":
+                # The API doesn't always stream: a short reply can arrive whole
+                # in this event, with no deltas before it, and then its text is
+                # the only copy of what the model wrote.
+                part = (event.get("item_id", ""), event.get("content_index", 0))
+                if part not in streamed_parts:
+                    text = event.get("text", "")
+                    if text:
+                        await self.stop_ttfb_metrics()
+                        text_chars += len(text)
+                        await self._push_llm_text(text)
 
             elif event_type == "response.reasoning_summary_text.delta":
                 await self.stop_ttfb_metrics()
@@ -1098,6 +1117,23 @@ class OpenAIResponsesLLMService(
                     await self.start_llm_usage_metrics(tokens)
 
                 self._full_model_name = response.get("model")
+
+                # A turn that produces neither speech nor a tool call leaves the
+                # bot silent with nothing else in flight, which is nearly always
+                # a surprise to the app. Say what came back so it can be told
+                # from a dropped response.
+                if not text_chars and not function_calls:
+                    item_types = [item.get("type") for item in (response.get("output") or [])]
+                    logger.warning(
+                        f"{self}: response {response.get('id')} produced no text and no "
+                        f"function call — nothing to speak. Status "
+                        f"{response.get('status')!r}, output items {item_types}."
+                    )
+                else:
+                    logger.debug(
+                        f"{self}: response {response.get('id')} produced {text_chars} chars "
+                        f"of text and {len(function_calls)} function call(s)."
+                    )
 
                 # Store state for next call's previous_response_id optimization.
                 # Include the response output so the hash covers the assistant's

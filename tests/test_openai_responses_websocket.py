@@ -289,6 +289,73 @@ class TestPreviousResponseOptimization:
 
 class TestReceiveResponseEventsText:
     @pytest.mark.asyncio
+    async def test_whole_text_pushed_when_no_deltas_arrive(self):
+        """A short reply can arrive complete in the terminal event.
+
+        The API doesn't always stream: a brief message can come as a single
+        ``response.output_text.done`` with no deltas before it, and then its
+        text is the only copy of what the model wrote.
+        """
+        service = _make_service()
+        service._push_llm_text = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+
+        ws = _ws_events(
+            {"type": "response.output_item.added", "item": {"type": "message"}},
+            {"type": "response.content_part.added", "item_id": "msg_1", "content_index": 0},
+            {
+                "type": "response.output_text.done",
+                "item_id": "msg_1",
+                "content_index": 0,
+                "text": "The volcano report is ready.",
+            },
+            {"type": "response.completed", "response": {"id": "resp_1", "model": "gpt-5.4"}},
+        )
+        service._websocket = ws
+
+        context = MagicMock(spec=LLMContext)
+        await service._receive_response_events(context, [{"role": "user", "content": "hi"}])
+
+        service._push_llm_text.assert_awaited_once_with("The volcano report is ready.")
+
+    @pytest.mark.asyncio
+    async def test_streamed_text_is_not_pushed_twice(self):
+        """When deltas did arrive, the terminal event repeats them — ignore it."""
+        service = _make_service()
+        service._push_llm_text = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+
+        ws = _ws_events(
+            {
+                "type": "response.output_text.delta",
+                "item_id": "msg_1",
+                "content_index": 0,
+                "delta": "Hello",
+            },
+            {
+                "type": "response.output_text.delta",
+                "item_id": "msg_1",
+                "content_index": 0,
+                "delta": " world",
+            },
+            {
+                "type": "response.output_text.done",
+                "item_id": "msg_1",
+                "content_index": 0,
+                "text": "Hello world",
+            },
+            {"type": "response.completed", "response": {"id": "resp_1", "model": "gpt-4.1"}},
+        )
+        service._websocket = ws
+
+        context = MagicMock(spec=LLMContext)
+        await service._receive_response_events(context, [{"role": "user", "content": "hi"}])
+
+        assert service._push_llm_text.call_count == 2
+
+    @pytest.mark.asyncio
     async def test_text_deltas_pushed(self):
         service = _make_service()
         service._push_llm_text = AsyncMock()
