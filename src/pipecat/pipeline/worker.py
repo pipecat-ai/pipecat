@@ -1083,6 +1083,11 @@ class PipelineWorker(BaseWorker):
 
     async def _setup(self, params: WorkerParams):
         """Set up the pipeline worker and all processors."""
+        # Processors connect while they are set up and push frames as they do,
+        # so the clock runs from here rather than from the StartFrame, which
+        # would leave those frames timestamped zero.
+        self._clock.start()
+
         await super().setup(self._task_manager or params.task_manager)
 
         # Do any additional pipeline worker setup externally.
@@ -1090,7 +1095,6 @@ class PipelineWorker(BaseWorker):
 
         # Start worker observer.
         await self._observer.setup(self.task_manager)
-        await self._observer.start()
 
         # Setup processors
         setup = FrameProcessorSetup(
@@ -1120,7 +1124,6 @@ class PipelineWorker(BaseWorker):
         await self.cleanup()
 
         # Cleanup observers.
-        await self._observer.stop()
         await self._observer.cleanup()
 
         # End conversation tracing if it's active - this will also close any active turn span
@@ -1160,8 +1163,6 @@ class PipelineWorker(BaseWorker):
         a StartFrame and by pushing any other frames queued by the user. It runs
         until the worker is cancelled or stopped (e.g. with an EndFrame).
         """
-        self._clock.start()
-
         self._maybe_start_idle_task()
 
         # Services spend most of the start sequence waiting on the network, which
