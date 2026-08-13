@@ -50,6 +50,7 @@ from pipecat.transports.daily.transport import (
     DailyTransportClient,
 )
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.shared import acquires, releases
 
 
 class TavusApi:
@@ -232,6 +233,7 @@ class TavusTransportClient:
         self._conversation_id = response["conversation_id"]
         return response["conversation_url"]
 
+    @acquires("client")
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the client and initialize the conversation.
 
@@ -239,9 +241,6 @@ class TavusTransportClient:
             setup: The frame processor setup configuration.
         """
         self._task_manager = setup.task_manager
-        if self._conversation_id is not None:
-            logger.debug(f"Conversation ID already defined: {self._conversation_id}")
-            return
         try:
             room_url = await self._initialize()
             daily_callbacks = DailyCallbacks(
@@ -289,6 +288,7 @@ class TavusTransportClient:
             logger.error(f"Failed to setup TavusTransportClient: {e}")
             await self._end_conversation()
 
+    @releases("client")
     async def cleanup(self):
         """Cleanup client resources."""
         await self._end_conversation()

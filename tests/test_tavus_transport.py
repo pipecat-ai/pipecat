@@ -6,12 +6,19 @@
 
 """Tests for the Tavus transport."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from pipecat.frames.frames import OutputAudioRawFrame
-from pipecat.transports.tavus.transport import TavusOutputTransport, TavusParams
+from pipecat.transports.tavus.transport import (
+    TavusOutputTransport,
+    TavusParams,
+    TavusTransportClient,
+)
+from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 def _make_output_transport(**params_kwargs) -> tuple[TavusOutputTransport, MagicMock]:
@@ -49,3 +56,48 @@ async def test_opting_out_paces_audio_to_playback_time():
 
     client.send_realtime_audio_frame.assert_awaited_once_with(frame)
     client.queue_tts_frame.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_setup_builds_a_single_daily_client(monkeypatch):
+    """The input and output transports share one client, and both set it up.
+
+    They are set up concurrently, so a client built per caller would leave the
+    losing one orphaned, with its callback tasks running and nobody to clean
+    them up.
+    """
+    import pipecat.transports.tavus.transport as tavus
+
+    built = []
+
+    def fake_daily_client(*args, **kwargs):
+        client = MagicMock()
+        client.setup = AsyncMock()
+        built.append(client)
+        return client
+
+    monkeypatch.setattr(tavus, "DailyTransportClient", fake_daily_client)
+
+    client = TavusTransportClient(
+        bot_name="Pipecat",
+        callbacks=MagicMock(),
+        api_key="test-key",
+        replica_id="replica",
+        session=MagicMock(),
+    )
+
+    conversations = []
+
+    async def fake_initialize():
+        await asyncio.sleep(0.01)  # the real one calls the Tavus API
+        conversations.append("conversation")
+        client._conversation_id = f"conversation-{len(conversations)}"
+        return "https://example.daily.co/room"
+
+    monkeypatch.setattr(client, "_initialize", fake_initialize)
+
+    setup = frame_processor_setup(TaskManager())
+    await asyncio.gather(client.setup(setup), client.setup(setup))
+
+    assert len(conversations) == 1, "a Tavus conversation was created per caller"
+    assert len(built) == 1, f"{len(built)} Daily clients built, so one is orphaned"
