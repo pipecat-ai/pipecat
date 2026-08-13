@@ -24,7 +24,6 @@ from pipecat.runner.run import (
     _mint_livekit_tokens,
     _print_startup_message,
     _setup_daily_routes,
-    _setup_livekit_routes,
     _setup_telephony_routes,
     _setup_unified_start_route,
     _setup_webrtc_routes,
@@ -350,26 +349,6 @@ class TestRunnerRun(unittest.TestCase):
 
 
 class TestLiveKitRunnerRoutes(unittest.TestCase):
-    def test_setup_livekit_routes_skips_when_livekit_is_missing(self):
-        app = FastAPI()
-        args = argparse.Namespace(dialin=False)
-
-        with patch("pipecat.runner.run._transport_routes_enabled", return_value=False):
-            _setup_livekit_routes(app, args)
-
-        paths = {route.path for route in app.routes}
-        self.assertNotIn("/livekit", paths)
-
-    def test_setup_livekit_routes_registers_when_livekit_is_available(self):
-        app = FastAPI()
-        args = argparse.Namespace(dialin=False)
-
-        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
-            _setup_livekit_routes(app, args)
-
-        paths = {route.path for route in app.routes}
-        self.assertIn("/livekit", paths)
-
     def test_livekit_credentials_raises_when_unconfigured(self):
         from fastapi import HTTPException
 
