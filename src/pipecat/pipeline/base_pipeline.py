@@ -7,8 +7,10 @@
 """Base pipeline implementation for frame processing."""
 
 import asyncio
+import time
 from collections.abc import Sequence
 
+from pipecat.observers.base_observer import ProcessorSetUp
 from pipecat.processors.frame_processor import FrameProcessor, FrameProcessorSetup
 
 
@@ -38,11 +40,20 @@ class BasePipeline(FrameProcessor):
         """
 
         async def setup_processor(processor: FrameProcessor):
+            started_at_ns = time.monotonic_ns()
             try:
                 await processor.setup(setup)
             except Exception as e:
                 await processor.push_error(
                     f"Error setting up processor: {e}", exception=e, treat_as_permanent=True
+                )
+            if setup.observer:
+                await setup.observer.on_processor_setup(
+                    ProcessorSetUp(
+                        processor=processor,
+                        started_at_ns=started_at_ns,
+                        finished_at_ns=time.monotonic_ns(),
+                    )
                 )
 
         await asyncio.gather(*[setup_processor(p) for p in processors])
