@@ -8,7 +8,6 @@
 
 import base64
 import json
-import re
 import warnings
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -454,20 +453,16 @@ class CartesiaTTSService(WebsocketTTSService):
         base_lang = language.split("-")[0].lower()
         return base_lang in {"zh", "ja"}
 
-    _CARTESIA_TAG_RE = re.compile(r"</?(?:spell|emotion|break|volume|speed)\b[^>]*>", re.IGNORECASE)
-
-    def _strip_cartesia_tags(self, text: str) -> str:
-        text = self._CARTESIA_TAG_RE.sub(" ", text)
-        text = re.sub(r"\s+", " ", text)
-        return text.strip()
-
     def _normalize_word_timestamps(
         self, words: list[str], starts: list[float]
     ) -> list[tuple[str, float]]:
         """Normalize raw word timestamps from Cartesia before further processing.
 
-        Strips Cartesia SSML tags (spell, emotion, break, volume, speed) from each word
-        and drops entries that become empty after stripping.
+        Words keep any SSML markup Cartesia returns on them. Cartesia reports timestamps
+        against the transcript as sent, so a tagged span comes back as one token carrying
+        its tags (e.g. `<spell>0364</spell>,`), and that is exactly the form the word
+        tracker matches against `tts_text`. Stripping the tags here would rewrite the token
+        into something present in neither text, stalling the segment.
 
         For Chinese and Japanese, Cartesia groups related characters in the same timestamp
         message.
@@ -491,18 +486,13 @@ class CartesiaTTSService(WebsocketTTSService):
             # For Chinese/Japanese, combine all characters in this message into one word
             # using the first character's start time.
             if words and starts:
-                combined_word = "".join(self._strip_cartesia_tags(w) for w in words)
+                combined_word = "".join(words)
                 first_start = starts[0]
                 return [(combined_word, first_start)] if combined_word else []
             else:
                 return []
         else:
-            result = []
-            for word, start in zip(words, starts):
-                cleaned = self._strip_cartesia_tags(word)
-                if cleaned:
-                    result.append((cleaned, start))
-            return result
+            return [(word, start) for word, start in zip(words, starts) if word]
 
     def _word_timestamps_include_inter_frame_spaces(self) -> bool:
         """Whether timestamp text should be treated as carrying its own spacing."""

@@ -49,6 +49,25 @@ def _concatenate_processed_timestamps(
     return concatenate_aggregated_text(text_parts)
 
 
+def test_cartesia_word_timestamps_keep_markup():
+    # Cartesia reports timestamps against the transcript as sent, so a tagged span comes back
+    # as one token carrying its tags. That is the form the word tracker matches against
+    # tts_text; rewriting it here would stall the segment and drop its text.
+    assert _process_word_timestamps(
+        words=["ending", "in", "<spell>0364</spell>,", "or"],
+        starts=[0.1, 0.2, 0.3, 0.4],
+        language="en",
+    ) == [("ending", 0.1), ("in", 0.2), ("<spell>0364</spell>,", 0.3), ("or", 0.4)]
+
+
+def test_cartesia_word_timestamps_drop_empty_tokens():
+    assert _process_word_timestamps(
+        words=["hi", "", "there"],
+        starts=[0.1, 0.2, 0.3],
+        language="en",
+    ) == [("hi", 0.1), ("there", 0.3)]
+
+
 def test_cartesia_chinese_word_timestamps_join_without_spaces():
     assert _process_word_timestamps(
         words=["你", "好", "。"],
