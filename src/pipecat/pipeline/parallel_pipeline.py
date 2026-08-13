@@ -124,7 +124,7 @@ class ParallelPipeline(BasePipeline):
             TypeError: If any processor list argument is not actually a list.
         """
         await super().setup(setup)
-        await asyncio.gather(*[p.setup(setup) for p in self._pipelines])
+        await self._setup_processors(self._pipelines, setup)
 
     async def cleanup(self):
         """Clean up the parallel pipeline and all its branches."""

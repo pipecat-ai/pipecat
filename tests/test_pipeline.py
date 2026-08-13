@@ -79,6 +79,48 @@ class TestPipeline(unittest.IsolatedAsyncioTestCase):
         )
         assert "foo" in received_down[-1].metadata
 
+    async def test_pipeline_setup_failures_are_reported(self):
+        """A processor that fails to set up reports it as an error frame.
+
+        Services connect during setup, so a failure there is as worth reporting
+        as one while handling a frame. Each failing processor reports its own,
+        so one failure never hides another.
+        """
+
+        class FailingSetup(FrameProcessor):
+            def __init__(self, reason: str):
+                super().__init__()
+                self._reason = reason
+
+            async def setup(self, setup):
+                await super().setup(setup)
+                raise RuntimeError(self._reason)
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                await self.push_frame(frame, direction)
+
+        errors = []
+
+        class ErrorWatcher(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, ErrorFrame):
+                    errors.append(frame.error)
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline(
+            [ErrorWatcher(), FailingSetup("first failed"), FailingSetup("second failed")]
+        )
+        worker = PipelineWorker(pipeline)
+
+        await worker.queue_frame(EndFrame())
+        await worker.run(WorkerParams(task_manager=TaskManager()))
+
+        self.assertEqual(len(errors), 2, f"expected both setup failures, got {errors}")
+        self.assertTrue(any("first failed" in e for e in errors))
+        self.assertTrue(any("second failed" in e for e in errors))
+
 
 class TestParallelPipeline(unittest.IsolatedAsyncioTestCase):
     async def test_parallel_single(self):

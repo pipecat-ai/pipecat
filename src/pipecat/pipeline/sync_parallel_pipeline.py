@@ -242,7 +242,7 @@ class SyncParallelPipeline(BasePipeline):
             setup: Configuration for frame processor setup.
         """
         await super().setup(setup)
-        await asyncio.gather(*[p.setup(setup) for p in self._pipelines])
+        await self._setup_processors(self._pipelines, setup)
 
     async def cleanup(self):
         """Clean up the parallel pipeline and all contained processors."""

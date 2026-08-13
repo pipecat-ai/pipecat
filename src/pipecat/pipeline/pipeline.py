@@ -174,7 +174,7 @@ class Pipeline(BasePipeline):
             setup: Configuration for frame processor setup.
         """
         await super().setup(setup)
-        await asyncio.gather(*[p.setup(setup) for p in self._processors])
+        await self._setup_processors(self._processors, setup)
 
     async def cleanup(self):
         """Clean up the pipeline and all contained processors."""
