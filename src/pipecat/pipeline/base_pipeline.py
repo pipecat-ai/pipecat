@@ -28,6 +28,10 @@ class BasePipeline(FrameProcessor):
         rest of the pipeline to carry on, the same way a failure while handling
         a frame is reported. Every failure is reported, not just the first.
 
+        The failure is permanent whatever caused it, since setting up is not
+        attempted again: the processor is left half-built for the rest of the
+        session, so it loses its usability and a switcher can move off it.
+
         Args:
             processors: The processors to set up.
             setup: Configuration for frame processor setup.
@@ -37,6 +41,8 @@ class BasePipeline(FrameProcessor):
             try:
                 await processor.setup(setup)
             except Exception as e:
-                await processor.push_error(f"Error setting up processor: {e}", exception=e)
+                await processor.push_error(
+                    f"Error setting up processor: {e}", exception=e, treat_as_permanent=True
+                )
 
         await asyncio.gather(*[setup_processor(p) for p in processors])

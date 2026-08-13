@@ -109,9 +109,9 @@ class TestPipeline(unittest.IsolatedAsyncioTestCase):
                     errors.append(frame.error)
                 await self.push_frame(frame, direction)
 
-        pipeline = Pipeline(
-            [ErrorWatcher(), FailingSetup("first failed"), FailingSetup("second failed")]
-        )
+        first = FailingSetup("first failed")
+        second = FailingSetup("second failed")
+        pipeline = Pipeline([ErrorWatcher(), first, second])
         worker = PipelineWorker(pipeline)
 
         await worker.queue_frame(EndFrame())
@@ -120,6 +120,11 @@ class TestPipeline(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(errors), 2, f"expected both setup failures, got {errors}")
         self.assertTrue(any("first failed" in e for e in errors))
         self.assertTrue(any("second failed" in e for e in errors))
+
+        # Setting up is not attempted again, so a processor that failed it can
+        # no longer do its job and a switcher can move off it.
+        self.assertFalse(first.is_usable)
+        self.assertFalse(second.is_usable)
 
 
 class TestParallelPipeline(unittest.IsolatedAsyncioTestCase):
