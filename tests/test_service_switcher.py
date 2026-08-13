@@ -152,7 +152,7 @@ class ErrorOnTextService(FrameProcessor):
             await self.push_error(
                 "service connection lost",
                 category=self._category,
-                processor_became_unusable=self._becomes_unusable,
+                treat_as_permanent=self._becomes_unusable,
             )
         await self.push_frame(frame, direction)
 
@@ -174,7 +174,7 @@ class RepeatedlyErroringService(FrameProcessor):
         await super().process_frame(frame, direction)
         if isinstance(frame, TextFrame) and self.errors == 0:
             self.errors += 1
-            await self.push_error("service connection lost", processor_became_unusable=True)
+            await self.push_error("service connection lost", treat_as_permanent=True)
             self.create_task(self._retry_loop(), name="retry")
         await self.push_frame(frame, direction)
 
@@ -183,7 +183,7 @@ class RepeatedlyErroringService(FrameProcessor):
             await asyncio.sleep(0.02)
             self.errors += 1
             await self.push_error(
-                f"reconnection attempt {attempt + 1} failed", processor_became_unusable=True
+                f"reconnection attempt {attempt + 1} failed", treat_as_permanent=True
             )
 
 

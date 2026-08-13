@@ -240,7 +240,7 @@ class TestProcessorUsable(unittest.IsolatedAsyncioTestCase):
                 await AIService.process_frame(self, frame, direction)
 
                 if isinstance(frame, TextFrame):
-                    await self.push_error("gave up retrying", processor_became_unusable=True)
+                    await self.push_error("gave up retrying", treat_as_permanent=True)
                 else:
                     await self.push_frame(frame, direction)
 
@@ -339,7 +339,7 @@ class TestPlainProcessorUsable(unittest.IsolatedAsyncioTestCase):
                 await super().process_frame(frame, direction)
 
                 if isinstance(frame, TextFrame):
-                    await self.push_error("out of attempts", processor_became_unusable=True)
+                    await self.push_error("out of attempts", treat_as_permanent=True)
                 else:
                     await self.push_frame(frame, direction)
 

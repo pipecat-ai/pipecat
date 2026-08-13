@@ -1887,6 +1887,6 @@ class WebsocketLLMService(LLMService[TAdapter], WebsocketService, Generic[TAdapt
             "not via a continuous background loop"
         )
 
-    async def _report_error(self, error: ErrorFrame, processor_became_unusable: bool = False):
+    async def _report_error(self, error: ErrorFrame, treat_as_permanent: bool = False):
         await self._call_event_handler("on_connection_error", error.error)
-        await self.push_error_frame(error, processor_became_unusable=processor_became_unusable)
+        await self.push_error_frame(error, treat_as_permanent=treat_as_permanent)

@@ -819,7 +819,7 @@ class FrameProcessor(BaseObject):
         exception: Exception | None = None,
         fatal: bool = False,
         category: ErrorCategory | None = None,
-        processor_became_unusable: bool = False,
+        treat_as_permanent: bool = False,
     ):
         """Creates and pushes an ErrorFrame upstream.
 
@@ -840,11 +840,12 @@ class FrameProcessor(BaseObject):
                 can't be attributed — an unexpected one caught by a broad
                 ``except``, say, which may not have come from this processor at
                 all.
-            processor_became_unusable: Whether this error leaves the processor
-                unable to do any more work, such as having failed too many
-                times to keep trying. A permanent category implies this on its
-                own, so it only needs passing for a failure the category
-                doesn't already convey.
+            treat_as_permanent: Whether to treat this error as one that will
+                keep recurring, leaving the processor unable to do any more
+                work — having failed too many times to keep trying, say. Only
+                needed for a failure the category doesn't already convey:
+                leaving it False doesn't keep the processor usable, since a
+                permanent category costs it its usability on its own.
 
         Example::
 
@@ -868,18 +869,21 @@ class FrameProcessor(BaseObject):
         )
         # Only passed on when there is something to say, so that reporting an
         # ordinary error stays a one-argument call.
-        if processor_became_unusable:
-            await self.push_error_frame(error=error_frame, processor_became_unusable=True)
+        if treat_as_permanent:
+            await self.push_error_frame(error=error_frame, treat_as_permanent=True)
         else:
             await self.push_error_frame(error=error_frame)
 
-    async def push_error_frame(self, error: ErrorFrame, processor_became_unusable: bool = False):
+    async def push_error_frame(self, error: ErrorFrame, treat_as_permanent: bool = False):
         """Push an error frame upstream.
 
         Args:
             error: The error frame to push.
-            processor_became_unusable: Whether this error leaves the processor
-                unable to do any more work. See :meth:`push_error`.
+            treat_as_permanent: Whether to treat this error as one that will
+                keep recurring, leaving the processor unable to do any more
+                work. Leaving it False doesn't keep the processor usable — a
+                permanent category costs it its usability either way. See
+                :meth:`push_error`.
         """
         if not error.processor:
             error.processor = self
@@ -894,7 +898,7 @@ class FrameProcessor(BaseObject):
 
         # Before anything sees the error, so that handlers reading
         # `frame.processor.is_usable` get the verdict that came with it.
-        if processor_became_unusable or error.category.is_permanent:
+        if treat_as_permanent or error.category.is_permanent:
             await self.set_usable(False)
 
         await self._call_event_handler("on_error", error)
